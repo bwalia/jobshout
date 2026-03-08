@@ -10,40 +10,9 @@ import {
   CartesianGrid,
 } from "recharts";
 
-interface AgentUtilizationData {
+export interface AgentUtilizationDataPoint {
   name: string;
   utilization: number;
-}
-
-type DateRange = "7d" | "30d" | "90d";
-
-// Mock utilisation data varies slightly per date range to give a realistic feel
-const MOCK_DATA: Record<DateRange, AgentUtilizationData[]> = {
-  "7d": [
-    { name: "CodeReviewer", utilization: 88 },
-    { name: "QA Sentinel", utilization: 72 },
-    { name: "SprintCoach", utilization: 65 },
-    { name: "TypeScript Mentor", utilization: 91 },
-    { name: "K8s Guardian", utilization: 54 },
-  ],
-  "30d": [
-    { name: "CodeReviewer", utilization: 82 },
-    { name: "QA Sentinel", utilization: 69 },
-    { name: "SprintCoach", utilization: 61 },
-    { name: "TypeScript Mentor", utilization: 87 },
-    { name: "K8s Guardian", utilization: 50 },
-  ],
-  "90d": [
-    { name: "CodeReviewer", utilization: 78 },
-    { name: "QA Sentinel", utilization: 65 },
-    { name: "SprintCoach", utilization: 58 },
-    { name: "TypeScript Mentor", utilization: 83 },
-    { name: "K8s Guardian", utilization: 47 },
-  ],
-};
-
-interface AgentUtilizationChartProps {
-  dateRange: DateRange;
 }
 
 interface TooltipPayloadItem {
@@ -71,9 +40,12 @@ function CustomTooltip({ active, payload, label }: CustomTooltipProps) {
   );
 }
 
-export function AgentUtilizationChart({ dateRange }: AgentUtilizationChartProps) {
-  const data = MOCK_DATA[dateRange];
+interface AgentUtilizationChartProps {
+  /** Array of agent utilization data points to render in the chart */
+  data: AgentUtilizationDataPoint[];
+}
 
+export function AgentUtilizationChart({ data }: AgentUtilizationChartProps) {
   return (
     <ResponsiveContainer width="100%" height={260}>
       <BarChart data={data} margin={{ top: 4, right: 4, left: -16, bottom: 0 }}>

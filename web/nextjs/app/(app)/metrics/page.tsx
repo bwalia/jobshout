@@ -1,9 +1,15 @@
 "use client";
 
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { AgentUtilizationChart } from "@/components/dashboard/AgentUtilizationChart";
+import type { AgentUtilizationDataPoint } from "@/components/dashboard/AgentUtilizationChart";
 import { TaskCompletionChart } from "@/components/dashboard/TaskCompletionChart";
+import type { TaskCompletionDataPoint } from "@/components/dashboard/TaskCompletionChart";
 import { MetricCard } from "@/components/dashboard/MetricCard";
+import { getDashboardSummary, getTaskCompletion } from "@/lib/api/metrics";
+import { getAgents } from "@/lib/api/agents";
+import type { Agent } from "@/lib/types/agent";
 
 type DateRange = "7d" | "30d" | "90d";
 
@@ -13,46 +19,92 @@ const DATE_RANGE_OPTIONS: { label: string; value: DateRange }[] = [
   { label: "90 days", value: "90d" },
 ];
 
-// Summary metric data keyed by date range
-const SUMMARY_METRICS: Record<
-  DateRange,
-  { tasksCompleted: number; tasksDelta: number; activeAgents: number; agentsDelta: number; avgUtilization: number; utilizationDelta: number; avgCycleTime: number; cycleTimeDelta: number }
-> = {
-  "7d": {
-    tasksCompleted: 142,
-    tasksDelta: 18.3,
-    activeAgents: 7,
-    agentsDelta: 16.7,
-    avgUtilization: 74,
-    utilizationDelta: 5.2,
-    avgCycleTime: 3.4,
-    cycleTimeDelta: -12.1,
-  },
-  "30d": {
-    tasksCompleted: 589,
-    tasksDelta: 22.5,
-    activeAgents: 8,
-    agentsDelta: 14.3,
-    avgUtilization: 71,
-    utilizationDelta: 3.8,
-    avgCycleTime: 3.9,
-    cycleTimeDelta: -8.4,
-  },
-  "90d": {
-    tasksCompleted: 1872,
-    tasksDelta: 31.0,
-    activeAgents: 9,
-    agentsDelta: 28.6,
-    avgUtilization: 68,
-    utilizationDelta: 2.1,
-    avgCycleTime: 4.2,
-    cycleTimeDelta: -5.9,
-  },
+/** Maps the UI date-range token to a numeric day count for the API. */
+const DATE_RANGE_DAYS: Record<DateRange, number> = {
+  "7d": 7,
+  "30d": 30,
+  "90d": 90,
 };
+
+// ---------------------------------------------------------------------------
+// Loading skeleton helpers
+// ---------------------------------------------------------------------------
+
+function MetricCardSkeleton() {
+  return (
+    <div className="rounded-xl border border-border bg-card p-5 shadow-sm animate-pulse">
+      <div className="h-4 w-24 rounded bg-muted" />
+      <div className="mt-2 h-9 w-20 rounded bg-muted" />
+      <div className="mt-2 h-5 w-28 rounded bg-muted" />
+    </div>
+  );
+}
+
+function ChartSkeleton() {
+  return (
+    <div className="h-[260px] w-full animate-pulse rounded-lg bg-muted" />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Page component
+// ---------------------------------------------------------------------------
 
 export default function MetricsPage() {
   const [dateRange, setDateRange] = useState<DateRange>("7d");
-  const metrics = SUMMARY_METRICS[dateRange];
+  const days = DATE_RANGE_DAYS[dateRange];
+
+  // Fetch dashboard summary metrics (does not vary by date range on the API,
+  // but we show values from the single summary response for all ranges).
+  const {
+    data: summary,
+    isLoading: summaryLoading,
+    isError: summaryError,
+  } = useQuery({
+    queryKey: ["metrics", "summary"],
+    queryFn: getDashboardSummary,
+  });
+
+  // Fetch task completion trend keyed by the current date range so React
+  // Query re-fetches automatically when the user switches ranges.
+  const {
+    data: taskCompletionRaw,
+    isLoading: taskCompletionLoading,
+    isError: taskCompletionError,
+  } = useQuery({
+    queryKey: ["metrics", "task-completion", days],
+    queryFn: () => getTaskCompletion(days),
+  });
+
+  // Fetch all agents (up to 100) so we can derive per-agent utilization from
+  // performance_score. The agents list does not vary by date range.
+  const {
+    data: agentsData,
+    isLoading: agentsLoading,
+    isError: agentsError,
+  } = useQuery({
+    queryKey: ["agents", "list", { per_page: 100 }],
+    queryFn: () => getAgents({ per_page: 100 }),
+  });
+
+  // Map API shapes to the chart prop shapes.
+  const agentUtilizationData: AgentUtilizationDataPoint[] =
+    agentsData?.data.map((agent: Agent) => ({
+      name: agent.name,
+      // performance_score is 0–100 and serves as the utilization proxy when
+      // no aggregate per-agent utilization endpoint exists.
+      utilization: Math.round(agent.performance_score),
+    })) ?? [];
+
+  const taskCompletionData: TaskCompletionDataPoint[] =
+    taskCompletionRaw?.map((point) => ({
+      // Use a short date label (MM/DD) for readability on the chart axis.
+      day: new Date(point.date).toLocaleDateString("en-US", {
+        month: "numeric",
+        day: "numeric",
+      }),
+      tasks: point.completed,
+    })) ?? [];
 
   return (
     <div className="space-y-8">
@@ -87,42 +139,85 @@ export default function MetricsPage() {
 
       {/* Summary metric cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <MetricCard
-          title="Tasks Completed"
-          value={metrics.tasksCompleted.toLocaleString()}
-          delta={metrics.tasksDelta}
-          description={`Over the last ${dateRange}`}
-        />
-        <MetricCard
-          title="Active Agents"
-          value={String(metrics.activeAgents)}
-          delta={metrics.agentsDelta}
-          description="Currently deployed agents"
-        />
-        <MetricCard
-          title="Avg Utilisation"
-          value={`${metrics.avgUtilization}%`}
-          delta={metrics.utilizationDelta}
-          description="Across all active agents"
-        />
-        <MetricCard
-          title="Avg Cycle Time"
-          value={`${metrics.avgCycleTime}d`}
-          delta={metrics.cycleTimeDelta}
-          description="Days from creation to done"
-        />
+        {summaryLoading ? (
+          <>
+            <MetricCardSkeleton />
+            <MetricCardSkeleton />
+            <MetricCardSkeleton />
+            <MetricCardSkeleton />
+          </>
+        ) : summaryError || !summary ? (
+          <p className="col-span-4 text-sm text-muted-foreground">
+            Unable to load summary metrics.
+          </p>
+        ) : (
+          <>
+            <MetricCard
+              title="Tasks Completed"
+              value={summary.tasks_completed.toLocaleString()}
+              // Delta is not available from this endpoint; display 0 as a
+              // neutral placeholder until a time-series summary endpoint exists.
+              delta={0}
+              description={`Over the last ${dateRange}`}
+            />
+            <MetricCard
+              title="Active Agents"
+              value={String(summary.active_agents)}
+              delta={0}
+              description="Currently deployed agents"
+            />
+            <MetricCard
+              title="Total Tasks"
+              value={summary.total_tasks.toLocaleString()}
+              delta={0}
+              description="All tasks across projects"
+            />
+            <MetricCard
+              title="Tasks In Progress"
+              value={summary.tasks_in_progress.toLocaleString()}
+              delta={0}
+              description="Currently being worked on"
+            />
+          </>
+        )}
       </div>
 
       {/* Charts grid */}
       <div className="grid gap-6 lg:grid-cols-2">
+        {/* Agent Utilisation */}
         <div className="rounded-xl border border-border bg-card p-6">
           <h2 className="mb-4 text-base font-semibold">Agent Utilisation</h2>
-          <AgentUtilizationChart dateRange={dateRange} />
+          {agentsLoading ? (
+            <ChartSkeleton />
+          ) : agentsError ? (
+            <p className="flex h-[260px] items-center justify-center text-sm text-muted-foreground">
+              Unable to load agent utilisation data.
+            </p>
+          ) : agentUtilizationData.length === 0 ? (
+            <p className="flex h-[260px] items-center justify-center text-sm text-muted-foreground">
+              No agent data available.
+            </p>
+          ) : (
+            <AgentUtilizationChart data={agentUtilizationData} />
+          )}
         </div>
 
+        {/* Task Completion Trend */}
         <div className="rounded-xl border border-border bg-card p-6">
           <h2 className="mb-4 text-base font-semibold">Task Completion Trend</h2>
-          <TaskCompletionChart dateRange={dateRange} />
+          {taskCompletionLoading ? (
+            <ChartSkeleton />
+          ) : taskCompletionError ? (
+            <p className="flex h-[260px] items-center justify-center text-sm text-muted-foreground">
+              Unable to load task completion data.
+            </p>
+          ) : taskCompletionData.length === 0 ? (
+            <p className="flex h-[260px] items-center justify-center text-sm text-muted-foreground">
+              No task completion data for this period.
+            </p>
+          ) : (
+            <TaskCompletionChart data={taskCompletionData} />
+          )}
         </div>
       </div>
     </div>

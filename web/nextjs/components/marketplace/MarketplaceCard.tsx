@@ -1,15 +1,6 @@
 "use client";
 
-interface MarketplaceAgent {
-  id: string;
-  name: string;
-  role: string;
-  category: string;
-  description: string;
-  download_count: number;
-  star_rating: number;
-  author: string;
-}
+import type { MarketplaceAgent } from "@/lib/api/marketplace";
 
 interface MarketplaceCardProps {
   agent: MarketplaceAgent;
@@ -37,8 +28,8 @@ export function MarketplaceCard({ agent, onImport }: MarketplaceCardProps) {
     CATEGORY_COLORS[agent.category] ?? "bg-secondary text-secondary-foreground";
 
   // Build star display: filled stars up to Math.floor(rating), partial or empty remainder
-  const fullStars = Math.floor(agent.star_rating);
-  const hasHalfStar = agent.star_rating - fullStars >= 0.5;
+  const fullStars = Math.floor(agent.rating);
+  const hasHalfStar = agent.rating - fullStars >= 0.5;
   const emptyStars = 5 - fullStars - (hasHalfStar ? 1 : 0);
 
   return (
@@ -55,10 +46,12 @@ export function MarketplaceCard({ agent, onImport }: MarketplaceCardProps) {
         </span>
       </div>
 
-      {/* Name and role */}
+      {/* Name and model info */}
       <div className="mt-3">
         <h3 className="font-semibold leading-tight">{agent.name}</h3>
-        <p className="mt-0.5 text-sm text-muted-foreground">{agent.role}</p>
+        <p className="mt-0.5 text-sm text-muted-foreground">
+          {agent.model_provider} &middot; {agent.model_name}
+        </p>
       </div>
 
       {/* Description */}
@@ -84,7 +77,7 @@ export function MarketplaceCard({ agent, onImport }: MarketplaceCardProps) {
               d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M7 10l5 5 5-5M12 15V3"
             />
           </svg>
-          {formatDownloadCount(agent.download_count)}
+          {formatDownloadCount(agent.downloads)}
         </span>
 
         {/* Star rating */}
@@ -124,14 +117,16 @@ export function MarketplaceCard({ agent, onImport }: MarketplaceCardProps) {
               </svg>
             ))}
           </span>
-          {agent.star_rating.toFixed(1)}
+          {agent.rating.toFixed(1)}
         </span>
       </div>
 
-      {/* Author */}
-      <p className="mt-2 text-xs text-muted-foreground">
-        by <span className="font-medium">{agent.author}</span>
-      </p>
+      {/* Author ID */}
+      {agent.author_id && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          by <span className="font-medium">{agent.author_id}</span>
+        </p>
+      )}
 
       {/* Import button */}
       <button

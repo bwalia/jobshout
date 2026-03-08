@@ -10,6 +10,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
+	miniogo "github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/rs/cors"
 	"go.uber.org/zap"
 
@@ -66,6 +68,20 @@ func main() {
 	hub := ws.NewHub(logger)
 	go hub.Run()
 
+	// MinIO client (optional — if endpoint is configured)
+	var uploadHandler *handler.UploadHandler
+	if cfg.MinIOEndpoint != "" {
+		minioClient, err := miniogo.New(cfg.MinIOEndpoint, &miniogo.Options{
+			Creds:  credentials.NewStaticV4(cfg.MinIOAccessKey, cfg.MinIOSecretKey, ""),
+			Secure: cfg.MinIOUseSSL,
+		})
+		if err != nil {
+			logger.Warn("failed to create minio client — uploads disabled", zap.Error(err))
+		} else {
+			uploadHandler = handler.NewUploadHandler(minioClient, cfg.MinIOBucketAvatars, logger)
+		}
+	}
+
 	// Handlers
 	authHandler := handler.NewAuthHandler(authSvc)
 	agentHandler := handler.NewAgentHandler(agentSvc)
@@ -114,6 +130,7 @@ func main() {
 			r.Use(requireAuth)
 
 			r.Get("/auth/me", authHandler.GetMe)
+			r.Patch("/auth/me", authHandler.UpdateProfile)
 
 			// Agents
 			r.Route("/agents", func(r chi.Router) {
@@ -148,6 +165,8 @@ func main() {
 					r.Delete("/", taskHandler.Delete)
 					r.Patch("/transition", taskHandler.Transition)
 					r.Put("/position", taskHandler.Reorder)
+					r.Get("/comments", taskHandler.ListComments)
+					r.Post("/comments", taskHandler.AddComment)
 				})
 			})
 
@@ -184,6 +203,12 @@ func main() {
 				r.Get("/agents/{agentID}", metricsHandler.AgentMetrics)
 				r.Get("/task-completion", metricsHandler.TaskCompletion)
 			})
+
+			// Uploads (MinIO)
+			if uploadHandler != nil {
+				r.Post("/uploads/avatar", uploadHandler.UploadAvatar)
+				r.Get("/uploads/avatar/*", uploadHandler.ServeAvatar)
+			}
 
 			// WebSocket
 			r.Get("/ws", wsHandler.Connect)

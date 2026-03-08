@@ -9,7 +9,7 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 
-	"github.com/jobshout/server/internal/middleware"
+	mw "github.com/jobshout/server/internal/middleware"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/service"
 )
@@ -33,7 +33,7 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID, _ := uuid.Parse(middleware.GetUserID(r.Context()))
+	userID, _ := uuid.Parse(mw.GetUserID(r.Context()))
 
 	task, err := h.svc.Create(r.Context(), userID, req)
 	if err != nil {
@@ -63,21 +63,79 @@ func (h *TaskHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TaskHandler) List(w http.ResponseWriter, r *http.Request) {
-	projectID, err := uuid.Parse(r.URL.Query().Get("project_id"))
-	if err != nil {
-		RespondError(w, http.StatusBadRequest, "project_id query parameter is required")
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
+	params := model.PaginationParams{Page: page, PerPage: perPage}
+
+	projectIDStr := r.URL.Query().Get("project_id")
+	if projectIDStr != "" {
+		projectID, err := uuid.Parse(projectIDStr)
+		if err != nil {
+			RespondError(w, http.StatusBadRequest, "invalid project_id")
+			return
+		}
+		result, err := h.svc.List(r.Context(), projectID, params)
+		if err != nil {
+			RespondError(w, http.StatusInternalServerError, "failed to list tasks")
+			return
+		}
+		RespondJSON(w, http.StatusOK, result)
 		return
 	}
 
-	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
-
-	result, err := h.svc.List(r.Context(), projectID, model.PaginationParams{Page: page, PerPage: perPage})
+	// No project_id: list all tasks for the user's org
+	orgID, err := uuid.Parse(mw.GetOrgID(r.Context()))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid org_id in token")
+		return
+	}
+	result, err := h.svc.ListByOrg(r.Context(), orgID, params)
 	if err != nil {
 		RespondError(w, http.StatusInternalServerError, "failed to list tasks")
 		return
 	}
 	RespondJSON(w, http.StatusOK, result)
+}
+
+func (h *TaskHandler) ListComments(w http.ResponseWriter, r *http.Request) {
+	taskID, err := uuid.Parse(chi.URLParam(r, "taskID"))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid task ID")
+		return
+	}
+
+	comments, err := h.svc.ListComments(r.Context(), taskID)
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, "failed to list comments")
+		return
+	}
+	RespondJSON(w, http.StatusOK, comments)
+}
+
+func (h *TaskHandler) AddComment(w http.ResponseWriter, r *http.Request) {
+	taskID, err := uuid.Parse(chi.URLParam(r, "taskID"))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid task ID")
+		return
+	}
+
+	var req model.AddCommentRequest
+	if !DecodeJSON(w, r, &req) {
+		return
+	}
+	if err := h.validate.Struct(req); err != nil {
+		RespondError(w, http.StatusBadRequest, "validation failed: "+err.Error())
+		return
+	}
+
+	userID, _ := uuid.Parse(mw.GetUserID(r.Context()))
+
+	comment, err := h.svc.AddComment(r.Context(), taskID, userID, req.Body)
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, "failed to add comment")
+		return
+	}
+	RespondJSON(w, http.StatusCreated, comment)
 }
 
 func (h *TaskHandler) Update(w http.ResponseWriter, r *http.Request) {

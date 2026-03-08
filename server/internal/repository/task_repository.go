@@ -15,6 +15,9 @@ type TaskRepository interface {
 	Create(ctx context.Context, task *model.Task) error
 	FindByID(ctx context.Context, id uuid.UUID) (*model.Task, error)
 	ListByProject(ctx context.Context, projectID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.Task], error)
+	ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.Task], error)
+	ListComments(ctx context.Context, taskID uuid.UUID) ([]model.TaskComment, error)
+	AddComment(ctx context.Context, comment *model.TaskComment) error
 	Update(ctx context.Context, task *model.Task) error
 	Delete(ctx context.Context, id uuid.UUID) error
 	TransitionStatus(ctx context.Context, id uuid.UUID, status string) error
@@ -119,6 +122,83 @@ func (r *taskRepository) ListByProject(ctx context.Context, projectID uuid.UUID,
 		Data: tasks, Total: total, Page: params.Page,
 		PerPage: params.PerPage, TotalPages: totalPages,
 	}, nil
+}
+
+func (r *taskRepository) ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.Task], error) {
+	params.Normalize()
+
+	var total int
+	countQuery := `SELECT COUNT(*) FROM tasks WHERE project_id IN (SELECT id FROM projects WHERE org_id = $1)`
+	if err := r.pool.QueryRow(ctx, countQuery, orgID).Scan(&total); err != nil {
+		return nil, fmt.Errorf("counting org tasks: %w", err)
+	}
+
+	query := `
+		SELECT id, project_id, parent_id, title, description, status, priority,
+			assigned_agent_id, assigned_user_id, story_points, due_date, position,
+			created_by, created_at, updated_at
+		FROM tasks WHERE project_id IN (SELECT id FROM projects WHERE org_id = $1)
+		ORDER BY updated_at DESC
+		LIMIT $2 OFFSET $3`
+
+	rows, err := r.pool.Query(ctx, query, orgID, params.PerPage, params.Offset())
+	if err != nil {
+		return nil, fmt.Errorf("listing org tasks: %w", err)
+	}
+	defer rows.Close()
+
+	tasks := make([]model.Task, 0)
+	for rows.Next() {
+		var t model.Task
+		if err := rows.Scan(
+			&t.ID, &t.ProjectID, &t.ParentID, &t.Title, &t.Description,
+			&t.Status, &t.Priority, &t.AssignedAgentID, &t.AssignedUserID,
+			&t.StoryPoints, &t.DueDate, &t.Position, &t.CreatedBy,
+			&t.CreatedAt, &t.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scanning org task: %w", err)
+		}
+		tasks = append(tasks, t)
+	}
+
+	totalPages := total / params.PerPage
+	if total%params.PerPage != 0 {
+		totalPages++
+	}
+
+	return &model.PaginatedResponse[model.Task]{
+		Data: tasks, Total: total, Page: params.Page,
+		PerPage: params.PerPage, TotalPages: totalPages,
+	}, nil
+}
+
+func (r *taskRepository) ListComments(ctx context.Context, taskID uuid.UUID) ([]model.TaskComment, error) {
+	query := `SELECT id, task_id, author_id, agent_id, body, created_at
+		FROM task_comments WHERE task_id = $1 ORDER BY created_at ASC`
+
+	rows, err := r.pool.Query(ctx, query, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("listing task comments: %w", err)
+	}
+	defer rows.Close()
+
+	comments := make([]model.TaskComment, 0)
+	for rows.Next() {
+		var c model.TaskComment
+		if err := rows.Scan(&c.ID, &c.TaskID, &c.AuthorID, &c.AgentID, &c.Body, &c.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scanning task comment: %w", err)
+		}
+		comments = append(comments, c)
+	}
+	return comments, nil
+}
+
+func (r *taskRepository) AddComment(ctx context.Context, comment *model.TaskComment) error {
+	query := `INSERT INTO task_comments (id, task_id, author_id, agent_id, body, created_at)
+		VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING created_at`
+	return r.pool.QueryRow(ctx, query,
+		comment.ID, comment.TaskID, comment.AuthorID, comment.AgentID, comment.Body,
+	).Scan(&comment.CreatedAt)
 }
 
 func (r *taskRepository) Update(ctx context.Context, task *model.Task) error {

@@ -1,136 +1,98 @@
 "use client";
 
 import { useState } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { MarketplaceCard } from "@/components/marketplace/MarketplaceCard";
 import { CategoryFilter } from "@/components/marketplace/CategoryFilter";
 import { ImportAgentDialog } from "@/components/marketplace/ImportAgentDialog";
-
-// Represents a marketplace agent listing (not the same as an org-owned Agent)
-interface MarketplaceAgent {
-  id: string;
-  name: string;
-  role: string;
-  category: string;
-  description: string;
-  download_count: number;
-  star_rating: number;
-  author: string;
-}
-
-const MOCK_AGENTS: MarketplaceAgent[] = [
-  {
-    id: "1",
-    name: "CodeReviewer Pro",
-    role: "Senior Code Reviewer",
-    category: "Engineering",
-    description: "Automated code review agent with deep understanding of best practices, security vulnerabilities, and performance patterns.",
-    download_count: 4821,
-    star_rating: 4.8,
-    author: "Jobshout Labs",
-  },
-  {
-    id: "2",
-    name: "DesignCritic",
-    role: "UX Design Analyst",
-    category: "Design",
-    description: "Reviews Figma designs and provides actionable feedback on accessibility, consistency, and usability.",
-    download_count: 2340,
-    star_rating: 4.5,
-    author: "DesignOps Team",
-  },
-  {
-    id: "3",
-    name: "QA Sentinel",
-    role: "QA Automation Engineer",
-    category: "QA",
-    description: "Generates test cases, identifies edge cases, and writes automated test suites for your codebase.",
-    download_count: 3105,
-    star_rating: 4.7,
-    author: "Jobshout Labs",
-  },
-  {
-    id: "4",
-    name: "SprintCoach",
-    role: "Agile Project Manager",
-    category: "Management",
-    description: "Manages sprint ceremonies, tracks velocity, identifies blockers, and produces sprint reports automatically.",
-    download_count: 1987,
-    star_rating: 4.3,
-    author: "AgilePlus",
-  },
-  {
-    id: "5",
-    name: "K8s Guardian",
-    role: "DevOps Engineer",
-    category: "DevOps",
-    description: "Monitors Kubernetes clusters, diagnoses pod failures, and proposes infrastructure fixes.",
-    download_count: 2755,
-    star_rating: 4.6,
-    author: "InfraTeam",
-  },
-  {
-    id: "6",
-    name: "TypeScriptMentor",
-    role: "Frontend Engineer",
-    category: "Engineering",
-    description: "Specializes in TypeScript, React, and Next.js. Helps with type safety, component architecture, and performance tuning.",
-    download_count: 5601,
-    star_rating: 4.9,
-    author: "Jobshout Labs",
-  },
-  {
-    id: "7",
-    name: "BrandVoice",
-    role: "Brand Designer",
-    category: "Design",
-    description: "Ensures visual consistency across marketing materials by enforcing brand guidelines and suggesting corrections.",
-    download_count: 1123,
-    star_rating: 4.1,
-    author: "CreativeHub",
-  },
-  {
-    id: "8",
-    name: "CI Optimizer",
-    role: "DevOps Engineer",
-    category: "DevOps",
-    description: "Analyzes CI/CD pipelines and recommends optimizations to reduce build times and flaky tests.",
-    download_count: 1890,
-    star_rating: 4.4,
-    author: "PipelinePros",
-  },
-];
+import {
+  getMarketplaceAgents,
+  importMarketplaceAgent,
+  type MarketplaceAgent,
+} from "@/lib/api/marketplace";
 
 const CATEGORIES = ["All", "Engineering", "Design", "QA", "Management", "DevOps"];
+
+// Skeleton card shown while the agent list is loading
+function AgentCardSkeleton() {
+  return (
+    <div className="flex flex-col rounded-xl border border-border bg-card p-5 shadow-sm animate-pulse">
+      <div className="flex items-start justify-between">
+        <div className="h-12 w-12 rounded-full bg-muted" />
+        <div className="h-5 w-20 rounded-full bg-muted" />
+      </div>
+      <div className="mt-3 space-y-2">
+        <div className="h-4 w-3/4 rounded bg-muted" />
+        <div className="h-3 w-1/2 rounded bg-muted" />
+      </div>
+      <div className="mt-2 space-y-1.5 flex-1">
+        <div className="h-3 w-full rounded bg-muted" />
+        <div className="h-3 w-full rounded bg-muted" />
+        <div className="h-3 w-2/3 rounded bg-muted" />
+      </div>
+      <div className="mt-4 h-3 w-1/3 rounded bg-muted" />
+      <div className="mt-4 h-9 w-full rounded-md bg-muted" />
+    </div>
+  );
+}
 
 export default function MarketplacePage() {
   const [activeCategory, setActiveCategory] = useState("All");
   const [searchQuery, setSearchQuery] = useState("");
-  // The agent pending import confirmation; null when dialog is closed
+  // The agent pending import confirmation; null when the dialog is closed
   const [pendingImport, setPendingImport] = useState<MarketplaceAgent | null>(null);
 
-  const filteredAgents = MOCK_AGENTS.filter((agent) => {
+  const {
+    data: agents = [],
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useQuery({
+    queryKey: ["marketplace-agents"],
+    queryFn: () => getMarketplaceAgents(),
+  });
+
+  const importMutation = useMutation({
+    mutationFn: (agentId: string) => importMarketplaceAgent(agentId),
+    onSuccess: (_data, _agentId) => {
+      toast.success(`"${pendingImport?.name}" has been added to your team.`);
+      setPendingImport(null);
+    },
+    onError: (err: unknown) => {
+      const message =
+        err instanceof Error ? err.message : "Something went wrong. Please try again.";
+      toast.error(`Import failed: ${message}`);
+    },
+  });
+
+  // Client-side filtering applied on top of the live data
+  const filteredAgents = agents.filter((agent) => {
     const matchesCategory =
       activeCategory === "All" || agent.category === activeCategory;
     const searchLower = searchQuery.toLowerCase();
     const matchesSearch =
       searchQuery === "" ||
       agent.name.toLowerCase().includes(searchLower) ||
-      agent.role.toLowerCase().includes(searchLower) ||
+      agent.model_name.toLowerCase().includes(searchLower) ||
       agent.description.toLowerCase().includes(searchLower);
     return matchesCategory && matchesSearch;
   });
 
   function handleImportRequest(agentId: string): void {
-    const agent = MOCK_AGENTS.find((a) => a.id === agentId) ?? null;
+    const agent = agents.find((a) => a.id === agentId) ?? null;
     setPendingImport(agent);
   }
 
   function handleImportConfirm(): void {
-    // TODO: call POST /api/v1/agents/import with pendingImport details
-    setPendingImport(null);
+    if (!pendingImport) return;
+    importMutation.mutate(pendingImport.id);
   }
 
   function handleImportCancel(): void {
+    // Prevent closing while the import request is in-flight
+    if (importMutation.isPending) return;
     setPendingImport(null);
   }
 
@@ -165,7 +127,7 @@ export default function MarketplacePage() {
             </svg>
             <input
               type="search"
-              placeholder="Search agents by name, role, or description..."
+              placeholder="Search agents by name, model, or description..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="flex h-10 w-full rounded-md border border-input bg-background pl-9 pr-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -181,21 +143,51 @@ export default function MarketplacePage() {
         onCategoryChange={setActiveCategory}
       />
 
-      {/* Results count */}
-      <p className="text-sm text-muted-foreground">
-        Showing{" "}
-        <span className="font-medium text-foreground">{filteredAgents.length}</span>{" "}
-        agent{filteredAgents.length !== 1 ? "s" : ""}
-        {activeCategory !== "All" && (
-          <> in <span className="font-medium text-foreground">{activeCategory}</span></>
-        )}
-        {searchQuery && (
-          <> matching &ldquo;<span className="font-medium text-foreground">{searchQuery}</span>&rdquo;</>
-        )}
-      </p>
+      {/* Error state */}
+      {isError && (
+        <div className="flex flex-col items-center justify-center rounded-xl border border-destructive/40 bg-destructive/10 py-12 text-center">
+          <p className="text-base font-medium text-destructive">
+            Failed to load marketplace agents
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {error instanceof Error ? error.message : "An unexpected error occurred."}
+          </p>
+          <button
+            type="button"
+            onClick={() => refetch()}
+            className="mt-4 inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            Try again
+          </button>
+        </div>
+      )}
+
+      {/* Results count — only shown when data is available */}
+      {!isLoading && !isError && (
+        <p className="text-sm text-muted-foreground">
+          Showing{" "}
+          <span className="font-medium text-foreground">{filteredAgents.length}</span>{" "}
+          agent{filteredAgents.length !== 1 ? "s" : ""}
+          {activeCategory !== "All" && (
+            <> in <span className="font-medium text-foreground">{activeCategory}</span></>
+          )}
+          {searchQuery && (
+            <> matching &ldquo;<span className="font-medium text-foreground">{searchQuery}</span>&rdquo;</>
+          )}
+        </p>
+      )}
+
+      {/* Loading skeletons */}
+      {isLoading && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <AgentCardSkeleton key={i} />
+          ))}
+        </div>
+      )}
 
       {/* Agent grid */}
-      {filteredAgents.length > 0 ? (
+      {!isLoading && !isError && filteredAgents.length > 0 && (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {filteredAgents.map((agent) => (
             <MarketplaceCard
@@ -205,7 +197,10 @@ export default function MarketplacePage() {
             />
           ))}
         </div>
-      ) : (
+      )}
+
+      {/* Empty state */}
+      {!isLoading && !isError && filteredAgents.length === 0 && (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-20 text-center">
           <p className="text-lg font-medium">No agents found</p>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -218,9 +213,11 @@ export default function MarketplacePage() {
       {pendingImport && (
         <ImportAgentDialog
           agentName={pendingImport.name}
-          agentRole={pendingImport.role}
+          agentModelProvider={pendingImport.model_provider}
+          agentModelName={pendingImport.model_name}
           agentCategory={pendingImport.category}
           agentDescription={pendingImport.description}
+          isImporting={importMutation.isPending}
           onConfirm={handleImportConfirm}
           onCancel={handleImportCancel}
         />

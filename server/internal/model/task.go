@@ -53,3 +53,16 @@ type ReorderTaskRequest struct {
 	Status   string `json:"status" validate:"required,oneof=backlog todo in_progress review done"`
 	Position int    `json:"position" validate:"min=0"`
 }
+
+type TaskComment struct {
+	ID        uuid.UUID  `json:"id"`
+	TaskID    uuid.UUID  `json:"task_id"`
+	AuthorID  *uuid.UUID `json:"author_id"`
+	AgentID   *uuid.UUID `json:"agent_id"`
+	Body      string     `json:"body"`
+	CreatedAt time.Time  `json:"created_at"`
+}
+
+type AddCommentRequest struct {
+	Body string `json:"body" validate:"required,min=1"`
+}

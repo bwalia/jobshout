@@ -116,7 +116,7 @@ export async function reorderTask(
   id: string,
   payload: ReorderTaskRequest
 ): Promise<Task> {
-  const { data } = await apiClient.patch<Task>(`/tasks/${id}/reorder`, payload);
+  const { data } = await apiClient.put<Task>(`/tasks/${id}/position`, payload);
   return data;
 }
 

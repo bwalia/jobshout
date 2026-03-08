@@ -21,6 +21,7 @@ type AuthService interface {
 	Login(ctx context.Context, req model.LoginRequest) (*model.AuthResponse, error)
 	RefreshToken(ctx context.Context, refreshToken string) (*model.AuthResponse, error)
 	GetMe(ctx context.Context, userID uuid.UUID) (*model.User, error)
+	UpdateProfile(ctx context.Context, userID uuid.UUID, req model.UpdateProfileRequest) (*model.User, error)
 }
 
 type authService struct {
@@ -148,6 +149,28 @@ func (s *authService) GetMe(ctx context.Context, userID uuid.UUID) (*model.User,
 	}
 	if user == nil {
 		return nil, ErrUserNotFound
+	}
+	return user, nil
+}
+
+func (s *authService) UpdateProfile(ctx context.Context, userID uuid.UUID, req model.UpdateProfileRequest) (*model.User, error) {
+	user, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("finding user: %w", err)
+	}
+	if user == nil {
+		return nil, ErrUserNotFound
+	}
+
+	if req.FullName != nil {
+		user.FullName = *req.FullName
+	}
+	if req.AvatarURL != nil {
+		user.AvatarURL = req.AvatarURL
+	}
+
+	if err := s.userRepo.UpdateProfile(ctx, user); err != nil {
+		return nil, fmt.Errorf("updating profile: %w", err)
 	}
 	return user, nil
 }

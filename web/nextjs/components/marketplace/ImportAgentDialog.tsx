@@ -4,37 +4,43 @@ import { useEffect, useRef } from "react";
 
 interface ImportAgentDialogProps {
   agentName: string;
-  agentRole: string;
+  agentModelProvider: string;
+  agentModelName: string;
   agentCategory: string;
   agentDescription: string;
+  /** Whether the import mutation is currently in-flight */
+  isImporting?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
 
 export function ImportAgentDialog({
   agentName,
-  agentRole,
+  agentModelProvider,
+  agentModelName,
   agentCategory,
   agentDescription,
+  isImporting = false,
   onConfirm,
   onCancel,
 }: ImportAgentDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
 
-  // Close dialog on Escape key
+  // Close dialog on Escape key (disabled while import is in-flight to prevent
+  // accidentally closing during a pending network request)
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent): void {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && !isImporting) {
         onCancel();
       }
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onCancel]);
+  }, [onCancel, isImporting]);
 
   // Close dialog when clicking the backdrop (outside the dialog box)
   function handleBackdropClick(event: React.MouseEvent<HTMLDivElement>): void {
-    if (event.target === event.currentTarget) {
+    if (event.target === event.currentTarget && !isImporting) {
       onCancel();
     }
   }
@@ -78,7 +84,9 @@ export function ImportAgentDialog({
                   {agentCategory}
                 </span>
               </div>
-              <p className="mt-0.5 text-sm text-muted-foreground">{agentRole}</p>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                {agentModelProvider} &middot; {agentModelName}
+              </p>
               <p className="mt-2 text-sm text-muted-foreground line-clamp-3">
                 {agentDescription}
               </p>
@@ -91,16 +99,18 @@ export function ImportAgentDialog({
           <button
             type="button"
             onClick={onCancel}
-            className="inline-flex h-9 items-center justify-center rounded-md border border-border bg-background px-4 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            disabled={isImporting}
+            className="inline-flex h-9 items-center justify-center rounded-md border border-border bg-background px-4 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
           >
             Cancel
           </button>
           <button
             type="button"
             onClick={onConfirm}
-            className="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            disabled={isImporting}
+            className="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
           >
-            Confirm Import
+            {isImporting ? "Importing…" : "Confirm Import"}
           </button>
         </div>
       </div>

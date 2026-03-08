@@ -14,7 +14,7 @@ import (
 type AgentService interface {
 	Create(ctx context.Context, orgID uuid.UUID, createdBy uuid.UUID, req model.CreateAgentRequest) (*model.Agent, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*model.Agent, error)
-	List(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.Agent], error)
+	List(ctx context.Context, orgID uuid.UUID, params model.PaginationParams, filter repository.AgentListFilter) (*model.PaginatedResponse[model.Agent], error)
 	Update(ctx context.Context, id uuid.UUID, req model.UpdateAgentRequest) (*model.Agent, error)
 	Delete(ctx context.Context, id uuid.UUID) error
 	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
@@ -70,8 +70,8 @@ func (s *agentService) GetByID(ctx context.Context, id uuid.UUID) (*model.Agent,
 	return agent, nil
 }
 
-func (s *agentService) List(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.Agent], error) {
-	return s.repo.ListByOrg(ctx, orgID, params)
+func (s *agentService) List(ctx context.Context, orgID uuid.UUID, params model.PaginationParams, filter repository.AgentListFilter) (*model.PaginatedResponse[model.Agent], error) {
+	return s.repo.ListByOrg(ctx, orgID, params, filter)
 }
 
 func (s *agentService) Update(ctx context.Context, id uuid.UUID, req model.UpdateAgentRequest) (*model.Agent, error) {

@@ -122,3 +122,30 @@ func (h *AuthHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 
 	RespondJSON(w, http.StatusOK, user)
 }
+
+// UpdateProfile handles PATCH /auth/me
+func (h *AuthHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
+	userIDStr := middleware.GetUserID(r.Context())
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		RespondError(w, http.StatusUnauthorized, "invalid user ID in token")
+		return
+	}
+
+	var req model.UpdateProfileRequest
+	if !DecodeJSON(w, r, &req) {
+		return
+	}
+
+	user, err := h.authSvc.UpdateProfile(r.Context(), userID, req)
+	if err != nil {
+		if errors.Is(err, service.ErrUserNotFound) {
+			RespondError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		RespondError(w, http.StatusInternalServerError, "failed to update profile")
+		return
+	}
+
+	RespondJSON(w, http.StatusOK, user)
+}

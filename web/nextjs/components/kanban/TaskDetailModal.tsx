@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { updateTask } from "@/lib/api/tasks";
-import type { Task, UpdateTaskRequest } from "@/lib/types/project";
+import { updateTask, getTaskComments, addTaskComment } from "@/lib/api/tasks";
+import type { Task, UpdateTaskRequest, TaskComment } from "@/lib/types/project";
 import type { TaskStatus, Priority } from "@/lib/types/common";
 
 // ---------------------------------------------------------------------------
@@ -38,17 +38,20 @@ interface TaskDetailModalProps {
   onUpdated?: (updatedTask: Task) => void;
 }
 
-/**
- * Slide-over style modal for viewing and editing a task's details.
- *
- * Editable fields:
- * - Title
- * - Description
- * - Status
- * - Priority
- * - Assignee (agent ID text field — a real implementation would use a picker)
- * - Due date
- */
+// ---------------------------------------------------------------------------
+// Relative time helper
+// ---------------------------------------------------------------------------
+
+function formatRelativeTime(isoTimestamp: string): string {
+  const diffMs = Date.now() - new Date(isoTimestamp).getTime();
+  const diffSeconds = Math.floor(diffMs / 1000);
+
+  if (diffSeconds < 60) return "just now";
+  if (diffSeconds < 3600) return `${Math.floor(diffSeconds / 60)}m ago`;
+  if (diffSeconds < 86_400) return `${Math.floor(diffSeconds / 3600)}h ago`;
+  return `${Math.floor(diffSeconds / 86_400)}d ago`;
+}
+
 export function TaskDetailModal({ task, onClose, onUpdated }: TaskDetailModalProps) {
   const queryClient = useQueryClient();
 
@@ -64,6 +67,9 @@ export function TaskDetailModal({ task, onClose, onUpdated }: TaskDetailModalPro
     task.due_date ? task.due_date.slice(0, 10) : ""
   );
 
+  // Comment input state
+  const [commentBody, setCommentBody] = useState("");
+
   // Keep local state fresh if the task prop changes (e.g. external update)
   useEffect(() => {
     setTitle(task.title);
@@ -73,6 +79,15 @@ export function TaskDetailModal({ task, onClose, onUpdated }: TaskDetailModalPro
     setAssignedAgentId(task.assigned_agent_id ?? "");
     setDueDate(task.due_date ? task.due_date.slice(0, 10) : "");
   }, [task]);
+
+  // Fetch comments for this task
+  const {
+    data: comments = [],
+    isLoading: commentsLoading,
+  } = useQuery<TaskComment[]>({
+    queryKey: ["taskComments", task.id],
+    queryFn: () => getTaskComments(task.id),
+  });
 
   const updateMutation = useMutation({
     mutationFn: (payload: UpdateTaskRequest) => updateTask(task.id, payload),
@@ -89,6 +104,19 @@ export function TaskDetailModal({ task, onClose, onUpdated }: TaskDetailModalPro
     },
   });
 
+  const addCommentMutation = useMutation({
+    mutationFn: (body: string) => addTaskComment(task.id, body),
+    onSuccess: () => {
+      // Refresh the comments list after a successful add
+      queryClient.invalidateQueries({ queryKey: ["taskComments", task.id] });
+      setCommentBody("");
+      toast.success("Comment added.");
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to add comment: ${error.message}`);
+    },
+  });
+
   function handleSave() {
     if (!title.trim()) return;
 
@@ -100,6 +128,12 @@ export function TaskDetailModal({ task, onClose, onUpdated }: TaskDetailModalPro
       assigned_agent_id: assignedAgentId.trim() || null,
       due_date: dueDate || null,
     });
+  }
+
+  function handleAddComment() {
+    const trimmed = commentBody.trim();
+    if (!trimmed) return;
+    addCommentMutation.mutate(trimmed);
   }
 
   return (
@@ -233,6 +267,64 @@ export function TaskDetailModal({ task, onClose, onUpdated }: TaskDetailModalPro
               onChange={(e) => setDueDate(e.target.value)}
               className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
+          </div>
+
+          {/* Comments section */}
+          <div className="space-y-3 border-t border-border pt-5">
+            <h3 className="text-sm font-semibold">Comments</h3>
+
+            {/* Comment list */}
+            {commentsLoading ? (
+              <div className="space-y-2">
+                {Array.from({ length: 2 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="h-10 animate-pulse rounded-md bg-muted"
+                  />
+                ))}
+              </div>
+            ) : comments.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No comments yet. Be the first to add one.
+              </p>
+            ) : (
+              <ul className="space-y-3">
+                {comments.map((comment) => (
+                  <li
+                    key={comment.id}
+                    className="rounded-md border border-border bg-muted/30 px-3 py-2"
+                  >
+                    <p className="text-sm text-foreground whitespace-pre-wrap">
+                      {comment.body}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {formatRelativeTime(comment.created_at)}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {/* Add comment input */}
+            <div className="space-y-2">
+              <textarea
+                rows={3}
+                value={commentBody}
+                onChange={(e) => setCommentBody(e.target.value)}
+                placeholder="Write a comment…"
+                className="flex w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+              <button
+                type="button"
+                onClick={handleAddComment}
+                disabled={
+                  !commentBody.trim() || addCommentMutation.isPending
+                }
+                className="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+              >
+                {addCommentMutation.isPending ? "Adding…" : "Add Comment"}
+              </button>
+            </div>
           </div>
         </div>
 

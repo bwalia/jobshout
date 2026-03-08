@@ -16,6 +16,9 @@ type TaskService interface {
 	Create(ctx context.Context, createdBy uuid.UUID, req model.CreateTaskRequest) (*model.Task, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*model.Task, error)
 	List(ctx context.Context, projectID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.Task], error)
+	ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.Task], error)
+	ListComments(ctx context.Context, taskID uuid.UUID) ([]model.TaskComment, error)
+	AddComment(ctx context.Context, taskID uuid.UUID, authorID uuid.UUID, body string) (*model.TaskComment, error)
 	Update(ctx context.Context, id uuid.UUID, req model.UpdateTaskRequest) (*model.Task, error)
 	Delete(ctx context.Context, id uuid.UUID) error
 	Transition(ctx context.Context, id uuid.UUID, status string) error
@@ -112,6 +115,27 @@ func (s *taskService) GetByID(ctx context.Context, id uuid.UUID) (*model.Task, e
 
 func (s *taskService) List(ctx context.Context, projectID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.Task], error) {
 	return s.repo.ListByProject(ctx, projectID, params)
+}
+
+func (s *taskService) ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.Task], error) {
+	return s.repo.ListByOrg(ctx, orgID, params)
+}
+
+func (s *taskService) ListComments(ctx context.Context, taskID uuid.UUID) ([]model.TaskComment, error) {
+	return s.repo.ListComments(ctx, taskID)
+}
+
+func (s *taskService) AddComment(ctx context.Context, taskID uuid.UUID, authorID uuid.UUID, body string) (*model.TaskComment, error) {
+	comment := &model.TaskComment{
+		ID:       uuid.New(),
+		TaskID:   taskID,
+		AuthorID: &authorID,
+		Body:     body,
+	}
+	if err := s.repo.AddComment(ctx, comment); err != nil {
+		return nil, fmt.Errorf("adding comment: %w", err)
+	}
+	return comment, nil
 }
 
 func (s *taskService) Update(ctx context.Context, id uuid.UUID, req model.UpdateTaskRequest) (*model.Task, error) {

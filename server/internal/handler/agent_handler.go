@@ -11,6 +11,7 @@ import (
 
 	"github.com/jobshout/server/internal/middleware"
 	"github.com/jobshout/server/internal/model"
+	"github.com/jobshout/server/internal/repository"
 	"github.com/jobshout/server/internal/service"
 )
 
@@ -82,7 +83,12 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
 	params := model.PaginationParams{Page: page, PerPage: perPage}
 
-	result, err := h.svc.List(r.Context(), orgID, params)
+	filter := repository.AgentListFilter{
+		Search: r.URL.Query().Get("search"),
+		Status: r.URL.Query().Get("status"),
+	}
+
+	result, err := h.svc.List(r.Context(), orgID, params, filter)
 	if err != nil {
 		RespondError(w, http.StatusInternalServerError, "failed to list agents")
 		return

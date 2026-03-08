@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -11,10 +12,16 @@ import (
 	"github.com/jobshout/server/internal/model"
 )
 
+// AgentListFilter holds optional filter criteria for listing agents.
+type AgentListFilter struct {
+	Search string
+	Status string
+}
+
 type AgentRepository interface {
 	Create(ctx context.Context, agent *model.Agent) error
 	FindByID(ctx context.Context, id uuid.UUID) (*model.Agent, error)
-	ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.Agent], error)
+	ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams, filter AgentListFilter) (*model.PaginatedResponse[model.Agent], error)
 	Update(ctx context.Context, agent *model.Agent) error
 	Delete(ctx context.Context, id uuid.UUID) error
 	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
@@ -64,24 +71,44 @@ func (r *agentRepository) FindByID(ctx context.Context, id uuid.UUID) (*model.Ag
 	return a, nil
 }
 
-func (r *agentRepository) ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.Agent], error) {
+func (r *agentRepository) ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams, filter AgentListFilter) (*model.PaginatedResponse[model.Agent], error) {
 	params.Normalize()
 
+	// Build dynamic WHERE clause
+	conditions := []string{"org_id = $1"}
+	args := []any{orgID}
+	argIdx := 2
+
+	if filter.Status != "" {
+		conditions = append(conditions, fmt.Sprintf("status = $%d", argIdx))
+		args = append(args, filter.Status)
+		argIdx++
+	}
+	if filter.Search != "" {
+		conditions = append(conditions, fmt.Sprintf("(LOWER(name) LIKE $%d OR LOWER(role) LIKE $%d)", argIdx, argIdx))
+		args = append(args, "%"+strings.ToLower(filter.Search)+"%")
+		argIdx++
+	}
+
+	whereClause := strings.Join(conditions, " AND ")
+
 	var total int
-	countQuery := `SELECT COUNT(*) FROM agents WHERE org_id = $1`
-	if err := r.pool.QueryRow(ctx, countQuery, orgID).Scan(&total); err != nil {
+	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM agents WHERE %s`, whereClause)
+	if err := r.pool.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
 		return nil, fmt.Errorf("counting agents: %w", err)
 	}
 
-	query := `
+	query := fmt.Sprintf(`
 		SELECT id, org_id, name, role, description, avatar_url, status,
 			model_provider, model_name, system_prompt, performance_score,
 			manager_id, created_by, created_at, updated_at
-		FROM agents WHERE org_id = $1
+		FROM agents WHERE %s
 		ORDER BY created_at DESC
-		LIMIT $2 OFFSET $3`
+		LIMIT $%d OFFSET $%d`, whereClause, argIdx, argIdx+1)
 
-	rows, err := r.pool.Query(ctx, query, orgID, params.PerPage, params.Offset())
+	args = append(args, params.PerPage, params.Offset())
+
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing agents: %w", err)
 	}

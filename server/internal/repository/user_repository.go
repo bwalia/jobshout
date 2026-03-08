@@ -17,6 +17,7 @@ type UserRepository interface {
 	FindByEmail(ctx context.Context, email string) (*model.User, error)
 	FindByID(ctx context.Context, id uuid.UUID) (*model.User, error)
 	UpdateOrgID(ctx context.Context, userID uuid.UUID, orgID uuid.UUID) error
+	UpdateProfile(ctx context.Context, user *model.User) error
 }
 
 type userRepository struct {
@@ -86,4 +87,10 @@ func (r *userRepository) UpdateOrgID(ctx context.Context, userID uuid.UUID, orgI
 		return fmt.Errorf("updating user org_id: %w", err)
 	}
 	return nil
+}
+
+func (r *userRepository) UpdateProfile(ctx context.Context, user *model.User) error {
+	query := `UPDATE users SET full_name = $1, avatar_url = $2, updated_at = NOW()
+		WHERE id = $3 RETURNING updated_at`
+	return r.pool.QueryRow(ctx, query, user.FullName, user.AvatarURL, user.ID).Scan(&user.UpdatedAt)
 }

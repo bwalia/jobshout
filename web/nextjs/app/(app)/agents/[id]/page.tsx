@@ -3,21 +3,33 @@
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Cpu, StickyNote, Activity } from "lucide-react";
+import { ArrowLeft, Cpu, StickyNote, Activity, BookOpen } from "lucide-react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { AgentStatusBadge } from "@/components/agent/AgentStatusBadge";
 import { useAgent } from "@/lib/hooks/useAgents";
-import { useProjectTasks } from "@/lib/hooks/useTasks";
+import { useTasks } from "@/lib/hooks/useTasks";
+import { KnowledgeFileList } from "@/components/agent/KnowledgeFileList";
+import { KnowledgeEditor } from "@/components/agent/KnowledgeEditor";
+import {
+  getKnowledgeFiles,
+  createKnowledgeFile,
+  updateKnowledgeFile,
+  deleteKnowledgeFile,
+} from "@/lib/api/knowledge";
+import type { KnowledgeFile } from "@/lib/api/knowledge";
 import type { Task } from "@/lib/types/project";
 
 // ---------------------------------------------------------------------------
 // Tab types
 // ---------------------------------------------------------------------------
-type Tab = "overview" | "tasks" | "metrics";
+type Tab = "overview" | "tasks" | "metrics" | "knowledge";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "tasks", label: "Tasks" },
   { id: "metrics", label: "Metrics" },
+  { id: "knowledge", label: "Knowledge" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -145,9 +157,9 @@ function formatStatus(status: string) {
 
 /** Placeholder tasks tab – fetches tasks assigned to this agent. */
 function TasksTab({ agentId }: { agentId: string }) {
-  // We query all tasks and filter by agent id on the client side since the
-  // API may not expose a dedicated /agents/:id/tasks endpoint yet.
-  const { data, isLoading, isError } = useProjectTasks("", {});
+  // Fetch all org tasks and filter by agent id on the client side since the
+  // API does not expose a dedicated /agents/:id/tasks endpoint.
+  const { data, isLoading, isError } = useTasks();
 
   // Filter tasks by this agent (graceful fallback – empty array if data is
   // unavailable or the endpoint is unimplemented).
@@ -206,6 +218,235 @@ function TasksTab({ agentId }: { agentId: string }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// New file name prompt dialog helper
+// ---------------------------------------------------------------------------
+
+interface NewFileDialogState {
+  open: boolean;
+  filename: string;
+}
+
+/** Knowledge tab: list of knowledge files and an editor for the selected one. */
+function KnowledgeTab({ agentId }: { agentId: string }) {
+  const queryClient = useQueryClient();
+  const [selectedFileId, setSelectedFileId] = useState<string>("");
+  const [editorContent, setEditorContent] = useState<string>("");
+  const [newFileDialog, setNewFileDialog] = useState<NewFileDialogState>({
+    open: false,
+    filename: "",
+  });
+
+  const {
+    data: files = [],
+    isLoading,
+    isError,
+  } = useQuery<KnowledgeFile[]>({
+    queryKey: ["knowledge", agentId],
+    queryFn: () => getKnowledgeFiles(agentId),
+    enabled: Boolean(agentId),
+  });
+
+  // When a file is selected from the list, load its content into the editor
+  function handleSelectFile(fileId: string): void {
+    const file = files.find((f) => f.id === fileId);
+    if (file) {
+      setSelectedFileId(fileId);
+      setEditorContent(file.content);
+    }
+  }
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      updateKnowledgeFile(agentId, selectedFileId, editorContent),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["knowledge", agentId] });
+      toast.success("Knowledge file saved.");
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to save file: ${error.message}`);
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (fileId: string) => deleteKnowledgeFile(agentId, fileId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["knowledge", agentId] });
+      toast.success("Knowledge file deleted.");
+      // Clear the editor if the deleted file was selected
+      setSelectedFileId("");
+      setEditorContent("");
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to delete file: ${error.message}`);
+    },
+  });
+
+  const createMutation = useMutation({
+    mutationFn: (filename: string) =>
+      createKnowledgeFile(agentId, { filename, content: "" }),
+    onSuccess: (created) => {
+      queryClient.invalidateQueries({ queryKey: ["knowledge", agentId] });
+      toast.success("Knowledge file created.");
+      // Auto-select the newly created file
+      setSelectedFileId(created.id);
+      setEditorContent("");
+      setNewFileDialog({ open: false, filename: "" });
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to create file: ${error.message}`);
+    },
+  });
+
+  function handleNewFile(): void {
+    setNewFileDialog({ open: true, filename: "" });
+  }
+
+  function handleCreateConfirm(): void {
+    const trimmed = newFileDialog.filename.trim();
+    if (!trimmed) return;
+    createMutation.mutate(trimmed);
+  }
+
+  function handleDeleteSelected(): void {
+    if (!selectedFileId) return;
+    deleteMutation.mutate(selectedFileId);
+  }
+
+  // Map KnowledgeFile[] to the shape expected by KnowledgeFileList
+  const fileListItems = files.map((f) => ({
+    id: f.id,
+    name: f.filename,
+    updated_at: f.updated_at,
+  }));
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="h-10 animate-pulse rounded-md bg-muted" />
+        ))}
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <p className="text-sm text-destructive">
+        Failed to load knowledge files.
+      </p>
+    );
+  }
+
+  return (
+    <div className="flex gap-0 overflow-hidden rounded-lg border border-border bg-card" style={{ minHeight: "520px" }}>
+      {/* Sidebar: file list + actions */}
+      <div className="flex w-56 flex-shrink-0 flex-col border-r border-border">
+        {/* New File button */}
+        <div className="border-b border-border px-3 py-2.5">
+          <button
+            type="button"
+            onClick={handleNewFile}
+            className="inline-flex w-full items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            + New File
+          </button>
+        </div>
+
+        {/* File list */}
+        <div className="flex-1 overflow-y-auto">
+          <KnowledgeFileList
+            files={fileListItems}
+            selectedFileId={selectedFileId}
+            onSelectFile={handleSelectFile}
+          />
+        </div>
+
+        {/* Delete selected file */}
+        {selectedFileId && (
+          <div className="border-t border-border px-3 py-2">
+            <button
+              type="button"
+              onClick={handleDeleteSelected}
+              disabled={deleteMutation.isPending}
+              className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/20 disabled:pointer-events-none disabled:opacity-50"
+            >
+              {deleteMutation.isPending ? "Deleting…" : "Delete File"}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Editor pane */}
+      <div className="flex flex-1 flex-col">
+        {selectedFileId ? (
+          <KnowledgeEditor
+            value={editorContent}
+            onChange={setEditorContent}
+            onSave={() => saveMutation.mutate()}
+          />
+        ) : (
+          <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+            Select a file to edit or create a new one.
+          </div>
+        )}
+      </div>
+
+      {/* New file name dialog (simple inline overlay) */}
+      {newFileDialog.open && (
+        <div
+          className="absolute inset-0 z-10 flex items-center justify-center bg-black/40"
+          onClick={() => setNewFileDialog({ open: false, filename: "" })}
+        >
+          <div
+            className="w-80 rounded-lg border border-border bg-card p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="mb-3 text-sm font-semibold">New Knowledge File</h3>
+            <input
+              type="text"
+              autoFocus
+              value={newFileDialog.filename}
+              onChange={(e) =>
+                setNewFileDialog((prev) => ({
+                  ...prev,
+                  filename: e.target.value,
+                }))
+              }
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleCreateConfirm();
+                if (e.key === "Escape")
+                  setNewFileDialog({ open: false, filename: "" });
+              }}
+              placeholder="e.g. overview.md"
+              className="mb-4 flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setNewFileDialog({ open: false, filename: "" })}
+                className="inline-flex h-8 items-center rounded-md border border-border bg-background px-3 text-xs hover:bg-accent"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleCreateConfirm}
+                disabled={
+                  !newFileDialog.filename.trim() || createMutation.isPending
+                }
+                className="inline-flex h-8 items-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+              >
+                {createMutation.isPending ? "Creating…" : "Create"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -366,6 +607,7 @@ export default function AgentProfilePage() {
               {tabId === "overview" && <StickyNote className="h-4 w-4" />}
               {tabId === "tasks" && <Activity className="h-4 w-4" />}
               {tabId === "metrics" && <Activity className="h-4 w-4" />}
+              {tabId === "knowledge" && <BookOpen className="h-4 w-4" />}
               {label}
             </button>
           ))}
@@ -373,12 +615,13 @@ export default function AgentProfilePage() {
       </div>
 
       {/* Tab content */}
-      <div>
+      <div className="relative">
         {activeTab === "overview" && <OverviewTab agent={agent} />}
         {activeTab === "tasks" && <TasksTab agentId={agent.id} />}
         {activeTab === "metrics" && (
           <MetricsTab performanceScore={agent.performance_score} />
         )}
+        {activeTab === "knowledge" && <KnowledgeTab agentId={agent.id} />}
       </div>
     </div>
   );

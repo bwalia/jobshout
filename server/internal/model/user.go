@@ -45,6 +45,12 @@ type RefreshRequest struct {
 	RefreshToken string `json:"refresh_token" validate:"required"`
 }
 
+// UpdateProfileRequest is the payload for updating user profile.
+type UpdateProfileRequest struct {
+	FullName  *string `json:"full_name"`
+	AvatarURL *string `json:"avatar_url"`
+}
+
 // RefreshToken represents a stored refresh token.
 type RefreshToken struct {
 	ID        uuid.UUID `json:"id"`
