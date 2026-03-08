@@ -1,0 +1,146 @@
+package repository
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jobshout/server/internal/model"
+)
+
+type AgentRepository interface {
+	Create(ctx context.Context, agent *model.Agent) error
+	FindByID(ctx context.Context, id uuid.UUID) (*model.Agent, error)
+	ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.Agent], error)
+	Update(ctx context.Context, agent *model.Agent) error
+	Delete(ctx context.Context, id uuid.UUID) error
+	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
+}
+
+type agentRepository struct {
+	pool *pgxpool.Pool
+}
+
+func NewAgentRepository(pool *pgxpool.Pool) AgentRepository {
+	return &agentRepository{pool: pool}
+}
+
+func (r *agentRepository) Create(ctx context.Context, agent *model.Agent) error {
+	query := `
+		INSERT INTO agents (id, org_id, name, role, description, avatar_url, status,
+			model_provider, model_name, system_prompt, performance_score, manager_id, created_by, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())
+		RETURNING created_at, updated_at`
+
+	return r.pool.QueryRow(ctx, query,
+		agent.ID, agent.OrgID, agent.Name, agent.Role, agent.Description, agent.AvatarURL,
+		agent.Status, agent.ModelProvider, agent.ModelName, agent.SystemPrompt,
+		agent.PerformanceScore, agent.ManagerID, agent.CreatedBy,
+	).Scan(&agent.CreatedAt, &agent.UpdatedAt)
+}
+
+func (r *agentRepository) FindByID(ctx context.Context, id uuid.UUID) (*model.Agent, error) {
+	query := `
+		SELECT id, org_id, name, role, description, avatar_url, status,
+			model_provider, model_name, system_prompt, performance_score,
+			manager_id, created_by, created_at, updated_at
+		FROM agents WHERE id = $1`
+
+	a := &model.Agent{}
+	err := r.pool.QueryRow(ctx, query, id).Scan(
+		&a.ID, &a.OrgID, &a.Name, &a.Role, &a.Description, &a.AvatarURL,
+		&a.Status, &a.ModelProvider, &a.ModelName, &a.SystemPrompt,
+		&a.PerformanceScore, &a.ManagerID, &a.CreatedBy, &a.CreatedAt, &a.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("finding agent by id: %w", err)
+	}
+	return a, nil
+}
+
+func (r *agentRepository) ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.Agent], error) {
+	params.Normalize()
+
+	var total int
+	countQuery := `SELECT COUNT(*) FROM agents WHERE org_id = $1`
+	if err := r.pool.QueryRow(ctx, countQuery, orgID).Scan(&total); err != nil {
+		return nil, fmt.Errorf("counting agents: %w", err)
+	}
+
+	query := `
+		SELECT id, org_id, name, role, description, avatar_url, status,
+			model_provider, model_name, system_prompt, performance_score,
+			manager_id, created_by, created_at, updated_at
+		FROM agents WHERE org_id = $1
+		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3`
+
+	rows, err := r.pool.Query(ctx, query, orgID, params.PerPage, params.Offset())
+	if err != nil {
+		return nil, fmt.Errorf("listing agents: %w", err)
+	}
+	defer rows.Close()
+
+	agents := make([]model.Agent, 0)
+	for rows.Next() {
+		var a model.Agent
+		if err := rows.Scan(
+			&a.ID, &a.OrgID, &a.Name, &a.Role, &a.Description, &a.AvatarURL,
+			&a.Status, &a.ModelProvider, &a.ModelName, &a.SystemPrompt,
+			&a.PerformanceScore, &a.ManagerID, &a.CreatedBy, &a.CreatedAt, &a.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scanning agent row: %w", err)
+		}
+		agents = append(agents, a)
+	}
+
+	totalPages := total / params.PerPage
+	if total%params.PerPage != 0 {
+		totalPages++
+	}
+
+	return &model.PaginatedResponse[model.Agent]{
+		Data:       agents,
+		Total:      total,
+		Page:       params.Page,
+		PerPage:    params.PerPage,
+		TotalPages: totalPages,
+	}, nil
+}
+
+func (r *agentRepository) Update(ctx context.Context, agent *model.Agent) error {
+	query := `
+		UPDATE agents SET name = $1, role = $2, description = $3, avatar_url = $4,
+			model_provider = $5, model_name = $6, system_prompt = $7, manager_id = $8,
+			updated_at = NOW()
+		WHERE id = $9
+		RETURNING updated_at`
+
+	return r.pool.QueryRow(ctx, query,
+		agent.Name, agent.Role, agent.Description, agent.AvatarURL,
+		agent.ModelProvider, agent.ModelName, agent.SystemPrompt, agent.ManagerID,
+		agent.ID,
+	).Scan(&agent.UpdatedAt)
+}
+
+func (r *agentRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	_, err := r.pool.Exec(ctx, `DELETE FROM agents WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("deleting agent: %w", err)
+	}
+	return nil
+}
+
+func (r *agentRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status string) error {
+	_, err := r.pool.Exec(ctx, `UPDATE agents SET status = $1, updated_at = NOW() WHERE id = $2`, status, id)
+	if err != nil {
+		return fmt.Errorf("updating agent status: %w", err)
+	}
+	return nil
+}

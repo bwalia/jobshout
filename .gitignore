@@ -1,0 +1,48 @@
+# Go
+server/bin/
+server/tmp/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go test
+*.test
+*.out
+
+# Go vendor (if used)
+server/vendor/
+
+# Node
+web/nextjs/node_modules/
+web/nextjs/.next/
+web/nextjs/out/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes
+postgres_data/
+minio_data/
+
+# Logs
+*.log
+
+# Coverage
+coverage/
+*.cover
+*.prof
