@@ -29,12 +29,11 @@ export class WSClient {
   private destroyed = false;
 
   // Separate listener maps for built-in lifecycle events and typed message events
-  private readonly lifecycleListeners: Map<ClientEvent, Set<EventCallback>> =
-    new Map([
-      ["open", new Set()],
-      ["close", new Set()],
-      ["error", new Set()],
-      ["message", new Set()],
+  private readonly lifecycleListeners = new Map<ClientEvent, Set<EventCallback>>([
+      ["open", new Set<EventCallback>()],
+      ["close", new Set<EventCallback>()],
+      ["error", new Set<EventCallback>()],
+      ["message", new Set<EventCallback>()],
     ]);
 
   /** Listeners keyed by the message `type` field for targeted subscriptions */

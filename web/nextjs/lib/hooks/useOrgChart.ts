@@ -87,7 +87,8 @@ export function useOrgChart() {
   const queryClient = useQueryClient();
 
   // Fetch agents list via the existing useAgents hook
-  const { agents, isLoading, isError } = useAgents();
+  const { data, isLoading, isError } = useAgents();
+  const agents = data?.data ?? [];
 
   // Derive the initial React Flow elements from the agents data
   const initialElements = useMemo(

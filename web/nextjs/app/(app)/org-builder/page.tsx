@@ -10,7 +10,8 @@ import { useAgents } from "@/lib/hooks/useAgents";
  * chart can be initialised with the current manager hierarchy.
  */
 export default function OrgBuilderPage() {
-  const { agents, isLoading, isError } = useAgents();
+  const { data, isLoading, isError } = useAgents();
+  const agents = data?.data ?? [];
 
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col gap-4">

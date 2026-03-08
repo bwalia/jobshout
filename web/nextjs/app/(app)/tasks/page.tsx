@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import type { Task, TaskStatus, Priority } from "@/lib/types/project";
+import type { Task } from "@/lib/types/project";
+import type { TaskStatus, Priority } from "@/lib/types/common";
 
 // Mock task data covering multiple projects and a variety of statuses/priorities
 const MOCK_TASKS: Array<
