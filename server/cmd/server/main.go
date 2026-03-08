@@ -17,14 +17,21 @@ import (
 
 	"github.com/jobshout/server/internal/config"
 	"github.com/jobshout/server/internal/database"
+	"github.com/jobshout/server/internal/executor"
 	"github.com/jobshout/server/internal/handler"
+	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/middleware"
+	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/repository"
 	"github.com/jobshout/server/internal/service"
+	"github.com/jobshout/server/internal/tools"
 	ws "github.com/jobshout/server/internal/websocket"
+	wfengine "github.com/jobshout/server/internal/workflow"
+
+	"github.com/google/uuid"
 )
 
-const version = "0.1.0"
+const version = "0.2.0"
 
 func main() {
 	logger, _ := zap.NewProduction()
@@ -49,26 +56,64 @@ func main() {
 		logger.Fatal("failed to run migrations", zap.Error(err))
 	}
 
-	// Repositories
+	// ─── Repositories ────────────────────────────────────────────────────────
 	userRepo := repository.NewUserRepository(pool)
 	tokenRepo := repository.NewTokenRepository(pool)
 	orgRepo := repository.NewOrganizationRepository(pool)
 	agentRepo := repository.NewAgentRepository(pool)
 	projectRepo := repository.NewProjectRepository(pool)
 	taskRepo := repository.NewTaskRepository(pool)
+	workflowRepo := repository.NewWorkflowRepository(pool)
+	execRepo := repository.NewExecutionRepository(pool)
+	toolPermRepo := repository.NewAgentToolRepository(pool)
 
-	// Services
+	// ─── LLM layer ───────────────────────────────────────────────────────────
+	// Ollama running locally is the default; OpenAI is used when configured.
+	llmRouter := llm.NewRouter(cfg)
+	logger.Info("LLM router initialised",
+		zap.String("default_provider", cfg.LLMProvider),
+		zap.String("ollama_url", cfg.OllamaBaseURL),
+		zap.String("ollama_model", cfg.OllamaDefaultModel),
+	)
+
+	// ─── Tool registry ───────────────────────────────────────────────────────
+	toolRegistry := tools.NewRegistry()
+	toolRegistry.Register(tools.NewHTTPTool())
+	toolRegistry.Register(tools.NewShellTool(nil))
+	logger.Info("tool registry initialised", zap.Int("tools", len(toolRegistry.All())))
+
+	// ─── Workflow DAG engine ─────────────────────────────────────────────────
+	// Resolver functions bridge the repository layer into the engine.
+	agentResolver := func(ctx context.Context, agentID uuid.UUID) (*model.Agent, error) {
+		return agentRepo.FindByID(ctx, agentID)
+	}
+	toolPermResolver := func(ctx context.Context, agentID uuid.UUID) ([]string, error) {
+		return toolPermRepo.ListByAgent(ctx, agentID)
+	}
+	dagPersister := service.NewDagPersister(execRepo)
+
+	dagEngine := wfengine.NewEngine(
+		executor.New(llmRouter, toolRegistry, logger),
+		agentResolver,
+		toolPermResolver,
+		dagPersister,
+		logger,
+	)
+
+	// ─── Services ────────────────────────────────────────────────────────────
 	jwtSvc := service.NewJWTService(cfg)
 	authSvc := service.NewAuthService(userRepo, tokenRepo, orgRepo, jwtSvc, logger)
 	agentSvc := service.NewAgentService(agentRepo, logger)
 	projectSvc := service.NewProjectService(projectRepo, logger)
 	taskSvc := service.NewTaskService(taskRepo, logger)
+	execSvc := service.NewExecutionService(agentRepo, execRepo, toolPermRepo, llmRouter, toolRegistry, logger)
+	workflowSvc := service.NewWorkflowService(workflowRepo, agentRepo, execRepo, toolPermRepo, dagEngine, logger)
 
-	// WebSocket hub
+	// ─── WebSocket hub ───────────────────────────────────────────────────────
 	hub := ws.NewHub(logger)
 	go hub.Run()
 
-	// MinIO client (optional — if endpoint is configured)
+	// ─── MinIO client (optional) ─────────────────────────────────────────────
 	var uploadHandler *handler.UploadHandler
 	if cfg.MinIOEndpoint != "" {
 		minioClient, err := miniogo.New(cfg.MinIOEndpoint, &miniogo.Options{
@@ -82,7 +127,7 @@ func main() {
 		}
 	}
 
-	// Handlers
+	// ─── Handlers ────────────────────────────────────────────────────────────
 	authHandler := handler.NewAuthHandler(authSvc)
 	agentHandler := handler.NewAgentHandler(agentSvc)
 	projectHandler := handler.NewProjectHandler(projectSvc)
@@ -92,6 +137,8 @@ func main() {
 	knowledgeHandler := handler.NewKnowledgeHandler(pool, logger)
 	metricsHandler := handler.NewMetricsHandler(pool, logger)
 	wsHandler := handler.NewWSHandler(hub, logger)
+	execHandler := handler.NewExecutionHandler(execSvc)
+	workflowHandler := handler.NewWorkflowHandler(workflowSvc)
 
 	// Auth middleware
 	requireAuth := middleware.RequireAuth(jwtSvc)
@@ -141,8 +188,15 @@ func main() {
 					r.Put("/", agentHandler.Update)
 					r.Delete("/", agentHandler.Delete)
 					r.Patch("/status", agentHandler.UpdateStatus)
+
+					// Agent LLM execution
+					r.Post("/execute", execHandler.Execute)
+					r.Get("/executions", execHandler.ListByAgent)
 				})
 			})
+
+			// Agent execution lookup by ID (standalone)
+			r.Get("/executions/{executionID}", execHandler.GetExecution)
 
 			// Projects
 			r.Route("/projects", func(r chi.Router) {
@@ -204,6 +258,22 @@ func main() {
 				r.Get("/task-completion", metricsHandler.TaskCompletion)
 			})
 
+			// Workflows
+			r.Route("/workflows", func(r chi.Router) {
+				r.Get("/", workflowHandler.List)
+				r.Post("/", workflowHandler.Create)
+				r.Route("/{workflowID}", func(r chi.Router) {
+					r.Get("/", workflowHandler.GetByID)
+					r.Put("/", workflowHandler.Update)
+					r.Delete("/", workflowHandler.Delete)
+					r.Post("/execute", workflowHandler.ExecuteWorkflow)
+					r.Get("/runs", workflowHandler.ListRuns)
+				})
+			})
+
+			// Workflow run status polling
+			r.Get("/workflow-runs/{runID}", workflowHandler.GetRun)
+
 			// Uploads (MinIO)
 			if uploadHandler != nil {
 				r.Post("/uploads/avatar", uploadHandler.UploadAvatar)
@@ -219,7 +289,7 @@ func main() {
 		Addr:         cfg.ServerPort,
 		Handler:      r,
 		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
+		WriteTimeout: 120 * time.Second, // increased for LLM calls
 		IdleTimeout:  60 * time.Second,
 	}
 
