@@ -36,7 +36,31 @@ func NewRouter(cfg *config.Config) *Router {
 		r.clients["openai"] = NewOpenAIClient(base, cfg.OpenAIAPIKey, cfg.OpenAIDefaultModel)
 	}
 
+	// Claude / Anthropic is registered when an API key is set.
+	if cfg.ClaudeAPIKey != "" {
+		r.clients["claude"] = NewClaudeClient(cfg.ClaudeBaseURL, cfg.ClaudeAPIKey, cfg.ClaudeDefaultModel)
+	}
+
 	return r
+}
+
+// RegisteredProviders returns a list of all registered provider names and
+// whether each is the default. Useful for the /llm-providers API endpoint.
+func (r *Router) RegisteredProviders() []ProviderInfo {
+	infos := make([]ProviderInfo, 0, len(r.clients))
+	for name := range r.clients {
+		infos = append(infos, ProviderInfo{
+			Name:      name,
+			IsDefault: name == r.defaultProvider,
+		})
+	}
+	return infos
+}
+
+// ProviderInfo describes a registered LLM provider.
+type ProviderInfo struct {
+	Name      string `json:"name"`
+	IsDefault bool   `json:"is_default"`
 }
 
 // For returns the Client for the given provider name, falling back to the

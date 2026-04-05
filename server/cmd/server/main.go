@@ -66,6 +66,9 @@ func main() {
 	workflowRepo := repository.NewWorkflowRepository(pool)
 	execRepo := repository.NewExecutionRepository(pool)
 	toolPermRepo := repository.NewAgentToolRepository(pool)
+	llmProviderRepo := repository.NewLLMProviderRepository(pool)
+	schedulerRepo := repository.NewSchedulerRepository(pool)
+	sessionRepo := repository.NewSessionRepository(pool)
 
 	// ─── LLM layer ───────────────────────────────────────────────────────────
 	// Ollama running locally is the default; OpenAI is used when configured.
@@ -139,6 +142,9 @@ func main() {
 	wsHandler := handler.NewWSHandler(hub, logger)
 	execHandler := handler.NewExecutionHandler(execSvc)
 	workflowHandler := handler.NewWorkflowHandler(workflowSvc)
+	llmProviderHandler := handler.NewLLMProviderHandler(llmProviderRepo, llmRouter)
+	schedulerHandler := handler.NewSchedulerHandler(schedulerRepo)
+	sessionHandler := handler.NewSessionHandler(sessionRepo)
 
 	// Auth middleware
 	requireAuth := middleware.RequireAuth(jwtSvc)
@@ -273,6 +279,45 @@ func main() {
 
 			// Workflow run status polling
 			r.Get("/workflow-runs/{runID}", workflowHandler.GetRun)
+
+			// LLM Provider Configs
+			r.Route("/llm-providers", func(r chi.Router) {
+				r.Get("/builtin", llmProviderHandler.ListBuiltin)
+				r.Get("/", llmProviderHandler.List)
+				r.Post("/", llmProviderHandler.Create)
+				r.Route("/{providerID}", func(r chi.Router) {
+					r.Get("/", llmProviderHandler.GetByID)
+					r.Put("/", llmProviderHandler.Update)
+					r.Delete("/", llmProviderHandler.Delete)
+				})
+			})
+
+			// Scheduled Tasks
+			r.Route("/scheduled-tasks", func(r chi.Router) {
+				r.Get("/", schedulerHandler.List)
+				r.Post("/", schedulerHandler.Create)
+				r.Route("/{taskID}", func(r chi.Router) {
+					r.Get("/", schedulerHandler.GetByID)
+					r.Put("/", schedulerHandler.Update)
+					r.Delete("/", schedulerHandler.Delete)
+					r.Get("/runs", schedulerHandler.ListRuns)
+				})
+			})
+
+			// Sessions (context management across LLM switches)
+			r.Route("/sessions", func(r chi.Router) {
+				r.Get("/", sessionHandler.List)
+				r.Post("/", sessionHandler.Create)
+				r.Route("/{sessionID}", func(r chi.Router) {
+					r.Get("/", sessionHandler.GetByID)
+					r.Put("/", sessionHandler.Update)
+					r.Delete("/", sessionHandler.Delete)
+					r.Post("/copy-context", sessionHandler.CopyContext)
+					r.Post("/snapshots", sessionHandler.CreateSnapshot)
+					r.Get("/snapshots", sessionHandler.ListSnapshots)
+					r.Post("/snapshots/{snapshotID}/restore", sessionHandler.RestoreSnapshot)
+				})
+			})
 
 			// Uploads (MinIO)
 			if uploadHandler != nil {

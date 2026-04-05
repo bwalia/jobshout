@@ -36,6 +36,12 @@ type Config struct {
 	OpenAIAPIKey       string `mapstructure:"OPENAI_API_KEY"`
 	OpenAIBaseURL      string `mapstructure:"OPENAI_BASE_URL"`
 	OpenAIDefaultModel string `mapstructure:"OPENAI_DEFAULT_MODEL"`
+
+	// Claude / Anthropic configuration.
+	// When LLM_PROVIDER=claude, CLAUDE_API_KEY must be set.
+	ClaudeAPIKey       string `mapstructure:"CLAUDE_API_KEY"`
+	ClaudeBaseURL      string `mapstructure:"CLAUDE_BASE_URL"`
+	ClaudeDefaultModel string `mapstructure:"CLAUDE_DEFAULT_MODEL"`
 }
 
 // AccessTokenExpiry returns the access token expiry duration.
@@ -66,6 +72,8 @@ func Load() (*Config, error) {
 	viper.SetDefault("OLLAMA_DEFAULT_MODEL", "llama3")
 	viper.SetDefault("OPENAI_BASE_URL", "https://api.openai.com")
 	viper.SetDefault("OPENAI_DEFAULT_MODEL", "gpt-4o-mini")
+	viper.SetDefault("CLAUDE_BASE_URL", "https://api.anthropic.com")
+	viper.SetDefault("CLAUDE_DEFAULT_MODEL", "claude-sonnet-4-20250514")
 
 	cfg := &Config{
 		DatabaseURL:          viper.GetString("DATABASE_URL"),
@@ -85,6 +93,9 @@ func Load() (*Config, error) {
 		OpenAIAPIKey:         viper.GetString("OPENAI_API_KEY"),
 		OpenAIBaseURL:        viper.GetString("OPENAI_BASE_URL"),
 		OpenAIDefaultModel:   viper.GetString("OPENAI_DEFAULT_MODEL"),
+		ClaudeAPIKey:         viper.GetString("CLAUDE_API_KEY"),
+		ClaudeBaseURL:        viper.GetString("CLAUDE_BASE_URL"),
+		ClaudeDefaultModel:   viper.GetString("CLAUDE_DEFAULT_MODEL"),
 	}
 
 	origins := viper.GetString("CORS_ORIGINS")

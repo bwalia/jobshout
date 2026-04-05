@@ -10,6 +10,10 @@ import {
   Store,
   BarChart3,
   Settings,
+  Cpu,
+  Clock,
+  ListTree,
+  MessageSquare,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 
@@ -23,6 +27,10 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "Agents", href: "/agents", icon: Bot },
   { label: "Projects", href: "/projects", icon: FolderKanban },
+  { label: "Task Manager", href: "/task-manager", icon: ListTree },
+  { label: "Scheduler", href: "/scheduler", icon: Clock },
+  { label: "Sessions", href: "/sessions", icon: MessageSquare },
+  { label: "LLM Providers", href: "/llm-providers", icon: Cpu },
   { label: "Org Builder", href: "/org-builder", icon: Network },
   { label: "Marketplace", href: "/marketplace", icon: Store },
   { label: "Metrics", href: "/metrics", icon: BarChart3 },
