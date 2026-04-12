@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/jobshout/server/internal/engine"
 	"github.com/jobshout/server/internal/executor"
 	"github.com/jobshout/server/internal/model"
 )
@@ -37,29 +38,29 @@ type ExecutionPersister interface {
 	RecordCompleted(ctx context.Context, execID uuid.UUID, result executor.Result) error
 }
 
-// Engine executes a workflow definition against a concrete Executor.
+// Engine executes a workflow definition against the appropriate execution engine.
 type Engine struct {
-	exec                  *executor.Executor
-	resolveAgent          AgentResolver
+	engineRouter           *engine.Router
+	resolveAgent           AgentResolver
 	resolveToolPermissions ToolPermissionResolver
-	persister             ExecutionPersister
-	logger                *zap.Logger
+	persister              ExecutionPersister
+	logger                 *zap.Logger
 }
 
 // NewEngine creates a DAG Engine.
 func NewEngine(
-	exec *executor.Executor,
+	engineRouter *engine.Router,
 	resolveAgent AgentResolver,
 	resolveToolPermissions ToolPermissionResolver,
 	persister ExecutionPersister,
 	logger *zap.Logger,
 ) *Engine {
 	return &Engine{
-		exec:                  exec,
-		resolveAgent:          resolveAgent,
+		engineRouter:           engineRouter,
+		resolveAgent:           resolveAgent,
 		resolveToolPermissions: resolveToolPermissions,
-		persister:             persister,
-		logger:                logger,
+		persister:              persister,
+		logger:                 logger,
 	}
 }
 
@@ -155,7 +156,10 @@ func (e *Engine) Execute(
 				execID := uuid.New()
 				_ = e.persister.RecordStarted(ctx, execID, agent.ID, run.OrgID, run.ID, s.ID, prompt)
 
-				res := e.exec.Run(ctx, execID, agent, prompt, agentTools)
+				// Resolve engine: step override > agent default > go_native.
+				engineType := engine.ResolveEngine(agent, nil, s.EngineType)
+				runner := e.engineRouter.For(engineType)
+				res := runner.Run(ctx, execID, agent, prompt, agentTools)
 				_ = e.persister.RecordCompleted(ctx, execID, res)
 
 				if res.Err != nil {

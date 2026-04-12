@@ -1,0 +1,90 @@
+# Prometheus ServiceMonitor for jobshout-api
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: jobshout-api-monitor
+  namespace: jobshout
+  labels:
+    app.kubernetes.io/name: jobshout-api
+    app.kubernetes.io/part-of: jobshout
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: jobshout-api
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+---
+# Prometheus ServiceMonitor for python-runtime
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: python-runtime-monitor
+  namespace: jobshout
+  labels:
+    app.kubernetes.io/name: python-runtime
+    app.kubernetes.io/part-of: jobshout
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: python-runtime
+  endpoints:
+    - port: http
+      path: /health
+      interval: 15s
+      scrapeTimeout: 10s
+---
+# PrometheusRule for alerting
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: jobshout-alerts
+  namespace: jobshout
+  labels:
+    app.kubernetes.io/part-of: jobshout
+    release: prometheus
+spec:
+  groups:
+    - name: jobshout.rules
+      rules:
+        - alert: JobshoutAPIHighErrorRate
+          expr: |
+            sum(rate(http_requests_total{service="jobshout-api",code=~"5.."}[5m]))
+            / sum(rate(http_requests_total{service="jobshout-api"}[5m])) > 0.05
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "JobShout API error rate above 5%"
+            description: "{{ $value | humanizePercentage }} of requests are returning 5xx errors"
+
+        - alert: JobshoutAPIPodRestart
+          expr: increase(kube_pod_container_status_restarts_total{namespace="jobshout",container="api"}[1h]) > 3
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "JobShout API pod restarting frequently"
+
+        - alert: PythonRuntimeHighLatency
+          expr: |
+            histogram_quantile(0.95,
+              sum(rate(http_request_duration_seconds_bucket{service="python-runtime"}[5m])) by (le)
+            ) > 30
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Python runtime p95 latency above 30s"
+
+        - alert: OllamaDown
+          expr: up{job="ollama"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Ollama LLM service is down"

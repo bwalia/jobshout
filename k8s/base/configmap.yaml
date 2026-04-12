@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jobshout-config
+  namespace: jobshout
+  labels:
+    app.kubernetes.io/part-of: jobshout
+data:
+  SERVER_PORT: "8080"
+  DATABASE_HOST: "postgres"
+  DATABASE_PORT: "5432"
+  DATABASE_NAME: "jobshout"
+  DATABASE_SSLMODE: "disable"
+  JWT_ISSUER: "jobshout"
+  LLM_PROVIDER: "ollama"
+  OLLAMA_BASE_URL: "http://ollama:11434"
+  OLLAMA_DEFAULT_MODEL: "llama3"
+  OPENAI_BASE_URL: "https://api.openai.com"
+  OPENAI_DEFAULT_MODEL: "gpt-4o-mini"
+  PYTHON_SIDECAR_URL: "http://python-runtime:8001"
+  LOG_LEVEL: "info"

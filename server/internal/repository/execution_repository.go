@@ -24,6 +24,12 @@ type ExecutionRepository interface {
 	ListByAgent(ctx context.Context, agentID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.AgentExecution], error)
 	// PersistResult is a convenience method used by the workflow DAG engine.
 	PersistResult(ctx context.Context, execID uuid.UUID, res executor.Result) error
+
+	// Trace methods for LangChain/LangGraph observability.
+	RecordLangChainTrace(ctx context.Context, trace *model.LangChainRunTrace) error
+	ListLangChainTraces(ctx context.Context, executionID uuid.UUID) ([]model.LangChainRunTrace, error)
+	RecordLangGraphSnapshot(ctx context.Context, snap *model.LangGraphStateSnapshot) error
+	ListLangGraphSnapshots(ctx context.Context, executionID uuid.UUID) ([]model.LangGraphStateSnapshot, error)
 }
 
 type executionRepository struct {
@@ -36,15 +42,19 @@ func NewExecutionRepository(pool *pgxpool.Pool) ExecutionRepository {
 }
 
 func (r *executionRepository) Create(ctx context.Context, exec *model.AgentExecution) error {
+	if exec.EngineType == "" {
+		exec.EngineType = model.EngineGoNative
+	}
 	const sql = `
 		INSERT INTO agent_executions
-		    (id, agent_id, org_id, workflow_run_id, step_id, input_prompt, status, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`
+		    (id, agent_id, org_id, workflow_run_id, step_id, input_prompt, status, engine_type, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`
 
 	_, err := r.pool.Exec(ctx, sql,
 		exec.ID, exec.AgentID, exec.OrgID,
 		exec.WorkflowRunID, exec.StepID,
 		exec.InputPrompt, model.ExecutionStatusPending,
+		exec.EngineType,
 	)
 	if err != nil {
 		return fmt.Errorf("execution_repo: create: %w", err)
@@ -108,14 +118,14 @@ func (r *executionRepository) RecordToolCall(ctx context.Context, call *model.Ex
 func (r *executionRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.AgentExecution, error) {
 	const sql = `
 		SELECT id, agent_id, org_id, workflow_run_id, step_id, input_prompt, output,
-		       status, error_message, total_tokens, iterations, started_at, completed_at, created_at
+		       status, error_message, total_tokens, iterations, engine_type, started_at, completed_at, created_at
 		FROM agent_executions WHERE id = $1`
 
 	exec := &model.AgentExecution{}
 	if err := r.pool.QueryRow(ctx, sql, id).Scan(
 		&exec.ID, &exec.AgentID, &exec.OrgID, &exec.WorkflowRunID, &exec.StepID,
 		&exec.InputPrompt, &exec.Output, &exec.Status, &exec.ErrorMessage,
-		&exec.TotalTokens, &exec.Iterations, &exec.StartedAt, &exec.CompletedAt, &exec.CreatedAt,
+		&exec.TotalTokens, &exec.Iterations, &exec.EngineType, &exec.StartedAt, &exec.CompletedAt, &exec.CreatedAt,
 	); err != nil {
 		return nil, fmt.Errorf("execution_repo: get by id: %w", err)
 	}
@@ -168,7 +178,7 @@ func (r *executionRepository) ListByAgent(ctx context.Context, agentID uuid.UUID
 
 	const listSQL = `
 		SELECT id, agent_id, org_id, workflow_run_id, step_id, input_prompt, output,
-		       status, error_message, total_tokens, iterations, started_at, completed_at, created_at
+		       status, error_message, total_tokens, iterations, engine_type, started_at, completed_at, created_at
 		FROM agent_executions WHERE agent_id = $1
 		ORDER BY created_at DESC LIMIT $2 OFFSET $3`
 
@@ -184,7 +194,7 @@ func (r *executionRepository) ListByAgent(ctx context.Context, agentID uuid.UUID
 		if err := rows.Scan(
 			&exec.ID, &exec.AgentID, &exec.OrgID, &exec.WorkflowRunID, &exec.StepID,
 			&exec.InputPrompt, &exec.Output, &exec.Status, &exec.ErrorMessage,
-			&exec.TotalTokens, &exec.Iterations, &exec.StartedAt, &exec.CompletedAt, &exec.CreatedAt,
+			&exec.TotalTokens, &exec.Iterations, &exec.EngineType, &exec.StartedAt, &exec.CompletedAt, &exec.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("execution_repo: scan execution: %w", err)
 		}
@@ -233,4 +243,109 @@ func (r *executionRepository) PersistResult(ctx context.Context, execID uuid.UUI
 		_ = r.RecordToolCall(ctx, call)
 	}
 	return nil
+}
+
+// --- LangChain trace methods ---
+
+func (r *executionRepository) RecordLangChainTrace(ctx context.Context, trace *model.LangChainRunTrace) error {
+	const sql = `
+		INSERT INTO langchain_run_traces
+		    (id, execution_id, run_id, chain_type, input_text, output_text, error, latency_ms, total_tokens, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())`
+
+	if trace.ID == uuid.Nil {
+		trace.ID = uuid.New()
+	}
+	_, err := r.pool.Exec(ctx, sql,
+		trace.ID, trace.ExecutionID, trace.RunID, trace.ChainType,
+		trace.InputText, trace.OutputText, trace.Error,
+		trace.LatencyMs, trace.TotalTokens,
+	)
+	if err != nil {
+		return fmt.Errorf("execution_repo: record langchain trace: %w", err)
+	}
+	return nil
+}
+
+func (r *executionRepository) ListLangChainTraces(ctx context.Context, executionID uuid.UUID) ([]model.LangChainRunTrace, error) {
+	const sql = `
+		SELECT id, execution_id, run_id, chain_type, input_text, output_text, error,
+		       latency_ms, total_tokens, created_at
+		FROM langchain_run_traces WHERE execution_id = $1 ORDER BY created_at`
+
+	rows, err := r.pool.Query(ctx, sql, executionID)
+	if err != nil {
+		return nil, fmt.Errorf("execution_repo: list langchain traces: %w", err)
+	}
+	defer rows.Close()
+
+	var traces []model.LangChainRunTrace
+	for rows.Next() {
+		var t model.LangChainRunTrace
+		if err := rows.Scan(
+			&t.ID, &t.ExecutionID, &t.RunID, &t.ChainType,
+			&t.InputText, &t.OutputText, &t.Error,
+			&t.LatencyMs, &t.TotalTokens, &t.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("execution_repo: scan langchain trace: %w", err)
+		}
+		traces = append(traces, t)
+	}
+	return traces, rows.Err()
+}
+
+// --- LangGraph snapshot methods ---
+
+func (r *executionRepository) RecordLangGraphSnapshot(ctx context.Context, snap *model.LangGraphStateSnapshot) error {
+	stateJSON, err := json.Marshal(snap.StateJSON)
+	if err != nil {
+		stateJSON = []byte("{}")
+	}
+
+	const sql = `
+		INSERT INTO langgraph_state_snapshots
+		    (id, execution_id, step_number, node_name, state_json, created_at)
+		VALUES ($1, $2, $3, $4, $5, NOW())`
+
+	if snap.ID == uuid.Nil {
+		snap.ID = uuid.New()
+	}
+	_, err = r.pool.Exec(ctx, sql,
+		snap.ID, snap.ExecutionID, snap.StepNumber, snap.NodeName, stateJSON,
+	)
+	if err != nil {
+		return fmt.Errorf("execution_repo: record langgraph snapshot: %w", err)
+	}
+	return nil
+}
+
+func (r *executionRepository) ListLangGraphSnapshots(ctx context.Context, executionID uuid.UUID) ([]model.LangGraphStateSnapshot, error) {
+	const sql = `
+		SELECT id, execution_id, step_number, node_name, state_json, created_at
+		FROM langgraph_state_snapshots WHERE execution_id = $1 ORDER BY step_number`
+
+	rows, err := r.pool.Query(ctx, sql, executionID)
+	if err != nil {
+		return nil, fmt.Errorf("execution_repo: list langgraph snapshots: %w", err)
+	}
+	defer rows.Close()
+
+	var snaps []model.LangGraphStateSnapshot
+	for rows.Next() {
+		var s model.LangGraphStateSnapshot
+		var stateRaw []byte
+		if err := rows.Scan(
+			&s.ID, &s.ExecutionID, &s.StepNumber, &s.NodeName, &stateRaw, &s.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("execution_repo: scan langgraph snapshot: %w", err)
+		}
+		if len(stateRaw) > 0 {
+			_ = json.Unmarshal(stateRaw, &s.StateJSON)
+		}
+		if s.StateJSON == nil {
+			s.StateJSON = map[string]any{}
+		}
+		snaps = append(snaps, s)
+	}
+	return snaps, rows.Err()
 }

@@ -78,6 +78,7 @@ func (s *workflowService) Create(ctx context.Context, orgID uuid.UUID, createdBy
 			InputTemplate: sr.InputTemplate,
 			Position:      sr.Position,
 			DependsOn:     sr.DependsOn,
+			EngineType:    sr.EngineType,
 		})
 	}
 

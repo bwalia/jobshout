@@ -32,6 +32,9 @@ type WorkflowStep struct {
 	Position      int         `json:"position"`
 	// DependsOn lists the names of steps that must complete before this step.
 	DependsOn     []string    `json:"depends_on,omitempty"`
+	// EngineType overrides the agent's default engine for this step.
+	// When empty, the agent's EngineType is used.
+	EngineType    string      `json:"engine_type,omitempty"`
 	CreatedAt     time.Time   `json:"created_at"`
 }
 
@@ -64,6 +67,7 @@ type CreateWorkflowStepRequest struct {
 	InputTemplate string   `json:"input_template" validate:"required"`
 	Position      int      `json:"position"`
 	DependsOn     []string `json:"depends_on"`
+	EngineType    string   `json:"engine_type,omitempty" validate:"omitempty,oneof=go_native langchain langgraph"`
 }
 
 type ExecuteWorkflowRequest struct {

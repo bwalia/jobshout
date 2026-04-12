@@ -1,4 +1,5 @@
 import type { AgentStatus } from "./common";
+import type { EngineType } from "./workflow";
 
 export interface Agent {
   id: string;
@@ -14,6 +15,8 @@ export interface Agent {
   performance_score: number;
   manager_id: string | null;
   created_by: string | null;
+  engine_type: EngineType;
+  engine_config: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 }
@@ -26,6 +29,8 @@ export interface CreateAgentRequest {
   model_name?: string;
   system_prompt?: string;
   manager_id?: string;
+  engine_type?: EngineType;
+  engine_config?: Record<string, unknown>;
 }
 
 export interface UpdateAgentRequest {

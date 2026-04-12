@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -36,16 +37,26 @@ func NewAgentRepository(pool *pgxpool.Pool) AgentRepository {
 }
 
 func (r *agentRepository) Create(ctx context.Context, agent *model.Agent) error {
+	if agent.EngineType == "" {
+		agent.EngineType = model.EngineGoNative
+	}
+	engineConfigJSON, err := json.Marshal(agent.EngineConfig)
+	if err != nil {
+		engineConfigJSON = []byte("{}")
+	}
+
 	query := `
 		INSERT INTO agents (id, org_id, name, role, description, avatar_url, status,
-			model_provider, model_name, system_prompt, performance_score, manager_id, created_by, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())
+			model_provider, model_name, system_prompt, performance_score, manager_id, created_by,
+			engine_type, engine_config, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW())
 		RETURNING created_at, updated_at`
 
 	return r.pool.QueryRow(ctx, query,
 		agent.ID, agent.OrgID, agent.Name, agent.Role, agent.Description, agent.AvatarURL,
 		agent.Status, agent.ModelProvider, agent.ModelName, agent.SystemPrompt,
 		agent.PerformanceScore, agent.ManagerID, agent.CreatedBy,
+		agent.EngineType, engineConfigJSON,
 	).Scan(&agent.CreatedAt, &agent.UpdatedAt)
 }
 
@@ -53,20 +64,28 @@ func (r *agentRepository) FindByID(ctx context.Context, id uuid.UUID) (*model.Ag
 	query := `
 		SELECT id, org_id, name, role, description, avatar_url, status,
 			model_provider, model_name, system_prompt, performance_score,
-			manager_id, created_by, created_at, updated_at
+			manager_id, created_by, engine_type, engine_config, created_at, updated_at
 		FROM agents WHERE id = $1`
 
 	a := &model.Agent{}
+	var engineConfigRaw []byte
 	err := r.pool.QueryRow(ctx, query, id).Scan(
 		&a.ID, &a.OrgID, &a.Name, &a.Role, &a.Description, &a.AvatarURL,
 		&a.Status, &a.ModelProvider, &a.ModelName, &a.SystemPrompt,
-		&a.PerformanceScore, &a.ManagerID, &a.CreatedBy, &a.CreatedAt, &a.UpdatedAt,
+		&a.PerformanceScore, &a.ManagerID, &a.CreatedBy,
+		&a.EngineType, &engineConfigRaw, &a.CreatedAt, &a.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("finding agent by id: %w", err)
+	}
+	if len(engineConfigRaw) > 0 {
+		_ = json.Unmarshal(engineConfigRaw, &a.EngineConfig)
+	}
+	if a.EngineConfig == nil {
+		a.EngineConfig = map[string]any{}
 	}
 	return a, nil
 }
@@ -101,7 +120,7 @@ func (r *agentRepository) ListByOrg(ctx context.Context, orgID uuid.UUID, params
 	query := fmt.Sprintf(`
 		SELECT id, org_id, name, role, description, avatar_url, status,
 			model_provider, model_name, system_prompt, performance_score,
-			manager_id, created_by, created_at, updated_at
+			manager_id, created_by, engine_type, engine_config, created_at, updated_at
 		FROM agents WHERE %s
 		ORDER BY created_at DESC
 		LIMIT $%d OFFSET $%d`, whereClause, argIdx, argIdx+1)
@@ -117,12 +136,20 @@ func (r *agentRepository) ListByOrg(ctx context.Context, orgID uuid.UUID, params
 	agents := make([]model.Agent, 0)
 	for rows.Next() {
 		var a model.Agent
+		var engineConfigRaw []byte
 		if err := rows.Scan(
 			&a.ID, &a.OrgID, &a.Name, &a.Role, &a.Description, &a.AvatarURL,
 			&a.Status, &a.ModelProvider, &a.ModelName, &a.SystemPrompt,
-			&a.PerformanceScore, &a.ManagerID, &a.CreatedBy, &a.CreatedAt, &a.UpdatedAt,
+			&a.PerformanceScore, &a.ManagerID, &a.CreatedBy,
+			&a.EngineType, &engineConfigRaw, &a.CreatedAt, &a.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scanning agent row: %w", err)
+		}
+		if len(engineConfigRaw) > 0 {
+			_ = json.Unmarshal(engineConfigRaw, &a.EngineConfig)
+		}
+		if a.EngineConfig == nil {
+			a.EngineConfig = map[string]any{}
 		}
 		agents = append(agents, a)
 	}
@@ -142,17 +169,22 @@ func (r *agentRepository) ListByOrg(ctx context.Context, orgID uuid.UUID, params
 }
 
 func (r *agentRepository) Update(ctx context.Context, agent *model.Agent) error {
+	engineConfigJSON, err := json.Marshal(agent.EngineConfig)
+	if err != nil {
+		engineConfigJSON = []byte("{}")
+	}
+
 	query := `
 		UPDATE agents SET name = $1, role = $2, description = $3, avatar_url = $4,
 			model_provider = $5, model_name = $6, system_prompt = $7, manager_id = $8,
-			updated_at = NOW()
-		WHERE id = $9
+			engine_type = $9, engine_config = $10, updated_at = NOW()
+		WHERE id = $11
 		RETURNING updated_at`
 
 	return r.pool.QueryRow(ctx, query,
 		agent.Name, agent.Role, agent.Description, agent.AvatarURL,
 		agent.ModelProvider, agent.ModelName, agent.SystemPrompt, agent.ManagerID,
-		agent.ID,
+		agent.EngineType, engineConfigJSON, agent.ID,
 	).Scan(&agent.UpdatedAt)
 }
 

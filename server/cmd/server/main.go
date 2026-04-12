@@ -15,10 +15,14 @@ import (
 	"github.com/rs/cors"
 	"go.uber.org/zap"
 
+	"github.com/jobshout/server/internal/bridge"
 	"github.com/jobshout/server/internal/config"
 	"github.com/jobshout/server/internal/database"
+	"github.com/jobshout/server/internal/engine"
 	"github.com/jobshout/server/internal/executor"
 	"github.com/jobshout/server/internal/handler"
+	"github.com/jobshout/server/internal/langchain"
+	"github.com/jobshout/server/internal/langgraph"
 	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/middleware"
 	"github.com/jobshout/server/internal/model"
@@ -31,7 +35,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const version = "0.2.0"
+const version = "0.3.0"
 
 func main() {
 	logger, _ := zap.NewProduction()
@@ -69,6 +73,7 @@ func main() {
 	llmProviderRepo := repository.NewLLMProviderRepository(pool)
 	schedulerRepo := repository.NewSchedulerRepository(pool)
 	sessionRepo := repository.NewSessionRepository(pool)
+	pluginRepo := repository.NewPluginRepository(pool)
 
 	// ─── LLM layer ───────────────────────────────────────────────────────────
 	// Ollama running locally is the default; OpenAI is used when configured.
@@ -85,8 +90,31 @@ func main() {
 	toolRegistry.Register(tools.NewShellTool(nil))
 	logger.Info("tool registry initialised", zap.Int("tools", len(toolRegistry.All())))
 
+	// ─── Engine Router (multi-runtime) ──────────────────────────────────────
+	goNativeExec := executor.New(llmRouter, toolRegistry, logger)
+
+	// Python sidecar clients for LangChain/LangGraph (nil-safe if not configured).
+	var lcClient *langchain.Client
+	var lgClient *langgraph.Client
+	if cfg.PythonSidecarURL != "" {
+		lcClient = langchain.NewClient(cfg.PythonSidecarURL, cfg.PythonSidecarSecret, logger)
+		lgClient = langgraph.NewClient(cfg.PythonSidecarURL, cfg.PythonSidecarSecret, logger)
+		logger.Info("Python sidecar clients initialised",
+			zap.String("sidecar_url", cfg.PythonSidecarURL),
+		)
+	}
+
+	var lcRunner engine.Runner
+	var lgRunner engine.Runner
+	if lcClient != nil {
+		lcRunner = lcClient
+	}
+	if lgClient != nil {
+		lgRunner = lgClient
+	}
+	engineRouter := engine.NewRouter(goNativeExec, lcRunner, lgRunner, logger)
+
 	// ─── Workflow DAG engine ─────────────────────────────────────────────────
-	// Resolver functions bridge the repository layer into the engine.
 	agentResolver := func(ctx context.Context, agentID uuid.UUID) (*model.Agent, error) {
 		return agentRepo.FindByID(ctx, agentID)
 	}
@@ -96,7 +124,7 @@ func main() {
 	dagPersister := service.NewDagPersister(execRepo)
 
 	dagEngine := wfengine.NewEngine(
-		executor.New(llmRouter, toolRegistry, logger),
+		engineRouter,
 		agentResolver,
 		toolPermResolver,
 		dagPersister,
@@ -109,8 +137,15 @@ func main() {
 	agentSvc := service.NewAgentService(agentRepo, logger)
 	projectSvc := service.NewProjectService(projectRepo, logger)
 	taskSvc := service.NewTaskService(taskRepo, logger)
-	execSvc := service.NewExecutionService(agentRepo, execRepo, toolPermRepo, llmRouter, toolRegistry, logger)
+	execSvc := service.NewExecutionService(agentRepo, execRepo, toolPermRepo, engineRouter, logger)
 	workflowSvc := service.NewWorkflowService(workflowRepo, agentRepo, execRepo, toolPermRepo, dagEngine, logger)
+	pluginSvc := service.NewPluginService(pluginRepo, agentRepo, engineRouter, logger)
+
+	// ─── Bridge client (SSE streaming) ──────────────────────────────────────
+	var bridgeClient *bridge.Client
+	if cfg.PythonSidecarURL != "" {
+		bridgeClient = bridge.NewClient(cfg.PythonSidecarURL, cfg.PythonSidecarSecret, logger)
+	}
 
 	// ─── WebSocket hub ───────────────────────────────────────────────────────
 	hub := ws.NewHub(logger)
@@ -142,6 +177,9 @@ func main() {
 	wsHandler := handler.NewWSHandler(hub, logger)
 	execHandler := handler.NewExecutionHandler(execSvc)
 	workflowHandler := handler.NewWorkflowHandler(workflowSvc)
+	engineHandler := handler.NewEngineHandler(lcClient, lgClient, logger)
+	pluginHandler := handler.NewPluginHandler(pluginSvc)
+	streamHandler := handler.NewStreamHandler(bridgeClient, logger)
 	llmProviderHandler := handler.NewLLMProviderHandler(llmProviderRepo, llmRouter)
 	schedulerHandler := handler.NewSchedulerHandler(schedulerRepo)
 	sessionHandler := handler.NewSessionHandler(sessionRepo)
@@ -201,8 +239,14 @@ func main() {
 				})
 			})
 
-			// Agent execution lookup by ID (standalone)
+			// Agent execution lookup by ID (standalone) + trace endpoints
 			r.Get("/executions/{executionID}", execHandler.GetExecution)
+			r.Get("/executions/{executionID}/langchain-traces", execHandler.ListLangChainTraces)
+			r.Get("/executions/{executionID}/langgraph-snapshots", execHandler.ListLangGraphSnapshots)
+
+			// Execution engines
+			r.Get("/engines", engineHandler.List)
+			r.Get("/engines/health", engineHandler.Health)
 
 			// Projects
 			r.Route("/projects", func(r chi.Router) {
@@ -279,6 +323,23 @@ func main() {
 
 			// Workflow run status polling
 			r.Get("/workflow-runs/{runID}", workflowHandler.GetRun)
+
+			// Plugins (user-defined LangGraph/LangChain workflows)
+			r.Route("/plugins", func(r chi.Router) {
+				r.Get("/", pluginHandler.List)
+				r.Post("/", pluginHandler.Create)
+				r.Route("/{pluginID}", func(r chi.Router) {
+					r.Get("/", pluginHandler.GetByID)
+					r.Put("/", pluginHandler.Update)
+					r.Delete("/", pluginHandler.Delete)
+					r.Post("/execute", pluginHandler.Execute)
+					r.Get("/executions", pluginHandler.ListExecutions)
+				})
+			})
+
+			// SSE Streaming execution
+			r.Post("/stream/execute", streamHandler.StreamExecute)
+			r.Get("/workflows/{workflowID}/stream/{stepName}", streamHandler.StreamWorkflowStep)
 
 			// LLM Provider Configs
 			r.Route("/llm-providers", func(r chi.Router) {

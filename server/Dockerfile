@@ -1,8 +1,12 @@
 FROM golang:1.24-alpine AS builder
 
-RUN apk add --no-cache git
+RUN apk add --no-cache git ca-certificates
 
 WORKDIR /app
+
+# Copy host CA certs for corporate proxy/VPN TLS interception
+COPY certs/ /usr/local/share/ca-certificates/
+RUN update-ca-certificates || true
 
 COPY go.mod go.sum ./
 RUN go mod download

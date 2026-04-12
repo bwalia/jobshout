@@ -42,6 +42,10 @@ type Config struct {
 	ClaudeAPIKey       string `mapstructure:"CLAUDE_API_KEY"`
 	ClaudeBaseURL      string `mapstructure:"CLAUDE_BASE_URL"`
 	ClaudeDefaultModel string `mapstructure:"CLAUDE_DEFAULT_MODEL"`
+
+	// Python sidecar (LangChain/LangGraph execution).
+	PythonSidecarURL    string `mapstructure:"PYTHON_SIDECAR_URL"`
+	PythonSidecarSecret string `mapstructure:"PYTHON_SIDECAR_SECRET"`
 }
 
 // AccessTokenExpiry returns the access token expiry duration.
@@ -74,6 +78,8 @@ func Load() (*Config, error) {
 	viper.SetDefault("OPENAI_DEFAULT_MODEL", "gpt-4o-mini")
 	viper.SetDefault("CLAUDE_BASE_URL", "https://api.anthropic.com")
 	viper.SetDefault("CLAUDE_DEFAULT_MODEL", "claude-sonnet-4-20250514")
+	viper.SetDefault("PYTHON_SIDECAR_URL", "http://localhost:8001")
+	viper.SetDefault("PYTHON_SIDECAR_SECRET", "change-me-sidecar-secret")
 
 	cfg := &Config{
 		DatabaseURL:          viper.GetString("DATABASE_URL"),
@@ -96,6 +102,8 @@ func Load() (*Config, error) {
 		ClaudeAPIKey:         viper.GetString("CLAUDE_API_KEY"),
 		ClaudeBaseURL:        viper.GetString("CLAUDE_BASE_URL"),
 		ClaudeDefaultModel:   viper.GetString("CLAUDE_DEFAULT_MODEL"),
+		PythonSidecarURL:     viper.GetString("PYTHON_SIDECAR_URL"),
+		PythonSidecarSecret:  viper.GetString("PYTHON_SIDECAR_SECRET"),
 	}
 
 	origins := viper.GetString("CORS_ORIGINS")

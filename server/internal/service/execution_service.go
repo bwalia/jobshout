@@ -8,28 +8,28 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
-	"github.com/jobshout/server/internal/executor"
-	"github.com/jobshout/server/internal/llm"
+	"github.com/jobshout/server/internal/engine"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/repository"
-	"github.com/jobshout/server/internal/tools"
 )
 
 // ExecutionService orchestrates agent task execution end-to-end.
-// It creates the AgentExecution record, drives the executor.Executor, and
+// It creates the AgentExecution record, drives the appropriate engine, and
 // persists the result with all tool call records.
 type ExecutionService interface {
 	// Execute runs an agent against a prompt and returns the completed execution.
-	Execute(ctx context.Context, orgID uuid.UUID, agentID uuid.UUID, prompt string) (*model.AgentExecution, error)
+	Execute(ctx context.Context, orgID uuid.UUID, agentID uuid.UUID, req model.ExecuteAgentRequest) (*model.AgentExecution, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*model.AgentExecution, error)
 	ListByAgent(ctx context.Context, agentID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.AgentExecution], error)
+	ListLangChainTraces(ctx context.Context, executionID uuid.UUID) ([]model.LangChainRunTrace, error)
+	ListLangGraphSnapshots(ctx context.Context, executionID uuid.UUID) ([]model.LangGraphStateSnapshot, error)
 }
 
 type executionService struct {
 	agentRepo     repository.AgentRepository
 	execRepo      repository.ExecutionRepository
 	toolPermRepo  repository.AgentToolRepository
-	exec          *executor.Executor
+	engineRouter  *engine.Router
 	logger        *zap.Logger
 }
 
@@ -38,20 +38,19 @@ func NewExecutionService(
 	agentRepo repository.AgentRepository,
 	execRepo repository.ExecutionRepository,
 	toolPermRepo repository.AgentToolRepository,
-	llmRouter *llm.Router,
-	toolRegistry *tools.Registry,
+	engineRouter *engine.Router,
 	logger *zap.Logger,
 ) ExecutionService {
 	return &executionService{
 		agentRepo:    agentRepo,
 		execRepo:     execRepo,
 		toolPermRepo: toolPermRepo,
-		exec:         executor.New(llmRouter, toolRegistry, logger),
+		engineRouter: engineRouter,
 		logger:       logger,
 	}
 }
 
-func (s *executionService) Execute(ctx context.Context, orgID uuid.UUID, agentID uuid.UUID, prompt string) (*model.AgentExecution, error) {
+func (s *executionService) Execute(ctx context.Context, orgID uuid.UUID, agentID uuid.UUID, req model.ExecuteAgentRequest) (*model.AgentExecution, error) {
 	agent, err := s.agentRepo.FindByID(ctx, agentID)
 	if err != nil {
 		return nil, fmt.Errorf("execution_svc: find agent: %w", err)
@@ -59,6 +58,9 @@ func (s *executionService) Execute(ctx context.Context, orgID uuid.UUID, agentID
 	if agent == nil {
 		return nil, ErrAgentNotFound
 	}
+
+	// Determine which engine to use.
+	engineType := engine.ResolveEngine(agent, req.EngineOverride, "")
 
 	// Resolve which tools this agent is allowed to use.
 	agentTools, err := s.toolPermRepo.ListByAgent(ctx, agentID)
@@ -76,8 +78,9 @@ func (s *executionService) Execute(ctx context.Context, orgID uuid.UUID, agentID
 		ID:          execID,
 		AgentID:     agentID,
 		OrgID:       orgID,
-		InputPrompt: prompt,
+		InputPrompt: req.Prompt,
 		Status:      model.ExecutionStatusPending,
+		EngineType:  engineType,
 	}
 	if err := s.execRepo.Create(ctx, execRecord); err != nil {
 		return nil, fmt.Errorf("execution_svc: create execution record: %w", err)
@@ -95,8 +98,9 @@ func (s *executionService) Execute(ctx context.Context, orgID uuid.UUID, agentID
 	// Update agent status to active.
 	_ = s.agentRepo.UpdateStatus(ctx, agentID, "active")
 
-	// Run the ReAct loop.
-	result := s.exec.Run(ctx, execID, agent, prompt, agentTools)
+	// Route to the correct engine and run.
+	runner := s.engineRouter.For(engineType)
+	result := runner.Run(ctx, execID, agent, req.Prompt, agentTools)
 
 	// Restore agent status.
 	_ = s.agentRepo.UpdateStatus(ctx, agentID, "idle")
@@ -137,4 +141,12 @@ func (s *executionService) GetByID(ctx context.Context, id uuid.UUID) (*model.Ag
 
 func (s *executionService) ListByAgent(ctx context.Context, agentID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.AgentExecution], error) {
 	return s.execRepo.ListByAgent(ctx, agentID, params)
+}
+
+func (s *executionService) ListLangChainTraces(ctx context.Context, executionID uuid.UUID) ([]model.LangChainRunTrace, error) {
+	return s.execRepo.ListLangChainTraces(ctx, executionID)
+}
+
+func (s *executionService) ListLangGraphSnapshots(ctx context.Context, executionID uuid.UUID) ([]model.LangGraphStateSnapshot, error) {
+	return s.execRepo.ListLangGraphSnapshots(ctx, executionID)
 }

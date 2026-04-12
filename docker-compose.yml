@@ -32,6 +32,41 @@ services:
       timeout: 5s
       retries: 5
 
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:11434/api/tags"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  python-sidecar:
+    build:
+      context: ./python-sidecar
+      dockerfile: Dockerfile
+    environment:
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      OLLAMA_DEFAULT_MODEL: ${OLLAMA_DEFAULT_MODEL:-llama3}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_DEFAULT_MODEL: ${OPENAI_DEFAULT_MODEL:-gpt-4o-mini}
+      SIDECAR_SECRET: ${PYTHON_SIDECAR_SECRET:-change-me-sidecar-secret}
+      LOG_LEVEL: ${SIDECAR_LOG_LEVEL:-info}
+    ports:
+      - "8001:8001"
+    depends_on:
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   jobshout-server:
     build:
       context: ./server
@@ -49,12 +84,20 @@ services:
       MINIO_BUCKET_KNOWLEDGE: ${MINIO_BUCKET_KNOWLEDGE:-knowledge}
       SERVER_PORT: ${SERVER_PORT:-:8080}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      OLLAMA_DEFAULT_MODEL: ${OLLAMA_DEFAULT_MODEL:-llama3}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      PYTHON_SIDECAR_URL: ${PYTHON_SIDECAR_URL:-http://python-sidecar:8001}
+      PYTHON_SIDECAR_SECRET: ${PYTHON_SIDECAR_SECRET:-change-me-sidecar-secret}
     ports:
       - "8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
       minio:
+        condition: service_healthy
+      python-sidecar:
         condition: service_healthy
 
   jobshout-ui:
@@ -72,3 +115,4 @@ services:
 volumes:
   postgres_data:
   minio_data:
+  ollama_data:

@@ -49,7 +49,7 @@ func (h *ExecutionHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	execution, err := h.svc.Execute(r.Context(), orgID, agentID, req.Prompt)
+	execution, err := h.svc.Execute(r.Context(), orgID, agentID, req)
 	if err != nil {
 		if errors.Is(err, service.ErrAgentNotFound) {
 			RespondError(w, http.StatusNotFound, "agent not found")
@@ -96,4 +96,42 @@ func (h *ExecutionHandler) ListByAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	RespondJSON(w, http.StatusOK, result)
+}
+
+// ListLangChainTraces handles GET /executions/{executionID}/langchain-traces
+func (h *ExecutionHandler) ListLangChainTraces(w http.ResponseWriter, r *http.Request) {
+	execID, err := uuid.Parse(chi.URLParam(r, "executionID"))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid execution ID")
+		return
+	}
+
+	traces, err := h.svc.ListLangChainTraces(r.Context(), execID)
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, "failed to list langchain traces")
+		return
+	}
+	if traces == nil {
+		traces = []model.LangChainRunTrace{}
+	}
+	RespondJSON(w, http.StatusOK, traces)
+}
+
+// ListLangGraphSnapshots handles GET /executions/{executionID}/langgraph-snapshots
+func (h *ExecutionHandler) ListLangGraphSnapshots(w http.ResponseWriter, r *http.Request) {
+	execID, err := uuid.Parse(chi.URLParam(r, "executionID"))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid execution ID")
+		return
+	}
+
+	snaps, err := h.svc.ListLangGraphSnapshots(r.Context(), execID)
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, "failed to list langgraph snapshots")
+		return
+	}
+	if snaps == nil {
+		snaps = []model.LangGraphStateSnapshot{}
+	}
+	RespondJSON(w, http.StatusOK, snaps)
 }

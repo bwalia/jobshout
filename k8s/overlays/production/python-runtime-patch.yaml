@@ -1,0 +1,18 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: python-runtime
+  namespace: jobshout
+spec:
+  replicas: 3
+  template:
+    spec:
+      containers:
+        - name: python-runtime
+          resources:
+            requests:
+              cpu: "1"
+              memory: 1Gi
+            limits:
+              cpu: "4"
+              memory: 4Gi

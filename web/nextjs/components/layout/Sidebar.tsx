@@ -14,6 +14,8 @@ import {
   Clock,
   ListTree,
   MessageSquare,
+  Workflow,
+  Puzzle,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 
@@ -30,6 +32,8 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Task Manager", href: "/task-manager", icon: ListTree },
   { label: "Scheduler", href: "/scheduler", icon: Clock },
   { label: "Sessions", href: "/sessions", icon: MessageSquare },
+  { label: "Workflows", href: "/workflows", icon: Workflow },
+  { label: "Plugins", href: "/plugins", icon: Puzzle },
   { label: "LLM Providers", href: "/llm-providers", icon: Cpu },
   { label: "Org Builder", href: "/org-builder", icon: Network },
   { label: "Marketplace", href: "/marketplace", icon: Store },
@@ -80,7 +84,7 @@ export function Sidebar() {
 
       {/* Footer – version tag */}
       <div className="px-5 py-3 border-t border-border">
-        <p className="text-xs text-muted-foreground">v0.1.0</p>
+        <p className="text-xs text-muted-foreground">v0.3.0</p>
       </div>
     </aside>
   );
