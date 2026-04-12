@@ -1,14 +1,15 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Play } from "lucide-react";
-import { useState } from "react";
+import { ArrowLeft, Play, ChevronDown, ChevronRight, Clock, Bot } from "lucide-react";
+import { useState, useMemo } from "react";
 import { WorkflowBuilder } from "@/components/workflow/WorkflowBuilder";
 import {
   useWorkflow,
   useUpdateWorkflow,
   useExecuteWorkflow,
   useWorkflowRuns,
+  useWorkflowRun,
 } from "@/lib/hooks/useWorkflows";
 import type { GraphDefinition, GraphNode, GraphEdge, WorkflowRun } from "@/lib/types/workflow";
 
@@ -28,6 +29,128 @@ function RunStatusBadge({ status }: { status: string }) {
   );
 }
 
+function formatDuration(startedAt: string | null, completedAt: string | null): string {
+  if (!startedAt) return "";
+  const start = new Date(startedAt).getTime();
+  const end = completedAt ? new Date(completedAt).getTime() : Date.now();
+  const ms = end - start;
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`;
+}
+
+function RunCard({
+  run,
+  stepNames,
+  isSelected,
+  onSelect,
+}: {
+  run: WorkflowRun;
+  stepNames: string[];
+  isSelected: boolean;
+  onSelect: (id: string | null) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const isActive = run.status === "running" || run.status === "pending";
+
+  // Poll individual run for live updates while active
+  const { data: liveRun } = useWorkflowRun(isActive ? run.id : "");
+  const currentRun = liveRun ?? run;
+
+  const outputs = currentRun.outputs ?? {};
+  const hasOutputs = Object.keys(outputs).length > 0;
+
+  return (
+    <div
+      className={`rounded-md border text-xs transition-colors ${
+        isSelected
+          ? "border-primary bg-primary/5"
+          : "border-border hover:border-muted-foreground/30"
+      }`}
+    >
+      {/* Header - always visible */}
+      <button
+        onClick={() => {
+          setExpanded(!expanded);
+          onSelect(isSelected ? null : currentRun.id);
+        }}
+        className="flex w-full items-center gap-2 p-2.5 text-left"
+      >
+        {hasOutputs || currentRun.error_message ? (
+          expanded ? (
+            <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+          )
+        ) : (
+          <div className="h-3 w-3 shrink-0" />
+        )}
+
+        <div className="flex flex-1 items-center justify-between min-w-0">
+          <span className="font-mono text-muted-foreground">
+            {currentRun.id.slice(0, 8)}
+          </span>
+          <RunStatusBadge status={currentRun.status} />
+        </div>
+      </button>
+
+      {/* Timing row */}
+      <div className="flex items-center gap-1.5 px-2.5 pb-2 text-muted-foreground">
+        <Clock className="h-3 w-3" />
+        <span>{new Date(currentRun.created_at).toLocaleString()}</span>
+        {currentRun.started_at && (
+          <span className="ml-auto">
+            {formatDuration(currentRun.started_at, currentRun.completed_at)}
+            {isActive && " …"}
+          </span>
+        )}
+      </div>
+
+      {/* Expanded: step outputs */}
+      {expanded && (
+        <div className="border-t border-border">
+          {currentRun.error_message && (
+            <div className="border-b border-border bg-red-500/5 px-3 py-2">
+              <p className="font-medium text-red-400 mb-0.5">Error</p>
+              <p className="text-red-400/80 whitespace-pre-wrap break-words">
+                {currentRun.error_message}
+              </p>
+            </div>
+          )}
+
+          {hasOutputs ? (
+            <div className="divide-y divide-border">
+              {stepNames.map((stepName) => {
+                const output = outputs[stepName];
+                if (output === undefined) return null;
+                return (
+                  <div key={stepName} className="px-3 py-2.5">
+                    <div className="flex items-center gap-1.5 mb-1.5">
+                      <Bot className="h-3 w-3 text-primary" />
+                      <span className="font-medium text-foreground">
+                        {stepName}
+                      </span>
+                    </div>
+                    <p className="text-muted-foreground whitespace-pre-wrap break-words leading-relaxed">
+                      {output}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            !currentRun.error_message && (
+              <div className="px-3 py-2.5 text-muted-foreground italic">
+                {isActive ? "Waiting for agent results…" : "No outputs recorded"}
+              </div>
+            )
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function WorkflowDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -36,6 +159,41 @@ export default function WorkflowDetailPage() {
   const executeWorkflow = useExecuteWorkflow();
   const { data: runsData } = useWorkflowRuns(params.id);
   const [showRuns, setShowRuns] = useState(false);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+
+  const runs = runsData?.data ?? [];
+  const steps = workflow?.steps ?? [];
+
+  const stepNames = useMemo(
+    () => steps.map((s) => s.name),
+    [steps],
+  );
+
+  // Build execution status map for the selected run to color nodes on the canvas
+  const { data: selectedRun } = useWorkflowRun(selectedRunId ?? "");
+  const executionStatus = useMemo<
+    Record<string, "pending" | "running" | "completed" | "failed"> | undefined
+  >(() => {
+    if (!selectedRun || steps.length === 0) return undefined;
+    const outputs = selectedRun.outputs ?? {};
+    const map: Record<string, "pending" | "running" | "completed" | "failed"> =
+      {};
+    for (const step of steps) {
+      if (outputs[step.name] !== undefined) {
+        map[step.name] = "completed";
+      } else if (
+        selectedRun.error_message?.includes(step.name)
+      ) {
+        map[step.name] = "failed";
+      } else if (selectedRun.status === "running") {
+        map[step.name] =
+          Object.keys(outputs).length === 0 ? "running" : "pending";
+      } else {
+        map[step.name] = "pending";
+      }
+    }
+    return map;
+  }, [selectedRun, steps]);
 
   if (isLoading) {
     return (
@@ -60,7 +218,7 @@ export default function WorkflowDetailPage() {
   }
 
   const initialGraph: GraphDefinition = {
-    nodes: (workflow.steps ?? []).map((step, index): GraphNode => ({
+    nodes: steps.map((step, index): GraphNode => ({
       id: step.id,
       type: (step.engine_type === "langgraph" ? "agent" : "llm") as GraphNode["type"],
       name: step.name,
@@ -71,9 +229,9 @@ export default function WorkflowDetailPage() {
       },
       position: { x: 250, y: index * 150 },
     })),
-    edges: (workflow.steps ?? []).flatMap((step) =>
+    edges: steps.flatMap((step) =>
       (step.depends_on ?? []).map((dep): GraphEdge => {
-        const depStep = workflow.steps?.find((s) => s.name === dep);
+        const depStep = steps.find((s) => s.name === dep);
         return {
           id: `${depStep?.id ?? dep}-${step.id}`,
           from: depStep?.id ?? dep,
@@ -81,7 +239,7 @@ export default function WorkflowDetailPage() {
         };
       })
     ),
-    entry_point: workflow.steps?.[0]?.id,
+    entry_point: steps[0]?.id,
   };
 
   const handleSave = (graph: GraphDefinition) => {
@@ -93,8 +251,6 @@ export default function WorkflowDetailPage() {
       },
     });
   };
-
-  const runs = runsData?.data ?? [];
 
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col">
@@ -142,11 +298,12 @@ export default function WorkflowDetailPage() {
           <WorkflowBuilder
             initialGraph={initialGraph}
             onSave={handleSave}
+            executionStatus={executionStatus}
           />
         </div>
 
         {showRuns && (
-          <div className="w-72 overflow-y-auto border-l border-border bg-card p-4">
+          <div className="w-80 overflow-y-auto border-l border-border bg-card p-4">
             <h3 className="text-sm font-semibold text-foreground mb-3">
               Execution History
             </h3>
@@ -155,25 +312,13 @@ export default function WorkflowDetailPage() {
             ) : (
               <div className="space-y-2">
                 {runs.map((run: WorkflowRun) => (
-                  <div
+                  <RunCard
                     key={run.id}
-                    className="rounded-md border border-border p-2.5 text-xs"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono text-muted-foreground">
-                        {run.id.slice(0, 8)}
-                      </span>
-                      <RunStatusBadge status={run.status} />
-                    </div>
-                    <p className="mt-1 text-muted-foreground">
-                      {new Date(run.created_at).toLocaleString()}
-                    </p>
-                    {run.error_message && (
-                      <p className="mt-1 text-red-400 truncate">
-                        {run.error_message}
-                      </p>
-                    )}
-                  </div>
+                    run={run}
+                    stepNames={stepNames}
+                    isSelected={selectedRunId === run.id}
+                    onSelect={setSelectedRunId}
+                  />
                 ))}
               </div>
             )}

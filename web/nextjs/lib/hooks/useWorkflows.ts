@@ -117,6 +117,14 @@ export function useWorkflowRuns(
     queryKey: workflowKeys.runs(workflowId),
     queryFn: () => getWorkflowRuns(workflowId, params),
     enabled: Boolean(workflowId),
+    refetchInterval: (query) => {
+      const runs = query.state.data?.data;
+      const hasActive = runs?.some(
+        (r: { status: string }) =>
+          r.status === "running" || r.status === "pending",
+      );
+      return hasActive ? 3000 : false;
+    },
   });
 }
 

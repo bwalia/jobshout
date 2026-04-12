@@ -9,25 +9,23 @@ import { useProjects } from "@/lib/hooks/useProjects";
 import type { Agent } from "@/lib/types/agent";
 import type { Task } from "@/lib/types/project";
 
-// Utility: format a status string for display
 function formatStatus(status: string): string {
   return status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-// Priority badge colours
 const PRIORITY_CLASSES: Record<string, string> = {
-  critical: "bg-red-500/20 text-red-400",
-  high: "bg-orange-500/20 text-orange-400",
-  medium: "bg-yellow-500/20 text-yellow-400",
-  low: "bg-blue-500/20 text-blue-400",
+  critical: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+  high: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
+  medium: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+  low: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
 };
 
 function TaskRow({ task }: { task: Task }) {
   const priorityClass =
-    PRIORITY_CLASSES[task.priority] ?? "bg-muted text-muted-foreground";
+    PRIORITY_CLASSES[task.priority] ?? "bg-secondary text-muted-foreground";
 
   return (
-    <li className="flex items-center justify-between gap-4 rounded-md px-4 py-3 hover:bg-accent/50 transition-colors">
+    <li className="flex items-center justify-between gap-4 px-5 py-3.5 transition-colors hover:bg-secondary/50">
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-foreground">
           {task.title}
@@ -37,7 +35,7 @@ function TaskRow({ task }: { task: Task }) {
         </p>
       </div>
       <span
-        className={`flex-shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${priorityClass}`}
+        className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${priorityClass}`}
       >
         {task.priority}
       </span>
@@ -46,33 +44,25 @@ function TaskRow({ task }: { task: Task }) {
 }
 
 export default function DashboardPage() {
-  // Fetch agents with status "active" for the active agents panel
   const {
     data: agentsData,
     isLoading: agentsLoading,
     isError: agentsError,
   } = useAgents({ status: "active", per_page: 6 });
 
-  // Fetch recent tasks (latest 8) for the recent tasks panel
   const {
     data: tasksData,
     isLoading: tasksLoading,
     isError: tasksError,
   } = useTasks({ per_page: 8 });
 
-  // Fetch project count for stats
   const { data: projectsData } = useProjects({ per_page: 1 });
-
-  // All agents (for total count stat)
   const { data: allAgentsData } = useAgents({ per_page: 1 });
-
-  // Tasks assigned today (we use today's tasks using in_progress filter as a proxy)
   const { data: activeTasksData } = useTasks({
     status: "in_progress",
     per_page: 1,
   });
 
-  // Derive average performance score from the visible active agents
   const avgPerformance =
     agentsData && agentsData.data.length > 0
       ? Math.round(
@@ -116,7 +106,7 @@ export default function DashboardPage() {
           </h2>
           <Link
             href="/agents"
-            className="text-sm text-primary hover:underline underline-offset-4"
+            className="text-sm font-medium text-primary hover:text-primary/80 transition-colors"
           >
             View all
           </Link>
@@ -127,7 +117,7 @@ export default function DashboardPage() {
             {Array.from({ length: 3 }).map((_, i) => (
               <div
                 key={i}
-                className="h-32 animate-pulse rounded-lg bg-muted"
+                className="h-36 animate-pulse rounded-xl bg-secondary"
               />
             ))}
           </div>
@@ -140,10 +130,10 @@ export default function DashboardPage() {
         )}
 
         {!agentsLoading && !agentsError && activeAgents.length === 0 && (
-          <div className="rounded-lg border border-dashed border-border px-6 py-10 text-center">
+          <div className="rounded-xl border border-dashed border-border px-6 py-10 text-center">
             <p className="text-sm text-muted-foreground">
               No active agents right now.{" "}
-              <Link href="/agents" className="text-primary hover:underline">
+              <Link href="/agents" className="font-medium text-primary hover:underline">
                 Create one
               </Link>
             </p>
@@ -167,32 +157,32 @@ export default function DashboardPage() {
           </h2>
           <Link
             href="/projects"
-            className="text-sm text-primary hover:underline underline-offset-4"
+            className="text-sm font-medium text-primary hover:text-primary/80 transition-colors"
           >
             View projects
           </Link>
         </div>
 
-        <div className="rounded-lg border border-border bg-card">
+        <div className="rounded-xl border border-border bg-card shadow-card overflow-hidden">
           {tasksLoading && (
-            <div className="space-y-px p-2">
+            <div className="space-y-px p-3">
               {Array.from({ length: 5 }).map((_, i) => (
                 <div
                   key={i}
-                  className="h-14 animate-pulse rounded-md bg-muted"
+                  className="h-14 animate-pulse rounded-lg bg-secondary"
                 />
               ))}
             </div>
           )}
 
           {tasksError && (
-            <p className="px-4 py-6 text-sm text-muted-foreground">
+            <p className="px-5 py-6 text-sm text-muted-foreground">
               Unable to load tasks.
             </p>
           )}
 
           {!tasksLoading && !tasksError && recentTasks.length === 0 && (
-            <p className="px-4 py-6 text-sm text-muted-foreground">
+            <p className="px-5 py-6 text-sm text-muted-foreground">
               No tasks yet. Start a project to create tasks.
             </p>
           )}

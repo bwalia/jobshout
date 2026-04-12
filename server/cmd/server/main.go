@@ -256,6 +256,14 @@ func main() {
 					r.Get("/", projectHandler.GetByID)
 					r.Put("/", projectHandler.Update)
 					r.Delete("/", projectHandler.Delete)
+					// Nested tasks route: rewrites project_id from URL path to query param
+					r.Get("/tasks", func(w http.ResponseWriter, r *http.Request) {
+						projectID := chi.URLParam(r, "projectID")
+						q := r.URL.Query()
+						q.Set("project_id", projectID)
+						r.URL.RawQuery = q.Encode()
+						taskHandler.List(w, r)
+					})
 				})
 			})
 

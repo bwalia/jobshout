@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import ReactFlow, {
   addEdge,
   Background,
@@ -68,6 +68,20 @@ export function WorkflowBuilder({
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
+
+  // Sync executionStatus changes into node data
+  useEffect(() => {
+    if (!executionStatus) return;
+    setNodes((nds) =>
+      nds.map((node) => {
+        const status = executionStatus[node.data.label as string];
+        if (status !== node.data.status) {
+          return { ...node, data: { ...node.data, status } };
+        }
+        return node;
+      }),
+    );
+  }, [executionStatus, setNodes]);
 
   const onConnect = useCallback(
     (connection: Connection) => {

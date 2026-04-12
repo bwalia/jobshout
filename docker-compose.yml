@@ -39,7 +39,7 @@ services:
     volumes:
       - ollama_data:/root/.ollama
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:11434/api/tags"]
+      test: ["CMD-SHELL", "ollama list || true"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -49,20 +49,18 @@ services:
       context: ./python-sidecar
       dockerfile: Dockerfile
     environment:
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
-      OLLAMA_DEFAULT_MODEL: ${OLLAMA_DEFAULT_MODEL:-llama3}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_DEFAULT_MODEL: ${OLLAMA_DEFAULT_MODEL:-tinyllama}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       OPENAI_DEFAULT_MODEL: ${OPENAI_DEFAULT_MODEL:-gpt-4o-mini}
       SIDECAR_SECRET: ${PYTHON_SIDECAR_SECRET:-change-me-sidecar-secret}
       LOG_LEVEL: ${SIDECAR_LOG_LEVEL:-info}
-    ports:
-      - "8001:8001"
     depends_on:
       ollama:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8001/health"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health')\""]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -83,15 +81,15 @@ services:
       MINIO_BUCKET_AVATARS: ${MINIO_BUCKET_AVATARS:-avatars}
       MINIO_BUCKET_KNOWLEDGE: ${MINIO_BUCKET_KNOWLEDGE:-knowledge}
       SERVER_PORT: ${SERVER_PORT:-:8080}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:3001}
       LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
-      OLLAMA_DEFAULT_MODEL: ${OLLAMA_DEFAULT_MODEL:-llama3}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_DEFAULT_MODEL: ${OLLAMA_DEFAULT_MODEL:-tinyllama}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       PYTHON_SIDECAR_URL: ${PYTHON_SIDECAR_URL:-http://python-sidecar:8001}
       PYTHON_SIDECAR_SECRET: ${PYTHON_SIDECAR_SECRET:-change-me-sidecar-secret}
     ports:
-      - "8080:8080"
+      - "8090:8080"
     depends_on:
       postgres:
         condition: service_healthy

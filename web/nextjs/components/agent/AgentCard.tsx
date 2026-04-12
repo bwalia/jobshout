@@ -4,12 +4,9 @@ import type { Agent } from "@/lib/types/agent";
 
 interface AgentCardProps {
   agent: Agent;
-  /** Optional: title of the task the agent is currently working on */
   currentTask?: string;
 }
 
-// A palette of background colours cycled by the first character of the agent
-// name so that each agent gets a consistent, visually distinct avatar colour.
 const AVATAR_COLOURS = [
   "bg-violet-600",
   "bg-blue-600",
@@ -26,7 +23,6 @@ function getAvatarColour(name: string): string {
   return AVATAR_COLOURS[index];
 }
 
-/** Derives up to two initials from an agent name. e.g. "Content Writer" → "CW" */
 function getInitials(name: string): string {
   return name
     .split(" ")
@@ -36,11 +32,16 @@ function getInitials(name: string): string {
     .join("");
 }
 
-/** Clamps a performance score (0–100) to a coloured text label. */
 function performanceColour(score: number): string {
-  if (score >= 80) return "text-emerald-500";
-  if (score >= 50) return "text-amber-500";
-  return "text-red-500";
+  if (score >= 80) return "text-emerald-600 dark:text-emerald-400";
+  if (score >= 50) return "text-amber-600 dark:text-amber-400";
+  return "text-red-600 dark:text-red-400";
+}
+
+function performanceBgColour(score: number): string {
+  if (score >= 80) return "bg-emerald-500";
+  if (score >= 50) return "bg-amber-500";
+  return "bg-red-500";
 }
 
 export function AgentCard({ agent, currentTask }: AgentCardProps) {
@@ -50,29 +51,27 @@ export function AgentCard({ agent, currentTask }: AgentCardProps) {
   return (
     <Link
       href={`/agents/${agent.id}`}
-      className="group flex flex-col gap-4 rounded-lg border border-border bg-card p-4 shadow-sm transition-colors hover:border-primary/50 hover:bg-accent/30"
+      className="group flex flex-col gap-4 rounded-xl border border-border bg-card p-5 shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:shadow-card-hover"
     >
       {/* Top row: avatar + status */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
-          {/* Avatar – image if provided, initials circle otherwise */}
           {agent.avatar_url ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={agent.avatar_url}
               alt={`${agent.name} avatar`}
-              className="h-10 w-10 rounded-full object-cover"
+              className="h-10 w-10 rounded-lg object-cover"
             />
           ) : (
             <span
-              className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white ${avatarColour}`}
+              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-sm font-semibold text-white ${avatarColour}`}
               aria-label={`${agent.name} avatar`}
             >
               {initials}
             </span>
           )}
 
-          {/* Name + role */}
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold text-foreground group-hover:text-primary transition-colors">
               {agent.name}
@@ -97,9 +96,9 @@ export function AgentCard({ agent, currentTask }: AgentCardProps) {
       </div>
 
       {/* Progress bar */}
-      <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+      <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden">
         <div
-          className={`h-full rounded-full transition-all ${performanceColour(agent.performance_score).replace("text-", "bg-")}`}
+          className={`h-full rounded-full transition-all ${performanceBgColour(agent.performance_score)}`}
           style={{ width: `${agent.performance_score}%` }}
           aria-valuenow={agent.performance_score}
           aria-valuemin={0}
