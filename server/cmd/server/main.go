@@ -17,6 +17,11 @@ import (
 
 	"github.com/jobshout/server/internal/bridge"
 	"github.com/jobshout/server/internal/config"
+	integ "github.com/jobshout/server/internal/integration"
+	jiraAdapter "github.com/jobshout/server/internal/integration/adapters/jira"
+	githubAdapter "github.com/jobshout/server/internal/integration/adapters/github"
+	slackAdapter "github.com/jobshout/server/internal/integration/adapters/slack"
+	teamsAdapter "github.com/jobshout/server/internal/integration/adapters/teams"
 	"github.com/jobshout/server/internal/database"
 	"github.com/jobshout/server/internal/engine"
 	"github.com/jobshout/server/internal/executor"
@@ -74,6 +79,10 @@ func main() {
 	schedulerRepo := repository.NewSchedulerRepository(pool)
 	sessionRepo := repository.NewSessionRepository(pool)
 	pluginRepo := repository.NewPluginRepository(pool)
+	integRepo := repository.NewIntegrationRepository(pool)
+	linkRepo := repository.NewTaskLinkRepository(pool)
+	syncLogRepo := repository.NewSyncLogRepository(pool)
+	notifConfigRepo := repository.NewNotificationConfigRepository(pool)
 
 	// ─── LLM layer ───────────────────────────────────────────────────────────
 	// Ollama running locally is the default; OpenAI is used when configured.
@@ -141,6 +150,22 @@ func main() {
 	workflowSvc := service.NewWorkflowService(workflowRepo, agentRepo, execRepo, toolPermRepo, dagEngine, logger)
 	pluginSvc := service.NewPluginService(pluginRepo, agentRepo, engineRouter, logger)
 
+	// ─── Integration framework ──────────────────────────────────────────────
+	adapterRegistry := integ.NewRegistry()
+	adapterRegistry.RegisterTask("jira", jiraAdapter.NewAdapter)
+	adapterRegistry.RegisterTask("github", githubAdapter.NewAdapter)
+	adapterRegistry.RegisterNotification("slack", slackAdapter.NewAdapter)
+	adapterRegistry.RegisterNotification("teams", teamsAdapter.NewAdapter)
+
+	eventBus := integ.NewBus()
+	integSvc := service.NewIntegrationService(integRepo, linkRepo, syncLogRepo, adapterRegistry, logger)
+	notifSvc := service.NewNotificationService(notifConfigRepo, adapterRegistry, logger)
+	go notifSvc.StartSubscriber(ctx, eventBus)
+	logger.Info("integration framework initialised",
+		zap.Int("task_adapters", 2),
+		zap.Int("notification_adapters", 2),
+	)
+
 	// ─── Bridge client (SSE streaming) ──────────────────────────────────────
 	var bridgeClient *bridge.Client
 	if cfg.PythonSidecarURL != "" {
@@ -183,6 +208,9 @@ func main() {
 	llmProviderHandler := handler.NewLLMProviderHandler(llmProviderRepo, llmRouter)
 	schedulerHandler := handler.NewSchedulerHandler(schedulerRepo)
 	sessionHandler := handler.NewSessionHandler(sessionRepo)
+	integHandler := handler.NewIntegrationHandler(integSvc)
+	notifHandler := handler.NewNotificationHandler(notifSvc)
+	webhookHandler := handler.NewWebhookHandler(integRepo, linkRepo, logger)
 
 	// Auth middleware
 	requireAuth := middleware.RequireAuth(jwtSvc)
@@ -208,6 +236,12 @@ func main() {
 
 	// Health check
 	r.Get("/health", handler.Health(pool, version))
+
+	// Public webhook endpoints (no auth — verified by HMAC)
+	r.Route("/webhooks", func(r chi.Router) {
+		r.Post("/jira/{integrationID}", webhookHandler.Jira)
+		r.Post("/github/{integrationID}", webhookHandler.GitHub)
+	})
 
 	// API v1 routes
 	r.Route("/api/v1", func(r chi.Router) {
@@ -385,6 +419,34 @@ func main() {
 					r.Post("/snapshots", sessionHandler.CreateSnapshot)
 					r.Get("/snapshots", sessionHandler.ListSnapshots)
 					r.Post("/snapshots/{snapshotID}/restore", sessionHandler.RestoreSnapshot)
+				})
+			})
+
+			// Integrations (Jira, GitHub)
+			r.Route("/integrations", func(r chi.Router) {
+				r.Get("/", integHandler.List)
+				r.Post("/", integHandler.Create)
+				r.Route("/{integrationID}", func(r chi.Router) {
+					r.Get("/", integHandler.Get)
+					r.Put("/", integHandler.Update)
+					r.Delete("/", integHandler.Delete)
+					r.Get("/links", integHandler.ListLinks)
+					r.Get("/sync-logs", integHandler.ListSyncLogs)
+					r.Post("/tasks/{taskID}/link", integHandler.LinkTask)
+					r.Delete("/tasks/{taskID}/link", integHandler.UnlinkTask)
+					r.Post("/links/{linkID}/sync", integHandler.SyncLink)
+				})
+			})
+
+			// Notifications (Slack, Teams)
+			r.Route("/notifications", func(r chi.Router) {
+				r.Get("/", notifHandler.List)
+				r.Post("/", notifHandler.Create)
+				r.Route("/{configID}", func(r chi.Router) {
+					r.Get("/", notifHandler.Get)
+					r.Put("/", notifHandler.Update)
+					r.Delete("/", notifHandler.Delete)
+					r.Post("/test", notifHandler.Test)
 				})
 			})
 
