@@ -17,11 +17,16 @@ import (
 
 	"github.com/jobshout/server/internal/bridge"
 	"github.com/jobshout/server/internal/config"
+	"github.com/jobshout/server/internal/costengine"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	integ "github.com/jobshout/server/internal/integration"
-	jiraAdapter "github.com/jobshout/server/internal/integration/adapters/jira"
+	emailAdapter "github.com/jobshout/server/internal/integration/adapters/email"
 	githubAdapter "github.com/jobshout/server/internal/integration/adapters/github"
+	jiraAdapter "github.com/jobshout/server/internal/integration/adapters/jira"
 	slackAdapter "github.com/jobshout/server/internal/integration/adapters/slack"
 	teamsAdapter "github.com/jobshout/server/internal/integration/adapters/teams"
+	telegramBot "github.com/jobshout/server/internal/integration/adapters/telegram"
 	"github.com/jobshout/server/internal/database"
 	"github.com/jobshout/server/internal/engine"
 	"github.com/jobshout/server/internal/executor"
@@ -32,6 +37,7 @@ import (
 	"github.com/jobshout/server/internal/middleware"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/repository"
+	"github.com/jobshout/server/internal/selector"
 	"github.com/jobshout/server/internal/service"
 	"github.com/jobshout/server/internal/tools"
 	ws "github.com/jobshout/server/internal/websocket"
@@ -83,6 +89,20 @@ func main() {
 	linkRepo := repository.NewTaskLinkRepository(pool)
 	syncLogRepo := repository.NewSyncLogRepository(pool)
 	notifConfigRepo := repository.NewNotificationConfigRepository(pool)
+	usageRepo := repository.NewUsageRepository(pool)
+	budgetRepo := repository.NewBudgetRepository(pool)
+	policyRepo := repository.NewPolicyRepository(pool)
+	rbacRepo := repository.NewRBACRepository(pool)
+	ssoRepo := repository.NewSSORepository(pool)
+	auditRepo := repository.NewAuditRepository(pool)
+	pricingRepo := repository.NewPricingRepository(pool)
+
+	// Autonomous agents + chat + Telegram repositories
+	memoryRepo := repository.NewMemoryRepository(pool)
+	goalRepo := repository.NewGoalRepository(pool)
+	multiAgentRepo := repository.NewMultiAgentRepository(pool)
+	chatRepo := repository.NewChatRepository(pool)
+	telegramRepo := repository.NewTelegramRepository(pool)
 
 	// ─── LLM layer ───────────────────────────────────────────────────────────
 	// Ollama running locally is the default; OpenAI is used when configured.
@@ -140,15 +160,55 @@ func main() {
 		logger,
 	)
 
+	// ─── Cost Engine ─────────────────────────────────────────────────────────
+	costEng := costengine.New()
+	logger.Info("cost engine initialised", zap.Int("known_models", len(costEng.KnownModels())))
+
 	// ─── Services ────────────────────────────────────────────────────────────
 	jwtSvc := service.NewJWTService(cfg)
 	authSvc := service.NewAuthService(userRepo, tokenRepo, orgRepo, jwtSvc, logger)
 	agentSvc := service.NewAgentService(agentRepo, logger)
 	projectSvc := service.NewProjectService(projectRepo, logger)
 	taskSvc := service.NewTaskService(taskRepo, logger)
-	execSvc := service.NewExecutionService(agentRepo, execRepo, toolPermRepo, engineRouter, logger)
+	govSvc := service.NewGovernanceService(budgetRepo, policyRepo, usageRepo, execRepo, costEng, logger)
+	analyticsSvc := service.NewAnalyticsService(usageRepo, logger)
+	rbacSvc := service.NewRBACService(rbacRepo, logger)
+	ssoSvc := service.NewSSOService(ssoRepo, userRepo, rbacRepo, auditRepo, logger)
+	leaderboardSvc := service.NewLeaderboardService(usageRepo, logger)
+	execSvc := service.NewExecutionService(agentRepo, execRepo, toolPermRepo, engineRouter, govSvc, logger)
 	workflowSvc := service.NewWorkflowService(workflowRepo, agentRepo, execRepo, toolPermRepo, dagEngine, logger)
 	pluginSvc := service.NewPluginService(pluginRepo, agentRepo, engineRouter, logger)
+
+	// ─── Autonomous agent engine ────────────────────────────────────────────
+	autonomousExec := executor.NewAutonomousExecutor(goNativeExec, llmRouter, memoryRepo, goalRepo, logger)
+	memorySvc := service.NewMemoryService(memoryRepo, logger)
+	intentSvc := service.NewIntentService(llmRouter, logger)
+	goalSvc := service.NewGoalService(goalRepo, agentRepo, toolPermRepo, autonomousExec, logger)
+	multiAgentSvc := service.NewMultiAgentService(multiAgentRepo, agentRepo, toolPermRepo, autonomousExec, logger)
+	chatSvc := service.NewChatService(chatRepo, intentSvc, memorySvc, goalSvc, logger)
+	_ = memorySvc // used by chatSvc
+
+	// ─── Telegram bot (conditional on config) ───────────────────────────────
+	var telegramSvc service.TelegramService
+	var tgBot *telegramBot.BotClient
+	if cfg.TelegramBotToken != "" {
+		tgBot = telegramBot.NewBotClient(cfg.TelegramBotToken)
+		telegramSvc = service.NewTelegramService(
+			tgBot, telegramRepo, chatSvc,
+			cfg.TelegramRatePerMin, cfg.FrontendBaseURL, logger,
+		)
+		// Register webhook at startup.
+		if cfg.TelegramWebhookURL != "" {
+			go func() {
+				if err := tgBot.SetWebhook(ctx, cfg.TelegramWebhookURL, cfg.TelegramSecretToken); err != nil {
+					logger.Warn("failed to register telegram webhook", zap.Error(err))
+				} else {
+					logger.Info("telegram webhook registered", zap.String("url", cfg.TelegramWebhookURL))
+				}
+			}()
+		}
+		logger.Info("Telegram bot initialised")
+	}
 
 	// ─── Integration framework ──────────────────────────────────────────────
 	adapterRegistry := integ.NewRegistry()
@@ -156,14 +216,17 @@ func main() {
 	adapterRegistry.RegisterTask("github", githubAdapter.NewAdapter)
 	adapterRegistry.RegisterNotification("slack", slackAdapter.NewAdapter)
 	adapterRegistry.RegisterNotification("teams", teamsAdapter.NewAdapter)
+	adapterRegistry.RegisterNotification("email", emailAdapter.NewAdapter)
 
 	eventBus := integ.NewBus()
 	integSvc := service.NewIntegrationService(integRepo, linkRepo, syncLogRepo, adapterRegistry, logger)
 	notifSvc := service.NewNotificationService(notifConfigRepo, adapterRegistry, logger)
+	budgetAlertDispatcher := service.NewBudgetAlertDispatcher(notifSvc, logger)
+	_ = budgetAlertDispatcher // available for governance service to dispatch budget alerts
 	go notifSvc.StartSubscriber(ctx, eventBus)
 	logger.Info("integration framework initialised",
 		zap.Int("task_adapters", 2),
-		zap.Int("notification_adapters", 2),
+		zap.Int("notification_adapters", 3),
 	)
 
 	// ─── Bridge client (SSE streaming) ──────────────────────────────────────
@@ -211,6 +274,26 @@ func main() {
 	integHandler := handler.NewIntegrationHandler(integSvc)
 	notifHandler := handler.NewNotificationHandler(notifSvc)
 	webhookHandler := handler.NewWebhookHandler(integRepo, linkRepo, logger)
+	governanceHandler := handler.NewGovernanceHandler(govSvc)
+	analyticsHandler := handler.NewAnalyticsHandler(analyticsSvc)
+	rbacHandler := handler.NewRBACHandler(rbacSvc)
+	ssoHandler := handler.NewSSOHandler(ssoSvc, jwtSvc)
+	auditHandler := handler.NewAuditHandler(auditRepo)
+	pricingHandler := handler.NewPricingHandler(pricingRepo)
+	leaderboardHandler := handler.NewLeaderboardHandler(leaderboardSvc)
+
+	// Chat, goal, multi-agent, and Telegram handlers
+	chatHandler := handler.NewChatHandler(chatSvc)
+	goalHandler := handler.NewGoalHandler(goalSvc)
+	multiAgentHandler := handler.NewMultiAgentHandler(multiAgentSvc)
+	var telegramHandler *handler.TelegramHandler
+	if telegramSvc != nil {
+		telegramHandler = handler.NewTelegramHandler(telegramSvc, cfg.TelegramSecretToken, logger)
+	}
+
+	// Agent selector
+	agentSelector := selector.New(pool, logger)
+	selectorHandler := handler.NewSelectorHandler(agentSelector)
 
 	// Auth middleware
 	requireAuth := middleware.RequireAuth(jwtSvc)
@@ -237,10 +320,16 @@ func main() {
 	// Health check
 	r.Get("/health", handler.Health(pool, version))
 
-	// Public webhook endpoints (no auth — verified by HMAC)
+	// Prometheus metrics endpoint
+	r.Handle("/metrics", promhttp.Handler())
+
+	// Public webhook endpoints (no auth — verified by HMAC/secret token)
 	r.Route("/webhooks", func(r chi.Router) {
 		r.Post("/jira/{integrationID}", webhookHandler.Jira)
 		r.Post("/github/{integrationID}", webhookHandler.GitHub)
+		if telegramHandler != nil {
+			r.Post("/telegram", telegramHandler.Webhook)
+		}
 	})
 
 	// API v1 routes
@@ -270,8 +359,17 @@ func main() {
 					// Agent LLM execution
 					r.Post("/execute", execHandler.Execute)
 					r.Get("/executions", execHandler.ListByAgent)
+
+					// Autonomous agent goals
+					r.Route("/goals", func(r chi.Router) {
+						r.Get("/", goalHandler.ListGoals)
+						r.Post("/", goalHandler.CreateGoal)
+					})
 				})
 			})
+
+			// Goal lookup by ID
+			r.Get("/goals/{goalID}", goalHandler.GetGoal)
 
 			// Agent execution lookup by ID (standalone) + trace endpoints
 			r.Get("/executions/{executionID}", execHandler.GetExecution)
@@ -449,6 +547,95 @@ func main() {
 					r.Post("/test", notifHandler.Test)
 				})
 			})
+
+			// Governance (budgets + policies)
+			r.Route("/governance", func(r chi.Router) {
+				r.Get("/budgets", governanceHandler.ListBudgets)
+				r.Post("/budgets", governanceHandler.UpsertBudget)
+				r.Delete("/budgets/{budgetID}", governanceHandler.DeleteBudget)
+				r.Get("/budgets/alerts", governanceHandler.ListAlerts)
+				r.Get("/policies", governanceHandler.ListPolicies)
+				r.Post("/policies", governanceHandler.UpsertPolicy)
+				r.Delete("/policies/{policyID}", governanceHandler.DeletePolicy)
+			})
+
+			// Analytics (usage, costs, top agents)
+			r.Route("/analytics", func(r chi.Router) {
+				r.Get("/usage", analyticsHandler.UsageTimeSeries)
+				r.Get("/usage/summary", analyticsHandler.OrgUsageSummary)
+				r.Get("/agents/{agentID}", analyticsHandler.AgentAnalytics)
+				r.Get("/top-agents", analyticsHandler.TopAgents)
+			})
+
+			// RBAC (roles and permissions)
+			r.Route("/rbac", func(r chi.Router) {
+				r.Get("/me/permissions", rbacHandler.MyPermissions)
+				r.Get("/roles", rbacHandler.ListRoles)
+				r.Post("/roles", rbacHandler.CreateRole)
+				r.Delete("/roles/{roleID}", rbacHandler.DeleteRole)
+				r.Post("/assignments", rbacHandler.AssignRole)
+				r.Delete("/assignments/{userID}/{roleID}", rbacHandler.RemoveRole)
+				r.Get("/users/{userID}/roles", rbacHandler.ListUserRoles)
+			})
+
+			// SSO (OIDC config + login flows)
+			r.Route("/sso", func(r chi.Router) {
+				r.Get("/configs", ssoHandler.ListConfigs)
+				r.Post("/configs", ssoHandler.CreateConfig)
+				r.Delete("/configs/{configID}", ssoHandler.DeleteConfig)
+				r.Get("/authorize", ssoHandler.Authorize)
+				r.Post("/callback", ssoHandler.Callback)
+				r.Get("/login-audit", ssoHandler.ListLoginAudit)
+			})
+
+			// Audit logs
+			r.Route("/audit", func(r chi.Router) {
+				r.Get("/actions", auditHandler.ListActions)
+				r.Get("/logins", auditHandler.ListLogins)
+			})
+
+			// Pricing configuration
+			r.Route("/pricing", func(r chi.Router) {
+				r.Get("/", pricingHandler.ListActive)
+				r.Post("/", pricingHandler.Create)
+				r.Delete("/{configID}", pricingHandler.Deactivate)
+			})
+
+			// Agent leaderboard + anomaly detection
+			r.Route("/leaderboard", func(r chi.Router) {
+				r.Get("/", leaderboardHandler.Leaderboard)
+				r.Get("/anomalies", leaderboardHandler.Anomalies)
+			})
+
+			// Chat sessions
+			r.Route("/chat/sessions", func(r chi.Router) {
+				r.Get("/", chatHandler.ListSessions)
+				r.Post("/", chatHandler.StartSession)
+				r.Route("/{sessionID}", func(r chi.Router) {
+					r.Get("/messages", chatHandler.GetHistory)
+					r.Post("/messages", chatHandler.SendMessage)
+				})
+			})
+
+			// Multi-agent collaboration jobs
+			r.Route("/multi-agent/jobs", func(r chi.Router) {
+				r.Get("/", multiAgentHandler.ListJobs)
+				r.Post("/", multiAgentHandler.RunJob)
+				r.Get("/{jobID}", multiAgentHandler.GetJob)
+			})
+
+			// Telegram account management
+			if telegramHandler != nil {
+				r.Route("/telegram", func(r chi.Router) {
+					r.Post("/link-token", telegramHandler.GenerateLinkToken)
+					r.Delete("/unlink", telegramHandler.UnlinkUser)
+					r.Get("/status", telegramHandler.LinkStatus)
+				})
+			}
+
+			// Cost-aware agent selection
+			r.Post("/agents/select", selectorHandler.Select)
+			r.Post("/agents/scores/refresh", selectorHandler.RefreshScores)
 
 			// Uploads (MinIO)
 			if uploadHandler != nil {

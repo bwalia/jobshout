@@ -46,6 +46,15 @@ type Config struct {
 	// Python sidecar (LangChain/LangGraph execution).
 	PythonSidecarURL    string `mapstructure:"PYTHON_SIDECAR_URL"`
 	PythonSidecarSecret string `mapstructure:"PYTHON_SIDECAR_SECRET"`
+
+	// Telegram Bot integration (optional).
+	TelegramBotToken     string `mapstructure:"TELEGRAM_BOT_TOKEN"`
+	TelegramWebhookURL   string `mapstructure:"TELEGRAM_WEBHOOK_URL"`
+	TelegramSecretToken  string `mapstructure:"TELEGRAM_WEBHOOK_SECRET"`
+	TelegramRatePerMin   int    `mapstructure:"TELEGRAM_RATE_PER_MIN"`
+
+	// Frontend base URL for generating links in Telegram messages.
+	FrontendBaseURL string `mapstructure:"FRONTEND_BASE_URL"`
 }
 
 // AccessTokenExpiry returns the access token expiry duration.
@@ -81,6 +90,10 @@ func Load() (*Config, error) {
 	viper.SetDefault("PYTHON_SIDECAR_URL", "http://localhost:8001")
 	viper.SetDefault("PYTHON_SIDECAR_SECRET", "change-me-sidecar-secret")
 
+	// Telegram defaults.
+	viper.SetDefault("TELEGRAM_RATE_PER_MIN", 20)
+	viper.SetDefault("FRONTEND_BASE_URL", "http://localhost:3000")
+
 	cfg := &Config{
 		DatabaseURL:          viper.GetString("DATABASE_URL"),
 		ServerPort:           viper.GetString("SERVER_PORT"),
@@ -104,6 +117,11 @@ func Load() (*Config, error) {
 		ClaudeDefaultModel:   viper.GetString("CLAUDE_DEFAULT_MODEL"),
 		PythonSidecarURL:     viper.GetString("PYTHON_SIDECAR_URL"),
 		PythonSidecarSecret:  viper.GetString("PYTHON_SIDECAR_SECRET"),
+		TelegramBotToken:     viper.GetString("TELEGRAM_BOT_TOKEN"),
+		TelegramWebhookURL:   viper.GetString("TELEGRAM_WEBHOOK_URL"),
+		TelegramSecretToken:  viper.GetString("TELEGRAM_WEBHOOK_SECRET"),
+		TelegramRatePerMin:   viper.GetInt("TELEGRAM_RATE_PER_MIN"),
+		FrontendBaseURL:      viper.GetString("FRONTEND_BASE_URL"),
 	}
 
 	origins := viper.GetString("CORS_ORIGINS")

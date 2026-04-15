@@ -13,6 +13,18 @@ const (
 	EventTaskCompleted EventType = "task.completed"
 	EventTaskFailed    EventType = "task.failed"
 	EventTaskUpdated   EventType = "task.updated"
+	EventBudgetAlert   EventType = "budget.alert"
+
+	// Autonomous agent events.
+	EventAgentGoalStarted   EventType = "agent.goal.started"
+	EventAgentGoalCompleted EventType = "agent.goal.completed"
+	EventAgentGoalFailed    EventType = "agent.goal.failed"
+
+	// Chat events.
+	EventChatMessage EventType = "chat.message"
+
+	// Telegram events.
+	EventTelegramLinked EventType = "telegram.linked"
 )
 
 // AllEventTypes returns every event type for subscription.
