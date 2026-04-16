@@ -19,6 +19,12 @@ type AgentExecution struct {
 	Status         string     `json:"status"`
 	ErrorMessage   *string    `json:"error_message"`
 	TotalTokens    int        `json:"total_tokens"`
+	InputTokens    int        `json:"input_tokens"`
+	OutputTokens   int        `json:"output_tokens"`
+	LatencyMs      int        `json:"latency_ms"`
+	CostUSD        float64    `json:"cost_usd"`
+	ModelName      *string    `json:"model_name"`
+	ModelProvider  *string    `json:"model_provider"`
 	Iterations     int        `json:"iterations"`
 	EngineType     string     `json:"engine_type"`
 	StartedAt      *time.Time `json:"started_at"`

@@ -184,7 +184,7 @@ func main() {
 	memorySvc := service.NewMemoryService(memoryRepo, logger)
 	intentSvc := service.NewIntentService(llmRouter, logger)
 	goalSvc := service.NewGoalService(goalRepo, agentRepo, toolPermRepo, autonomousExec, logger)
-	multiAgentSvc := service.NewMultiAgentService(multiAgentRepo, agentRepo, toolPermRepo, autonomousExec, logger)
+	multiAgentSvc := service.NewMultiAgentService(multiAgentRepo, agentRepo, toolPermRepo, goalRepo, autonomousExec, logger)
 	chatSvc := service.NewChatService(chatRepo, intentSvc, memorySvc, goalSvc, logger)
 	_ = memorySvc // used by chatSvc
 

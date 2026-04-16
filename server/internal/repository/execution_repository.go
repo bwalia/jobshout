@@ -24,6 +24,8 @@ type ExecutionRepository interface {
 	ListByAgent(ctx context.Context, agentID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.AgentExecution], error)
 	// PersistResult is a convenience method used by the workflow DAG engine.
 	PersistResult(ctx context.Context, execID uuid.UUID, res executor.Result) error
+	// UpdateCostFields sets cost-tracking columns after execution completes.
+	UpdateCostFields(ctx context.Context, id uuid.UUID, inputTokens, outputTokens, latencyMs int, costUSD float64, modelName, modelProvider string) error
 
 	// Trace methods for LangChain/LangGraph observability.
 	RecordLangChainTrace(ctx context.Context, trace *model.LangChainRunTrace) error
@@ -95,6 +97,20 @@ func (r *executionRepository) MarkFailed(ctx context.Context, id uuid.UUID, errM
 	return nil
 }
 
+// UpdateCostFields sets the cost-tracking columns on an execution after completion.
+func (r *executionRepository) UpdateCostFields(ctx context.Context, id uuid.UUID, inputTokens, outputTokens, latencyMs int, costUSD float64, modelName, modelProvider string) error {
+	const sql = `
+		UPDATE agent_executions
+		SET input_tokens = $2, output_tokens = $3, latency_ms = $4, cost_usd = $5,
+		    model_name = $6, model_provider = $7
+		WHERE id = $1`
+	_, err := r.pool.Exec(ctx, sql, id, inputTokens, outputTokens, latencyMs, costUSD, modelName, modelProvider)
+	if err != nil {
+		return fmt.Errorf("execution_repo: update cost fields: %w", err)
+	}
+	return nil
+}
+
 func (r *executionRepository) RecordToolCall(ctx context.Context, call *model.ExecutionToolCall) error {
 	inputJSON, err := json.Marshal(call.Input)
 	if err != nil {
@@ -118,14 +134,17 @@ func (r *executionRepository) RecordToolCall(ctx context.Context, call *model.Ex
 func (r *executionRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.AgentExecution, error) {
 	const sql = `
 		SELECT id, agent_id, org_id, workflow_run_id, step_id, input_prompt, output,
-		       status, error_message, total_tokens, iterations, engine_type, started_at, completed_at, created_at
+		       status, error_message, total_tokens, input_tokens, output_tokens, latency_ms, cost_usd,
+		       model_name, model_provider, iterations, engine_type, started_at, completed_at, created_at
 		FROM agent_executions WHERE id = $1`
 
 	exec := &model.AgentExecution{}
 	if err := r.pool.QueryRow(ctx, sql, id).Scan(
 		&exec.ID, &exec.AgentID, &exec.OrgID, &exec.WorkflowRunID, &exec.StepID,
 		&exec.InputPrompt, &exec.Output, &exec.Status, &exec.ErrorMessage,
-		&exec.TotalTokens, &exec.Iterations, &exec.EngineType, &exec.StartedAt, &exec.CompletedAt, &exec.CreatedAt,
+		&exec.TotalTokens, &exec.InputTokens, &exec.OutputTokens, &exec.LatencyMs, &exec.CostUSD,
+		&exec.ModelName, &exec.ModelProvider, &exec.Iterations, &exec.EngineType,
+		&exec.StartedAt, &exec.CompletedAt, &exec.CreatedAt,
 	); err != nil {
 		return nil, fmt.Errorf("execution_repo: get by id: %w", err)
 	}
@@ -178,7 +197,8 @@ func (r *executionRepository) ListByAgent(ctx context.Context, agentID uuid.UUID
 
 	const listSQL = `
 		SELECT id, agent_id, org_id, workflow_run_id, step_id, input_prompt, output,
-		       status, error_message, total_tokens, iterations, engine_type, started_at, completed_at, created_at
+		       status, error_message, total_tokens, input_tokens, output_tokens, latency_ms, cost_usd,
+		       model_name, model_provider, iterations, engine_type, started_at, completed_at, created_at
 		FROM agent_executions WHERE agent_id = $1
 		ORDER BY created_at DESC LIMIT $2 OFFSET $3`
 
@@ -194,7 +214,9 @@ func (r *executionRepository) ListByAgent(ctx context.Context, agentID uuid.UUID
 		if err := rows.Scan(
 			&exec.ID, &exec.AgentID, &exec.OrgID, &exec.WorkflowRunID, &exec.StepID,
 			&exec.InputPrompt, &exec.Output, &exec.Status, &exec.ErrorMessage,
-			&exec.TotalTokens, &exec.Iterations, &exec.EngineType, &exec.StartedAt, &exec.CompletedAt, &exec.CreatedAt,
+			&exec.TotalTokens, &exec.InputTokens, &exec.OutputTokens, &exec.LatencyMs, &exec.CostUSD,
+			&exec.ModelName, &exec.ModelProvider, &exec.Iterations, &exec.EngineType,
+			&exec.StartedAt, &exec.CompletedAt, &exec.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("execution_repo: scan execution: %w", err)
 		}

@@ -41,11 +41,16 @@ type ToolCallRecord struct {
 
 // Result is the outcome of a completed Executor run.
 type Result struct {
-	FinalAnswer  string
-	Iterations   int
-	TotalTokens  int
-	ToolCalls    []ToolCallRecord
-	Err          error
+	FinalAnswer   string
+	Iterations    int
+	TotalTokens   int
+	InputTokens   int
+	OutputTokens  int
+	LatencyMs     int
+	ModelProvider string
+	ModelName     string
+	ToolCalls     []ToolCallRecord
+	Err           error
 }
 
 // Executor runs the ReAct loop for a single agent against a given task prompt.
@@ -90,6 +95,8 @@ func (e *Executor) Run(
 		return Result{Err: fmt.Errorf("executor: resolve LLM client: %w", err)}
 	}
 
+	resolvedProvider := client.ProviderName()
+
 	// Build the tool subset this agent may use.
 	toolRegistry := e.registry.Subset(agentTools)
 	toolSpecs := make([]llm.ToolSpec, 0)
@@ -116,9 +123,13 @@ func (e *Executor) Run(
 		{Role: llm.RoleUser, Content: llm.BuildTaskUserMessage(taskPrompt)},
 	}
 
+	runStart := time.Now()
+
 	var (
-		toolCalls   []ToolCallRecord
-		totalTokens int
+		toolCalls    []ToolCallRecord
+		totalTokens  int
+		inputTokens  int
+		outputTokens int
 	)
 
 	for iteration := 1; iteration <= MaxIterations; iteration++ {
@@ -131,14 +142,13 @@ func (e *Executor) Run(
 			Temperature: 0.2,
 		})
 		if err != nil {
-			return Result{
-				Err:         fmt.Errorf("executor: LLM generate (iteration %d): %w", iteration, err),
-				Iterations:  iteration,
-				TotalTokens: totalTokens,
-				ToolCalls:   toolCalls,
-			}
+			return buildResult("", iteration, totalTokens, inputTokens, outputTokens,
+				runStart, resolvedProvider, modelName, toolCalls,
+				fmt.Errorf("executor: LLM generate (iteration %d): %w", iteration, err))
 		}
 
+		inputTokens += llmResp.InputTokens
+		outputTokens += llmResp.OutputTokens
 		totalTokens += llmResp.InputTokens + llmResp.OutputTokens
 
 		// Append the assistant turn to maintain conversation history.
@@ -155,12 +165,8 @@ func (e *Executor) Run(
 				zap.Error(parseErr),
 			)
 			// Graceful degradation: treat raw content as the final answer.
-			return Result{
-				FinalAnswer: llmResp.Content,
-				Iterations:  iteration,
-				TotalTokens: totalTokens,
-				ToolCalls:   toolCalls,
-			}
+			return buildResult(llmResp.Content, iteration, totalTokens, inputTokens, outputTokens,
+				runStart, resolvedProvider, modelName, toolCalls, nil)
 		}
 
 		log.Debug("parsed ReAct response",
@@ -171,23 +177,15 @@ func (e *Executor) Run(
 
 		// Case 1: Agent has produced a final answer.
 		if parsed.FinalAnswer != nil && *parsed.FinalAnswer != "" {
-			return Result{
-				FinalAnswer: *parsed.FinalAnswer,
-				Iterations:  iteration,
-				TotalTokens: totalTokens,
-				ToolCalls:   toolCalls,
-			}
+			return buildResult(*parsed.FinalAnswer, iteration, totalTokens, inputTokens, outputTokens,
+				runStart, resolvedProvider, modelName, toolCalls, nil)
 		}
 
 		// Case 2: Agent wants to call a tool.
 		if parsed.Action == nil || *parsed.Action == "" {
 			// No action and no final answer — shouldn't happen but recover gracefully.
-			return Result{
-				FinalAnswer: parsed.Thought,
-				Iterations:  iteration,
-				TotalTokens: totalTokens,
-				ToolCalls:   toolCalls,
-			}
+			return buildResult(parsed.Thought, iteration, totalTokens, inputTokens, outputTokens,
+				runStart, resolvedProvider, modelName, toolCalls, nil)
 		}
 
 		toolName := *parsed.Action
@@ -252,12 +250,9 @@ func (e *Executor) Run(
 	}
 
 	// Exceeded max iterations without a final answer.
-	return Result{
-		Err:         fmt.Errorf("executor: exceeded maximum iterations (%d) without a final answer", MaxIterations),
-		Iterations:  MaxIterations,
-		TotalTokens: totalTokens,
-		ToolCalls:   toolCalls,
-	}
+	return buildResult("", MaxIterations, totalTokens, inputTokens, outputTokens,
+		runStart, resolvedProvider, modelName, toolCalls,
+		fmt.Errorf("executor: exceeded maximum iterations (%d) without a final answer", MaxIterations))
 }
 
 // parseReActResponse extracts the JSON object from the LLM content string.
@@ -286,3 +281,26 @@ func parseReActResponse(content string) (*reactResponse, error) {
 }
 
 func boolPtr(b bool) *bool { return &b }
+
+// buildResult constructs a Result with the common metering fields pre-filled.
+func buildResult(
+	finalAnswer string,
+	iterations, totalTokens, inputTokens, outputTokens int,
+	startTime time.Time,
+	provider, model string,
+	toolCalls []ToolCallRecord,
+	err error,
+) Result {
+	return Result{
+		FinalAnswer:   finalAnswer,
+		Iterations:    iterations,
+		TotalTokens:   totalTokens,
+		InputTokens:   inputTokens,
+		OutputTokens:  outputTokens,
+		LatencyMs:     int(time.Since(startTime).Milliseconds()),
+		ModelProvider:  provider,
+		ModelName:      model,
+		ToolCalls:      toolCalls,
+		Err:            err,
+	}
+}

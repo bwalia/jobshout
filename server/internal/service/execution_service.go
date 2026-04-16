@@ -30,15 +30,18 @@ type executionService struct {
 	execRepo      repository.ExecutionRepository
 	toolPermRepo  repository.AgentToolRepository
 	engineRouter  *engine.Router
+	govSvc        GovernanceService
 	logger        *zap.Logger
 }
 
 // NewExecutionService creates an ExecutionService.
+// govSvc may be nil if governance is not configured.
 func NewExecutionService(
 	agentRepo repository.AgentRepository,
 	execRepo repository.ExecutionRepository,
 	toolPermRepo repository.AgentToolRepository,
 	engineRouter *engine.Router,
+	govSvc GovernanceService,
 	logger *zap.Logger,
 ) ExecutionService {
 	return &executionService{
@@ -46,6 +49,7 @@ func NewExecutionService(
 		execRepo:     execRepo,
 		toolPermRepo: toolPermRepo,
 		engineRouter: engineRouter,
+		govSvc:       govSvc,
 		logger:       logger,
 	}
 }
@@ -57,6 +61,21 @@ func (s *executionService) Execute(ctx context.Context, orgID uuid.UUID, agentID
 	}
 	if agent == nil {
 		return nil, ErrAgentNotFound
+	}
+
+	// Enforce governance policies before execution.
+	if s.govSvc != nil {
+		provider := ""
+		if agent.ModelProvider != nil {
+			provider = *agent.ModelProvider
+		}
+		modelName := ""
+		if agent.ModelName != nil {
+			modelName = *agent.ModelName
+		}
+		if err := s.govSvc.EnforcePolicy(ctx, orgID, agentID, provider, modelName); err != nil {
+			return nil, err
+		}
 	}
 
 	// Determine which engine to use.
@@ -108,6 +127,34 @@ func (s *executionService) Execute(ctx context.Context, orgID uuid.UUID, agentID
 	// Persist the result.
 	if err := s.execRepo.PersistResult(ctx, execID, result); err != nil {
 		s.logger.Error("failed to persist execution result", zap.Error(err))
+	}
+
+	// Record usage and cost asynchronously.
+	if s.govSvc != nil {
+		usageExec := &model.AgentExecution{
+			ID:            execID,
+			AgentID:       agentID,
+			OrgID:         orgID,
+			TotalTokens:   result.TotalTokens,
+			InputTokens:   result.InputTokens,
+			OutputTokens:  result.OutputTokens,
+			LatencyMs:     result.LatencyMs,
+			Status:        model.ExecutionStatusCompleted,
+		}
+		if result.ModelProvider != "" {
+			usageExec.ModelProvider = &result.ModelProvider
+		}
+		if result.ModelName != "" {
+			usageExec.ModelName = &result.ModelName
+		}
+		if result.Err != nil {
+			usageExec.Status = model.ExecutionStatusFailed
+		}
+		go func() {
+			if err := s.govSvc.RecordUsage(context.Background(), usageExec); err != nil {
+				s.logger.Error("failed to record usage", zap.Error(err))
+			}
+		}()
 	}
 
 	// Return the fully populated record.

@@ -24,6 +24,7 @@ type multiAgentService struct {
 	repo         repository.MultiAgentRepository
 	agentRepo    repository.AgentRepository
 	toolPermRepo repository.AgentToolRepository
+	goalRepo     repository.GoalRepository
 	autoExec     *executor.AutonomousExecutor
 	logger       *zap.Logger
 }
@@ -32,6 +33,7 @@ func NewMultiAgentService(
 	repo repository.MultiAgentRepository,
 	agentRepo repository.AgentRepository,
 	toolPermRepo repository.AgentToolRepository,
+	goalRepo repository.GoalRepository,
 	autoExec *executor.AutonomousExecutor,
 	logger *zap.Logger,
 ) MultiAgentService {
@@ -39,6 +41,7 @@ func NewMultiAgentService(
 		repo:         repo,
 		agentRepo:    agentRepo,
 		toolPermRepo: toolPermRepo,
+		goalRepo:     goalRepo,
 		autoExec:     autoExec,
 		logger:       logger,
 	}
@@ -119,6 +122,11 @@ func (s *multiAgentService) runCollaboration(ctx context.Context, job *model.Mul
 		MaxIter:  executor.MaxGoalIterations,
 	}
 
+	if err := s.goalRepo.Create(ctx, planGoal); err != nil {
+		s.failJob(ctx, job.ID, log, "create plan goal: "+err.Error())
+		return
+	}
+
 	planResult := s.autoExec.RunGoal(ctx, planGoal.ID, planner, nil)
 	if planResult.Err != nil {
 		s.failJob(ctx, job.ID, log, "planner failed: "+planResult.Err.Error())
@@ -149,6 +157,11 @@ func (s *multiAgentService) runCollaboration(ctx context.Context, job *model.Mul
 			MaxIter:  executor.MaxGoalIterations,
 		}
 
+		if err := s.goalRepo.Create(ctx, execGoal); err != nil {
+			s.failJob(ctx, job.ID, log, "create exec goal: "+err.Error())
+			return
+		}
+
 		execResult := s.autoExec.RunGoal(ctx, execGoal.ID, execAgent, execTools)
 		execOutput := execResult.Reflection
 		if execOutput == "" && len(execResult.Observations) > 0 {
@@ -172,6 +185,11 @@ func (s *multiAgentService) runCollaboration(ctx context.Context, job *model.Mul
 			Plan:    []model.PlanStep{},
 			Status:  model.GoalStatusPending,
 			MaxIter: 3,
+		}
+
+		if err := s.goalRepo.Create(ctx, reviewGoal); err != nil {
+			s.failJob(ctx, job.ID, log, "create review goal: "+err.Error())
+			return
 		}
 
 		reviewResult := s.autoExec.RunGoal(ctx, reviewGoal.ID, reviewer, nil)
