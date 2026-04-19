@@ -77,7 +77,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("MINIO_USE_SSL", false)
 	viper.SetDefault("MINIO_BUCKET_AVATARS", "avatars")
 	viper.SetDefault("MINIO_BUCKET_KNOWLEDGE", "knowledge")
-	viper.SetDefault("CORS_ORIGINS", "http://localhost:3000")
+	viper.SetDefault("CORS_ORIGINS", "http://localhost:3001")
 
 	// LLM defaults — Ollama running locally is the out-of-the-box provider.
 	viper.SetDefault("LLM_PROVIDER", "ollama")
@@ -92,7 +92,7 @@ func Load() (*Config, error) {
 
 	// Telegram defaults.
 	viper.SetDefault("TELEGRAM_RATE_PER_MIN", 20)
-	viper.SetDefault("FRONTEND_BASE_URL", "http://localhost:3000")
+	viper.SetDefault("FRONTEND_BASE_URL", "http://localhost:3001")
 
 	cfg := &Config{
 		DatabaseURL:          viper.GetString("DATABASE_URL"),

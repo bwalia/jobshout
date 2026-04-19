@@ -38,7 +38,7 @@ spec:
               service:
                 name: jobshout-web
                 port:
-                  number: 3000
+                  number: 3001
   tls:
     - hosts:
         - jobshout.example.com

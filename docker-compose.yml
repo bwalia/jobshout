@@ -81,7 +81,7 @@ services:
       MINIO_BUCKET_AVATARS: ${MINIO_BUCKET_AVATARS:-avatars}
       MINIO_BUCKET_KNOWLEDGE: ${MINIO_BUCKET_KNOWLEDGE:-knowledge}
       SERVER_PORT: ${SERVER_PORT:-:8080}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:3001}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3001}
       LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       OLLAMA_DEFAULT_MODEL: ${OLLAMA_DEFAULT_MODEL:-tinyllama}
@@ -106,7 +106,7 @@ services:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
       NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:8080}
     ports:
-      - "3000:3000"
+      - "3001:3001"
     depends_on:
       - jobshout-server
 

@@ -22,7 +22,7 @@ docker compose up --build
 
 # Services:
 # - API:        http://localhost:8080
-# - UI:         http://localhost:3000
+# - UI:         http://localhost:3001
 # - PostgreSQL: localhost:5432
 # - MinIO:      http://localhost:9000 (console: http://localhost:9001)
 ```

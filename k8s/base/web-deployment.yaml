@@ -20,7 +20,7 @@ spec:
         - name: web
           image: jobshout/web:latest
           ports:
-            - containerPort: 3000
+            - containerPort: 3001
               name: http
           env:
             - name: NEXT_PUBLIC_API_URL
@@ -35,13 +35,13 @@ spec:
           livenessProbe:
             httpGet:
               path: /
-              port: 3000
+              port: 3001
             initialDelaySeconds: 15
             periodSeconds: 15
           readinessProbe:
             httpGet:
               path: /
-              port: 3000
+              port: 3001
             initialDelaySeconds: 5
             periodSeconds: 5
 ---
@@ -56,8 +56,8 @@ metadata:
 spec:
   type: ClusterIP
   ports:
-    - port: 3000
-      targetPort: 3000
+    - port: 3001
+      targetPort: 3001
       name: http
   selector:
     app.kubernetes.io/name: jobshout-web
