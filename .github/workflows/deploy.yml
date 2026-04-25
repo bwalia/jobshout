@@ -135,26 +135,41 @@ jobs:
         run: |
           set -e
           fail=0
-          check() {
-            local name="$1" url="$2"
-            if curl -fsS --max-time 5 "$url" -o /dev/null; then
-              echo "OK   $name -> $url"
-            else
-              # Some ports (postgres, raw tcp) won't speak HTTP; just check TCP.
-              if bash -c "</dev/tcp/${HOST_IP}/$3" 2>/dev/null; then
-                echo "TCP  $name -> ${HOST_IP}:$3 open"
-              else
-                echo "FAIL $name -> $url"
-                fail=1
+
+          # Retry an HTTP check up to 12 times (1m) — services without a
+          # compose healthcheck (server, ui) may still be binding ports.
+          check_http() {
+            local name="$1" url="$2" port="$3"
+            for i in $(seq 1 12); do
+              if curl -fsS --max-time 5 "$url" -o /dev/null; then
+                echo "OK   $name -> $url"
+                return 0
               fi
-            fi
+              sleep 5
+            done
+            echo "FAIL $name -> $url (after retries)"
+            fail=1
           }
-          check "UI"            "http://${HOST_IP}:${UI_HOST_PORT}"              "${UI_HOST_PORT}"
-          check "API"           "http://${HOST_IP}:${SERVER_HOST_PORT}/health"   "${SERVER_HOST_PORT}"
-          check "MinIO API"     "http://${HOST_IP}:${MINIO_API_HOST_PORT}/minio/health/ready" "${MINIO_API_HOST_PORT}"
-          check "MinIO console" "http://${HOST_IP}:${MINIO_CONSOLE_HOST_PORT}"   "${MINIO_CONSOLE_HOST_PORT}"
-          check "Ollama"        "http://${HOST_IP}:${OLLAMA_HOST_PORT}/"         "${OLLAMA_HOST_PORT}"
-          check "Postgres"      ""                                               "${POSTGRES_HOST_PORT}"
+
+          check_tcp() {
+            local name="$1" port="$2"
+            for i in $(seq 1 12); do
+              if bash -c "</dev/tcp/${HOST_IP}/${port}" 2>/dev/null; then
+                echo "TCP  $name -> ${HOST_IP}:${port} open"
+                return 0
+              fi
+              sleep 5
+            done
+            echo "FAIL $name -> ${HOST_IP}:${port} (after retries)"
+            fail=1
+          }
+
+          check_http "UI"            "http://${HOST_IP}:${UI_HOST_PORT}"              "${UI_HOST_PORT}"
+          check_http "API"           "http://${HOST_IP}:${SERVER_HOST_PORT}/health"   "${SERVER_HOST_PORT}"
+          check_http "MinIO API"     "http://${HOST_IP}:${MINIO_API_HOST_PORT}/minio/health/ready" "${MINIO_API_HOST_PORT}"
+          check_http "MinIO console" "http://${HOST_IP}:${MINIO_CONSOLE_HOST_PORT}"   "${MINIO_CONSOLE_HOST_PORT}"
+          check_http "Ollama"        "http://${HOST_IP}:${OLLAMA_HOST_PORT}/"         "${OLLAMA_HOST_PORT}"
+          check_tcp  "Postgres"      "${POSTGRES_HOST_PORT}"
           exit $fail
 
       - name: Deployment summary
