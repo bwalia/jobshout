@@ -22,7 +22,7 @@ jobs:
       SERVER_HOST_PORT: "8190"
       POSTGRES_HOST_PORT: "5433"
       MINIO_API_HOST_PORT: "9100"
-      MINIO_CONSOLE_HOST_PORT: "9101"
+      MINIO_CONSOLE_HOST_PORT: "9110"
       OLLAMA_HOST_PORT: "11440"
 
     steps:
@@ -99,6 +99,13 @@ jobs:
         working-directory: ${{ env.DEPLOY_DIR }}
         run: |
           docker compose -p jobshout build --pull
+
+      - name: Stop previous stack (preserve volumes)
+        working-directory: ${{ env.DEPLOY_DIR }}
+        run: |
+          # Drop any containers from a prior (possibly half-failed) deploy so
+          # port bindings are released before we bring the stack back up.
+          docker compose -p jobshout down --remove-orphans || true
 
       - name: Bring stack up
         working-directory: ${{ env.DEPLOY_DIR }}
