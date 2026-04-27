@@ -23,7 +23,8 @@ jobs:
       POSTGRES_HOST_PORT: "5433"
       MINIO_API_HOST_PORT: "9100"
       MINIO_CONSOLE_HOST_PORT: "9110"
-      OLLAMA_HOST_PORT: "11440"
+      # No OLLAMA_HOST_PORT — compose no longer runs Ollama; we use the
+      # host's Ollama on :11434 via host.docker.internal.
 
     steps:
       - name: Checkout
@@ -60,7 +61,6 @@ jobs:
           POSTGRES_HOST_PORT=${POSTGRES_HOST_PORT}
           MINIO_API_HOST_PORT=${MINIO_API_HOST_PORT}
           MINIO_CONSOLE_HOST_PORT=${MINIO_CONSOLE_HOST_PORT}
-          OLLAMA_HOST_PORT=${OLLAMA_HOST_PORT}
 
           POSTGRES_USER=jobshout
           POSTGRES_PASSWORD=jobshout
@@ -85,8 +85,10 @@ jobs:
           NEXT_PUBLIC_WS_URL=wss://dev-api.jobshout.co.uk
 
           LLM_PROVIDER=ollama
-          OLLAMA_BASE_URL=http://ollama:11434
-          OLLAMA_DEFAULT_MODEL=tinyllama
+          # Use the host's existing Ollama (already has qwen2.5-coder, llama3, etc.)
+          # instead of the compose-managed one which starts empty.
+          OLLAMA_BASE_URL=http://${HOST_IP}:11434
+          OLLAMA_DEFAULT_MODEL=qwen2.5-coder:7b
           OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
           OPENAI_BASE_URL=https://api.openai.com/v1
           OPENAI_DEFAULT_MODEL=gpt-4o-mini
@@ -168,7 +170,7 @@ jobs:
           check_http "API"           "http://${HOST_IP}:${SERVER_HOST_PORT}/health"   "${SERVER_HOST_PORT}"
           check_http "MinIO API"     "http://${HOST_IP}:${MINIO_API_HOST_PORT}/minio/health/ready" "${MINIO_API_HOST_PORT}"
           check_http "MinIO console" "http://${HOST_IP}:${MINIO_CONSOLE_HOST_PORT}"   "${MINIO_CONSOLE_HOST_PORT}"
-          check_http "Ollama"        "http://${HOST_IP}:${OLLAMA_HOST_PORT}/"         "${OLLAMA_HOST_PORT}"
+          check_http "Ollama (host)" "http://${HOST_IP}:11434/"                       "11434"
           check_tcp  "Postgres"      "${POSTGRES_HOST_PORT}"
           exit $fail
 
@@ -186,6 +188,6 @@ jobs:
             echo "| API | http://${HOST_IP}:${SERVER_HOST_PORT} |"
             echo "| MinIO API | http://${HOST_IP}:${MINIO_API_HOST_PORT} |"
             echo "| MinIO console | http://${HOST_IP}:${MINIO_CONSOLE_HOST_PORT} |"
-            echo "| Ollama | http://${HOST_IP}:${OLLAMA_HOST_PORT} |"
+            echo "| Ollama (host, not managed by compose) | http://${HOST_IP}:11434 |"
             echo "| Postgres | ${HOST_IP}:${POSTGRES_HOST_PORT} |"
           } >> "$GITHUB_STEP_SUMMARY"
