@@ -19,12 +19,15 @@ type OllamaClient struct {
 }
 
 // NewOllamaClient creates an OllamaClient with a sensible HTTP timeout.
+// Cold model loads (first call after Ollama starts, or after the model
+// is evicted from VRAM) can take several minutes on CPU-only hosts, so
+// the timeout is generous by default.
 func NewOllamaClient(baseURL, defaultModel string) *OllamaClient {
 	return &OllamaClient{
 		BaseURL:      baseURL,
 		DefaultModel: defaultModel,
 		httpClient: &http.Client{
-			Timeout: 120 * time.Second,
+			Timeout: 10 * time.Minute,
 		},
 	}
 }

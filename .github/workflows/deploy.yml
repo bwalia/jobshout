@@ -88,7 +88,7 @@ jobs:
           # Use the host's existing Ollama (already has qwen2.5-coder, llama3, etc.)
           # instead of the compose-managed one which starts empty.
           OLLAMA_BASE_URL=http://${HOST_IP}:11434
-          OLLAMA_DEFAULT_MODEL=qwen2.5-coder:7b
+          OLLAMA_DEFAULT_MODEL=llama3:latest
           OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
           OPENAI_BASE_URL=https://api.openai.com/v1
           OPENAI_DEFAULT_MODEL=gpt-4o-mini
