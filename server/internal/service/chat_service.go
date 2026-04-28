@@ -17,14 +17,20 @@ type ChatService interface {
 	SendMessage(ctx context.Context, orgID, userID, sessionID uuid.UUID, content, source string) (*model.ChatMessage, *model.ChatMessage, error)
 	GetHistory(ctx context.Context, sessionID uuid.UUID, limit int) ([]model.ChatMessage, error)
 	ListSessions(ctx context.Context, orgID, userID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.ChatSession], error)
+
+	// SetRouter wires the 12-stage LLM chat router after construction. When
+	// set, SendMessage delegates to it for intent detection and agent/workflow
+	// dispatch.
+	SetRouter(router ChatRouterService)
 }
 
 type chatService struct {
-	chatRepo  repository.ChatRepository
-	intentSvc IntentService
-	memorySvc MemoryService
-	goalSvc   GoalService
-	logger    *zap.Logger
+	chatRepo   repository.ChatRepository
+	intentSvc  IntentService
+	memorySvc  MemoryService
+	goalSvc    GoalService
+	routerSvc  ChatRouterService
+	logger     *zap.Logger
 }
 
 func NewChatService(
@@ -41,6 +47,14 @@ func NewChatService(
 		goalSvc:   goalSvc,
 		logger:    logger,
 	}
+}
+
+// SetRouter wires a ChatRouterService after construction so the router and the
+// chat service can reference each other without a construction-order cycle.
+// When set, SendMessage delegates to the router instead of the legacy
+// intentSvc dispatch.
+func (s *chatService) SetRouter(router ChatRouterService) {
+	s.routerSvc = router
 }
 
 func (s *chatService) StartSession(ctx context.Context, orgID, userID uuid.UUID, req model.StartChatSessionRequest) (*model.ChatSession, error) {
@@ -83,17 +97,50 @@ func (s *chatService) SendMessage(ctx context.Context, orgID, userID, sessionID 
 		return nil, nil, fmt.Errorf("chat_svc: persist user message: %w", err)
 	}
 
-	// Parse intent.
-	intent, err := s.intentSvc.Parse(ctx, content)
-	if err != nil {
-		s.logger.Warn("intent parsing failed, defaulting to chat", zap.Error(err))
-		intent = &ParsedIntent{Action: IntentChat, Parameters: map[string]any{}}
+	// Prefer the 12-stage chat router when wired. Fall back to the legacy
+	// intent+dispatch path so behaviour degrades gracefully if it's missing.
+	var (
+		responseContent string
+		agentMeta       map[string]any
+	)
+
+	if s.routerSvc != nil {
+		history, _ := s.chatRepo.ListMessages(ctx, sessionID, 10)
+		res, err := s.routerSvc.Route(ctx, orgID, userID, sessionID, content, history)
+		if err != nil {
+			s.logger.Warn("chat router failed, falling back", zap.Error(err))
+		}
+		if res != nil {
+			responseContent = res.Message
+			agentMeta = map[string]any{
+				"intent":     res.Intent,
+				"confidence": res.Confidence,
+			}
+			if res.Agent != nil {
+				agentMeta["agent_id"] = res.Agent.ID.String()
+			}
+			if res.Execution != nil {
+				agentMeta["execution_id"] = res.Execution.ID.String()
+			}
+			if res.WorkflowRun != nil {
+				agentMeta["workflow_run_id"] = res.WorkflowRun.ID.String()
+			}
+		}
 	}
 
-	// Dispatch based on intent and build response.
-	responseContent := s.dispatch(ctx, orgID, userID, sessionID, intent, content)
+	if responseContent == "" {
+		intent, err := s.intentSvc.Parse(ctx, content)
+		if err != nil {
+			s.logger.Warn("intent parsing failed, defaulting to chat", zap.Error(err))
+			intent = &ParsedIntent{Action: IntentChat, Parameters: map[string]any{}}
+		}
+		responseContent = s.dispatch(ctx, orgID, userID, sessionID, intent, content)
+		agentMeta = map[string]any{
+			"intent":     intent.Action,
+			"confidence": intent.Confidence,
+		}
+	}
 
-	// Persist the agent response.
 	agentMsg := &model.ChatMessage{
 		ID:        uuid.New(),
 		SessionID: sessionID,
@@ -101,10 +148,7 @@ func (s *chatService) SendMessage(ctx context.Context, orgID, userID, sessionID 
 		Role:      model.ChatRoleAgent,
 		Source:    source,
 		Content:   responseContent,
-		Metadata: map[string]any{
-			"intent":     intent.Action,
-			"confidence": intent.Confidence,
-		},
+		Metadata:  agentMeta,
 	}
 	if err := s.chatRepo.AppendMessage(ctx, agentMsg); err != nil {
 		s.logger.Warn("failed to persist agent response", zap.Error(err))
