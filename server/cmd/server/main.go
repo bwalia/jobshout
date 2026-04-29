@@ -188,6 +188,19 @@ func main() {
 	chatSvc := service.NewChatService(chatRepo, intentSvc, memorySvc, goalSvc, logger)
 	_ = memorySvc // used by chatSvc
 
+	// 12-stage LLM chat router: intent → policy → clarify/select/plan/execute.
+	// Wired after chatSvc so the two services can reference each other.
+	chatRouterSvc := service.NewChatRouterService(
+		llmRouter,
+		agentSvc,
+		execSvc,
+		workflowSvc,
+		taskRepo,
+		nil, // policies — populate from config/DB when governance wires them through
+		logger,
+	)
+	chatSvc.SetRouter(chatRouterSvc)
+
 	// ─── Telegram bot (conditional on config) ───────────────────────────────
 	var telegramSvc service.TelegramService
 	var tgBot *telegramBot.BotClient
@@ -284,6 +297,7 @@ func main() {
 
 	// Chat, goal, multi-agent, and Telegram handlers
 	chatHandler := handler.NewChatHandler(chatSvc)
+	chatRouterHandler := handler.NewChatRouterHandler(chatRouterSvc)
 	goalHandler := handler.NewGoalHandler(goalSvc)
 	multiAgentHandler := handler.NewMultiAgentHandler(multiAgentSvc)
 	var telegramHandler *handler.TelegramHandler
@@ -616,6 +630,9 @@ func main() {
 					r.Post("/messages", chatHandler.SendMessage)
 				})
 			})
+
+			// Stateless chat router (Slack/Telegram/UI ad-hoc calls).
+			r.Post("/chat/route", chatRouterHandler.Route)
 
 			// Multi-agent collaboration jobs
 			r.Route("/multi-agent/jobs", func(r chi.Router) {

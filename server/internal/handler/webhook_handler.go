@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -127,7 +128,7 @@ func (h *WebhookHandler) GitHub(w http.ResponseWriter, r *http.Request) {
 	// Look up the task link
 	externalID := ""
 	if payload.Issue.Number > 0 {
-		externalID = json.Number(json.Number(payload.Issue.Number).String()).String()
+		externalID = strconv.Itoa(payload.Issue.Number)
 	}
 	link, err := h.linkRepo.FindByExternalID(r.Context(), integrationID, externalID)
 	if err != nil || link == nil {
