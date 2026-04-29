@@ -15,9 +15,11 @@ import (
 	"github.com/rs/cors"
 	"go.uber.org/zap"
 
+	"github.com/jobshout/server/internal/blog"
 	"github.com/jobshout/server/internal/bridge"
 	"github.com/jobshout/server/internal/config"
 	"github.com/jobshout/server/internal/costengine"
+	"github.com/jobshout/server/internal/scheduler"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	integ "github.com/jobshout/server/internal/integration"
@@ -96,6 +98,7 @@ func main() {
 	ssoRepo := repository.NewSSORepository(pool)
 	auditRepo := repository.NewAuditRepository(pool)
 	pricingRepo := repository.NewPricingRepository(pool)
+	blogRepo := repository.NewBlogRepository(pool)
 
 	// Autonomous agents + chat + Telegram repositories
 	memoryRepo := repository.NewMemoryRepository(pool)
@@ -178,6 +181,34 @@ func main() {
 	execSvc := service.NewExecutionService(agentRepo, execRepo, toolPermRepo, engineRouter, govSvc, logger)
 	workflowSvc := service.NewWorkflowService(workflowRepo, agentRepo, execRepo, toolPermRepo, dagEngine, logger)
 	pluginSvc := service.NewPluginService(pluginRepo, agentRepo, engineRouter, logger)
+
+	// ─── Blog generator (LLM → git → PR) ────────────────────────────────────
+	var blogRunner *blog.Runner
+	if cfg.GitHubToken != "" {
+		blogLLM, err := llmRouter.For(cfg.LLMProvider)
+		if err != nil {
+			logger.Warn("blog: llm router returned error — blog generator disabled",
+				zap.Error(err))
+		} else {
+			blogRunner = blog.NewRunner(blog.Config{
+				GitHubToken: cfg.GitHubToken,
+				AuthorName:  cfg.GitHubUserName,
+				AuthorEmail: cfg.GitHubUserEmail,
+				RepoOwner:   cfg.BlogRepoOwner,
+				RepoName:    cfg.BlogRepoName,
+				BaseBranch:  cfg.BlogBaseBranch,
+				WorkDir:     cfg.BlogWorkDir,
+				ContentDir:  "content/blogs",
+			}, blogLLM, logger)
+			logger.Info("blog generator initialised",
+				zap.String("repo", cfg.BlogRepoOwner+"/"+cfg.BlogRepoName),
+				zap.String("base_branch", cfg.BlogBaseBranch),
+			)
+		}
+	} else {
+		logger.Info("blog: GITHUB_TOKEN unset — blog generator disabled")
+	}
+	blogSvc := service.NewBlogService(blogRunner, blogRepo, logger)
 
 	// ─── Autonomous agent engine ────────────────────────────────────────────
 	autonomousExec := executor.NewAutonomousExecutor(goNativeExec, llmRouter, memoryRepo, goalRepo, logger)
@@ -294,6 +325,7 @@ func main() {
 	auditHandler := handler.NewAuditHandler(auditRepo)
 	pricingHandler := handler.NewPricingHandler(pricingRepo)
 	leaderboardHandler := handler.NewLeaderboardHandler(leaderboardSvc)
+	blogHandler := handler.NewBlogHandler(blogSvc)
 
 	// Chat, goal, multi-agent, and Telegram handlers
 	chatHandler := handler.NewChatHandler(chatSvc)
@@ -477,6 +509,13 @@ func main() {
 
 			// Workflow run status polling
 			r.Get("/workflow-runs/{runID}", workflowHandler.GetRun)
+
+			// Automated blog generator (LLM → git → PR).
+			r.Route("/blogs", func(r chi.Router) {
+				r.Post("/generate", blogHandler.Generate)
+				r.Get("/runs", blogHandler.ListRuns)
+				r.Get("/runs/{runID}", blogHandler.GetRun)
+			})
 
 			// Plugins (user-defined LangGraph/LangChain workflows)
 			r.Route("/plugins", func(r chi.Router) {
@@ -664,6 +703,12 @@ func main() {
 			r.Get("/ws", wsHandler.Connect)
 		})
 	})
+
+	// ─── Scheduler dispatcher ───────────────────────────────────────────────
+	// Ticks every 30s, picks up due scheduled_tasks, and dispatches them to
+	// the appropriate path (blog pipeline / workflow / agent).
+	schedulerRunner := scheduler.NewRunner(schedulerRepo, blogSvc, workflowSvc, execSvc, logger)
+	go schedulerRunner.Start(ctx)
 
 	srv := &http.Server{
 		Addr:         cfg.ServerPort,

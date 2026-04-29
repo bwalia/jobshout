@@ -55,6 +55,19 @@ type Config struct {
 
 	// Frontend base URL for generating links in Telegram messages.
 	FrontendBaseURL string `mapstructure:"FRONTEND_BASE_URL"`
+
+	// GitHub — shared token used by the blog generator for git push + PR
+	// creation. Per-integration tokens live on model.Integration rows.
+	GitHubToken     string `mapstructure:"GITHUB_TOKEN"`
+	GitHubUserName  string `mapstructure:"GITHUB_USER_NAME"`
+	GitHubUserEmail string `mapstructure:"GITHUB_USER_EMAIL"`
+
+	// Blog generator — target repo + filesystem workdir for clones.
+	// Workdir is auto-cleaned on each run.
+	BlogRepoOwner  string `mapstructure:"BLOG_REPO_OWNER"`
+	BlogRepoName   string `mapstructure:"BLOG_REPO_NAME"`
+	BlogBaseBranch string `mapstructure:"BLOG_BASE_BRANCH"`
+	BlogWorkDir    string `mapstructure:"BLOG_WORK_DIR"`
 }
 
 // AccessTokenExpiry returns the access token expiry duration.
@@ -94,6 +107,15 @@ func Load() (*Config, error) {
 	viper.SetDefault("TELEGRAM_RATE_PER_MIN", 20)
 	viper.SetDefault("FRONTEND_BASE_URL", "http://localhost:3001")
 
+	// GitHub + blog defaults — GITHUB_TOKEN is intentionally empty so the
+	// blog generator refuses to run until an operator sets it.
+	viper.SetDefault("GITHUB_USER_NAME", "JobShout Bot")
+	viper.SetDefault("GITHUB_USER_EMAIL", "bot@jobshout.local")
+	viper.SetDefault("BLOG_REPO_OWNER", "bwalia")
+	viper.SetDefault("BLOG_REPO_NAME", "workstation-website")
+	viper.SetDefault("BLOG_BASE_BRANCH", "main")
+	viper.SetDefault("BLOG_WORK_DIR", "/tmp/jobshout-blog")
+
 	cfg := &Config{
 		DatabaseURL:          viper.GetString("DATABASE_URL"),
 		ServerPort:           viper.GetString("SERVER_PORT"),
@@ -122,6 +144,13 @@ func Load() (*Config, error) {
 		TelegramSecretToken:  viper.GetString("TELEGRAM_WEBHOOK_SECRET"),
 		TelegramRatePerMin:   viper.GetInt("TELEGRAM_RATE_PER_MIN"),
 		FrontendBaseURL:      viper.GetString("FRONTEND_BASE_URL"),
+		GitHubToken:          viper.GetString("GITHUB_TOKEN"),
+		GitHubUserName:       viper.GetString("GITHUB_USER_NAME"),
+		GitHubUserEmail:      viper.GetString("GITHUB_USER_EMAIL"),
+		BlogRepoOwner:        viper.GetString("BLOG_REPO_OWNER"),
+		BlogRepoName:         viper.GetString("BLOG_REPO_NAME"),
+		BlogBaseBranch:       viper.GetString("BLOG_BASE_BRANCH"),
+		BlogWorkDir:          viper.GetString("BLOG_WORK_DIR"),
 	}
 
 	origins := viper.GetString("CORS_ORIGINS")

@@ -17,7 +17,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /jobshout-server ./cmd
 
 FROM alpine:3.19
 
-RUN apk add --no-cache ca-certificates tzdata
+# git is required at runtime by the automated blog generator, which shells
+# out to `git clone/commit/push` against the target repo.
+RUN apk add --no-cache ca-certificates tzdata git
 
 WORKDIR /app
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -19,6 +20,7 @@ type SchedulerRepository interface {
 	DeleteTask(ctx context.Context, id uuid.UUID) error
 	ListDueTasks(ctx context.Context) ([]model.ScheduledTask, error)
 	IncrementRunCount(ctx context.Context, id uuid.UUID) error
+	SetNextRunAt(ctx context.Context, id uuid.UUID, next time.Time) error
 	CreateRun(ctx context.Context, run *model.ScheduledTaskRun) error
 	ListRuns(ctx context.Context, taskID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.ScheduledTaskRun], error)
 }
@@ -195,6 +197,13 @@ func (r *schedulerRepository) ListDueTasks(ctx context.Context) ([]model.Schedul
 func (r *schedulerRepository) IncrementRunCount(ctx context.Context, id uuid.UUID) error {
 	_, err := r.pool.Exec(ctx,
 		"UPDATE scheduled_tasks SET run_count = run_count + 1, last_run_at = NOW(), updated_at = NOW() WHERE id = $1", id)
+	return err
+}
+
+func (r *schedulerRepository) SetNextRunAt(ctx context.Context, id uuid.UUID, next time.Time) error {
+	_, err := r.pool.Exec(ctx,
+		"UPDATE scheduled_tasks SET next_run_at = $2, updated_at = NOW() WHERE id = $1",
+		id, next)
 	return err
 }
 

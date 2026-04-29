@@ -83,6 +83,14 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       PYTHON_SIDECAR_URL: ${PYTHON_SIDECAR_URL:-http://python-sidecar:8001}
       PYTHON_SIDECAR_SECRET: ${PYTHON_SIDECAR_SECRET:-change-me-sidecar-secret}
+      # Automated blog generator — empty GITHUB_TOKEN disables the feature.
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_USER_NAME: ${GITHUB_USER_NAME:-JobShout Bot}
+      GITHUB_USER_EMAIL: ${GITHUB_USER_EMAIL:-bot@jobshout.local}
+      BLOG_REPO_OWNER: ${BLOG_REPO_OWNER:-bwalia}
+      BLOG_REPO_NAME: ${BLOG_REPO_NAME:-workstation-website}
+      BLOG_BASE_BRANCH: ${BLOG_BASE_BRANCH:-main}
+      BLOG_WORK_DIR: ${BLOG_WORK_DIR:-/tmp/jobshout-blog}
     ports:
       - "${SERVER_HOST_PORT:-8190}:8080"
     depends_on:
