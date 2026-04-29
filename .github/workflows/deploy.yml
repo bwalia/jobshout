@@ -94,6 +94,16 @@ jobs:
           OPENAI_DEFAULT_MODEL=gpt-4o-mini
           PYTHON_SIDECAR_URL=http://python-sidecar:8001
           PYTHON_SIDECAR_SECRET=${{ secrets.PYTHON_SIDECAR_SECRET || 'ci-dev-sidecar-secret' }}
+
+          # Blog generator — optional. Token must have repo scope (or
+          # fine-grained Contents+PRs) on bwalia/workstation-website.
+          GITHUB_TOKEN=${{ secrets.BLOG_GITHUB_TOKEN }}
+          GITHUB_USER_NAME=JobShout Bot
+          GITHUB_USER_EMAIL=bot@jobshout.local
+          BLOG_REPO_OWNER=bwalia
+          BLOG_REPO_NAME=workstation-website
+          BLOG_BASE_BRANCH=main
+          BLOG_WORK_DIR=/tmp/jobshout-blog
           EOF
           chmod 600 .env
 
