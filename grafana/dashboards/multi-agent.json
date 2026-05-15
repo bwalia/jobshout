@@ -1,0 +1,207 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "title": "JobShout — Multi-Agent Collaborations",
+  "uid": "jobshout-multi-agent",
+  "tags": ["jobshout", "multi-agent"],
+  "version": 1,
+  "schemaVersion": 38,
+  "refresh": "30s",
+  "time": { "from": "now-24h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "templating": {
+    "list": [
+      {
+        "name": "DS_PROMETHEUS",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": { "text": "Prometheus", "value": "Prometheus" }
+      },
+      {
+        "name": "org_id",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "query": "label_values(jobshout_multi_agent_jobs_total, org_id)",
+        "refresh": 1,
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" }
+      },
+      {
+        "name": "source",
+        "type": "custom",
+        "query": "All,api,schedule",
+        "current": { "text": "All", "value": ".*" },
+        "options": [
+          { "text": "All",      "value": ".*",     "selected": true },
+          { "text": "API",      "value": "api",    "selected": false },
+          { "text": "Schedule", "value": "schedule","selected": false }
+        ]
+      }
+    ]
+  },
+  "panels": [
+    {
+      "title": "Jobs (24h)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "sum(increase(jobshout_multi_agent_jobs_total{org_id=~\"$org_id\", source=~\"$source\"}[24h]))",
+          "legendFormat": "Jobs",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "In Flight",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "red",    "value": 20 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum(jobshout_multi_agent_jobs_active{org_id=~\"$org_id\"})",
+          "legendFormat": "Active",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Approval Rate (24h)",
+      "type": "gauge",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 1,
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red",    "value": null },
+              { "color": "yellow", "value": 0.6 },
+              { "color": "green",  "value": 0.85 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(jobshout_multi_agent_job_approvals_total{org_id=~\"$org_id\", approved=\"true\"}[24h])) / clamp_min(sum(increase(jobshout_multi_agent_job_approvals_total{org_id=~\"$org_id\"}[24h])), 1)",
+          "legendFormat": "Approved",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Failure Rate (24h)",
+      "type": "gauge",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 1,
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": null },
+              { "color": "yellow", "value": 0.05 },
+              { "color": "red",    "value": 0.15 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(jobshout_multi_agent_jobs_total{org_id=~\"$org_id\", source=~\"$source\", status=\"failed\"}[24h])) / clamp_min(sum(increase(jobshout_multi_agent_jobs_total{org_id=~\"$org_id\", source=~\"$source\"}[24h])), 1)",
+          "legendFormat": "Failed",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Throughput by Source (jobs/min)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "sum by (source) (rate(jobshout_multi_agent_jobs_total{org_id=~\"$org_id\"}[5m])) * 60",
+          "legendFormat": "{{source}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Job Duration (p50 / p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": { "unit": "s" }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(jobshout_multi_agent_job_duration_seconds_bucket{org_id=~\"$org_id\", source=~\"$source\"}[5m])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(jobshout_multi_agent_job_duration_seconds_bucket{org_id=~\"$org_id\", source=~\"$source\"}[5m])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "title": "Review Iterations Distribution",
+      "type": "heatmap",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "sum by (le) (increase(jobshout_multi_agent_review_iterations_bucket{org_id=~\"$org_id\", source=~\"$source\"}[5m]))",
+          "legendFormat": "{{le}}",
+          "refId": "A",
+          "format": "heatmap"
+        }
+      ]
+    },
+    {
+      "title": "Outcome by Status (last 24h)",
+      "type": "piechart",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "sum by (status) (increase(jobshout_multi_agent_jobs_total{org_id=~\"$org_id\", source=~\"$source\"}[24h]))",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

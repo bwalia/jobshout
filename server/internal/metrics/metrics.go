@@ -104,7 +104,57 @@ var (
 		Name: "jobshout_active_executions",
 		Help: "Number of currently running executions",
 	}, []string{"org_id"})
+
+	// ─── Multi-Agent Collaboration ──────────────────────────────────────
+	//
+	// Each "job" is one planner→executor→reviewer collaboration. Source is
+	// "api" for ad-hoc RunJob requests and "schedule" for runs dispatched
+	// by the scheduler — letting the dashboard split commitment-style
+	// recurring work from interactive use.
+
+	MultiAgentJobsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "jobshout_multi_agent_jobs_total",
+		Help: "Total multi-agent collaboration jobs by terminal status",
+	}, []string{"org_id", "source", "status"}) // status: completed | failed
+
+	MultiAgentJobApprovals = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "jobshout_multi_agent_job_approvals_total",
+		Help: "Multi-agent jobs by reviewer decision",
+	}, []string{"org_id", "approved"}) // approved: true | false
+
+	MultiAgentJobDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "jobshout_multi_agent_job_duration_seconds",
+		Help:    "Wall-clock duration of multi-agent jobs from start to terminal status",
+		Buckets: []float64{1, 5, 15, 30, 60, 120, 300, 600, 1800},
+	}, []string{"org_id", "source", "status"})
+
+	MultiAgentReviewIterations = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "jobshout_multi_agent_review_iterations",
+		Help:    "Number of execute→review cycles before a multi-agent job ended",
+		Buckets: []float64{1, 2, 3, 4, 5, 10},
+	}, []string{"org_id", "source"})
+
+	MultiAgentJobsActive = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "jobshout_multi_agent_jobs_active",
+		Help: "Multi-agent jobs currently in flight (not yet terminal)",
+	}, []string{"org_id"})
 )
+
+// RecordMultiAgentJob captures the terminal-state metrics for one MA job.
+// source is "api" for RunJob HTTP calls and "schedule" for runs the scheduler
+// dispatched. status is "completed" or "failed".
+func RecordMultiAgentJob(orgID, source, status string, durationSec float64, iterations int, approved *bool) {
+	MultiAgentJobsTotal.WithLabelValues(orgID, source, status).Inc()
+	MultiAgentJobDuration.WithLabelValues(orgID, source, status).Observe(durationSec)
+	MultiAgentReviewIterations.WithLabelValues(orgID, source).Observe(float64(iterations))
+	if approved != nil {
+		approvedLabel := "false"
+		if *approved {
+			approvedLabel = "true"
+		}
+		MultiAgentJobApprovals.WithLabelValues(orgID, approvedLabel).Inc()
+	}
+}
 
 // RecordExecution is a convenience method to record all execution-related metrics.
 func RecordExecution(orgID, agentID, provider, modelName, status string, latencyMs int, inputTokens, outputTokens int, costUSD float64) {

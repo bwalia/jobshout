@@ -19,6 +19,7 @@ import {
   ChevronLeft,
   Zap,
   Kanban,
+  Goal,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 
@@ -45,6 +46,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: "Agents", href: "/agents", icon: Bot },
       { label: "Agent Board", href: "/agent-board", icon: Kanban },
+      { label: "Sprints", href: "/sprints", icon: Goal },
       { label: "Sessions", href: "/sessions", icon: MessageSquare },
       { label: "Scheduler", href: "/scheduler", icon: Clock },
     ],

@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS sprint_agents;
+DROP TABLE IF EXISTS sprint_jobs;
+DROP TABLE IF EXISTS sprints;
