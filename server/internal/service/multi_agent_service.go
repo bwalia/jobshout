@@ -4,13 +4,22 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/jobshout/server/internal/executor"
+	"github.com/jobshout/server/internal/metrics"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/repository"
+)
+
+// Source labels passed to the multi-agent metrics. Kept private to the
+// service so the values are guaranteed consistent with the dashboards.
+const (
+	sourceAPI      = "api"
+	sourceSchedule = "schedule"
 )
 
 // MultiAgentService orchestrates planner → executor → reviewer collaboration.
@@ -64,7 +73,7 @@ func (s *multiAgentService) RunJob(ctx context.Context, orgID uuid.UUID, req mod
 	// Run the collaboration loop asynchronously so HTTP callers see 202.
 	go func() {
 		bgCtx := context.Background()
-		s.runCollaboration(bgCtx, job)
+		s.runCollaboration(bgCtx, job, sourceAPI)
 	}()
 
 	return job, nil
@@ -75,7 +84,10 @@ func (s *multiAgentService) RunJobSync(ctx context.Context, orgID uuid.UUID, req
 	if err != nil {
 		return nil, err
 	}
-	s.runCollaboration(ctx, job)
+	// Sync entry is exclusively used by the scheduler today, so the source is
+	// fixed. If a future caller needs sync-from-API this should grow into an
+	// explicit option.
+	s.runCollaboration(ctx, job, sourceSchedule)
 	// Re-load so the caller sees the final status / outputs the loop wrote.
 	return s.repo.GetByID(ctx, job.ID)
 }
@@ -115,8 +127,38 @@ func (s *multiAgentService) Board(ctx context.Context, orgID uuid.UUID) ([]model
 	return s.repo.BoardEntries(ctx, orgID)
 }
 
-func (s *multiAgentService) runCollaboration(ctx context.Context, job *model.MultiAgentJob) {
-	log := s.logger.With(zap.String("job_id", job.ID.String()))
+func (s *multiAgentService) runCollaboration(ctx context.Context, job *model.MultiAgentJob, source string) {
+	log := s.logger.With(zap.String("job_id", job.ID.String()), zap.String("source", source))
+
+	orgIDLabel := job.OrgID.String()
+	metrics.MultiAgentJobsActive.WithLabelValues(orgIDLabel).Inc()
+	startedAt := time.Now()
+
+	// Always emit terminal metrics regardless of how runCollaboration exits.
+	defer func() {
+		metrics.MultiAgentJobsActive.WithLabelValues(orgIDLabel).Dec()
+
+		// Re-fetch so we see the status / approval / iteration count the loop
+		// actually persisted (failJob / MarkCompleted both update the row).
+		final, err := s.repo.GetByID(context.Background(), job.ID)
+		if err != nil {
+			log.Warn("multi-agent: could not fetch terminal state for metrics", zap.Error(err))
+			return
+		}
+		status := final.Status
+		if status != model.MultiAgentStatusFailed {
+			// Anything that escaped the loop without the failed marker is
+			// counted as completed for dashboard purposes — the review loop
+			// itself decides approved/rejected via the Approved field.
+			status = model.MultiAgentStatusCompleted
+		}
+		metrics.RecordMultiAgentJob(
+			orgIDLabel, source, status,
+			time.Since(startedAt).Seconds(),
+			final.Iterations,
+			final.Approved,
+		)
+	}()
 
 	// Load all three agents.
 	planner, err := s.agentRepo.FindByID(ctx, job.PlannerID)

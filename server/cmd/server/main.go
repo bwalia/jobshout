@@ -104,6 +104,8 @@ func main() {
 	memoryRepo := repository.NewMemoryRepository(pool)
 	goalRepo := repository.NewGoalRepository(pool)
 	multiAgentRepo := repository.NewMultiAgentRepository(pool)
+	sprintRepo := repository.NewSprintRepository(pool)
+	skillRepo := repository.NewSkillRepository(pool)
 	chatRepo := repository.NewChatRepository(pool)
 	telegramRepo := repository.NewTelegramRepository(pool)
 
@@ -216,6 +218,7 @@ func main() {
 	intentSvc := service.NewIntentService(llmRouter, logger)
 	goalSvc := service.NewGoalService(goalRepo, agentRepo, toolPermRepo, autonomousExec, logger)
 	multiAgentSvc := service.NewMultiAgentService(multiAgentRepo, agentRepo, toolPermRepo, goalRepo, autonomousExec, logger)
+	sprintSvc := service.NewSprintService(sprintRepo)
 	chatSvc := service.NewChatService(chatRepo, intentSvc, memorySvc, goalSvc, logger)
 	_ = memorySvc // used by chatSvc
 
@@ -332,6 +335,8 @@ func main() {
 	chatRouterHandler := handler.NewChatRouterHandler(chatRouterSvc)
 	goalHandler := handler.NewGoalHandler(goalSvc)
 	multiAgentHandler := handler.NewMultiAgentHandler(multiAgentSvc)
+	sprintHandler := handler.NewSprintHandler(sprintSvc)
+	skillHandler := handler.NewSkillHandler(skillRepo)
 	var telegramHandler *handler.TelegramHandler
 	if telegramSvc != nil {
 		telegramHandler = handler.NewTelegramHandler(telegramSvc, cfg.TelegramSecretToken, logger)
@@ -683,6 +688,32 @@ func main() {
 			// Live agent board — current activity per agent (powers the
 			// Kanban view in the dashboard).
 			r.Get("/agents/board", multiAgentHandler.Board)
+
+			// Skills registry (OpenClaw-style capability bundles)
+			r.Route("/skills", func(r chi.Router) {
+				r.Get("/", skillHandler.List)
+				r.Post("/", skillHandler.Create)
+				r.Delete("/{skillID}", skillHandler.Delete)
+			})
+			// Per-agent skill enablement
+			r.Get("/agents/{agentID}/skills", skillHandler.ListForAgent)
+			r.Post("/agents/{agentID}/skills", skillHandler.EnableForAgent)
+			r.Delete("/agents/{agentID}/skills/{skillID}", skillHandler.DisableForAgent)
+
+			// Sprints (Scrum-style iteration board)
+			r.Route("/sprints", func(r chi.Router) {
+				r.Get("/", sprintHandler.List)
+				r.Post("/", sprintHandler.Create)
+				r.Route("/{sprintID}", func(r chi.Router) {
+					r.Get("/", sprintHandler.Get)
+					r.Put("/", sprintHandler.Update)
+					r.Delete("/", sprintHandler.Delete)
+					r.Post("/jobs", sprintHandler.AddJob)
+					r.Delete("/jobs/{jobID}", sprintHandler.RemoveJob)
+					r.Post("/agents", sprintHandler.AddAgent)
+					r.Delete("/agents/{agentID}", sprintHandler.RemoveAgent)
+				})
+			})
 
 			// Telegram account management
 			if telegramHandler != nil {
