@@ -707,7 +707,7 @@ func main() {
 	// ─── Scheduler dispatcher ───────────────────────────────────────────────
 	// Ticks every 30s, picks up due scheduled_tasks, and dispatches them to
 	// the appropriate path (blog pipeline / workflow / agent).
-	schedulerRunner := scheduler.NewRunner(schedulerRepo, blogSvc, workflowSvc, execSvc, logger)
+	schedulerRunner := scheduler.NewRunner(schedulerRepo, blogSvc, workflowSvc, execSvc, multiAgentSvc, logger)
 	go schedulerRunner.Start(ctx)
 
 	srv := &http.Server{

@@ -29,28 +29,31 @@ const TickInterval = 30 * time.Second
 // Runner is the cron dispatcher. It is started from main.go and runs
 // until its context is cancelled.
 type Runner struct {
-	repo      repository.SchedulerRepository
-	blogSvc   service.BlogService
-	workflows service.WorkflowService
-	execs     service.ExecutionService
-	parser    cron.Parser
-	logger    *zap.Logger
+	repo        repository.SchedulerRepository
+	blogSvc     service.BlogService
+	workflows   service.WorkflowService
+	execs       service.ExecutionService
+	multiAgents service.MultiAgentService
+	parser      cron.Parser
+	logger      *zap.Logger
 }
 
-// NewRunner wires the Runner. blogSvc may be nil — blog-tagged tasks will
-// then be skipped with a clear warning rather than crashing.
+// NewRunner wires the Runner. blogSvc / multiAgents may be nil — tasks of
+// those types will be skipped with a clear warning rather than crashing.
 func NewRunner(
 	repo repository.SchedulerRepository,
 	blogSvc service.BlogService,
 	workflows service.WorkflowService,
 	execs service.ExecutionService,
+	multiAgents service.MultiAgentService,
 	logger *zap.Logger,
 ) *Runner {
 	return &Runner{
-		repo:      repo,
-		blogSvc:   blogSvc,
-		workflows: workflows,
-		execs:     execs,
+		repo:        repo,
+		blogSvc:     blogSvc,
+		workflows:   workflows,
+		execs:       execs,
+		multiAgents: multiAgents,
 		// Standard 5-field cron spec ("0 9 * * 1") is what users know from
 		// crontabs; the library also supports descriptors like @daily.
 		parser: cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor),
@@ -116,6 +119,8 @@ func (r *Runner) runOne(ctx context.Context, t model.ScheduledTask) {
 		err = r.dispatchBlog(ctx, t, runRec)
 	case t.TaskType == "workflow" && t.WorkflowID != nil:
 		err = r.dispatchWorkflow(ctx, t, runRec)
+	case t.TaskType == "multi_agent":
+		err = r.dispatchMultiAgent(ctx, t, runRec)
 	case t.TaskType == "agent" && t.AgentID != nil:
 		err = r.dispatchAgent(ctx, t, runRec)
 	default:
@@ -241,6 +246,33 @@ func (r *Runner) dispatchAgent(ctx context.Context, t model.ScheduledTask, runRe
 		return err
 	}
 	runRec.ExecutionID = &exec.ID
+	return nil
+}
+
+func (r *Runner) dispatchMultiAgent(ctx context.Context, t model.ScheduledTask, runRec *model.ScheduledTaskRun) error {
+	if r.multiAgents == nil {
+		return fmt.Errorf("scheduler: multi-agent service not configured")
+	}
+	if t.PlannerID == nil || t.ExecutorID == nil || t.ReviewerID == nil {
+		return fmt.Errorf("scheduler: multi-agent task missing planner/executor/reviewer")
+	}
+
+	job, err := r.multiAgents.RunJobSync(ctx, t.OrgID, model.RunMultiAgentRequest{
+		TaskPrompt: t.InputPrompt,
+		PlannerID:  *t.PlannerID,
+		ExecutorID: *t.ExecutorID,
+		ReviewerID: *t.ReviewerID,
+		MaxReview:  t.MaxReview,
+	})
+	if err != nil {
+		return err
+	}
+	runRec.MultiAgentJobID = &job.ID
+	if job.Status == model.MultiAgentStatusFailed && job.ErrorMsg != nil {
+		// Surface the underlying failure to the run record so operators don't
+		// have to chase the job ID to see why a scheduled run failed.
+		return fmt.Errorf("multi-agent job failed: %s", *job.ErrorMsg)
+	}
 	return nil
 }
 

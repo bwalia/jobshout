@@ -16,6 +16,11 @@ import (
 // MultiAgentService orchestrates planner → executor → reviewer collaboration.
 type MultiAgentService interface {
 	RunJob(ctx context.Context, orgID uuid.UUID, req model.RunMultiAgentRequest) (*model.MultiAgentJob, error)
+	// RunJobSync runs the same collaboration loop but blocks until the job
+	// finishes (success or failure). The scheduler dispatcher uses this so it
+	// can write a single ScheduledTaskRun row tying the run to the produced
+	// MultiAgentJob.
+	RunJobSync(ctx context.Context, orgID uuid.UUID, req model.RunMultiAgentRequest) (*model.MultiAgentJob, error)
 	GetJob(ctx context.Context, id uuid.UUID) (*model.MultiAgentJob, error)
 	ListJobs(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.MultiAgentJob], error)
 }
@@ -48,6 +53,31 @@ func NewMultiAgentService(
 }
 
 func (s *multiAgentService) RunJob(ctx context.Context, orgID uuid.UUID, req model.RunMultiAgentRequest) (*model.MultiAgentJob, error) {
+	job, err := s.createJob(ctx, orgID, req)
+	if err != nil {
+		return nil, err
+	}
+
+	// Run the collaboration loop asynchronously so HTTP callers see 202.
+	go func() {
+		bgCtx := context.Background()
+		s.runCollaboration(bgCtx, job)
+	}()
+
+	return job, nil
+}
+
+func (s *multiAgentService) RunJobSync(ctx context.Context, orgID uuid.UUID, req model.RunMultiAgentRequest) (*model.MultiAgentJob, error) {
+	job, err := s.createJob(ctx, orgID, req)
+	if err != nil {
+		return nil, err
+	}
+	s.runCollaboration(ctx, job)
+	// Re-load so the caller sees the final status / outputs the loop wrote.
+	return s.repo.GetByID(ctx, job.ID)
+}
+
+func (s *multiAgentService) createJob(ctx context.Context, orgID uuid.UUID, req model.RunMultiAgentRequest) (*model.MultiAgentJob, error) {
 	maxReview := req.MaxReview
 	if maxReview <= 0 {
 		maxReview = 2
@@ -67,13 +97,6 @@ func (s *multiAgentService) RunJob(ctx context.Context, orgID uuid.UUID, req mod
 	if err := s.repo.Create(ctx, job); err != nil {
 		return nil, fmt.Errorf("multi_agent_svc: create: %w", err)
 	}
-
-	// Run the collaboration loop asynchronously.
-	go func() {
-		bgCtx := context.Background()
-		s.runCollaboration(bgCtx, job)
-	}()
-
 	return job, nil
 }
 
