@@ -45,3 +45,31 @@ type RunMultiAgentRequest struct {
 	ReviewerID uuid.UUID `json:"reviewer_id" validate:"required"`
 	MaxReview  int       `json:"max_review,omitempty"`
 }
+
+// AgentBoardEntry is one row on the agent board: an agent paired with the
+// activity derived from its most recent multi_agent_jobs participation. The
+// frontend groups these by Activity to render Kanban columns.
+type AgentBoardEntry struct {
+	AgentID   uuid.UUID `json:"agent_id"`
+	Name      string    `json:"name"`
+	Role      string    `json:"role"`
+	AvatarURL *string   `json:"avatar_url,omitempty"`
+
+	// Activity is the column the card belongs in. One of:
+	//   idle | planning | executing | reviewing | failed
+	Activity string `json:"activity"`
+
+	// CurrentJobID is the job driving the activity (nil when idle).
+	CurrentJobID *uuid.UUID `json:"current_job_id,omitempty"`
+
+	// Role within the current job — planner | executor | reviewer (omitted when idle).
+	JobRole *string `json:"job_role,omitempty"`
+
+	// CurrentJobPrompt is the user-supplied task prompt of the current job,
+	// shown on the card so a reader can see *what* the agent is doing.
+	CurrentJobPrompt *string `json:"current_job_prompt,omitempty"`
+
+	// LastActiveAt is the most recent in-flight or terminal job timestamp,
+	// for sorting columns by recency.
+	LastActiveAt *time.Time `json:"last_active_at,omitempty"`
+}

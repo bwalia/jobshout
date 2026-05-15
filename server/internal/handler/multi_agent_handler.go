@@ -62,6 +62,23 @@ func (h *MultiAgentHandler) GetJob(w http.ResponseWriter, r *http.Request) {
 	RespondJSON(w, http.StatusOK, job)
 }
 
+// Board returns the agent-board: every agent in the org with the activity
+// derived from its most recent multi-agent job participation. The frontend
+// groups these by `activity` to render a Kanban-style live view.
+func (h *MultiAgentHandler) Board(w http.ResponseWriter, r *http.Request) {
+	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid org_id")
+		return
+	}
+	entries, err := h.svc.Board(r.Context(), orgID)
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	RespondJSON(w, http.StatusOK, entries)
+}
+
 // ListJobs lists multi-agent jobs for the org.
 func (h *MultiAgentHandler) ListJobs(w http.ResponseWriter, r *http.Request) {
 	orgID, _ := uuid.Parse(middleware.GetOrgID(r.Context()))

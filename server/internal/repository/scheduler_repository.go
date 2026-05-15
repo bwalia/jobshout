@@ -33,6 +33,38 @@ func NewSchedulerRepository(pool *pgxpool.Pool) SchedulerRepository {
 	return &schedulerRepository{pool: pool}
 }
 
+// scheduledTaskColumns is the canonical SELECT column list for ScheduledTask.
+// Keep in sync with scanScheduledTask below.
+const scheduledTaskColumns = `
+	id, org_id, name, description, task_type, agent_id, workflow_id,
+	planner_id, executor_id, reviewer_id, max_review,
+	input_prompt, input_json, provider_config_id, model_override,
+	schedule_type, cron_expression, interval_seconds, run_at, schedule_preset,
+	status, last_run_at, next_run_at, run_count, max_runs,
+	retry_on_failure, max_retries, priority, tags, created_by, created_at, updated_at`
+
+// rowScanner abstracts pgx.Row and a single iteration of pgx.Rows so we can
+// reuse one scan function across QueryRow and Query result loops.
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanScheduledTask(s rowScanner, t *model.ScheduledTask) error {
+	var inputRaw []byte
+	if err := s.Scan(
+		&t.ID, &t.OrgID, &t.Name, &t.Description, &t.TaskType, &t.AgentID, &t.WorkflowID,
+		&t.PlannerID, &t.ExecutorID, &t.ReviewerID, &t.MaxReview,
+		&t.InputPrompt, &inputRaw, &t.ProviderConfigID, &t.ModelOverride,
+		&t.ScheduleType, &t.CronExpression, &t.IntervalSeconds, &t.RunAt, &t.SchedulePreset,
+		&t.Status, &t.LastRunAt, &t.NextRunAt, &t.RunCount, &t.MaxRuns,
+		&t.RetryOnFailure, &t.MaxRetries, &t.Priority, &t.Tags, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt,
+	); err != nil {
+		return err
+	}
+	_ = json.Unmarshal(inputRaw, &t.InputJSON)
+	return nil
+}
+
 func (r *schedulerRepository) CreateTask(ctx context.Context, t *model.ScheduledTask) error {
 	inputJSON, _ := json.Marshal(t.InputJSON)
 	if inputJSON == nil {
@@ -42,42 +74,28 @@ func (r *schedulerRepository) CreateTask(ctx context.Context, t *model.Scheduled
 	const sql = `
 		INSERT INTO scheduled_tasks
 		    (id, org_id, name, description, task_type, agent_id, workflow_id,
+		     planner_id, executor_id, reviewer_id, max_review,
 		     input_prompt, input_json, provider_config_id, model_override,
-		     schedule_type, cron_expression, interval_seconds, run_at,
+		     schedule_type, cron_expression, interval_seconds, run_at, schedule_preset, next_run_at,
 		     status, max_runs, retry_on_failure, max_retries, priority, tags, created_by)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
 		RETURNING created_at, updated_at`
 
 	return r.pool.QueryRow(ctx, sql,
 		t.ID, t.OrgID, t.Name, t.Description, t.TaskType, t.AgentID, t.WorkflowID,
+		t.PlannerID, t.ExecutorID, t.ReviewerID, t.MaxReview,
 		t.InputPrompt, inputJSON, t.ProviderConfigID, t.ModelOverride,
-		t.ScheduleType, t.CronExpression, t.IntervalSeconds, t.RunAt,
+		t.ScheduleType, t.CronExpression, t.IntervalSeconds, t.RunAt, t.SchedulePreset, t.NextRunAt,
 		t.Status, t.MaxRuns, t.RetryOnFailure, t.MaxRetries, t.Priority, t.Tags, t.CreatedBy,
 	).Scan(&t.CreatedAt, &t.UpdatedAt)
 }
 
 func (r *schedulerRepository) GetTask(ctx context.Context, id uuid.UUID) (*model.ScheduledTask, error) {
-	const sql = `
-		SELECT id, org_id, name, description, task_type, agent_id, workflow_id,
-		       input_prompt, input_json, provider_config_id, model_override,
-		       schedule_type, cron_expression, interval_seconds, run_at,
-		       status, last_run_at, next_run_at, run_count, max_runs,
-		       retry_on_failure, max_retries, priority, tags, created_by, created_at, updated_at
-		FROM scheduled_tasks WHERE id = $1`
-
+	sql := `SELECT ` + scheduledTaskColumns + ` FROM scheduled_tasks WHERE id = $1`
 	t := &model.ScheduledTask{}
-	var inputRaw []byte
-	err := r.pool.QueryRow(ctx, sql, id).Scan(
-		&t.ID, &t.OrgID, &t.Name, &t.Description, &t.TaskType, &t.AgentID, &t.WorkflowID,
-		&t.InputPrompt, &inputRaw, &t.ProviderConfigID, &t.ModelOverride,
-		&t.ScheduleType, &t.CronExpression, &t.IntervalSeconds, &t.RunAt,
-		&t.Status, &t.LastRunAt, &t.NextRunAt, &t.RunCount, &t.MaxRuns,
-		&t.RetryOnFailure, &t.MaxRetries, &t.Priority, &t.Tags, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt,
-	)
-	if err != nil {
+	if err := scanScheduledTask(r.pool.QueryRow(ctx, sql, id), t); err != nil {
 		return nil, fmt.Errorf("scheduler_repo: get task: %w", err)
 	}
-	_ = json.Unmarshal(inputRaw, &t.InputJSON)
 	return t, nil
 }
 
@@ -89,13 +107,7 @@ func (r *schedulerRepository) ListTasks(ctx context.Context, orgID uuid.UUID, pa
 		return nil, fmt.Errorf("scheduler_repo: count: %w", err)
 	}
 
-	const sql = `
-		SELECT id, org_id, name, description, task_type, agent_id, workflow_id,
-		       input_prompt, input_json, provider_config_id, model_override,
-		       schedule_type, cron_expression, interval_seconds, run_at,
-		       status, last_run_at, next_run_at, run_count, max_runs,
-		       retry_on_failure, max_retries, priority, tags, created_by, created_at, updated_at
-		FROM scheduled_tasks WHERE org_id = $1
+	sql := `SELECT ` + scheduledTaskColumns + ` FROM scheduled_tasks WHERE org_id = $1
 		ORDER BY created_at DESC LIMIT $2 OFFSET $3`
 
 	rows, err := r.pool.Query(ctx, sql, orgID, params.PerPage, params.Offset())
@@ -107,17 +119,9 @@ func (r *schedulerRepository) ListTasks(ctx context.Context, orgID uuid.UUID, pa
 	var tasks []model.ScheduledTask
 	for rows.Next() {
 		var t model.ScheduledTask
-		var inputRaw []byte
-		if err := rows.Scan(
-			&t.ID, &t.OrgID, &t.Name, &t.Description, &t.TaskType, &t.AgentID, &t.WorkflowID,
-			&t.InputPrompt, &inputRaw, &t.ProviderConfigID, &t.ModelOverride,
-			&t.ScheduleType, &t.CronExpression, &t.IntervalSeconds, &t.RunAt,
-			&t.Status, &t.LastRunAt, &t.NextRunAt, &t.RunCount, &t.MaxRuns,
-			&t.RetryOnFailure, &t.MaxRetries, &t.Priority, &t.Tags, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt,
-		); err != nil {
+		if err := scanScheduledTask(rows, &t); err != nil {
 			return nil, fmt.Errorf("scheduler_repo: scan: %w", err)
 		}
-		_ = json.Unmarshal(inputRaw, &t.InputJSON)
 		tasks = append(tasks, t)
 	}
 
@@ -159,13 +163,7 @@ func (r *schedulerRepository) DeleteTask(ctx context.Context, id uuid.UUID) erro
 }
 
 func (r *schedulerRepository) ListDueTasks(ctx context.Context) ([]model.ScheduledTask, error) {
-	const sql = `
-		SELECT id, org_id, name, description, task_type, agent_id, workflow_id,
-		       input_prompt, input_json, provider_config_id, model_override,
-		       schedule_type, cron_expression, interval_seconds, run_at,
-		       status, last_run_at, next_run_at, run_count, max_runs,
-		       retry_on_failure, max_retries, priority, tags, created_by, created_at, updated_at
-		FROM scheduled_tasks
+	sql := `SELECT ` + scheduledTaskColumns + ` FROM scheduled_tasks
 		WHERE status = 'active' AND next_run_at <= NOW()
 		ORDER BY priority DESC, next_run_at`
 
@@ -178,17 +176,9 @@ func (r *schedulerRepository) ListDueTasks(ctx context.Context) ([]model.Schedul
 	var tasks []model.ScheduledTask
 	for rows.Next() {
 		var t model.ScheduledTask
-		var inputRaw []byte
-		if err := rows.Scan(
-			&t.ID, &t.OrgID, &t.Name, &t.Description, &t.TaskType, &t.AgentID, &t.WorkflowID,
-			&t.InputPrompt, &inputRaw, &t.ProviderConfigID, &t.ModelOverride,
-			&t.ScheduleType, &t.CronExpression, &t.IntervalSeconds, &t.RunAt,
-			&t.Status, &t.LastRunAt, &t.NextRunAt, &t.RunCount, &t.MaxRuns,
-			&t.RetryOnFailure, &t.MaxRetries, &t.Priority, &t.Tags, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt,
-		); err != nil {
+		if err := scanScheduledTask(rows, &t); err != nil {
 			return nil, fmt.Errorf("scheduler_repo: scan due: %w", err)
 		}
-		_ = json.Unmarshal(inputRaw, &t.InputJSON)
 		tasks = append(tasks, t)
 	}
 	return tasks, rows.Err()
@@ -210,11 +200,12 @@ func (r *schedulerRepository) SetNextRunAt(ctx context.Context, id uuid.UUID, ne
 func (r *schedulerRepository) CreateRun(ctx context.Context, run *model.ScheduledTaskRun) error {
 	const sql = `
 		INSERT INTO scheduled_task_runs
-		    (id, scheduled_task_id, execution_id, workflow_run_id, status, output, error_message, started_at, completed_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+		    (id, scheduled_task_id, execution_id, workflow_run_id, multi_agent_job_id,
+		     status, output, error_message, started_at, completed_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
 
 	_, err := r.pool.Exec(ctx, sql,
-		run.ID, run.ScheduledTaskID, run.ExecutionID, run.WorkflowRunID,
+		run.ID, run.ScheduledTaskID, run.ExecutionID, run.WorkflowRunID, run.MultiAgentJobID,
 		run.Status, run.Output, run.ErrorMessage, run.StartedAt, run.CompletedAt,
 	)
 	return err
@@ -229,8 +220,8 @@ func (r *schedulerRepository) ListRuns(ctx context.Context, taskID uuid.UUID, pa
 	}
 
 	const sql = `
-		SELECT id, scheduled_task_id, execution_id, workflow_run_id, status,
-		       output, error_message, started_at, completed_at, created_at
+		SELECT id, scheduled_task_id, execution_id, workflow_run_id, multi_agent_job_id,
+		       status, output, error_message, started_at, completed_at, created_at
 		FROM scheduled_task_runs WHERE scheduled_task_id = $1
 		ORDER BY created_at DESC LIMIT $2 OFFSET $3`
 
@@ -244,7 +235,7 @@ func (r *schedulerRepository) ListRuns(ctx context.Context, taskID uuid.UUID, pa
 	for rows.Next() {
 		var run model.ScheduledTaskRun
 		if err := rows.Scan(
-			&run.ID, &run.ScheduledTaskID, &run.ExecutionID, &run.WorkflowRunID,
+			&run.ID, &run.ScheduledTaskID, &run.ExecutionID, &run.WorkflowRunID, &run.MultiAgentJobID,
 			&run.Status, &run.Output, &run.ErrorMessage, &run.StartedAt, &run.CompletedAt, &run.CreatedAt,
 		); err != nil {
 			return nil, err

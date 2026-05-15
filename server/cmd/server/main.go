@@ -680,6 +680,10 @@ func main() {
 				r.Get("/{jobID}", multiAgentHandler.GetJob)
 			})
 
+			// Live agent board — current activity per agent (powers the
+			// Kanban view in the dashboard).
+			r.Get("/agents/board", multiAgentHandler.Board)
+
 			// Telegram account management
 			if telegramHandler != nil {
 				r.Route("/telegram", func(r chi.Router) {
@@ -707,7 +711,7 @@ func main() {
 	// ─── Scheduler dispatcher ───────────────────────────────────────────────
 	// Ticks every 30s, picks up due scheduled_tasks, and dispatches them to
 	// the appropriate path (blog pipeline / workflow / agent).
-	schedulerRunner := scheduler.NewRunner(schedulerRepo, blogSvc, workflowSvc, execSvc, logger)
+	schedulerRunner := scheduler.NewRunner(schedulerRepo, blogSvc, workflowSvc, execSvc, multiAgentSvc, logger)
 	go schedulerRunner.Start(ctx)
 
 	srv := &http.Server{

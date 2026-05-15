@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -21,6 +22,10 @@ type MultiAgentRepository interface {
 	MarkCompleted(ctx context.Context, id uuid.UUID) error
 	MarkFailed(ctx context.Context, id uuid.UUID, errMsg string) error
 	ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.MultiAgentJob], error)
+	// BoardEntries returns one row per agent in the org with its current
+	// activity derived from the most recent multi_agent_jobs participation
+	// (LATERAL pick of the latest job touching the agent in any role).
+	BoardEntries(ctx context.Context, orgID uuid.UUID) ([]model.AgentBoardEntry, error)
 }
 
 type multiAgentRepository struct {
@@ -131,6 +136,91 @@ func (r *multiAgentRepository) MarkFailed(ctx context.Context, id uuid.UUID, err
 		return fmt.Errorf("multi_agent_repo: mark_failed: %w", err)
 	}
 	return nil
+}
+
+func (r *multiAgentRepository) BoardEntries(ctx context.Context, orgID uuid.UUID) ([]model.AgentBoardEntry, error) {
+	// For each agent in the org, look at the latest multi_agent_jobs row that
+	// references it (in any of planner/executor/reviewer). Status drives the
+	// board column:
+	//   - planning  → planner column (job.status = 'planning')
+	//   - executing → executor column
+	//   - reviewing → reviewer column
+	//   - failed    → failed column (terminal)
+	//   - completed → idle (treated as "ready for next task")
+	// Agents with no jobs at all also land in idle.
+	const sql = `
+		WITH latest AS (
+			SELECT a.id AS agent_id, j.id AS job_id, j.status, j.task_prompt, j.created_at,
+			       CASE
+			           WHEN a.id = j.planner_id  THEN 'planner'
+			           WHEN a.id = j.executor_id THEN 'executor'
+			           WHEN a.id = j.reviewer_id THEN 'reviewer'
+			           ELSE NULL
+			       END AS job_role,
+			       ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY j.created_at DESC) AS rn
+			FROM agents a
+			LEFT JOIN multi_agent_jobs j
+			       ON j.org_id = a.org_id
+			      AND (a.id = j.planner_id OR a.id = j.executor_id OR a.id = j.reviewer_id)
+			WHERE a.org_id = $1
+		)
+		SELECT a.id, a.name, a.role, a.avatar_url,
+		       latest.job_id, latest.status, latest.task_prompt, latest.job_role, latest.created_at
+		FROM agents a
+		LEFT JOIN latest ON latest.agent_id = a.id AND (latest.rn = 1 OR latest.rn IS NULL)
+		WHERE a.org_id = $1
+		ORDER BY a.name`
+
+	rows, err := r.pool.Query(ctx, sql, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("multi_agent_repo: board: %w", err)
+	}
+	defer rows.Close()
+
+	out := []model.AgentBoardEntry{}
+	for rows.Next() {
+		var (
+			e         model.AgentBoardEntry
+			jobID     *uuid.UUID
+			jobStatus *string
+			prompt    *string
+			role      *string
+			createdAt *time.Time
+		)
+		if err := rows.Scan(&e.AgentID, &e.Name, &e.Role, &e.AvatarURL,
+			&jobID, &jobStatus, &prompt, &role, &createdAt); err != nil {
+			return nil, fmt.Errorf("multi_agent_repo: board scan: %w", err)
+		}
+		e.Activity = boardActivity(jobStatus)
+		if e.Activity != "idle" {
+			e.CurrentJobID = jobID
+			e.JobRole = role
+			e.CurrentJobPrompt = prompt
+		}
+		e.LastActiveAt = createdAt
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// boardActivity maps a multi_agent_jobs.status to the agent-board column.
+// Completed → idle so finished jobs free up the agent.
+func boardActivity(jobStatus *string) string {
+	if jobStatus == nil {
+		return "idle"
+	}
+	switch *jobStatus {
+	case model.MultiAgentStatusPlanning:
+		return "planning"
+	case model.MultiAgentStatusExecuting:
+		return "executing"
+	case model.MultiAgentStatusReviewing:
+		return "reviewing"
+	case model.MultiAgentStatusFailed:
+		return "failed"
+	default:
+		return "idle"
+	}
 }
 
 func (r *multiAgentRepository) ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.MultiAgentJob], error) {

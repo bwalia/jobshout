@@ -8,6 +8,49 @@ module.exports = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        // JIRA / Confluence-style: Inter for body, Inter Tight for display
+        // (headings, big numerics). Falls back to system stack if Google
+        // Fonts is unreachable.
+        sans: [
+          "var(--font-sans)",
+          "-apple-system",
+          "BlinkMacSystemFont",
+          "Segoe UI",
+          "Roboto",
+          "Helvetica",
+          "Arial",
+          "sans-serif",
+        ],
+        display: [
+          "var(--font-display)",
+          "var(--font-sans)",
+          "-apple-system",
+          "BlinkMacSystemFont",
+          "Segoe UI",
+          "Roboto",
+          "sans-serif",
+        ],
+        mono: [
+          "ui-monospace",
+          "SFMono-Regular",
+          "Menlo",
+          "Monaco",
+          "Consolas",
+          "monospace",
+        ],
+      },
+      // JIRA's tighter type scale: smaller, denser, more lines per screen.
+      fontSize: {
+        "2xs": ["10px", { lineHeight: "14px", letterSpacing: "0.02em" }],
+        xs: ["11px", { lineHeight: "16px", letterSpacing: "0.005em" }],
+        sm: ["13px", { lineHeight: "20px" }],
+        base: ["14px", { lineHeight: "22px" }],
+        lg: ["16px", { lineHeight: "24px" }],
+        xl: ["18px", { lineHeight: "28px", letterSpacing: "-0.01em" }],
+        "2xl": ["22px", { lineHeight: "30px", letterSpacing: "-0.015em" }],
+        "3xl": ["28px", { lineHeight: "36px", letterSpacing: "-0.02em" }],
+      },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
@@ -48,6 +91,16 @@ module.exports = {
           accent: "hsl(var(--sidebar-accent))",
           muted: "hsl(var(--sidebar-muted))",
           border: "hsl(var(--sidebar-border))",
+        },
+        // JIRA-aligned status palette — used by the agent board and any other
+        // ticket-style surface to keep state colours consistent.
+        status: {
+          todo:     "hsl(var(--status-todo))",
+          progress: "hsl(var(--status-progress))",
+          review:   "hsl(var(--status-review))",
+          done:     "hsl(var(--status-done))",
+          blocked:  "hsl(var(--status-blocked))",
+          idle:     "hsl(var(--status-idle))",
         },
       },
       borderRadius: {
