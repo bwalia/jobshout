@@ -23,6 +23,9 @@ type MultiAgentService interface {
 	RunJobSync(ctx context.Context, orgID uuid.UUID, req model.RunMultiAgentRequest) (*model.MultiAgentJob, error)
 	GetJob(ctx context.Context, id uuid.UUID) (*model.MultiAgentJob, error)
 	ListJobs(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.MultiAgentJob], error)
+	// Board returns the agent-board entries for the org, used by the UI to
+	// render the live "what is each agent doing right now" Kanban.
+	Board(ctx context.Context, orgID uuid.UUID) ([]model.AgentBoardEntry, error)
 }
 
 type multiAgentService struct {
@@ -106,6 +109,10 @@ func (s *multiAgentService) GetJob(ctx context.Context, id uuid.UUID) (*model.Mu
 
 func (s *multiAgentService) ListJobs(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.MultiAgentJob], error) {
 	return s.repo.ListByOrg(ctx, orgID, params)
+}
+
+func (s *multiAgentService) Board(ctx context.Context, orgID uuid.UUID) ([]model.AgentBoardEntry, error) {
+	return s.repo.BoardEntries(ctx, orgID)
 }
 
 func (s *multiAgentService) runCollaboration(ctx context.Context, job *model.MultiAgentJob) {

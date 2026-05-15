@@ -680,6 +680,10 @@ func main() {
 				r.Get("/{jobID}", multiAgentHandler.GetJob)
 			})
 
+			// Live agent board — current activity per agent (powers the
+			// Kanban view in the dashboard).
+			r.Get("/agents/board", multiAgentHandler.Board)
+
 			// Telegram account management
 			if telegramHandler != nil {
 				r.Route("/telegram", func(r chi.Router) {
