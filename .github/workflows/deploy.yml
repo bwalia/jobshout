@@ -24,9 +24,9 @@ jobs:
       MINIO_API_HOST_PORT: "9100"
       MINIO_CONSOLE_HOST_PORT: "9110"
       # Grafana — runner VM's :3000 is already in use, so expose Grafana on
-      # a high port. Prometheus stays on :9091 (internal use mostly).
+      # a high port. Prometheus too — :9091 is already in use on this host.
       GRAFANA_HOST_PORT: "31001"
-      PROMETHEUS_HOST_PORT: "9091"
+      PROMETHEUS_HOST_PORT: "39091"
       # No OLLAMA_HOST_PORT — compose no longer runs Ollama; we use the
       # host's Ollama on :11434 via host.docker.internal.
 
