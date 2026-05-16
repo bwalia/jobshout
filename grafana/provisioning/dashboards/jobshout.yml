@@ -1,0 +1,16 @@
+apiVersion: 1
+
+# Loads every JSON file in /var/lib/grafana/dashboards (mounted from the
+# repo's grafana/dashboards/) so adding a new dashboard is a code change,
+# not a Grafana UI click.
+providers:
+  - name: jobshout
+    orgId: 1
+    folder: JobShout
+    type: file
+    disableDeletion: false
+    allowUiUpdates: true
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

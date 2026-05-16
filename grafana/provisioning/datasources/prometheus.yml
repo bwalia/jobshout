@@ -1,0 +1,14 @@
+apiVersion: 1
+
+# Provisions the Prometheus datasource so the multi-agent / cost / usage
+# dashboards have something to query on first boot. UID is fixed at
+# "Prometheus" so the dashboard JSON files (which use ${DS_PROMETHEUS}) bind
+# without manual datasource picking.
+datasources:
+  - name: Prometheus
+    uid: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false

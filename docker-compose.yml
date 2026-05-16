@@ -116,6 +116,45 @@ services:
     depends_on:
       - jobshout-server
 
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    # Internal-only by default — the runner VM already hosts other services
+    # on its public ports, and Grafana proxies queries via the docker network.
+    # If a user wants to hit Prometheus directly, set PROMETHEUS_HOST_PORT.
+    ports:
+      - "${PROMETHEUS_HOST_PORT:-9091}:9090"
+    volumes:
+      - ./grafana/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+    depends_on:
+      - jobshout-server
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    # Host port 31001 — the runner VM's :3000 was already taken (see
+    # GRAFANA_HOST_PORT default). Override with GRAFANA_HOST_PORT in .env.
+    ports:
+      - "${GRAFANA_HOST_PORT:-31001}:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # Anonymous read access so the dashboards are usable without an
+      # admin login during smoke testing. Flip to false in prod.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
 volumes:
   postgres_data:
   minio_data:
+  prometheus_data:
+  grafana_data:

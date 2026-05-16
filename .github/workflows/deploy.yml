@@ -23,6 +23,10 @@ jobs:
       POSTGRES_HOST_PORT: "5433"
       MINIO_API_HOST_PORT: "9100"
       MINIO_CONSOLE_HOST_PORT: "9110"
+      # Grafana — runner VM's :3000 is already in use, so expose Grafana on
+      # a high port. Prometheus stays on :9091 (internal use mostly).
+      GRAFANA_HOST_PORT: "31001"
+      PROMETHEUS_HOST_PORT: "9091"
       # No OLLAMA_HOST_PORT — compose no longer runs Ollama; we use the
       # host's Ollama on :11434 via host.docker.internal.
 
@@ -61,6 +65,9 @@ jobs:
           POSTGRES_HOST_PORT=${POSTGRES_HOST_PORT}
           MINIO_API_HOST_PORT=${MINIO_API_HOST_PORT}
           MINIO_CONSOLE_HOST_PORT=${MINIO_CONSOLE_HOST_PORT}
+          GRAFANA_HOST_PORT=${GRAFANA_HOST_PORT}
+          PROMETHEUS_HOST_PORT=${PROMETHEUS_HOST_PORT}
+          GRAFANA_ADMIN_PASSWORD=${{ secrets.GRAFANA_ADMIN_PASSWORD || 'admin' }}
 
           POSTGRES_USER=jobshout
           POSTGRES_PASSWORD=jobshout
@@ -180,6 +187,8 @@ jobs:
           check_http "API"           "http://${HOST_IP}:${SERVER_HOST_PORT}/health"   "${SERVER_HOST_PORT}"
           check_http "MinIO API"     "http://${HOST_IP}:${MINIO_API_HOST_PORT}/minio/health/ready" "${MINIO_API_HOST_PORT}"
           check_http "MinIO console" "http://${HOST_IP}:${MINIO_CONSOLE_HOST_PORT}"   "${MINIO_CONSOLE_HOST_PORT}"
+          check_http "Grafana"       "http://${HOST_IP}:${GRAFANA_HOST_PORT}/api/health" "${GRAFANA_HOST_PORT}"
+          check_http "Prometheus"    "http://${HOST_IP}:${PROMETHEUS_HOST_PORT}/-/ready" "${PROMETHEUS_HOST_PORT}"
           check_http "Ollama (host)" "http://${HOST_IP}:11434/"                       "11434"
           check_tcp  "Postgres"      "${POSTGRES_HOST_PORT}"
           exit $fail
@@ -198,6 +207,8 @@ jobs:
             echo "| API | http://${HOST_IP}:${SERVER_HOST_PORT} |"
             echo "| MinIO API | http://${HOST_IP}:${MINIO_API_HOST_PORT} |"
             echo "| MinIO console | http://${HOST_IP}:${MINIO_CONSOLE_HOST_PORT} |"
+            echo "| Grafana | http://${HOST_IP}:${GRAFANA_HOST_PORT} |"
+            echo "| Prometheus | http://${HOST_IP}:${PROMETHEUS_HOST_PORT} |"
             echo "| Ollama (host, not managed by compose) | http://${HOST_IP}:11434 |"
             echo "| Postgres | ${HOST_IP}:${POSTGRES_HOST_PORT} |"
           } >> "$GITHUB_STEP_SUMMARY"
