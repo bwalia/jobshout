@@ -33,6 +33,18 @@ type CreateSkillRequest struct {
 	Version     string         `json:"version"`
 }
 
+// UpdateSkillRequest patches a skill's mutable fields. All fields are optional;
+// only the ones provided are applied, which is what lets the UI drive status
+// transitions (draft → published → deprecated) in isolation.
+type UpdateSkillRequest struct {
+	Name        *string        `json:"name" validate:"omitempty,min=2"`
+	Description *string        `json:"description"`
+	Kind        *string        `json:"kind" validate:"omitempty,oneof=tool prompt bundle"`
+	ConfigJSON  map[string]any `json:"config_json"`
+	Version     *string        `json:"version"`
+	Status      *string        `json:"status" validate:"omitempty,oneof=draft published deprecated"`
+}
+
 type AgentSkill struct {
 	AgentID        uuid.UUID      `json:"agent_id"`
 	SkillID        uuid.UUID      `json:"skill_id"`

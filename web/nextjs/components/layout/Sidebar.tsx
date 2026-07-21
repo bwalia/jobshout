@@ -20,6 +20,7 @@ import {
   Zap,
   Kanban,
   Goal,
+  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 
@@ -63,6 +64,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: "Workflows", href: "/workflows", icon: Workflow },
       { label: "Plugins", href: "/plugins", icon: Puzzle },
+      { label: "Skills", href: "/skills", icon: Sparkles },
     ],
   },
   {

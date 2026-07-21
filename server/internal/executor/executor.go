@@ -53,10 +53,18 @@ type Result struct {
 	Err           error
 }
 
+// SkillProvider yields the skills currently enabled for an agent. It is
+// satisfied by repository.SkillRepository; the executor depends on this narrow
+// interface so it never imports the repository package directly.
+type SkillProvider interface {
+	ListForAgent(ctx context.Context, agentID uuid.UUID) ([]model.Skill, error)
+}
+
 // Executor runs the ReAct loop for a single agent against a given task prompt.
 type Executor struct {
 	llmRouter *llm.Router
 	registry  *tools.Registry
+	skills    SkillProvider
 	logger    *zap.Logger
 }
 
@@ -67,6 +75,14 @@ func New(router *llm.Router, registry *tools.Registry, logger *zap.Logger) *Exec
 		registry:  registry,
 		logger:    logger,
 	}
+}
+
+// WithSkills attaches a SkillProvider so enabled skills are folded into each
+// run (prompt patches for kind=prompt, extra tools for kind=tool). Returns the
+// receiver for fluent wiring. When no provider is set, runs proceed unchanged.
+func (e *Executor) WithSkills(p SkillProvider) *Executor {
+	e.skills = p
+	return e
 }
 
 // Run executes the ReAct loop for agent against taskPrompt.
@@ -97,7 +113,33 @@ func (e *Executor) Run(
 
 	resolvedProvider := client.ProviderName()
 
-	// Build the tool subset this agent may use.
+	// Base system-prompt text from the agent definition.
+	systemPromptText := ""
+	if agent.SystemPrompt != nil {
+		systemPromptText = *agent.SystemPrompt
+	}
+
+	// Fold in any enabled skills: kind=prompt skills append to the system
+	// prompt, kind=tool skills widen the permitted tool set. Skill failures are
+	// non-fatal — a run must never break because the registry hiccuped.
+	if e.skills != nil {
+		skills, serr := e.skills.ListForAgent(ctx, agent.ID)
+		if serr != nil {
+			log.Warn("failed to load agent skills; continuing without them", zap.Error(serr))
+		} else if len(skills) > 0 {
+			var promptPatch string
+			agentTools, promptPatch = applySkills(agentTools, skills)
+			if promptPatch != "" {
+				systemPromptText = strings.TrimSpace(systemPromptText + "\n\n" + promptPatch)
+			}
+			log.Info("applied agent skills",
+				zap.Int("skills", len(skills)),
+				zap.Int("effective_tools", len(agentTools)),
+			)
+		}
+	}
+
+	// Build the tool subset this agent may use (after skills widened it).
 	toolRegistry := e.registry.Subset(agentTools)
 	toolSpecs := make([]llm.ToolSpec, 0)
 	for _, t := range toolRegistry.All() {
@@ -105,10 +147,6 @@ func (e *Executor) Run(
 	}
 
 	// Build the system prompt once.
-	systemPromptText := ""
-	if agent.SystemPrompt != nil {
-		systemPromptText = *agent.SystemPrompt
-	}
 	systemPrompt := llm.BuildReActSystemPrompt(agent.Name, agent.Role, systemPromptText, toolSpecs)
 
 	// Resolve model name.
@@ -281,6 +319,78 @@ func parseReActResponse(content string) (*reactResponse, error) {
 }
 
 func boolPtr(b bool) *bool { return &b }
+
+// applySkills folds enabled skills into the agent's tool allow-list and returns
+// any system-prompt text to append. It is deterministic and side-effect free so
+// it can be unit-tested without an LLM or database.
+//
+//   - kind=tool   → config_json.tool (string) and/or config_json.tools ([]string)
+//     are added to the tool allow-list (deduped, order preserved).
+//   - kind=prompt → config_json.prompt (string), falling back to the skill
+//     description, is collected under an "Enabled Skills" heading.
+//   - kind=bundle → not expanded yet (no execution semantics); skipped.
+func applySkills(agentTools []string, skills []model.Skill) ([]string, string) {
+	seen := make(map[string]bool, len(agentTools))
+	merged := make([]string, 0, len(agentTools))
+	for _, t := range agentTools {
+		if !seen[t] {
+			seen[t] = true
+			merged = append(merged, t)
+		}
+	}
+
+	var patches []string
+	for _, s := range skills {
+		switch s.Kind {
+		case "tool":
+			for _, name := range skillToolNames(s) {
+				if name != "" && !seen[name] {
+					seen[name] = true
+					merged = append(merged, name)
+				}
+			}
+		case "prompt":
+			if frag := skillPromptFragment(s); frag != "" {
+				patches = append(patches, "- "+frag)
+			}
+		}
+	}
+
+	patch := ""
+	if len(patches) > 0 {
+		patch = "## Enabled Skills\n\n" + strings.Join(patches, "\n")
+	}
+	return merged, patch
+}
+
+// skillToolNames extracts the tool name(s) a kind=tool skill grants, supporting
+// both a single "tool" string and a "tools" array in config_json.
+func skillToolNames(s model.Skill) []string {
+	var out []string
+	if v, ok := s.ConfigJSON["tool"].(string); ok && v != "" {
+		out = append(out, v)
+	}
+	if raw, ok := s.ConfigJSON["tools"].([]any); ok {
+		for _, item := range raw {
+			if name, ok := item.(string); ok && name != "" {
+				out = append(out, name)
+			}
+		}
+	}
+	return out
+}
+
+// skillPromptFragment returns the prompt text a kind=prompt skill contributes,
+// preferring config_json.prompt and falling back to the skill description.
+func skillPromptFragment(s model.Skill) string {
+	if v, ok := s.ConfigJSON["prompt"].(string); ok && strings.TrimSpace(v) != "" {
+		return strings.TrimSpace(v)
+	}
+	if s.Description != nil {
+		return strings.TrimSpace(*s.Description)
+	}
+	return ""
+}
 
 // buildResult constructs a Result with the common metering fields pre-filled.
 func buildResult(

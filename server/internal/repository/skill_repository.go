@@ -18,6 +18,7 @@ type SkillRepository interface {
 	// List returns every skill visible to orgID — that is, every built-in
 	// skill (org_id IS NULL) plus org-private skills owned by orgID.
 	List(ctx context.Context, orgID uuid.UUID) ([]model.Skill, error)
+	Update(ctx context.Context, s *model.Skill) error
 	Delete(ctx context.Context, id uuid.UUID) error
 
 	EnableForAgent(ctx context.Context, agentID, skillID uuid.UUID, override map[string]any) error
@@ -101,6 +102,27 @@ func (r *skillRepository) List(ctx context.Context, orgID uuid.UUID) ([]model.Sk
 		out = append(out, s)
 	}
 	return out, rows.Err()
+}
+
+func (r *skillRepository) Update(ctx context.Context, s *model.Skill) error {
+	cfg, _ := json.Marshal(s.ConfigJSON)
+	if cfg == nil {
+		cfg = []byte("{}")
+	}
+	const sql = `
+		UPDATE skills SET
+		    name        = $2,
+		    description = $3,
+		    kind        = $4,
+		    config_json = $5,
+		    version     = $6,
+		    status      = $7,
+		    updated_at  = NOW()
+		WHERE id = $1
+		RETURNING updated_at`
+	return r.pool.QueryRow(ctx, sql,
+		s.ID, s.Name, s.Description, s.Kind, cfg, s.Version, s.Status,
+	).Scan(&s.UpdatedAt)
 }
 
 func (r *skillRepository) Delete(ctx context.Context, id uuid.UUID) error {

@@ -125,7 +125,9 @@ func main() {
 	logger.Info("tool registry initialised", zap.Int("tools", len(toolRegistry.All())))
 
 	// ─── Engine Router (multi-runtime) ──────────────────────────────────────
-	goNativeExec := executor.New(llmRouter, toolRegistry, logger)
+	// WithSkills folds each agent's enabled skills into its runs (prompt
+	// patches + extra tools) via the skills registry.
+	goNativeExec := executor.New(llmRouter, toolRegistry, logger).WithSkills(skillRepo)
 
 	// Python sidecar clients for LangChain/LangGraph (nil-safe if not configured).
 	var lcClient *langchain.Client
@@ -693,6 +695,8 @@ func main() {
 			r.Route("/skills", func(r chi.Router) {
 				r.Get("/", skillHandler.List)
 				r.Post("/", skillHandler.Create)
+				r.Get("/{skillID}", skillHandler.Get)
+				r.Put("/{skillID}", skillHandler.Update)
 				r.Delete("/{skillID}", skillHandler.Delete)
 			})
 			// Per-agent skill enablement
