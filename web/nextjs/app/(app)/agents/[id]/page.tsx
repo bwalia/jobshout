@@ -3,7 +3,17 @@
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Cpu, StickyNote, Activity, BookOpen } from "lucide-react";
+import {
+  ArrowLeft,
+  Cpu,
+  StickyNote,
+  Activity,
+  BookOpen,
+  Sparkles,
+  Wrench,
+  MessageSquareText,
+  Boxes,
+} from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AgentStatusBadge } from "@/components/agent/AgentStatusBadge";
@@ -18,18 +28,26 @@ import {
   deleteKnowledgeFile,
 } from "@/lib/api/knowledge";
 import type { KnowledgeFile } from "@/lib/api/knowledge";
+import {
+  useSkills,
+  useAgentSkills,
+  useEnableAgentSkill,
+  useDisableAgentSkill,
+} from "@/lib/hooks/useSkills";
+import type { Skill, SkillKind } from "@/lib/api/skills";
 import type { Task } from "@/lib/types/project";
 
 // ---------------------------------------------------------------------------
 // Tab types
 // ---------------------------------------------------------------------------
-type Tab = "overview" | "tasks" | "metrics" | "knowledge";
+type Tab = "overview" | "tasks" | "metrics" | "knowledge" | "skills";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "tasks", label: "Tasks" },
   { id: "metrics", label: "Metrics" },
   { id: "knowledge", label: "Knowledge" },
+  { id: "skills", label: "Skills" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -490,6 +508,123 @@ function MetricsTab({
 }
 
 // ---------------------------------------------------------------------------
+// Skills tab — enable/disable registry skills for this agent
+// ---------------------------------------------------------------------------
+const SKILL_KIND_META: Record<
+  SkillKind,
+  { icon: React.ElementType; color: string }
+> = {
+  tool: { icon: Wrench, color: "text-sky-400" },
+  prompt: { icon: MessageSquareText, color: "text-violet-400" },
+  bundle: { icon: Boxes, color: "text-amber-400" },
+};
+
+function SkillsTab({ agentId }: { agentId: string }) {
+  const { data: catalog = [], isLoading: catalogLoading } = useSkills();
+  const {
+    data: enabled = [],
+    isLoading: enabledLoading,
+    isError,
+  } = useAgentSkills(agentId);
+  const enableSkill = useEnableAgentSkill(agentId);
+  const disableSkill = useDisableAgentSkill(agentId);
+
+  const enabledIds = new Set(enabled.map((s) => s.id));
+  const isLoading = catalogLoading || enabledLoading;
+
+  if (isLoading) {
+    return (
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="h-24 animate-pulse rounded-lg bg-muted" />
+        ))}
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <p className="text-sm text-destructive">Failed to load agent skills.</p>
+    );
+  }
+
+  if (catalog.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border py-16 text-center">
+        <Sparkles className="h-10 w-10 text-muted-foreground mb-3" />
+        <p className="text-base font-medium text-foreground">
+          No skills available
+        </p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Create skills in the{" "}
+          <Link href="/skills" className="text-primary hover:underline">
+            Skills registry
+          </Link>{" "}
+          to enable them here.
+        </p>
+      </div>
+    );
+  }
+
+  const pending = enableSkill.isPending || disableSkill.isPending;
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">
+        Enabled skills are folded into this agent&apos;s runs — tool skills widen
+        its available tools, prompt skills patch its system prompt.
+      </p>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {catalog.map((skill: Skill) => {
+          const meta = SKILL_KIND_META[skill.kind] ?? SKILL_KIND_META.tool;
+          const Icon = meta.icon;
+          const on = enabledIds.has(skill.id);
+          return (
+            <div
+              key={skill.id}
+              className="flex items-start justify-between gap-3 rounded-lg border border-border bg-card p-4"
+            >
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <Icon className={`h-4 w-4 shrink-0 ${meta.color}`} />
+                  <h4 className="truncate text-sm font-semibold text-foreground">
+                    {skill.name}
+                  </h4>
+                </div>
+                {skill.description && (
+                  <p className="mt-1 text-xs text-muted-foreground line-clamp-2">
+                    {skill.description}
+                  </p>
+                )}
+                <span className="mt-2 inline-block rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
+                  {skill.kind}
+                </span>
+              </div>
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() =>
+                  on
+                    ? disableSkill.mutate(skill.id)
+                    : enableSkill.mutate(skill.id)
+                }
+                className={`shrink-0 rounded-md px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50 ${
+                  on
+                    ? "border border-border text-muted-foreground hover:bg-accent"
+                    : "bg-primary text-primary-foreground hover:bg-primary/90"
+                }`}
+              >
+                {on ? "Enabled" : "Enable"}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Page component
 // ---------------------------------------------------------------------------
 export default function AgentProfilePage() {
@@ -608,6 +743,7 @@ export default function AgentProfilePage() {
               {tabId === "tasks" && <Activity className="h-4 w-4" />}
               {tabId === "metrics" && <Activity className="h-4 w-4" />}
               {tabId === "knowledge" && <BookOpen className="h-4 w-4" />}
+              {tabId === "skills" && <Sparkles className="h-4 w-4" />}
               {label}
             </button>
           ))}
@@ -622,6 +758,7 @@ export default function AgentProfilePage() {
           <MetricsTab performanceScore={agent.performance_score} />
         )}
         {activeTab === "knowledge" && <KnowledgeTab agentId={agent.id} />}
+        {activeTab === "skills" && <SkillsTab agentId={agent.id} />}
       </div>
     </div>
   );

@@ -78,6 +78,68 @@ func (h *SkillHandler) Create(w http.ResponseWriter, r *http.Request) {
 	RespondJSON(w, http.StatusCreated, s)
 }
 
+func (h *SkillHandler) Get(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "skillID"))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid skill id")
+		return
+	}
+	s, err := h.repo.Get(r.Context(), id)
+	if err != nil {
+		RespondError(w, http.StatusNotFound, "skill not found")
+		return
+	}
+	RespondJSON(w, http.StatusOK, s)
+}
+
+func (h *SkillHandler) Update(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "skillID"))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid skill id")
+		return
+	}
+	var req model.UpdateSkillRequest
+	if !DecodeJSON(w, r, &req) {
+		return
+	}
+	if err := h.validate.Struct(req); err != nil {
+		RespondError(w, http.StatusBadRequest, "validation: "+err.Error())
+		return
+	}
+
+	s, err := h.repo.Get(r.Context(), id)
+	if err != nil {
+		RespondError(w, http.StatusNotFound, "skill not found")
+		return
+	}
+
+	// Apply only the fields the caller provided (partial update).
+	if req.Name != nil {
+		s.Name = *req.Name
+	}
+	if req.Description != nil {
+		s.Description = req.Description
+	}
+	if req.Kind != nil {
+		s.Kind = *req.Kind
+	}
+	if req.ConfigJSON != nil {
+		s.ConfigJSON = req.ConfigJSON
+	}
+	if req.Version != nil {
+		s.Version = *req.Version
+	}
+	if req.Status != nil {
+		s.Status = *req.Status
+	}
+
+	if err := h.repo.Update(r.Context(), s); err != nil {
+		RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	RespondJSON(w, http.StatusOK, s)
+}
+
 func (h *SkillHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "skillID"))
 	if err != nil {
