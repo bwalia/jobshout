@@ -1,0 +1,103 @@
+# Base defaults for the JobShout Helm chart.
+# Per-environment overrides live in values-<env>.yaml. The namespace is passed
+# on the CLI (--namespace <env>), matching the cluster convention where peer
+# apps deploy into the bare int/test/acc/prod namespaces with app-prefixed
+# resource names.
+
+env: int
+host: int.jobshout.co.uk
+
+image:
+  registry: int-spectoncr.diytaxreturn.co.uk
+  namespace: jobshout
+  # server / web / python-sidecar images share this tag (git SHA), injected at
+  # deploy time via --set image.tag=<sha>.
+  tag: latest
+  pullPolicy: IfNotPresent
+  pullSecret: jobshout-registry
+
+# External Secrets Operator -> HashiCorp Vault (ClusterSecretStore vault-backend).
+# All app secrets live at secret/jobshout/<env>/config and are materialized into
+# a k8s Secret named jobshout-secrets. Registry creds share the same Vault path.
+externalSecret:
+  enabled: true
+  refreshInterval: "1m"
+  storeName: vault-backend
+  storeKind: ClusterSecretStore
+  vaultKeyPrefix: secret/jobshout
+  vaultKeySuffix: config
+
+# Fallback plaintext secrets, used ONLY when externalSecret.enabled=false
+# (local `helm template`/testing without Vault). Never populated in a real env.
+secrets:
+  databaseUser: jobshout
+  databasePassword: ""
+  jwtSecret: ""
+  openaiApiKey: ""
+  pythonSidecarSecret: ""
+  registryUsername: ""
+  registryPassword: ""
+
+ingress:
+  enabled: true
+  className: wslproxy
+  clusterIssuer: main-issuer
+  tls: true
+  annotations: {}
+
+# Ollama runs OUTSIDE the cluster on the LAN host; not deployed by this chart.
+# 192.168.1.177 is a fixed address: the router holds a DHCP reservation binding
+# it to the host NIC (MAC 1c:1d:d3:ef:dd:fe), so it is safe to hardcode here.
+# In-cluster there is no host.docker.internal, so pods reach host Ollama by IP.
+ai:
+  enabled: true
+  provider: ollama
+  ollamaBaseURL: "http://192.168.1.177:11434"
+  ollamaModel: "llama3:latest"
+  openaiBaseURL: "https://api.openai.com"
+  openaiModel: "gpt-4o-mini"
+
+logLevel: info
+
+storage:
+  className: local-path
+  postgres: 10Gi
+
+api:
+  replicas: 1
+  port: 8080
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { cpu: "1", memory: 512Mi }
+
+web:
+  replicas: 1
+  port: 3001
+  # Public base URL the browser uses to reach the API (through the ingress).
+  publicApiURL: "https://int.jobshout.co.uk/api"
+  publicWsURL: "wss://int.jobshout.co.uk/api"
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+
+pythonRuntime:
+  replicas: 1
+  port: 8001
+  resources:
+    requests: { cpu: 500m, memory: 512Mi }
+    limits: { cpu: "2", memory: 2Gi }
+
+postgres:
+  enabled: true
+  port: 5432
+  database: jobshout
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { cpu: "1", memory: 1Gi }
+
+redis:
+  enabled: true
+  port: 6379
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 512Mi }

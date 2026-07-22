@@ -1,0 +1,82 @@
+{{- if .Values.postgres.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  labels:
+    {{- include "jobshout.labels" . | nindent 4 }}
+    {{- include "jobshout.selector" (dict "name" "postgres") | nindent 4 }}
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "jobshout.selector" (dict "name" "postgres") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "jobshout.selector" (dict "name" "postgres") | nindent 8 }}
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: {{ .Values.postgres.port }}
+              name: postgres
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: jobshout-config
+                  key: DATABASE_NAME
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: jobshout-secrets
+                  key: DATABASE_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: jobshout-secrets
+                  key: DATABASE_PASSWORD
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            {{- toYaml .Values.postgres.resources | nindent 12 }}
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", {{ .Values.secrets.databaseUser | default "jobshout" | quote }}]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", {{ .Values.secrets.databaseUser | default "jobshout" | quote }}]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: {{ .Values.storage.className }}
+        resources:
+          requests:
+            storage: {{ .Values.storage.postgres }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels:
+    {{- include "jobshout.labels" . | nindent 4 }}
+    {{- include "jobshout.selector" (dict "name" "postgres") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.postgres.port }}
+      targetPort: {{ .Values.postgres.port }}
+      name: postgres
+  selector:
+    {{- include "jobshout.selector" (dict "name" "postgres") | nindent 4 }}
+{{- end }}

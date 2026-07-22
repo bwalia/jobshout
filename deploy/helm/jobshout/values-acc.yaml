@@ -1,0 +1,25 @@
+env: acc
+host: acc.jobshout.co.uk
+logLevel: info
+
+ai:
+  enabled: true
+  ollamaBaseURL: "http://192.168.1.177:11434"
+  ollamaModel: "llama3:latest"
+
+api:
+  replicas: 2
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { cpu: "1", memory: 1Gi }
+
+web:
+  replicas: 1
+  publicApiURL: "https://acc.jobshout.co.uk/api"
+  publicWsURL: "wss://acc.jobshout.co.uk/api"
+
+pythonRuntime:
+  replicas: 2
+
+storage:
+  postgres: 15Gi

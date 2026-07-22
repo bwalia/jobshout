@@ -1,0 +1,7 @@
+apiVersion: v2
+name: jobshout
+description: JobShout — AI agent mission-control platform (k3s deploy)
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+home: https://jobshout.co.uk

@@ -1,0 +1,43 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: jobshout-ingress
+  labels:
+    {{- include "jobshout.labels" . | nindent 4 }}
+  annotations:
+    {{- if .Values.ingress.tls }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.clusterIssuer }}
+    {{- end }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ .Values.host }}
+      http:
+        paths:
+          # Server mounts routes under /api/v1 and serves /health at root, so
+          # the /api prefix reaches the API with no rewrite needed.
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: jobshout-api
+                port:
+                  number: {{ .Values.api.port }}
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: jobshout-web
+                port:
+                  number: {{ .Values.web.port }}
+  {{- if .Values.ingress.tls }}
+  tls:
+    - hosts:
+        - {{ .Values.host }}
+      secretName: jobshout-tls
+  {{- end }}
+{{- end }}

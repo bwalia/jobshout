@@ -1,0 +1,22 @@
+env: int
+host: int.jobshout.co.uk
+logLevel: debug
+
+ai:
+  enabled: true
+  ollamaBaseURL: "http://192.168.1.177:11434"
+  ollamaModel: "llama3:latest"
+
+api:
+  replicas: 1
+
+web:
+  replicas: 1
+  publicApiURL: "https://int.jobshout.co.uk/api"
+  publicWsURL: "wss://int.jobshout.co.uk/api"
+
+pythonRuntime:
+  replicas: 1
+
+storage:
+  postgres: 10Gi
