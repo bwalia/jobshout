@@ -15,8 +15,9 @@ jobs:
     runs-on: [self-hosted, int]
 
     env:
-      DEPLOY_DIR: /home/bwalia/deployments/jobshout
-      HOST_IP: 192.168.1.193
+      # DEPLOY_DIR and HOST_IP are resolved at runtime by the "Resolve host
+      # config" step below so this workflow is portable across runners (the
+      # self-hosted macOS runner has no /home and a DHCP-assigned LAN IP).
       # Host port mappings — chosen to avoid conflicts on the runner VM.
       UI_HOST_PORT: "3001"
       SERVER_HOST_PORT: "8190"
@@ -36,6 +37,29 @@ jobs:
           echo "Runner: $(hostname) – user $(whoami)"
           docker --version
           docker compose version
+
+      - name: Resolve host config
+        run: |
+          set -e
+          # Deploy target lives under the runner user's home ($HOME), not a
+          # hardcoded Linux path — macOS home is /Users/<user>.
+          echo "DEPLOY_DIR=$HOME/deployments/jobshout" >> "$GITHUB_ENV"
+
+          # Detect the runner's primary LAN IP from the default route so the
+          # deploy never depends on a stale hardcoded address. Works on both
+          # macOS (route get / ipconfig) and Linux (ip route); falls back to
+          # localhost if detection fails.
+          host_ip=""
+          if command -v route >/dev/null 2>&1 && command -v ipconfig >/dev/null 2>&1; then
+            iface="$(route -n get default 2>/dev/null | awk '/interface:/{print $2}')"
+            [ -n "$iface" ] && host_ip="$(ipconfig getifaddr "$iface" 2>/dev/null || true)"
+          fi
+          if [ -z "$host_ip" ] && command -v ip >/dev/null 2>&1; then
+            host_ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')"
+          fi
+          [ -z "$host_ip" ] && host_ip="127.0.0.1"
+          echo "HOST_IP=$host_ip" >> "$GITHUB_ENV"
+          echo "Resolved DEPLOY_DIR=$HOME/deployments/jobshout HOST_IP=$host_ip"
 
       - name: Sync repository to deploy directory
         run: |
@@ -85,9 +109,11 @@ jobs:
           NEXT_PUBLIC_WS_URL=wss://dev-api.jobshout.co.uk
 
           LLM_PROVIDER=ollama
-          # Use the host's existing Ollama (already has qwen2.5-coder, llama3, etc.)
-          # instead of the compose-managed one which starts empty.
-          OLLAMA_BASE_URL=http://${HOST_IP}:11434
+          # Reach the host's Ollama via Docker Desktop's host gateway. The
+          # compose file maps host.docker.internal -> host-gateway via
+          # extra_hosts, so this resolves from inside the containers on both
+          # macOS and Linux without depending on the host's LAN IP.
+          OLLAMA_BASE_URL=http://host.docker.internal:11434
           OLLAMA_DEFAULT_MODEL=llama3:latest
           OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
           OPENAI_BASE_URL=https://api.openai.com/v1
@@ -166,21 +192,23 @@ jobs:
           check_tcp() {
             local name="$1" port="$2"
             for i in $(seq 1 12); do
-              if bash -c "</dev/tcp/${HOST_IP}/${port}" 2>/dev/null; then
-                echo "TCP  $name -> ${HOST_IP}:${port} open"
+              if bash -c "</dev/tcp/127.0.0.1/${port}" 2>/dev/null; then
+                echo "TCP  $name -> 127.0.0.1:${port} open"
                 return 0
               fi
               sleep 5
             done
-            echo "FAIL $name -> ${HOST_IP}:${port} (after retries)"
+            echo "FAIL $name -> 127.0.0.1:${port} (after retries)"
             fail=1
           }
 
-          check_http "UI"            "http://${HOST_IP}:${UI_HOST_PORT}"              "${UI_HOST_PORT}"
-          check_http "API"           "http://${HOST_IP}:${SERVER_HOST_PORT}/health"   "${SERVER_HOST_PORT}"
-          check_http "MinIO API"     "http://${HOST_IP}:${MINIO_API_HOST_PORT}/minio/health/ready" "${MINIO_API_HOST_PORT}"
-          check_http "MinIO console" "http://${HOST_IP}:${MINIO_CONSOLE_HOST_PORT}"   "${MINIO_CONSOLE_HOST_PORT}"
-          check_http "Ollama (host)" "http://${HOST_IP}:11434/"                       "11434"
+          # Published ports bind 0.0.0.0, so probe loopback — the most reliable
+          # host-side check regardless of the runner's LAN IP.
+          check_http "UI"            "http://127.0.0.1:${UI_HOST_PORT}"              "${UI_HOST_PORT}"
+          check_http "API"           "http://127.0.0.1:${SERVER_HOST_PORT}/health"   "${SERVER_HOST_PORT}"
+          check_http "MinIO API"     "http://127.0.0.1:${MINIO_API_HOST_PORT}/minio/health/ready" "${MINIO_API_HOST_PORT}"
+          check_http "MinIO console" "http://127.0.0.1:${MINIO_CONSOLE_HOST_PORT}"   "${MINIO_CONSOLE_HOST_PORT}"
+          check_http "Ollama (host)" "http://127.0.0.1:11434/"                       "11434"
           check_tcp  "Postgres"      "${POSTGRES_HOST_PORT}"
           exit $fail
 

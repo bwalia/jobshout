@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jobshout-config
+  labels:
+    {{- include "jobshout.labels" . | nindent 4 }}
+data:
+  SERVER_PORT: "8080"
+  DATABASE_HOST: "postgres"
+  DATABASE_PORT: "5432"
+  DATABASE_NAME: {{ .Values.postgres.database | quote }}
+  DATABASE_SSLMODE: "disable"
+  REDIS_URL: "redis://redis:6379"
+  JWT_ISSUER: "jobshout"
+  LOG_LEVEL: {{ .Values.logLevel | quote }}
+  LLM_PROVIDER: {{ .Values.ai.provider | quote }}
+  OLLAMA_BASE_URL: {{ .Values.ai.ollamaBaseURL | quote }}
+  OLLAMA_DEFAULT_MODEL: {{ .Values.ai.ollamaModel | quote }}
+  OPENAI_BASE_URL: {{ .Values.ai.openaiBaseURL | quote }}
+  OPENAI_DEFAULT_MODEL: {{ .Values.ai.openaiModel | quote }}
+  PYTHON_SIDECAR_URL: "http://python-runtime:8001"
