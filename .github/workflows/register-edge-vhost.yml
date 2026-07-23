@@ -11,8 +11,9 @@ name: Register edge vhost (Cloudflare + wslproxy)
 #      without CF_API_TOKEN — external-dns normally maintains this already).
 #   2. wslproxy vhost (pop0) for <host> via the admin API, from the checked-in
 #      server spec. Until this exists the edge answers "Host not configured".
-#   3. Verify https://<host>/health returns 200 (JobShout's Next.js web app
-#      serves /health — see web/nextjs/middleware.ts).
+#   3. Verify https://<host>/login returns 200. The web app's /health path is
+#      only allowlisted in middleware.ts, not implemented (it 404s); /login is a
+#      real public page and the ingress serves it from the web app at "/".
 #
 # Secrets (configure on this repo, shared with the k3s deploy):
 #   WSLPROXY_USER / WSLPROXY_PASSWORD / WSLPROXY_GATEWAY_URL   wslproxy admin API
@@ -131,10 +132,12 @@ jobs:
         run: |
           set -euo pipefail
           # pop0 picks up the new vhost within ~1 min via its config-sync cron.
+          # /login is a real public page that returns 200 (the web app's /health
+          # is allowlisted but unimplemented — it 404s).
           for i in $(seq 1 20); do
-            code=$(curl -sS -o /tmp/body -m 10 -w '%{http_code}' "https://${HOST}/health" || echo 000)
+            code=$(curl -sS -o /tmp/body -m 10 -w '%{http_code}' "https://${HOST}/login" || echo 000)
             body=$(head -c 120 /tmp/body | tr -d '\n')
-            echo "[$i] https://${HOST}/health -> $code :: $body"
+            echo "[$i] https://${HOST}/login -> $code :: $body"
             if [ "$code" = "200" ] && ! grep -qi 'Host not configured' /tmp/body; then
               echo "✅ ${HOST} is live through the edge."; exit 0
             fi
