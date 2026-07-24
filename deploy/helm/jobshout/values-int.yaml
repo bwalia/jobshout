@@ -1,5 +1,5 @@
 env: int
-host: int-jobshout.workstation.co.uk
+host: int.jobshout.co.uk
 logLevel: debug
 
 ai:
@@ -12,8 +12,8 @@ api:
 
 web:
   replicas: 1
-  publicApiURL: "https://int-jobshout.workstation.co.uk/api"
-  publicWsURL: "wss://int-jobshout.workstation.co.uk/api"
+  publicApiURL: "https://int.jobshout.co.uk/api"
+  publicWsURL: "wss://int.jobshout.co.uk/api"
 
 pythonRuntime:
   replicas: 1

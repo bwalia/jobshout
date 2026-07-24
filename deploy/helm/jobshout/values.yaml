@@ -5,10 +5,10 @@
 # resource names.
 
 env: int
-# Hosts live under *.workstation.co.uk, a wildcard -> pop0.wslproxy.com, so every
-# environment resolves automatically (no per-host Cloudflare record needed) —
-# same edge model beaconpulse uses.
-host: int-jobshout.workstation.co.uk
+# Public host per environment. jobshout.co.uk has no wildcard, so each host needs
+# a Cloudflare CNAME -> pop0.wslproxy.com plus a wslproxy vhost -> the k3s Traefik
+# edge (see .github/workflows/register-edge-vhost.yml).
+host: int.jobshout.co.uk
 
 image:
   # int-spectoncr.diytaxreturn.co.uk (via the pop1 edge) is reachable from the
@@ -91,8 +91,8 @@ web:
   replicas: 1
   port: 3001
   # Public base URL the browser uses to reach the API (through the ingress).
-  publicApiURL: "https://int-jobshout.workstation.co.uk/api"
-  publicWsURL: "wss://int-jobshout.workstation.co.uk/api"
+  publicApiURL: "https://int.jobshout.co.uk/api"
+  publicWsURL: "wss://int.jobshout.co.uk/api"
   resources:
     requests: { cpu: 100m, memory: 128Mi }
     limits: { cpu: 500m, memory: 512Mi }

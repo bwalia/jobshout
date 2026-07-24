@@ -1,5 +1,5 @@
 env: prod
-host: jobshout.workstation.co.uk
+host: jobshout.co.uk
 logLevel: info
 
 ai:
@@ -15,8 +15,8 @@ api:
 
 web:
   replicas: 2
-  publicApiURL: "https://jobshout.workstation.co.uk/api"
-  publicWsURL: "wss://jobshout.workstation.co.uk/api"
+  publicApiURL: "https://jobshout.co.uk/api"
+  publicWsURL: "wss://jobshout.co.uk/api"
 
 pythonRuntime:
   replicas: 2
