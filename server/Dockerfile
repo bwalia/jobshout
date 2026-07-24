@@ -1,4 +1,7 @@
-FROM golang:1.24-alpine AS builder
+# Pin the builder to the NATIVE build platform so the Go toolchain runs
+# un-emulated (the amd64 Go compiler segfaults under QEMU on an arm64 host).
+# Go then cross-compiles to the target arch via GOARCH below.
+FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
 
 RUN apk add --no-cache git ca-certificates
 
@@ -13,7 +16,13 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /jobshout-server ./cmd/server
+# TARGETOS/TARGETARCH are injected by buildx from --platform (e.g. linux/amd64).
+# When building without buildx (local docker compose), they are unset and Go
+# builds for the native arch — so local builds stay correct.
+ARG TARGETOS
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} ${TARGETARCH:+GOARCH=$TARGETARCH} \
+    go build -ldflags="-s -w" -o /jobshout-server ./cmd/server
 
 FROM alpine:3.19
 
