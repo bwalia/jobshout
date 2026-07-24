@@ -60,27 +60,33 @@ jobs:
         if: ${{ env.DEPLOYMENT_TYPE == 'build' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
         run: docker login "$IMAGE_REGISTRY" -u "${{ secrets.REGISTRY_USERNAME }}" -p "${{ secrets.REGISTRY_PASSWORD }}"
 
-      - name: Build & push server, web, python-sidecar
+      - name: Build & push server, web, python-sidecar (linux/amd64)
         if: ${{ env.DEPLOYMENT_TYPE == 'build' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
         run: |
           set -euo pipefail
           SHA="${{ steps.tag.outputs.sha }}"
           NS="$IMAGE_REGISTRY/$IMAGE_NAMESPACE"
 
-          docker build -f server/Dockerfile -t "$NS/server:$SHA" -t "$NS/server:latest" server
-          docker push "$NS/server:$SHA"; docker push "$NS/server:latest"
+          # k3s1 nodes are amd64 but this runner is an arm64 Mac, so cross-build
+          # for linux/amd64 with buildx (QEMU) and push directly — same as
+          # beaconpulse. Plain `docker build` here produced arm64 images, which
+          # failed on the cluster with "no match for platform in manifest"
+          # (ImagePullBackOff). A docker-container builder is required for
+          # --platform cross-builds; create it once (idempotent).
+          docker buildx inspect jsbuilder >/dev/null 2>&1 \
+            || docker buildx create --name jsbuilder --driver docker-container --bootstrap
+          bx() { docker buildx build --builder jsbuilder --platform linux/amd64 --push "$@"; }
+
+          bx -f server/Dockerfile -t "$NS/server:$SHA" -t "$NS/server:latest" server
 
           # NEXT_PUBLIC_* are baked at BUILD time, so build same-origin (empty
           # base): the browser calls /api and /ws on whichever host serves it, so
           # ONE image is valid for every ring.
-          docker build -f web/nextjs/Dockerfile \
-            --build-arg NEXT_PUBLIC_API_URL="" --build-arg NEXT_PUBLIC_WS_URL="" \
-            -t "$NS/web:$SHA" -t "$NS/web:latest" web/nextjs
-          docker push "$NS/web:$SHA"; docker push "$NS/web:latest"
+          bx --build-arg NEXT_PUBLIC_API_URL="" --build-arg NEXT_PUBLIC_WS_URL="" \
+            -f web/nextjs/Dockerfile -t "$NS/web:$SHA" -t "$NS/web:latest" web/nextjs
 
-          docker build -f python-sidecar/Dockerfile \
+          bx -f python-sidecar/Dockerfile \
             -t "$NS/python-sidecar:$SHA" -t "$NS/python-sidecar:latest" python-sidecar
-          docker push "$NS/python-sidecar:$SHA"; docker push "$NS/python-sidecar:latest"
 
   deploy:
     name: Deploy to k3s (${{ github.event.inputs.TARGET_ENV || 'int' }})
