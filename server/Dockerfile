@@ -21,7 +21,10 @@ COPY . .
 # builds for the native arch — so local builds stay correct.
 ARG TARGETOS
 ARG TARGETARCH
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} ${TARGETARCH:+GOARCH=$TARGETARCH} \
+# GOARCH/GOOS must be literal assignment tokens (the shell recognizes
+# assignments before expansion, so ${VAR:+GOARCH=...} would be parsed as a
+# command). Default to the native arch when TARGETARCH is unset (local builds).
+RUN CGO_ENABLED=0 GOOS="${TARGETOS:-linux}" GOARCH="${TARGETARCH:-$(go env GOARCH)}" \
     go build -ldflags="-s -w" -o /jobshout-server ./cmd/server
 
 FROM alpine:3.19
