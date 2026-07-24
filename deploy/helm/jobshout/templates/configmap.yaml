@@ -5,7 +5,9 @@ metadata:
   labels:
     {{- include "jobshout.labels" . | nindent 4 }}
 data:
-  SERVER_PORT: "8080"
+  # Must include the leading colon — the server passes this straight to
+  # net.Listen, which needs ":8080" (a bare "8080" is "missing port in address").
+  SERVER_PORT: ":8080"
   DATABASE_HOST: "postgres"
   DATABASE_PORT: "5432"
   DATABASE_NAME: {{ .Values.postgres.database | quote }}
