@@ -111,14 +111,25 @@ jobs:
 
       - name: Deploy Helm chart
         if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+        env:
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
         run: |
           set -euo pipefail
           TAG="${{ github.event.inputs.IMAGE_TAG }}"
           [ -z "$TAG" ] && TAG="${GITHUB_SHA::7}"
           echo "Deploying jobshout to '$TARGET_ENV' namespace with image tag '$TAG'..."
+          # This k3s cluster has no External Secrets Operator, so use the chart's
+          # plaintext fallback (externalSecret.enabled=false): it renders a plain
+          # jobshout-secrets Secret plus the jobshout-registry pull secret from
+          # the registry creds passed below. Install ESO + Vault and drop these
+          # overrides to switch to the managed-secret path.
           helm upgrade --install jobshout ./deploy/helm/jobshout \
             -f "./deploy/helm/jobshout/values-${TARGET_ENV}.yaml" \
             --set image.tag="$TAG" \
+            --set externalSecret.enabled=false \
+            --set-string secrets.registryUsername="$REGISTRY_USERNAME" \
+            --set-string secrets.registryPassword="$REGISTRY_PASSWORD" \
             --namespace "$TARGET_ENV" --create-namespace \
             --wait --timeout 10m
 
