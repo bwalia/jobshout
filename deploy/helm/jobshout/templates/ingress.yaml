@@ -18,22 +18,16 @@ spec:
     - host: {{ .Values.host }}
       http:
         paths:
-          # Server mounts routes under /api/v1 and serves /health at root, so
-          # the /api prefix reaches the API with no rewrite needed.
-          - path: /api
-            pathType: Prefix
-            backend:
-              service:
-                name: jobshout-api
-                port:
-                  number: {{ .Values.api.port }}
+          # Single backend: the wslproxy edge forwards the whole host to one
+          # service, so the in-cluster nginx gateway (not the ingress) fans out
+          # /api and /webhooks to the API and everything else to the web app.
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: jobshout-web
+                name: jobshout-nginx
                 port:
-                  number: {{ .Values.web.port }}
+                  number: 80
   {{- if .Values.ingress.tls }}
   tls:
     - hosts:
