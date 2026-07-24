@@ -5,9 +5,16 @@
 # resource names.
 
 env: int
-host: int.jobshout.co.uk
+# Hosts live under *.workstation.co.uk, a wildcard -> pop0.wslproxy.com, so every
+# environment resolves automatically (no per-host Cloudflare record needed) —
+# same edge model beaconpulse uses.
+host: int-jobshout.workstation.co.uk
 
 image:
+  # int-spectoncr.diytaxreturn.co.uk (via the pop1 edge) is reachable from the
+  # jobshout self-hosted runner and from k3s1; spectoncr.workstation.co.uk (pop0)
+  # is NOT reachable from this runner. Both front the same SpectonCR registry —
+  # the NodePort's auth realm is int-spectoncr.diytaxreturn.co.uk.
   registry: int-spectoncr.diytaxreturn.co.uk
   namespace: jobshout
   # server / web / python-sidecar images share this tag (git SHA), injected at
@@ -45,14 +52,13 @@ ingress:
   tls: true
   annotations: {}
 
-# Ollama runs OUTSIDE the cluster on the LAN host; not deployed by this chart.
-# 192.168.1.177 is a fixed address: the router holds a DHCP reservation binding
-# it to the host NIC (MAC 1c:1d:d3:ef:dd:fe), so it is safe to hardcode here.
-# In-cluster there is no host.docker.internal, so pods reach host Ollama by IP.
+# Ollama runs OUTSIDE the cluster; reached via the shared platform endpoint
+# ollama.workstation.co.uk (same one beaconpulse uses), which is routable from
+# k3s1 pods — unlike a LAN IP, which is not.
 ai:
   enabled: true
   provider: ollama
-  ollamaBaseURL: "http://192.168.1.177:11434"
+  ollamaBaseURL: "https://ollama.workstation.co.uk"
   ollamaModel: "llama3:latest"
   openaiBaseURL: "https://api.openai.com"
   openaiModel: "gpt-4o-mini"
@@ -74,8 +80,8 @@ web:
   replicas: 1
   port: 3001
   # Public base URL the browser uses to reach the API (through the ingress).
-  publicApiURL: "https://int.jobshout.co.uk/api"
-  publicWsURL: "wss://int.jobshout.co.uk/api"
+  publicApiURL: "https://int-jobshout.workstation.co.uk/api"
+  publicWsURL: "wss://int-jobshout.workstation.co.uk/api"
   resources:
     requests: { cpu: 100m, memory: 128Mi }
     limits: { cpu: 500m, memory: 512Mi }

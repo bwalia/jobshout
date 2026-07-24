@@ -1,0 +1,130 @@
+name: Build & deploy JobShout to k3s
+
+# Build the three JobShout images (server, web, python-sidecar) to the SpectonCR
+# registry and deploy the Helm chart to the chosen environment's namespace on
+# k3s. Same pattern as beaconpulse's deploy-k3s.yml.
+#
+# Continuous deployment: every push to master builds the images and deploys to
+# the int environment (TARGET_ENV/DEPLOYMENT_TYPE resolve to int/build-and-deploy
+# via the env: block below, since push events carry no workflow inputs).
+# Promotion to test/acc/prod is a manual workflow_dispatch (deploy-only, pinning
+# the image tag that was validated in the lower ring).
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      TARGET_ENV:
+        type: choice
+        description: "Target environment"
+        default: "int"
+        required: true
+        options: [int, test, acc, prod]
+      DEPLOYMENT_TYPE:
+        type: choice
+        description: "Build only, deploy only, or both"
+        default: "build-and-deploy"
+        required: true
+        options: [build, deploy, build-and-deploy]
+      IMAGE_TAG:
+        type: string
+        description: "Image tag to DEPLOY (deploy-only). Blank = this commit's short SHA."
+        default: ""
+        required: false
+
+concurrency:
+  group: jobshout-k3s-${{ github.event.inputs.TARGET_ENV || 'int' }}
+  cancel-in-progress: false
+
+env:
+  # int-spectoncr.diytaxreturn.co.uk (pop1 edge) is reachable from the jobshout
+  # self-hosted runner; spectoncr.workstation.co.uk (pop0) is not. Same registry.
+  IMAGE_REGISTRY: int-spectoncr.diytaxreturn.co.uk
+  IMAGE_NAMESPACE: jobshout
+  TARGET_ENV: ${{ github.event.inputs.TARGET_ENV || 'int' }}
+  DEPLOYMENT_TYPE: ${{ github.event.inputs.DEPLOYMENT_TYPE || 'build-and-deploy' }}
+
+jobs:
+  build:
+    name: Build & push images
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute image tag (short SHA)
+        id: tag
+        run: echo "sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Registry login (SpectonCR)
+        if: ${{ env.DEPLOYMENT_TYPE == 'build' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+        run: docker login "$IMAGE_REGISTRY" -u "${{ secrets.REGISTRY_USERNAME }}" -p "${{ secrets.REGISTRY_PASSWORD }}"
+
+      - name: Build & push server, web, python-sidecar
+        if: ${{ env.DEPLOYMENT_TYPE == 'build' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+        run: |
+          set -euo pipefail
+          SHA="${{ steps.tag.outputs.sha }}"
+          NS="$IMAGE_REGISTRY/$IMAGE_NAMESPACE"
+
+          docker build -f server/Dockerfile -t "$NS/server:$SHA" -t "$NS/server:latest" server
+          docker push "$NS/server:$SHA"; docker push "$NS/server:latest"
+
+          # NEXT_PUBLIC_* are baked at BUILD time, so build same-origin (empty
+          # base): the browser calls /api and /ws on whichever host serves it, so
+          # ONE image is valid for every ring.
+          docker build -f web/nextjs/Dockerfile \
+            --build-arg NEXT_PUBLIC_API_URL="" --build-arg NEXT_PUBLIC_WS_URL="" \
+            -t "$NS/web:$SHA" -t "$NS/web:latest" web/nextjs
+          docker push "$NS/web:$SHA"; docker push "$NS/web:latest"
+
+          docker build -f python-sidecar/Dockerfile \
+            -t "$NS/python-sidecar:$SHA" -t "$NS/python-sidecar:latest" python-sidecar
+          docker push "$NS/python-sidecar:$SHA"; docker push "$NS/python-sidecar:latest"
+
+  deploy:
+    name: Deploy to k3s (${{ github.event.inputs.TARGET_ENV || 'int' }})
+    needs: [build]
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Decode kubeconfig
+        if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+        env:
+          KUBECONFIG_BASE64: ${{ secrets.KUBE_CONFIG_DATA_K3S }}
+        run: |
+          umask 077
+          echo "$KUBECONFIG_BASE64" | base64 -d > "$RUNNER_TEMP/kubeconfig"
+          echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+
+      - name: Ensure kubectl & helm
+        if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+        run: |
+          if ! command -v kubectl >/dev/null 2>&1; then
+            curl -sLO "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+          fi
+          if ! command -v helm >/dev/null 2>&1; then
+            curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          fi
+
+      - name: Deploy Helm chart
+        if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.IMAGE_TAG }}"
+          [ -z "$TAG" ] && TAG="${GITHUB_SHA::7}"
+          echo "Deploying jobshout to '$TARGET_ENV' namespace with image tag '$TAG'..."
+          helm upgrade --install jobshout ./deploy/helm/jobshout \
+            -f "./deploy/helm/jobshout/values-${TARGET_ENV}.yaml" \
+            --set image.tag="$TAG" \
+            --namespace "$TARGET_ENV" --create-namespace \
+            --wait --timeout 10m
+
+      - name: Rollout status
+        if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+        run: |
+          kubectl -n "$TARGET_ENV" rollout status deploy/jobshout-api --timeout=5m || true
+          kubectl -n "$TARGET_ENV" rollout status deploy/jobshout-web --timeout=5m || true
+          kubectl -n "$TARGET_ENV" get pods -o wide
