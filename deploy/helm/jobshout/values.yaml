@@ -11,7 +11,11 @@ env: int
 host: int-jobshout.workstation.co.uk
 
 image:
-  registry: spectoncr.workstation.co.uk
+  # int-spectoncr.diytaxreturn.co.uk (via the pop1 edge) is reachable from the
+  # jobshout self-hosted runner and from k3s1; spectoncr.workstation.co.uk (pop0)
+  # is NOT reachable from this runner. Both front the same SpectonCR registry —
+  # the NodePort's auth realm is int-spectoncr.diytaxreturn.co.uk.
+  registry: int-spectoncr.diytaxreturn.co.uk
   namespace: jobshout
   # server / web / python-sidecar images share this tag (git SHA), injected at
   # deploy time via --set image.tag=<sha>.

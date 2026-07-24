@@ -38,7 +38,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  IMAGE_REGISTRY: spectoncr.workstation.co.uk
+  # int-spectoncr.diytaxreturn.co.uk (pop1 edge) is reachable from the jobshout
+  # self-hosted runner; spectoncr.workstation.co.uk (pop0) is not. Same registry.
+  IMAGE_REGISTRY: int-spectoncr.diytaxreturn.co.uk
   IMAGE_NAMESPACE: jobshout
   TARGET_ENV: ${{ github.event.inputs.TARGET_ENV || 'int' }}
   DEPLOYMENT_TYPE: ${{ github.event.inputs.DEPLOYMENT_TYPE || 'build-and-deploy' }}
