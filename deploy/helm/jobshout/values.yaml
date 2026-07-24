@@ -45,6 +45,17 @@ secrets:
   registryUsername: ""
   registryPassword: ""
 
+# In-cluster nginx gateway. The wslproxy edge routes the whole host to a single
+# backend, so the ingress points at this gateway and nginx fans traffic out by
+# path (/api + /webhooks -> API, everything else -> web), same as beaconpulse.
+gateway:
+  enabled: true
+  image: nginx:1.27-alpine
+  resolver: "10.43.0.10"   # k3s cluster DNS (kube-dns ClusterIP)
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 128Mi }
+
 ingress:
   enabled: true
   className: wslproxy

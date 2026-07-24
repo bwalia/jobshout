@@ -1,0 +1,61 @@
+{{- if .Values.gateway.enabled }}
+# nginx gateway config: the wslproxy edge routes the whole host to ONE backend,
+# so this single entrypoint fans traffic out to the API vs the web app by path
+# (same approach as beaconpulse). The server mounts routes under /api/v1 and
+# also serves /health and /webhooks at the root, so those go to the API too;
+# everything else goes to the Next.js web app.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jobshout-nginx-config
+  labels:
+    {{- include "jobshout.labels" . | nindent 4 }}
+data:
+  nginx.conf: |
+    worker_processes auto;
+    events { worker_connections 1024; }
+    http {
+      include       /etc/nginx/mime.types;
+      default_type  application/octet-stream;
+      sendfile      on;
+      server_tokens off;
+      client_max_body_size 25m;
+
+      map $http_upgrade $connection_upgrade { default upgrade; '' close; }
+
+      # Cluster DNS, so upstreams resolve at request time: nginx starts even if a
+      # backend isn't up yet and follows new Service IPs after a redeploy.
+      resolver {{ .Values.gateway.resolver }} valid=10s ipv6=off;
+
+      proxy_http_version 1.1;
+      proxy_set_header Host              $host;
+      proxy_set_header X-Real-IP         $remote_addr;
+      proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+      proxy_set_header Upgrade           $http_upgrade;
+      proxy_set_header Connection        $connection_upgrade;
+      proxy_read_timeout 300s;
+
+      server {
+        listen 80;
+
+        location /api/ {
+          set $up http://jobshout-api.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.api.port }};
+          proxy_pass $up;
+        }
+        location = /health {
+          set $up http://jobshout-api.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.api.port }};
+          proxy_pass $up;
+        }
+        location /webhooks/ {
+          set $up http://jobshout-api.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.api.port }};
+          proxy_pass $up;
+        }
+
+        location / {
+          set $web http://jobshout-web.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.web.port }};
+          proxy_pass $web;
+        }
+      }
+    }
+{{- end }}
