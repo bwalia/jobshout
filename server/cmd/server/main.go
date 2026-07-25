@@ -22,6 +22,10 @@ import (
 	"github.com/jobshout/server/internal/scheduler"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/jobshout/server/internal/database"
+	"github.com/jobshout/server/internal/engine"
+	"github.com/jobshout/server/internal/executor"
+	"github.com/jobshout/server/internal/handler"
 	integ "github.com/jobshout/server/internal/integration"
 	emailAdapter "github.com/jobshout/server/internal/integration/adapters/email"
 	githubAdapter "github.com/jobshout/server/internal/integration/adapters/github"
@@ -29,10 +33,6 @@ import (
 	slackAdapter "github.com/jobshout/server/internal/integration/adapters/slack"
 	teamsAdapter "github.com/jobshout/server/internal/integration/adapters/teams"
 	telegramBot "github.com/jobshout/server/internal/integration/adapters/telegram"
-	"github.com/jobshout/server/internal/database"
-	"github.com/jobshout/server/internal/engine"
-	"github.com/jobshout/server/internal/executor"
-	"github.com/jobshout/server/internal/handler"
 	"github.com/jobshout/server/internal/langchain"
 	"github.com/jobshout/server/internal/langgraph"
 	"github.com/jobshout/server/internal/llm"
@@ -117,6 +117,19 @@ func main() {
 		zap.String("ollama_url", cfg.OllamaBaseURL),
 		zap.String("ollama_model", cfg.OllamaDefaultModel),
 	)
+
+	// ─── Embedding + knowledge ingestion (RAG foundation) ────────────────────
+	knowledgeChunkRepo := repository.NewKnowledgeChunkRepository(pool)
+	var embedder llm.Embedder
+	if e, err := llmRouter.Embedder(); err != nil {
+		logger.Info("embeddings not configured — knowledge ingestion will be skipped",
+			zap.String("embedding_provider", cfg.EmbeddingProvider), zap.Error(err))
+	} else {
+		embedder = e
+		logger.Info("embedder initialised",
+			zap.String("provider", e.EmbedderName()), zap.Int("dimensions", e.Dimensions()))
+	}
+	knowledgeIngestSvc := service.NewKnowledgeIngestService(knowledgeChunkRepo, embedder, logger)
 
 	// ─── Tool registry ───────────────────────────────────────────────────────
 	toolRegistry := tools.NewRegistry()
@@ -309,7 +322,7 @@ func main() {
 	taskHandler := handler.NewTaskHandler(taskSvc)
 	orgHandler := handler.NewOrganizationHandler(orgRepo)
 	marketplaceHandler := handler.NewMarketplaceHandler(pool, logger)
-	knowledgeHandler := handler.NewKnowledgeHandler(pool, logger)
+	knowledgeHandler := handler.NewKnowledgeHandler(pool, knowledgeIngestSvc, logger)
 	metricsHandler := handler.NewMetricsHandler(pool, logger)
 	wsHandler := handler.NewWSHandler(hub, logger)
 	execHandler := handler.NewExecutionHandler(execSvc)

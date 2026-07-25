@@ -9,11 +9,11 @@ import (
 
 // Config holds all application configuration values.
 type Config struct {
-	DatabaseURL          string   `mapstructure:"DATABASE_URL"`
-	ServerPort           string   `mapstructure:"SERVER_PORT"`
-	JWTSecret            string   `mapstructure:"JWT_SECRET"`
-	JWTExpiryMinutes     int      `mapstructure:"JWT_EXPIRY_MINUTES"`
-	JWTRefreshExpiryDays int      `mapstructure:"JWT_REFRESH_EXPIRY_DAYS"`
+	DatabaseURL          string `mapstructure:"DATABASE_URL"`
+	ServerPort           string `mapstructure:"SERVER_PORT"`
+	JWTSecret            string `mapstructure:"JWT_SECRET"`
+	JWTExpiryMinutes     int    `mapstructure:"JWT_EXPIRY_MINUTES"`
+	JWTRefreshExpiryDays int    `mapstructure:"JWT_REFRESH_EXPIRY_DAYS"`
 	CORSOrigins          []string
 
 	// MinIO / S3-compatible object storage (optional).
@@ -43,15 +43,23 @@ type Config struct {
 	ClaudeBaseURL      string `mapstructure:"CLAUDE_BASE_URL"`
 	ClaudeDefaultModel string `mapstructure:"CLAUDE_DEFAULT_MODEL"`
 
+	// Embedding configuration (used for RAG / knowledge retrieval).
+	// The default provider is OpenAI with text-embedding-3-small (1536 dims).
+	// When EMBEDDING_PROVIDER=openai, OPENAI_API_KEY must be set for embeddings
+	// to work; otherwise ingestion degrades gracefully (best-effort, logged).
+	EmbeddingProvider   string `mapstructure:"EMBEDDING_PROVIDER"`
+	EmbeddingModel      string `mapstructure:"EMBEDDING_MODEL"`
+	EmbeddingDimensions int    `mapstructure:"EMBEDDING_DIMENSIONS"`
+
 	// Python sidecar (LangChain/LangGraph execution).
 	PythonSidecarURL    string `mapstructure:"PYTHON_SIDECAR_URL"`
 	PythonSidecarSecret string `mapstructure:"PYTHON_SIDECAR_SECRET"`
 
 	// Telegram Bot integration (optional).
-	TelegramBotToken     string `mapstructure:"TELEGRAM_BOT_TOKEN"`
-	TelegramWebhookURL   string `mapstructure:"TELEGRAM_WEBHOOK_URL"`
-	TelegramSecretToken  string `mapstructure:"TELEGRAM_WEBHOOK_SECRET"`
-	TelegramRatePerMin   int    `mapstructure:"TELEGRAM_RATE_PER_MIN"`
+	TelegramBotToken    string `mapstructure:"TELEGRAM_BOT_TOKEN"`
+	TelegramWebhookURL  string `mapstructure:"TELEGRAM_WEBHOOK_URL"`
+	TelegramSecretToken string `mapstructure:"TELEGRAM_WEBHOOK_SECRET"`
+	TelegramRatePerMin  int    `mapstructure:"TELEGRAM_RATE_PER_MIN"`
 
 	// Frontend base URL for generating links in Telegram messages.
 	FrontendBaseURL string `mapstructure:"FRONTEND_BASE_URL"`
@@ -100,6 +108,11 @@ func Load() (*Config, error) {
 	viper.SetDefault("OPENAI_DEFAULT_MODEL", "gpt-4o-mini")
 	viper.SetDefault("CLAUDE_BASE_URL", "https://api.anthropic.com")
 	viper.SetDefault("CLAUDE_DEFAULT_MODEL", "claude-sonnet-4-20250514")
+
+	// Embedding defaults — OpenAI text-embedding-3-small (1536 dims).
+	viper.SetDefault("EMBEDDING_PROVIDER", "openai")
+	viper.SetDefault("EMBEDDING_MODEL", "text-embedding-3-small")
+	viper.SetDefault("EMBEDDING_DIMENSIONS", 1536)
 	viper.SetDefault("PYTHON_SIDECAR_URL", "http://localhost:8001")
 	viper.SetDefault("PYTHON_SIDECAR_SECRET", "change-me-sidecar-secret")
 
@@ -137,6 +150,9 @@ func Load() (*Config, error) {
 		ClaudeAPIKey:         viper.GetString("CLAUDE_API_KEY"),
 		ClaudeBaseURL:        viper.GetString("CLAUDE_BASE_URL"),
 		ClaudeDefaultModel:   viper.GetString("CLAUDE_DEFAULT_MODEL"),
+		EmbeddingProvider:    viper.GetString("EMBEDDING_PROVIDER"),
+		EmbeddingModel:       viper.GetString("EMBEDDING_MODEL"),
+		EmbeddingDimensions:  viper.GetInt("EMBEDDING_DIMENSIONS"),
 		PythonSidecarURL:     viper.GetString("PYTHON_SIDECAR_URL"),
 		PythonSidecarSecret:  viper.GetString("PYTHON_SIDECAR_SECRET"),
 		TelegramBotToken:     viper.GetString("TELEGRAM_BOT_TOKEN"),
