@@ -20,6 +20,26 @@ spec:
         prometheus.io/path: "/metrics"
     spec:
       {{- include "jobshout.imagePullSecrets" . | nindent 6 }}
+      {{- if .Values.postgres.enabled }}
+      # Wait for the in-cluster Postgres to accept connections before starting
+      # the API. The API connects + runs migrations on boot, so without this it
+      # crash-loops on a brand-new namespace until the DB is up — which trips a
+      # deploy's post-rollout health check (e.g. Ring Promoter marking a fresh
+      # ring unhealthy even though the deploy succeeds).
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:16-alpine
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h postgres -p {{ .Values.postgres.port }}; do
+                echo "waiting for postgres:{{ .Values.postgres.port }}…"; sleep 2
+              done
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { cpu: 100m, memory: 32Mi }
+      {{- end }}
       containers:
         - name: api
           image: {{ include "jobshout.image" (dict "ctx" . "repo" "server") }}
