@@ -106,6 +106,17 @@ Input parameters:
 Returns the created issue's external id and URL.`, t.provider)
 }
 
+// Parameters advertises the JSON-Schema for this tool's inputs (title,
+// description, priority) so providers that support native tool-calling receive
+// a real function definition. It does not change Execute.
+func (t *createIssueTool) Parameters() ParameterSchema {
+	return ObjectSchema(map[string]any{
+		"title":       map[string]any{"type": "string", "description": "Issue title/summary"},
+		"description": map[string]any{"type": "string", "description": "Issue body"},
+		"priority":    map[string]any{"type": "string", "description": "one of: critical, high, medium, low"},
+	}, "title")
+}
+
 func (t *createIssueTool) Execute(ctx context.Context, input map[string]any) (string, error) {
 	adapter, err := resolveTaskAdapter(ctx, t.store, t.adapters, t.provider)
 	if err != nil {
@@ -147,6 +158,15 @@ Input parameters:
 Returns the issue's title, status, priority and URL as JSON.`, t.provider)
 }
 
+// Parameters advertises the JSON-Schema for this tool's inputs (external_id)
+// so providers that support native tool-calling receive a real function
+// definition. It does not change Execute.
+func (t *getIssueTool) Parameters() ParameterSchema {
+	return ObjectSchema(map[string]any{
+		"external_id": map[string]any{"type": "string", "description": "The issue key/number, e.g. PROJ-123"},
+	}, "external_id")
+}
+
 func (t *getIssueTool) Execute(ctx context.Context, input map[string]any) (string, error) {
 	adapter, err := resolveTaskAdapter(ctx, t.store, t.adapters, t.provider)
 	if err != nil {
@@ -180,6 +200,15 @@ func (t *sendMessageTool) Description() string {
 Input parameters:
   message (string, required) - The message text to send
 Returns "sent" on success.`, t.channel)
+}
+
+// Parameters advertises the JSON-Schema for this tool's inputs (message) so
+// providers that support native tool-calling receive a real function
+// definition. It does not change Execute.
+func (t *sendMessageTool) Parameters() ParameterSchema {
+	return ObjectSchema(map[string]any{
+		"message": map[string]any{"type": "string", "description": "The message text to send"},
+	}, "message")
 }
 
 func (t *sendMessageTool) Execute(ctx context.Context, input map[string]any) (string, error) {

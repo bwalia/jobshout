@@ -41,6 +41,30 @@ Input parameters:
 Returns the response status code and body.`
 }
 
+// Parameters advertises the JSON-Schema for this tool's inputs so providers
+// that support native tool-calling receive a real function definition. It is
+// derived from the documented inputs in Description and does not change Execute.
+func (t *HTTPTool) Parameters() ParameterSchema {
+	return ObjectSchema(map[string]any{
+		"method": map[string]any{
+			"type":        "string",
+			"description": "HTTP method: GET, POST, PUT, PATCH, DELETE",
+		},
+		"url": map[string]any{
+			"type":        "string",
+			"description": "Full URL including scheme, e.g. https://api.example.com/endpoint",
+		},
+		"headers": map[string]any{
+			"type":        "object",
+			"description": "Map of header name to value",
+		},
+		"body": map[string]any{
+			"type":        "string",
+			"description": "Request body (typically JSON)",
+		},
+	}, "method", "url")
+}
+
 func (t *HTTPTool) Execute(ctx context.Context, input map[string]any) (string, error) {
 	method, err := stringParam(input, "method", true)
 	if err != nil {

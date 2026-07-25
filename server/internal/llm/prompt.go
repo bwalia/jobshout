@@ -70,6 +70,30 @@ func BuildReActSystemPrompt(agentName, agentRole, agentSystemPrompt string, tool
 	return sb.String()
 }
 
+// BuildNativeSystemPrompt constructs the system prompt for the native
+// tool-calling path. Unlike BuildReActSystemPrompt it does NOT instruct the
+// model to emit ReAct JSON — tools are advertised to the provider as real
+// function definitions, and the model requests them through the provider's own
+// tool-call mechanism. Tool descriptions are therefore omitted here.
+func BuildNativeSystemPrompt(agentName, agentRole, agentSystemPrompt string) string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("You are %s, an AI agent with the role: %s.\n\n", agentName, agentRole))
+
+	if agentSystemPrompt != "" {
+		sb.WriteString("Additional context about you:\n")
+		sb.WriteString(agentSystemPrompt)
+		sb.WriteString("\n\n")
+	}
+
+	sb.WriteString("## Instructions\n\n")
+	sb.WriteString("You have access to a set of tools. Call them when they help you complete the task. ")
+	sb.WriteString("You may call multiple tools over several turns. ")
+	sb.WriteString("When you have gathered enough information, respond with your final answer as plain text.")
+
+	return sb.String()
+}
+
 // BuildTaskUserMessage formats the initial task description as a user turn.
 func BuildTaskUserMessage(taskPrompt string) string {
 	return "Task: " + taskPrompt
