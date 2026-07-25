@@ -131,6 +131,9 @@ func main() {
 			zap.String("provider", e.EmbedderName()), zap.Int("dimensions", e.Dimensions()))
 	}
 	knowledgeIngestSvc := service.NewKnowledgeIngestService(knowledgeChunkRepo, embedder, logger)
+	// Enable semantic long-term memory (embed-on-write + cosine recall); falls
+	// back to ILIKE when embedder is nil.
+	memoryRepo = memoryRepo.WithEmbedder(embedder)
 
 	// ─── Tool registry ───────────────────────────────────────────────────────
 	toolRegistry := tools.NewRegistry()
