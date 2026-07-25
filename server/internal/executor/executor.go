@@ -24,10 +24,10 @@ const MaxIterations = 15
 
 // reactResponse is the JSON structure every LLM turn must return.
 type reactResponse struct {
-	Thought      string          `json:"thought"`
-	Action       *string         `json:"action"`
-	ActionInput  map[string]any  `json:"action_input"`
-	FinalAnswer  *string         `json:"final_answer"`
+	Thought     string         `json:"thought"`
+	Action      *string        `json:"action"`
+	ActionInput map[string]any `json:"action_input"`
+	FinalAnswer *string        `json:"final_answer"`
 }
 
 // ToolCallRecord is a single tool invocation captured during execution.
@@ -101,6 +101,10 @@ func (e *Executor) Run(
 		zap.String("agent_name", agent.Name),
 	)
 
+	// Org-scope the context so org-aware tools (the integration tools) resolve
+	// this tenant's own credentials when the agent calls them.
+	ctx = tools.WithOrg(ctx, agent.OrgID)
+
 	// Resolve the LLM client for this agent.
 	providerName := ""
 	if agent.ModelProvider != nil {
@@ -153,6 +157,17 @@ func (e *Executor) Run(
 	modelName := ""
 	if agent.ModelName != nil {
 		modelName = *agent.ModelName
+	}
+
+	// Native tool-calling path: when the provider advertises tool support AND
+	// every tool the agent may use exposes a JSON schema, drive the loop with
+	// real function definitions instead of the ReAct JSON-in-prompt fallback.
+	// Otherwise fall through to the existing ReAct loop below, unchanged.
+	if toolDefs, ok := buildToolDefs(toolRegistry); ok && len(toolDefs) > 0 && clientSupportsTools(client) {
+		log.Info("using native tool-calling path", zap.Int("tools", len(toolDefs)))
+		nativeSystem := llm.BuildNativeSystemPrompt(agent.Name, agent.Role, systemPromptText)
+		return e.runNative(ctx, log, client, modelName, resolvedProvider,
+			nativeSystem, taskPrompt, toolDefs, toolRegistry)
 	}
 
 	// Seed the conversation.
@@ -408,9 +423,161 @@ func buildResult(
 		InputTokens:   inputTokens,
 		OutputTokens:  outputTokens,
 		LatencyMs:     int(time.Since(startTime).Milliseconds()),
-		ModelProvider:  provider,
-		ModelName:      model,
-		ToolCalls:      toolCalls,
-		Err:            err,
+		ModelProvider: provider,
+		ModelName:     model,
+		ToolCalls:     toolCalls,
+		Err:           err,
 	}
+}
+
+// clientSupportsTools reports whether the resolved LLM client advertises native
+// tool-calling. Clients opt in by implementing llm.ToolCapableClient; those that
+// don't (or that return false) drive the ReAct loop instead.
+func clientSupportsTools(client llm.Client) bool {
+	tc, ok := client.(llm.ToolCapableClient)
+	return ok && tc.SupportsTools()
+}
+
+// buildToolDefs converts every tool in the registry into an llm.ToolDef, but
+// only if ALL of them expose a JSON schema (implement tools.SchemaProvider).
+// The second return is false the moment any tool lacks a schema, signalling the
+// caller to fall back to the ReAct loop.
+func buildToolDefs(reg *tools.Registry) ([]llm.ToolDef, bool) {
+	all := reg.All()
+	defs := make([]llm.ToolDef, 0, len(all))
+	for _, t := range all {
+		sp, ok := t.(tools.SchemaProvider)
+		if !ok {
+			return nil, false
+		}
+		defs = append(defs, llm.ToolDef{
+			Name:        t.Name(),
+			Description: t.Description(),
+			Parameters:  sp.Parameters(),
+		})
+	}
+	return defs, true
+}
+
+// runNative drives the agent loop using the provider's native tool-calling
+// mechanism. On each turn it sends the tool definitions; when the model returns
+// tool calls it executes them via the registry and appends the results in the
+// provider-agnostic Message shape (each client translates that to its own wire
+// format), repeating up to MaxIterations. Metering and ToolCallRecord/Result
+// handling mirror the ReAct path exactly.
+func (e *Executor) runNative(
+	ctx context.Context,
+	log *zap.Logger,
+	client llm.Client,
+	modelName, resolvedProvider, systemPrompt, taskPrompt string,
+	toolDefs []llm.ToolDef,
+	toolRegistry *tools.Registry,
+) Result {
+	messages := []llm.Message{
+		{Role: llm.RoleSystem, Content: systemPrompt},
+		{Role: llm.RoleUser, Content: llm.BuildTaskUserMessage(taskPrompt)},
+	}
+
+	runStart := time.Now()
+
+	var (
+		toolCalls    []ToolCallRecord
+		totalTokens  int
+		inputTokens  int
+		outputTokens int
+	)
+
+	for iteration := 1; iteration <= MaxIterations; iteration++ {
+		log.Info("native tool-calling iteration", zap.Int("iteration", iteration))
+
+		llmResp, err := client.Generate(ctx, llm.GenerateRequest{
+			Messages:    messages,
+			Model:       modelName,
+			MaxTokens:   4096,
+			Temperature: 0.2,
+			ToolDefs:    toolDefs,
+		})
+		if err != nil {
+			return buildResult("", iteration, totalTokens, inputTokens, outputTokens,
+				runStart, resolvedProvider, modelName, toolCalls,
+				fmt.Errorf("executor: LLM generate (iteration %d): %w", iteration, err))
+		}
+
+		inputTokens += llmResp.InputTokens
+		outputTokens += llmResp.OutputTokens
+		totalTokens += llmResp.InputTokens + llmResp.OutputTokens
+
+		// No tool calls => the message content is the final answer.
+		if len(llmResp.ToolCalls) == 0 {
+			return buildResult(llmResp.Content, iteration, totalTokens, inputTokens, outputTokens,
+				runStart, resolvedProvider, modelName, toolCalls, nil)
+		}
+
+		// Echo the assistant turn (optional text + the tool_use blocks) so the
+		// follow-up request preserves conversation shape for the provider.
+		messages = append(messages, llm.Message{
+			Role:      llm.RoleAssistant,
+			Content:   llmResp.Content,
+			ToolCalls: llmResp.ToolCalls,
+		})
+
+		// Execute each requested tool and append its result as a RoleTool message.
+		for _, tc := range llmResp.ToolCalls {
+			input := tc.Arguments
+			if input == nil {
+				input = map[string]any{}
+			}
+
+			tool, ok := toolRegistry.Get(tc.Name)
+			if !ok {
+				resultMsg := fmt.Sprintf("Error: tool %q is not available to this agent.", tc.Name)
+				log.Warn("agent requested unavailable tool", zap.String("tool", tc.Name))
+				messages = append(messages, llm.Message{
+					Role:       llm.RoleTool,
+					ToolCallID: tc.ID,
+					Content:    resultMsg,
+				})
+				toolCalls = append(toolCalls, ToolCallRecord{
+					ToolName: tc.Name,
+					Input:    input,
+					Err:      fmt.Errorf("tool not available"),
+				})
+				continue
+			}
+
+			// Execute the tool with a 60-second timeout.
+			toolCtx, toolCancel := context.WithTimeout(ctx, 60*time.Second)
+			start := time.Now()
+			toolOutput, toolErr := tool.Execute(toolCtx, input)
+			toolCancel()
+			durationMs := int(time.Since(start).Milliseconds())
+
+			toolCalls = append(toolCalls, ToolCallRecord{
+				ToolName:   tc.Name,
+				Input:      input,
+				Output:     toolOutput,
+				Err:        toolErr,
+				DurationMs: durationMs,
+			})
+
+			resultMsg := toolOutput
+			if toolErr != nil {
+				resultMsg = fmt.Sprintf("Error executing tool: %v", toolErr)
+				log.Warn("tool execution error", zap.String("tool", tc.Name), zap.Error(toolErr))
+			} else {
+				log.Info("tool executed", zap.String("tool", tc.Name), zap.Int("duration_ms", durationMs))
+			}
+
+			messages = append(messages, llm.Message{
+				Role:       llm.RoleTool,
+				ToolCallID: tc.ID,
+				Content:    resultMsg,
+			})
+		}
+	}
+
+	// Exceeded max iterations without a final answer.
+	return buildResult("", MaxIterations, totalTokens, inputTokens, outputTokens,
+		runStart, resolvedProvider, modelName, toolCalls,
+		fmt.Errorf("executor: exceeded maximum iterations (%d) without a final answer", MaxIterations))
 }
