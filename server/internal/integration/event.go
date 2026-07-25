@@ -25,6 +25,9 @@ const (
 
 	// Telegram events.
 	EventTelegramLinked EventType = "telegram.linked"
+
+	// Human-in-the-loop approval events.
+	EventApprovalRequested EventType = "approval.requested"
 )
 
 // AllEventTypes returns every event type for subscription.

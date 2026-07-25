@@ -83,6 +83,7 @@ func main() {
 	workflowRepo := repository.NewWorkflowRepository(pool)
 	execRepo := repository.NewExecutionRepository(pool)
 	toolPermRepo := repository.NewAgentToolRepository(pool)
+	approvalRepo := repository.NewApprovalRepository(pool)
 	llmProviderRepo := repository.NewLLMProviderRepository(pool)
 	schedulerRepo := repository.NewSchedulerRepository(pool)
 	sessionRepo := repository.NewSessionRepository(pool)
@@ -319,6 +320,16 @@ func main() {
 	budgetAlertDispatcher := service.NewBudgetAlertDispatcher(notifSvc, logger)
 	_ = budgetAlertDispatcher // available for governance service to dispatch budget alerts
 	go notifSvc.StartSubscriber(ctx, eventBus)
+
+	// Phase 3: human-in-the-loop approvals. The approval service is both the
+	// executor's approval gate (it decides which tool calls pause and records the
+	// pending approval + manager notification) and the resume driver for
+	// approve/reject decisions. Wire it as the go-native executor's gate now that
+	// notifSvc exists; the gate is read at run time, so setting it post-construction
+	// is safe and keeps runs default-off when no rule is configured.
+	approvalSvc := service.NewApprovalService(approvalRepo, execRepo, agentRepo, userRepo, goNativeExec, notifSvc, logger)
+	goNativeExec.WithApprovalGate(approvalSvc)
+	logger.Info("human-in-the-loop approvals initialised")
 	logger.Info("integration framework initialised",
 		zap.Int("task_adapters", 2),
 		zap.Int("notification_adapters", 3),
@@ -369,6 +380,7 @@ func main() {
 	integHandler := handler.NewIntegrationHandler(integSvc)
 	mcpHandler := handler.NewMCPHandler(mcpSvc)
 	notifHandler := handler.NewNotificationHandler(notifSvc)
+	approvalHandler := handler.NewApprovalHandler(approvalSvc)
 	webhookHandler := handler.NewWebhookHandler(integRepo, linkRepo, logger)
 	governanceHandler := handler.NewGovernanceHandler(govSvc)
 	analyticsHandler := handler.NewAnalyticsHandler(analyticsSvc)
@@ -664,6 +676,15 @@ func main() {
 					r.Put("/", notifHandler.Update)
 					r.Delete("/", notifHandler.Delete)
 					r.Post("/test", notifHandler.Test)
+				})
+			})
+
+			// Human-in-the-loop approvals (Phase 3)
+			r.Route("/approvals", func(r chi.Router) {
+				r.Get("/", approvalHandler.List)
+				r.Route("/{approvalID}", func(r chi.Router) {
+					r.Get("/", approvalHandler.Get)
+					r.Post("/decide", approvalHandler.Decide)
 				})
 			})
 
