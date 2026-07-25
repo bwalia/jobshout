@@ -91,6 +91,12 @@ Takes no input parameters.
 Returns a JSON array of {server, name, description} — use "server" and "name" with mcp_call to invoke a tool.`
 }
 
+// Parameters advertises the (empty) JSON-Schema for this tool so it is
+// compatible with providers that support native function-calling.
+func (t *mcpListToolsTool) Parameters() ParameterSchema {
+	return ObjectSchema(map[string]any{})
+}
+
 type mcpToolEntry struct {
 	Server      string `json:"server"`
 	Name        string `json:"name"`
@@ -142,6 +148,16 @@ Input parameters:
   tool      (string, required) - The tool name to invoke on that server
   arguments (object, optional) - Arguments passed to the tool
 Returns the tool's text result.`
+}
+
+// Parameters advertises the JSON-Schema for this tool's inputs so it works with
+// providers that support native function-calling.
+func (t *mcpCallTool) Parameters() ParameterSchema {
+	return ObjectSchema(map[string]any{
+		"server":    map[string]any{"type": "string", "description": "The MCP server name (see mcp_list_tools)"},
+		"tool":      map[string]any{"type": "string", "description": "The tool name to invoke on that server"},
+		"arguments": map[string]any{"type": "object", "description": "Arguments passed to the tool"},
+	}, "server", "tool")
 }
 
 func (t *mcpCallTool) Execute(ctx context.Context, input map[string]any) (string, error) {
