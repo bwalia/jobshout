@@ -136,12 +136,21 @@ func main() {
 	toolRegistry := tools.NewRegistry()
 	toolRegistry.Register(tools.NewHTTPTool())
 	toolRegistry.Register(tools.NewShellTool(nil))
+	// knowledge_search performs semantic retrieval over an agent's knowledge
+	// base; it only works with a configured embedder, so register it only then.
+	if embedder != nil {
+		toolRegistry.Register(tools.NewKnowledgeTool(embedder, knowledgeChunkRepo))
+	}
 	logger.Info("tool registry initialised", zap.Int("tools", len(toolRegistry.All())))
 
 	// ─── Engine Router (multi-runtime) ──────────────────────────────────────
 	// WithSkills folds each agent's enabled skills into its runs (prompt
 	// patches + extra tools) via the skills registry.
-	goNativeExec := executor.New(llmRouter, toolRegistry, logger).WithSkills(skillRepo)
+	// WithKnowledge augments each run with the agent's most relevant stored
+	// knowledge before the loop starts (best-effort; skipped when no embedder).
+	goNativeExec := executor.New(llmRouter, toolRegistry, logger).
+		WithSkills(skillRepo).
+		WithKnowledge(knowledgeChunkRepo, embedder)
 
 	// Python sidecar clients for LangChain/LangGraph (nil-safe if not configured).
 	var lcClient *langchain.Client
