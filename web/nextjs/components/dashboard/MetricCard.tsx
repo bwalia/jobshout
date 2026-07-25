@@ -1,54 +1,57 @@
+import { ArrowDownRight, ArrowUpRight } from "lucide-react";
+import { cn } from "@/lib/utils/cn";
+
 interface MetricCardProps {
   /** Short label displayed above the value */
   title: string;
   /** The primary metric value to display prominently */
   value: string;
   /**
-   * Percentage change vs the previous period.
-   * Positive values are shown in green with an up arrow;
-   * negative values are shown in red with a down arrow.
+   * Percentage change vs the previous period. Positive is shown as a live-green
+   * signal, negative as an error-red one.
    */
   delta: number;
   /** Optional explanatory text shown below the delta */
   description?: string;
 }
 
+/**
+ * A telemetry KPI tile: mono, tabular value (the "ops console" voice), a
+ * signal-coloured delta, and an amber signal hairline that lights on hover.
+ */
 export function MetricCard({ title, value, delta, description }: MetricCardProps) {
   const isPositive = delta >= 0;
 
   return (
-    <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-      {/* Title */}
-      <p className="text-sm font-medium text-muted-foreground">{title}</p>
+    <div className="group relative overflow-hidden rounded-xl border border-border bg-card p-5 transition-colors hover:border-primary/40">
+      {/* Amber signal hairline — lights on hover, quiet otherwise. */}
+      <span
+        aria-hidden
+        className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-90"
+      />
 
-      {/* Large value */}
-      <p className="mt-2 text-3xl font-bold tracking-tight">{value}</p>
+      <p className="text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
+        {title}
+      </p>
 
-      {/* Delta badge */}
-      <div className="mt-2 flex items-center gap-1.5">
+      <p className="tabular mt-2.5 text-3xl font-semibold tracking-tight text-foreground">
+        {value}
+      </p>
+
+      <div className="mt-2 flex items-center gap-2">
         <span
-          className={[
-            "inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-xs font-semibold",
+          className={cn(
+            "tabular inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-xs font-semibold",
             isPositive
-              ? "bg-green-100 text-green-700"
-              : "bg-red-100 text-red-700",
-          ].join(" ")}
+              ? "bg-signal-live/12 text-signal-live"
+              : "bg-signal-error/12 text-signal-error"
+          )}
         >
-          {/* Arrow icon - points up for positive, down for negative */}
-          <svg
-            className="h-3 w-3"
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={3}
-          >
-            {isPositive ? (
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
-            ) : (
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-            )}
-          </svg>
+          {isPositive ? (
+            <ArrowUpRight className="h-3 w-3" />
+          ) : (
+            <ArrowDownRight className="h-3 w-3" />
+          )}
           {Math.abs(delta).toFixed(1)}%
         </span>
 

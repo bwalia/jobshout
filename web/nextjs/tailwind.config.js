@@ -31,7 +31,9 @@ module.exports = {
           "Roboto",
           "sans-serif",
         ],
+        // Telemetry voice — agent ids, timestamps, metrics.
         mono: [
+          "var(--font-mono)",
           "ui-monospace",
           "SFMono-Regular",
           "Menlo",
@@ -102,6 +104,14 @@ module.exports = {
           blocked:  "hsl(var(--status-blocked))",
           idle:     "hsl(var(--status-idle))",
         },
+        // Signal Room accent + live-status hues (the broadcast language).
+        signal: {
+          DEFAULT: "hsl(var(--signal))",
+          live:    "hsl(var(--signal-live))",
+          warn:    "hsl(var(--signal-warn))",
+          error:   "hsl(var(--signal-error))",
+          info:    "hsl(var(--signal-info))",
+        },
       },
       borderRadius: {
         xl: "var(--radius)",
@@ -112,6 +122,10 @@ module.exports = {
       boxShadow: {
         "card": "0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px -1px rgba(0, 0, 0, 0.04)",
         "card-hover": "0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.05)",
+        // Amber signal glow for the primary CTA / focused control.
+        "signal": "0 0 0 1px hsl(var(--signal) / 0.35), 0 4px 20px -4px hsl(var(--signal) / 0.4)",
+        // Soft green glow for a live/broadcasting element.
+        "glow-live": "0 0 16px -2px hsl(var(--signal-live) / 0.55)",
       },
     },
   },

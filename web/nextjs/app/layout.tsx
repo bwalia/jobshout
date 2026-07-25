@@ -1,29 +1,37 @@
 import type { Metadata } from "next";
-import { Inter, Inter_Tight } from "next/font/google";
+import { Inter, Space_Grotesk, JetBrains_Mono } from "next/font/google";
 import "@/styles/globals.css";
 import { Providers } from "./providers";
 
-// Body type — Inter is the closest free face to Atlassian's Charlie Sans.
-// We pin a CSS variable so Tailwind / globals.css can compose it into the
-// font stack instead of locking it into a single className.
+// "Signal Room" type system:
+//   - Inter          → UI/body, dense and legible at small sizes (--font-sans)
+//   - Space Grotesk  → display, the technical/characterful headline voice (--font-display)
+//   - JetBrains Mono → all telemetry: agent ids, timestamps, metrics (--font-mono)
+// The mono-for-data pairing is the signature typographic move — the "ops
+// console" voice. (Swap JetBrains for Geist Mono if you prefer.)
 const inter = Inter({
   subsets: ["latin"],
   variable: "--font-sans",
   display: "swap",
 });
 
-// Display type for headings + numerics — gives the dashboard the same
-// confident heading weight as JIRA / Confluence without buying Charlie Sans.
-const interTight = Inter_Tight({
+const spaceGrotesk = Space_Grotesk({
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
   variable: "--font-display",
   display: "swap",
 });
 
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-mono",
+  display: "swap",
+});
+
 export const metadata: Metadata = {
-  title: "Jobshout - AI Team Command Center",
+  title: "JobShout — Mission Control for AI Agents",
   description:
-    "Mission control for AI teams. Create agents, build teams, assign projects, track work, and automate workflows.",
+    "Mission control for autonomous AI agents. Dispatch agents, orchestrate multi-agent work, watch the live fleet, and step in when it matters.",
 };
 
 export default function RootLayout({
@@ -35,7 +43,7 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${inter.variable} ${interTight.variable}`}
+      className={`${inter.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable}`}
     >
       <body className="font-sans antialiased">
         <Providers>{children}</Providers>
