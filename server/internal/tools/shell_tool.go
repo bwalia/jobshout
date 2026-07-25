@@ -66,6 +66,18 @@ shell operators (|, &&, ;, >, etc.) are NOT supported for safety reasons.
 Returns the combined stdout and stderr of the command.`
 }
 
+// Parameters advertises the JSON-Schema for this tool's inputs so providers
+// that support native tool-calling receive a real function definition. It is
+// derived from the documented inputs in Description and does not change Execute.
+func (t *ShellTool) Parameters() ParameterSchema {
+	return ObjectSchema(map[string]any{
+		"command": map[string]any{
+			"type":        "string",
+			"description": `The full shell command to run, e.g. "kubectl get pods -n default"`,
+		},
+	}, "command")
+}
+
 func (t *ShellTool) Execute(ctx context.Context, input map[string]any) (string, error) {
 	cmdStr, err := stringParam(input, "command", true)
 	if err != nil {

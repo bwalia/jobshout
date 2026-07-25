@@ -38,17 +38,31 @@ func NewClaudeClient(baseURL, apiKey, defaultModel string) *ClaudeClient {
 
 func (c *ClaudeClient) ProviderName() string { return "claude" }
 
+// SupportsTools reports that this client can use native tool-calling
+// (GenerateRequest.ToolDefs / GenerateResponse.ToolCalls).
+func (c *ClaudeClient) SupportsTools() bool { return true }
+
 // claudeRequest mirrors the Anthropic /v1/messages request body.
 type claudeRequest struct {
-	Model     string           `json:"model"`
-	MaxTokens int              `json:"max_tokens"`
-	System    string           `json:"system,omitempty"`
-	Messages  []claudeMessage  `json:"messages"`
+	Model     string          `json:"model"`
+	MaxTokens int             `json:"max_tokens"`
+	System    string          `json:"system,omitempty"`
+	Messages  []claudeMessage `json:"messages"`
+	Tools     []claudeTool    `json:"tools,omitempty"`
 }
 
+// claudeMessage's Content is either a plain string or an array of content
+// blocks (text / tool_use / tool_result) — hence the any type.
 type claudeMessage struct {
 	Role    string `json:"role"`
-	Content string `json:"content"`
+	Content any    `json:"content"`
+}
+
+// claudeTool is a function definition in the Anthropic "tools" array.
+type claudeTool struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	InputSchema map[string]any `json:"input_schema"`
 }
 
 type claudeResponse struct {
@@ -56,8 +70,11 @@ type claudeResponse struct {
 	Type    string `json:"type"`
 	Role    string `json:"role"`
 	Content []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
+		Type  string          `json:"type"`
+		Text  string          `json:"text"`
+		ID    string          `json:"id"`
+		Name  string          `json:"name"`
+		Input json.RawMessage `json:"input"`
 	} `json:"content"`
 	StopReason string `json:"stop_reason"`
 	Usage      struct {
@@ -81,15 +98,46 @@ func (c *ClaudeClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 		maxTokens = 4096
 	}
 
-	// Separate system message from conversation messages.
+	// Separate system message from conversation messages, translating any
+	// native tool-calling fields into Anthropic content blocks.
 	var systemPrompt string
 	msgs := make([]claudeMessage, 0, len(req.Messages))
 	for _, m := range req.Messages {
-		if m.Role == RoleSystem {
+		switch {
+		case m.Role == RoleSystem:
 			systemPrompt = m.Content
-			continue
+		case m.Role == RoleTool:
+			// A tool result becomes a user message with a tool_result block.
+			msgs = append(msgs, claudeMessage{
+				Role: RoleUser,
+				Content: []any{map[string]any{
+					"type":        "tool_result",
+					"tool_use_id": m.ToolCallID,
+					"content":     m.Content,
+				}},
+			})
+		case len(m.ToolCalls) > 0:
+			// An assistant turn that requested tools: optional text + tool_use blocks.
+			blocks := make([]any, 0, len(m.ToolCalls)+1)
+			if m.Content != "" {
+				blocks = append(blocks, map[string]any{"type": "text", "text": m.Content})
+			}
+			for _, tc := range m.ToolCalls {
+				input := tc.Arguments
+				if input == nil {
+					input = map[string]any{}
+				}
+				blocks = append(blocks, map[string]any{
+					"type":  "tool_use",
+					"id":    tc.ID,
+					"name":  tc.Name,
+					"input": input,
+				})
+			}
+			msgs = append(msgs, claudeMessage{Role: m.Role, Content: blocks})
+		default:
+			msgs = append(msgs, claudeMessage{Role: m.Role, Content: m.Content})
 		}
-		msgs = append(msgs, claudeMessage{Role: m.Role, Content: m.Content})
 	}
 
 	body := claudeRequest{
@@ -97,6 +145,19 @@ func (c *ClaudeClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 		MaxTokens: maxTokens,
 		System:    systemPrompt,
 		Messages:  msgs,
+	}
+
+	// Native tool-calling: advertise function definitions when provided.
+	for _, td := range req.ToolDefs {
+		schema := td.Parameters
+		if schema == nil {
+			schema = map[string]any{"type": "object", "properties": map[string]any{}}
+		}
+		body.Tools = append(body.Tools, claudeTool{
+			Name:        td.Name,
+			Description: td.Description,
+			InputSchema: schema,
+		})
 	}
 
 	payload, err := json.Marshal(body)
@@ -136,11 +197,23 @@ func (c *ClaudeClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 		return nil, fmt.Errorf("claude: API error (%s): %s", chatResp.Error.Type, chatResp.Error.Message)
 	}
 
-	// Concatenate all text content blocks.
+	// Concatenate text blocks; collect any tool_use blocks as native tool calls.
 	var content string
+	var toolCalls []ToolCall
 	for _, block := range chatResp.Content {
-		if block.Type == "text" {
+		switch block.Type {
+		case "text":
 			content += block.Text
+		case "tool_use":
+			args := map[string]any{}
+			if len(block.Input) > 0 {
+				_ = json.Unmarshal(block.Input, &args)
+			}
+			toolCalls = append(toolCalls, ToolCall{
+				ID:        block.ID,
+				Name:      block.Name,
+				Arguments: args,
+			})
 		}
 	}
 
@@ -149,5 +222,6 @@ func (c *ClaudeClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 		FinishReason: chatResp.StopReason,
 		InputTokens:  chatResp.Usage.InputTokens,
 		OutputTokens: chatResp.Usage.OutputTokens,
+		ToolCalls:    toolCalls,
 	}, nil
 }
