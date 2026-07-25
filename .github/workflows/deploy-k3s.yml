@@ -1,14 +1,15 @@
 name: Build & deploy JobShout to k3s
 
 # Build the three JobShout images (server, web, python-sidecar) to the SpectonCR
-# registry and deploy the Helm chart to the chosen environment's namespace on
-# k3s. Same pattern as beaconpulse's deploy-k3s.yml.
+# registry, then hand deployment to Ring Promoter (https://rp.workstation.co.uk).
+# Seeding a ring makes RP run the actual deploy as a short-lived k8s Job in the
+# ring-exec namespace (git-clone this repo at the seeded tag + helm upgrade into
+# the ring's namespace) — the DTAP control plane owns the deploy, not this CI.
 #
-# Continuous deployment: every push to master builds the images and deploys to
-# the int environment (TARGET_ENV/DEPLOYMENT_TYPE resolve to int/build-and-deploy
-# via the env: block below, since push events carry no workflow inputs).
-# Promotion to test/acc/prod is a manual workflow_dispatch (deploy-only, pinning
-# the image tag that was validated in the lower ring).
+# Continuous deployment: every push to master builds the images and seeds the
+# int ring. Promotion int -> test -> acc -> prod is done from the Ring Promoter
+# UI (rp.workstation.co.uk/?app=jobshout). workflow_dispatch can build-only, or
+# seed a chosen ring / pinned tag.
 
 on:
   push:
@@ -89,59 +90,36 @@ jobs:
             -t "$NS/python-sidecar:$SHA" -t "$NS/python-sidecar:latest" python-sidecar
 
   deploy:
-    name: Deploy to k3s (${{ github.event.inputs.TARGET_ENV || 'int' }})
+    name: Seed Ring Promoter (${{ github.event.inputs.TARGET_ENV || 'int' }})
     needs: [build]
     runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Decode kubeconfig
+      - name: Seed Ring Promoter — RP runs the k8sjob deploy
         if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
         env:
-          KUBECONFIG_BASE64: ${{ secrets.KUBE_CONFIG_DATA_K3S }}
-        run: |
-          umask 077
-          echo "$KUBECONFIG_BASE64" | base64 -d > "$RUNNER_TEMP/kubeconfig"
-          echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
-
-      - name: Ensure kubectl & helm
-        if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
-        run: |
-          if ! command -v kubectl >/dev/null 2>&1; then
-            curl -sLO "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-            chmod +x kubectl && sudo mv kubectl /usr/local/bin/
-          fi
-          if ! command -v helm >/dev/null 2>&1; then
-            curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-          fi
-
-      - name: Deploy Helm chart
-        if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
-        env:
-          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
-          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+          RP_API_TOKEN: ${{ secrets.RP_API_TOKEN }}
+          RP_URL: ${{ secrets.RP_URL }}
         run: |
           set -euo pipefail
           TAG="${{ github.event.inputs.IMAGE_TAG }}"
           [ -z "$TAG" ] && TAG="${GITHUB_SHA::7}"
-          echo "Deploying jobshout to '$TARGET_ENV' namespace with image tag '$TAG'..."
-          # This k3s cluster has no External Secrets Operator, so use the chart's
-          # plaintext fallback (externalSecret.enabled=false): it renders a plain
-          # jobshout-secrets Secret plus the jobshout-registry pull secret from
-          # the registry creds passed below. Install ESO + Vault and drop these
-          # overrides to switch to the managed-secret path.
-          helm upgrade --install jobshout ./deploy/helm/jobshout \
-            -f "./deploy/helm/jobshout/values-${TARGET_ENV}.yaml" \
-            --set image.tag="$TAG" \
-            --set externalSecret.enabled=false \
-            --set-string secrets.registryUsername="$REGISTRY_USERNAME" \
-            --set-string secrets.registryPassword="$REGISTRY_PASSWORD" \
-            --namespace "$TARGET_ENV" --create-namespace \
-            --wait --timeout 10m
-
-      - name: Rollout status
-        if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
-        run: |
-          kubectl -n "$TARGET_ENV" rollout status deploy/jobshout-api --timeout=5m || true
-          kubectl -n "$TARGET_ENV" rollout status deploy/jobshout-web --timeout=5m || true
-          kubectl -n "$TARGET_ENV" get pods -o wide
+          RP="${RP_URL:-https://rp.workstation.co.uk}"
+          if [ -z "${RP_API_TOKEN:-}" ]; then
+            echo "::error::RP_API_TOKEN is not set — cannot seed Ring Promoter."
+            exit 1
+          fi
+          echo "Seeding jobshout '${TARGET_ENV}' @ ${TAG} via Ring Promoter…"
+          # Ring Promoter runs the actual deploy as a k8sjob in ring-exec (git
+          # clones this repo at the seeded tag and helm-installs into the ring's
+          # namespace, with externalSecret off + registry creds handled cluster-
+          # side). Promotion int -> test -> acc -> prod is done in the RP UI.
+          code=$(curl -sS -o /tmp/seed.out -w '%{http_code}' \
+            -X POST "${RP}/api/apps/jobshout/seed?async=1" \
+            -H "Authorization: Bearer ${RP_API_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            -d "$(printf '{"ring":"%s","version":"%s"}' "$TARGET_ENV" "$TAG")" || echo 000)
+          echo "seed -> HTTP ${code} :: $(cat /tmp/seed.out)"
+          case "${code}" in
+            200|202) echo "Seeded — Ring Promoter is running the deploy. Track: ${RP}/?app=jobshout" ;;
+            *) echo "::error::Ring Promoter seed failed (HTTP ${code})"; exit 1 ;;
+          esac
