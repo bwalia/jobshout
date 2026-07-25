@@ -24,10 +24,10 @@ const MaxIterations = 15
 
 // reactResponse is the JSON structure every LLM turn must return.
 type reactResponse struct {
-	Thought      string          `json:"thought"`
-	Action       *string         `json:"action"`
-	ActionInput  map[string]any  `json:"action_input"`
-	FinalAnswer  *string         `json:"final_answer"`
+	Thought     string         `json:"thought"`
+	Action      *string        `json:"action"`
+	ActionInput map[string]any `json:"action_input"`
+	FinalAnswer *string        `json:"final_answer"`
 }
 
 // ToolCallRecord is a single tool invocation captured during execution.
@@ -100,6 +100,10 @@ func (e *Executor) Run(
 		zap.String("agent_id", agent.ID.String()),
 		zap.String("agent_name", agent.Name),
 	)
+
+	// Org-scope the context so org-aware tools (the integration tools) resolve
+	// this tenant's own credentials when the agent calls them.
+	ctx = tools.WithOrg(ctx, agent.OrgID)
 
 	// Resolve the LLM client for this agent.
 	providerName := ""
@@ -408,9 +412,9 @@ func buildResult(
 		InputTokens:   inputTokens,
 		OutputTokens:  outputTokens,
 		LatencyMs:     int(time.Since(startTime).Milliseconds()),
-		ModelProvider:  provider,
-		ModelName:      model,
-		ToolCalls:      toolCalls,
-		Err:            err,
+		ModelProvider: provider,
+		ModelName:     model,
+		ToolCalls:     toolCalls,
+		Err:           err,
 	}
 }

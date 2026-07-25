@@ -22,6 +22,10 @@ import (
 	"github.com/jobshout/server/internal/scheduler"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/jobshout/server/internal/database"
+	"github.com/jobshout/server/internal/engine"
+	"github.com/jobshout/server/internal/executor"
+	"github.com/jobshout/server/internal/handler"
 	integ "github.com/jobshout/server/internal/integration"
 	emailAdapter "github.com/jobshout/server/internal/integration/adapters/email"
 	githubAdapter "github.com/jobshout/server/internal/integration/adapters/github"
@@ -29,10 +33,6 @@ import (
 	slackAdapter "github.com/jobshout/server/internal/integration/adapters/slack"
 	teamsAdapter "github.com/jobshout/server/internal/integration/adapters/teams"
 	telegramBot "github.com/jobshout/server/internal/integration/adapters/telegram"
-	"github.com/jobshout/server/internal/database"
-	"github.com/jobshout/server/internal/engine"
-	"github.com/jobshout/server/internal/executor"
-	"github.com/jobshout/server/internal/handler"
 	"github.com/jobshout/server/internal/langchain"
 	"github.com/jobshout/server/internal/langgraph"
 	"github.com/jobshout/server/internal/llm"
@@ -270,6 +270,16 @@ func main() {
 	eventBus := integ.NewBus()
 	integSvc := service.NewIntegrationService(integRepo, linkRepo, syncLogRepo, adapterRegistry, logger)
 	notifSvc := service.NewNotificationService(notifConfigRepo, adapterRegistry, logger)
+
+	// Phase 1: make the org's configured integrations agent-callable. These
+	// tools resolve the calling org (from the execution context) to its own
+	// Jira/GitHub/Slack/Teams/Email credentials at call time, so agents can act
+	// on external systems inside the ReAct loop — not just background sync.
+	for _, it := range tools.NewIntegrationTools(integRepo, notifConfigRepo, adapterRegistry) {
+		toolRegistry.Register(it)
+	}
+	logger.Info("integration tools registered", zap.Int("count", 7))
+
 	budgetAlertDispatcher := service.NewBudgetAlertDispatcher(notifSvc, logger)
 	_ = budgetAlertDispatcher // available for governance service to dispatch budget alerts
 	go notifSvc.StartSubscriber(ctx, eventBus)
