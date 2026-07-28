@@ -2,6 +2,9 @@ env: int
 host: int.jobshout.co.uk
 logLevel: debug
 
+image:
+  tag: 89f91ac  # Pinned: working web image after jobshout-web build regression (beba970)
+
 ai:
   enabled: true
   ollamaBaseURL: "https://ollama.workstation.co.uk"
