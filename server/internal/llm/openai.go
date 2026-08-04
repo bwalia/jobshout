@@ -34,17 +34,50 @@ func NewOpenAIClient(baseURL, apiKey, defaultModel string) *OpenAIClient {
 
 func (c *OpenAIClient) ProviderName() string { return "openai" }
 
+// SupportsTools reports that this client can use native tool-calling
+// (GenerateRequest.ToolDefs / GenerateResponse.ToolCalls).
+func (c *OpenAIClient) SupportsTools() bool { return true }
+
 // openAIChatRequest mirrors the OpenAI /v1/chat/completions request body.
 type openAIChatRequest struct {
-	Model       string           `json:"model"`
-	Messages    []openAIMessage  `json:"messages"`
-	MaxTokens   int              `json:"max_tokens,omitempty"`
-	Temperature float64          `json:"temperature,omitempty"`
+	Model       string          `json:"model"`
+	Messages    []openAIMessage `json:"messages"`
+	MaxTokens   int             `json:"max_tokens,omitempty"`
+	Temperature float64         `json:"temperature,omitempty"`
+	Tools       []openAITool    `json:"tools,omitempty"`
 }
 
 type openAIMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string           `json:"role"`
+	Content    string           `json:"content"`
+	ToolCalls  []openAIToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string           `json:"tool_call_id,omitempty"`
+}
+
+// openAITool is a function definition in the /chat/completions "tools" array.
+type openAITool struct {
+	Type     string           `json:"type"`
+	Function openAIToolSchema `json:"function"`
+}
+
+type openAIToolSchema struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Parameters  map[string]any `json:"parameters,omitempty"`
+}
+
+// openAIToolCall is one entry in an assistant message's tool_calls array (both
+// on requests we echo back and on parsed responses).
+type openAIToolCall struct {
+	ID       string                 `json:"id"`
+	Type     string                 `json:"type"`
+	Function openAIToolCallFunction `json:"function"`
+}
+
+type openAIToolCallFunction struct {
+	Name string `json:"name"`
+	// Arguments is a JSON-encoded string per the OpenAI wire format.
+	Arguments string `json:"arguments"`
 }
 
 type openAIChatResponse struct {
@@ -70,7 +103,16 @@ func (c *OpenAIClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 
 	msgs := make([]openAIMessage, len(req.Messages))
 	for i, m := range req.Messages {
-		msgs[i] = openAIMessage{Role: m.Role, Content: m.Content}
+		om := openAIMessage{Role: m.Role, Content: m.Content, ToolCallID: m.ToolCallID}
+		for _, tc := range m.ToolCalls {
+			args, _ := json.Marshal(tc.Arguments)
+			om.ToolCalls = append(om.ToolCalls, openAIToolCall{
+				ID:       tc.ID,
+				Type:     "function",
+				Function: openAIToolCallFunction{Name: tc.Name, Arguments: string(args)},
+			})
+		}
+		msgs[i] = om
 	}
 
 	body := openAIChatRequest{
@@ -78,6 +120,18 @@ func (c *OpenAIClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 		Messages:    msgs,
 		MaxTokens:   req.MaxTokens,
 		Temperature: req.Temperature,
+	}
+
+	// Native tool-calling: advertise function definitions when provided.
+	for _, td := range req.ToolDefs {
+		body.Tools = append(body.Tools, openAITool{
+			Type: "function",
+			Function: openAIToolSchema{
+				Name:        td.Name,
+				Description: td.Description,
+				Parameters:  td.Parameters,
+			},
+		})
 	}
 
 	payload, err := json.Marshal(body)
@@ -122,10 +176,27 @@ func (c *OpenAIClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 		return nil, fmt.Errorf("openai: response contained no choices")
 	}
 
+	choice := chatResp.Choices[0]
+
+	// Parse any native tool calls. Arguments arrive as a JSON-encoded string.
+	var toolCalls []ToolCall
+	for _, tc := range choice.Message.ToolCalls {
+		args := map[string]any{}
+		if tc.Function.Arguments != "" {
+			_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
+		}
+		toolCalls = append(toolCalls, ToolCall{
+			ID:        tc.ID,
+			Name:      tc.Function.Name,
+			Arguments: args,
+		})
+	}
+
 	return &GenerateResponse{
-		Content:      chatResp.Choices[0].Message.Content,
-		FinishReason: chatResp.Choices[0].FinishReason,
+		Content:      choice.Message.Content,
+		FinishReason: choice.FinishReason,
 		InputTokens:  chatResp.Usage.PromptTokens,
 		OutputTokens: chatResp.Usage.CompletionTokens,
+		ToolCalls:    toolCalls,
 	}, nil
 }

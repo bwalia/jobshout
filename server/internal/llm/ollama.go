@@ -34,6 +34,10 @@ func NewOllamaClient(baseURL, defaultModel string) *OllamaClient {
 
 func (c *OllamaClient) ProviderName() string { return "ollama" }
 
+// SupportsTools reports that this client does NOT use native tool-calling; the
+// executor falls back to the ReAct JSON-in-prompt loop for Ollama.
+func (c *OllamaClient) SupportsTools() bool { return false }
+
 // ollamaChatRequest mirrors the Ollama /api/chat request body.
 type ollamaChatRequest struct {
 	Model    string          `json:"model"`

@@ -11,12 +11,41 @@ const (
 	RoleSystem    = "system"
 	RoleUser      = "user"
 	RoleAssistant = "assistant"
+	// RoleTool marks a message carrying the result of a native tool call. Each
+	// provider translates it into its own wire shape (OpenAI: a role:"tool"
+	// message; Claude: a user message with a tool_result block).
+	RoleTool = "tool"
 )
 
 // Message is a single turn in a chat conversation.
+//
+// The trailing fields support the native tool-calling path and are ignored on
+// the ReAct path (they marshal only within each provider's own request shape,
+// never via these json tags):
+//   - ToolCalls is set on an assistant message that requested tool calls, so a
+//     follow-up request echoes the assistant turn in the provider's format.
+//   - ToolCallID + Content together form a tool-result message (RoleTool)
+//     replying to the ToolCall with that ID.
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string     `json:"role"`
+	Content    string     `json:"content"`
+	ToolCalls  []ToolCall `json:"-"`
+	ToolCallID string     `json:"-"`
+}
+
+// ToolDef is a native function/tool definition passed to providers that support
+// tool-calling. Parameters is a JSON-Schema object.
+type ToolDef struct {
+	Name        string
+	Description string
+	Parameters  map[string]any
+}
+
+// ToolCall is a tool invocation the model requested via native tool-calling.
+type ToolCall struct {
+	ID        string
+	Name      string
+	Arguments map[string]any
 }
 
 // GenerateRequest is the input to a Generate call.
@@ -29,6 +58,11 @@ type GenerateRequest struct {
 	MaxTokens int
 	// Temperature controls randomness (0.0–1.0; 0 means use client default).
 	Temperature float64
+	// ToolDefs, when non-empty and supported by the client, are sent as native
+	// function definitions so the model can request tool calls directly. Empty
+	// (the default) preserves the previous behavior; clients that don't support
+	// tool-calling ignore this field.
+	ToolDefs []ToolDef
 }
 
 // GenerateResponse holds the model's reply and usage metadata.
@@ -41,6 +75,9 @@ type GenerateResponse struct {
 	InputTokens int
 	// OutputTokens is the number of tokens in the completion (if reported).
 	OutputTokens int
+	// ToolCalls holds any native tool invocations the model requested. Empty
+	// unless ToolDefs were sent and the provider returned tool calls.
+	ToolCalls []ToolCall
 }
 
 // Client is the interface every LLM provider must satisfy.
@@ -49,4 +86,13 @@ type Client interface {
 	Generate(ctx context.Context, req GenerateRequest) (*GenerateResponse, error)
 	// ProviderName returns a human-readable name for logging/metrics.
 	ProviderName() string
+}
+
+// ToolCapableClient is the OPTIONAL capability interface a Client may implement
+// to signal support for native tool-calling. It is kept separate from Client so
+// existing implementations (and test stubs) satisfy Client unchanged; callers
+// type-assert to discover the capability. A client that reports true accepts
+// GenerateRequest.ToolDefs and populates GenerateResponse.ToolCalls.
+type ToolCapableClient interface {
+	SupportsTools() bool
 }
