@@ -119,16 +119,41 @@ func main() {
 		zap.String("ollama_model", cfg.OllamaDefaultModel),
 	)
 
+	// ─── Embedding + knowledge ingestion (RAG foundation) ────────────────────
+	knowledgeChunkRepo := repository.NewKnowledgeChunkRepository(pool)
+	var embedder llm.Embedder
+	if e, err := llmRouter.Embedder(); err != nil {
+		logger.Info("embeddings not configured — knowledge ingestion will be skipped",
+			zap.String("embedding_provider", cfg.EmbeddingProvider), zap.Error(err))
+	} else {
+		embedder = e
+		logger.Info("embedder initialised",
+			zap.String("provider", e.EmbedderName()), zap.Int("dimensions", e.Dimensions()))
+	}
+	knowledgeIngestSvc := service.NewKnowledgeIngestService(knowledgeChunkRepo, embedder, logger)
+	// Enable semantic long-term memory (embed-on-write + cosine recall); falls
+	// back to ILIKE when embedder is nil.
+	memoryRepo = memoryRepo.WithEmbedder(embedder)
+
 	// ─── Tool registry ───────────────────────────────────────────────────────
 	toolRegistry := tools.NewRegistry()
 	toolRegistry.Register(tools.NewHTTPTool())
 	toolRegistry.Register(tools.NewShellTool(nil))
+	// knowledge_search performs semantic retrieval over an agent's knowledge
+	// base; it only works with a configured embedder, so register it only then.
+	if embedder != nil {
+		toolRegistry.Register(tools.NewKnowledgeTool(embedder, knowledgeChunkRepo))
+	}
 	logger.Info("tool registry initialised", zap.Int("tools", len(toolRegistry.All())))
 
 	// ─── Engine Router (multi-runtime) ──────────────────────────────────────
 	// WithSkills folds each agent's enabled skills into its runs (prompt
 	// patches + extra tools) via the skills registry.
-	goNativeExec := executor.New(llmRouter, toolRegistry, logger).WithSkills(skillRepo)
+	// WithKnowledge augments each run with the agent's most relevant stored
+	// knowledge before the loop starts (best-effort; skipped when no embedder).
+	goNativeExec := executor.New(llmRouter, toolRegistry, logger).
+		WithSkills(skillRepo).
+		WithKnowledge(knowledgeChunkRepo, embedder)
 
 	// Python sidecar clients for LangChain/LangGraph (nil-safe if not configured).
 	var lcClient *langchain.Client
@@ -330,7 +355,7 @@ func main() {
 	taskHandler := handler.NewTaskHandler(taskSvc)
 	orgHandler := handler.NewOrganizationHandler(orgRepo)
 	marketplaceHandler := handler.NewMarketplaceHandler(pool, logger)
-	knowledgeHandler := handler.NewKnowledgeHandler(pool, logger)
+	knowledgeHandler := handler.NewKnowledgeHandler(pool, knowledgeIngestSvc, logger)
 	metricsHandler := handler.NewMetricsHandler(pool, logger)
 	wsHandler := handler.NewWSHandler(hub, logger)
 	execHandler := handler.NewExecutionHandler(execSvc)

@@ -53,6 +53,10 @@ type Result struct {
 	Err           error
 }
 
+// knowledgeTopK is the number of knowledge chunks the executor retrieves and
+// injects as context before a run's loop starts.
+const knowledgeTopK = 5
+
 // SkillProvider yields the skills currently enabled for an agent. It is
 // satisfied by repository.SkillRepository; the executor depends on this narrow
 // interface so it never imports the repository package directly.
@@ -65,6 +69,8 @@ type Executor struct {
 	llmRouter *llm.Router
 	registry  *tools.Registry
 	skills    SkillProvider
+	knowledge tools.KnowledgeSearcher
+	embedder  tools.Embedder
 	logger    *zap.Logger
 }
 
@@ -85,6 +91,17 @@ func (e *Executor) WithSkills(p SkillProvider) *Executor {
 	return e
 }
 
+// WithKnowledge attaches a chunk searcher and embedder so each run is augmented
+// with the agent's most relevant stored knowledge before the loop starts.
+// Returns the receiver for fluent wiring. Retrieval is best-effort: it is
+// skipped entirely unless BOTH a searcher and an embedder are configured, and a
+// retrieval failure never breaks a run.
+func (e *Executor) WithKnowledge(searcher tools.KnowledgeSearcher, embedder tools.Embedder) *Executor {
+	e.knowledge = searcher
+	e.embedder = embedder
+	return e
+}
+
 // Run executes the ReAct loop for agent against taskPrompt.
 // agentTools is the subset of tool names the agent is permitted to use.
 // The execution ID is used only for structured logging correlation.
@@ -102,8 +119,10 @@ func (e *Executor) Run(
 	)
 
 	// Org-scope the context so org-aware tools (the integration tools) resolve
-	// this tenant's own credentials when the agent calls them.
+	// this tenant's own credentials when the agent calls them, and agent-scope it
+	// so agent-aware tools (knowledge_search) resolve this agent's own knowledge.
 	ctx = tools.WithOrg(ctx, agent.OrgID)
+	ctx = tools.WithAgent(ctx, agent.ID)
 
 	// Resolve the LLM client for this agent.
 	providerName := ""
@@ -159,6 +178,12 @@ func (e *Executor) Run(
 		modelName = *agent.ModelName
 	}
 
+	// Best-effort retrieval-augmented context: fetch the agent's most relevant
+	// knowledge chunks for this task and inject them as a leading context
+	// message. Gated on a configured searcher+embedder and never fatal — a
+	// retrieval failure must never break the run. Shared by both loop paths.
+	knowledgeMsg := e.retrieveKnowledge(ctx, log, agent.ID, taskPrompt)
+
 	// Native tool-calling path: when the provider advertises tool support AND
 	// every tool the agent may use exposes a JSON schema, drive the loop with
 	// real function definitions instead of the ReAct JSON-in-prompt fallback.
@@ -167,14 +192,11 @@ func (e *Executor) Run(
 		log.Info("using native tool-calling path", zap.Int("tools", len(toolDefs)))
 		nativeSystem := llm.BuildNativeSystemPrompt(agent.Name, agent.Role, systemPromptText)
 		return e.runNative(ctx, log, client, modelName, resolvedProvider,
-			nativeSystem, taskPrompt, toolDefs, toolRegistry)
+			nativeSystem, taskPrompt, knowledgeMsg, toolDefs, toolRegistry)
 	}
 
 	// Seed the conversation.
-	messages := []llm.Message{
-		{Role: llm.RoleSystem, Content: systemPrompt},
-		{Role: llm.RoleUser, Content: llm.BuildTaskUserMessage(taskPrompt)},
-	}
+	messages := seedMessages(systemPrompt, knowledgeMsg, taskPrompt)
 
 	runStart := time.Now()
 
@@ -430,6 +452,65 @@ func buildResult(
 	}
 }
 
+// seedMessages builds the initial conversation for a run: the system prompt,
+// an optional leading knowledge-context message (omitted when empty), then the
+// task. Both loop paths seed identically so retrieval-augmentation applies
+// uniformly. The knowledge block is a user-role message rather than a second
+// system message: some providers (e.g. Claude) collapse to a single system
+// prompt, so a second system message would clobber the agent's own prompt.
+func seedMessages(systemPrompt, knowledgeMsg, taskPrompt string) []llm.Message {
+	msgs := make([]llm.Message, 0, 3)
+	msgs = append(msgs, llm.Message{Role: llm.RoleSystem, Content: systemPrompt})
+	if knowledgeMsg != "" {
+		msgs = append(msgs, llm.Message{Role: llm.RoleUser, Content: knowledgeMsg})
+	}
+	msgs = append(msgs, llm.Message{Role: llm.RoleUser, Content: llm.BuildTaskUserMessage(taskPrompt)})
+	return msgs
+}
+
+// retrieveKnowledge returns a "Relevant knowledge:\n..." context block built
+// from the agent's top-K knowledge chunks most similar to taskPrompt, or the
+// empty string when retrieval is not configured or yields nothing. It is
+// best-effort: any error (embedding or search) is logged and swallowed so a run
+// is never broken by the knowledge base.
+func (e *Executor) retrieveKnowledge(ctx context.Context, log *zap.Logger, agentID uuid.UUID, taskPrompt string) string {
+	if e.knowledge == nil || e.embedder == nil {
+		return ""
+	}
+
+	vectors, err := e.embedder.Embed(ctx, []string{taskPrompt})
+	if err != nil {
+		log.Warn("knowledge retrieval: embed failed; continuing without it", zap.Error(err))
+		return ""
+	}
+	if len(vectors) == 0 {
+		return ""
+	}
+
+	chunks, err := e.knowledge.SearchByAgent(ctx, agentID, vectors[0], knowledgeTopK)
+	if err != nil {
+		log.Warn("knowledge retrieval: search failed; continuing without it", zap.Error(err))
+		return ""
+	}
+	if len(chunks) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("Relevant knowledge:\n")
+	for _, c := range chunks {
+		content := strings.TrimSpace(c.Content)
+		if content == "" {
+			continue
+		}
+		sb.WriteString("- ")
+		sb.WriteString(content)
+		sb.WriteString("\n")
+	}
+	log.Info("injected retrieved knowledge into run", zap.Int("chunks", len(chunks)))
+	return strings.TrimRight(sb.String(), "\n")
+}
+
 // clientSupportsTools reports whether the resolved LLM client advertises native
 // tool-calling. Clients opt in by implementing llm.ToolCapableClient; those that
 // don't (or that return false) drive the ReAct loop instead.
@@ -469,14 +550,11 @@ func (e *Executor) runNative(
 	ctx context.Context,
 	log *zap.Logger,
 	client llm.Client,
-	modelName, resolvedProvider, systemPrompt, taskPrompt string,
+	modelName, resolvedProvider, systemPrompt, taskPrompt, knowledgeMsg string,
 	toolDefs []llm.ToolDef,
 	toolRegistry *tools.Registry,
 ) Result {
-	messages := []llm.Message{
-		{Role: llm.RoleSystem, Content: systemPrompt},
-		{Role: llm.RoleUser, Content: llm.BuildTaskUserMessage(taskPrompt)},
-	}
+	messages := seedMessages(systemPrompt, knowledgeMsg, taskPrompt)
 
 	runStart := time.Now()
 

@@ -1,25 +1,30 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 
 	"github.com/jobshout/server/internal/middleware"
+	"github.com/jobshout/server/internal/service"
 )
 
 // KnowledgeHandler handles agent knowledge file endpoints.
 type KnowledgeHandler struct {
 	pool   *pgxpool.Pool
+	ingest service.KnowledgeIngestService
 	logger *zap.Logger
 }
 
-// NewKnowledgeHandler constructs a KnowledgeHandler.
-func NewKnowledgeHandler(pool *pgxpool.Pool, logger *zap.Logger) *KnowledgeHandler {
-	return &KnowledgeHandler{pool: pool, logger: logger}
+// NewKnowledgeHandler constructs a KnowledgeHandler. ingest may be nil, in which
+// case knowledge files are stored without vector ingestion.
+func NewKnowledgeHandler(pool *pgxpool.Pool, ingest service.KnowledgeIngestService, logger *zap.Logger) *KnowledgeHandler {
+	return &KnowledgeHandler{pool: pool, ingest: ingest, logger: logger}
 }
 
 type knowledgeFileRow struct {
@@ -119,10 +124,39 @@ func (h *KnowledgeHandler) CreateFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Best-effort vector ingestion — never blocks the CRUD response.
+	h.ingestFile(r.Context(), orgID, agentID, id, req.Content)
+
 	RespondJSON(w, http.StatusCreated, map[string]string{
 		"id":       id,
 		"filename": req.Filename,
 	})
+}
+
+// ingestFile runs best-effort vector ingestion for a knowledge file. Errors are
+// logged and swallowed so knowledge-file CRUD is never blocked.
+func (h *KnowledgeHandler) ingestFile(ctx context.Context, orgIDStr, agentIDStr, fileIDStr, content string) {
+	if h.ingest == nil {
+		return
+	}
+	orgID, err := uuid.Parse(orgIDStr)
+	if err != nil {
+		h.logger.Warn("knowledge ingest: invalid org id", zap.Error(err))
+		return
+	}
+	agentID, err := uuid.Parse(agentIDStr)
+	if err != nil {
+		h.logger.Warn("knowledge ingest: invalid agent id", zap.Error(err))
+		return
+	}
+	fileID, err := uuid.Parse(fileIDStr)
+	if err != nil {
+		h.logger.Warn("knowledge ingest: invalid file id", zap.Error(err))
+		return
+	}
+	if err := h.ingest.IngestFile(ctx, orgID, agentID, fileID, content); err != nil {
+		h.logger.Warn("knowledge ingest failed", zap.Error(err))
+	}
 }
 
 type updateKnowledgeFileRequest struct {
@@ -140,6 +174,15 @@ func (h *KnowledgeHandler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 
 	sizeBytes := len([]byte(req.Content))
 
+	// Fetch the owning agent + org so the re-ingested chunks are scoped
+	// correctly. A missing row is reported as not found below.
+	var agentID, orgID string
+	ownerErr := h.pool.QueryRow(r.Context(),
+		`SELECT kf.agent_id, a.org_id
+			FROM knowledge_files kf JOIN agents a ON a.id = kf.agent_id
+			WHERE kf.id = $1`, fileID,
+	).Scan(&agentID, &orgID)
+
 	tag, err := h.pool.Exec(r.Context(),
 		`UPDATE knowledge_files SET content = $1, size_bytes = $2, updated_at = NOW()
 			WHERE id = $3`,
@@ -153,6 +196,11 @@ func (h *KnowledgeHandler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 	if tag.RowsAffected() == 0 {
 		RespondError(w, http.StatusNotFound, "knowledge file not found")
 		return
+	}
+
+	// Best-effort re-ingestion — never blocks the CRUD response.
+	if ownerErr == nil {
+		h.ingestFile(r.Context(), orgID, agentID, fileID, req.Content)
 	}
 
 	RespondJSON(w, http.StatusOK, map[string]string{"message": "updated"})

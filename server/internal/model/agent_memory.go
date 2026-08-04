@@ -25,4 +25,13 @@ type AgentMemoryLongTerm struct {
 	Summary   string         `json:"summary"`
 	Metadata  map[string]any `json:"metadata"`
 	CreatedAt time.Time      `json:"created_at"`
+
+	// Embedding is the pgvector representation of the memory used for
+	// semantic (cosine-similarity) recall. It is nil when no embedder is
+	// configured or for rows written before the embedding backfill.
+	Embedding []float32 `json:"-"`
+
+	// Distance is populated by semantic searches (cosine distance; lower is
+	// more similar) and is zero-valued outside of search results.
+	Distance float64 `json:"distance,omitempty"`
 }
