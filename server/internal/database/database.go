@@ -39,3 +39,65 @@ func NewPool(ctx context.Context, databaseURL string, logger *zap.Logger) (*pgxp
 
 	return pool, nil
 }
+
+// NewPoolWithRetry calls NewPool repeatedly, backing off between attempts,
+// until it succeeds or timeout elapses.
+//
+// Without this, any blip that makes Postgres briefly unreachable — a DB
+// restart, a DNS hiccup, a rescheduled StatefulSet — is fatal at startup. The
+// pod then enters CrashLoopBackOff, and because the backoff grows to minutes,
+// the API stays down long after the database has come back. Retrying here
+// turns a short outage into a slow start instead of an outage of our own.
+//
+// A timeout of 0 disables retrying and behaves exactly like NewPool.
+func NewPoolWithRetry(ctx context.Context, databaseURL string, logger *zap.Logger, timeout time.Duration) (*pgxpool.Pool, error) {
+	const (
+		initialBackoff = 1 * time.Second
+		maxBackoff     = 15 * time.Second
+	)
+
+	if timeout <= 0 {
+		return NewPool(ctx, databaseURL, logger)
+	}
+
+	deadline := time.Now().Add(timeout)
+	backoff := initialBackoff
+
+	for attempt := 1; ; attempt++ {
+		pool, err := NewPool(ctx, databaseURL, logger)
+		if err == nil {
+			if attempt > 1 {
+				logger.Info("database reachable after retrying",
+					zap.Int("attempts", attempt),
+				)
+			}
+			return pool, nil
+		}
+
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("database connect cancelled after %d attempt(s): %w", attempt, err)
+		}
+
+		// Stop if sleeping again would carry us past the deadline; there is no
+		// point burning the remaining window on a wait we know we cannot honour.
+		if !time.Now().Add(backoff).Before(deadline) {
+			return nil, fmt.Errorf("database unreachable after %d attempt(s) over %s: %w", attempt, timeout, err)
+		}
+
+		logger.Warn("database not reachable, retrying",
+			zap.Int("attempt", attempt),
+			zap.Duration("retry_in", backoff),
+			zap.Error(err),
+		)
+
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("database connect cancelled after %d attempt(s): %w", attempt, err)
+		case <-time.After(backoff):
+		}
+
+		if backoff *= 2; backoff > maxBackoff {
+			backoff = maxBackoff
+		}
+	}
+}

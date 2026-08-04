@@ -83,6 +83,14 @@ storage:
 api:
   replicas: 1
   port: 8080
+  # How long the API retries its initial Postgres connection before giving up
+  # and exiting. Must stay comfortably under the startup probe budget below
+  # (periodSeconds x failureThreshold), or Kubernetes kills the pod while it is
+  # still legitimately retrying. Set to 0 to fail fast on the first error.
+  dbConnectTimeout: 5m
+  startupProbe:
+    periodSeconds: 10
+    failureThreshold: 40 # 400s of budget for a 300s retry window
   resources:
     requests: { cpu: 250m, memory: 256Mi }
     limits: { cpu: "1", memory: 512Mi }
@@ -108,9 +116,27 @@ postgres:
   enabled: true
   port: 5432
   database: jobshout
+  # Shared by the StatefulSet and the backup CronJob. pg_dump refuses to run
+  # against a server newer than itself, so both must move together.
+  image: postgres:16-alpine
   resources:
     requests: { cpu: 250m, memory: 512Mi }
     limits: { cpu: "1", memory: 1Gi }
+
+# Nightly pg_dump. Restores are manual — this only guarantees a dump exists.
+#
+# NOTE: backups land on a local-path PVC, which pins them to one node's disk,
+# the same class of failure that can take out the database itself. This is a
+# floor, not a backup strategy; shipping the dumps off-cluster (MinIO/S3) is
+# the follow-up.
+backup:
+  enabled: true
+  schedule: "0 2 * * *"
+  retentionDays: 14
+  size: 10Gi
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 512Mi }
 
 redis:
   enabled: true

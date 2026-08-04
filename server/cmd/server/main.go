@@ -62,7 +62,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pool, err := database.NewPool(ctx, cfg.DatabaseURL, logger)
+	pool, err := database.NewPoolWithRetry(ctx, cfg.DatabaseURL, logger, cfg.DatabaseConnectTimeout)
 	if err != nil {
 		logger.Fatal("failed to connect to database", zap.Error(err))
 	}
