@@ -4,106 +4,122 @@
 
 @layer base {
   /*
-   * Tokens follow the JIRA / ADS visual rhythm:
-   *   - low-saturation neutrals for surfaces (closer to ADS Neutral than to
-   *     pure slate)
-   *   - Atlassian Brand Blue (#0C66E4) for primary
-   *   - JIRA-style status hues for todo / in-progress / done / blocked
+   * "Signal Room" — mission control for autonomous AI agents.
    *
-   * We keep the CSS variable names already used across the codebase so this
-   * is a drop-in palette refresh — no component edits required.
+   *   - Warm ink surfaces (a violet-brown near-black), NOT cold slate — so the
+   *     product doesn't read as a generic dark dashboard.
+   *   - Signal Amber (#FFB020) is the ONE brand accent (primary + the live
+   *     pulse). Green/red/blue appear ONLY as agent status, never as brand.
+   *   - Dark is the identity (default); light is a warm-paper companion.
+   *
+   * Variable names are unchanged from the previous palette, so this is a
+   * drop-in reskin: every screen picks it up through the token cascade.
    */
   :root {
-    /* Surfaces */
-    --background: 220 25% 98%;          /* ADS Neutral 0/100 — page bg */
-    --foreground: 220 25% 10%;          /* ADS Neutral 1000 */
+    /* Surfaces — warm paper */
+    --background: 40 30% 97%;
+    --foreground: 250 18% 12%;
 
     --card: 0 0% 100%;
-    --card-foreground: 220 25% 10%;
+    --card-foreground: 250 18% 12%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 220 25% 10%;
+    --popover-foreground: 250 18% 12%;
 
-    /* Brand — Atlassian Blue 600 (#0C66E4) */
-    --primary: 215 90% 47%;
-    --primary-foreground: 0 0% 100%;
+    /* Brand — Signal Amber (dark text sits on it) */
+    --primary: 39 96% 50%;
+    --primary-foreground: 32 45% 12%;
 
-    --secondary: 220 14% 94%;           /* ADS Neutral 200 */
-    --secondary-foreground: 220 25% 10%;
+    --secondary: 40 16% 93%;
+    --secondary-foreground: 250 18% 12%;
 
-    --muted: 220 14% 94%;
-    --muted-foreground: 220 9% 38%;     /* ADS Neutral 700 */
+    --muted: 40 16% 93%;
+    --muted-foreground: 250 8% 42%;
 
-    --accent: 215 100% 96%;             /* Blue 100 tint */
-    --accent-foreground: 215 90% 38%;   /* Blue 700 */
+    --accent: 39 90% 94%;
+    --accent-foreground: 32 80% 34%;
 
-    --destructive: 4 76% 50%;           /* Red 500 (#E2483D family) */
+    --destructive: 2 78% 52%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 220 13% 87%;              /* ADS Neutral 300 */
-    --input: 220 13% 87%;
-    --ring: 215 90% 47%;
+    --border: 40 14% 87%;
+    --input: 40 14% 87%;
+    --ring: 39 96% 50%;
 
-    --radius: 0.5rem;                   /* JIRA cards are tighter (8px) */
+    --radius: 0.625rem;
 
-    /* Sidebar — keep the dark sidebar for global navigation contrast */
-    --sidebar: 220 25% 10%;
-    --sidebar-foreground: 220 9% 65%;
-    --sidebar-accent: 215 90% 56%;
-    --sidebar-muted: 220 25% 14%;
-    --sidebar-border: 220 25% 16%;
+    /* Sidebar — warm ink even in light mode (the console rail is always dark) */
+    --sidebar: 249 20% 8%;
+    --sidebar-foreground: 250 8% 62%;
+    --sidebar-accent: 39 100% 56%;
+    --sidebar-muted: 247 16% 13%;
+    --sidebar-border: 251 14% 16%;
 
-    /* JIRA status palette */
-    --status-todo:     220 9% 50%;     /* gray  — To Do */
-    --status-progress: 215 90% 47%;    /* blue  — In Progress */
-    --status-review:   38 92% 50%;     /* amber — In Review */
-    --status-done:     150 60% 38%;    /* green — Done */
-    --status-blocked:  4 76% 50%;      /* red   — Blocked / Failed */
-    --status-idle:     220 9% 65%;     /* lighter gray — Idle */
+    /* Agent status hues (semantic — never used as brand) */
+    --status-todo:     250 6% 52%;   /* idle / queued  */
+    --status-progress: 39 96% 50%;   /* broadcasting   → amber */
+    --status-review:   39 96% 50%;   /* awaiting appr. → amber */
+    --status-done:     151 62% 42%;  /* completed      → green */
+    --status-blocked:  2 82% 58%;    /* failed         → red   */
+    --status-idle:     250 6% 60%;
+
+    /* Named signal tokens (used by SignalDot + charts) */
+    --signal:      39 100% 56%;
+    --signal-live: 151 64% 54%;
+    --signal-warn: 39 100% 56%;
+    --signal-error: 0 100% 68%;
+    --signal-info: 228 100% 72%;
   }
 
   .dark {
-    --background: 220 35% 6%;           /* ADS Dark Neutral 0 (#101418-ish) */
-    --foreground: 220 14% 92%;
+    /* Surfaces — warm ink (violet-brown near-black, not slate) */
+    --background: 249 16% 8%;
+    --foreground: 250 20% 94%;
 
-    --card: 220 30% 9%;                 /* surfaces lift over the bg */
-    --card-foreground: 220 14% 92%;
+    --card: 250 15% 11%;
+    --card-foreground: 250 20% 94%;
 
-    --popover: 220 30% 9%;
-    --popover-foreground: 220 14% 92%;
+    --popover: 250 16% 10%;
+    --popover-foreground: 250 20% 94%;
 
-    --primary: 215 90% 60%;             /* Blue brightens slightly on dark */
-    --primary-foreground: 0 0% 100%;
+    /* Brand — Signal Amber, dark text */
+    --primary: 39 100% 56%;
+    --primary-foreground: 30 40% 9%;
 
-    --secondary: 220 20% 14%;
-    --secondary-foreground: 220 14% 88%;
+    --secondary: 250 12% 16%;
+    --secondary-foreground: 250 16% 90%;
 
-    --muted: 220 20% 14%;
-    --muted-foreground: 220 9% 60%;
+    --muted: 250 12% 16%;
+    --muted-foreground: 250 8% 60%;
 
-    --accent: 215 50% 18%;
-    --accent-foreground: 215 90% 75%;
+    --accent: 39 44% 16%;
+    --accent-foreground: 39 100% 70%;
 
-    --destructive: 4 76% 55%;
-    --destructive-foreground: 0 0% 100%;
+    --destructive: 0 84% 64%;
+    --destructive-foreground: 250 20% 96%;
 
-    --border: 220 16% 18%;
-    --input: 220 16% 20%;
-    --ring: 215 90% 60%;
+    --border: 251 13% 18%;
+    --input: 251 13% 20%;
+    --ring: 39 100% 56%;
 
-    --sidebar: 220 35% 4%;
-    --sidebar-foreground: 220 9% 58%;
-    --sidebar-accent: 215 90% 60%;
-    --sidebar-muted: 220 30% 9%;
-    --sidebar-border: 220 25% 12%;
+    --sidebar: 249 20% 6%;
+    --sidebar-foreground: 250 8% 60%;
+    --sidebar-accent: 39 100% 56%;
+    --sidebar-muted: 250 15% 11%;
+    --sidebar-border: 251 14% 13%;
 
-    /* Status hues stay readable on dark by lifting lightness slightly. */
-    --status-todo:     220 9% 60%;
-    --status-progress: 215 90% 60%;
-    --status-review:   38 92% 56%;
-    --status-done:     150 55% 48%;
-    --status-blocked:  4 76% 60%;
-    --status-idle:     220 9% 50%;
+    --status-todo:     250 6% 58%;
+    --status-progress: 39 100% 56%;
+    --status-review:   39 100% 56%;
+    --status-done:     151 64% 54%;
+    --status-blocked:  0 84% 64%;
+    --status-idle:     250 6% 48%;
+
+    --signal:      39 100% 56%;
+    --signal-live: 151 64% 54%;
+    --signal-warn: 39 100% 56%;
+    --signal-error: 0 100% 68%;
+    --signal-info: 228 100% 72%;
   }
 }
 
@@ -114,16 +130,52 @@
   body {
     @apply bg-background text-foreground antialiased;
   }
+  /* Telemetry: numerics / ids / timestamps read as mono + tabular when tagged
+     .tabular — used across KPI tiles, tables and the live feed. */
+  .tabular {
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
 }
 
-/* Scrollbar — thin and polished */
+/* ─── Signal pulse — the signature motif ─────────────────────────────────── */
 @layer utilities {
+  /* Concentric broadcast ripple emitted by a "live" agent. */
+  @keyframes signal-ping {
+    0% {
+      transform: scale(1);
+      opacity: 0.55;
+    }
+    75%,
+    100% {
+      transform: scale(2.6);
+      opacity: 0;
+    }
+  }
+  @keyframes signal-breathe {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.45;
+    }
+  }
+  .animate-signal-ping {
+    animation: signal-ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
+  .animate-signal-breathe {
+    animation: signal-breathe 2.4s ease-in-out infinite;
+  }
+
   .scrollbar-thin {
     scrollbar-width: thin;
     scrollbar-color: hsl(var(--border)) transparent;
   }
   .scrollbar-thin::-webkit-scrollbar {
     width: 6px;
+    height: 6px;
   }
   .scrollbar-thin::-webkit-scrollbar-track {
     background: transparent;
@@ -131,5 +183,13 @@
   .scrollbar-thin::-webkit-scrollbar-thumb {
     background-color: hsl(var(--border));
     border-radius: 3px;
+  }
+}
+
+/* Quality floor: respect reduced motion for every signal / animation. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-signal-ping,
+  .animate-signal-breathe {
+    animation: none !important;
   }
 }

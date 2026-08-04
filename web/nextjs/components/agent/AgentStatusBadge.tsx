@@ -1,64 +1,59 @@
 import type { AgentStatus } from "@/lib/types/common";
+import { SignalDot, type SignalStatus } from "@/components/ui/signal-dot";
+import { cn } from "@/lib/utils/cn";
 
 interface AgentStatusBadgeProps {
   status: AgentStatus;
 }
 
-/** Maps each status to its display label and Tailwind colour tokens. */
+/** Maps each agent status to its label, signal motif and token-based colours. */
 const STATUS_CONFIG: Record<
   AgentStatus,
-  { label: string; dotClass: string; textClass: string; bgClass: string }
+  { label: string; signal: SignalStatus; text: string; bg: string }
 > = {
+  active: {
+    label: "Live",
+    signal: "live",
+    text: "text-signal-live",
+    bg: "bg-signal-live/10",
+  },
   idle: {
     label: "Idle",
-    dotClass: "bg-slate-400",
-    textClass: "text-slate-400",
-    bgClass: "bg-slate-400/10",
-  },
-  active: {
-    label: "Active",
-    dotClass: "bg-emerald-500",
-    textClass: "text-emerald-500",
-    bgClass: "bg-emerald-500/10",
+    signal: "idle",
+    text: "text-muted-foreground",
+    bg: "bg-muted",
   },
   paused: {
     label: "Paused",
-    dotClass: "bg-amber-500",
-    textClass: "text-amber-500",
-    bgClass: "bg-amber-500/10",
+    signal: "attention",
+    text: "text-signal",
+    bg: "bg-signal/10",
   },
   offline: {
     label: "Offline",
-    dotClass: "bg-red-500",
-    textClass: "text-red-500",
-    bgClass: "bg-red-500/10",
+    signal: "error",
+    text: "text-signal-error",
+    bg: "bg-signal-error/10",
   },
 };
 
 /**
- * A small pill badge that communicates an agent's current status.
- * Active agents render a pulsing dot to convey real-time activity.
+ * A pill that communicates an agent's status. Live agents emit the broadcast
+ * pulse (the Signal Room signature) via SignalDot.
  */
 export function AgentStatusBadge({ status }: AgentStatusBadgeProps) {
-  const config = STATUS_CONFIG[status] ?? STATUS_CONFIG.offline;
+  const c = STATUS_CONFIG[status] ?? STATUS_CONFIG.offline;
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${config.bgClass} ${config.textClass}`}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium",
+        c.bg,
+        c.text
+      )}
     >
-      <span className="relative flex h-2 w-2 flex-shrink-0">
-        {/* Pulse ring – shown only for the "active" status */}
-        {status === "active" && (
-          <span
-            className={`absolute inline-flex h-full w-full animate-ping rounded-full opacity-75 ${config.dotClass}`}
-            aria-hidden="true"
-          />
-        )}
-        <span
-          className={`relative inline-flex h-2 w-2 rounded-full ${config.dotClass}`}
-        />
-      </span>
-      {config.label}
+      <SignalDot status={c.signal} size="sm" />
+      {c.label}
     </span>
   );
 }

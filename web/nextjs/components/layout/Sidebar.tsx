@@ -17,12 +17,13 @@ import {
   Workflow,
   Puzzle,
   ChevronLeft,
-  Zap,
+  Radio,
   Kanban,
   Goal,
   Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
+import { SignalDot } from "@/components/ui/signal-dot";
 
 interface NavItem {
   label: string;
@@ -97,12 +98,13 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
       {/* Brand header */}
       <div className="flex h-16 items-center justify-between border-b border-sidebar-border px-4">
         <div className="flex items-center gap-2.5 overflow-hidden">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <Zap className="h-4 w-4" />
+          <span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-signal">
+            <Radio className="h-4 w-4" />
           </span>
           {!collapsed && (
-            <span className="text-base font-semibold tracking-tight text-white whitespace-nowrap">
-              Jobshout
+            <span className="flex items-center gap-2 whitespace-nowrap font-display text-base font-semibold tracking-tight text-white">
+              JobShout
+              <SignalDot status="live" size="sm" />
             </span>
           )}
         </div>
@@ -123,7 +125,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         {NAV_SECTIONS.map((section) => (
           <div key={section.title} className="mb-6">
             {!collapsed && (
-              <p className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/50">
+              <p className="mb-2 px-3 font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-sidebar-foreground/45">
                 {section.title}
               </p>
             )}
@@ -159,11 +161,11 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
       {/* Footer */}
       <div className="border-t border-sidebar-border px-4 py-3">
         {!collapsed ? (
-          <p className="text-[11px] text-sidebar-foreground/40">
-            Jobshout v0.3.0
+          <p className="font-mono text-[10px] tracking-tight text-sidebar-foreground/40">
+            JobShout <span className="text-sidebar-accent/70">v0.3.0</span>
           </p>
         ) : (
-          <p className="text-center text-[10px] text-sidebar-foreground/40">
+          <p className="text-center font-mono text-[10px] text-sidebar-foreground/40">
             v0.3
           </p>
         )}
