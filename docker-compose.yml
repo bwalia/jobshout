@@ -1,6 +1,9 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    # pgvector, not plain postgres: migration 000016 opens with CREATE EXTENSION
+    # vector, which stock postgres images cannot install. Keep this in step with
+    # postgres.image in deploy/helm/jobshout/values.yaml.
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-jobshout}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jobshout}

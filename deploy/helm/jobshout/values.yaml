@@ -116,9 +116,15 @@ postgres:
   enabled: true
   port: 5432
   database: jobshout
-  # Shared by the StatefulSet and the backup CronJob. pg_dump refuses to run
-  # against a server newer than itself, so both must move together.
-  image: postgres:16-alpine
+  # Shared by the StatefulSet, the API's wait-for-postgres initContainer, and
+  # the backup CronJob. pg_dump refuses to run against a server newer than
+  # itself, so all of them must move together.
+  #
+  # pgvector, not plain postgres: migration 000016 opens with CREATE EXTENSION
+  # vector, and stock postgres images do not ship it — the extension is not
+  # merely absent from the database, it is unavailable to install, so the API
+  # fatals during migrations and never serves. Same PostgreSQL 16.14 underneath.
+  image: pgvector/pgvector:pg16
   resources:
     requests: { cpu: 250m, memory: 512Mi }
     limits: { cpu: "1", memory: 1Gi }
