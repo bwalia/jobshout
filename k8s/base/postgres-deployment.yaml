@@ -19,7 +19,9 @@ spec:
     spec:
       containers:
         - name: postgres
-          image: postgres:16-alpine
+          # pgvector, not plain postgres: migration 000016 runs CREATE EXTENSION
+          # vector, which stock postgres images cannot install.
+          image: pgvector/pgvector:pg16
           ports:
             - containerPort: 5432
               name: postgres
