@@ -22,6 +22,11 @@ import (
 // MaxIterations is the hard cap on ReAct loop iterations to prevent infinite loops.
 const MaxIterations = 15
 
+// StatusAwaitingApproval is the Result.Status value set when a run pauses on a
+// gated tool call, waiting for a human decision. An empty Status is the default
+// and denotes a normal (completed or failed) run.
+const StatusAwaitingApproval = "awaiting_approval"
+
 // reactResponse is the JSON structure every LLM turn must return.
 type reactResponse struct {
 	Thought     string         `json:"thought"`
@@ -51,6 +56,13 @@ type Result struct {
 	ModelName     string
 	ToolCalls     []ToolCallRecord
 	Err           error
+
+	// Status is "" for a normal (completed or failed) run, or
+	// StatusAwaitingApproval when the run paused on a gated tool call.
+	Status string
+	// ApprovalID is the pending approval created when Status ==
+	// StatusAwaitingApproval; it is the zero UUID otherwise.
+	ApprovalID uuid.UUID
 }
 
 // knowledgeTopK is the number of knowledge chunks the executor retrieves and
@@ -71,6 +83,7 @@ type Executor struct {
 	skills    SkillProvider
 	knowledge tools.KnowledgeSearcher
 	embedder  tools.Embedder
+	gate      ApprovalGate
 	logger    *zap.Logger
 }
 
@@ -99,6 +112,16 @@ func (e *Executor) WithSkills(p SkillProvider) *Executor {
 func (e *Executor) WithKnowledge(searcher tools.KnowledgeSearcher, embedder tools.Embedder) *Executor {
 	e.knowledge = searcher
 	e.embedder = embedder
+	return e
+}
+
+// WithApprovalGate attaches a human-in-the-loop approval gate. When a gated tool
+// is about to run, the ReAct loop pauses: it serialises its resumable state,
+// records a pending approval via the gate, and returns a Result with
+// Status == StatusAwaitingApproval. Returns the receiver for fluent wiring. When
+// no gate is set (the default), runs proceed unchanged and no tool is ever gated.
+func (e *Executor) WithApprovalGate(g ApprovalGate) *Executor {
+	e.gate = g
 	return e
 }
 
@@ -191,43 +214,55 @@ func (e *Executor) Run(
 	if toolDefs, ok := buildToolDefs(toolRegistry); ok && len(toolDefs) > 0 && clientSupportsTools(client) {
 		log.Info("using native tool-calling path", zap.Int("tools", len(toolDefs)))
 		nativeSystem := llm.BuildNativeSystemPrompt(agent.Name, agent.Role, systemPromptText)
-		return e.runNative(ctx, log, client, modelName, resolvedProvider,
+		return e.runNative(ctx, log, agent.ID, client, modelName, resolvedProvider,
 			nativeSystem, taskPrompt, knowledgeMsg, toolDefs, toolRegistry)
 	}
 
-	// Seed the conversation.
-	messages := seedMessages(systemPrompt, knowledgeMsg, taskPrompt)
+	// Seed the conversation and drive the ReAct loop from a fresh state.
+	st := &reactLoopState{
+		client:       client,
+		modelName:    modelName,
+		provider:     resolvedProvider,
+		toolRegistry: toolRegistry,
+		agentID:      agent.ID,
+		orgID:        agent.OrgID,
+		execID:       execID,
+		agentTools:   agentTools,
+		messages:     seedMessages(systemPrompt, knowledgeMsg, taskPrompt),
+		iteration:    0,
+		runStart:     time.Now(),
+		log:          log,
+	}
+	return e.reactLoop(ctx, st)
+}
 
-	runStart := time.Now()
+// reactLoop drives the ReAct iteration loop over the supplied state, starting at
+// st.iteration+1. It is shared by a fresh Run and by Resume (which pre-populates
+// the state from a persisted approval), so both take exactly the same code path.
+// When a gated tool is about to execute it pauses via pauseForApproval, returning
+// a Result with Status == StatusAwaitingApproval.
+func (e *Executor) reactLoop(ctx context.Context, st *reactLoopState) Result {
+	for iteration := st.iteration + 1; iteration <= MaxIterations; iteration++ {
+		st.log.Info("ReAct iteration", zap.Int("iteration", iteration))
 
-	var (
-		toolCalls    []ToolCallRecord
-		totalTokens  int
-		inputTokens  int
-		outputTokens int
-	)
-
-	for iteration := 1; iteration <= MaxIterations; iteration++ {
-		log.Info("ReAct iteration", zap.Int("iteration", iteration))
-
-		llmResp, err := client.Generate(ctx, llm.GenerateRequest{
-			Messages:    messages,
-			Model:       modelName,
+		llmResp, err := st.client.Generate(ctx, llm.GenerateRequest{
+			Messages:    st.messages,
+			Model:       st.modelName,
 			MaxTokens:   4096,
 			Temperature: 0.2,
 		})
 		if err != nil {
-			return buildResult("", iteration, totalTokens, inputTokens, outputTokens,
-				runStart, resolvedProvider, modelName, toolCalls,
+			return buildResult("", iteration, st.totalTokens, st.inputTokens, st.outputTokens,
+				st.runStart, st.provider, st.modelName, st.toolCalls,
 				fmt.Errorf("executor: LLM generate (iteration %d): %w", iteration, err))
 		}
 
-		inputTokens += llmResp.InputTokens
-		outputTokens += llmResp.OutputTokens
-		totalTokens += llmResp.InputTokens + llmResp.OutputTokens
+		st.inputTokens += llmResp.InputTokens
+		st.outputTokens += llmResp.OutputTokens
+		st.totalTokens += llmResp.InputTokens + llmResp.OutputTokens
 
 		// Append the assistant turn to maintain conversation history.
-		messages = append(messages, llm.Message{
+		st.messages = append(st.messages, llm.Message{
 			Role:    llm.RoleAssistant,
 			Content: llmResp.Content,
 		})
@@ -235,16 +270,16 @@ func (e *Executor) Run(
 		// Parse the structured JSON response.
 		parsed, parseErr := parseReActResponse(llmResp.Content)
 		if parseErr != nil {
-			log.Warn("failed to parse ReAct JSON; treating as final answer",
+			st.log.Warn("failed to parse ReAct JSON; treating as final answer",
 				zap.String("raw", llmResp.Content),
 				zap.Error(parseErr),
 			)
 			// Graceful degradation: treat raw content as the final answer.
-			return buildResult(llmResp.Content, iteration, totalTokens, inputTokens, outputTokens,
-				runStart, resolvedProvider, modelName, toolCalls, nil)
+			return buildResult(llmResp.Content, iteration, st.totalTokens, st.inputTokens, st.outputTokens,
+				st.runStart, st.provider, st.modelName, st.toolCalls, nil)
 		}
 
-		log.Debug("parsed ReAct response",
+		st.log.Debug("parsed ReAct response",
 			zap.String("thought", parsed.Thought),
 			zap.Boolp("has_action", boolPtr(parsed.Action != nil)),
 			zap.Boolp("has_final_answer", boolPtr(parsed.FinalAnswer != nil)),
@@ -252,15 +287,15 @@ func (e *Executor) Run(
 
 		// Case 1: Agent has produced a final answer.
 		if parsed.FinalAnswer != nil && *parsed.FinalAnswer != "" {
-			return buildResult(*parsed.FinalAnswer, iteration, totalTokens, inputTokens, outputTokens,
-				runStart, resolvedProvider, modelName, toolCalls, nil)
+			return buildResult(*parsed.FinalAnswer, iteration, st.totalTokens, st.inputTokens, st.outputTokens,
+				st.runStart, st.provider, st.modelName, st.toolCalls, nil)
 		}
 
 		// Case 2: Agent wants to call a tool.
 		if parsed.Action == nil || *parsed.Action == "" {
 			// No action and no final answer — shouldn't happen but recover gracefully.
-			return buildResult(parsed.Thought, iteration, totalTokens, inputTokens, outputTokens,
-				runStart, resolvedProvider, modelName, toolCalls, nil)
+			return buildResult(parsed.Thought, iteration, st.totalTokens, st.inputTokens, st.outputTokens,
+				st.runStart, st.provider, st.modelName, st.toolCalls, nil)
 		}
 
 		toolName := *parsed.Action
@@ -269,22 +304,31 @@ func (e *Executor) Run(
 			toolInput = map[string]any{}
 		}
 
-		tool, ok := toolRegistry.Get(toolName)
+		tool, ok := st.toolRegistry.Get(toolName)
 		if !ok {
 			toolResult := fmt.Sprintf("Error: tool %q is not available to this agent.", toolName)
-			log.Warn("agent requested unavailable tool", zap.String("tool", toolName))
+			st.log.Warn("agent requested unavailable tool", zap.String("tool", toolName))
 
-			messages = append(messages, llm.Message{
+			st.messages = append(st.messages, llm.Message{
 				Role:    llm.RoleUser,
 				Content: llm.BuildToolResultMessage(toolName, toolResult),
 			})
 
-			toolCalls = append(toolCalls, ToolCallRecord{
+			st.toolCalls = append(st.toolCalls, ToolCallRecord{
 				ToolName: toolName,
 				Input:    toolInput,
 				Err:      fmt.Errorf("tool not available"),
 			})
 			continue
+		}
+
+		// Approval gate: when configured and this tool is gated for the agent,
+		// pause the run here — before the tool runs — and record a pending
+		// approval. The assistant turn requesting the tool is already in the
+		// conversation, so Resume can execute the tool and continue cleanly.
+		if e.gate != nil && e.gate.RequiresApproval(st.agentID, toolName) {
+			st.iteration = iteration
+			return e.pauseForApproval(ctx, st, toolName, toolInput)
 		}
 
 		// Execute the tool with a 60-second timeout.
@@ -301,32 +345,32 @@ func (e *Executor) Run(
 			Err:        toolErr,
 			DurationMs: durationMs,
 		}
-		toolCalls = append(toolCalls, record)
+		st.toolCalls = append(st.toolCalls, record)
 
 		var toolResultMsg string
 		if toolErr != nil {
 			toolResultMsg = fmt.Sprintf("Error executing tool: %v", toolErr)
-			log.Warn("tool execution error",
+			st.log.Warn("tool execution error",
 				zap.String("tool", toolName),
 				zap.Error(toolErr),
 			)
 		} else {
 			toolResultMsg = toolOutput
-			log.Info("tool executed",
+			st.log.Info("tool executed",
 				zap.String("tool", toolName),
 				zap.Int("duration_ms", durationMs),
 			)
 		}
 
-		messages = append(messages, llm.Message{
+		st.messages = append(st.messages, llm.Message{
 			Role:    llm.RoleUser,
 			Content: llm.BuildToolResultMessage(toolName, toolResultMsg),
 		})
 	}
 
 	// Exceeded max iterations without a final answer.
-	return buildResult("", MaxIterations, totalTokens, inputTokens, outputTokens,
-		runStart, resolvedProvider, modelName, toolCalls,
+	return buildResult("", MaxIterations, st.totalTokens, st.inputTokens, st.outputTokens,
+		st.runStart, st.provider, st.modelName, st.toolCalls,
 		fmt.Errorf("executor: exceeded maximum iterations (%d) without a final answer", MaxIterations))
 }
 
@@ -549,6 +593,7 @@ func buildToolDefs(reg *tools.Registry) ([]llm.ToolDef, bool) {
 func (e *Executor) runNative(
 	ctx context.Context,
 	log *zap.Logger,
+	agentID uuid.UUID,
 	client llm.Client,
 	modelName, resolvedProvider, systemPrompt, taskPrompt, knowledgeMsg string,
 	toolDefs []llm.ToolDef,
@@ -621,6 +666,16 @@ func (e *Executor) runNative(
 					Err:      fmt.Errorf("tool not available"),
 				})
 				continue
+			}
+
+			// Approval gate on the native path is not yet supported: pausing
+			// mid-turn would require serialising provider-native tool_call state.
+			// Fail fast with a clear message rather than silently bypassing the
+			// gate. The ReAct path supports pause/resume fully. (Follow-up.)
+			if e.gate != nil && e.gate.RequiresApproval(agentID, tc.Name) {
+				return buildResult("", iteration, totalTokens, inputTokens, outputTokens,
+					runStart, resolvedProvider, modelName, toolCalls,
+					fmt.Errorf("executor: tool %q requires human approval, but pause/resume is not yet supported on the native tool-calling path", tc.Name))
 			}
 
 			// Execute the tool with a 60-second timeout.
