@@ -1,0 +1,106 @@
+{{- if and .Values.postgres.enabled .Values.backup.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-backup
+  labels:
+    {{- include "jobshout.labels" . | nindent 4 }}
+    {{- include "jobshout.selector" (dict "name" "postgres-backup") | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: {{ .Values.storage.className }}
+  resources:
+    requests:
+      storage: {{ .Values.backup.size }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  labels:
+    {{- include "jobshout.labels" . | nindent 4 }}
+    {{- include "jobshout.selector" (dict "name" "postgres-backup") | nindent 4 }}
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  # A dump that overruns its slot must not stack a second one on top of it.
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  # Without this, a controller outage longer than the schedule interval makes
+  # the CronJob skip the run entirely rather than catch up late.
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            {{- include "jobshout.selector" (dict "name" "postgres-backup") | nindent 12 }}
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: pg-dump
+              image: {{ .Values.postgres.image }}
+              env:
+                - name: PGHOST
+                  valueFrom:
+                    configMapKeyRef:
+                      name: jobshout-config
+                      key: DATABASE_HOST
+                - name: PGPORT
+                  valueFrom:
+                    configMapKeyRef:
+                      name: jobshout-config
+                      key: DATABASE_PORT
+                - name: PGDATABASE
+                  valueFrom:
+                    configMapKeyRef:
+                      name: jobshout-config
+                      key: DATABASE_NAME
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef:
+                      name: jobshout-secrets
+                      key: DATABASE_USER
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: jobshout-secrets
+                      key: DATABASE_PASSWORD
+                - name: RETENTION_DAYS
+                  value: {{ .Values.backup.retentionDays | quote }}
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+
+                  TS=$(date -u +%Y%m%dT%H%M%SZ)
+                  WORK="/backups/.in-progress-${TS}.sql"
+                  OUT="/backups/jobshout-${TS}.sql.gz"
+
+                  # Dump to a file rather than piping into gzip: busybox sh has
+                  # no reliable pipefail, so a failed pg_dump in a pipeline would
+                  # still exit 0 and leave a truncated "backup" behind.
+                  pg_dump --no-owner --no-acl -f "$WORK"
+                  gzip -c "$WORK" > "${OUT}.partial"
+
+                  # Only claim the canonical name once the bytes are all there,
+                  # so a crash mid-write can never look like a good backup.
+                  mv "${OUT}.partial" "$OUT"
+                  rm -f "$WORK"
+
+                  find /backups -maxdepth 1 -name 'jobshout-*.sql.gz' -mtime "+${RETENTION_DAYS}" -delete
+                  find /backups -maxdepth 1 \( -name '.in-progress-*' -o -name '*.partial' \) -mtime +1 -delete
+
+                  echo "wrote $OUT ($(du -h "$OUT" | cut -f1))"
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+              resources:
+                {{- toYaml .Values.backup.resources | nindent 16 }}
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: postgres-backup
+{{- end }}

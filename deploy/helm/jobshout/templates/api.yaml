@@ -57,13 +57,29 @@ spec:
               value: "postgres://$(DATABASE_USER):$(DATABASE_PASSWORD)@$(DATABASE_HOST):$(DATABASE_PORT)/$(DATABASE_NAME)?sslmode=$(DATABASE_SSLMODE)"
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}
+          # The API retries its first Postgres connection for up to
+          # DATABASE_CONNECT_TIMEOUT before exiting. The startup probe hands it
+          # that whole window: liveness does not start until startup succeeds,
+          # so a database that is slow to come back no longer gets the pod
+          # killed while it is still legitimately retrying.
+          startupProbe:
+            tcpSocket:
+              port: {{ .Values.api.port }}
+            periodSeconds: {{ .Values.api.startupProbe.periodSeconds }}
+            failureThreshold: {{ .Values.api.startupProbe.failureThreshold }}
+          # Liveness is deliberately a bare TCP check, not GET /health: the
+          # health handler pings Postgres and returns 503 when the DB is
+          # unreachable. Wiring that into liveness lets a DB outage kill every
+          # API pod — which a restart cannot fix, so they crash-loop until the
+          # DB returns. Readiness keeps the DB check, so pods still leave the
+          # Service endpoints while degraded; they just stay alive to reconnect.
           livenessProbe:
-            httpGet:
-              path: /health
+            tcpSocket:
               port: {{ .Values.api.port }}
             initialDelaySeconds: 15
             periodSeconds: 15
             timeoutSeconds: 5
+            failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /health

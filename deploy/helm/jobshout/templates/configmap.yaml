@@ -12,6 +12,7 @@ data:
   DATABASE_PORT: "5432"
   DATABASE_NAME: {{ .Values.postgres.database | quote }}
   DATABASE_SSLMODE: "disable"
+  DATABASE_CONNECT_TIMEOUT: {{ .Values.api.dbConnectTimeout | quote }}
   REDIS_URL: "redis://redis:6379"
   JWT_ISSUER: "jobshout"
   LOG_LEVEL: {{ .Values.logLevel | quote }}

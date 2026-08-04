@@ -16,6 +16,10 @@ type Config struct {
 	JWTRefreshExpiryDays int      `mapstructure:"JWT_REFRESH_EXPIRY_DAYS"`
 	CORSOrigins          []string
 
+	// How long to keep retrying the initial database connection at startup
+	// before giving up and exiting. 0 fails fast on the first error.
+	DatabaseConnectTimeout time.Duration `mapstructure:"DATABASE_CONNECT_TIMEOUT"`
+
 	// MinIO / S3-compatible object storage (optional).
 	MinIOEndpoint        string `mapstructure:"MINIO_ENDPOINT"`
 	MinIOAccessKey       string `mapstructure:"MINIO_ACCESS_KEY"`
@@ -85,6 +89,7 @@ func Load() (*Config, error) {
 	viper.AutomaticEnv()
 
 	viper.SetDefault("SERVER_PORT", ":8080")
+	viper.SetDefault("DATABASE_CONNECT_TIMEOUT", "5m")
 	viper.SetDefault("JWT_EXPIRY_MINUTES", 15)
 	viper.SetDefault("JWT_REFRESH_EXPIRY_DAYS", 7)
 	viper.SetDefault("MINIO_USE_SSL", false)
@@ -151,6 +156,8 @@ func Load() (*Config, error) {
 		BlogRepoName:         viper.GetString("BLOG_REPO_NAME"),
 		BlogBaseBranch:       viper.GetString("BLOG_BASE_BRANCH"),
 		BlogWorkDir:          viper.GetString("BLOG_WORK_DIR"),
+
+		DatabaseConnectTimeout: viper.GetDuration("DATABASE_CONNECT_TIMEOUT"),
 	}
 
 	origins := viper.GetString("CORS_ORIGINS")
