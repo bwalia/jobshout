@@ -17,6 +17,7 @@ data:
   JWT_ISSUER: "jobshout"
   LOG_LEVEL: {{ .Values.logLevel | quote }}
   LLM_PROVIDER: {{ .Values.ai.provider | quote }}
+  AUTO_MODEL_SELECTION: {{ .Values.ai.autoModelSelection | quote }}
   OLLAMA_BASE_URL: {{ .Values.ai.ollamaBaseURL | quote }}
   OLLAMA_DEFAULT_MODEL: {{ .Values.ai.ollamaModel | quote }}
   OPENAI_BASE_URL: {{ .Values.ai.openaiBaseURL | quote }}

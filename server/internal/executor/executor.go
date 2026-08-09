@@ -16,6 +16,7 @@ import (
 
 	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/model"
+	"github.com/jobshout/server/internal/modelselect"
 	"github.com/jobshout/server/internal/tools"
 )
 
@@ -84,6 +85,7 @@ type Executor struct {
 	knowledge tools.KnowledgeSearcher
 	embedder  tools.Embedder
 	gate      ApprovalGate
+	selector  *modelselect.Selector
 	logger    *zap.Logger
 }
 
@@ -125,6 +127,16 @@ func (e *Executor) WithApprovalGate(g ApprovalGate) *Executor {
 	return e
 }
 
+// WithAutoSelect attaches a per-task model selector, enabling agents whose
+// ModelProvider is "auto" to have a provider and model chosen for them at call
+// time. Returns the receiver for fluent wiring. When no selector is set, an
+// agent asking for "auto" quietly falls back to the configured default provider
+// rather than failing, so this is safe to leave unwired.
+func (e *Executor) WithAutoSelect(s *modelselect.Selector) *Executor {
+	e.selector = s
+	return e
+}
+
 // Run executes the ReAct loop for agent against taskPrompt.
 // agentTools is the subset of tool names the agent is permitted to use.
 // The execution ID is used only for structured logging correlation.
@@ -147,17 +159,9 @@ func (e *Executor) Run(
 	ctx = tools.WithOrg(ctx, agent.OrgID)
 	ctx = tools.WithAgent(ctx, agent.ID)
 
-	// Resolve the LLM client for this agent.
-	providerName := ""
-	if agent.ModelProvider != nil {
-		providerName = *agent.ModelProvider
-	}
-	client, err := e.llmRouter.For(providerName)
-	if err != nil {
-		return Result{Err: fmt.Errorf("executor: resolve LLM client: %w", err)}
-	}
-
-	resolvedProvider := client.ProviderName()
+	// The LLM client is resolved further down, once the tool set is known:
+	// auto-selection needs to know whether this run requires native
+	// tool-calling before it can rule models in or out.
 
 	// Base system-prompt text from the agent definition.
 	systemPromptText := ""
@@ -195,11 +199,19 @@ func (e *Executor) Run(
 	// Build the system prompt once.
 	systemPrompt := llm.BuildReActSystemPrompt(agent.Name, agent.Role, systemPromptText, toolSpecs)
 
-	// Resolve model name.
-	modelName := ""
-	if agent.ModelName != nil {
-		modelName = *agent.ModelName
+	// Resolve provider + model. For an agent set to "auto" this picks a model
+	// sized to the task; for every other agent it resolves exactly as before.
+	choice, err := resolveModel(e.llmRouter, e.selector, log, agent, modelselect.TaskSignals{
+		Kind:         modelselect.KindStep,
+		PromptTokens: estimateTokens(systemPrompt, taskPrompt),
+		NeedsTools:   len(toolSpecs) > 0,
+	})
+	if err != nil {
+		return Result{Err: err}
 	}
+	client := choice.Client
+	resolvedProvider := choice.Provider
+	modelName := choice.Model
 
 	// Best-effort retrieval-augmented context: fetch the agent's most relevant
 	// knowledge chunks for this task and inject them as a leading context

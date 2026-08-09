@@ -11,6 +11,7 @@ import (
 
 	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/model"
+	"github.com/jobshout/server/internal/modelselect"
 )
 
 // MaxGoalIterations caps how many plan+act cycles a goal can run.
@@ -51,6 +52,7 @@ type AutonomousExecutor struct {
 	llm      *llm.Router
 	memory   MemoryStore
 	goalRepo GoalStore
+	selector *modelselect.Selector
 	logger   *zap.Logger
 }
 
@@ -70,6 +72,16 @@ func NewAutonomousExecutor(
 		goalRepo: goalRepo,
 		logger:   logger,
 	}
+}
+
+// WithAutoSelect attaches a per-task model selector, so an agent whose
+// ModelProvider is "auto" gets planning and reflection sized independently —
+// planning is held to a higher quality bar than an individual step, because a
+// bad plan wastes every step that follows it. Returns the receiver for fluent
+// wiring; leaving it unset keeps the previous behaviour.
+func (a *AutonomousExecutor) WithAutoSelect(s *modelselect.Selector) *AutonomousExecutor {
+	a.selector = s
+	return a
 }
 
 // RunGoal executes the full autonomous loop for a goal.
@@ -192,23 +204,22 @@ func (a *AutonomousExecutor) generatePlan(
 	goalText string,
 	memories []string,
 ) ([]model.PlanStep, error) {
-	client, err := a.resolveClient(agent)
+	prompt := llm.BuildPlanningPrompt(agent.Name, agent.Role, goalText, memories)
+
+	choice, err := resolveModel(a.llm, a.selector, a.logger, agent, modelselect.TaskSignals{
+		Kind:            modelselect.KindPlan,
+		PromptTokens:    estimateTokens(prompt),
+		MaxOutputTokens: 2048,
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	prompt := llm.BuildPlanningPrompt(agent.Name, agent.Role, goalText, memories)
-
-	modelName := ""
-	if agent.ModelName != nil {
-		modelName = *agent.ModelName
-	}
-
-	resp, err := client.Generate(ctx, llm.GenerateRequest{
+	resp, err := choice.Client.Generate(ctx, llm.GenerateRequest{
 		Messages: []llm.Message{
 			{Role: llm.RoleUser, Content: prompt},
 		},
-		Model:       modelName,
+		Model:       choice.Model,
 		MaxTokens:   2048,
 		Temperature: 0.3,
 	})
@@ -248,23 +259,22 @@ func (a *AutonomousExecutor) generateReflection(
 	goalText string,
 	observations []string,
 ) (string, error) {
-	client, err := a.resolveClient(agent)
+	prompt := llm.BuildReflectionPrompt(agent.Name, goalText, observations)
+
+	choice, err := resolveModel(a.llm, a.selector, a.logger, agent, modelselect.TaskSignals{
+		Kind:            modelselect.KindReflect,
+		PromptTokens:    estimateTokens(prompt),
+		MaxOutputTokens: 1024,
+	})
 	if err != nil {
 		return "", err
 	}
 
-	prompt := llm.BuildReflectionPrompt(agent.Name, goalText, observations)
-
-	modelName := ""
-	if agent.ModelName != nil {
-		modelName = *agent.ModelName
-	}
-
-	resp, err := client.Generate(ctx, llm.GenerateRequest{
+	resp, err := choice.Client.Generate(ctx, llm.GenerateRequest{
 		Messages: []llm.Message{
 			{Role: llm.RoleUser, Content: prompt},
 		},
-		Model:       modelName,
+		Model:       choice.Model,
 		MaxTokens:   1024,
 		Temperature: 0.4,
 	})
@@ -295,14 +305,6 @@ func (a *AutonomousExecutor) buildStepPrompt(goalText string, step model.PlanSte
 
 	sb.WriteString("\nExecute this step and provide the result.")
 	return sb.String()
-}
-
-func (a *AutonomousExecutor) resolveClient(agent *model.Agent) (llm.Client, error) {
-	providerName := ""
-	if agent.ModelProvider != nil {
-		providerName = *agent.ModelProvider
-	}
-	return a.llm.For(providerName)
 }
 
 // extractJSON finds and returns the first JSON object in a string.

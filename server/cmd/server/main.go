@@ -38,6 +38,7 @@ import (
 	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/middleware"
 	"github.com/jobshout/server/internal/model"
+	"github.com/jobshout/server/internal/modelselect"
 	"github.com/jobshout/server/internal/repository"
 	"github.com/jobshout/server/internal/selector"
 	"github.com/jobshout/server/internal/service"
@@ -198,6 +199,19 @@ func main() {
 	costEng := costengine.New()
 	logger.Info("cost engine initialised", zap.Int("known_models", len(costEng.KnownModels())))
 
+	// ─── Auto model selection ────────────────────────────────────────────────
+	// Wired here rather than at executor construction because selection is
+	// cost-aware and the cost engine does not exist until now. Agents pinned to
+	// a provider ignore this entirely; only ModelProvider="auto" consults it.
+	var autoSelector *modelselect.Selector
+	if cfg.AutoModelSelection {
+		autoSelector = modelselect.New(llmRouter, costEng, nil)
+		goNativeExec.WithAutoSelect(autoSelector)
+		logger.Info("auto model selection enabled")
+	} else {
+		logger.Info("auto model selection disabled; agents set to \"auto\" use the default provider")
+	}
+
 	// ─── Services ────────────────────────────────────────────────────────────
 	jwtSvc := service.NewJWTService(cfg)
 	authSvc := service.NewAuthService(userRepo, tokenRepo, orgRepo, jwtSvc, logger)
@@ -242,7 +256,7 @@ func main() {
 	blogSvc := service.NewBlogService(blogRunner, blogRepo, logger)
 
 	// ─── Autonomous agent engine ────────────────────────────────────────────
-	autonomousExec := executor.NewAutonomousExecutor(goNativeExec, llmRouter, memoryRepo, goalRepo, logger)
+	autonomousExec := executor.NewAutonomousExecutor(goNativeExec, llmRouter, memoryRepo, goalRepo, logger).WithAutoSelect(autoSelector)
 	memorySvc := service.NewMemoryService(memoryRepo, logger)
 	intentSvc := service.NewIntentService(llmRouter, logger)
 	goalSvc := service.NewGoalService(goalRepo, agentRepo, toolPermRepo, autonomousExec, logger)
