@@ -41,6 +41,8 @@ secrets:
   databasePassword: ""
   jwtSecret: ""
   openaiApiKey: ""
+  # Set via --set-string or Vault; never committed here.
+  ollamaJwtSecret: ""
   pythonSidecarSecret: ""
   registryUsername: ""
   registryPassword: ""

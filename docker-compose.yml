@@ -80,9 +80,13 @@ services:
       SERVER_PORT: ${SERVER_PORT:-:8080}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3001}
       LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
-      # Point at the host's Ollama (qwen2.5-coder, llama3.x pre-loaded).
+      # Point at the host's Ollama (qwen2.5-coder, llama3.x pre-loaded), or at
+      # the shared auth gateway by setting OLLAMA_BASE_URL + OLLAMA_JWT_SECRET
+      # in .env. Empty secret = no gateway, requests go out unsigned.
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       OLLAMA_DEFAULT_MODEL: ${OLLAMA_DEFAULT_MODEL:-llama3:latest}
+      OLLAMA_JWT_SECRET: ${OLLAMA_JWT_SECRET:-}
+      OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-3m}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       PYTHON_SIDECAR_URL: ${PYTHON_SIDECAR_URL:-http://python-sidecar:8001}
       PYTHON_SIDECAR_SECRET: ${PYTHON_SIDECAR_SECRET:-change-me-sidecar-secret}

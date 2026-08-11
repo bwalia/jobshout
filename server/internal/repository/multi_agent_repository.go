@@ -139,35 +139,63 @@ func (r *multiAgentRepository) MarkFailed(ctx context.Context, id uuid.UUID, err
 }
 
 func (r *multiAgentRepository) BoardEntries(ctx context.Context, orgID uuid.UUID) ([]model.AgentBoardEntry, error) {
-	// For each agent in the org, look at the latest multi_agent_jobs row that
-	// references it (in any of planner/executor/reviewer). Status drives the
-	// board column:
-	//   - planning  → planner column (job.status = 'planning')
-	//   - executing → executor column
-	//   - reviewing → reviewer column
-	//   - failed    → failed column (terminal)
-	//   - completed → idle (treated as "ready for next task")
-	// Agents with no jobs at all also land in idle.
+	// An agent's board column comes from its most recent activity, where
+	// "activity" has two sources:
+	//
+	//   1. multi_agent_jobs — the agent participated as planner/executor/reviewer.
+	//   2. blog_runs        — the agent is the article generator for that run.
+	//
+	// Both are normalised into the same shape, unioned, and the newest row per
+	// agent wins. Agents with no activity at all fall through to idle.
+	//
+	// For blog runs the running step is pulled out of the steps JSONB so the
+	// card can name the exact phase the agent is on, rather than just "running".
 	const sql = `
-		WITH latest AS (
-			SELECT a.id AS agent_id, j.id AS job_id, j.status, j.task_prompt, j.created_at,
+		WITH job_activity AS (
+			SELECT a.id AS agent_id,
+			       'job'::text     AS kind,
+			       j.id            AS source_id,
+			       j.status::text  AS status,
+			       NULL::text      AS step_key,
+			       j.task_prompt::text AS detail,
 			       CASE
 			           WHEN a.id = j.planner_id  THEN 'planner'
 			           WHEN a.id = j.executor_id THEN 'executor'
 			           WHEN a.id = j.reviewer_id THEN 'reviewer'
-			           ELSE NULL
-			       END AS job_role,
-			       ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY j.created_at DESC) AS rn
+			       END::text       AS job_role,
+			       j.created_at
 			FROM agents a
-			LEFT JOIN multi_agent_jobs j
+			JOIN multi_agent_jobs j
 			       ON j.org_id = a.org_id
 			      AND (a.id = j.planner_id OR a.id = j.executor_id OR a.id = j.reviewer_id)
 			WHERE a.org_id = $1
+		),
+		blog_activity AS (
+			SELECT b.agent_id,
+			       'blog'::text    AS kind,
+			       b.id            AS source_id,
+			       b.status::text  AS status,
+			       s.key::text     AS step_key,
+			       COALESCE(s.label, b.status)::text AS detail,
+			       'writer'::text  AS job_role,
+			       b.created_at
+			FROM blog_runs b
+			LEFT JOIN LATERAL (
+			    SELECT e->>'key' AS key, e->>'label' AS label
+			    FROM jsonb_array_elements(b.steps) e
+			    WHERE e->>'status' = 'running'
+			    LIMIT 1
+			) s ON TRUE
+			WHERE b.org_id = $1 AND b.agent_id IS NOT NULL
+		),
+		combined AS (
+			SELECT u.*, ROW_NUMBER() OVER (PARTITION BY u.agent_id ORDER BY u.created_at DESC) AS rn
+			FROM (SELECT * FROM job_activity UNION ALL SELECT * FROM blog_activity) u
 		)
 		SELECT a.id, a.name, a.role, a.avatar_url,
-		       latest.job_id, latest.status, latest.task_prompt, latest.job_role, latest.created_at
+		       c.kind, c.source_id, c.status, c.step_key, c.detail, c.job_role, c.created_at
 		FROM agents a
-		LEFT JOIN latest ON latest.agent_id = a.id AND (latest.rn = 1 OR latest.rn IS NULL)
+		LEFT JOIN combined c ON c.agent_id = a.id AND c.rn = 1
 		WHERE a.org_id = $1
 		ORDER BY a.name`
 
@@ -181,21 +209,23 @@ func (r *multiAgentRepository) BoardEntries(ctx context.Context, orgID uuid.UUID
 	for rows.Next() {
 		var (
 			e         model.AgentBoardEntry
-			jobID     *uuid.UUID
-			jobStatus *string
-			prompt    *string
+			kind      *string
+			sourceID  *uuid.UUID
+			status    *string
+			stepKey   *string
+			detail    *string
 			role      *string
 			createdAt *time.Time
 		)
 		if err := rows.Scan(&e.AgentID, &e.Name, &e.Role, &e.AvatarURL,
-			&jobID, &jobStatus, &prompt, &role, &createdAt); err != nil {
+			&kind, &sourceID, &status, &stepKey, &detail, &role, &createdAt); err != nil {
 			return nil, fmt.Errorf("multi_agent_repo: board scan: %w", err)
 		}
-		e.Activity = boardActivity(jobStatus)
-		if e.Activity != "idle" {
-			e.CurrentJobID = jobID
+		e.Activity = boardActivity(kind, status, stepKey)
+		if e.Activity != model.ActivityIdle {
+			e.CurrentJobID = sourceID
 			e.JobRole = role
-			e.CurrentJobPrompt = prompt
+			e.CurrentJobPrompt = detail
 		}
 		e.LastActiveAt = createdAt
 		out = append(out, e)
@@ -203,24 +233,48 @@ func (r *multiAgentRepository) BoardEntries(ctx context.Context, orgID uuid.UUID
 	return out, rows.Err()
 }
 
-// boardActivity maps a multi_agent_jobs.status to the agent-board column.
-// Completed → idle so finished jobs free up the agent.
-func boardActivity(jobStatus *string) string {
-	if jobStatus == nil {
-		return "idle"
+// boardActivity maps one normalised activity row to an agent-board column.
+// Terminal states map to idle so a finished job frees the agent up.
+//
+// Blog runs additionally consult the running step: generation is ordinary work
+// (executing), while the git/PR phases get their own column because pushing to
+// a real repository is materially different from writing text.
+func boardActivity(kind, status, stepKey *string) string {
+	if kind == nil || status == nil {
+		return model.ActivityIdle
 	}
-	switch *jobStatus {
-	case model.MultiAgentStatusPlanning:
-		return "planning"
-	case model.MultiAgentStatusExecuting:
-		return "executing"
-	case model.MultiAgentStatusReviewing:
-		return "reviewing"
-	case model.MultiAgentStatusFailed:
-		return "failed"
-	default:
-		return "idle"
+
+	switch *kind {
+	case "job":
+		switch *status {
+		case model.MultiAgentStatusPlanning:
+			return model.ActivityPlanning
+		case model.MultiAgentStatusExecuting:
+			return model.ActivityExecuting
+		case model.MultiAgentStatusReviewing:
+			return model.ActivityReviewing
+		case model.MultiAgentStatusFailed:
+			return model.ActivityFailed
+		}
+		return model.ActivityIdle
+
+	case "blog":
+		switch *status {
+		case model.BlogRunStatusFailed:
+			return model.ActivityFailed
+		case model.BlogRunStatusRunning:
+			if stepKey != nil {
+				switch *stepKey {
+				case model.BlogStepPublishing, model.BlogStepOpeningPR:
+					return model.ActivityPublishing
+				}
+			}
+			return model.ActivityExecuting
+		}
+		return model.ActivityIdle
 	}
+
+	return model.ActivityIdle
 }
 
 func (r *multiAgentRepository) ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.MultiAgentJob], error) {

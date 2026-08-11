@@ -16,6 +16,22 @@ const (
 	MultiAgentStatusFailed    = "failed"
 )
 
+// Agent-board columns. These are a separate vocabulary from agents.status —
+// status is what an agent *is*, activity is what it is *doing right now*.
+//
+// Every value here must have a matching column in the frontend's COLUMNS array
+// (web/nextjs/app/(app)/agent-board/page.tsx). The board groups with
+// `out[e.activity]?.push(e)`, so an activity with no column is silently
+// dropped and the agent vanishes from the board.
+const (
+	ActivityIdle       = "idle"
+	ActivityPlanning   = "planning"
+	ActivityExecuting  = "executing"
+	ActivityReviewing  = "reviewing"
+	ActivityPublishing = "publishing"
+	ActivityFailed     = "failed"
+)
+
 // MultiAgentJob represents a collaborative task executed by a planner,
 // executor, and reviewer agent working together.
 type MultiAgentJob struct {
@@ -47,7 +63,8 @@ type RunMultiAgentRequest struct {
 }
 
 // AgentBoardEntry is one row on the agent board: an agent paired with the
-// activity derived from its most recent multi_agent_jobs participation. The
+// activity derived from its most recent multi_agent_jobs participation or
+// blog_runs attribution, whichever is newer. The
 // frontend groups these by Activity to render Kanban columns.
 type AgentBoardEntry struct {
 	AgentID   uuid.UUID `json:"agent_id"`
@@ -55,18 +72,20 @@ type AgentBoardEntry struct {
 	Role      string    `json:"role"`
 	AvatarURL *string   `json:"avatar_url,omitempty"`
 
-	// Activity is the column the card belongs in. One of:
-	//   idle | planning | executing | reviewing | failed
+	// Activity is the column the card belongs in — one of the Activity*
+	// constants above.
 	Activity string `json:"activity"`
 
-	// CurrentJobID is the job driving the activity (nil when idle).
+	// CurrentJobID is the multi-agent job or blog run driving the activity
+	// (nil when idle).
 	CurrentJobID *uuid.UUID `json:"current_job_id,omitempty"`
 
-	// Role within the current job — planner | executor | reviewer (omitted when idle).
+	// Role within the current work — planner | executor | reviewer for a
+	// collaboration job, writer for a blog run (omitted when idle).
 	JobRole *string `json:"job_role,omitempty"`
 
-	// CurrentJobPrompt is the user-supplied task prompt of the current job,
-	// shown on the card so a reader can see *what* the agent is doing.
+	// CurrentJobPrompt describes what the agent is doing: the task prompt for a
+	// collaboration job, or the label of the running step for a blog run.
 	CurrentJobPrompt *string `json:"current_job_prompt,omitempty"`
 
 	// LastActiveAt is the most recent in-flight or terminal job timestamp,

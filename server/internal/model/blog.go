@@ -14,31 +14,94 @@ const (
 	BlogRunStatusFailed    = "failed"
 )
 
-// BlogRun records a single invocation of the auto-blog pipeline.
+// Blog step keys. These name the phases of a run in order, and are what the
+// agent board maps onto its columns — see BlogStepActivity.
+const (
+	BlogStepQueued     = "queued"
+	BlogStepGenerating = "generating"
+	BlogStepGenerated  = "generated"
+	BlogStepPublishing = "publishing"
+	BlogStepOpeningPR  = "opening_pr"
+	BlogStepPublished  = "published"
+)
+
+// Step statuses. A step is pending until it starts, running while it is the
+// current step, then done or failed.
+const (
+	StepStatusPending = "pending"
+	StepStatusRunning = "running"
+	StepStatusDone    = "done"
+	StepStatusFailed  = "failed"
+)
+
+// BlogStep is one entry in a run's progress trace. The shape mirrors PlanStep
+// in goal.go so the UI can render both with the same timeline treatment.
+type BlogStep struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	// Status is one of StepStatusPending / Running / Done / Failed.
+	Status      string     `json:"status"`
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	Error       *string    `json:"error,omitempty"`
+}
+
+// BlogRun records a single invocation of the article pipeline.
 type BlogRun struct {
-	ID           uuid.UUID        `json:"id"`
-	OrgID        uuid.UUID        `json:"org_id"`
-	TriggeredBy  *uuid.UUID       `json:"triggered_by"`
-	Source       string           `json:"source"` // api | schedule
-	Status       string           `json:"status"`
-	Topics       []string         `json:"topics"`
-	Model        *string          `json:"model"`
-	Branch       *string          `json:"branch"`
-	PRNumber     *int             `json:"pr_number"`
-	PRURL        *string          `json:"pr_url"`
+	ID          uuid.UUID  `json:"id"`
+	OrgID       uuid.UUID  `json:"org_id"`
+	AgentID     *uuid.UUID `json:"agent_id"`
+	TriggeredBy *uuid.UUID `json:"triggered_by"`
+	Source      string     `json:"source"` // api | schedule
+	Status      string     `json:"status"`
+	Topics      []string   `json:"topics"`
+	Model       *string    `json:"model"`
+	Branch      *string    `json:"branch"`
+	PRNumber    *int       `json:"pr_number"`
+	PRURL       *string    `json:"pr_url"`
+	// Articles is the lightweight per-article summary. The markdown body lives
+	// in blog_articles and is fetched separately so listing runs stays cheap.
 	Articles     []BlogRunArticle `json:"articles"`
+	Steps        []BlogStep       `json:"steps"`
 	ErrorMessage *string          `json:"error_message"`
 	StartedAt    *time.Time       `json:"started_at"`
 	CompletedAt  *time.Time       `json:"completed_at"`
+	PublishedAt  *time.Time       `json:"published_at"`
 	CreatedAt    time.Time        `json:"created_at"`
 }
 
-// BlogRunArticle is the minimal per-article record persisted with the run —
-// we deliberately don't store the full markdown (it lives in the PR).
+// CurrentStep returns the step the run is on, or nil when nothing is running.
+// The agent board uses this to label the agent's card.
+func (r *BlogRun) CurrentStep() *BlogStep {
+	for i := range r.Steps {
+		if r.Steps[i].Status == StepStatusRunning {
+			return &r.Steps[i]
+		}
+	}
+	return nil
+}
+
+// BlogRunArticle is the per-article summary carried on the run itself.
 type BlogRunArticle struct {
-	Topic string `json:"topic"`
-	Slug  string `json:"slug"`
-	Path  string `json:"path"`
+	ID    uuid.UUID `json:"id"`
+	Topic string    `json:"topic"`
+	Slug  string    `json:"slug"`
+	Path  string    `json:"path"`
+	// WordCount lets the list view show article size without loading the body.
+	WordCount int `json:"word_count"`
+}
+
+// BlogArticle is a generated article including its markdown body.
+type BlogArticle struct {
+	ID        uuid.UUID `json:"id"`
+	RunID     uuid.UUID `json:"run_id"`
+	OrgID     uuid.UUID `json:"org_id"`
+	Topic     string    `json:"topic"`
+	Slug      string    `json:"slug"`
+	Path      string    `json:"path"`
+	Markdown  string    `json:"markdown"`
+	WordCount int       `json:"word_count"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // GenerateBlogRequest is the HTTP request body for POST /api/v1/blogs/generate.

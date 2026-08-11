@@ -1,9 +1,15 @@
-// Package blog implements JobShout's automated blog-content pipeline:
-// LLM generates markdown → git clone/commit/push → GitHub PR.
+// Package blog implements JobShout's automated article pipeline:
+// LLM generates markdown → (optionally) git clone/commit/push → GitHub PR.
 //
-// The pipeline is a single deterministic function rather than a ReAct agent
+// The pipeline is a set of deterministic functions rather than a ReAct agent
 // loop — git and the GitHub API are not operations where we want the LLM
-// guessing at argument names.
+// guessing at argument names. It is presented in the product as the built-in
+// "Article Writer" agent; the agent identity is for visibility and attribution,
+// the behaviour underneath stays fixed.
+//
+// Generation and publishing are deliberately separate. Generation needs no
+// GitHub credentials and never touches a repository, so an article can be
+// written and reviewed in the UI before anyone decides to ship it.
 package blog
 
 import (
@@ -17,6 +23,7 @@ import (
 
 	"github.com/jobshout/server/internal/integration/adapters/github"
 	"github.com/jobshout/server/internal/llm"
+	"github.com/jobshout/server/internal/model"
 )
 
 // Config captures what the Runner needs. Populated from *config.Config in main.go.
@@ -28,7 +35,7 @@ type Config struct {
 	RepoName    string
 	BaseBranch  string
 	WorkDir     string
-	ContentDir  string // path within the repo where blogs are written
+	ContentDir  string // path within the repo where articles are written
 }
 
 // GenerateRequest is the user-facing input.
@@ -39,19 +46,30 @@ type GenerateRequest struct {
 }
 
 // HardMaxArticles is the safety ceiling regardless of what the caller asks
-// for. One PR with 25 blogs is almost certainly a mistake.
+// for. One PR with 25 articles is almost certainly a mistake.
 const HardMaxArticles = 10
 
-// Result is returned to the caller.
-type Result struct {
-	Branch      string             `json:"branch"`
-	PRNumber    int                `json:"pr_number"`
-	PRURL       string             `json:"pr_url"`
-	Articles    []GeneratedArticle `json:"articles"`
-	GeneratedAt time.Time          `json:"generated_at"`
+// PublishResult is returned once articles have been pushed and a PR opened.
+type PublishResult struct {
+	Branch      string    `json:"branch"`
+	PRNumber    int       `json:"pr_number"`
+	PRURL       string    `json:"pr_url"`
+	PublishedAt time.Time `json:"published_at"`
 }
 
-// Runner orchestrates the full generate-and-publish pipeline.
+// ProgressFunc is called as the pipeline moves between steps, so the caller can
+// persist a live trace. It must not block for long — it runs inline.
+//
+// A nil ProgressFunc is valid; use progress() via reportTo to stay nil-safe.
+type ProgressFunc func(stepKey, label string)
+
+func report(p ProgressFunc, stepKey, label string) {
+	if p != nil {
+		p(stepKey, label)
+	}
+}
+
+// Runner orchestrates generation and publishing.
 type Runner struct {
 	cfg    Config
 	llm    llm.Client
@@ -61,23 +79,35 @@ type Runner struct {
 	clock func() time.Time
 }
 
-// NewRunner wires the Runner with its dependencies.
+// NewRunner wires the Runner with its dependencies. The GitHub token may be
+// empty — generation still works, and only publishing is refused.
 func NewRunner(cfg Config, llmClient llm.Client, logger *zap.Logger) *Runner {
+	var prClient *github.PullRequestClient
+	if cfg.GitHubToken != "" {
+		prClient = github.NewPullRequestClient(cfg.GitHubToken)
+	}
 	return &Runner{
 		cfg:    cfg,
 		llm:    llmClient,
-		pr:     github.NewPullRequestClient(cfg.GitHubToken),
+		pr:     prClient,
 		logger: logger,
 		clock:  time.Now,
 	}
 }
 
-// Run executes the full pipeline. It is safe to call concurrently — each
-// invocation gets its own clone directory keyed on the generated branch name.
-func (r *Runner) Run(ctx context.Context, req GenerateRequest) (*Result, error) {
-	if r.cfg.GitHubToken == "" {
-		return nil, fmt.Errorf("blog: GITHUB_TOKEN is not set")
-	}
+// CanPublish reports whether this Runner has the credentials to open a PR.
+// The API surfaces this so the UI can disable the Publish action rather than
+// letting a user press a button that is guaranteed to fail.
+func (r *Runner) CanPublish() bool {
+	return r.cfg.GitHubToken != "" && r.pr != nil
+}
+
+// Generate produces markdown for every requested topic. It never touches git
+// and needs no GitHub credentials.
+//
+// Any single topic failing aborts the batch — we prefer an all-or-nothing run
+// over silently publishing half of what was asked for.
+func (r *Runner) Generate(ctx context.Context, req GenerateRequest, progress ProgressFunc) ([]GeneratedArticle, error) {
 	if r.llm == nil {
 		return nil, fmt.Errorf("blog: llm client is nil")
 	}
@@ -104,17 +134,30 @@ func (r *Runner) Run(ctx context.Context, req GenerateRequest) (*Result, error) 
 		topics = topics[:cap]
 	}
 
-	now := r.clock()
-	branch := fmt.Sprintf("ai/blog-%s-%s", now.Format("2006-01-02"), randSuffix(now))
-
-	// 1. Generate markdown for every topic before touching git. If the LLM
-	//    fails we abort without creating a branch.
-	articles, err := generateArticles(ctx, r.llm, req.Model, r.cfg.ContentDir, topics, now)
+	articles, err := generateArticles(ctx, r.llm, req.Model, r.cfg.ContentDir, topics, r.clock(), progress)
 	if err != nil {
 		return nil, err
 	}
 
-	// 2. Clone, branch, write files, commit, push.
+	report(progress, model.BlogStepGenerated, fmt.Sprintf("Generated %d article(s)", len(articles)))
+	return articles, nil
+}
+
+// Publish clones the content repository, commits the given articles on a fresh
+// branch, pushes, and opens a pull request.
+func (r *Runner) Publish(ctx context.Context, articles []GeneratedArticle, progress ProgressFunc) (*PublishResult, error) {
+	if !r.CanPublish() {
+		return nil, fmt.Errorf("blog: publishing is not configured (GITHUB_TOKEN is unset)")
+	}
+	if len(articles) == 0 {
+		return nil, fmt.Errorf("blog: nothing to publish")
+	}
+
+	now := r.clock()
+	branch := fmt.Sprintf("ai/blog-%s-%s", now.Format("2006-01-02"), randSuffix(now))
+
+	report(progress, model.BlogStepPublishing, "Committing to "+r.cfg.RepoOwner+"/"+r.cfg.RepoName)
+
 	workDir := filepath.Join(r.cfg.WorkDir, branch)
 	repo := newGitRepo(workDir, r.cfg.RepoOwner, r.cfg.RepoName, r.cfg.GitHubToken, r.cfg.AuthorName, r.cfg.AuthorEmail)
 	defer repo.cleanup()
@@ -139,27 +182,27 @@ func (r *Runner) Run(ctx context.Context, req GenerateRequest) (*Result, error) 
 		return nil, err
 	}
 
-	// 3. Open the PR.
-	title := prTitle(articles)
-	body := prBody(articles)
+	report(progress, model.BlogStepOpeningPR, "Opening pull request")
+
 	createdPR, err := r.pr.CreatePullRequest(ctx,
-		r.cfg.RepoOwner, r.cfg.RepoName, title, branch, r.cfg.BaseBranch, body)
+		r.cfg.RepoOwner, r.cfg.RepoName, prTitle(articles), branch, r.cfg.BaseBranch, prBody(articles))
 	if err != nil {
 		return nil, err
 	}
 
-	r.logger.Info("blog: run complete",
+	r.logger.Info("blog: publish complete",
 		zap.String("branch", branch),
 		zap.Int("pr", createdPR.Number),
 		zap.Int("articles", len(articles)),
 	)
 
-	return &Result{
+	report(progress, model.BlogStepPublished, fmt.Sprintf("Published as PR #%d", createdPR.Number))
+
+	return &PublishResult{
 		Branch:      branch,
 		PRNumber:    createdPR.Number,
 		PRURL:       createdPR.HTMLURL,
-		Articles:    articles,
-		GeneratedAt: now,
+		PublishedAt: now,
 	}, nil
 }
 

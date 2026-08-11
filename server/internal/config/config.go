@@ -39,6 +39,15 @@ type Config struct {
 	// Ollama configuration (used when LLM_PROVIDER=ollama or as fallback).
 	OllamaBaseURL      string `mapstructure:"OLLAMA_BASE_URL"`
 	OllamaDefaultModel string `mapstructure:"OLLAMA_DEFAULT_MODEL"`
+	// OllamaJWTSecret is the shared secret for the auth gateway that fronts
+	// Ollama. Empty means there is no gateway (a direct/local Ollama), and
+	// requests go out unsigned. There is deliberately no default: a signing
+	// secret does not belong in committed source. Set it via the environment
+	// or .env, which is gitignored.
+	OllamaJWTSecret string `mapstructure:"OLLAMA_JWT_SECRET"`
+	// OllamaTimeout bounds a single Ollama request. Large models that are not
+	// resident must be loaded before the first token, so this needs headroom.
+	OllamaTimeout time.Duration `mapstructure:"OLLAMA_TIMEOUT"`
 
 	// OpenAI (or OpenAI-compatible) configuration.
 	// When LLM_PROVIDER=openai, OPENAI_API_KEY must be set.
@@ -115,6 +124,8 @@ func Load() (*Config, error) {
 	viper.SetDefault("LLM_PROVIDER", "ollama")
 	viper.SetDefault("OLLAMA_BASE_URL", "http://localhost:11434")
 	viper.SetDefault("OLLAMA_DEFAULT_MODEL", "llama3")
+	// No OLLAMA_JWT_SECRET default on purpose — see the field comment.
+	viper.SetDefault("OLLAMA_TIMEOUT", "3m")
 	viper.SetDefault("OPENAI_BASE_URL", "https://api.openai.com")
 	viper.SetDefault("OPENAI_DEFAULT_MODEL", "gpt-4o-mini")
 	viper.SetDefault("CLAUDE_BASE_URL", "https://api.anthropic.com")
@@ -155,6 +166,8 @@ func Load() (*Config, error) {
 		LLMProvider:          viper.GetString("LLM_PROVIDER"),
 		OllamaBaseURL:        viper.GetString("OLLAMA_BASE_URL"),
 		OllamaDefaultModel:   viper.GetString("OLLAMA_DEFAULT_MODEL"),
+		OllamaJWTSecret:      viper.GetString("OLLAMA_JWT_SECRET"),
+		OllamaTimeout:        viper.GetDuration("OLLAMA_TIMEOUT"),
 		OpenAIAPIKey:         viper.GetString("OPENAI_API_KEY"),
 		OpenAIBaseURL:        viper.GetString("OPENAI_BASE_URL"),
 		OpenAIDefaultModel:   viper.GetString("OPENAI_DEFAULT_MODEL"),

@@ -21,6 +21,7 @@ import {
   Kanban,
   Goal,
   Sparkles,
+  Newspaper,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { SignalDot } from "@/components/ui/signal-dot";
@@ -63,6 +64,7 @@ const NAV_SECTIONS: NavSection[] = [
   {
     title: "Automation",
     items: [
+      { label: "Articles", href: "/articles", icon: Newspaper },
       { label: "Workflows", href: "/workflows", icon: Workflow },
       { label: "Plugins", href: "/plugins", icon: Puzzle },
       { label: "Skills", href: "/skills", icon: Sparkles },

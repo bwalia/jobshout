@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jobshout/server/internal/llm"
+	"github.com/jobshout/server/internal/model"
 )
 
 // BlogPromptTemplate is the system prompt given to the content LLM.
@@ -36,17 +37,24 @@ type GeneratedArticle struct {
 	Slug     string
 	Path     string // relative to repo root
 	Markdown string
+	// WordCount is a rough size indicator shown in the UI so a reader can spot
+	// a truncated or runaway article without opening it.
+	WordCount int
 }
 
 // generateArticles calls the LLM once per topic and returns the articles in
 // the same order. Any single failure aborts the batch (we prefer atomic PRs
 // over publishing half the batch silently).
+//
+// progress fires before each topic so a long batch reports which article it is
+// on rather than sitting on a single opaque "generating" step.
 func generateArticles(
 	ctx context.Context,
 	client llm.Client,
-	model, contentDir string,
+	modelName, contentDir string,
 	topics []string,
 	now time.Time,
+	progress ProgressFunc,
 ) ([]GeneratedArticle, error) {
 	out := make([]GeneratedArticle, 0, len(topics))
 	seenSlugs := map[string]int{}
@@ -57,8 +65,11 @@ func generateArticles(
 			return nil, fmt.Errorf("blog: topic %d is empty", i)
 		}
 
+		report(progress, model.BlogStepGenerating,
+			fmt.Sprintf("Writing %d/%d — %s", i+1, len(topics), topic))
+
 		resp, err := client.Generate(ctx, llm.GenerateRequest{
-			Model: model,
+			Model: modelName,
 			Messages: []llm.Message{
 				{Role: "user", Content: fmt.Sprintf(BlogPromptTemplate, topic)},
 			},
@@ -87,10 +98,11 @@ func generateArticles(
 		path := strings.TrimRight(contentDir, "/") + "/" + filename
 
 		out = append(out, GeneratedArticle{
-			Topic:    topic,
-			Slug:     slug,
-			Path:     path,
-			Markdown: md,
+			Topic:     topic,
+			Slug:      slug,
+			Path:      path,
+			Markdown:  md,
+			WordCount: len(strings.Fields(md)),
 		})
 	}
 

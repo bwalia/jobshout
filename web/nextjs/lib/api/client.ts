@@ -91,3 +91,21 @@ export interface APIError {
   error: string;
   message?: string;
 }
+
+/**
+ * Pull the server's own explanation out of a failed request.
+ *
+ * Axios reports "Request failed with status code 400", which tells a user
+ * nothing. The API answers with `{"error": "..."}` carrying the actual reason
+ * — "publishing is not configured", "run has already been published" — and
+ * that is what belongs in the toast. Falls back when the shape is unexpected.
+ */
+export function apiErrorMessage(err: unknown, fallback: string): string {
+  if (axios.isAxiosError(err)) {
+    const data = err.response?.data as APIError | undefined;
+    if (data?.error) return data.error;
+    if (data?.message) return data.message;
+  }
+  if (err instanceof Error && err.message) return err.message;
+  return fallback;
+}
