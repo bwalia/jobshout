@@ -73,6 +73,11 @@ ai:
   ollamaModel: "llama3:latest"
   openaiBaseURL: "https://api.openai.com"
   openaiModel: "gpt-4o-mini"
+  # Per-task model selection. When true, an agent whose modelProvider is "auto"
+  # gets a provider+model chosen per call — cheap local models for routine work,
+  # stronger ones for planning and code. Agents pinned to a provider are
+  # unaffected; setting this false just makes "auto" fall back to the default.
+  autoModelSelection: true
 
 logLevel: info
 

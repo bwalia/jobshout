@@ -20,6 +20,11 @@ type Config struct {
 	// before giving up and exiting. 0 fails fast on the first error.
 	DatabaseConnectTimeout time.Duration `mapstructure:"DATABASE_CONNECT_TIMEOUT"`
 
+	// AutoModelSelection enables per-task provider/model selection for agents
+	// whose ModelProvider is "auto". Agents pinned to a provider are unaffected
+	// either way; turning this off just makes "auto" fall back to the default.
+	AutoModelSelection bool `mapstructure:"AUTO_MODEL_SELECTION"`
+
 	// MinIO / S3-compatible object storage (optional).
 	MinIOEndpoint        string `mapstructure:"MINIO_ENDPOINT"`
 	MinIOAccessKey       string `mapstructure:"MINIO_ACCESS_KEY"`
@@ -98,6 +103,7 @@ func Load() (*Config, error) {
 
 	viper.SetDefault("SERVER_PORT", ":8080")
 	viper.SetDefault("DATABASE_CONNECT_TIMEOUT", "5m")
+	viper.SetDefault("AUTO_MODEL_SELECTION", true)
 	viper.SetDefault("JWT_EXPIRY_MINUTES", 15)
 	viper.SetDefault("JWT_REFRESH_EXPIRY_DAYS", 7)
 	viper.SetDefault("MINIO_USE_SSL", false)
@@ -174,6 +180,7 @@ func Load() (*Config, error) {
 		BlogWorkDir:          viper.GetString("BLOG_WORK_DIR"),
 
 		DatabaseConnectTimeout: viper.GetDuration("DATABASE_CONNECT_TIMEOUT"),
+		AutoModelSelection:     viper.GetBool("AUTO_MODEL_SELECTION"),
 	}
 
 	origins := viper.GetString("CORS_ORIGINS")
