@@ -13,7 +13,7 @@ import (
 	"github.com/jobshout/server/internal/service"
 )
 
-// BlogHandler exposes the automated blog-generator endpoints.
+// BlogHandler exposes the article-generator endpoints.
 type BlogHandler struct {
 	svc      service.BlogService
 	validate *validator.Validate
@@ -24,8 +24,9 @@ func NewBlogHandler(svc service.BlogService) *BlogHandler {
 	return &BlogHandler{svc: svc, validate: validator.New()}
 }
 
-// Generate handles POST /api/v1/blogs/generate — runs the full pipeline
-// (LLM → git → PR) synchronously and returns the persisted run record.
+// Generate handles POST /api/v1/blogs/generate. The pipeline runs in the
+// background, so this returns 202 with the pending run; poll GetRun for
+// progress. Generation never touches GitHub — see Publish.
 func (h *BlogHandler) Generate(w http.ResponseWriter, r *http.Request) {
 	var req model.GenerateBlogRequest
 	if !DecodeJSON(w, r, &req) {
@@ -41,23 +42,49 @@ func (h *BlogHandler) Generate(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, http.StatusBadRequest, "invalid org_id in token")
 		return
 	}
-	userIDStr := middleware.GetUserID(r.Context())
 	var triggeredBy *uuid.UUID
-	if parsed, err := uuid.Parse(userIDStr); err == nil {
+	if parsed, err := uuid.Parse(middleware.GetUserID(r.Context())); err == nil {
 		triggeredBy = &parsed
 	}
 
 	run, err := h.svc.Generate(r.Context(), orgID, triggeredBy, "api", req)
 	if err != nil {
-		// Still return the run record so the caller can see what was
-		// persisted, but surface the error status.
-		RespondJSON(w, http.StatusInternalServerError, map[string]any{
-			"error": err.Error(),
-			"run":   run,
-		})
+		RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	RespondJSON(w, http.StatusCreated, run)
+	RespondJSON(w, http.StatusAccepted, run)
+}
+
+// Publish handles POST /api/v1/blogs/runs/{runID}/publish — commits a completed
+// run's articles to the content repository and opens a pull request.
+func (h *BlogHandler) Publish(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "runID"))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid run ID")
+		return
+	}
+	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid org_id in token")
+		return
+	}
+
+	run, err := h.svc.Publish(r.Context(), orgID, id)
+	if err != nil {
+		// Publishing is refused for reasons the caller can act on (not
+		// configured, wrong status, already published), so surface the message.
+		RespondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	RespondJSON(w, http.StatusOK, run)
+}
+
+// Config handles GET /api/v1/blogs/config — what the UI needs to decide which
+// actions to offer.
+func (h *BlogHandler) Config(w http.ResponseWriter, r *http.Request) {
+	RespondJSON(w, http.StatusOK, map[string]any{
+		"can_publish": h.svc.CanPublish(),
+	})
 }
 
 // GetRun handles GET /api/v1/blogs/runs/{runID}.
@@ -92,4 +119,39 @@ func (h *BlogHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	RespondJSON(w, http.StatusOK, result)
+}
+
+// ListArticles handles GET /api/v1/blogs/runs/{runID}/articles — full markdown
+// for every article the run produced.
+func (h *BlogHandler) ListArticles(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "runID"))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid run ID")
+		return
+	}
+	articles, err := h.svc.ListArticles(r.Context(), id)
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, "failed to list articles")
+		return
+	}
+	RespondJSON(w, http.StatusOK, articles)
+}
+
+// GetArticle handles GET /api/v1/blogs/articles/{articleID}.
+func (h *BlogHandler) GetArticle(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "articleID"))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid article ID")
+		return
+	}
+	article, err := h.svc.GetArticle(r.Context(), id)
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, "failed to load article")
+		return
+	}
+	if article == nil {
+		RespondError(w, http.StatusNotFound, "article not found")
+		return
+	}
+	RespondJSON(w, http.StatusOK, article)
 }

@@ -31,8 +31,12 @@ func NewRouter(cfg *config.Config) *Router {
 		defaultEmbeddingProvider: cfg.EmbeddingProvider,
 	}
 
-	// Ollama is always registered — it requires no API key.
-	r.clients["ollama"] = NewOllamaClient(cfg.OllamaBaseURL, cfg.OllamaDefaultModel)
+	// Ollama is always registered — it requires no API key. When
+	// OLLAMA_JWT_SECRET is set, the base URL is treated as an auth gateway and
+	// every request carries a freshly minted JWT.
+	r.clients["ollama"] = NewOllamaClientWithAuth(
+		cfg.OllamaBaseURL, cfg.OllamaDefaultModel, cfg.OllamaJWTSecret, cfg.OllamaTimeout,
+	)
 
 	// OpenAI (and compatible endpoints) are registered when an API key is set.
 	openAIBase := cfg.OpenAIBaseURL
@@ -68,8 +72,9 @@ func NewRouter(cfg *config.Config) *Router {
 		}
 	}
 
-	// Ollama embedder requires no API key, so it is always available.
-	r.embedders["ollama"] = NewOllamaEmbedder(cfg.OllamaBaseURL, ollamaEmbModel, dims)
+	// Ollama embedder requires no API key, so it is always available. It shares
+	// the chat host, so it shares the gateway credential too.
+	r.embedders["ollama"] = NewOllamaEmbedderWithAuth(cfg.OllamaBaseURL, ollamaEmbModel, dims, cfg.OllamaJWTSecret)
 	// OpenAI embedder is registered only when an API key is set.
 	if cfg.OpenAIAPIKey != "" {
 		r.embedders["openai"] = NewOpenAIEmbedder(openAIBase, cfg.OpenAIAPIKey, openAIEmbModel, dims)

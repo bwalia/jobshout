@@ -17,11 +17,20 @@ type OllamaEmbedder struct {
 	BaseURL    string
 	Model      string
 	dimensions int
+	auth       *ollamaAuth
 	httpClient *http.Client
 }
 
-// NewOllamaEmbedder creates an OllamaEmbedder with a sensible HTTP timeout.
+// NewOllamaEmbedder creates an OllamaEmbedder talking to a plain Ollama server.
 func NewOllamaEmbedder(baseURL, model string, dimensions int) *OllamaEmbedder {
+	return NewOllamaEmbedderWithAuth(baseURL, model, dimensions, "")
+}
+
+// NewOllamaEmbedderWithAuth creates an OllamaEmbedder that signs each request
+// with a freshly minted JWT when gatewaySecret is non-empty. Embeddings hit the
+// same host as chat, so they go through the same gateway and need the same
+// credential.
+func NewOllamaEmbedderWithAuth(baseURL, model string, dimensions int, gatewaySecret string) *OllamaEmbedder {
 	if model == "" {
 		model = "nomic-embed-text"
 	}
@@ -32,6 +41,7 @@ func NewOllamaEmbedder(baseURL, model string, dimensions int) *OllamaEmbedder {
 		BaseURL:    baseURL,
 		Model:      model,
 		dimensions: dimensions,
+		auth:       newOllamaAuth(gatewaySecret),
 		httpClient: &http.Client{
 			Timeout: 5 * time.Minute,
 		},
@@ -80,6 +90,9 @@ func (e *OllamaEmbedder) embedOne(ctx context.Context, text string) ([]float32, 
 		return nil, fmt.Errorf("ollama: build embedding request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	if err := e.auth.apply(httpReq); err != nil {
+		return nil, err
+	}
 
 	resp, err := e.httpClient.Do(httpReq)
 	if err != nil {
@@ -92,6 +105,9 @@ func (e *OllamaEmbedder) embedOne(ctx context.Context, text string) ([]float32, 
 		return nil, fmt.Errorf("ollama: read embedding response body: %w", err)
 	}
 
+	if isAuthStatus(resp.StatusCode) {
+		return nil, authError(resp.StatusCode, string(rawBody))
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("ollama: unexpected embedding status %d: %s", resp.StatusCode, string(rawBody))
 	}

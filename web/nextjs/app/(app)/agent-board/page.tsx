@@ -1,7 +1,15 @@
 "use client";
 
 import { useMemo } from "react";
-import { Bot, Brain, Hammer, Eye, AlertTriangle, Coffee } from "lucide-react";
+import {
+  Bot,
+  Brain,
+  Hammer,
+  Eye,
+  AlertTriangle,
+  Coffee,
+  GitPullRequest,
+} from "lucide-react";
 import {
   useAgentBoard,
 } from "@/lib/hooks/useAgentBoard";
@@ -62,6 +70,14 @@ const COLUMNS: ColumnDef[] = [
     dot: "bg-status-review",
   },
   {
+    key: "publishing",
+    label: "Publishing",
+    hint: "Shipping work to a real system",
+    icon: GitPullRequest,
+    accent: "border-status-done/40",
+    dot: "bg-status-done",
+  },
+  {
     key: "failed",
     label: "Failed",
     hint: "Last job errored",
@@ -85,6 +101,7 @@ export default function AgentBoardPage() {
       planning: [],
       executing: [],
       reviewing: [],
+      publishing: [],
       failed: [],
     };
     for (const e of entries ?? []) {

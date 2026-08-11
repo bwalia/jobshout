@@ -17,6 +17,7 @@ test.describe("Navigation & Layout", () => {
     { href: "/agents", heading: "Agents" },
     { href: "/projects", heading: "Projects" },
     { href: "/task-manager", heading: "Multi-Level Task Manager" },
+    { href: "/articles", heading: "Articles" },
     { href: "/workflows", heading: "Workflows" },
   ];
 

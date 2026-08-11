@@ -28,8 +28,32 @@ type Agent struct {
 	CreatedBy        *uuid.UUID     `json:"created_by"`
 	EngineType       string         `json:"engine_type"`
 	EngineConfig     map[string]any `json:"engine_config"`
-	CreatedAt        time.Time      `json:"created_at"`
-	UpdatedAt        time.Time      `json:"updated_at"`
+	// Metadata carries platform-owned annotations that are not user-editable.
+	// Built-in agents seeded by the platform are marked here — see
+	// BuiltinArticleWriter — which is how the UI tells them apart from agents a
+	// user created.
+	Metadata  map[string]any `json:"metadata"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+}
+
+// MetadataKeyBuiltin is the Metadata key identifying a platform-seeded agent,
+// and BuiltinArticleWriter is its value for the article generator. Kept as
+// constants because migration 000019 and auth_service.Register both write this
+// exact marker and the board/UI read it.
+const (
+	MetadataKeyBuiltin   = "builtin"
+	BuiltinArticleWriter = "article_writer"
+)
+
+// IsBuiltin reports whether the agent was seeded by the platform under the
+// given builtin name.
+func (a *Agent) IsBuiltin(name string) bool {
+	if a.Metadata == nil {
+		return false
+	}
+	v, _ := a.Metadata[MetadataKeyBuiltin].(string)
+	return v == name
 }
 
 type CreateAgentRequest struct {

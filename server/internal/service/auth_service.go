@@ -28,15 +28,18 @@ type authService struct {
 	userRepo  repository.UserRepository
 	tokenRepo repository.TokenRepository
 	orgRepo   repository.OrganizationRepository
+	agentRepo repository.AgentRepository
 	jwtSvc    JWTService
 	logger    *zap.Logger
 }
 
-// NewAuthService creates a new AuthService.
+// NewAuthService creates a new AuthService. agentRepo is used to give each new
+// organization its built-in agents; pass nil to skip that seeding.
 func NewAuthService(
 	userRepo repository.UserRepository,
 	tokenRepo repository.TokenRepository,
 	orgRepo repository.OrganizationRepository,
+	agentRepo repository.AgentRepository,
 	jwtSvc JWTService,
 	logger *zap.Logger,
 ) AuthService {
@@ -44,6 +47,7 @@ func NewAuthService(
 		userRepo:  userRepo,
 		tokenRepo: tokenRepo,
 		orgRepo:   orgRepo,
+		agentRepo: agentRepo,
 		jwtSvc:    jwtSvc,
 		logger:    logger,
 	}
@@ -89,7 +93,32 @@ func (s *authService) Register(ctx context.Context, req model.RegisterRequest) (
 	// Set the org owner to this user
 	org.OwnerID = &user.ID
 
+	s.seedBuiltinAgents(ctx, org.ID, user.ID)
+
 	return s.generateAuthResponse(ctx, user)
+}
+
+// seedBuiltinAgents gives a brand-new organization the platform's built-in
+// agents, so the dashboard is not empty on first login.
+//
+// Migration 000019 seeds the same agents for organizations that already
+// existed; this covers everything created since the last boot. Failures are
+// logged and swallowed — a missing built-in is a degraded experience, not a
+// reason to fail a registration that has already created the org and user.
+func (s *authService) seedBuiltinAgents(ctx context.Context, orgID, createdBy uuid.UUID) {
+	if s.agentRepo == nil {
+		return
+	}
+
+	agent := articleWriterSeed(orgID)
+	agent.CreatedBy = &createdBy
+	if err := s.agentRepo.Create(ctx, agent); err != nil {
+		s.logger.Warn("auth: failed to seed built-in Article Writer agent",
+			zap.String("org_id", orgID.String()), zap.Error(err))
+		return
+	}
+	s.logger.Info("auth: seeded built-in agents for new organization",
+		zap.String("org_id", orgID.String()))
 }
 
 func (s *authService) Login(ctx context.Context, req model.LoginRequest) (*model.AuthResponse, error) {

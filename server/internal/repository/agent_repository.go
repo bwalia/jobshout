@@ -22,6 +22,9 @@ type AgentListFilter struct {
 type AgentRepository interface {
 	Create(ctx context.Context, agent *model.Agent) error
 	FindByID(ctx context.Context, id uuid.UUID) (*model.Agent, error)
+	// FindBuiltin resolves a platform-seeded agent by its metadata marker,
+	// returning (nil, nil) when the org has none.
+	FindBuiltin(ctx context.Context, orgID uuid.UUID, builtin string) (*model.Agent, error)
 	ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams, filter AgentListFilter) (*model.PaginatedResponse[model.Agent], error)
 	Update(ctx context.Context, agent *model.Agent) error
 	Delete(ctx context.Context, id uuid.UUID) error
@@ -44,48 +47,95 @@ func (r *agentRepository) Create(ctx context.Context, agent *model.Agent) error 
 	if err != nil {
 		engineConfigJSON = []byte("{}")
 	}
+	metadataJSON, err := json.Marshal(agent.Metadata)
+	if err != nil || agent.Metadata == nil {
+		metadataJSON = []byte("{}")
+	}
 
 	query := `
 		INSERT INTO agents (id, org_id, name, role, description, avatar_url, status,
 			model_provider, model_name, system_prompt, performance_score, manager_id, created_by,
-			engine_type, engine_config, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW())
+			engine_type, engine_config, metadata, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW(), NOW())
 		RETURNING created_at, updated_at`
 
 	return r.pool.QueryRow(ctx, query,
 		agent.ID, agent.OrgID, agent.Name, agent.Role, agent.Description, agent.AvatarURL,
 		agent.Status, agent.ModelProvider, agent.ModelName, agent.SystemPrompt,
 		agent.PerformanceScore, agent.ManagerID, agent.CreatedBy,
-		agent.EngineType, engineConfigJSON,
+		agent.EngineType, engineConfigJSON, metadataJSON,
 	).Scan(&agent.CreatedAt, &agent.UpdatedAt)
 }
 
-func (r *agentRepository) FindByID(ctx context.Context, id uuid.UUID) (*model.Agent, error) {
-	query := `
-		SELECT id, org_id, name, role, description, avatar_url, status,
-			model_provider, model_name, system_prompt, performance_score,
-			manager_id, created_by, engine_type, engine_config, created_at, updated_at
-		FROM agents WHERE id = $1`
+// FindBuiltin returns the org's platform-seeded agent carrying the given
+// builtin marker, or nil when the org has none. Used to resolve the Article
+// Writer without hardcoding an ID.
+func (r *agentRepository) FindBuiltin(ctx context.Context, orgID uuid.UUID, builtin string) (*model.Agent, error) {
+	query := `SELECT ` + agentColumns + `
+		FROM agents
+		WHERE org_id = $1 AND metadata->>'builtin' = $2
+		ORDER BY created_at ASC
+		LIMIT 1`
 
-	a := &model.Agent{}
-	var engineConfigRaw []byte
-	err := r.pool.QueryRow(ctx, query, id).Scan(
-		&a.ID, &a.OrgID, &a.Name, &a.Role, &a.Description, &a.AvatarURL,
-		&a.Status, &a.ModelProvider, &a.ModelName, &a.SystemPrompt,
-		&a.PerformanceScore, &a.ManagerID, &a.CreatedBy,
-		&a.EngineType, &engineConfigRaw, &a.CreatedAt, &a.UpdatedAt,
-	)
+	a, err := scanAgent(r.pool.QueryRow(ctx, query, orgID, builtin))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("finding agent by id: %w", err)
+		return nil, fmt.Errorf("finding builtin agent %q: %w", builtin, err)
 	}
+	return a, nil
+}
+
+// agentColumns is the single source of truth for the agent SELECT list, paired
+// with scanAgent below. Keeping the two together matters: a column added to one
+// query but not its scan is invisible to the compiler and only shows up as a
+// runtime "number of field descriptions must equal number of destinations".
+const agentColumns = `
+	id, org_id, name, role, description, avatar_url, status,
+	model_provider, model_name, system_prompt, performance_score,
+	manager_id, created_by, engine_type, engine_config, metadata,
+	created_at, updated_at`
+
+// scanAgent reads one row in agentColumns order and hydrates its JSONB fields.
+func scanAgent(row pgx.Row) (*model.Agent, error) {
+	a := &model.Agent{}
+	var engineConfigRaw, metadataRaw []byte
+	if err := row.Scan(
+		&a.ID, &a.OrgID, &a.Name, &a.Role, &a.Description, &a.AvatarURL,
+		&a.Status, &a.ModelProvider, &a.ModelName, &a.SystemPrompt,
+		&a.PerformanceScore, &a.ManagerID, &a.CreatedBy,
+		&a.EngineType, &engineConfigRaw, &metadataRaw,
+		&a.CreatedAt, &a.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+
+	// Guarantee non-nil maps so callers never have to nil-check before indexing.
 	if len(engineConfigRaw) > 0 {
 		_ = json.Unmarshal(engineConfigRaw, &a.EngineConfig)
 	}
 	if a.EngineConfig == nil {
 		a.EngineConfig = map[string]any{}
+	}
+	if len(metadataRaw) > 0 {
+		_ = json.Unmarshal(metadataRaw, &a.Metadata)
+	}
+	if a.Metadata == nil {
+		a.Metadata = map[string]any{}
+	}
+	return a, nil
+}
+
+func (r *agentRepository) FindByID(ctx context.Context, id uuid.UUID) (*model.Agent, error) {
+	query := `SELECT ` + agentColumns + ` FROM agents WHERE id = $1`
+
+	a, err := scanAgent(r.pool.QueryRow(ctx, query, id))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("finding agent by id: %w", err)
 	}
 	return a, nil
 }
@@ -117,10 +167,7 @@ func (r *agentRepository) ListByOrg(ctx context.Context, orgID uuid.UUID, params
 		return nil, fmt.Errorf("counting agents: %w", err)
 	}
 
-	query := fmt.Sprintf(`
-		SELECT id, org_id, name, role, description, avatar_url, status,
-			model_provider, model_name, system_prompt, performance_score,
-			manager_id, created_by, engine_type, engine_config, created_at, updated_at
+	query := fmt.Sprintf(`SELECT `+agentColumns+`
 		FROM agents WHERE %s
 		ORDER BY created_at DESC
 		LIMIT $%d OFFSET $%d`, whereClause, argIdx, argIdx+1)
@@ -135,23 +182,11 @@ func (r *agentRepository) ListByOrg(ctx context.Context, orgID uuid.UUID, params
 
 	agents := make([]model.Agent, 0)
 	for rows.Next() {
-		var a model.Agent
-		var engineConfigRaw []byte
-		if err := rows.Scan(
-			&a.ID, &a.OrgID, &a.Name, &a.Role, &a.Description, &a.AvatarURL,
-			&a.Status, &a.ModelProvider, &a.ModelName, &a.SystemPrompt,
-			&a.PerformanceScore, &a.ManagerID, &a.CreatedBy,
-			&a.EngineType, &engineConfigRaw, &a.CreatedAt, &a.UpdatedAt,
-		); err != nil {
+		a, err := scanAgent(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scanning agent row: %w", err)
 		}
-		if len(engineConfigRaw) > 0 {
-			_ = json.Unmarshal(engineConfigRaw, &a.EngineConfig)
-		}
-		if a.EngineConfig == nil {
-			a.EngineConfig = map[string]any{}
-		}
-		agents = append(agents, a)
+		agents = append(agents, *a)
 	}
 
 	totalPages := total / params.PerPage

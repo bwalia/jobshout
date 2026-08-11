@@ -119,6 +119,9 @@ func main() {
 		zap.String("default_provider", cfg.LLMProvider),
 		zap.String("ollama_url", cfg.OllamaBaseURL),
 		zap.String("ollama_model", cfg.OllamaDefaultModel),
+		// Whether the secret is set, never the secret itself.
+		zap.Bool("ollama_gateway_auth", cfg.OllamaJWTSecret != ""),
+		zap.Duration("ollama_timeout", cfg.OllamaTimeout),
 	)
 
 	// ─── Embedding + knowledge ingestion (RAG foundation) ────────────────────
@@ -214,7 +217,7 @@ func main() {
 
 	// ─── Services ────────────────────────────────────────────────────────────
 	jwtSvc := service.NewJWTService(cfg)
-	authSvc := service.NewAuthService(userRepo, tokenRepo, orgRepo, jwtSvc, logger)
+	authSvc := service.NewAuthService(userRepo, tokenRepo, orgRepo, agentRepo, jwtSvc, logger)
 	agentSvc := service.NewAgentService(agentRepo, logger)
 	projectSvc := service.NewProjectService(projectRepo, logger)
 	taskSvc := service.NewTaskService(taskRepo, logger)
@@ -227,33 +230,35 @@ func main() {
 	workflowSvc := service.NewWorkflowService(workflowRepo, agentRepo, execRepo, toolPermRepo, dagEngine, logger)
 	pluginSvc := service.NewPluginService(pluginRepo, agentRepo, engineRouter, logger)
 
-	// ─── Blog generator (LLM → git → PR) ────────────────────────────────────
+	// ─── Article generator (LLM → markdown → optional git/PR) ───────────────
+	// Built unconditionally: generation needs no GitHub credentials and its
+	// output is read in the product. Only publishing is token-gated, and the
+	// runner reports that through CanPublish() so the UI can disable it.
 	var blogRunner *blog.Runner
-	if cfg.GitHubToken != "" {
-		blogLLM, err := llmRouter.For(cfg.LLMProvider)
-		if err != nil {
-			logger.Warn("blog: llm router returned error — blog generator disabled",
-				zap.Error(err))
-		} else {
-			blogRunner = blog.NewRunner(blog.Config{
-				GitHubToken: cfg.GitHubToken,
-				AuthorName:  cfg.GitHubUserName,
-				AuthorEmail: cfg.GitHubUserEmail,
-				RepoOwner:   cfg.BlogRepoOwner,
-				RepoName:    cfg.BlogRepoName,
-				BaseBranch:  cfg.BlogBaseBranch,
-				WorkDir:     cfg.BlogWorkDir,
-				ContentDir:  "content/blogs",
-			}, blogLLM, logger)
-			logger.Info("blog generator initialised",
-				zap.String("repo", cfg.BlogRepoOwner+"/"+cfg.BlogRepoName),
-				zap.String("base_branch", cfg.BlogBaseBranch),
-			)
-		}
+	if blogLLM, err := llmRouter.For(cfg.LLMProvider); err != nil {
+		logger.Warn("blog: llm router returned error — article generator disabled",
+			zap.Error(err))
 	} else {
-		logger.Info("blog: GITHUB_TOKEN unset — blog generator disabled")
+		blogRunner = blog.NewRunner(blog.Config{
+			GitHubToken: cfg.GitHubToken,
+			AuthorName:  cfg.GitHubUserName,
+			AuthorEmail: cfg.GitHubUserEmail,
+			RepoOwner:   cfg.BlogRepoOwner,
+			RepoName:    cfg.BlogRepoName,
+			BaseBranch:  cfg.BlogBaseBranch,
+			WorkDir:     cfg.BlogWorkDir,
+			ContentDir:  "content/blogs",
+		}, blogLLM, logger)
+		logger.Info("article generator initialised",
+			zap.String("repo", cfg.BlogRepoOwner+"/"+cfg.BlogRepoName),
+			zap.String("base_branch", cfg.BlogBaseBranch),
+			zap.Bool("can_publish", blogRunner.CanPublish()),
+		)
+		if !blogRunner.CanPublish() {
+			logger.Info("blog: GITHUB_TOKEN unset — articles can be generated and read, but not published")
+		}
 	}
-	blogSvc := service.NewBlogService(blogRunner, blogRepo, logger)
+	blogSvc := service.NewBlogService(blogRunner, blogRepo, agentRepo, logger)
 
 	// ─── Autonomous agent engine ────────────────────────────────────────────
 	autonomousExec := executor.NewAutonomousExecutor(goNativeExec, llmRouter, memoryRepo, goalRepo, logger).WithAutoSelect(autoSelector)
@@ -590,11 +595,19 @@ func main() {
 			// Workflow run status polling
 			r.Get("/workflow-runs/{runID}", workflowHandler.GetRun)
 
-			// Automated blog generator (LLM → git → PR).
+			// Article generator (LLM → markdown → optional git/PR). Generation
+			// and publishing are separate so an article can be reviewed in the
+			// UI before it reaches the content repository.
 			r.Route("/blogs", func(r chi.Router) {
+				r.Get("/config", blogHandler.Config)
 				r.Post("/generate", blogHandler.Generate)
 				r.Get("/runs", blogHandler.ListRuns)
-				r.Get("/runs/{runID}", blogHandler.GetRun)
+				r.Route("/runs/{runID}", func(r chi.Router) {
+					r.Get("/", blogHandler.GetRun)
+					r.Get("/articles", blogHandler.ListArticles)
+					r.Post("/publish", blogHandler.Publish)
+				})
+				r.Get("/articles/{articleID}", blogHandler.GetArticle)
 			})
 
 			// Plugins (user-defined LangGraph/LangChain workflows)

@@ -74,10 +74,26 @@ func TestGenerateArticles_Success(t *testing.T) {
 	}}
 	now := time.Date(2026, 4, 29, 10, 0, 0, 0, time.UTC)
 
+	// Collect the progress callbacks so we can assert the run reports which
+	// article it is on, not just an opaque "generating".
+	var progressLabels []string
 	arts, err := generateArticles(context.Background(), llm, "llama3", "content/blogs",
-		[]string{"Kubernetes debugging", "AI agents"}, now)
+		[]string{"Kubernetes debugging", "AI agents"}, now,
+		func(_, label string) { progressLabels = append(progressLabels, label) })
 	if err != nil {
 		t.Fatalf("generateArticles: %v", err)
+	}
+	want := []string{"Writing 1/2 — Kubernetes debugging", "Writing 2/2 — AI agents"}
+	if len(progressLabels) != len(want) {
+		t.Fatalf("progress labels = %v, want %v", progressLabels, want)
+	}
+	for i := range want {
+		if progressLabels[i] != want[i] {
+			t.Errorf("progress[%d] = %q, want %q", i, progressLabels[i], want[i])
+		}
+	}
+	if arts[0].WordCount != len(strings.Fields(arts[0].Markdown)) {
+		t.Errorf("WordCount = %d, want %d", arts[0].WordCount, len(strings.Fields(arts[0].Markdown)))
 	}
 	if len(arts) != 2 {
 		t.Fatalf("want 2 articles, got %d", len(arts))
@@ -100,8 +116,9 @@ func TestGenerateArticles_Success(t *testing.T) {
 
 func TestGenerateArticles_EmptyTopic(t *testing.T) {
 	l := &stubLLM{responses: []string{"# x"}}
+	// nil progress must be tolerated — most callers do not want a trace.
 	_, err := generateArticles(context.Background(), l, "", "content/blogs",
-		[]string{"  "}, time.Now())
+		[]string{"  "}, time.Now(), nil)
 	if err == nil {
 		t.Fatal("expected error for empty topic")
 	}
@@ -110,7 +127,7 @@ func TestGenerateArticles_EmptyTopic(t *testing.T) {
 func TestGenerateArticles_DuplicateTopics(t *testing.T) {
 	l := &stubLLM{responses: []string{"# a", "# b"}}
 	arts, err := generateArticles(context.Background(), l, "", "content/blogs",
-		[]string{"Kubernetes debugging", "Kubernetes debugging"}, time.Now())
+		[]string{"Kubernetes debugging", "Kubernetes debugging"}, time.Now(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
