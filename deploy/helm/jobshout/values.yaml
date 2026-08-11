@@ -83,14 +83,23 @@ storage:
 api:
   replicas: 1
   port: 8080
-  # How long the API retries its initial Postgres connection before giving up
-  # and exiting. Must stay comfortably under the startup probe budget below
-  # (periodSeconds x failureThreshold), or Kubernetes kills the pod while it is
-  # still legitimately retrying. Set to 0 to fail fast on the first error.
-  dbConnectTimeout: 5m
+  # Three budgets that must nest, innermost first:
+  #
+  #   dbConnectTimeout (180s) < startup probe (240s) < helm --wait (300s)
+  #
+  # The API retries its initial Postgres connection for dbConnectTimeout. The
+  # startup probe must outlast that, or Kubernetes kills the pod while it is
+  # still legitimately retrying. And the whole rollout must finish inside the
+  # `helm upgrade --wait --timeout 5m` that Ring Promoter runs, or helm gives up
+  # and records the release as failed even though the pods go on to converge.
+  # An earlier 400s probe budget overran that window and left int marked failed
+  # while it was in fact perfectly healthy.
+  #
+  # Set dbConnectTimeout to 0 to fail fast on the first error.
+  dbConnectTimeout: 3m
   startupProbe:
     periodSeconds: 10
-    failureThreshold: 40 # 400s of budget for a 300s retry window
+    failureThreshold: 24 # 240s
   resources:
     requests: { cpu: 250m, memory: 256Mi }
     limits: { cpu: "1", memory: 512Mi }
