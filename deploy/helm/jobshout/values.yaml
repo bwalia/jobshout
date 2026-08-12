@@ -170,6 +170,14 @@ postgres:
   # merely absent from the database, it is unavailable to install, so the API
   # fatals during migrations and never serves. Same PostgreSQL 16.14 underneath.
   image: pgvector/pgvector:pg16
+  # The API's wait-for-postgres initContainer only calls pg_isready, so it does
+  # not need the vector extension — and pulling the full pgvector image for it
+  # is what makes a rollout onto a node that has not cached it take ten-plus
+  # minutes, past the deploy's helm --wait timeout. Postgres lands on one node
+  # and the API on another, so that pull is the normal case, not the rare one.
+  # Any image carrying pg_isready of a compatible version will do; the alpine
+  # postgres is an order of magnitude smaller.
+  waitImage: postgres:16-alpine
   resources:
     requests: { cpu: 250m, memory: 512Mi }
     limits: { cpu: "1", memory: 1Gi }
