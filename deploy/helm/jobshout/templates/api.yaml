@@ -28,7 +28,7 @@ spec:
       # ring unhealthy even though the deploy succeeds).
       initContainers:
         - name: wait-for-postgres
-          image: {{ .Values.postgres.image }}
+          image: {{ .Values.postgres.waitImage | default .Values.postgres.image }}
           command:
             - sh
             - -c
