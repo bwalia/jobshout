@@ -97,7 +97,7 @@ export function usePublishBlogRun() {
     onSuccess: (_, id) => {
       qc.invalidateQueries({ queryKey: blogKeys.detail(id) });
       qc.invalidateQueries({ queryKey: blogKeys.lists() });
-      toast.success("Pull request opened");
+      toast.success("Filed in the CMS as a draft");
     },
     onError: (e) => toast.error(apiErrorMessage(e, "Failed to publish")),
   });
