@@ -16,6 +16,7 @@ import time
 
 from app.config.settings import Settings
 from app.github.client import GitHubClient, GitHubError
+from app.github.markers import already_started, started_comment
 from app.opencode.runner import OpenCodeError
 from app.reviewer.agent import NothingToReview, review_pull_request
 from app.reviewer.workspace import WorkspaceError
@@ -23,30 +24,13 @@ from app.reviewer.workspace import WorkspaceError
 DEFAULT_INTERVAL = 30  # seconds between polls; GitHub's authenticated limit is ample
 
 
-def _marker(head_sha: str) -> str:
-    return f"<!-- review-bot:started:{head_sha} -->"
-
-
-def _started_comment(head_sha: str) -> str:
-    return (
-        "🤖 **AI review started.** Exploring the repository and reviewing this pull "
-        "request with a local model — this takes a few minutes. I'll post the review "
-        "here when it's ready.\n\n" + _marker(head_sha)
-    )
-
-
-def _already_started(client: GitHubClient, number: int, head_sha: str) -> bool:
-    marker = _marker(head_sha)
-    return any(marker in body for body in client.issue_comment_bodies(number))
-
-
 def _handle_pr(settings: Settings, client: GitHubClient, pr, on_event) -> None:
     """Ack, review, and post for a single PR. Idempotent per head sha."""
-    if _already_started(client, pr.number, pr.head_sha):
+    if already_started(client, pr.number, pr.head_sha):
         return  # this exact commit has already been picked up
 
     on_event(f"PR #{pr.number}: review requested at {pr.head_sha[:8]} — starting")
-    client.post_issue_comment(pr.number, _started_comment(pr.head_sha))
+    client.post_issue_comment(pr.number, started_comment(pr.head_sha))
 
     try:
         result = review_pull_request(
@@ -79,7 +63,7 @@ def poll_once(settings: Settings, client: GitHubClient, on_event=lambda m: None)
     handled = 0
     for pr in prs:
         # Re-check the marker inside the loop; a long review may have elapsed.
-        if _already_started(client, pr.number, pr.head_sha):
+        if already_started(client, pr.number, pr.head_sha):
             continue
         _handle_pr(settings, client, pr, on_event)
         handled += 1
