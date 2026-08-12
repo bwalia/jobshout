@@ -18,13 +18,13 @@ type BlogService interface {
 	// Generate starts a run and returns immediately with the pending record.
 	// The pipeline continues in the background; poll GetByID for progress.
 	Generate(ctx context.Context, orgID uuid.UUID, triggeredBy *uuid.UUID, source string, req model.GenerateBlogRequest) (*model.BlogRun, error)
-	// Publish pushes a completed run's articles and opens a pull request.
+	// Publish creates one CMS draft per article of a completed run.
 	Publish(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) (*model.BlogRun, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*model.BlogRun, error)
 	ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.BlogRun], error)
 	ListArticles(ctx context.Context, runID uuid.UUID) ([]model.BlogArticle, error)
 	GetArticle(ctx context.Context, id uuid.UUID) (*model.BlogArticle, error)
-	// CanPublish reports whether GitHub credentials are configured, so the UI
+	// CanPublish reports whether the CMS connection is configured, so the UI
 	// can disable the action instead of offering a button that always fails.
 	CanPublish() bool
 	// EnsureArticleWriter resolves the org's built-in Article Writer, creating
@@ -57,7 +57,7 @@ func (s *blogService) CanPublish() bool {
 // the backfill in migration 000019 — that covers organizations which already
 // existed, this covers everything created since.
 func articleWriterSeed(orgID uuid.UUID) *model.Agent {
-	desc := "Writes SEO-optimised technical articles in markdown, then publishes them to the content repository as a pull request for review."
+	desc := "Writes SEO-optimised technical articles in markdown, converts them to HTML, and files them in the CMS as drafts for review."
 	prompt := "You are a technical blog writer for a developer audience. You produce high-quality, SEO-optimised articles in pure markdown: a single H1 title, H2/H3 structure, 800-1200 words, at least one code block where it helps the reader, and a short Further Reading list."
 	return &model.Agent{
 		ID:           uuid.New(),
@@ -100,6 +100,7 @@ func initialSteps() []model.BlogStep {
 	return []model.BlogStep{
 		{Key: model.BlogStepQueued, Label: "Queued", Status: model.StepStatusDone},
 		{Key: model.BlogStepGenerating, Label: "Writing articles", Status: model.StepStatusPending},
+		{Key: model.BlogStepConverting, Label: "Converting to HTML", Status: model.StepStatusPending},
 		{Key: model.BlogStepGenerated, Label: "Articles ready", Status: model.StepStatusPending},
 	}
 }
@@ -108,9 +109,8 @@ func initialSteps() []model.BlogStep {
 // ever generated does not show phases it will never reach.
 func publishSteps() []model.BlogStep {
 	return []model.BlogStep{
-		{Key: model.BlogStepPublishing, Label: "Committing to repository", Status: model.StepStatusPending},
-		{Key: model.BlogStepOpeningPR, Label: "Opening pull request", Status: model.StepStatusPending},
-		{Key: model.BlogStepPublished, Label: "Published", Status: model.StepStatusPending},
+		{Key: model.BlogStepPublishing, Label: "Posting drafts to the CMS", Status: model.StepStatusPending},
+		{Key: model.BlogStepPublished, Label: "Drafts created", Status: model.StepStatusPending},
 	}
 }
 
@@ -282,7 +282,7 @@ func (s *blogService) runGeneration(run *model.BlogRun, agent *model.Agent, req 
 		persisted = append(persisted, model.BlogArticle{
 			ID: id, RunID: run.ID, OrgID: run.OrgID,
 			Topic: a.Topic, Slug: a.Slug, Path: a.Path,
-			Markdown: a.Markdown, WordCount: a.WordCount,
+			Markdown: a.Markdown, HTML: a.HTML, WordCount: a.WordCount,
 		})
 		summaries = append(summaries, model.BlogRunArticle{
 			ID: id, Topic: a.Topic, Slug: a.Slug, Path: a.Path, WordCount: a.WordCount,
@@ -314,7 +314,7 @@ func (s *blogService) runGeneration(run *model.BlogRun, agent *model.Agent, req 
 
 func (s *blogService) Publish(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) (*model.BlogRun, error) {
 	if !s.CanPublish() {
-		return nil, fmt.Errorf("blog_svc: publishing is not configured (GITHUB_TOKEN is unset)")
+		return nil, fmt.Errorf("blog_svc: publishing is not configured (OPSAPI_BASE_URL, OPSAPI_TOKEN and OPSAPI_NAMESPACE must all be set)")
 	}
 
 	run, err := s.repo.GetByID(ctx, runID)
@@ -327,7 +327,7 @@ func (s *blogService) Publish(ctx context.Context, orgID uuid.UUID, runID uuid.U
 	if run.Status != model.BlogRunStatusCompleted {
 		return nil, fmt.Errorf("blog_svc: only a completed run can be published (status is %q)", run.Status)
 	}
-	if run.PRURL != nil {
+	if run.PublishedAt != nil {
 		return nil, fmt.Errorf("blog_svc: run has already been published")
 	}
 
@@ -339,10 +339,17 @@ func (s *blogService) Publish(ctx context.Context, orgID uuid.UUID, runID uuid.U
 		return nil, fmt.Errorf("blog_svc: run has no articles to publish")
 	}
 
+	// articleIDs maps slug back to the stored row, so the publish result — which
+	// travels through the blog package and knows nothing of our IDs — can be
+	// written back to the right articles. Slugs are de-duplicated within a run
+	// at generation time, so they are unique here.
+	articleIDs := make(map[string]uuid.UUID, len(stored))
 	articles := make([]blog.GeneratedArticle, 0, len(stored))
 	for _, a := range stored {
+		articleIDs[a.Slug] = a.ID
 		articles = append(articles, blog.GeneratedArticle{
-			Topic: a.Topic, Slug: a.Slug, Path: a.Path, Markdown: a.Markdown, WordCount: a.WordCount,
+			Topic: a.Topic, Slug: a.Slug, Path: a.Path,
+			Markdown: a.Markdown, HTML: a.HTML, WordCount: a.WordCount,
 		})
 	}
 
@@ -363,12 +370,30 @@ func (s *blogService) Publish(ctx context.Context, orgID uuid.UUID, runID uuid.U
 
 	tracker.finish()
 	run.Steps = tracker.steps
-	run.Branch = &result.Branch
-	pr := result.PRNumber
-	run.PRNumber = &pr
-	run.PRURL = &result.PRURL
+	run.CMSNamespace = &result.Namespace
 	run.PublishedAt = &result.PublishedAt
 	run.ErrorMessage = nil
+
+	posted := make([]model.BlogArticlePost, 0, len(result.Posts))
+	for _, p := range result.Posts {
+		id, ok := articleIDs[p.Slug]
+		if !ok {
+			// Only reachable if the runner invented a slug we never sent. The
+			// draft exists either way, so log it rather than failing a publish
+			// that already happened.
+			s.logger.Warn("blog_svc: published post has no matching article",
+				zap.String("slug", p.Slug), zap.String("post_uuid", p.PostUUID))
+			continue
+		}
+		posted = append(posted, model.BlogArticlePost{
+			ArticleID: id, PostUUID: p.PostUUID, Status: p.Status,
+		})
+	}
+	if err := s.repo.MarkArticlesPosted(ctx, posted); err != nil {
+		// The drafts are in the CMS; losing our record of where is worth a loud
+		// log but not an error that suggests the publish did not happen.
+		s.logger.Error("blog_svc: failed to record posted articles", zap.Error(err))
+	}
 
 	if err := s.repo.Update(ctx, run); err != nil {
 		return nil, fmt.Errorf("blog_svc: persist publish: %w", err)

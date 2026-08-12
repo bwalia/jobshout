@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, ExternalLink, GitPullRequest, Newspaper } from "lucide-react";
+import { CheckCircle2, ArrowLeft, Newspaper, Send } from "lucide-react";
 import {
   useBlogArticles,
   useBlogConfig,
@@ -49,8 +49,9 @@ export default function ArticleRunPage() {
     );
   }
 
+  const isPublished = Boolean(run.published_at);
   const canPublish =
-    Boolean(config?.can_publish) && run.status === "completed" && !run.pr_url;
+    Boolean(config?.can_publish) && run.status === "completed" && !isPublished;
 
   return (
     <div className="space-y-6">
@@ -78,25 +79,19 @@ export default function ArticleRunPage() {
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
-            {run.pr_url && (
-              <a
-                href={run.pr_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
-              >
-                <ExternalLink className="h-4 w-4" />
-                PR #{run.pr_number}
-              </a>
-            )}
-            {!run.pr_url && (
+            {isPublished ? (
+              <span className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground">
+                <CheckCircle2 className="h-4 w-4 text-status-done" />
+                Drafted in {run.cms_namespace ?? "the CMS"}
+              </span>
+            ) : (
               <button
                 type="button"
                 disabled={!canPublish || publish.isPending}
                 onClick={() => publish.mutate(runId)}
                 title={
                   config?.can_publish === false
-                    ? "Publishing needs a GitHub token on the server"
+                    ? "Publishing needs the CMS connection configured on the server"
                     : run.status !== "completed"
                       ? "Wait for the articles to finish"
                       : undefined
@@ -107,8 +102,8 @@ export default function ArticleRunPage() {
                   "disabled:cursor-not-allowed disabled:opacity-50"
                 )}
               >
-                <GitPullRequest className="h-4 w-4" />
-                {publish.isPending ? "Publishing..." : "Publish"}
+                <Send className="h-4 w-4" />
+                {publish.isPending ? "Sending..." : "Send to CMS"}
               </button>
             )}
           </div>
@@ -116,8 +111,16 @@ export default function ArticleRunPage() {
 
         {config?.can_publish === false && (
           <p className="mt-3 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-            Publishing is unavailable — the server has no GitHub token
+            Publishing is unavailable — the server has no CMS connection
             configured. Articles can still be written, read and downloaded.
+          </p>
+        )}
+
+        {isPublished && (
+          <p className="mt-3 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            Sent as {run.articles.length} draft
+            {run.articles.length === 1 ? "" : "s"}. Nothing is live until
+            it&apos;s published in the CMS.
           </p>
         )}
 

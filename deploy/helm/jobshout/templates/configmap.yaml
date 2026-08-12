@@ -24,3 +24,9 @@ data:
   OPENAI_BASE_URL: {{ .Values.ai.openaiBaseURL | quote }}
   OPENAI_DEFAULT_MODEL: {{ .Values.ai.openaiModel | quote }}
   PYTHON_SIDECAR_URL: "http://python-runtime:8001"
+  # opsapi CMS — where the Article Writer files generated posts as drafts. The
+  # token is a secret and lives in the Secret, not here.
+  OPSAPI_BASE_URL: {{ .Values.cms.baseURL | quote }}
+  OPSAPI_NAMESPACE: {{ .Values.cms.namespace | quote }}
+  OPSAPI_TIMEOUT: {{ .Values.cms.timeout | default "30s" | quote }}
+  BLOG_AUTHOR_NAME: {{ .Values.cms.authorName | default "JobShout Article Writer" | quote }}

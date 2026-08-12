@@ -34,8 +34,8 @@ func TestBoardActivity(t *testing.T) {
 		// Article generation.
 		{"blog writing", ptr("blog"), ptr(model.BlogRunStatusRunning), ptr(model.BlogStepGenerating), model.ActivityExecuting},
 		{"blog running with no step yet", ptr("blog"), ptr(model.BlogRunStatusRunning), nil, model.ActivityExecuting},
-		{"blog committing", ptr("blog"), ptr(model.BlogRunStatusRunning), ptr(model.BlogStepPublishing), model.ActivityPublishing},
-		{"blog opening PR", ptr("blog"), ptr(model.BlogRunStatusRunning), ptr(model.BlogStepOpeningPR), model.ActivityPublishing},
+		{"blog converting", ptr("blog"), ptr(model.BlogRunStatusRunning), ptr(model.BlogStepConverting), model.ActivityExecuting},
+		{"blog posting to the CMS", ptr("blog"), ptr(model.BlogRunStatusRunning), ptr(model.BlogStepPublishing), model.ActivityPublishing},
 		{"blog failed", ptr("blog"), ptr(model.BlogRunStatusFailed), nil, model.ActivityFailed},
 		{"blog completed frees the agent", ptr("blog"), ptr(model.BlogRunStatusCompleted), nil, model.ActivityIdle},
 		{"blog pending", ptr("blog"), ptr(model.BlogRunStatusPending), nil, model.ActivityIdle},
@@ -76,8 +76,8 @@ func TestBoardActivityValuesAreKnownColumns(t *testing.T) {
 	}
 	steps := []*string{
 		nil,
-		ptr(model.BlogStepQueued), ptr(model.BlogStepGenerating), ptr(model.BlogStepGenerated),
-		ptr(model.BlogStepPublishing), ptr(model.BlogStepOpeningPR), ptr(model.BlogStepPublished),
+		ptr(model.BlogStepQueued), ptr(model.BlogStepGenerating), ptr(model.BlogStepConverting),
+		ptr(model.BlogStepGenerated), ptr(model.BlogStepPublishing), ptr(model.BlogStepPublished),
 	}
 
 	for _, k := range kinds {

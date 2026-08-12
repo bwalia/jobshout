@@ -6,11 +6,11 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
-  ExternalLink,
   FileText,
   Newspaper,
   Plus,
   Search,
+  Send,
 } from "lucide-react";
 import { useBlogRuns } from "@/lib/hooks/useBlog";
 import { GenerateArticleDialog } from "@/components/blog/GenerateArticleDialog";
@@ -108,10 +108,10 @@ function RunCard({ run }: { run: BlogRun }) {
           <FileText className="h-3.5 w-3.5" />
           {run.articles.length} article{run.articles.length === 1 ? "" : "s"}
         </span>
-        {run.pr_url ? (
+        {run.published_at ? (
           <span className="inline-flex items-center gap-1 text-primary">
-            <ExternalLink className="h-3.5 w-3.5" />
-            PR #{run.pr_number}
+            <Send className="h-3.5 w-3.5" />
+            Drafted in {run.cms_namespace ?? "the CMS"}
           </span>
         ) : (
           <time dateTime={run.created_at}>
@@ -145,8 +145,8 @@ export default function ArticlesPage() {
               Articles
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Everything the Article Writer has produced. Review here, publish
-              when it&apos;s ready.
+              Everything the Article Writer has produced. Review here, then
+              file it in the CMS as a draft when it&apos;s ready.
             </p>
           </div>
           <button

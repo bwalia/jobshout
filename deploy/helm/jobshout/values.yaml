@@ -34,8 +34,26 @@ externalSecret:
   vaultKeyPrefix: secret/jobshout
   vaultKeySuffix: config
 
-# Fallback plaintext secrets, used ONLY when externalSecret.enabled=false
-# (local `helm template`/testing without Vault). Never populated in a real env.
+# Secrets that exist on the cluster but are NOT managed by this chart, layered
+# onto the API's environment after jobshout-secrets so their keys win.
+#
+# Real credentials have nowhere else to go on the k3s path: Ring Promoter
+# deploys with externalSecret.enabled=false, and it git-clones this chart from a
+# public repo — so anything committed here is public. Create the secret on the
+# cluster once and name it here:
+#
+#   kubectl -n <ring> create secret generic jobshout-cms \
+#     --from-literal=OPSAPI_TOKEN=<token> \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#
+# Missing secrets are tolerated (optional: true), so naming one before it exists
+# does not break a deploy.
+extraSecretRefs: []
+
+# Fallback plaintext secrets, used ONLY when externalSecret.enabled=false.
+# On k3s1 that is every deploy, so these stay as placeholders: a real value
+# committed here would be public. Anything genuinely secret belongs in an
+# extraSecretRefs secret instead.
 secrets:
   databaseUser: jobshout
   databasePassword: ""
@@ -43,9 +61,20 @@ secrets:
   openaiApiKey: ""
   # Set via --set-string or Vault; never committed here.
   ollamaJwtSecret: ""
+  opsapiToken: ""
   pythonSidecarSecret: ""
   registryUsername: ""
   registryPassword: ""
+
+# opsapi CMS — the Article Writer files generated posts there as drafts. All of
+# baseURL, namespace and secrets.opsapiToken must be set before the Publish
+# action appears; empty leaves the agent generate-only, which is the default so
+# a deploy cannot accidentally start writing into someone else's namespace.
+cms:
+  baseURL: ""
+  namespace: ""
+  timeout: "30s"
+  authorName: "JobShout Article Writer"
 
 # In-cluster nginx gateway. The wslproxy edge routes the whole host to a single
 # backend, so the ingress points at this gateway and nginx fans traffic out by

@@ -2,45 +2,75 @@ package blog
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
 	"go.uber.org/zap"
 
+	"github.com/jobshout/server/internal/integration/adapters/opsapi"
 	"github.com/jobshout/server/internal/model"
 )
 
-// newTestRunner builds a Runner with the given GitHub token. An empty token is
-// the interesting case: generation must still work, publishing must not.
-func newTestRunner(token string, responses ...string) *Runner {
+// fakeCMS records what would have been sent to opsapi and answers with the
+// shape a real create returns.
+type fakeCMS struct {
+	posts []opsapi.CreatePostRequest
+	err   error
+}
+
+func (f *fakeCMS) Namespace() string { return "acme" }
+
+func (f *fakeCMS) CreatePost(_ context.Context, req opsapi.CreatePostRequest) (*opsapi.Post, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	f.posts = append(f.posts, req)
+	return &opsapi.Post{
+		UUID:   fmt.Sprintf("post-%d", len(f.posts)),
+		Title:  req.Title,
+		Slug:   req.Slug,
+		Status: req.Status,
+	}, nil
+}
+
+// newTestRunner builds a Runner with the given CMS. A nil CMS is the
+// interesting case: generation must still work, publishing must not.
+func newTestRunner(cms CMSPublisher, responses ...string) *Runner {
 	return NewRunner(Config{
-		GitHubToken: token,
-		RepoOwner:   "acme",
-		RepoName:    "site",
-		BaseBranch:  "main",
-		ContentDir:  "content/blogs",
-	}, &stubLLM{responses: responses}, zap.NewNop())
+		ContentDir: "content/blogs",
+		AuthorName: "Test Writer",
+	}, &stubLLM{responses: responses}, cms, zap.NewNop())
 }
 
 func TestCanPublish(t *testing.T) {
-	if newTestRunner("").CanPublish() {
-		t.Error("CanPublish() = true with no token, want false")
+	if newTestRunner(nil).CanPublish() {
+		t.Error("CanPublish() = true with no CMS, want false")
 	}
-	if !newTestRunner("ghp_token").CanPublish() {
-		t.Error("CanPublish() = false with a token, want true")
+	if !newTestRunner(&fakeCMS{}).CanPublish() {
+		t.Error("CanPublish() = false with a CMS, want true")
 	}
 }
 
-// Generation must not require GitHub credentials — the whole point of the
-// split is that an article can be written and read without a repository.
-func TestGenerate_WithoutGitHubToken(t *testing.T) {
-	r := newTestRunner("", "# Kubernetes\n\nBody.")
+// A nil *opsapi.Client held in a non-nil interface is what main.go hands over
+// when opsapi is unconfigured. It must not read as "publishing works".
+func TestCanPublish_TypedNilClient(t *testing.T) {
+	var client *opsapi.Client // NewClient returns this when config is incomplete
+	if newTestRunner(client).CanPublish() {
+		t.Error("CanPublish() = true for a typed-nil opsapi client, want false")
+	}
+}
+
+// Generation must not require CMS credentials — the whole point of the split is
+// that an article can be written and read without anything leaving the system.
+func TestGenerate_WithoutCMS(t *testing.T) {
+	r := newTestRunner(nil, "# Kubernetes\n\nBody.")
 
 	arts, err := r.Generate(context.Background(), GenerateRequest{
 		Topics: []string{"Kubernetes debugging"},
 	}, nil)
 	if err != nil {
-		t.Fatalf("Generate without token: %v", err)
+		t.Fatalf("Generate without CMS: %v", err)
 	}
 	if len(arts) != 1 {
 		t.Fatalf("want 1 article, got %d", len(arts))
@@ -50,33 +80,125 @@ func TestGenerate_WithoutGitHubToken(t *testing.T) {
 	}
 }
 
-func TestPublish_WithoutTokenIsRefused(t *testing.T) {
-	r := newTestRunner("")
+// Every generated article carries its HTML: conversion is part of the pipeline,
+// not something publishing does on the way out.
+func TestGenerate_RendersHTML(t *testing.T) {
+	r := newTestRunner(nil, "# Title\n\nHello **world**.")
+
+	arts, err := r.Generate(context.Background(), GenerateRequest{Topics: []string{"t"}}, nil)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	got := arts[0]
+	if got.Title != "Title" {
+		t.Errorf("Title = %q, want %q", got.Title, "Title")
+	}
+	if !strings.Contains(got.HTML, "<strong>world</strong>") {
+		t.Errorf("HTML not rendered: %q", got.HTML)
+	}
+	if strings.Contains(got.HTML, "<h1>") {
+		t.Errorf("leading H1 should be dropped, the CMS renders the title: %q", got.HTML)
+	}
+	if got.Excerpt == "" {
+		t.Error("Excerpt should be derived during generation")
+	}
+}
+
+func TestPublish_WithoutCMSIsRefused(t *testing.T) {
+	r := newTestRunner(nil)
 	_, err := r.Publish(context.Background(), []GeneratedArticle{{Topic: "x", Markdown: "# x"}}, nil)
 	if err == nil {
-		t.Fatal("expected Publish to be refused without a token")
+		t.Fatal("expected Publish to be refused without a CMS")
 	}
-	if !strings.Contains(err.Error(), "GITHUB_TOKEN") {
+	if !strings.Contains(err.Error(), "OPSAPI_BASE_URL") {
 		t.Errorf("error should name the missing config, got: %v", err)
 	}
 }
 
 func TestPublish_NothingToPublish(t *testing.T) {
-	r := newTestRunner("ghp_token")
+	r := newTestRunner(&fakeCMS{})
 	if _, err := r.Publish(context.Background(), nil, nil); err == nil {
 		t.Fatal("expected an error when publishing zero articles")
 	}
 }
 
+// Everything this pipeline sends is a draft. A run that could publish straight
+// to a live site would make review optional, which is the opposite of the point.
+func TestPublish_AlwaysCreatesDrafts(t *testing.T) {
+	cms := &fakeCMS{}
+	r := newTestRunner(cms, "# One\n\nBody one.", "# Two\n\nBody two.")
+
+	arts, err := r.Generate(context.Background(), GenerateRequest{Topics: []string{"one", "two"}}, nil)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	result, err := r.Publish(context.Background(), arts, nil)
+	if err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+
+	if len(cms.posts) != 2 {
+		t.Fatalf("sent %d posts, want 2", len(cms.posts))
+	}
+	for i, p := range cms.posts {
+		if p.Status != opsapi.StatusDraft {
+			t.Errorf("post %d status = %q, want %q", i, p.Status, opsapi.StatusDraft)
+		}
+		if p.ContentHTML == "" {
+			t.Errorf("post %d has no HTML body", i)
+		}
+		if p.AuthorName != "Test Writer" {
+			t.Errorf("post %d author = %q, want the configured byline", i, p.AuthorName)
+		}
+	}
+	if len(result.Posts) != 2 {
+		t.Fatalf("result has %d posts, want 2", len(result.Posts))
+	}
+	if result.Namespace != "acme" {
+		t.Errorf("result namespace = %q, want %q", result.Namespace, "acme")
+	}
+	// The slug is how the service matches a result back to a stored article.
+	if result.Posts[0].Slug != arts[0].Slug {
+		t.Errorf("result slug = %q, want %q", result.Posts[0].Slug, arts[0].Slug)
+	}
+	if result.Posts[0].PostUUID == "" {
+		t.Error("result should carry the CMS post UUID")
+	}
+}
+
+// Articles stored before HTML rendering existed have markdown and nothing else.
+// Publishing them must work rather than refusing on a missing field.
+func TestPublish_RendersArticlesWithoutHTML(t *testing.T) {
+	cms := &fakeCMS{}
+	r := newTestRunner(cms)
+
+	_, err := r.Publish(context.Background(), []GeneratedArticle{{
+		Topic: "legacy", Slug: "legacy", Markdown: "# Legacy\n\nStored before HTML existed.",
+	}}, nil)
+	if err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if len(cms.posts) != 1 {
+		t.Fatalf("sent %d posts, want 1", len(cms.posts))
+	}
+	if !strings.Contains(cms.posts[0].ContentHTML, "<p>") {
+		t.Errorf("body was not rendered on the way out: %q", cms.posts[0].ContentHTML)
+	}
+	if cms.posts[0].Title != "Legacy" {
+		t.Errorf("title = %q, want the markdown H1", cms.posts[0].Title)
+	}
+}
+
 func TestGenerate_NoTopics(t *testing.T) {
-	r := newTestRunner("")
+	r := newTestRunner(nil)
 	if _, err := r.Generate(context.Background(), GenerateRequest{Topics: []string{" ", ""}}, nil); err == nil {
 		t.Fatal("expected an error when every topic is blank")
 	}
 }
 
 // The batch is capped regardless of what the caller asks for, so a typo cannot
-// produce a 25-article pull request.
+// produce 25 drafts in the CMS.
 func TestGenerate_CapsTopics(t *testing.T) {
 	responses := make([]string, HardMaxArticles)
 	topics := make([]string, HardMaxArticles+5)
@@ -87,7 +209,7 @@ func TestGenerate_CapsTopics(t *testing.T) {
 		topics[i] = "topic " + string(rune('a'+i))
 	}
 
-	r := newTestRunner("", responses...)
+	r := newTestRunner(nil, responses...)
 	arts, err := r.Generate(context.Background(), GenerateRequest{Topics: topics}, nil)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
@@ -97,21 +219,24 @@ func TestGenerate_CapsTopics(t *testing.T) {
 	}
 }
 
-// Generation reports its final step so the UI can show "ready" rather than
+// Generation reports its steps in order so the UI can show "ready" rather than
 // leaving the last per-topic label running forever.
-func TestGenerate_ReportsGeneratedStep(t *testing.T) {
+func TestGenerate_ReportsSteps(t *testing.T) {
 	var keys []string
-	r := newTestRunner("", "# a\n\nbody")
+	r := newTestRunner(nil, "# a\n\nbody")
 	if _, err := r.Generate(context.Background(), GenerateRequest{Topics: []string{"a"}},
 		func(key, _ string) { keys = append(keys, key) }); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 
-	if len(keys) < 2 {
-		t.Fatalf("want at least a generating and a generated step, got %v", keys)
+	if len(keys) < 3 {
+		t.Fatalf("want generating, converting and generated steps, got %v", keys)
 	}
 	if keys[0] != model.BlogStepGenerating {
 		t.Errorf("first step = %q, want %q", keys[0], model.BlogStepGenerating)
+	}
+	if keys[len(keys)-2] != model.BlogStepConverting {
+		t.Errorf("second-to-last step = %q, want %q", keys[len(keys)-2], model.BlogStepConverting)
 	}
 	if keys[len(keys)-1] != model.BlogStepGenerated {
 		t.Errorf("last step = %q, want %q", keys[len(keys)-1], model.BlogStepGenerated)

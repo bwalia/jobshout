@@ -19,9 +19,9 @@ const (
 const (
 	BlogStepQueued     = "queued"
 	BlogStepGenerating = "generating"
+	BlogStepConverting = "converting"
 	BlogStepGenerated  = "generated"
 	BlogStepPublishing = "publishing"
-	BlogStepOpeningPR  = "opening_pr"
 	BlogStepPublished  = "published"
 )
 
@@ -56,9 +56,9 @@ type BlogRun struct {
 	Status      string     `json:"status"`
 	Topics      []string   `json:"topics"`
 	Model       *string    `json:"model"`
-	Branch      *string    `json:"branch"`
-	PRNumber    *int       `json:"pr_number"`
-	PRURL       *string    `json:"pr_url"`
+	// CMSNamespace is the opsapi namespace the run's drafts were created in.
+	// Nil until the run is published.
+	CMSNamespace *string `json:"cms_namespace"`
 	// Articles is the lightweight per-article summary. The markdown body lives
 	// in blog_articles and is fetched separately so listing runs stays cheap.
 	Articles     []BlogRunArticle `json:"articles"`
@@ -91,17 +91,34 @@ type BlogRunArticle struct {
 	WordCount int `json:"word_count"`
 }
 
-// BlogArticle is a generated article including its markdown body.
+// BlogArticle is a generated article: the markdown, the HTML it was converted
+// to, and where it ended up in the CMS once published.
 type BlogArticle struct {
-	ID        uuid.UUID `json:"id"`
-	RunID     uuid.UUID `json:"run_id"`
-	OrgID     uuid.UUID `json:"org_id"`
-	Topic     string    `json:"topic"`
-	Slug      string    `json:"slug"`
-	Path      string    `json:"path"`
-	Markdown  string    `json:"markdown"`
-	WordCount int       `json:"word_count"`
-	CreatedAt time.Time `json:"created_at"`
+	ID       uuid.UUID `json:"id"`
+	RunID    uuid.UUID `json:"run_id"`
+	OrgID    uuid.UUID `json:"org_id"`
+	Topic    string    `json:"topic"`
+	Slug     string    `json:"slug"`
+	Path     string    `json:"path"`
+	Markdown string    `json:"markdown"`
+	// HTML is what gets sent to the CMS. Stored so the exact published body can
+	// be inspected without re-running the conversion.
+	HTML string `json:"html"`
+	// PostUUID identifies the CMS draft this article was posted as. Nil until
+	// the run is published.
+	PostUUID   *string    `json:"post_uuid"`
+	PostStatus *string    `json:"post_status"`
+	PostedAt   *time.Time `json:"posted_at"`
+	WordCount  int        `json:"word_count"`
+	CreatedAt  time.Time  `json:"created_at"`
+}
+
+// BlogArticlePost is the result of posting one article, written back to
+// blog_articles after a successful publish.
+type BlogArticlePost struct {
+	ArticleID uuid.UUID
+	PostUUID  string
+	Status    string
 }
 
 // GenerateBlogRequest is the HTTP request body for POST /api/v1/blogs/generate.

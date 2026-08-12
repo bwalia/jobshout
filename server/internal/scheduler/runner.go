@@ -218,7 +218,9 @@ func (r *Runner) dispatchBlog(ctx context.Context, t model.ScheduledTask, runRec
 	}
 	runRec.WorkflowRunID = nil
 	// Stash the blog run ID in Output so the ScheduledTaskRun is traceable.
-	out := fmt.Sprintf(`{"blog_run_id":%q,"pr_url":%q}`, run.ID.String(), safeStr(run.PRURL))
+	// Only the ID: Generate returns as soon as the run is queued, so anything
+	// the pipeline produces later is not knowable here.
+	out := fmt.Sprintf(`{"blog_run_id":%q}`, run.ID.String())
 	runRec.Output = &out
 	return nil
 }
@@ -306,9 +308,3 @@ func blogRequestFromInput(in map[string]any) (model.GenerateBlogRequest, error) 
 	return req, nil
 }
 
-func safeStr(p *string) string {
-	if p == nil {
-		return ""
-	}
-	return *p
-}

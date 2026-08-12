@@ -236,9 +236,10 @@ func (r *multiAgentRepository) BoardEntries(ctx context.Context, orgID uuid.UUID
 // boardActivity maps one normalised activity row to an agent-board column.
 // Terminal states map to idle so a finished job frees the agent up.
 //
-// Blog runs additionally consult the running step: generation is ordinary work
-// (executing), while the git/PR phases get their own column because pushing to
-// a real repository is materially different from writing text.
+// Blog runs additionally consult the running step: generation and conversion
+// are ordinary work (executing), while the publishing phase gets its own column
+// because sending an article to the CMS is materially different from writing
+// one here.
 func boardActivity(kind, status, stepKey *string) string {
 	if kind == nil || status == nil {
 		return model.ActivityIdle
@@ -265,7 +266,7 @@ func boardActivity(kind, status, stepKey *string) string {
 		case model.BlogRunStatusRunning:
 			if stepKey != nil {
 				switch *stepKey {
-				case model.BlogStepPublishing, model.BlogStepOpeningPR:
+				case model.BlogStepPublishing:
 					return model.ActivityPublishing
 				}
 			}

@@ -30,16 +30,42 @@ Requirements:
 
 Return only the markdown article — no preamble, no meta commentary.`
 
-// GeneratedArticle is the produced markdown plus the path it should land at
-// in the target repo.
+// GeneratedArticle is one produced article: the markdown the LLM wrote, the
+// HTML it renders to, and the fields the CMS needs alongside the body.
 type GeneratedArticle struct {
-	Topic    string
-	Slug     string
-	Path     string // relative to repo root
+	Topic string
+	Slug  string
+	// Path is the markdown filename this article is filed under. Nothing writes
+	// it to disk any more; it stays as the article's stable label in the UI.
+	Path     string
 	Markdown string
+	// Title is the article's own H1, falling back to the topic. It becomes the
+	// CMS post title.
+	Title string
+	// HTML is Markdown rendered for the CMS, populated by render().
+	HTML string
+	// Excerpt is the post summary, derived from HTML — so it is empty until
+	// render() has run.
+	Excerpt string
 	// WordCount is a rough size indicator shown in the UI so a reader can spot
 	// a truncated or runaway article without opening it.
 	WordCount int
+}
+
+// render fills HTML and Excerpt from Markdown. Separate from generation so the
+// conversion is its own reportable step, and so an article loaded back from the
+// database can be rendered without calling the LLM again.
+func (a *GeneratedArticle) render() error {
+	rendered, err := renderHTML(a.Markdown)
+	if err != nil {
+		return fmt.Errorf("blog: article %q: %w", a.Topic, err)
+	}
+	a.HTML = rendered
+	a.Excerpt = articleExcerpt(rendered)
+	if a.Title == "" {
+		a.Title = articleTitle(a.Markdown, a.Topic)
+	}
+	return nil
 }
 
 // generateArticles calls the LLM once per topic and returns the articles in
@@ -102,6 +128,7 @@ func generateArticles(
 			Slug:      slug,
 			Path:      path,
 			Markdown:  md,
+			Title:     articleTitle(md, topic),
 			WordCount: len(strings.Fields(md)),
 		})
 	}

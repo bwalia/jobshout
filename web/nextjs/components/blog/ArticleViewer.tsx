@@ -3,23 +3,26 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Check, Copy, Download, FileText, Newspaper } from "lucide-react";
+import { Check, Code2, Copy, Download, FileText, Newspaper } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import type { BlogArticle } from "@/lib/types/blog";
 
-type Tab = "article" | "markdown";
+type Tab = "article" | "markdown" | "html";
 
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: "article", label: "Article", icon: Newspaper },
   { id: "markdown", label: "Markdown", icon: FileText },
+  { id: "html", label: "HTML", icon: Code2 },
 ];
 
 /**
- * Shows one generated article two ways: rendered as it will read once the site
- * builds it, and as the raw markdown that is committed to the repository.
+ * Shows one generated article three ways: rendered as prose, as the raw
+ * markdown the LLM wrote, and as the HTML that gets sent to the CMS.
  *
- * The raw view is byte-for-byte what lands in the .md file — no reformatting —
- * so it can be used to check exactly what will be published.
+ * The markdown and HTML views are byte-for-byte what the server holds — no
+ * reformatting — so either can be used to check exactly what will be published.
+ * The HTML is shown as source rather than rendered: the point of the tab is to
+ * see the markup, and the Article tab already covers how it reads.
  */
 export function ArticleViewer({ article }: { article: BlogArticle }) {
   const [tab, setTab] = useState<Tab>("article");
@@ -131,7 +134,10 @@ export function ArticleViewer({ article }: { article: BlogArticle }) {
           </article>
         ) : (
           <pre className="whitespace-pre-wrap break-words rounded-lg border border-border bg-muted/40 p-4 font-mono text-xs leading-relaxed text-foreground">
-            {article.markdown}
+            {tab === "html"
+              ? article.html ||
+                "This article was generated before HTML conversion existed. It is converted on the way to the CMS."
+              : article.markdown}
           </pre>
         )}
       </div>
