@@ -74,6 +74,16 @@ def test_status_stays_fast_while_review_runs(server_env, monkeypatch):
     wait(server_env.get(second["job_id"]))
 
 
+def test_allowed_hosts_cover_both_host_header_cases(monkeypatch):
+    monkeypatch.setattr(srv, "_HOSTNAME_RAW", "Balinders-Mac-Studio.local")
+    hosts = srv._allowed_hosts()
+    # curl preserves typed case; Node/browsers lowercase — both must pass the
+    # SDK's case-sensitive Host check.
+    assert "Balinders-Mac-Studio.local:*" in hosts
+    assert "balinders-mac-studio.local:*" in hosts
+    assert "localhost:*" in hosts
+
+
 def test_prime_uses_same_job_api(server_env, monkeypatch):
     class FakeMap:
         built_sha = "a" * 40

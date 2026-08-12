@@ -33,7 +33,8 @@ DEFAULT_PORT = 8765
 load_dotenv()  # same .env the CLI/watcher use; launchd's WorkingDirectory makes this resolve
 
 _PORT = int(os.getenv("REVIEW_BOT_PORT", str(DEFAULT_PORT)))
-_HOSTNAME = socket.gethostname().lower()
+_HOSTNAME_RAW = socket.gethostname()  # e.g. "Balinders-Mac-Studio.local" — case preserved
+_HOSTNAME = _HOSTNAME_RAW.lower()
 _PUBLIC_URL = os.getenv("REVIEW_BOT_URL", f"http://{_HOSTNAME}:{_PORT}").rstrip("/")
 
 
@@ -125,24 +126,31 @@ def list_repos() -> dict:
 
 
 def _allowed_hosts() -> list[str]:
-    """Host-header values clients may use to reach us (DNS-rebinding guard)."""
-    short = _HOSTNAME.split(".")[0]
-    hosts = {"localhost:*", "127.0.0.1:*", f"{_HOSTNAME}:*", f"{short}:*", f"{short}.local:*"}
-    public_host = urlparse(_PUBLIC_URL).hostname
-    if public_host:
-        hosts.add(f"{public_host}:*")
+    """Host-header values clients may use to reach us (DNS-rebinding guard).
+
+    The SDK middleware matches Host headers case-SENSITIVELY, but hostnames are
+    case-insensitive on the wire (curl preserves the case you type; browsers and
+    Node lowercase it) — so every name goes in with its original case AND lowered.
+    """
+    names = {"localhost", "127.0.0.1"}
+    for base in (_HOSTNAME_RAW, urlparse(_PUBLIC_URL).hostname or ""):
+        for variant in (base, base.lower()):
+            if not variant:
+                continue
+            short = variant.split(".")[0]
+            names.update({variant, short, f"{short}.local"})
     try:
         # Route lookup only — no packet is sent; yields the primary LAN address.
         probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         probe.connect(("8.8.8.8", 80))
-        hosts.add(f"{probe.getsockname()[0]}:*")
+        names.add(probe.getsockname()[0])
         probe.close()
     except OSError:
         pass
     for extra in os.getenv("REVIEW_BOT_ALLOWED_HOSTS", "").split(","):
         if extra.strip():
-            hosts.add(f"{extra.strip()}:*")
-    return sorted(hosts)
+            names.update({extra.strip(), extra.strip().lower()})
+    return sorted(f"{name}:*" for name in names)
 
 
 def main() -> None:
