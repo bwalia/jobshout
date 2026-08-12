@@ -27,6 +27,9 @@ type BlogRepository interface {
 	CreateArticles(ctx context.Context, articles []model.BlogArticle) error
 	ListArticlesByRun(ctx context.Context, runID uuid.UUID) ([]model.BlogArticle, error)
 	GetArticle(ctx context.Context, id uuid.UUID) (*model.BlogArticle, error)
+	// MarkArticlesPosted records where each article landed in the CMS, after a
+	// publish has already succeeded.
+	MarkArticlesPosted(ctx context.Context, posts []model.BlogArticlePost) error
 }
 
 type blogRepository struct {
@@ -41,7 +44,7 @@ func NewBlogRepository(pool *pgxpool.Pool) BlogRepository {
 // blogRunColumns is the shared SELECT list so the row scanners cannot drift.
 const blogRunColumns = `
 	id, org_id, agent_id, triggered_by, source, status, topics, model,
-	branch, pr_number, pr_url, articles, steps, error_message,
+	cms_namespace, articles, steps, error_message,
 	started_at, completed_at, published_at, created_at`
 
 // scanBlogRun reads one row in blogRunColumns order.
@@ -50,8 +53,7 @@ func scanBlogRun(row pgx.Row) (*model.BlogRun, error) {
 	var topicsRaw, articlesRaw, stepsRaw []byte
 	err := row.Scan(
 		&run.ID, &run.OrgID, &run.AgentID, &run.TriggeredBy, &run.Source, &run.Status,
-		&topicsRaw, &run.Model,
-		&run.Branch, &run.PRNumber, &run.PRURL,
+		&topicsRaw, &run.Model, &run.CMSNamespace,
 		&articlesRaw, &stepsRaw, &run.ErrorMessage,
 		&run.StartedAt, &run.CompletedAt, &run.PublishedAt, &run.CreatedAt,
 	)
@@ -62,6 +64,25 @@ func scanBlogRun(row pgx.Row) (*model.BlogRun, error) {
 	_ = json.Unmarshal(articlesRaw, &run.Articles)
 	_ = json.Unmarshal(stepsRaw, &run.Steps)
 	return run, nil
+}
+
+// blogArticleColumns pairs with scanBlogArticle, for the same reason
+// blogRunColumns pairs with scanBlogRun.
+const blogArticleColumns = `
+	id, run_id, org_id, topic, slug, path, markdown, html,
+	post_uuid, post_status, posted_at, word_count, created_at`
+
+// scanBlogArticle reads one row in blogArticleColumns order.
+func scanBlogArticle(row pgx.Row) (*model.BlogArticle, error) {
+	var a model.BlogArticle
+	err := row.Scan(
+		&a.ID, &a.RunID, &a.OrgID, &a.Topic, &a.Slug, &a.Path, &a.Markdown, &a.HTML,
+		&a.PostUUID, &a.PostStatus, &a.PostedAt, &a.WordCount, &a.CreatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &a, nil
 }
 
 func (r *blogRepository) Create(ctx context.Context, run *model.BlogRun) error {
@@ -88,18 +109,16 @@ func (r *blogRepository) Update(ctx context.Context, run *model.BlogRun) error {
 	const sql = `
 		UPDATE blog_runs SET
 		    status        = $2,
-		    branch        = $3,
-		    pr_number     = $4,
-		    pr_url        = $5,
-		    articles      = $6,
-		    steps         = $7,
-		    error_message = $8,
-		    completed_at  = $9,
-		    published_at  = $10
+		    cms_namespace = $3,
+		    articles      = $4,
+		    steps         = $5,
+		    error_message = $6,
+		    completed_at  = $7,
+		    published_at  = $8
 		WHERE id = $1`
 
 	_, err := r.pool.Exec(ctx, sql,
-		run.ID, run.Status, run.Branch, run.PRNumber, run.PRURL,
+		run.ID, run.Status, run.CMSNamespace,
 		articlesJSON, stepsJSON, run.ErrorMessage, run.CompletedAt, run.PublishedAt,
 	)
 	if err != nil {
@@ -166,10 +185,10 @@ func (r *blogRepository) CreateArticles(ctx context.Context, articles []model.Bl
 
 	batch := &pgx.Batch{}
 	const sql = `
-		INSERT INTO blog_articles (id, run_id, org_id, topic, slug, path, markdown, word_count, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8, NOW())`
+		INSERT INTO blog_articles (id, run_id, org_id, topic, slug, path, markdown, html, word_count, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, NOW())`
 	for _, a := range articles {
-		batch.Queue(sql, a.ID, a.RunID, a.OrgID, a.Topic, a.Slug, a.Path, a.Markdown, a.WordCount)
+		batch.Queue(sql, a.ID, a.RunID, a.OrgID, a.Topic, a.Slug, a.Path, a.Markdown, a.HTML, a.WordCount)
 	}
 
 	br := r.pool.SendBatch(ctx, batch)
@@ -183,8 +202,7 @@ func (r *blogRepository) CreateArticles(ctx context.Context, articles []model.Bl
 }
 
 func (r *blogRepository) ListArticlesByRun(ctx context.Context, runID uuid.UUID) ([]model.BlogArticle, error) {
-	const sql = `
-		SELECT id, run_id, org_id, topic, slug, path, markdown, word_count, created_at
+	sql := `SELECT ` + blogArticleColumns + `
 		FROM blog_articles WHERE run_id = $1 ORDER BY created_at ASC`
 
 	rows, err := r.pool.Query(ctx, sql, runID)
@@ -195,29 +213,48 @@ func (r *blogRepository) ListArticlesByRun(ctx context.Context, runID uuid.UUID)
 
 	articles := make([]model.BlogArticle, 0)
 	for rows.Next() {
-		var a model.BlogArticle
-		if err := rows.Scan(&a.ID, &a.RunID, &a.OrgID, &a.Topic, &a.Slug, &a.Path,
-			&a.Markdown, &a.WordCount, &a.CreatedAt); err != nil {
+		a, err := scanBlogArticle(rows)
+		if err != nil {
 			return nil, fmt.Errorf("blog_repo: scan article: %w", err)
 		}
-		articles = append(articles, a)
+		articles = append(articles, *a)
 	}
 	return articles, rows.Err()
 }
 
 func (r *blogRepository) GetArticle(ctx context.Context, id uuid.UUID) (*model.BlogArticle, error) {
-	const sql = `
-		SELECT id, run_id, org_id, topic, slug, path, markdown, word_count, created_at
-		FROM blog_articles WHERE id = $1`
+	sql := `SELECT ` + blogArticleColumns + ` FROM blog_articles WHERE id = $1`
 
-	var a model.BlogArticle
-	err := r.pool.QueryRow(ctx, sql, id).Scan(&a.ID, &a.RunID, &a.OrgID, &a.Topic, &a.Slug,
-		&a.Path, &a.Markdown, &a.WordCount, &a.CreatedAt)
+	a, err := scanBlogArticle(r.pool.QueryRow(ctx, sql, id))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("blog_repo: get article: %w", err)
 	}
-	return &a, nil
+	return a, nil
+}
+
+func (r *blogRepository) MarkArticlesPosted(ctx context.Context, posts []model.BlogArticlePost) error {
+	if len(posts) == 0 {
+		return nil
+	}
+
+	batch := &pgx.Batch{}
+	const sql = `
+		UPDATE blog_articles
+		SET post_uuid = $2, post_status = $3, posted_at = NOW()
+		WHERE id = $1`
+	for _, p := range posts {
+		batch.Queue(sql, p.ArticleID, p.PostUUID, p.Status)
+	}
+
+	br := r.pool.SendBatch(ctx, batch)
+	defer br.Close()
+	for range posts {
+		if _, err := br.Exec(); err != nil {
+			return fmt.Errorf("blog_repo: mark article posted: %w", err)
+		}
+	}
+	return nil
 }

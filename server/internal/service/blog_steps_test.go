@@ -153,7 +153,7 @@ func TestStepTracker_UnknownKeyIsAppended(t *testing.T) {
 // is never published does not display steps it will never reach.
 func TestPublishStepsAreSeparate(t *testing.T) {
 	for _, s := range initialSteps() {
-		if s.Key == model.BlogStepPublishing || s.Key == model.BlogStepOpeningPR {
+		if s.Key == model.BlogStepPublishing || s.Key == model.BlogStepPublished {
 			t.Errorf("initialSteps must not contain publish phase %q", s.Key)
 		}
 	}
@@ -164,7 +164,7 @@ func TestPublishStepsAreSeparate(t *testing.T) {
 			t.Errorf("publish step %q should start pending", s.Key)
 		}
 	}
-	for _, want := range []string{model.BlogStepPublishing, model.BlogStepOpeningPR, model.BlogStepPublished} {
+	for _, want := range []string{model.BlogStepPublishing, model.BlogStepPublished} {
 		if !keys[want] {
 			t.Errorf("publishSteps missing %q", want)
 		}

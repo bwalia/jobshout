@@ -121,15 +121,17 @@ jobs:
           PYTHON_SIDECAR_URL=http://python-sidecar:8001
           PYTHON_SIDECAR_SECRET=${{ secrets.PYTHON_SIDECAR_SECRET || 'ci-dev-sidecar-secret' }}
 
-          # Blog generator — optional. Token must have repo scope (or
-          # fine-grained Contents+PRs) on bwalia/workstation-website.
-          GITHUB_TOKEN=${{ secrets.BLOG_GITHUB_TOKEN }}
-          GITHUB_USER_NAME=JobShout Bot
-          GITHUB_USER_EMAIL=bot@jobshout.local
-          BLOG_REPO_OWNER=bwalia
-          BLOG_REPO_NAME=workstation-website
-          BLOG_BASE_BRANCH=main
-          BLOG_WORK_DIR=/tmp/jobshout-blog
+          # Blog generator — optional. Writing articles always works; only
+          # filing them in the opsapi CMS as drafts needs these, and all three
+          # must be present or publishing stays disabled. OPSAPI_TOKEN is a
+          # seed JWT the server keeps alive via /auth/refresh; its opsapi user
+          # needs the "cms" module in OPSAPI_NAMESPACE.
+          # Host and namespace are not secret, so they sit here like the other
+          # service hosts above; only the token comes from a repo secret.
+          OPSAPI_BASE_URL=https://int-opsapi.workstation.co.uk
+          OPSAPI_NAMESPACE=workstation
+          OPSAPI_TOKEN=${{ secrets.OPSAPI_TOKEN }}
+          BLOG_AUTHOR_NAME=JobShout Article Writer
           EOF
           chmod 600 .env
 

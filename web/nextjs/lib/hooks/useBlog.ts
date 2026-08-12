@@ -24,7 +24,7 @@ export const blogKeys = {
   articles: (runId: string) => [...blogKeys.all, "articles", runId] as const,
 };
 
-/** Whether publishing to GitHub is configured on this deployment. */
+/** Whether the CMS connection is configured on this deployment. */
 export function useBlogConfig() {
   return useQuery({
     queryKey: blogKeys.config(),

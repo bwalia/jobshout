@@ -82,18 +82,22 @@ type Config struct {
 	// Frontend base URL for generating links in Telegram messages.
 	FrontendBaseURL string `mapstructure:"FRONTEND_BASE_URL"`
 
-	// GitHub — shared token used by the blog generator for git push + PR
-	// creation. Per-integration tokens live on model.Integration rows.
-	GitHubToken     string `mapstructure:"GITHUB_TOKEN"`
-	GitHubUserName  string `mapstructure:"GITHUB_USER_NAME"`
-	GitHubUserEmail string `mapstructure:"GITHUB_USER_EMAIL"`
+	// opsapi CMS — where generated articles are filed as drafts. All three of
+	// URL, token and namespace are needed before publishing is offered at all;
+	// generation works without any of them.
+	//
+	// OpsAPIToken is a seed JWT, not a permanent credential: opsapi's login
+	// requires an emailed OTP, so a token is obtained once by hand and the
+	// server keeps it alive through /auth/refresh.
+	OpsAPIBaseURL   string        `mapstructure:"OPSAPI_BASE_URL"`
+	OpsAPIToken     string        `mapstructure:"OPSAPI_TOKEN"`
+	OpsAPINamespace string        `mapstructure:"OPSAPI_NAMESPACE"`
+	OpsAPITimeout   time.Duration `mapstructure:"OPSAPI_TIMEOUT"`
 
-	// Blog generator — target repo + filesystem workdir for clones.
-	// Workdir is auto-cleaned on each run.
-	BlogRepoOwner  string `mapstructure:"BLOG_REPO_OWNER"`
-	BlogRepoName   string `mapstructure:"BLOG_REPO_NAME"`
-	BlogBaseBranch string `mapstructure:"BLOG_BASE_BRANCH"`
-	BlogWorkDir    string `mapstructure:"BLOG_WORK_DIR"`
+	// Blog generator — the directory generated markdown is filed under, which
+	// is a label in the UI rather than a path on disk.
+	BlogContentDir string `mapstructure:"BLOG_CONTENT_DIR"`
+	BlogAuthorName string `mapstructure:"BLOG_AUTHOR_NAME"`
 }
 
 // AccessTokenExpiry returns the access token expiry duration.
@@ -142,14 +146,12 @@ func Load() (*Config, error) {
 	viper.SetDefault("TELEGRAM_RATE_PER_MIN", 20)
 	viper.SetDefault("FRONTEND_BASE_URL", "http://localhost:3001")
 
-	// GitHub + blog defaults — GITHUB_TOKEN is intentionally empty so the
-	// blog generator refuses to run until an operator sets it.
-	viper.SetDefault("GITHUB_USER_NAME", "JobShout Bot")
-	viper.SetDefault("GITHUB_USER_EMAIL", "bot@jobshout.local")
-	viper.SetDefault("BLOG_REPO_OWNER", "bwalia")
-	viper.SetDefault("BLOG_REPO_NAME", "workstation-website")
-	viper.SetDefault("BLOG_BASE_BRANCH", "main")
-	viper.SetDefault("BLOG_WORK_DIR", "/tmp/jobshout-blog")
+	// Blog + CMS defaults. The opsapi credentials are intentionally empty:
+	// publishing stays disabled until an operator supplies all three, and a
+	// default URL would only produce confusing failures against the wrong host.
+	viper.SetDefault("OPSAPI_TIMEOUT", "30s")
+	viper.SetDefault("BLOG_CONTENT_DIR", "content/blogs")
+	viper.SetDefault("BLOG_AUTHOR_NAME", "JobShout Article Writer")
 
 	cfg := &Config{
 		DatabaseURL:          viper.GetString("DATABASE_URL"),
@@ -184,13 +186,12 @@ func Load() (*Config, error) {
 		TelegramSecretToken:  viper.GetString("TELEGRAM_WEBHOOK_SECRET"),
 		TelegramRatePerMin:   viper.GetInt("TELEGRAM_RATE_PER_MIN"),
 		FrontendBaseURL:      viper.GetString("FRONTEND_BASE_URL"),
-		GitHubToken:          viper.GetString("GITHUB_TOKEN"),
-		GitHubUserName:       viper.GetString("GITHUB_USER_NAME"),
-		GitHubUserEmail:      viper.GetString("GITHUB_USER_EMAIL"),
-		BlogRepoOwner:        viper.GetString("BLOG_REPO_OWNER"),
-		BlogRepoName:         viper.GetString("BLOG_REPO_NAME"),
-		BlogBaseBranch:       viper.GetString("BLOG_BASE_BRANCH"),
-		BlogWorkDir:          viper.GetString("BLOG_WORK_DIR"),
+		OpsAPIBaseURL:        viper.GetString("OPSAPI_BASE_URL"),
+		OpsAPIToken:          viper.GetString("OPSAPI_TOKEN"),
+		OpsAPINamespace:      viper.GetString("OPSAPI_NAMESPACE"),
+		OpsAPITimeout:        viper.GetDuration("OPSAPI_TIMEOUT"),
+		BlogContentDir:       viper.GetString("BLOG_CONTENT_DIR"),
+		BlogAuthorName:       viper.GetString("BLOG_AUTHOR_NAME"),
 
 		DatabaseConnectTimeout: viper.GetDuration("DATABASE_CONNECT_TIMEOUT"),
 		AutoModelSelection:     viper.GetBool("AUTO_MODEL_SELECTION"),

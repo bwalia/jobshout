@@ -9,9 +9,9 @@ export type BlogRunStatus = "pending" | "running" | "completed" | "failed";
 export type BlogStepKey =
   | "queued"
   | "generating"
+  | "converting"
   | "generated"
   | "publishing"
-  | "opening_pr"
   | "published";
 
 export type StepStatus = "pending" | "running" | "done" | "failed";
@@ -35,7 +35,10 @@ export interface BlogRunArticle {
   word_count: number;
 }
 
-/** A generated article including its markdown body. */
+/**
+ * A generated article: the markdown, the HTML it converts to, and where it
+ * ended up in the CMS once published.
+ */
 export interface BlogArticle {
   id: string;
   run_id: string;
@@ -44,6 +47,12 @@ export interface BlogArticle {
   slug: string;
   path: string;
   markdown: string;
+  /** The body as sent to the CMS. */
+  html: string;
+  /** The CMS draft this article was posted as; null until published. */
+  post_uuid: string | null;
+  post_status: string | null;
+  posted_at: string | null;
   word_count: number;
   created_at: string;
 }
@@ -57,9 +66,8 @@ export interface BlogRun {
   status: BlogRunStatus;
   topics: string[];
   model: string | null;
-  branch: string | null;
-  pr_number: number | null;
-  pr_url: string | null;
+  /** The CMS namespace the drafts were created in; null until published. */
+  cms_namespace: string | null;
   articles: BlogRunArticle[];
   steps: BlogStep[];
   error_message: string | null;
@@ -77,8 +85,8 @@ export interface GenerateBlogRequest {
 
 /**
  * What the UI needs to decide which actions to offer. `can_publish` is false
- * when the server has no GitHub token, in which case articles can still be
- * generated and read — they just cannot be pushed to the content repository.
+ * when the server has no CMS connection configured, in which case articles can
+ * still be generated and read — they just cannot be filed as drafts.
  */
 export interface BlogConfig {
   can_publish: boolean;

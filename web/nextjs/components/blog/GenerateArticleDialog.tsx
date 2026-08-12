@@ -63,7 +63,7 @@ export function GenerateArticleDialog({
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
             One topic per line. The Article Writer produces a markdown article
-            for each; nothing is published until you say so.
+            for each; nothing reaches the CMS until you say so.
           </p>
         </div>
 

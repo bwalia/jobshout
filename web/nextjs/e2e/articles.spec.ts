@@ -115,13 +115,13 @@ test.describe("Articles", () => {
     await expect(page.locator("pre").first()).toContainText("#");
   });
 
-  test("publish is unavailable when GitHub is not configured", async ({
+  test("publish is unavailable when the CMS is not configured", async ({
     page,
   }) => {
     const config = await fetch(`${API_URL}/blogs/config`, {
       headers: { Authorization: `Bearer ${creds.token}` },
     }).then((r) => r.json());
-    test.skip(config.can_publish, "GitHub is configured on this server");
+    test.skip(config.can_publish, "The CMS is configured on this server");
 
     const start = await fetch(`${API_URL}/blogs/generate`, {
       method: "POST",
@@ -137,6 +137,8 @@ test.describe("Articles", () => {
     await expect(
       page.getByText("Publishing is unavailable"),
     ).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByRole("button", { name: /Publish/ })).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: /Send to CMS/ }),
+    ).toBeDisabled();
   });
 });

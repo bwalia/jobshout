@@ -52,6 +52,26 @@ spec:
                 name: jobshout-config
             - secretRef:
                 name: jobshout-secrets
+            {{- /*
+              Secrets this chart does NOT manage, layered last so their keys win
+              over the placeholders in jobshout-secrets.
+
+              This exists because the deploy has nowhere else to put a real
+              credential: Ring Promoter helm-installs with externalSecret off
+              (k3s1's Vault stores are not usable), and the chart is git-cloned
+              from a PUBLIC repo, so a values file is not a place a token can
+              live. Instead the secret is created on the cluster out of band and
+              named here — the name is not sensitive, the value never enters git,
+              and helm leaves it alone across redeploys.
+
+              optional: true so a ring that has not created it still starts;
+              the affected feature just stays disabled.
+            */}}
+            {{- range .Values.extraSecretRefs }}
+            - secretRef:
+                name: {{ . }}
+                optional: true
+            {{- end }}
           env:
             - name: DATABASE_URL
               value: "postgres://$(DATABASE_USER):$(DATABASE_PASSWORD)@$(DATABASE_HOST):$(DATABASE_PORT)/$(DATABASE_NAME)?sslmode=$(DATABASE_SSLMODE)"

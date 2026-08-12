@@ -1,41 +1,48 @@
 // Package blog implements JobShout's automated article pipeline:
-// LLM generates markdown → (optionally) git clone/commit/push → GitHub PR.
+// LLM generates markdown → markdown is rendered to HTML → the HTML is posted to
+// the opsapi CMS as a draft.
 //
 // The pipeline is a set of deterministic functions rather than a ReAct agent
-// loop — git and the GitHub API are not operations where we want the LLM
-// guessing at argument names. It is presented in the product as the built-in
-// "Article Writer" agent; the agent identity is for visibility and attribution,
-// the behaviour underneath stays fixed.
+// loop — an HTTP contract is not somewhere we want the LLM guessing at field
+// names. It is presented in the product as the built-in "Article Writer" agent;
+// the agent identity is for visibility and attribution, the behaviour
+// underneath stays fixed.
 //
 // Generation and publishing are deliberately separate. Generation needs no
-// GitHub credentials and never touches a repository, so an article can be
-// written and reviewed in the UI before anyone decides to ship it.
+// opsapi credentials and never leaves this system, so an article can be written
+// and reviewed in the UI before anyone decides to send it. Publishing creates
+// drafts, never live posts — the CMS is where a human approves the thing.
 package blog
 
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"go.uber.org/zap"
 
-	"github.com/jobshout/server/internal/integration/adapters/github"
+	"github.com/jobshout/server/internal/integration/adapters/opsapi"
 	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/model"
 )
 
 // Config captures what the Runner needs. Populated from *config.Config in main.go.
 type Config struct {
-	GitHubToken string
-	AuthorName  string
-	AuthorEmail string
-	RepoOwner   string
-	RepoName    string
-	BaseBranch  string
-	WorkDir     string
-	ContentDir  string // path within the repo where articles are written
+	// ContentDir is the directory the markdown filename is recorded under. It
+	// no longer maps to a checkout — it survives as the article's stable,
+	// human-readable identity in the UI and in blog_articles.path.
+	ContentDir string
+	// AuthorName is the byline attached to posts created in the CMS.
+	AuthorName string
+}
+
+// CMSPublisher is the slice of the opsapi client this package uses. Declared
+// here, where it is consumed, so tests can substitute a fake without reaching
+// for the HTTP layer.
+type CMSPublisher interface {
+	CreatePost(ctx context.Context, req opsapi.CreatePostRequest) (*opsapi.Post, error)
+	Namespace() string
 }
 
 // GenerateRequest is the user-facing input.
@@ -46,21 +53,33 @@ type GenerateRequest struct {
 }
 
 // HardMaxArticles is the safety ceiling regardless of what the caller asks
-// for. One PR with 25 articles is almost certainly a mistake.
+// for. One batch of 25 articles is almost certainly a mistake.
 const HardMaxArticles = 10
 
-// PublishResult is returned once articles have been pushed and a PR opened.
+// PostedArticle records where one article landed in the CMS.
+type PostedArticle struct {
+	// Slug is JobShout's slug for the article, used to match this result back
+	// to the article it came from.
+	Slug string `json:"slug"`
+	// PostUUID is opsapi's identifier — what a user needs to open the draft.
+	PostUUID string `json:"post_uuid"`
+	// PostSlug is the slug opsapi settled on, which can differ from ours when
+	// it had to de-duplicate within the namespace.
+	PostSlug string `json:"post_slug"`
+	Status   string `json:"status"`
+}
+
+// PublishResult is returned once articles have been posted to the CMS.
 type PublishResult struct {
-	Branch      string    `json:"branch"`
-	PRNumber    int       `json:"pr_number"`
-	PRURL       string    `json:"pr_url"`
-	PublishedAt time.Time `json:"published_at"`
+	Namespace   string          `json:"namespace"`
+	Posts       []PostedArticle `json:"posts"`
+	PublishedAt time.Time       `json:"published_at"`
 }
 
 // ProgressFunc is called as the pipeline moves between steps, so the caller can
 // persist a live trace. It must not block for long — it runs inline.
 //
-// A nil ProgressFunc is valid; use progress() via reportTo to stay nil-safe.
+// A nil ProgressFunc is valid; use report to stay nil-safe.
 type ProgressFunc func(stepKey, label string)
 
 func report(p ProgressFunc, stepKey, label string) {
@@ -73,37 +92,52 @@ func report(p ProgressFunc, stepKey, label string) {
 type Runner struct {
 	cfg    Config
 	llm    llm.Client
-	pr     *github.PullRequestClient
+	cms    CMSPublisher
 	logger *zap.Logger
 	// clock lets tests inject a deterministic time.
 	clock func() time.Time
 }
 
-// NewRunner wires the Runner with its dependencies. The GitHub token may be
-// empty — generation still works, and only publishing is refused.
-func NewRunner(cfg Config, llmClient llm.Client, logger *zap.Logger) *Runner {
-	var prClient *github.PullRequestClient
-	if cfg.GitHubToken != "" {
-		prClient = github.NewPullRequestClient(cfg.GitHubToken)
-	}
+// NewRunner wires the Runner with its dependencies. cms may be nil — generation
+// still works, and only publishing is refused.
+func NewRunner(cfg Config, llmClient llm.Client, cms CMSPublisher, logger *zap.Logger) *Runner {
 	return &Runner{
 		cfg:    cfg,
 		llm:    llmClient,
-		pr:     prClient,
+		cms:    cms,
 		logger: logger,
 		clock:  time.Now,
 	}
 }
 
-// CanPublish reports whether this Runner has the credentials to open a PR.
-// The API surfaces this so the UI can disable the Publish action rather than
-// letting a user press a button that is guaranteed to fail.
+// CanPublish reports whether this Runner can reach the CMS. The API surfaces
+// this so the UI can disable the Publish action rather than letting a user
+// press a button that is guaranteed to fail.
+//
+// The nil check is on the interface's dynamic value as well: main.go passes a
+// possibly-nil *opsapi.Client, which is a non-nil interface holding a nil
+// pointer and would sail past a bare `r.cms != nil`.
 func (r *Runner) CanPublish() bool {
-	return r.cfg.GitHubToken != "" && r.pr != nil
+	if r == nil || r.cms == nil {
+		return false
+	}
+	if c, ok := r.cms.(*opsapi.Client); ok {
+		return c != nil
+	}
+	return true
 }
 
-// Generate produces markdown for every requested topic. It never touches git
-// and needs no GitHub credentials.
+// CMSNamespace is the namespace publishing targets, or "" when the CMS is not
+// configured. Callers use it to record where a run's drafts went.
+func (r *Runner) CMSNamespace() string {
+	if !r.CanPublish() {
+		return ""
+	}
+	return r.cms.Namespace()
+}
+
+// Generate produces markdown for every requested topic, renders each to HTML,
+// and returns both. It needs no CMS credentials.
 //
 // Any single topic failing aborts the batch — we prefer an all-or-nothing run
 // over silently publishing half of what was asked for.
@@ -139,105 +173,100 @@ func (r *Runner) Generate(ctx context.Context, req GenerateRequest, progress Pro
 		return nil, err
 	}
 
+	// Rendering is its own step rather than part of generation: it is the point
+	// where a malformed article stops being the LLM's problem and starts being
+	// ours, and a reader watching the trace should see which one failed.
+	report(progress, model.BlogStepConverting, fmt.Sprintf("Converting %d article(s) to HTML", len(articles)))
+	for i := range articles {
+		if err := articles[i].render(); err != nil {
+			return nil, err
+		}
+	}
+
 	report(progress, model.BlogStepGenerated, fmt.Sprintf("Generated %d article(s)", len(articles)))
 	return articles, nil
 }
 
-// Publish clones the content repository, commits the given articles on a fresh
-// branch, pushes, and opens a pull request.
+// Publish creates one CMS draft per article.
+//
+// Posts go in as drafts without exception: this pipeline decides what gets
+// written, not what a public site shows.
+//
+// A failure part-way leaves the earlier drafts in place. They are drafts, so
+// nothing is visible to anyone, and deleting them to "clean up" would throw
+// away work the user can simply publish again — the alternative, an
+// all-or-nothing rollback, is not something the CMS API offers anyway.
 func (r *Runner) Publish(ctx context.Context, articles []GeneratedArticle, progress ProgressFunc) (*PublishResult, error) {
 	if !r.CanPublish() {
-		return nil, fmt.Errorf("blog: publishing is not configured (GITHUB_TOKEN is unset)")
+		return nil, fmt.Errorf("blog: publishing is not configured (set OPSAPI_BASE_URL, OPSAPI_TOKEN and OPSAPI_NAMESPACE)")
 	}
 	if len(articles) == 0 {
 		return nil, fmt.Errorf("blog: nothing to publish")
 	}
 
-	now := r.clock()
-	branch := fmt.Sprintf("ai/blog-%s-%s", now.Format("2006-01-02"), randSuffix(now))
+	namespace := r.cms.Namespace()
+	posts := make([]PostedArticle, 0, len(articles))
 
-	report(progress, model.BlogStepPublishing, "Committing to "+r.cfg.RepoOwner+"/"+r.cfg.RepoName)
+	for i, a := range articles {
+		report(progress, model.BlogStepPublishing,
+			fmt.Sprintf("Posting %d/%d to %s — %s", i+1, len(articles), namespace, a.Topic))
 
-	workDir := filepath.Join(r.cfg.WorkDir, branch)
-	repo := newGitRepo(workDir, r.cfg.RepoOwner, r.cfg.RepoName, r.cfg.GitHubToken, r.cfg.AuthorName, r.cfg.AuthorEmail)
-	defer repo.cleanup()
-
-	if err := repo.clone(ctx, r.cfg.BaseBranch); err != nil {
-		return nil, err
-	}
-	if err := repo.checkoutNewBranch(ctx, branch); err != nil {
-		return nil, err
-	}
-	for _, a := range articles {
-		if err := repo.writeFile(a.Path, a.Markdown); err != nil {
-			return nil, err
+		// Title and Excerpt are derived, not stored: an article loaded back from
+		// blog_articles arrives with markdown and HTML and nothing else. Fill
+		// them in here, or opsapi rejects the post outright for having no title.
+		//
+		// The stored HTML is kept as-is when present — it is what was reviewed
+		// in the UI, so it is what should be sent. Only articles written before
+		// the conversion step existed are rendered on the way out.
+		if a.HTML == "" {
+			if err := a.render(); err != nil {
+				return nil, err
+			}
+		} else {
+			if a.Title == "" {
+				a.Title = articleTitle(a.Markdown, a.Topic)
+			}
+			if a.Excerpt == "" {
+				a.Excerpt = articleExcerpt(a.HTML)
+			}
 		}
-	}
-	commitMsg := fmt.Sprintf("Add %d AI-generated blog post(s)\n\n%s",
-		len(articles), topicBullets(articles))
-	if err := repo.commit(ctx, commitMsg); err != nil {
-		return nil, err
-	}
-	if err := repo.push(ctx, branch); err != nil {
-		return nil, err
+
+		post, err := r.cms.CreatePost(ctx, opsapi.CreatePostRequest{
+			Title:       a.Title,
+			Slug:        a.Slug,
+			Excerpt:     a.Excerpt,
+			ContentHTML: a.HTML,
+			Status:      opsapi.StatusDraft,
+			AuthorName:  r.cfg.AuthorName,
+			SEOTitle:    a.Title,
+			// opsapi caps meta descriptions at the same length we trim excerpts
+			// to, so the excerpt serves both without a second derivation.
+			SEODescription: a.Excerpt,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("blog: publish %d/%d: %w", i+1, len(articles), err)
+		}
+
+		posts = append(posts, PostedArticle{
+			Slug:     a.Slug,
+			PostUUID: post.UUID,
+			PostSlug: post.Slug,
+			Status:   post.Status,
+		})
 	}
 
-	report(progress, model.BlogStepOpeningPR, "Opening pull request")
-
-	createdPR, err := r.pr.CreatePullRequest(ctx,
-		r.cfg.RepoOwner, r.cfg.RepoName, prTitle(articles), branch, r.cfg.BaseBranch, prBody(articles))
-	if err != nil {
-		return nil, err
-	}
-
+	now := r.clock()
 	r.logger.Info("blog: publish complete",
-		zap.String("branch", branch),
-		zap.Int("pr", createdPR.Number),
-		zap.Int("articles", len(articles)),
+		zap.String("namespace", namespace),
+		zap.Int("drafts", len(posts)),
 	)
 
-	report(progress, model.BlogStepPublished, fmt.Sprintf("Published as PR #%d", createdPR.Number))
+	report(progress, model.BlogStepPublished,
+		fmt.Sprintf("Created %d draft(s) in %s", len(posts), namespace))
 
 	return &PublishResult{
-		Branch:      branch,
-		PRNumber:    createdPR.Number,
-		PRURL:       createdPR.HTMLURL,
+		Namespace:   namespace,
+		Posts:       posts,
 		PublishedAt: now,
 	}, nil
-}
-
-// prTitle builds the PR title — single article gets a descriptive title,
-// batches get a summary title.
-func prTitle(articles []GeneratedArticle) string {
-	if len(articles) == 1 {
-		return "AI Generated Blog: " + articles[0].Topic
-	}
-	return fmt.Sprintf("AI Generated Blog: %d posts", len(articles))
-}
-
-// prBody is the PR description — includes all topics + file paths for review.
-func prBody(articles []GeneratedArticle) string {
-	var b strings.Builder
-	b.WriteString("Auto-generated by JobShout. Review before merging.\n\n")
-	b.WriteString("### Articles\n\n")
-	for _, a := range articles {
-		fmt.Fprintf(&b, "- **%s** — `%s`\n", a.Topic, a.Path)
-	}
-	return b.String()
-}
-
-func topicBullets(articles []GeneratedArticle) string {
-	var out []string
-	for _, a := range articles {
-		out = append(out, "- "+a.Topic)
-	}
-	return strings.Join(out, "\n")
-}
-
-// randSuffix derives a short suffix from nanoseconds so two runs in the same
-// second don't collide on branch name. Deterministic given the clock, so
-// tests stay reproducible.
-func randSuffix(t time.Time) string {
-	n := t.UnixNano() % 0xFFFF
-	return fmt.Sprintf("%04x", n)
 }

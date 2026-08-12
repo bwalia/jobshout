@@ -29,6 +29,7 @@ import (
 	integ "github.com/jobshout/server/internal/integration"
 	emailAdapter "github.com/jobshout/server/internal/integration/adapters/email"
 	githubAdapter "github.com/jobshout/server/internal/integration/adapters/github"
+	"github.com/jobshout/server/internal/integration/adapters/opsapi"
 	jiraAdapter "github.com/jobshout/server/internal/integration/adapters/jira"
 	slackAdapter "github.com/jobshout/server/internal/integration/adapters/slack"
 	teamsAdapter "github.com/jobshout/server/internal/integration/adapters/teams"
@@ -230,32 +231,35 @@ func main() {
 	workflowSvc := service.NewWorkflowService(workflowRepo, agentRepo, execRepo, toolPermRepo, dagEngine, logger)
 	pluginSvc := service.NewPluginService(pluginRepo, agentRepo, engineRouter, logger)
 
-	// ─── Article generator (LLM → markdown → optional git/PR) ───────────────
-	// Built unconditionally: generation needs no GitHub credentials and its
-	// output is read in the product. Only publishing is token-gated, and the
-	// runner reports that through CanPublish() so the UI can disable it.
+	// ─── Article generator (LLM → markdown → HTML → CMS draft) ──────────────
+	// Built unconditionally: generation needs no opsapi credentials and its
+	// output is read in the product. Only publishing is credential-gated, and
+	// the runner reports that through CanPublish() so the UI can disable it.
+	//
+	// NewClient returns nil when the opsapi config is incomplete, which the
+	// runner reads as "publishing is not configured".
+	cmsClient := opsapi.NewClient(opsapi.Config{
+		BaseURL:   cfg.OpsAPIBaseURL,
+		Token:     cfg.OpsAPIToken,
+		Namespace: cfg.OpsAPINamespace,
+		Timeout:   cfg.OpsAPITimeout,
+	})
 	var blogRunner *blog.Runner
 	if blogLLM, err := llmRouter.For(cfg.LLMProvider); err != nil {
 		logger.Warn("blog: llm router returned error — article generator disabled",
 			zap.Error(err))
 	} else {
 		blogRunner = blog.NewRunner(blog.Config{
-			GitHubToken: cfg.GitHubToken,
-			AuthorName:  cfg.GitHubUserName,
-			AuthorEmail: cfg.GitHubUserEmail,
-			RepoOwner:   cfg.BlogRepoOwner,
-			RepoName:    cfg.BlogRepoName,
-			BaseBranch:  cfg.BlogBaseBranch,
-			WorkDir:     cfg.BlogWorkDir,
-			ContentDir:  "content/blogs",
-		}, blogLLM, logger)
+			ContentDir: cfg.BlogContentDir,
+			AuthorName: cfg.BlogAuthorName,
+		}, blogLLM, cmsClient, logger)
 		logger.Info("article generator initialised",
-			zap.String("repo", cfg.BlogRepoOwner+"/"+cfg.BlogRepoName),
-			zap.String("base_branch", cfg.BlogBaseBranch),
+			zap.String("cms_namespace", cfg.OpsAPINamespace),
 			zap.Bool("can_publish", blogRunner.CanPublish()),
 		)
 		if !blogRunner.CanPublish() {
-			logger.Info("blog: GITHUB_TOKEN unset — articles can be generated and read, but not published")
+			logger.Info("blog: opsapi CMS not configured — articles can be generated and read, but not published " +
+				"(set OPSAPI_BASE_URL, OPSAPI_TOKEN and OPSAPI_NAMESPACE)")
 		}
 	}
 	blogSvc := service.NewBlogService(blogRunner, blogRepo, agentRepo, logger)

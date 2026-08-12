@@ -35,7 +35,7 @@ export async function generateBlog(
   return data;
 }
 
-/** Commits a completed run's articles and opens a pull request. */
+/** Files a completed run's articles in the CMS as drafts. */
 export async function publishBlogRun(id: string): Promise<BlogRun> {
   const { data } = await apiClient.post<BlogRun>(`/blogs/runs/${id}/publish`);
   return data;
