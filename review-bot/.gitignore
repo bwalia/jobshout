@@ -4,3 +4,7 @@ __pycache__/
 *.pyc
 watch.log
 watch.err
+mcp.log
+mcp.err
+repos.json
+.claude/

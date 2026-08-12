@@ -57,6 +57,21 @@ Use `--dry-run` first on any new repo — it exercises the full pipeline and pri
 the exact review without touching GitHub. `prime` is optional: the first review
 builds the map automatically if it is missing.
 
+### `/custom-review` from your editor (remote MCP)
+
+An always-on MCP server (`app/mcp_server.py`, `com.review-bot.mcp` under launchd)
+exposes reviews to Claude Code and Cursor on **any** machine — no Python, Ollama, or
+review-bot checkout needed there. It serves a start/poll job API (`start_review`,
+`review_status`, `prime`, `list_repos`): every tool answers in under a second, and the
+editor's agent polls until the review finishes, so no client tool-timeout is ever hit.
+One worker thread serializes all reviews (a shared clone cannot host two concurrent
+worktree-pruning reviews); extra requests queue with a visible position. Repos it may
+review are allowlisted in `repos.json`; clones are managed on demand under
+`~/.cache/review-bot/clones`.
+
+Developer setup (~2 minutes): see **[docs/client-setup.md](docs/client-setup.md)**.
+Design record: ADR-0002 in the software-design-patterns repo.
+
 ### Repo map (opt-in)
 
 `prime` builds a compact **repo map** — a distilled note of the architecture,
@@ -181,15 +196,21 @@ are **kept and moved into the summary** rather than dropped or allowed to fail t
 ```
 app/
   config/     .env loading and validation
-  github/     client.py (REST), diff.py (hunk→line map), review.py (payload)
+  github/     client.py (REST), diff.py (hunk→line map), review.py (payload),
+              markers.py (head-sha dedup marker, shared by watcher and jobs)
   opencode/   provider.py (Ollama config), runner.py (subprocess + JSON recovery)
   reviewer/   agent.py (orchestration), schema.py (validation), workspace.py (worktree)
   prompts/    review.py — the reviewer prompt
+  repos.py    repo allowlist (repos.json) + managed clones
+  jobs.py     single-worker job queue (the global review lock)
+  mcp_server.py  Streamable HTTP MCP server (start/poll job API, bearer auth)
   main.py     CLI
+tests/        pytest suite (markers, repos, jobs, MCP tool layer)
 ```
 
 ## Scope
 
-PoC. One reviewer agent, no database, no queue. PR detection is the CLI; a webhook
-would be a thin FastAPI wrapper calling `review_pull_request()` — the reason that
-function takes a PR number and nothing else.
+PoC grown one deliberate step: one reviewer agent, no database, and a single-worker
+in-memory job queue serving the MCP server. PR detection is the watcher or the editor
+command; `review_pull_request()` still takes a PR number and nothing else — the reason
+both the watcher and the MCP job runner can wrap it unchanged.
