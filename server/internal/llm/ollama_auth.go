@@ -3,6 +3,8 @@ package llm
 import (
 	"fmt"
 	"net/http"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -73,12 +75,12 @@ func (a *ollamaAuth) apply(req *http.Request) error {
 // Retrying is pointless: the same secret produces the same verdict, and a
 // fresh token would fail identically. Returning a terminal error keeps callers
 // from burning a retry budget on it.
-func authError(status int, body string) error {
+func authError(status int, body []byte) error {
 	return fmt.Errorf(
 		"ollama: gateway rejected the request (status %d) — the JWT signature did not verify. "+
 			"Check OLLAMA_JWT_SECRET matches the gateway's secret and that this host's clock is accurate. "+
 			"Response: %s",
-		status, body,
+		status, upstreamSnippet(body),
 	)
 }
 
@@ -86,3 +88,46 @@ func authError(status int, body string) error {
 func isAuthStatus(status int) bool {
 	return status == http.StatusUnauthorized || status == http.StatusForbidden
 }
+
+// upstreamSnippetLimit bounds how much of an upstream response body is carried
+// into an error. Long enough to identify the failure, short enough that the
+// message stays readable where it surfaces — a blog run stores it and the UI
+// shows it on a card.
+const upstreamSnippetLimit = 200
+
+var (
+	htmlTagRegex    = regexp.MustCompile(`(?s)<[^>]*>`)
+	whitespaceRegex = regexp.MustCompile(`\s+`)
+)
+
+// upstreamSnippet reduces an upstream response body to something worth showing
+// a human.
+//
+// Gateways answer with an HTML error page, not JSON. Embedding one verbatim put
+// a full document — doctype, inline stylesheet and all — into an error message
+// that a user reads on a card in the UI, burying the one sentence that said
+// what went wrong. Tags are stripped, whitespace collapsed, and the result
+// truncated on a word boundary.
+func upstreamSnippet(body []byte) string {
+	s := string(body)
+	if strings.Contains(s, "<") && strings.Contains(s, ">") {
+		// Drop <style>/<script> contents outright: they are never diagnostic,
+		// and stripping only their tags would leave CSS rules as "text".
+		s = scriptStyleRegex.ReplaceAllString(s, " ")
+		s = htmlTagRegex.ReplaceAllString(s, " ")
+	}
+	s = strings.TrimSpace(whitespaceRegex.ReplaceAllString(s, " "))
+	if s == "" {
+		return "(empty response)"
+	}
+	if len(s) <= upstreamSnippetLimit {
+		return s
+	}
+	cut := s[:upstreamSnippetLimit]
+	if idx := strings.LastIndexByte(cut, ' '); idx > 0 {
+		cut = cut[:idx]
+	}
+	return cut + "…"
+}
+
+var scriptStyleRegex = regexp.MustCompile(`(?is)<(script|style)\b[^>]*>.*?</(script|style)>`)

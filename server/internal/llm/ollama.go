@@ -138,10 +138,10 @@ func (c *OllamaClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 	}
 
 	if isAuthStatus(resp.StatusCode) {
-		return nil, authError(resp.StatusCode, string(rawBody))
+		return nil, authError(resp.StatusCode, rawBody)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("ollama: unexpected status %d: %s", resp.StatusCode, string(rawBody))
+		return nil, fmt.Errorf("ollama: unexpected status %d: %s", resp.StatusCode, upstreamSnippet(rawBody))
 	}
 
 	var chatResp ollamaChatResponse

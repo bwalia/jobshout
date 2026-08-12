@@ -79,6 +79,51 @@ func (h *BlogHandler) Publish(w http.ResponseWriter, r *http.Request) {
 	RespondJSON(w, http.StatusOK, run)
 }
 
+// Delete handles DELETE /api/v1/blogs/runs/{runID} — forgets a run and the
+// articles it produced. Drafts already in the CMS are not touched.
+func (h *BlogHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "runID"))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid run ID")
+		return
+	}
+	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid org_id in token")
+		return
+	}
+
+	if err := h.svc.Delete(r.Context(), orgID, id); err != nil {
+		// Refused for reasons the caller can act on — wrong org, still running,
+		// already gone — so surface the message rather than a bare 500.
+		RespondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	RespondJSON(w, http.StatusOK, map[string]any{"deleted": true})
+}
+
+// Retry handles POST /api/v1/blogs/runs/{runID}/retry — runs a failed run's
+// topics again on the same run. Asynchronous like Generate; poll GetRun.
+func (h *BlogHandler) Retry(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "runID"))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid run ID")
+		return
+	}
+	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid org_id in token")
+		return
+	}
+
+	run, err := h.svc.Retry(r.Context(), orgID, id)
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	RespondJSON(w, http.StatusAccepted, run)
+}
+
 // Config handles GET /api/v1/blogs/config — what the UI needs to decide which
 // actions to offer.
 func (h *BlogHandler) Config(w http.ResponseWriter, r *http.Request) {

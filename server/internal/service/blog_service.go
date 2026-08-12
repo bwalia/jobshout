@@ -21,6 +21,11 @@ type BlogService interface {
 	// Publish creates one CMS draft per article of a completed run.
 	Publish(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) (*model.BlogRun, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*model.BlogRun, error)
+	// Delete removes a run and everything it produced.
+	Delete(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) error
+	// Retry re-runs a failed run's original topics in place, so a transient
+	// failure does not leave a dead card the user has to clean up by hand.
+	Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) (*model.BlogRun, error)
 	ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.BlogRun], error)
 	ListArticles(ctx context.Context, runID uuid.UUID) ([]model.BlogArticle, error)
 	GetArticle(ctx context.Context, id uuid.UUID) (*model.BlogArticle, error)
@@ -428,6 +433,88 @@ func (s *blogService) finalizePublished(
 	if err := s.repo.Update(ctx, run); err != nil {
 		return nil, fmt.Errorf("blog_svc: persist publish: %w", err)
 	}
+	return run, nil
+}
+
+// Delete removes a run. Drafts already sent to the CMS are deliberately left
+// alone: they live in another system that has its own notion of ownership, and
+// silently deleting someone's CMS content because they tidied up a list here
+// would be a surprise. Forgetting the run is the local action.
+func (s *blogService) Delete(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) error {
+	run, err := s.repo.GetByID(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if run.OrgID != orgID {
+		return fmt.Errorf("blog_svc: run does not belong to this organization")
+	}
+	if run.Status == model.BlogRunStatusRunning {
+		return fmt.Errorf("blog_svc: cannot delete a run while it is still writing")
+	}
+	return s.repo.Delete(ctx, runID)
+}
+
+// Retry restarts a failed run using the topics it was created with.
+//
+// It reuses the same run rather than creating a second one: a retry is another
+// attempt at the same request, and spawning a new card per attempt would leave
+// the failures behind as litter — which is what made deletion necessary in the
+// first place.
+func (s *blogService) Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) (*model.BlogRun, error) {
+	if s.runner == nil {
+		return nil, fmt.Errorf("blog_svc: generator not configured")
+	}
+
+	run, err := s.repo.GetByID(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	if run.OrgID != orgID {
+		return nil, fmt.Errorf("blog_svc: run does not belong to this organization")
+	}
+	if run.Status != model.BlogRunStatusFailed {
+		return nil, fmt.Errorf("blog_svc: only a failed run can be retried (status is %q)", run.Status)
+	}
+	if len(run.Topics) == 0 {
+		return nil, fmt.Errorf("blog_svc: run has no topics to retry")
+	}
+
+	agent, err := s.EnsureArticleWriter(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+
+	// A run can fail after its articles were written — storing them is a
+	// separate step that can fail on its own. Clear them so a retry cannot
+	// leave two attempts' output on the same run.
+	if err := s.repo.DeleteArticlesByRun(ctx, runID); err != nil {
+		return nil, err
+	}
+
+	startedAt := time.Now()
+	run.Status = model.BlogRunStatusRunning
+	run.AgentID = &agent.ID
+	run.Steps = initialSteps()
+	run.Articles = []model.BlogRunArticle{}
+	run.ErrorMessage = nil
+	run.StartedAt = &startedAt
+	run.CompletedAt = nil
+
+	if err := s.repo.Update(ctx, run); err != nil {
+		return nil, fmt.Errorf("blog_svc: reset run for retry: %w", err)
+	}
+	// Update does not write steps back to their reset state on its own path for
+	// a fresh run, so stamp the trace explicitly before work starts.
+	if err := s.repo.UpdateSteps(ctx, run.ID, run.Steps); err != nil {
+		return nil, fmt.Errorf("blog_svc: reset steps for retry: %w", err)
+	}
+
+	req := model.GenerateBlogRequest{Topics: run.Topics}
+	if run.Model != nil {
+		req.Model = *run.Model
+	}
+	go s.runGeneration(run, agent, req)
+
 	return run, nil
 }
 

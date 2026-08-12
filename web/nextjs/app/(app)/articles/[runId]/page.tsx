@@ -2,13 +2,22 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { CheckCircle2, ArrowLeft, Newspaper, Send } from "lucide-react";
+import { useParams, useRouter } from "next/navigation";
+import {
+  ArrowLeft,
+  CheckCircle2,
+  Newspaper,
+  RotateCw,
+  Send,
+  Trash2,
+} from "lucide-react";
 import {
   useBlogArticles,
   useBlogConfig,
   useBlogRun,
+  useDeleteBlogRun,
   usePublishBlogRun,
+  useRetryBlogRun,
 } from "@/lib/hooks/useBlog";
 import { RunSteps } from "@/components/blog/RunSteps";
 import { ArticleViewer } from "@/components/blog/ArticleViewer";
@@ -18,9 +27,12 @@ export default function ArticleRunPage() {
   const params = useParams();
   const runId = String(params.runId ?? "");
 
+  const router = useRouter();
   const { data: run, isLoading, isError } = useBlogRun(runId);
   const { data: config } = useBlogConfig();
   const publish = usePublishBlogRun();
+  const retry = useRetryBlogRun();
+  const remove = useDeleteBlogRun();
 
   // No point asking for bodies until generation has produced them.
   const { data: articles } = useBlogArticles(
@@ -79,12 +91,27 @@ export default function ArticleRunPage() {
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
-            {isPublished ? (
+            {run.status === "failed" && (
+              <button
+                type="button"
+                disabled={retry.isPending}
+                onClick={() => retry.mutate(runId)}
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors",
+                  "bg-primary text-primary-foreground hover:bg-primary/90",
+                  "disabled:cursor-not-allowed disabled:opacity-50"
+                )}
+              >
+                <RotateCw className="h-4 w-4" />
+                {retry.isPending ? "Retrying..." : "Retry"}
+              </button>
+            )}
+            {run.status !== "failed" && isPublished ? (
               <span className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground">
                 <CheckCircle2 className="h-4 w-4 text-status-done" />
                 Drafted in {run.cms_namespace ?? "the CMS"}
               </span>
-            ) : (
+            ) : run.status === "failed" ? null : (
               <button
                 type="button"
                 disabled={!canPublish || publish.isPending}
@@ -106,6 +133,26 @@ export default function ArticleRunPage() {
                 {publish.isPending ? "Sending..." : "Send to CMS"}
               </button>
             )}
+
+            {/* Deleting forgets the run here; a draft already in the CMS stays
+                put, since that is another system's content to manage. */}
+            {run.status !== "running" && run.status !== "pending" && (
+              <button
+                type="button"
+                disabled={remove.isPending}
+                onClick={() => {
+                  if (confirm("Delete this run and its articles?")) {
+                    remove.mutate(runId, {
+                      onSuccess: () => router.push("/articles"),
+                    });
+                  }
+                }}
+                className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:border-destructive/40 hover:text-destructive disabled:opacity-50"
+                aria-label="Delete run"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            )}
           </div>
         </div>
 
@@ -125,9 +172,16 @@ export default function ArticleRunPage() {
         )}
 
         {run.error_message && (
-          <p className="mt-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-            {run.error_message}
-          </p>
+          <div className="mt-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2">
+            <p className="text-2xs font-medium uppercase tracking-wide text-destructive/80">
+              {run.status === "failed" ? "Run failed" : "Last action failed"}
+            </p>
+            {/* break-words, and its own scroll box: an upstream error can be a
+                single unbroken string, which would otherwise widen the page. */}
+            <p className="mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap break-words text-xs text-destructive">
+              {run.error_message}
+            </p>
+          </div>
         )}
       </div>
 

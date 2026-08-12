@@ -29,8 +29,8 @@ import (
 	integ "github.com/jobshout/server/internal/integration"
 	emailAdapter "github.com/jobshout/server/internal/integration/adapters/email"
 	githubAdapter "github.com/jobshout/server/internal/integration/adapters/github"
-	"github.com/jobshout/server/internal/integration/adapters/opsapi"
 	jiraAdapter "github.com/jobshout/server/internal/integration/adapters/jira"
+	"github.com/jobshout/server/internal/integration/adapters/opsapi"
 	slackAdapter "github.com/jobshout/server/internal/integration/adapters/slack"
 	teamsAdapter "github.com/jobshout/server/internal/integration/adapters/teams"
 	telegramBot "github.com/jobshout/server/internal/integration/adapters/telegram"
@@ -610,6 +610,8 @@ func main() {
 					r.Get("/", blogHandler.GetRun)
 					r.Get("/articles", blogHandler.ListArticles)
 					r.Post("/publish", blogHandler.Publish)
+					r.Post("/retry", blogHandler.Retry)
+					r.Delete("/", blogHandler.Delete)
 				})
 				r.Get("/articles/{articleID}", blogHandler.GetArticle)
 			})
