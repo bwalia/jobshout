@@ -127,6 +127,15 @@ func (r *Runner) CanPublish() bool {
 	return true
 }
 
+// CMSNamespace is the namespace publishing targets, or "" when the CMS is not
+// configured. Callers use it to record where a run's drafts went.
+func (r *Runner) CMSNamespace() string {
+	if !r.CanPublish() {
+		return ""
+	}
+	return r.cms.Namespace()
+}
+
 // Generate produces markdown for every requested topic, renders each to HTML,
 // and returns both. It needs no CMS credentials.
 //
@@ -202,11 +211,23 @@ func (r *Runner) Publish(ctx context.Context, articles []GeneratedArticle, progr
 		report(progress, model.BlogStepPublishing,
 			fmt.Sprintf("Posting %d/%d to %s — %s", i+1, len(articles), namespace, a.Topic))
 
-		// Articles generated before HTML rendering existed have markdown but no
-		// HTML. Render on the way out rather than refusing to publish them.
+		// Title and Excerpt are derived, not stored: an article loaded back from
+		// blog_articles arrives with markdown and HTML and nothing else. Fill
+		// them in here, or opsapi rejects the post outright for having no title.
+		//
+		// The stored HTML is kept as-is when present — it is what was reviewed
+		// in the UI, so it is what should be sent. Only articles written before
+		// the conversion step existed are rendered on the way out.
 		if a.HTML == "" {
 			if err := a.render(); err != nil {
 				return nil, err
+			}
+		} else {
+			if a.Title == "" {
+				a.Title = articleTitle(a.Markdown, a.Topic)
+			}
+			if a.Excerpt == "" {
+				a.Excerpt = articleExcerpt(a.HTML)
 			}
 		}
 

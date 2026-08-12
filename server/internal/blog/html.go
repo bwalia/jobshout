@@ -8,7 +8,6 @@ import (
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
-	"github.com/yuin/goldmark/renderer/html"
 )
 
 // markdownConverter renders the markdown the LLM produces into the HTML the
@@ -22,13 +21,14 @@ import (
 // HTML in the output is the model going off-script rather than intent, and the
 // result is written straight into a page on a public site. Goldmark's default
 // escapes it, which is what we want.
+//
+// Hard wraps are deliberately NOT enabled. A model that soft-wraps a paragraph
+// at ~80 columns is expressing nothing by it, and turning those newlines into
+// <br> puts forced breaks in the middle of running prose. Without the option a
+// wrapped paragraph reflows correctly, and a model that wanted a real break can
+// still get one the CommonMark way.
 var markdownConverter = goldmark.New(
 	goldmark.WithExtensions(extension.GFM),
-	goldmark.WithRendererOptions(
-		// Preserve hard line breaks inside paragraphs; models use them for
-		// list-like passages that are not actually lists.
-		html.WithHardWraps(),
-	),
 )
 
 // renderHTML converts an article's markdown to HTML for the CMS.

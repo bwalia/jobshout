@@ -242,3 +242,42 @@ func TestGenerate_ReportsSteps(t *testing.T) {
 		t.Errorf("last step = %q, want %q", keys[len(keys)-1], model.BlogStepGenerated)
 	}
 }
+
+// Publishing loads articles back from the database, where only markdown, HTML
+// and the identifying fields are stored — Title and Excerpt are derived and do
+// not survive the round trip. Publish must recompute them, because opsapi
+// rejects a post with no title outright.
+func TestPublish_RecomputesDerivedFieldsFromStoredArticle(t *testing.T) {
+	cms := &fakeCMS{}
+	r := newTestRunner(cms)
+
+	// Exactly what service.Publish builds from a blog_articles row.
+	stored := GeneratedArticle{
+		Topic:    "kubernetes debugging",
+		Slug:     "kubernetes-debugging",
+		Path:     "content/blogs/2026-08-12-kubernetes-debugging.md",
+		Markdown: "# Debugging Kubernetes\n\nStart with the events.",
+		HTML:     "<p>Start with the events.</p>",
+	}
+
+	if _, err := r.Publish(context.Background(), []GeneratedArticle{stored}, nil); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if len(cms.posts) != 1 {
+		t.Fatalf("sent %d posts, want 1", len(cms.posts))
+	}
+	got := cms.posts[0]
+	if got.Title != "Debugging Kubernetes" {
+		t.Errorf("Title = %q, want the markdown H1 — opsapi 400s on an empty title", got.Title)
+	}
+	if got.SEOTitle == "" {
+		t.Error("SEOTitle is empty")
+	}
+	if got.Excerpt == "" {
+		t.Error("Excerpt is empty — the draft would have no summary")
+	}
+	// The stored HTML is what was reviewed, so it must be sent verbatim.
+	if got.ContentHTML != stored.HTML {
+		t.Errorf("ContentHTML = %q, want the stored HTML %q", got.ContentHTML, stored.HTML)
+	}
+}

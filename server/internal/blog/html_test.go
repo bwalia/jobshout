@@ -48,6 +48,14 @@ func TestRenderHTML(t *testing.T) {
 			notWant:  []string{"<script>"},
 		},
 		{
+			// Models soft-wrap paragraphs. Those newlines must not become <br>
+			// or the article renders with breaks mid-sentence in the CMS.
+			name:     "a soft-wrapped paragraph reflows into one paragraph",
+			markdown: "# T\n\nA sentence that the model wrapped\nacross two source lines.",
+			want:     []string{"<p>A sentence that the model wrapped\nacross two source lines.</p>"},
+			notWant:  []string{"<br>"},
+		},
+		{
 			name:     "an H1 further down the body survives",
 			markdown: "# Title\n\nIntro.\n\n# Later heading\n\nMore.",
 			want:     []string{"<h1>Later heading</h1>"},

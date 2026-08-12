@@ -343,14 +343,34 @@ func (s *blogService) Publish(ctx context.Context, orgID uuid.UUID, runID uuid.U
 	// travels through the blog package and knows nothing of our IDs — can be
 	// written back to the right articles. Slugs are de-duplicated within a run
 	// at generation time, so they are unique here.
+	//
+	// Articles that already carry a post UUID are skipped. Publishing is not
+	// atomic — a batch can fail on its fourth article with three drafts already
+	// in the CMS — and the run stays unpublished so the user can retry. Without
+	// this filter that retry would post the first three a second time, and the
+	// CMS has no way to know they are the same article.
 	articleIDs := make(map[string]uuid.UUID, len(stored))
 	articles := make([]blog.GeneratedArticle, 0, len(stored))
+	alreadyPosted := 0
 	for _, a := range stored {
+		if a.PostUUID != nil && *a.PostUUID != "" {
+			alreadyPosted++
+			continue
+		}
 		articleIDs[a.Slug] = a.ID
 		articles = append(articles, blog.GeneratedArticle{
 			Topic: a.Topic, Slug: a.Slug, Path: a.Path,
 			Markdown: a.Markdown, HTML: a.HTML, WordCount: a.WordCount,
 		})
+	}
+
+	// Everything already reached the CMS on an earlier attempt and only the
+	// run's own bookkeeping was left undone. Finish that rather than reporting
+	// "nothing to publish", which would read as a failure.
+	if len(articles) == 0 {
+		s.logger.Info("blog_svc: all articles already posted, finalising run",
+			zap.String("blog_run_id", run.ID.String()), zap.Int("articles", alreadyPosted))
+		return s.finalizePublished(ctx, run, s.runner.CMSNamespace(), time.Now())
 	}
 
 	run.Steps = append(run.Steps, publishSteps()...)
@@ -370,9 +390,6 @@ func (s *blogService) Publish(ctx context.Context, orgID uuid.UUID, runID uuid.U
 
 	tracker.finish()
 	run.Steps = tracker.steps
-	run.CMSNamespace = &result.Namespace
-	run.PublishedAt = &result.PublishedAt
-	run.ErrorMessage = nil
 
 	posted := make([]model.BlogArticlePost, 0, len(result.Posts))
 	for _, p := range result.Posts {
@@ -391,10 +408,23 @@ func (s *blogService) Publish(ctx context.Context, orgID uuid.UUID, runID uuid.U
 	}
 	if err := s.repo.MarkArticlesPosted(ctx, posted); err != nil {
 		// The drafts are in the CMS; losing our record of where is worth a loud
-		// log but not an error that suggests the publish did not happen.
-		s.logger.Error("blog_svc: failed to record posted articles", zap.Error(err))
+		// log but not an error that suggests the publish did not happen. It does
+		// mean a later retry cannot tell these were already sent, so say so.
+		s.logger.Error("blog_svc: failed to record posted articles — a retry would duplicate them",
+			zap.Error(err))
 	}
 
+	return s.finalizePublished(ctx, run, result.Namespace, result.PublishedAt)
+}
+
+// finalizePublished stamps a run as published and persists it. Shared by the
+// normal path and the already-posted path so the two cannot drift.
+func (s *blogService) finalizePublished(
+	ctx context.Context, run *model.BlogRun, namespace string, at time.Time,
+) (*model.BlogRun, error) {
+	run.CMSNamespace = &namespace
+	run.PublishedAt = &at
+	run.ErrorMessage = nil
 	if err := s.repo.Update(ctx, run); err != nil {
 		return nil, fmt.Errorf("blog_svc: persist publish: %w", err)
 	}
