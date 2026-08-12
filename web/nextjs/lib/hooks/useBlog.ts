@@ -11,6 +11,8 @@ import {
   getBlogRun,
   getBlogRuns,
   publishBlogRun,
+  retryBlogRun,
+  deleteBlogRun,
 } from "@/lib/api/blog";
 import { apiErrorMessage } from "@/lib/api/client";
 
@@ -97,8 +99,33 @@ export function usePublishBlogRun() {
     onSuccess: (_, id) => {
       qc.invalidateQueries({ queryKey: blogKeys.detail(id) });
       qc.invalidateQueries({ queryKey: blogKeys.lists() });
-      toast.success("Pull request opened");
+      toast.success("Filed in the CMS as a draft");
     },
     onError: (e) => toast.error(apiErrorMessage(e, "Failed to publish")),
+  });
+}
+
+export function useRetryBlogRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => retryBlogRun(id),
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: blogKeys.detail(id) });
+      qc.invalidateQueries({ queryKey: blogKeys.lists() });
+      toast.success("Article Writer is trying again");
+    },
+    onError: (e) => toast.error(apiErrorMessage(e, "Failed to retry")),
+  });
+}
+
+export function useDeleteBlogRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => deleteBlogRun(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: blogKeys.lists() });
+      toast.success("Run deleted");
+    },
+    onError: (e) => toast.error(apiErrorMessage(e, "Failed to delete")),
   });
 }

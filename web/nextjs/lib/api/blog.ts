@@ -41,6 +41,17 @@ export async function publishBlogRun(id: string): Promise<BlogRun> {
   return data;
 }
 
+/** Re-runs a failed run's topics on the same run. 202 + poll, like generate. */
+export async function retryBlogRun(id: string): Promise<BlogRun> {
+  const { data } = await apiClient.post<BlogRun>(`/blogs/runs/${id}/retry`);
+  return data;
+}
+
+/** Forgets a run and its articles. Drafts already in the CMS are untouched. */
+export async function deleteBlogRun(id: string): Promise<void> {
+  await apiClient.delete(`/blogs/runs/${id}`);
+}
+
 export async function getBlogArticles(runId: string): Promise<BlogArticle[]> {
   const { data } = await apiClient.get<BlogArticle[]>(
     `/blogs/runs/${runId}/articles`

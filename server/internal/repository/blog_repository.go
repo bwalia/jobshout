@@ -23,6 +23,8 @@ type BlogRepository interface {
 	UpdateSteps(ctx context.Context, runID uuid.UUID, steps []model.BlogStep) error
 	GetByID(ctx context.Context, id uuid.UUID) (*model.BlogRun, error)
 	ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.BlogRun], error)
+	// Delete removes a run. Its articles go with it via ON DELETE CASCADE.
+	Delete(ctx context.Context, id uuid.UUID) error
 
 	CreateArticles(ctx context.Context, articles []model.BlogArticle) error
 	ListArticlesByRun(ctx context.Context, runID uuid.UUID) ([]model.BlogArticle, error)
@@ -30,6 +32,9 @@ type BlogRepository interface {
 	// MarkArticlesPosted records where each article landed in the CMS, after a
 	// publish has already succeeded.
 	MarkArticlesPosted(ctx context.Context, posts []model.BlogArticlePost) error
+	// DeleteArticlesByRun clears a run's articles so a retry cannot leave the
+	// previous attempt's output alongside the new one.
+	DeleteArticlesByRun(ctx context.Context, runID uuid.UUID) error
 }
 
 type blogRepository struct {
@@ -143,6 +148,25 @@ func (r *blogRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.Blog
 		return nil, fmt.Errorf("blog_repo: get: %w", err)
 	}
 	return run, nil
+}
+
+func (r *blogRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	// blog_articles.run_id is ON DELETE CASCADE, so the bodies go with the run.
+	tag, err := r.pool.Exec(ctx, `DELETE FROM blog_runs WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("blog_repo: delete run: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("blog_repo: run not found")
+	}
+	return nil
+}
+
+func (r *blogRepository) DeleteArticlesByRun(ctx context.Context, runID uuid.UUID) error {
+	if _, err := r.pool.Exec(ctx, `DELETE FROM blog_articles WHERE run_id = $1`, runID); err != nil {
+		return fmt.Errorf("blog_repo: delete articles: %w", err)
+	}
+	return nil
 }
 
 func (r *blogRepository) ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.BlogRun], error) {

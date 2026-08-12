@@ -9,10 +9,16 @@ import {
   FileText,
   Newspaper,
   Plus,
+  RotateCw,
   Search,
   Send,
+  Trash2,
 } from "lucide-react";
-import { useBlogRuns } from "@/lib/hooks/useBlog";
+import {
+  useBlogRuns,
+  useDeleteBlogRun,
+  useRetryBlogRun,
+} from "@/lib/hooks/useBlog";
 import { GenerateArticleDialog } from "@/components/blog/GenerateArticleDialog";
 import { SignalDot } from "@/components/ui/signal-dot";
 import { cn } from "@/lib/utils/cn";
@@ -67,6 +73,16 @@ function currentStepLabel(run: BlogRun): string | null {
 
 function RunCard({ run }: { run: BlogRun }) {
   const step = currentStepLabel(run);
+  const retry = useRetryBlogRun();
+  const remove = useDeleteBlogRun();
+
+  // The whole card is a link, so an action inside it has to claim the click
+  // outright — otherwise deleting a run also navigates to the run being deleted.
+  const act = (e: React.MouseEvent, fn: () => void) => {
+    e.preventDefault();
+    e.stopPropagation();
+    fn();
+  };
   const title =
     run.topics.length === 1
       ? run.topics[0]
@@ -98,7 +114,10 @@ function RunCard({ run }: { run: BlogRun }) {
       )}
 
       {run.status === "failed" && run.error_message && (
-        <p className="mt-3 line-clamp-2 rounded bg-destructive/5 px-2 py-1.5 text-2xs text-destructive">
+        <p
+          className="mt-3 line-clamp-3 rounded bg-destructive/5 px-2 py-1.5 text-2xs text-destructive"
+          title={run.error_message}
+        >
           {run.error_message}
         </p>
       )}
@@ -119,6 +138,39 @@ function RunCard({ run }: { run: BlogRun }) {
           </time>
         )}
       </div>
+
+      {/* A run that is still writing offers neither: the server refuses to
+          delete one mid-flight, and there is nothing yet to retry. */}
+      {run.status !== "running" && run.status !== "pending" && (
+        <div className="mt-3 flex items-center gap-2 border-t border-border pt-3">
+          {run.status === "failed" && (
+            <button
+              type="button"
+              disabled={retry.isPending}
+              onClick={(e) => act(e, () => retry.mutate(run.id))}
+              className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-2xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+            >
+              <RotateCw className="h-3 w-3" />
+              {retry.isPending ? "Retrying..." : "Retry"}
+            </button>
+          )}
+          <button
+            type="button"
+            disabled={remove.isPending}
+            onClick={(e) =>
+              act(e, () => {
+                if (confirm(`Delete this run and its articles?`)) {
+                  remove.mutate(run.id);
+                }
+              })
+            }
+            className="ml-auto inline-flex items-center gap-1.5 rounded-md p-1 text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50"
+            aria-label="Delete run"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
     </Link>
   );
 }

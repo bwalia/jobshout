@@ -106,10 +106,10 @@ func (e *OllamaEmbedder) embedOne(ctx context.Context, text string) ([]float32, 
 	}
 
 	if isAuthStatus(resp.StatusCode) {
-		return nil, authError(resp.StatusCode, string(rawBody))
+		return nil, authError(resp.StatusCode, rawBody)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("ollama: unexpected embedding status %d: %s", resp.StatusCode, string(rawBody))
+		return nil, fmt.Errorf("ollama: unexpected embedding status %d: %s", resp.StatusCode, upstreamSnippet(rawBody))
 	}
 
 	var embResp ollamaEmbeddingResponse

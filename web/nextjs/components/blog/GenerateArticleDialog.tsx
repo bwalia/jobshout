@@ -9,7 +9,7 @@ const HARD_MAX_ARTICLES = 10;
 
 /**
  * Briefs the Article Writer. One topic per line — each becomes its own article
- * and its own file in the content repository.
+ * and a draft post in the CMS once it is sent.
  */
 export function GenerateArticleDialog({
   open,
