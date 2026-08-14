@@ -105,8 +105,13 @@ Requirements:
 - Include at least one code block where it genuinely helps.
 - Cite a source with [n] wherever you state a specific fact, version, number or
   quotation drawn from it. Do not cite a number that is not in the list above.
-- You may explain, contextualise and give opinions in your own voice — just do
-  not present an unsourced specific as established fact.
+- Anything describing HOW A TECHNOLOGY WORKS is a factual claim and needs a
+  citation — what runs where, what a component does, what replaces what. This
+  holds even when it feels like common background knowledge. If no source above
+  supports it, leave it out; a shorter accurate article beats a longer one with
+  a confident mistake in it.
+- You may explain, contextualise, draw connections and give opinions in your own
+  voice. What you may not do is assert an unsupported mechanism as fact.
 - Do NOT write a "Further Reading" or "References" section. The reference list
   is generated separately from the citations you use.
 
@@ -159,6 +164,13 @@ DRAFT:
 %s
 
 Find concrete problems. Look specifically for:
+
+- UNCITED TECHNICAL ASSERTIONS. This is the most important check. Any sentence
+  explaining how something works — what runs where, what a component does, what
+  happens to data, what a technology replaces — is a factual claim, even when it
+  sounds like general background. If it has no [n] citation, flag it. Judge it
+  on its own merits too: if such a sentence is technically WRONG, say so plainly
+  and say what is actually true. Do not assume the writer got the basics right.
 - Specific claims (versions, numbers, dates, capabilities) presented as fact with
   no [n] citation, or citing a number that is not in the source list.
 - Claims that go further than the cited source actually supports.
@@ -166,6 +178,8 @@ Find concrete problems. Look specifically for:
   deleted without the reader losing anything.
 - Sections that do not deliver the intended angle.
 - Missing or broken code blocks, or code that would not run.
+- Sections that are too thin to be useful — a heading with one short paragraph
+  under it.
 
 List each problem as one specific, actionable sentence naming where it occurs.
 If the draft has no real problems, return an empty list — do not invent work.
@@ -211,9 +225,13 @@ PROBLEMS TO FIX:
 CURRENT DRAFT:
 %s
 
-Rewrite the article addressing every problem listed. Fix an uncited claim either
-by citing a source that supports it or by removing the claim — do not invent a
-citation number, and do not soften a claim into vagueness to avoid citing it.
+Rewrite the article addressing every problem listed.
+
+For an uncited or incorrect technical claim you have exactly three options:
+cite a source above that genuinely supports it, correct it to what is actually
+true, or delete the sentence. Do not invent a citation number, and do not blur a
+claim into vagueness to avoid having to support it — a sentence that survives by
+saying nothing is worse than one that is gone.
 
 Keep everything that was already working. Preserve the H1 title, the markdown
 structure and the length. Do not add a "Further Reading" or "References" section.
@@ -232,6 +250,79 @@ you changed.`,
 	}
 	return md, nil
 }
+
+// Target article length. The draft prompt asks for this range, but asking is
+// not getting: a live run against a local model produced 382 words against the
+// same instruction. So the floor is checked rather than trusted, which is the
+// same stance this package takes on citations.
+const (
+	MinArticleWords = 900
+	MaxArticleWords = 1400
+)
+
+// expand fills out an article that came in under the target length.
+//
+// It is deliberately not "write more". A model told to lengthen a piece pads it
+// — restating the heading, adding a paragraph of throat-clearing before each
+// section — which makes the article longer and worse. So it is given the
+// specific sections that are thin, told what material it still has available,
+// and told which kinds of expansion actually carry weight.
+func (r *Runner) expand(
+	ctx context.Context, modelName string, brief model.BlogBrief, rb *research.Brief,
+	plan *writePlan, markdown string, currentWords int,
+) (string, error) {
+	prompt := fmt.Sprintf(`This article is too short. It is %d words and needs to be %d-%d.
+
+TITLE: %s
+ANGLE: %s
+
+GUIDANCE FROM THE REQUESTER:
+%s
+
+SOURCES you may draw on — cite by number, e.g. [2]:
+%s
+
+CURRENT ARTICLE:
+%s
+
+Expand it to at least %d words by adding substance, not padding. Specifically:
+- Develop the sections that are thinnest. A section of one short paragraph is
+  the first place to look.
+- Add the practical detail a working engineer needs: what the trade-offs are,
+  what breaks, what to watch for, what the migration actually involves.
+- Add or extend a code block where it earns its place.
+- Draw on sources you have not used yet, if any are relevant.
+
+Do NOT:
+- Restate the heading as the first sentence of a section.
+- Add a preamble to each section explaining what the section will cover.
+- Add filler like "in today's fast-moving landscape".
+- Introduce facts no source supports. If you cannot support it, do not add it.
+- Add a "Further Reading" or "References" section.
+
+Keep the existing title, structure and every citation that is already there.
+Return only the expanded markdown article — no preamble, no commentary.`,
+		currentWords, MinArticleWords, MaxArticleWords,
+		plan.Title, plan.Angle,
+		guidanceOrNone(brief.Context),
+		formatSources(rb),
+		markdown,
+		MinArticleWords,
+	)
+
+	resp, err := r.generate(ctx, modelName, prompt)
+	if err != nil {
+		return "", fmt.Errorf("expand: %w", err)
+	}
+	md := stripOuterFence(strings.TrimSpace(resp))
+	if md == "" {
+		return "", fmt.Errorf("expand: model returned an empty article")
+	}
+	return md, nil
+}
+
+// wordCount counts words the way the UI reports them.
+func wordCount(markdown string) int { return len(strings.Fields(markdown)) }
 
 // generate is the single point where the writer talks to the LLM.
 func (r *Runner) generate(ctx context.Context, modelName, prompt string) (string, error) {

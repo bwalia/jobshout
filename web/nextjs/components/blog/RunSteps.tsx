@@ -63,16 +63,25 @@ export function RunSteps({ steps }: { steps: BlogStep[] }) {
 
             <div className={cn("min-w-0 flex-1", !isLast && "pb-4")}>
               <div className="flex items-baseline justify-between gap-3">
-                <p
-                  className={cn(
-                    "text-sm",
-                    step.status === "pending" || step.status === "skipped"
-                      ? "text-muted-foreground"
-                      : "font-medium text-foreground"
+                <div className="min-w-0">
+                  <p
+                    className={cn(
+                      "text-sm",
+                      step.status === "pending" || step.status === "skipped"
+                        ? "text-muted-foreground"
+                        : "font-medium text-foreground"
+                    )}
+                  >
+                    {step.label}
+                  </p>
+                  {/* Which agent is doing this. Omitted rather than guessed
+                      for runs that predate the field. */}
+                  {step.agent && (
+                    <p className="mt-0.5 text-2xs text-muted-foreground">
+                      {step.agent}
+                    </p>
                   )}
-                >
-                  {step.label}
-                </p>
+                </div>
                 {step.status === "skipped" ? (
                   <span className="shrink-0 text-2xs text-muted-foreground">
                     not needed

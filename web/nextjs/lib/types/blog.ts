@@ -13,6 +13,7 @@ export type BlogStepKey =
   | "generating"
   | "reviewing"
   | "revising"
+  | "expanding"
   | "converting"
   | "generated"
   | "publishing"
@@ -34,6 +35,13 @@ export type StepStatus =
 export interface BlogStep {
   key: BlogStepKey;
   label: string;
+  /**
+   * Which agent performs this step. A run is a collaboration — the Research
+   * Agent gathers sources, the Article Writer turns them into a piece — and
+   * naming that makes the handover visible. Absent on runs written before the
+   * field existed.
+   */
+  agent?: string;
   status: StepStatus;
   started_at?: string;
   completed_at?: string;

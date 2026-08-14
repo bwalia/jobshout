@@ -97,12 +97,16 @@ type PublishResult struct {
 // ProgressFunc is called as the pipeline moves between steps, so the caller can
 // persist a live trace. It must not block for long — it runs inline.
 //
+// agent names which agent is doing the work, so the trace shows the handover
+// between the Research Agent and the Article Writer rather than presenting a
+// run as one anonymous process.
+//
 // A nil ProgressFunc is valid; use report to stay nil-safe.
-type ProgressFunc func(stepKey, label string)
+type ProgressFunc func(stepKey, label, agent string)
 
-func report(p ProgressFunc, stepKey, label string) {
+func report(p ProgressFunc, stepKey, label, agent string) {
 	if p != nil {
-		p(stepKey, label)
+		p(stepKey, label, agent)
 	}
 }
 
@@ -203,14 +207,14 @@ func (r *Runner) Generate(ctx context.Context, req GenerateRequest, progress Pro
 	// Rendering is its own step rather than part of generation: it is the point
 	// where a malformed article stops being the LLM's problem and starts being
 	// ours, and a reader watching the trace should see which one failed.
-	report(progress, model.BlogStepConverting, fmt.Sprintf("Converting %d article(s) to HTML", len(articles)))
+	report(progress, model.BlogStepConverting, fmt.Sprintf("Converting %d article(s) to HTML", len(articles)), model.AgentNameArticleWriter)
 	for i := range articles {
 		if err := articles[i].render(); err != nil {
 			return nil, err
 		}
 	}
 
-	report(progress, model.BlogStepGenerated, fmt.Sprintf("Generated %d article(s)", len(articles)))
+	report(progress, model.BlogStepGenerated, fmt.Sprintf("Generated %d article(s)", len(articles)), model.AgentNameArticleWriter)
 	return articles, nil
 }
 
@@ -236,7 +240,8 @@ func (r *Runner) Publish(ctx context.Context, articles []GeneratedArticle, progr
 
 	for i, a := range articles {
 		report(progress, model.BlogStepPublishing,
-			fmt.Sprintf("Posting %d/%d to %s — %s", i+1, len(articles), namespace, a.Topic))
+			fmt.Sprintf("Posting %d/%d to %s — %s", i+1, len(articles), namespace, a.Topic),
+			model.AgentNameArticleWriter)
 
 		// Title and Excerpt are derived, not stored: an article loaded back from
 		// blog_articles arrives with markdown and HTML and nothing else. Fill
@@ -289,7 +294,8 @@ func (r *Runner) Publish(ctx context.Context, articles []GeneratedArticle, progr
 	)
 
 	report(progress, model.BlogStepPublished,
-		fmt.Sprintf("Created %d draft(s) in %s", len(posts), namespace))
+		fmt.Sprintf("Created %d draft(s) in %s", len(posts), namespace),
+		model.AgentNameArticleWriter)
 
 	return &PublishResult{
 		Namespace:   namespace,

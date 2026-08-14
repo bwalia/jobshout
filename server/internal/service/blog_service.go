@@ -101,16 +101,20 @@ func (s *blogService) EnsureArticleWriter(ctx context.Context, orgID uuid.UUID) 
 // initialSteps is the trace a run starts with. Steps are pre-seeded as pending
 // so the UI can render the whole pipeline up front and light each one up as it
 // happens, rather than growing a list from nothing.
+// The agent on each step is seeded here rather than only stamped when the step
+// runs, so the trace shows who will do what before anything has started.
 func initialSteps() []model.BlogStep {
+	writer, researcher := model.AgentNameArticleWriter, model.AgentNameResearcher
 	return []model.BlogStep{
 		{Key: model.BlogStepQueued, Label: "Queued", Status: model.StepStatusDone},
-		{Key: model.BlogStepResearching, Label: "Researching sources", Status: model.StepStatusPending},
-		{Key: model.BlogStepOutlining, Label: "Choosing a title and outline", Status: model.StepStatusPending},
-		{Key: model.BlogStepGenerating, Label: "Writing articles", Status: model.StepStatusPending},
-		{Key: model.BlogStepReviewing, Label: "Reviewing the draft", Status: model.StepStatusPending},
-		{Key: model.BlogStepRevising, Label: "Revising", Status: model.StepStatusPending},
-		{Key: model.BlogStepConverting, Label: "Converting to HTML", Status: model.StepStatusPending},
-		{Key: model.BlogStepGenerated, Label: "Articles ready", Status: model.StepStatusPending},
+		{Key: model.BlogStepResearching, Label: "Researching sources", Agent: researcher, Status: model.StepStatusPending},
+		{Key: model.BlogStepOutlining, Label: "Choosing a title and outline", Agent: writer, Status: model.StepStatusPending},
+		{Key: model.BlogStepGenerating, Label: "Writing articles", Agent: writer, Status: model.StepStatusPending},
+		{Key: model.BlogStepReviewing, Label: "Reviewing the draft", Agent: writer, Status: model.StepStatusPending},
+		{Key: model.BlogStepRevising, Label: "Revising", Agent: writer, Status: model.StepStatusPending},
+		{Key: model.BlogStepExpanding, Label: "Expanding to full length", Agent: writer, Status: model.StepStatusPending},
+		{Key: model.BlogStepConverting, Label: "Converting to HTML", Agent: writer, Status: model.StepStatusPending},
+		{Key: model.BlogStepGenerated, Label: "Articles ready", Agent: writer, Status: model.StepStatusPending},
 	}
 }
 
@@ -133,7 +137,7 @@ type stepTracker struct {
 	logger *zap.Logger
 }
 
-func (t *stepTracker) advance(key, label string) {
+func (t *stepTracker) advance(key, label, agent string) {
 	now := time.Now()
 	for i := range t.steps {
 		if t.steps[i].Status == model.StepStatusRunning {
@@ -145,6 +149,9 @@ func (t *stepTracker) advance(key, label string) {
 	for i := range t.steps {
 		if t.steps[i].Key == key {
 			t.steps[i].Status = model.StepStatusRunning
+			if agent != "" {
+				t.steps[i].Agent = agent
+			}
 			// A step can be re-entered: "generating" fires once per topic,
 			// relabelling itself each time. Keep the original start so the
 			// duration covers the whole phase rather than the last topic, and
@@ -163,7 +170,7 @@ func (t *stepTracker) advance(key, label string) {
 	}
 	if !found {
 		t.steps = append(t.steps, model.BlogStep{
-			Key: key, Label: label, Status: model.StepStatusRunning, StartedAt: &now,
+			Key: key, Label: label, Agent: agent, Status: model.StepStatusRunning, StartedAt: &now,
 		})
 	}
 	t.persist()

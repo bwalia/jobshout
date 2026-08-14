@@ -51,8 +51,8 @@ func findStep(steps []model.BlogStep, key string) *model.BlogStep {
 func TestStepTracker_OneRunningStepAtATime(t *testing.T) {
 	tr, _ := newTracker()
 
-	tr.advance(model.BlogStepGenerating, "Writing 1/2 — a")
-	tr.advance(model.BlogStepGenerated, "Generated 2 article(s)")
+	tr.advance(model.BlogStepGenerating, "Writing 1/2 — a", model.AgentNameArticleWriter)
+	tr.advance(model.BlogStepGenerated, "Generated 2 article(s)", model.AgentNameArticleWriter)
 
 	running := 0
 	for _, s := range tr.steps {
@@ -73,14 +73,14 @@ func TestStepTracker_OneRunningStepAtATime(t *testing.T) {
 func TestStepTracker_ReenteredStepStaysRunning(t *testing.T) {
 	tr, _ := newTracker()
 
-	tr.advance(model.BlogStepGenerating, "Writing 1/3 — a")
+	tr.advance(model.BlogStepGenerating, "Writing 1/3 — a", model.AgentNameArticleWriter)
 	first := findStep(tr.steps, model.BlogStepGenerating).StartedAt
 	if first == nil {
 		t.Fatal("first entry did not set StartedAt")
 	}
 
-	tr.advance(model.BlogStepGenerating, "Writing 2/3 — b")
-	tr.advance(model.BlogStepGenerating, "Writing 3/3 — c")
+	tr.advance(model.BlogStepGenerating, "Writing 2/3 — b", model.AgentNameArticleWriter)
+	tr.advance(model.BlogStepGenerating, "Writing 3/3 — c", model.AgentNameArticleWriter)
 
 	step := findStep(tr.steps, model.BlogStepGenerating)
 	if step.Status != model.StepStatusRunning {
@@ -100,7 +100,7 @@ func TestStepTracker_ReenteredStepStaysRunning(t *testing.T) {
 func TestStepTracker_FinishClosesRunningStep(t *testing.T) {
 	tr, rec := newTracker()
 
-	tr.advance(model.BlogStepGenerating, "Writing 1/1 — a")
+	tr.advance(model.BlogStepGenerating, "Writing 1/1 — a", model.AgentNameArticleWriter)
 	tr.finish()
 
 	step := findStep(rec.last, model.BlogStepGenerating)
@@ -117,7 +117,7 @@ func TestStepTracker_FinishClosesRunningStep(t *testing.T) {
 func TestStepTracker_FailMarksOnlyTheRunningStep(t *testing.T) {
 	tr, rec := newTracker()
 
-	tr.advance(model.BlogStepGenerating, "Writing 1/1 — a")
+	tr.advance(model.BlogStepGenerating, "Writing 1/1 — a", model.AgentNameArticleWriter)
 	tr.fail(errors.New("ollama unreachable"))
 
 	failed := findStep(rec.last, model.BlogStepGenerating)
@@ -138,7 +138,7 @@ func TestStepTracker_UnknownKeyIsAppended(t *testing.T) {
 	tr, _ := newTracker()
 	before := len(tr.steps)
 
-	tr.advance("verifying", "Checking links")
+	tr.advance("verifying", "Checking links", model.AgentNameArticleWriter)
 
 	if len(tr.steps) != before+1 {
 		t.Fatalf("steps = %d, want %d", len(tr.steps), before+1)

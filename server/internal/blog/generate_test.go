@@ -236,7 +236,7 @@ func TestGenerate_ReportsSteps(t *testing.T) {
 	var keys []string
 	r := newTestRunner(nil, writeScript("A", "# a\n\nbody")...)
 	if _, err := r.Generate(context.Background(), GenerateRequest{Briefs: briefsFor("a")},
-		func(key, _ string) { keys = append(keys, key) }); err != nil {
+		func(key, _, _ string) { keys = append(keys, key) }); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 
