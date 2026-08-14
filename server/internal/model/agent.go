@@ -38,12 +38,18 @@ type Agent struct {
 }
 
 // MetadataKeyBuiltin is the Metadata key identifying a platform-seeded agent,
-// and BuiltinArticleWriter is its value for the article generator. Kept as
-// constants because migration 000019 and auth_service.Register both write this
-// exact marker and the board/UI read it.
+// and the Builtin* values name each one. Kept as constants because migration
+// 000019 and auth_service.Register both write these exact markers and the
+// board/UI read them.
 const (
 	MetadataKeyBuiltin   = "builtin"
 	BuiltinArticleWriter = "article_writer"
+	// BuiltinResearcher is the Research Agent: it searches the internet, reads
+	// sources and returns verified findings. The Article Writer is its first
+	// consumer, but it is deliberately a separate agent — "find out about X and
+	// come back with sources you have actually read" is a capability worth
+	// having on its own, and it appears on the board in its own right.
+	BuiltinResearcher = "researcher"
 )
 
 // IsBuiltin reports whether the agent was seeded by the platform under the

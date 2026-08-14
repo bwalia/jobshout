@@ -302,8 +302,12 @@ func blogRequestFromInput(in map[string]any) (model.GenerateBlogRequest, error) 
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return model.GenerateBlogRequest{}, fmt.Errorf("decode blog input: %w", err)
 	}
-	if len(req.Topics) == 0 {
-		return model.GenerateBlogRequest{}, fmt.Errorf("scheduled blog task missing 'topics'")
+	// Tasks stored before briefs existed carry a bare topics array; Normalize
+	// folds either shape into briefs so a schedule created months ago keeps
+	// firing without being rewritten.
+	req.Normalize()
+	if err := req.Validate(); err != nil {
+		return model.GenerateBlogRequest{}, fmt.Errorf("scheduled blog task: %w", err)
 	}
 	return req, nil
 }

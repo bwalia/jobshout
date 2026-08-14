@@ -8,13 +8,27 @@ export type BlogRunStatus = "pending" | "running" | "completed" | "failed";
 /** Step keys, in the order the pipeline moves through them. */
 export type BlogStepKey =
   | "queued"
+  | "researching"
+  | "outlining"
   | "generating"
+  | "reviewing"
+  | "revising"
   | "converting"
   | "generated"
   | "publishing"
   | "published";
 
-export type StepStatus = "pending" | "running" | "done" | "failed";
+/**
+ * `skipped` marks a step that was never needed — a draft the reviewer had no
+ * complaints about is never revised. It is distinct from `pending` so a
+ * finished run does not look like it stalled.
+ */
+export type StepStatus =
+  | "pending"
+  | "running"
+  | "done"
+  | "failed"
+  | "skipped";
 
 /** One entry in a run's progress trace. */
 export interface BlogStep {
@@ -26,13 +40,26 @@ export interface BlogStep {
   error?: string;
 }
 
+/** One source an article cites. Every reference was retrieved and verified. */
+export interface BlogReference {
+  url: string;
+  title: string;
+  site?: string;
+  published_at?: string;
+}
+
 /** Per-article summary carried on the run. The body is fetched separately. */
 export interface BlogRunArticle {
   id: string;
+  /** What the agent was asked to write about. */
   topic: string;
+  /** What the agent decided to call it, after researching the topic. */
+  title: string;
   slug: string;
   path: string;
   word_count: number;
+  /** How well-sourced the article is, without loading its references. */
+  reference_count: number;
 }
 
 /**
@@ -44,8 +71,11 @@ export interface BlogArticle {
   run_id: string;
   org_id: string;
   topic: string;
+  title: string;
   slug: string;
   path: string;
+  /** The verified sources this article cites, in citation order. */
+  references: BlogReference[];
   markdown: string;
   /** The body as sent to the CMS. */
   html: string;
@@ -64,6 +94,9 @@ export interface BlogRun {
   triggered_by: string | null;
   source: "api" | "schedule";
   status: BlogRunStatus;
+  /** What the run was asked to write: a topic and its guidance, per article. */
+  briefs: BlogBrief[];
+  /** The same subjects without their context, kept for older runs. */
   topics: string[];
   model: string | null;
   /** The CMS namespace the drafts were created in; null until published. */
@@ -77,8 +110,18 @@ export interface BlogRun {
   created_at: string;
 }
 
+/**
+ * One article's instructions. The topic is a subject, not a title — the agent
+ * researches it and chooses the title from what it finds.
+ */
+export interface BlogBrief {
+  topic: string;
+  /** Optional guidance: angle, audience, points to hit, things to avoid. */
+  context?: string;
+}
+
 export interface GenerateBlogRequest {
-  topics: string[];
+  briefs: BlogBrief[];
   model?: string;
   max_articles?: number;
 }

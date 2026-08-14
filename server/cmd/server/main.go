@@ -41,6 +41,7 @@ import (
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/modelselect"
 	"github.com/jobshout/server/internal/repository"
+	"github.com/jobshout/server/internal/research"
 	"github.com/jobshout/server/internal/selector"
 	"github.com/jobshout/server/internal/service"
 	"github.com/jobshout/server/internal/tools"
@@ -150,6 +151,14 @@ func main() {
 	if embedder != nil {
 		toolRegistry.Register(tools.NewKnowledgeTool(embedder, knowledgeChunkRepo))
 	}
+	// web_search / web_fetch / trending_topics give agents grounded internet
+	// access. They need no credentials, so they register unconditionally — any
+	// agent can be granted them through its tool permissions, and the Article
+	// Writer is built on them.
+	researchClient := research.New(logger)
+	for _, rt := range tools.NewResearchTools(researchClient) {
+		toolRegistry.Register(rt)
+	}
 	logger.Info("tool registry initialised", zap.Int("tools", len(toolRegistry.All())))
 
 	// ─── Engine Router (multi-runtime) ──────────────────────────────────────
@@ -244,6 +253,19 @@ func main() {
 		Namespace: cfg.OpsAPINamespace,
 		Timeout:   cfg.OpsAPITimeout,
 	})
+	// The Research Agent shares the article generator's LLM but is wired
+	// independently: it is a platform capability in its own right, and anything
+	// that needs current, cited material about a subject consumes it.
+	var researchAgent *research.Agent
+	if researchLLM, err := llmRouter.For(cfg.LLMProvider); err != nil {
+		logger.Warn("research: llm router returned error — research agent disabled", zap.Error(err))
+	} else {
+		researchAgent = research.NewAgent(researchClient, researchLLM, research.DefaultAgentConfig(), logger)
+		logger.Info("research agent initialised",
+			zap.Int("max_sources", research.DefaultAgentConfig().MaxSources))
+	}
+	researchSvc := service.NewResearchService(researchAgent, researchClient, agentRepo, logger)
+
 	var blogRunner *blog.Runner
 	if blogLLM, err := llmRouter.For(cfg.LLMProvider); err != nil {
 		logger.Warn("blog: llm router returned error — article generator disabled",
@@ -252,7 +274,7 @@ func main() {
 		blogRunner = blog.NewRunner(blog.Config{
 			ContentDir: cfg.BlogContentDir,
 			AuthorName: cfg.BlogAuthorName,
-		}, blogLLM, cmsClient, logger)
+		}, blogLLM, cmsClient, researchSvc, logger)
 		logger.Info("article generator initialised",
 			zap.String("cms_namespace", cfg.OpsAPINamespace),
 			zap.Bool("can_publish", blogRunner.CanPublish()),
@@ -413,6 +435,7 @@ func main() {
 	pricingHandler := handler.NewPricingHandler(pricingRepo)
 	leaderboardHandler := handler.NewLeaderboardHandler(leaderboardSvc)
 	blogHandler := handler.NewBlogHandler(blogSvc)
+	researchHandler := handler.NewResearchHandler(researchSvc)
 
 	// Chat, goal, multi-agent, and Telegram handlers
 	chatHandler := handler.NewChatHandler(chatSvc)
@@ -614,6 +637,14 @@ func main() {
 					r.Delete("/", blogHandler.Delete)
 				})
 				r.Get("/articles/{articleID}", blogHandler.GetArticle)
+			})
+
+			// Research is exposed on its own, not only via the article
+			// pipeline: "find out about X and come back with sources you have
+			// actually read" is a capability other callers want too.
+			r.Route("/research", func(r chi.Router) {
+				r.Post("/", researchHandler.Research)
+				r.Get("/trending", researchHandler.Trending)
 			})
 
 			// Plugins (user-defined LangGraph/LangChain workflows)

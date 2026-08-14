@@ -42,11 +42,17 @@ func newLifecycleSvc(run *model.BlogRun) (*blogService, *runStore) {
 // nonNilRunner satisfies Retry's "generator configured" check. The guards under
 // test all return before anything reaches it.
 func nonNilRunner() *blog.Runner {
-	return blog.NewRunner(blog.Config{}, nil, nil, zap.NewNop())
+	return blog.NewRunner(blog.Config{}, nil, nil, nil, zap.NewNop())
 }
 
 func aRun(orgID uuid.UUID, status string, topics ...string) *model.BlogRun {
-	return &model.BlogRun{ID: uuid.New(), OrgID: orgID, Status: status, Topics: topics}
+	// Briefs are what Retry replays now; the repository derives them from
+	// topics on read, so a run built by hand has to do the same.
+	briefs := make([]model.BlogBrief, 0, len(topics))
+	for _, t := range topics {
+		briefs = append(briefs, model.BlogBrief{Topic: t})
+	}
+	return &model.BlogRun{ID: uuid.New(), OrgID: orgID, Status: status, Topics: topics, Briefs: briefs}
 }
 
 func TestDelete_RefusesAnotherOrgsRun(t *testing.T) {

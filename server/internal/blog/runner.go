@@ -1,12 +1,18 @@
 // Package blog implements JobShout's automated article pipeline:
-// LLM generates markdown → markdown is rendered to HTML → the HTML is posted to
-// the opsapi CMS as a draft.
+// research → plan → draft → review → revise → render to HTML → post to the
+// opsapi CMS as a draft.
 //
-// The pipeline is a set of deterministic functions rather than a ReAct agent
-// loop — an HTTP contract is not somewhere we want the LLM guessing at field
-// names. It is presented in the product as the built-in "Article Writer" agent;
-// the agent identity is for visibility and attribution, the behaviour
-// underneath stays fixed.
+// The writing itself is agentic: the Research Agent finds and verifies sources,
+// the model chooses the article's title and structure from what that research
+// found, and it then critiques and revises its own draft. What is *not* left to
+// the model is the sequence. Research always happens, citations are always
+// resolved against sources that were actually retrieved, and the CMS request is
+// always built by this package — those are guarantees the pipeline makes about
+// its output, and a guarantee a model can decide to skip is not one. So the
+// model decides what to say and the pipeline decides what must be true of it.
+//
+// It is presented in the product as the built-in "Article Writer" agent, and
+// commissions the built-in "Research Agent" for the sources it writes from.
 //
 // Generation and publishing are deliberately separate. Generation needs no
 // opsapi credentials and never leaves this system, so an article can be written
@@ -20,11 +26,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/jobshout/server/internal/integration/adapters/opsapi"
 	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/model"
+	"github.com/jobshout/server/internal/research"
 )
 
 // Config captures what the Runner needs. Populated from *config.Config in main.go.
@@ -47,9 +55,19 @@ type CMSPublisher interface {
 
 // GenerateRequest is the user-facing input.
 type GenerateRequest struct {
-	Topics      []string `json:"topics"`
-	Model       string   `json:"model,omitempty"`        // optional override for the LLM
-	MaxArticles int      `json:"max_articles,omitempty"` // safety cap; 0 = no cap below hard limit
+	// OrgID scopes the research the pipeline commissions, so a run is
+	// attributed to the right organization's Research Agent.
+	OrgID       uuid.UUID
+	Briefs      []model.BlogBrief `json:"briefs"`
+	Model       string            `json:"model,omitempty"`        // optional override for the LLM
+	MaxArticles int               `json:"max_articles,omitempty"` // safety cap; 0 = no cap below hard limit
+}
+
+// Researcher is the slice of service.ResearchService this package consumes.
+// Declared here, where it is used, so blog does not import service — and so a
+// test can supply a brief without a network or an LLM.
+type Researcher interface {
+	Research(ctx context.Context, orgID uuid.UUID, req research.Request, progress research.ProgressFunc) (*research.Brief, error)
 }
 
 // HardMaxArticles is the safety ceiling regardless of what the caller asks
@@ -90,23 +108,29 @@ func report(p ProgressFunc, stepKey, label string) {
 
 // Runner orchestrates generation and publishing.
 type Runner struct {
-	cfg    Config
-	llm    llm.Client
-	cms    CMSPublisher
-	logger *zap.Logger
+	cfg      Config
+	llm      llm.Client
+	cms      CMSPublisher
+	research Researcher
+	logger   *zap.Logger
 	// clock lets tests inject a deterministic time.
 	clock func() time.Time
 }
 
 // NewRunner wires the Runner with its dependencies. cms may be nil — generation
 // still works, and only publishing is refused.
-func NewRunner(cfg Config, llmClient llm.Client, cms CMSPublisher, logger *zap.Logger) *Runner {
+//
+// researcher may not be nil. Every article this pipeline produces is written
+// from verified sources, so a Runner with nowhere to get them cannot do its
+// job — and failing at construction is better than discovering it per-article.
+func NewRunner(cfg Config, llmClient llm.Client, cms CMSPublisher, researcher Researcher, logger *zap.Logger) *Runner {
 	return &Runner{
-		cfg:    cfg,
-		llm:    llmClient,
-		cms:    cms,
-		logger: logger,
-		clock:  time.Now,
+		cfg:      cfg,
+		llm:      llmClient,
+		cms:      cms,
+		research: researcher,
+		logger:   logger,
+		clock:    time.Now,
 	}
 }
 
@@ -145,14 +169,17 @@ func (r *Runner) Generate(ctx context.Context, req GenerateRequest, progress Pro
 	if r.llm == nil {
 		return nil, fmt.Errorf("blog: llm client is nil")
 	}
+	if r.research == nil {
+		return nil, fmt.Errorf("blog: research is not configured — articles are written from verified sources and there are none available")
+	}
 
-	topics := make([]string, 0, len(req.Topics))
-	for _, t := range req.Topics {
-		if s := strings.TrimSpace(t); s != "" {
-			topics = append(topics, s)
+	briefs := make([]model.BlogBrief, 0, len(req.Briefs))
+	for _, b := range req.Briefs {
+		if s := strings.TrimSpace(b.Topic); s != "" {
+			briefs = append(briefs, model.BlogBrief{Topic: s, Context: strings.TrimSpace(b.Context)})
 		}
 	}
-	if len(topics) == 0 {
+	if len(briefs) == 0 {
 		return nil, fmt.Errorf("blog: at least one topic is required")
 	}
 
@@ -160,15 +187,15 @@ func (r *Runner) Generate(ctx context.Context, req GenerateRequest, progress Pro
 	if cap <= 0 || cap > HardMaxArticles {
 		cap = HardMaxArticles
 	}
-	if len(topics) > cap {
-		r.logger.Warn("blog: truncating topics to cap",
-			zap.Int("requested", len(topics)),
+	if len(briefs) > cap {
+		r.logger.Warn("blog: truncating briefs to cap",
+			zap.Int("requested", len(briefs)),
 			zap.Int("cap", cap),
 		)
-		topics = topics[:cap]
+		briefs = briefs[:cap]
 	}
 
-	articles, err := generateArticles(ctx, r.llm, req.Model, r.cfg.ContentDir, topics, r.clock(), progress)
+	articles, err := r.writeArticles(ctx, req, briefs, progress)
 	if err != nil {
 		return nil, err
 	}

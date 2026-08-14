@@ -104,7 +104,11 @@ func (s *blogService) EnsureArticleWriter(ctx context.Context, orgID uuid.UUID) 
 func initialSteps() []model.BlogStep {
 	return []model.BlogStep{
 		{Key: model.BlogStepQueued, Label: "Queued", Status: model.StepStatusDone},
+		{Key: model.BlogStepResearching, Label: "Researching sources", Status: model.StepStatusPending},
+		{Key: model.BlogStepOutlining, Label: "Choosing a title and outline", Status: model.StepStatusPending},
 		{Key: model.BlogStepGenerating, Label: "Writing articles", Status: model.StepStatusPending},
+		{Key: model.BlogStepReviewing, Label: "Reviewing the draft", Status: model.StepStatusPending},
+		{Key: model.BlogStepRevising, Label: "Revising", Status: model.StepStatusPending},
 		{Key: model.BlogStepConverting, Label: "Converting to HTML", Status: model.StepStatusPending},
 		{Key: model.BlogStepGenerated, Label: "Articles ready", Status: model.StepStatusPending},
 	}
@@ -165,13 +169,22 @@ func (t *stepTracker) advance(key, label string) {
 	t.persist()
 }
 
-// finish closes the currently running step as done.
+// finish closes the currently running step as done, and marks anything that
+// never started as skipped.
+//
+// The skip pass matters because the trace is pre-seeded with the whole
+// pipeline: a run where the reviewer found nothing to fix never enters the
+// revising step, and leaving it pending on a completed run makes finished work
+// look stalled.
 func (t *stepTracker) finish() {
 	now := time.Now()
 	for i := range t.steps {
-		if t.steps[i].Status == model.StepStatusRunning {
+		switch t.steps[i].Status {
+		case model.StepStatusRunning:
 			t.steps[i].Status = model.StepStatusDone
 			t.steps[i].CompletedAt = &now
+		case model.StepStatusPending:
+			t.steps[i].Status = model.StepStatusSkipped
 		}
 	}
 	t.persist()
@@ -215,6 +228,14 @@ func (s *blogService) Generate(
 		return nil, err
 	}
 
+	// Normalize is idempotent, so calling it here costs nothing when the
+	// handler already did — and guarantees the briefs are populated for callers
+	// that build the request directly, like the scheduler.
+	req.Normalize()
+	if err := req.Validate(); err != nil {
+		return nil, fmt.Errorf("blog_svc: %w", err)
+	}
+
 	startedAt := time.Now()
 	run := &model.BlogRun{
 		ID:          uuid.New(),
@@ -223,6 +244,7 @@ func (s *blogService) Generate(
 		TriggeredBy: triggeredBy,
 		Source:      source,
 		Status:      model.BlogRunStatusRunning,
+		Briefs:      req.Briefs,
 		Topics:      req.Topics,
 		Steps:       initialSteps(),
 		Articles:    []model.BlogRunArticle{},
@@ -253,7 +275,8 @@ func (s *blogService) runGeneration(run *model.BlogRun, agent *model.Agent, req 
 	s.setAgentStatus(ctx, agent.ID, "active")
 
 	articles, err := s.runner.Generate(ctx, blog.GenerateRequest{
-		Topics:      req.Topics,
+		OrgID:       run.OrgID,
+		Briefs:      req.Briefs,
 		Model:       req.Model,
 		MaxArticles: req.MaxArticles,
 	}, tracker.advance)
@@ -284,13 +307,19 @@ func (s *blogService) runGeneration(run *model.BlogRun, agent *model.Agent, req 
 	summaries := make([]model.BlogRunArticle, 0, len(articles))
 	for _, a := range articles {
 		id := uuid.New()
+		refs := a.References
+		if refs == nil {
+			refs = []model.BlogReference{}
+		}
 		persisted = append(persisted, model.BlogArticle{
 			ID: id, RunID: run.ID, OrgID: run.OrgID,
-			Topic: a.Topic, Slug: a.Slug, Path: a.Path,
-			Markdown: a.Markdown, HTML: a.HTML, WordCount: a.WordCount,
+			Topic: a.Topic, Title: a.Title, Slug: a.Slug, Path: a.Path,
+			References: refs,
+			Markdown:   a.Markdown, HTML: a.HTML, WordCount: a.WordCount,
 		})
 		summaries = append(summaries, model.BlogRunArticle{
-			ID: id, Topic: a.Topic, Slug: a.Slug, Path: a.Path, WordCount: a.WordCount,
+			ID: id, Topic: a.Topic, Title: a.Title, Slug: a.Slug, Path: a.Path,
+			WordCount: a.WordCount, ReferenceCount: len(refs),
 		})
 	}
 
@@ -475,7 +504,7 @@ func (s *blogService) Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUI
 	if run.Status != model.BlogRunStatusFailed {
 		return nil, fmt.Errorf("blog_svc: only a failed run can be retried (status is %q)", run.Status)
 	}
-	if len(run.Topics) == 0 {
+	if len(run.Briefs) == 0 {
 		return nil, fmt.Errorf("blog_svc: run has no topics to retry")
 	}
 
@@ -509,7 +538,11 @@ func (s *blogService) Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUI
 		return nil, fmt.Errorf("blog_svc: reset steps for retry: %w", err)
 	}
 
-	req := model.GenerateBlogRequest{Topics: run.Topics}
+	// Retry replays the briefs, not just the topics: the context is half the
+	// instruction, and a retry that dropped it would write a different article
+	// than the one that was asked for.
+	req := model.GenerateBlogRequest{Briefs: run.Briefs}
+	req.Normalize()
 	if run.Model != nil {
 		req.Model = *run.Model
 	}

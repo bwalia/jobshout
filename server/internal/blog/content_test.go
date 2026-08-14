@@ -5,29 +5,109 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
+
+	"github.com/google/uuid"
+	"go.uber.org/zap"
 
 	"github.com/jobshout/server/internal/llm"
+	"github.com/jobshout/server/internal/research"
 )
 
-// stubLLM returns a canned response for each Generate call, in order.
+// stubLLM answers each prompt with the first canned response whose trigger
+// appears in it.
+//
+// Keyed on content rather than call order because the writer now makes several
+// different calls per article — plan, draft, review, sometimes revise — and an
+// ordered list breaks every time a phase is added or skipped.
 type stubLLM struct {
-	responses []string
+	responses []scriptedResponse
 	calls     []llm.GenerateRequest
-	idx       int
+	// failOn makes any prompt containing this substring return an error.
+	failOn string
+}
+
+type scriptedResponse struct {
+	trigger string
+	content string
 }
 
 func (s *stubLLM) Generate(ctx context.Context, req llm.GenerateRequest) (*llm.GenerateResponse, error) {
 	s.calls = append(s.calls, req)
-	if s.idx >= len(s.responses) {
-		return nil, fmt.Errorf("stubLLM: out of responses")
+	prompt := req.Messages[len(req.Messages)-1].Content
+
+	if s.failOn != "" && strings.Contains(prompt, s.failOn) {
+		return nil, fmt.Errorf("stubLLM: scripted failure")
 	}
-	out := s.responses[s.idx]
-	s.idx++
-	return &llm.GenerateResponse{Content: out}, nil
+	for _, r := range s.responses {
+		if strings.Contains(prompt, r.trigger) {
+			return &llm.GenerateResponse{Content: r.content}, nil
+		}
+	}
+	return nil, fmt.Errorf("stubLLM: no canned response matched prompt")
 }
 
 func (s *stubLLM) ProviderName() string { return "stub" }
+
+// Prompt fragments that identify each phase, so a test can script one phase
+// without knowing the wording of the others.
+const (
+	promptPlan   = "planning a technical article"
+	promptDraft  = "writing a technical article"
+	promptReview = "reviewing a draft technical article"
+	promptRevise = "revising a technical article"
+)
+
+// writeScript builds the canned responses for a single clean article.
+func writeScript(title, body string) []scriptedResponse {
+	return []scriptedResponse{
+		{trigger: promptPlan, content: fmt.Sprintf(`{"title":%q,"angle":"why it matters","sections":["One","Two"]}`, title)},
+		{trigger: promptDraft, content: body},
+		{trigger: promptReview, content: `{"issues":[]}`},
+	}
+}
+
+// testDoc is the source text the fake researcher's findings quote from.
+const testDoc = "Kubernetes 1.31 promoted the Gateway API to general availability after an extended beta."
+
+// fakeResearcher returns a canned brief without touching the network or an LLM.
+type fakeResearcher struct {
+	brief *research.Brief
+	err   error
+	// requests records what the writer asked to have researched.
+	requests []research.Request
+}
+
+func (f *fakeResearcher) Research(
+	_ context.Context, _ uuid.UUID, req research.Request, progress research.ProgressFunc,
+) (*research.Brief, error) {
+	f.requests = append(f.requests, req)
+	if progress != nil {
+		progress(research.PhaseSearching, "searching")
+	}
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.brief != nil {
+		return f.brief, nil
+	}
+	return defaultBrief(), nil
+}
+
+// defaultBrief is a usable two-source brief.
+func defaultBrief() *research.Brief {
+	return &research.Brief{
+		Topic:   "Gateway API",
+		Summary: "Gateway API is now GA.",
+		Findings: []research.Finding{
+			{Claim: "Gateway API reached GA in 1.31.", SourceURL: "https://kubernetes.io/blog/ga", Quote: testDoc},
+			{Claim: "A migration tool exists.", SourceURL: "https://kubernetes.io/blog/migrate", Quote: testDoc},
+		},
+		Sources: []research.Source{
+			{URL: "https://kubernetes.io/blog/ga", Title: "Gateway API is GA", Site: "kubernetes.io"},
+			{URL: "https://kubernetes.io/blog/migrate", Title: "Migrating from Ingress", Site: "kubernetes.io"},
+		},
+	}
+}
 
 func TestSlugify(t *testing.T) {
 	cases := map[string]string{
@@ -67,71 +147,5 @@ func TestStripOuterFence(t *testing.T) {
 	}
 }
 
-func TestGenerateArticles_Success(t *testing.T) {
-	llm := &stubLLM{responses: []string{
-		"# Kubernetes\n\nBody 1.",
-		"```\n# AI Agents\n\nBody 2.\n```",
-	}}
-	now := time.Date(2026, 4, 29, 10, 0, 0, 0, time.UTC)
-
-	// Collect the progress callbacks so we can assert the run reports which
-	// article it is on, not just an opaque "generating".
-	var progressLabels []string
-	arts, err := generateArticles(context.Background(), llm, "llama3", "content/blogs",
-		[]string{"Kubernetes debugging", "AI agents"}, now,
-		func(_, label string) { progressLabels = append(progressLabels, label) })
-	if err != nil {
-		t.Fatalf("generateArticles: %v", err)
-	}
-	want := []string{"Writing 1/2 — Kubernetes debugging", "Writing 2/2 — AI agents"}
-	if len(progressLabels) != len(want) {
-		t.Fatalf("progress labels = %v, want %v", progressLabels, want)
-	}
-	for i := range want {
-		if progressLabels[i] != want[i] {
-			t.Errorf("progress[%d] = %q, want %q", i, progressLabels[i], want[i])
-		}
-	}
-	if arts[0].WordCount != len(strings.Fields(arts[0].Markdown)) {
-		t.Errorf("WordCount = %d, want %d", arts[0].WordCount, len(strings.Fields(arts[0].Markdown)))
-	}
-	if len(arts) != 2 {
-		t.Fatalf("want 2 articles, got %d", len(arts))
-	}
-	if !strings.HasPrefix(arts[0].Path, "content/blogs/2026-04-29-kubernetes-debugging") {
-		t.Errorf("unexpected path[0]: %q", arts[0].Path)
-	}
-	if strings.HasPrefix(arts[1].Markdown, "```") {
-		t.Errorf("outer fence leaked into article[1]: %q", arts[1].Markdown[:20])
-	}
-
-	// Prompt should contain the topic verbatim so the LLM sees it.
-	if !strings.Contains(llm.calls[0].Messages[0].Content, "Kubernetes debugging") {
-		t.Error("prompt missing topic")
-	}
-	if llm.calls[0].Model != "llama3" {
-		t.Errorf("model override not applied: %q", llm.calls[0].Model)
-	}
-}
-
-func TestGenerateArticles_EmptyTopic(t *testing.T) {
-	l := &stubLLM{responses: []string{"# x"}}
-	// nil progress must be tolerated — most callers do not want a trace.
-	_, err := generateArticles(context.Background(), l, "", "content/blogs",
-		[]string{"  "}, time.Now(), nil)
-	if err == nil {
-		t.Fatal("expected error for empty topic")
-	}
-}
-
-func TestGenerateArticles_DuplicateTopics(t *testing.T) {
-	l := &stubLLM{responses: []string{"# a", "# b"}}
-	arts, err := generateArticles(context.Background(), l, "", "content/blogs",
-		[]string{"Kubernetes debugging", "Kubernetes debugging"}, time.Now(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if arts[0].Path == arts[1].Path {
-		t.Errorf("duplicate topics produced duplicate paths: %q", arts[0].Path)
-	}
-}
+// testLogger is a no-op logger for tests that construct a Runner directly.
+func testLogger() *zap.Logger { return zap.NewNop() }

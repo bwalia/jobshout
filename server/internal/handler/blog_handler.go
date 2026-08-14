@@ -32,8 +32,11 @@ func (h *BlogHandler) Generate(w http.ResponseWriter, r *http.Request) {
 	if !DecodeJSON(w, r, &req) {
 		return
 	}
-	if err := h.validate.Struct(req); err != nil {
-		RespondError(w, http.StatusBadRequest, "validation failed: "+err.Error())
+	// Normalize folds the legacy topics field into briefs, so the rest of the
+	// pipeline reads one shape regardless of which form the caller sent.
+	req.Normalize()
+	if err := req.Validate(); err != nil {
+		RespondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
