@@ -3,14 +3,24 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Check, Code2, Copy, Download, FileText, Newspaper } from "lucide-react";
+import {
+  Check,
+  Code2,
+  Copy,
+  Download,
+  ExternalLink,
+  FileText,
+  Link2,
+  Newspaper,
+} from "lucide-react";
 import { cn } from "@/lib/utils/cn";
-import type { BlogArticle } from "@/lib/types/blog";
+import type { BlogArticle, BlogReference } from "@/lib/types/blog";
 
-type Tab = "article" | "markdown" | "html";
+type Tab = "article" | "sources" | "markdown" | "html";
 
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: "article", label: "Article", icon: Newspaper },
+  { id: "sources", label: "Sources", icon: Link2 },
   { id: "markdown", label: "Markdown", icon: FileText },
   { id: "html", label: "HTML", icon: Code2 },
 ];
@@ -27,6 +37,11 @@ const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
 export function ArticleViewer({ article }: { article: BlogArticle }) {
   const [tab, setTab] = useState<Tab>("article");
   const [copied, setCopied] = useState(false);
+
+  // Articles written before references were stored have none, so this is
+  // always a list rather than possibly undefined.
+  const references = article.references ?? [];
+  const referenceCount = references.length;
 
   async function copyMarkdown() {
     try {
@@ -55,10 +70,16 @@ export function ArticleViewer({ article }: { article: BlogArticle }) {
       <div className="flex items-start justify-between gap-4 border-b border-border pb-3">
         <div className="min-w-0">
           <h2 className="truncate text-base font-semibold text-foreground">
-            {article.topic}
+            {article.title || article.topic}
           </h2>
+          <p className="mt-0.5 truncate text-2xs text-muted-foreground">
+            {/* The topic is what was asked for; the title above is what the
+                agent decided to write. Showing both makes that visible. */}
+            Topic: {article.topic}
+          </p>
           <p className="mt-0.5 truncate font-mono text-2xs text-muted-foreground">
-            {article.path} · {article.word_count} words
+            {article.path} · {article.word_count} words ·{" "}
+            {referenceCount === 1 ? "1 source" : `${referenceCount} sources`}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -132,6 +153,8 @@ export function ArticleViewer({ article }: { article: BlogArticle }) {
               {article.markdown}
             </ReactMarkdown>
           </article>
+        ) : tab === "sources" ? (
+          <SourceList references={references} />
         ) : (
           <pre className="whitespace-pre-wrap break-words rounded-lg border border-border bg-muted/40 p-4 font-mono text-xs leading-relaxed text-foreground">
             {tab === "html"
@@ -142,5 +165,59 @@ export function ArticleViewer({ article }: { article: BlogArticle }) {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * The sources behind an article, numbered as the article cites them.
+ *
+ * Every entry here was retrieved and had a claim verified against it — these
+ * are not reading suggestions. An article with none is worth noticing, so the
+ * empty state says so plainly rather than rendering nothing.
+ */
+function SourceList({ references }: { references: BlogReference[] }) {
+  if (references.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed border-border p-6 text-center">
+        <p className="text-sm text-muted-foreground">
+          This article cites no sources.
+        </p>
+        <p className="mt-1 text-2xs text-muted-foreground">
+          Articles written before sourced generation, or where the writer used
+          none of the research, have an empty list.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <ol className="space-y-2">
+      {references.map((ref, i) => (
+        <li
+          key={ref.url}
+          className="flex gap-3 rounded-md border border-border bg-background/40 p-3"
+        >
+          <span className="shrink-0 font-mono text-2xs text-muted-foreground">
+            [{i + 1}]
+          </span>
+          <div className="min-w-0 flex-1">
+            <a
+              href={ref.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
+            >
+              <span className="truncate">{ref.title || ref.url}</span>
+              <ExternalLink className="h-3 w-3 shrink-0" />
+            </a>
+            <p className="mt-0.5 truncate text-2xs text-muted-foreground">
+              {ref.site}
+              {ref.published_at &&
+                ` · ${new Date(ref.published_at).toLocaleDateString()}`}
+            </p>
+          </div>
+        </li>
+      ))}
+    </ol>
   );
 }

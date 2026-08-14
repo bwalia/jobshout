@@ -110,15 +110,25 @@ func (s *authService) seedBuiltinAgents(ctx context.Context, orgID, createdBy uu
 		return
 	}
 
-	agent := articleWriterSeed(orgID)
-	agent.CreatedBy = &createdBy
-	if err := s.agentRepo.Create(ctx, agent); err != nil {
-		s.logger.Warn("auth: failed to seed built-in Article Writer agent",
-			zap.String("org_id", orgID.String()), zap.Error(err))
-		return
+	// Each built-in is seeded independently so one failing does not deprive the
+	// organization of the others.
+	seeds := map[string]*model.Agent{
+		"Article Writer": articleWriterSeed(orgID),
+		"Research Agent": researcherSeed(orgID),
+	}
+	seeded := 0
+	for name, agent := range seeds {
+		agent.CreatedBy = &createdBy
+		if err := s.agentRepo.Create(ctx, agent); err != nil {
+			s.logger.Warn("auth: failed to seed built-in agent",
+				zap.String("agent", name),
+				zap.String("org_id", orgID.String()), zap.Error(err))
+			continue
+		}
+		seeded++
 	}
 	s.logger.Info("auth: seeded built-in agents for new organization",
-		zap.String("org_id", orgID.String()))
+		zap.String("org_id", orgID.String()), zap.Int("agents", seeded))
 }
 
 func (s *authService) Login(ctx context.Context, req model.LoginRequest) (*model.AuthResponse, error) {

@@ -42,7 +42,7 @@ test.describe("Articles", () => {
     });
   });
 
-  test("the generate dialog validates the topic list", async ({ page }) => {
+  test("the generate dialog takes one brief per article", async ({ page }) => {
     await navigateTo(page, "/articles");
     await page.getByRole("button", { name: "Write articles" }).first().click();
 
@@ -50,17 +50,23 @@ test.describe("Articles", () => {
     const submit = page.getByRole("button", { name: "Write", exact: true });
     await expect(submit).toBeDisabled();
 
-    await page.fill("#topics", "First topic\nSecond topic");
-    await expect(page.getByText("2 topics")).toBeVisible();
+    // One box per article, each with its own topic and context, rather than
+    // one textarea split on newlines.
+    await page.getByLabel("Topic").first().fill("First topic");
+    await page
+      .getByLabel("Context (optional)")
+      .first()
+      .fill("For platform engineers.");
+    await expect(page.getByText("1 article", { exact: true })).toBeVisible();
     await expect(submit).toBeEnabled();
 
-    // The server truncates past the hard cap, so the form refuses first.
-    await page.fill(
-      "#topics",
-      Array.from({ length: 11 }, (_, i) => `Topic ${i}`).join("\n"),
-    );
-    await expect(page.getByText("maximum is 10")).toBeVisible();
-    await expect(submit).toBeDisabled();
+    await page.getByRole("button", { name: "+ Add another article" }).click();
+    await page.getByLabel("Topic").nth(1).fill("Second topic");
+    await expect(page.getByText("2 articles")).toBeVisible();
+
+    // A row can be taken back out.
+    await page.getByRole("button", { name: "Remove article 2" }).click();
+    await expect(page.getByText("1 article", { exact: true })).toBeVisible();
   });
 
   // Generation needs a reachable LLM, so this drives the run through the API
@@ -77,7 +83,9 @@ test.describe("Articles", () => {
         "Content-Type": "application/json",
         Authorization: `Bearer ${creds.token}`,
       },
-      body: JSON.stringify({ topics: ["End to end article test"] }),
+      body: JSON.stringify({
+        briefs: [{ topic: "End to end article test" }],
+      }),
     });
     expect(start.status).toBe(202);
     const run = await start.json();
@@ -129,7 +137,7 @@ test.describe("Articles", () => {
         "Content-Type": "application/json",
         Authorization: `Bearer ${creds.token}`,
       },
-      body: JSON.stringify({ topics: ["Publish gating test"] }),
+      body: JSON.stringify({ briefs: [{ topic: "Publish gating test" }] }),
     });
     const run = await start.json();
 

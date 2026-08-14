@@ -36,11 +36,26 @@ func (f *fakeCMS) CreatePost(_ context.Context, req opsapi.CreatePostRequest) (*
 
 // newTestRunner builds a Runner with the given CMS. A nil CMS is the
 // interesting case: generation must still work, publishing must not.
-func newTestRunner(cms CMSPublisher, responses ...string) *Runner {
+func newTestRunner(cms CMSPublisher, responses ...scriptedResponse) *Runner {
+	return newTestRunnerWith(cms, &fakeResearcher{}, responses...)
+}
+
+// newTestRunnerWith also substitutes the researcher, for tests about what
+// happens when research fails or comes back thin.
+func newTestRunnerWith(cms CMSPublisher, researcher Researcher, responses ...scriptedResponse) *Runner {
 	return NewRunner(Config{
 		ContentDir: "content/blogs",
 		AuthorName: "Test Writer",
-	}, &stubLLM{responses: responses}, cms, zap.NewNop())
+	}, &stubLLM{responses: responses}, cms, researcher, zap.NewNop())
+}
+
+// briefsFor is shorthand for a request over plain topics.
+func briefsFor(topics ...string) []model.BlogBrief {
+	out := make([]model.BlogBrief, 0, len(topics))
+	for _, t := range topics {
+		out = append(out, model.BlogBrief{Topic: t})
+	}
+	return out
 }
 
 func TestCanPublish(t *testing.T) {
@@ -64,10 +79,10 @@ func TestCanPublish_TypedNilClient(t *testing.T) {
 // Generation must not require CMS credentials — the whole point of the split is
 // that an article can be written and read without anything leaving the system.
 func TestGenerate_WithoutCMS(t *testing.T) {
-	r := newTestRunner(nil, "# Kubernetes\n\nBody.")
+	r := newTestRunner(nil, writeScript("Kubernetes", "# Kubernetes\n\nBody.")...)
 
 	arts, err := r.Generate(context.Background(), GenerateRequest{
-		Topics: []string{"Kubernetes debugging"},
+		Briefs: briefsFor("Kubernetes debugging"),
 	}, nil)
 	if err != nil {
 		t.Fatalf("Generate without CMS: %v", err)
@@ -83,9 +98,9 @@ func TestGenerate_WithoutCMS(t *testing.T) {
 // Every generated article carries its HTML: conversion is part of the pipeline,
 // not something publishing does on the way out.
 func TestGenerate_RendersHTML(t *testing.T) {
-	r := newTestRunner(nil, "# Title\n\nHello **world**.")
+	r := newTestRunner(nil, writeScript("Title", "# Title\n\nHello **world**.")...)
 
-	arts, err := r.Generate(context.Background(), GenerateRequest{Topics: []string{"t"}}, nil)
+	arts, err := r.Generate(context.Background(), GenerateRequest{Briefs: briefsFor("t")}, nil)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
@@ -126,9 +141,9 @@ func TestPublish_NothingToPublish(t *testing.T) {
 // to a live site would make review optional, which is the opposite of the point.
 func TestPublish_AlwaysCreatesDrafts(t *testing.T) {
 	cms := &fakeCMS{}
-	r := newTestRunner(cms, "# One\n\nBody one.", "# Two\n\nBody two.")
+	r := newTestRunner(cms, writeScript("One", "# One\n\nBody one.")...)
 
-	arts, err := r.Generate(context.Background(), GenerateRequest{Topics: []string{"one", "two"}}, nil)
+	arts, err := r.Generate(context.Background(), GenerateRequest{Briefs: briefsFor("one", "two")}, nil)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
@@ -192,7 +207,7 @@ func TestPublish_RendersArticlesWithoutHTML(t *testing.T) {
 
 func TestGenerate_NoTopics(t *testing.T) {
 	r := newTestRunner(nil)
-	if _, err := r.Generate(context.Background(), GenerateRequest{Topics: []string{" ", ""}}, nil); err == nil {
+	if _, err := r.Generate(context.Background(), GenerateRequest{Briefs: briefsFor(" ", "")}, nil); err == nil {
 		t.Fatal("expected an error when every topic is blank")
 	}
 }
@@ -200,17 +215,13 @@ func TestGenerate_NoTopics(t *testing.T) {
 // The batch is capped regardless of what the caller asks for, so a typo cannot
 // produce 25 drafts in the CMS.
 func TestGenerate_CapsTopics(t *testing.T) {
-	responses := make([]string, HardMaxArticles)
 	topics := make([]string, HardMaxArticles+5)
-	for i := range responses {
-		responses[i] = "# t\n\nbody"
-	}
 	for i := range topics {
 		topics[i] = "topic " + string(rune('a'+i))
 	}
 
-	r := newTestRunner(nil, responses...)
-	arts, err := r.Generate(context.Background(), GenerateRequest{Topics: topics}, nil)
+	r := newTestRunner(nil, writeScript("T", "# T\n\nbody")...)
+	arts, err := r.Generate(context.Background(), GenerateRequest{Briefs: briefsFor(topics...)}, nil)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
@@ -223,17 +234,18 @@ func TestGenerate_CapsTopics(t *testing.T) {
 // leaving the last per-topic label running forever.
 func TestGenerate_ReportsSteps(t *testing.T) {
 	var keys []string
-	r := newTestRunner(nil, "# a\n\nbody")
-	if _, err := r.Generate(context.Background(), GenerateRequest{Topics: []string{"a"}},
+	r := newTestRunner(nil, writeScript("A", "# a\n\nbody")...)
+	if _, err := r.Generate(context.Background(), GenerateRequest{Briefs: briefsFor("a")},
 		func(key, _ string) { keys = append(keys, key) }); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 
 	if len(keys) < 3 {
-		t.Fatalf("want generating, converting and generated steps, got %v", keys)
+		t.Fatalf("want the writing steps plus converting and generated, got %v", keys)
 	}
-	if keys[0] != model.BlogStepGenerating {
-		t.Errorf("first step = %q, want %q", keys[0], model.BlogStepGenerating)
+	// Research comes first now: nothing is written before there are sources.
+	if keys[0] != model.BlogStepResearching {
+		t.Errorf("first step = %q, want %q", keys[0], model.BlogStepResearching)
 	}
 	if keys[len(keys)-2] != model.BlogStepConverting {
 		t.Errorf("second-to-last step = %q, want %q", keys[len(keys)-2], model.BlogStepConverting)

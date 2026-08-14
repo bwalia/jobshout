@@ -216,7 +216,9 @@ export default function ArticleRunPage() {
                           : "text-muted-foreground hover:bg-accent hover:text-foreground"
                       )}
                     >
-                      {a.topic}
+                      {/* The agent's title, falling back to the topic for runs
+                          written before titles were stored. */}
+                      {a.title || a.topic}
                     </button>
                   </li>
                 ))}

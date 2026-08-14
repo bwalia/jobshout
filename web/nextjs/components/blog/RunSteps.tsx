@@ -10,6 +10,9 @@ const DOT: Record<StepStatus, SignalStatus> = {
   running: "live",
   done: "done",
   failed: "error",
+  // A skipped step did not fail and did not do anything — it reads as an
+  // inactive stop on the trace, not a problem.
+  skipped: "queued",
 };
 
 /** Elapsed time for a finished step, so a slow phase is visible at a glance. */
@@ -63,17 +66,23 @@ export function RunSteps({ steps }: { steps: BlogStep[] }) {
                 <p
                   className={cn(
                     "text-sm",
-                    step.status === "pending"
+                    step.status === "pending" || step.status === "skipped"
                       ? "text-muted-foreground"
                       : "font-medium text-foreground"
                   )}
                 >
                   {step.label}
                 </p>
-                {duration(step) && (
-                  <span className="shrink-0 font-mono text-2xs text-muted-foreground">
-                    {duration(step)}
+                {step.status === "skipped" ? (
+                  <span className="shrink-0 text-2xs text-muted-foreground">
+                    not needed
                   </span>
+                ) : (
+                  duration(step) && (
+                    <span className="shrink-0 font-mono text-2xs text-muted-foreground">
+                      {duration(step)}
+                    </span>
+                  )
                 )}
               </div>
               {step.error && (
