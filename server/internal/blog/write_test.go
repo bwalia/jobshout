@@ -161,7 +161,7 @@ func TestWrite_RevisesWhenReviewFindsIssues(t *testing.T) {
 
 	var steps []string
 	arts, err := r.Generate(context.Background(), GenerateRequest{Briefs: briefsFor("t")},
-		func(key, _ string) { steps = append(steps, key) })
+		func(key, _, _ string) { steps = append(steps, key) })
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestWrite_SkipsRevisionWhenReviewIsClean(t *testing.T) {
 
 	var steps []string
 	arts, err := r.Generate(context.Background(), GenerateRequest{Briefs: briefsFor("t")},
-		func(key, _ string) { steps = append(steps, key) })
+		func(key, _, _ string) { steps = append(steps, key) })
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
@@ -230,6 +230,154 @@ func TestWrite_RefusesWithoutAResearcher(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "research") {
 		t.Errorf("error %q does not name the missing dependency", err)
+	}
+}
+
+// longBody returns markdown of roughly n words, for exercising the length guard.
+func longBody(title string, n int) string {
+	return "# " + title + "\n\n" + strings.TrimSpace(strings.Repeat("substantive sentence about the subject [1]. ", n/6))
+}
+
+// Asking for a word count is not getting one: a live run returned 382 words
+// against a 900-word instruction. The floor is checked, not trusted.
+func TestWrite_ExpandsAnArticleThatCameInShort(t *testing.T) {
+	responses := []scriptedResponse{
+		{trigger: promptPlan, content: `{"title":"T","angle":"a","sections":["One"]}`},
+		{trigger: promptDraft, content: "# T\n\nFar too short [1]."},
+		{trigger: promptReview, content: `{"issues":[]}`},
+		{trigger: promptExpand, content: longBody("T", MinArticleWords+120)},
+	}
+	r := newTestRunner(nil, responses...)
+
+	var steps []string
+	arts, err := r.Generate(context.Background(), GenerateRequest{Briefs: briefsFor("t")},
+		func(key, _, _ string) { steps = append(steps, key) })
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	if arts[0].WordCount < MinArticleWords {
+		t.Errorf("got %d words, want at least %d after expansion", arts[0].WordCount, MinArticleWords)
+	}
+	var expanded bool
+	for _, s := range steps {
+		if s == model.BlogStepExpanding {
+			expanded = true
+		}
+	}
+	if !expanded {
+		t.Errorf("the expanding step was never reported: %v", steps)
+	}
+}
+
+// An article already at length is left alone — expansion is a repair, not a
+// routine pass.
+func TestWrite_SkipsExpansionWhenLongEnough(t *testing.T) {
+	responses := []scriptedResponse{
+		{trigger: promptPlan, content: `{"title":"T","angle":"a","sections":["One"]}`},
+		{trigger: promptDraft, content: longBody("T", MinArticleWords+200)},
+		{trigger: promptReview, content: `{"issues":[]}`},
+	}
+	r := newTestRunner(nil, responses...)
+
+	var steps []string
+	if _, err := r.Generate(context.Background(), GenerateRequest{Briefs: briefsFor("t")},
+		func(key, _, _ string) { steps = append(steps, key) }); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	for _, s := range steps {
+		if s == model.BlogStepExpanding {
+			t.Errorf("expanded an article that was already long enough: %v", steps)
+		}
+	}
+}
+
+// A model that "expands" to something no longer than the original has usually
+// rewritten it shorter and blander. Keep what we had.
+func TestWrite_KeepsOriginalWhenExpansionDoesNotLengthen(t *testing.T) {
+	responses := []scriptedResponse{
+		{trigger: promptPlan, content: `{"title":"T","angle":"a","sections":["One"]}`},
+		{trigger: promptDraft, content: "# T\n\nThe original short draft with its own distinctive wording [1]."},
+		{trigger: promptReview, content: `{"issues":[]}`},
+		{trigger: promptExpand, content: "# T\n\nShorter [1]."},
+	}
+	r := newTestRunner(nil, responses...)
+
+	arts, err := r.Generate(context.Background(), GenerateRequest{Briefs: briefsFor("t")}, nil)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if !strings.Contains(arts[0].Markdown, "distinctive wording") {
+		t.Errorf("the original was replaced by a shorter expansion:\n%s", arts[0].Markdown)
+	}
+}
+
+// A failed expansion costs length, not the article.
+func TestWrite_SurvivesExpansionFailure(t *testing.T) {
+	llmStub := &stubLLM{
+		failOn:    promptExpand,
+		responses: writeScript("T", "# T\n\nShort but real [1]."),
+	}
+	r := NewRunner(Config{ContentDir: "content/blogs"}, llmStub, nil, &fakeResearcher{}, testLogger())
+
+	arts, err := r.Generate(context.Background(), GenerateRequest{Briefs: briefsFor("t")}, nil)
+	if err != nil {
+		t.Fatalf("Generate failed when only expansion was broken: %v", err)
+	}
+	if !strings.Contains(arts[0].Markdown, "Short but real") {
+		t.Error("the short draft was discarded")
+	}
+}
+
+// Each step records which agent performed it, so the trace shows the handover
+// rather than presenting the run as one anonymous process.
+func TestWrite_AttributesStepsToTheRightAgent(t *testing.T) {
+	r := newTestRunner(nil, writeScript("T", "# T\n\nBody [1].")...)
+
+	got := map[string]string{}
+	if _, err := r.Generate(context.Background(), GenerateRequest{Briefs: briefsFor("t")},
+		func(key, _, agent string) { got[key] = agent }); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	want := map[string]string{
+		model.BlogStepResearching: model.AgentNameResearcher,
+		model.BlogStepOutlining:   model.AgentNameArticleWriter,
+		model.BlogStepGenerating:  model.AgentNameArticleWriter,
+		model.BlogStepReviewing:   model.AgentNameArticleWriter,
+		model.BlogStepConverting:  model.AgentNameArticleWriter,
+		model.BlogStepGenerated:   model.AgentNameArticleWriter,
+	}
+	for key, wantAgent := range want {
+		if got[key] != wantAgent {
+			t.Errorf("step %q attributed to %q, want %q", key, got[key], wantAgent)
+		}
+	}
+}
+
+// The research agent's own sub-phases stay attributed to the Research Agent,
+// not to whoever commissioned the research.
+func TestWrite_ResearchSubPhasesStayWithTheResearcher(t *testing.T) {
+	r := newTestRunner(nil, writeScript("T", "# T\n\nBody [1].")...)
+
+	var researchAgents []string
+	if _, err := r.Generate(context.Background(), GenerateRequest{Briefs: briefsFor("t")},
+		func(key, _, agent string) {
+			if key == model.BlogStepResearching {
+				researchAgents = append(researchAgents, agent)
+			}
+		}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	if len(researchAgents) < 2 {
+		t.Fatalf("expected the researcher's own phases to be reported, got %v", researchAgents)
+	}
+	for i, a := range researchAgents {
+		if a != model.AgentNameResearcher {
+			t.Errorf("research report %d attributed to %q, want %q", i, a, model.AgentNameResearcher)
+		}
 	}
 }
 

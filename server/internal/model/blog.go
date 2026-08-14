@@ -28,10 +28,14 @@ const (
 	BlogStepGenerating  = "generating"
 	BlogStepReviewing   = "reviewing"
 	BlogStepRevising    = "revising"
-	BlogStepConverting  = "converting"
-	BlogStepGenerated   = "generated"
-	BlogStepPublishing  = "publishing"
-	BlogStepPublished   = "published"
+	// BlogStepExpanding runs only when the finished draft came in under the
+	// target length. Its own step so a short article that had to be filled out
+	// is visible rather than hidden inside "writing".
+	BlogStepExpanding  = "expanding"
+	BlogStepConverting = "converting"
+	BlogStepGenerated  = "generated"
+	BlogStepPublishing = "publishing"
+	BlogStepPublished  = "published"
 )
 
 // Step statuses. A step is pending until it starts, running while it is the
@@ -48,11 +52,27 @@ const (
 	StepStatusSkipped = "skipped"
 )
 
+// Built-in agent display names, used to attribute each step of a run to
+// whichever agent performs it. These are the names the agents are seeded under,
+// kept as constants so the trace and the Agents page cannot drift apart.
+const (
+	AgentNameArticleWriter = "Article Writer"
+	AgentNameResearcher    = "Research Agent"
+)
+
 // BlogStep is one entry in a run's progress trace. The shape mirrors PlanStep
 // in goal.go so the UI can render both with the same timeline treatment.
 type BlogStep struct {
 	Key   string `json:"key"`
 	Label string `json:"label"`
+	// Agent names which agent performs this step. A run is a collaboration —
+	// the Research Agent gathers and verifies sources, the Article Writer turns
+	// them into a piece — and without this the trace reads as one opaque
+	// process rather than showing the handover.
+	//
+	// Empty on runs written before this field existed; the UI omits it rather
+	// than guessing.
+	Agent string `json:"agent,omitempty"`
 	// Status is one of StepStatusPending / Running / Done / Failed.
 	Status      string     `json:"status"`
 	StartedAt   *time.Time `json:"started_at,omitempty"`

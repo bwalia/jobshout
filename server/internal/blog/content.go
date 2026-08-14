@@ -118,7 +118,7 @@ func (r *Runner) writeOne(
 	progress ProgressFunc,
 ) (*GeneratedArticle, error) {
 	// 1. Research. Everything downstream is written from what this returns.
-	report(progress, model.BlogStepResearching, "Researching "+label)
+	report(progress, model.BlogStepResearching, "Researching "+label, model.AgentNameResearcher)
 	rb, err := r.research.Research(ctx, req.OrgID, research.Request{
 		Topic:   brief.Topic,
 		Context: brief.Context,
@@ -127,7 +127,7 @@ func (r *Runner) writeOne(
 		// The research agent's own phases are surfaced under the researching
 		// step, so a reader watching a run sees it search and read rather than
 		// watching one step sit still for a minute.
-		report(progress, model.BlogStepResearching, detail)
+		report(progress, model.BlogStepResearching, detail, model.AgentNameResearcher)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("research: %w", err)
@@ -137,21 +137,21 @@ func (r *Runner) writeOne(
 	}
 
 	// 2. Plan — the title comes from what the research found.
-	report(progress, model.BlogStepOutlining, "Planning "+label)
+	report(progress, model.BlogStepOutlining, "Planning "+label, model.AgentNameArticleWriter)
 	plan, err := r.plan(ctx, req.Model, brief, rb)
 	if err != nil {
 		return nil, err
 	}
 
 	// 3. Draft.
-	report(progress, model.BlogStepGenerating, "Writing "+plan.Title)
+	report(progress, model.BlogStepGenerating, "Writing "+plan.Title, model.AgentNameArticleWriter)
 	markdown, err := r.draft(ctx, req.Model, brief, rb, plan)
 	if err != nil {
 		return nil, err
 	}
 
 	// 4. Review, then 5. revise — but only when there is something to fix.
-	report(progress, model.BlogStepReviewing, "Reviewing "+plan.Title)
+	report(progress, model.BlogStepReviewing, "Reviewing "+plan.Title, model.AgentNameArticleWriter)
 	c, err := r.review(ctx, req.Model, rb, plan, markdown)
 	switch {
 	case err != nil:
@@ -165,7 +165,8 @@ func (r *Runner) writeOne(
 		r.logger.Info("blog: review found nothing to fix", zap.String("title", plan.Title))
 	default:
 		report(progress, model.BlogStepRevising,
-			fmt.Sprintf("Revising %s (%d issue(s))", plan.Title, len(c.Issues)))
+			fmt.Sprintf("Revising %s (%d issue(s))", plan.Title, len(c.Issues)),
+			model.AgentNameArticleWriter)
 		revised, rerr := r.revise(ctx, req.Model, rb, plan, markdown, c)
 		if rerr != nil {
 			r.logger.Warn("blog: revision failed, keeping the reviewed draft",
@@ -175,7 +176,44 @@ func (r *Runner) writeOne(
 		}
 	}
 
-	// 6. Resolve citations into a reference list. This drops markers pointing
+	// 6. Expand if the piece came in short.
+	//
+	// Checked rather than trusted: the draft prompt asks for a word range and a
+	// live run against a local model returned 382 words anyway. Revision can
+	// also legitimately cut filler and take an already-brief article below the
+	// floor, so the check belongs here, after revision, on whatever text
+	// actually survived.
+	if words := wordCount(markdown); words < MinArticleWords {
+		report(progress, model.BlogStepExpanding,
+			fmt.Sprintf("Expanding %s (%d words, target %d)", plan.Title, words, MinArticleWords),
+			model.AgentNameArticleWriter)
+
+		expanded, eerr := r.expand(ctx, req.Model, brief, rb, plan, markdown, words)
+		switch {
+		case eerr != nil:
+			r.logger.Warn("blog: expansion failed, keeping the short article",
+				zap.String("title", plan.Title), zap.Int("words", words), zap.Error(eerr))
+		case wordCount(expanded) <= words:
+			// A model that "expands" to something no longer than the original
+			// has usually rewritten it shorter and blander. Keep what we had.
+			r.logger.Warn("blog: expansion did not lengthen the article, keeping the original",
+				zap.String("title", plan.Title),
+				zap.Int("before", words), zap.Int("after", wordCount(expanded)))
+		default:
+			markdown = expanded
+		}
+
+		// One pass only. A second rarely adds substance, and each one costs a
+		// full generation on a pipeline that already makes ten calls per
+		// article. Still short is reported rather than retried into padding.
+		if final := wordCount(markdown); final < MinArticleWords {
+			r.logger.Warn("blog: article is below the target length",
+				zap.String("title", plan.Title),
+				zap.Int("words", final), zap.Int("target", MinArticleWords))
+		}
+	}
+
+	// 7. Resolve citations into a reference list. This drops markers pointing
 	// at sources that were never offered and renumbers what survives, so the
 	// published article's references are exactly what it cites.
 	rawCitations := countCitations(markdown)
