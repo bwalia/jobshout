@@ -409,7 +409,11 @@ func (s *blogService) runGeneration(run *model.BlogRun, agent *model.Agent, req 
 		req.Briefs = briefs
 		req.Normalize()
 		run.Briefs, run.Topics = req.Briefs, req.Topics
-		if uerr := s.repo.Update(ctx, run); uerr != nil {
+		// Update does not write briefs — it is the terminal write — so the
+		// discovered subject needs its own narrow one. Without it the run
+		// finishes with an empty topic list, which leaves the page headerless
+		// and makes Retry refuse the run for having nothing to retry.
+		if uerr := s.repo.UpdateBriefs(ctx, run.ID, run.Briefs, run.Topics); uerr != nil {
 			log.Warn("blog_svc: failed to record discovered topics", zap.Error(uerr))
 		}
 	}

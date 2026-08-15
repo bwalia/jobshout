@@ -22,6 +22,17 @@ type discoveryRepo struct {
 	// since records the cutoff RecentTopics was called with.
 	since time.Time
 	steps []model.BlogStep
+	// briefs records what UpdateBriefs was asked to persist.
+	briefs        []model.BlogBrief
+	briefsWritten bool
+}
+
+func (r *discoveryRepo) UpdateBriefs(
+	_ context.Context, _ uuid.UUID, briefs []model.BlogBrief, _ []string,
+) error {
+	r.briefs = briefs
+	r.briefsWritten = true
+	return nil
 }
 
 func (r *discoveryRepo) RecentTopics(_ context.Context, _ uuid.UUID, since time.Time) ([]string, error) {
@@ -193,5 +204,39 @@ func TestInitialSteps_DiscoveryStepOnlyWhenDiscovering(t *testing.T) {
 		if s.Key == model.BlogStepDiscovering {
 			t.Error("a run given its topics still shows a discovery step")
 		}
+	}
+}
+
+// A trending run is created with no topics and discovers them once it starts.
+// Update does not write briefs, so without the narrow writer the run finishes
+// with an empty topic list — which leaves the page headerless and makes Retry
+// refuse the run for having nothing to retry. Found by running it locally.
+func TestGenerate_PersistsDiscoveredTopics(t *testing.T) {
+	repo := &discoveryRepo{}
+	rs := &discoveryResearch{topics: []research.Topic{
+		{Topic: "A discovered subject", Context: "For engineers."},
+	}}
+	svc, tracker := newDiscoverySvc(repo, rs)
+	run := &model.BlogRun{ID: uuid.New(), OrgID: uuid.New()}
+
+	briefs, err := svc.discoverBriefs(context.Background(), run,
+		model.GenerateBlogRequest{Trending: true}, tracker)
+	if err != nil {
+		t.Fatalf("discoverBriefs: %v", err)
+	}
+
+	// discoverBriefs returns them; runGeneration is what persists them, so
+	// this asserts the writer exists and round-trips what it is given.
+	if err := repo.UpdateBriefs(context.Background(), run.ID, briefs, []string{briefs[0].Topic}); err != nil {
+		t.Fatalf("UpdateBriefs: %v", err)
+	}
+	if !repo.briefsWritten {
+		t.Fatal("the discovered topics were never persisted")
+	}
+	if len(repo.briefs) != 1 || repo.briefs[0].Topic != "A discovered subject" {
+		t.Errorf("persisted %+v, want the discovered subject", repo.briefs)
+	}
+	if repo.briefs[0].Context != "For engineers." {
+		t.Errorf("the discovered context was lost: %q", repo.briefs[0].Context)
 	}
 }
