@@ -11,6 +11,7 @@ import (
 	"github.com/jobshout/server/internal/blog"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/repository"
+	"github.com/jobshout/server/internal/research"
 )
 
 // BlogService orchestrates blog.Runner invocations and persists each run.
@@ -38,8 +39,12 @@ type BlogService interface {
 }
 
 type blogService struct {
-	runner    *blog.Runner
-	repo      repository.BlogRepository
+	runner *blog.Runner
+	repo   repository.BlogRepository
+	// research is used only for topic discovery. Article research goes through
+	// the runner, which holds its own reference — this one is for runs that
+	// arrive without a subject at all.
+	research  ResearchService
 	agentRepo repository.AgentRepository
 	logger    *zap.Logger
 }
@@ -48,10 +53,17 @@ type blogService struct {
 func NewBlogService(
 	runner *blog.Runner,
 	repo repository.BlogRepository,
+	research ResearchService,
 	agentRepo repository.AgentRepository,
 	logger *zap.Logger,
 ) BlogService {
-	return &blogService{runner: runner, repo: repo, agentRepo: agentRepo, logger: logger}
+	return &blogService{
+		runner:    runner,
+		repo:      repo,
+		research:  research,
+		agentRepo: agentRepo,
+		logger:    logger,
+	}
 }
 
 func (s *blogService) CanPublish() bool {
@@ -103,10 +115,29 @@ func (s *blogService) EnsureArticleWriter(ctx context.Context, orgID uuid.UUID) 
 // happens, rather than growing a list from nothing.
 // The agent on each step is seeded here rather than only stamped when the step
 // runs, so the trace shows who will do what before anything has started.
-func initialSteps() []model.BlogStep {
+//
+// discovering adds the topic-discovery step, which only exists on runs that
+// were not given a subject. Seeding it conditionally keeps a normal run's trace
+// free of a step it will never reach.
+func initialSteps(discovering bool) []model.BlogStep {
 	writer, researcher := model.AgentNameArticleWriter, model.AgentNameResearcher
-	return []model.BlogStep{
+	steps := []model.BlogStep{
 		{Key: model.BlogStepQueued, Label: "Queued", Status: model.StepStatusDone},
+	}
+	if discovering {
+		steps = append(steps, model.BlogStep{
+			Key:    model.BlogStepDiscovering,
+			Label:  "Finding what is trending",
+			Agent:  researcher,
+			Status: model.StepStatusPending,
+		})
+	}
+	return append(steps, writeSteps(writer, researcher)...)
+}
+
+// writeSteps is the per-article pipeline, shared by every run.
+func writeSteps(writer, researcher string) []model.BlogStep {
+	return []model.BlogStep{
 		{Key: model.BlogStepResearching, Label: "Researching sources", Agent: researcher, Status: model.StepStatusPending},
 		{Key: model.BlogStepOutlining, Label: "Choosing a title and outline", Agent: writer, Status: model.StepStatusPending},
 		{Key: model.BlogStepGenerating, Label: "Writing articles", Agent: writer, Status: model.StepStatusPending},
@@ -253,7 +284,7 @@ func (s *blogService) Generate(
 		Status:      model.BlogRunStatusRunning,
 		Briefs:      req.Briefs,
 		Topics:      req.Topics,
-		Steps:       initialSteps(),
+		Steps:       initialSteps(req.Trending),
 		Articles:    []model.BlogRunArticle{},
 		StartedAt:   &startedAt,
 	}
@@ -274,12 +305,114 @@ func (s *blogService) Generate(
 	return run, nil
 }
 
+// recentTopicWindow is how far back a run looks to avoid repeating itself.
+//
+// Two weeks rather than a few days: a story stays on the front page for the
+// better part of a week, and the failure this prevents — a daily schedule
+// publishing the same article five times — is far more damaging than
+// occasionally skipping a subject that deserved a second look.
+const recentTopicWindow = 14 * 24 * time.Hour
+
+// discoverBriefs finds subjects for a run that was not given any.
+func (s *blogService) discoverBriefs(
+	ctx context.Context,
+	run *model.BlogRun,
+	req model.GenerateBlogRequest,
+	tracker *stepTracker,
+) ([]model.BlogBrief, error) {
+	if s.research == nil {
+		return nil, fmt.Errorf("blog_svc: topic discovery is not configured")
+	}
+	tracker.advance(model.BlogStepDiscovering, "Finding what is trending", model.AgentNameResearcher)
+
+	// What this org has published recently is what discovery must not repeat.
+	// A failure here degrades the run to "might repeat itself" rather than
+	// stopping it — losing an article to a database hiccup is the worse trade.
+	avoid, err := s.repo.RecentTopics(ctx, run.OrgID, time.Now().Add(-recentTopicWindow))
+	if err != nil {
+		s.logger.Warn("blog_svc: could not load recent topics, discovery may repeat itself",
+			zap.Error(err))
+		avoid = nil
+	}
+
+	count := req.ResolvedTrendingCount(blog.HardMaxArticles)
+	topics, err := s.research.Discover(ctx, run.OrgID, research.DiscoverRequest{
+		Count: count,
+		Avoid: avoid,
+		Model: req.Model,
+	}, func(_, detail string) {
+		tracker.advance(model.BlogStepDiscovering, detail, model.AgentNameResearcher)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	briefs := make([]model.BlogBrief, 0, len(topics))
+	for _, t := range topics {
+		briefs = append(briefs, model.BlogBrief{Topic: t.Topic, Context: t.Context})
+	}
+	if len(briefs) == 0 {
+		return nil, fmt.Errorf("blog_svc: discovery returned no topics")
+	}
+
+	tracker.advance(model.BlogStepDiscovering,
+		fmt.Sprintf("Chose %d topic(s)", len(briefs)), model.AgentNameResearcher)
+	s.logger.Info("blog: discovered topics for a trending run",
+		zap.String("blog_run_id", run.ID.String()),
+		zap.Int("count", len(briefs)), zap.Int("avoided", len(avoid)))
+
+	return briefs, nil
+}
+
+// failRun records a terminal failure on a run. Shared by the discovery and
+// generation paths so the two cannot record it differently.
+func (s *blogService) failRun(
+	ctx context.Context,
+	run *model.BlogRun,
+	tracker *stepTracker,
+	cause error,
+	log *zap.Logger,
+	agent *model.Agent,
+) {
+	tracker.fail(cause)
+	run.Steps = tracker.steps
+	completedAt := time.Now()
+	run.CompletedAt = &completedAt
+	msg := cause.Error()
+	run.Status = model.BlogRunStatusFailed
+	run.ErrorMessage = &msg
+	if uerr := s.repo.Update(ctx, run); uerr != nil {
+		log.Error("blog_svc: failed to record failure", zap.Error(uerr))
+	}
+	// Leave the agent active — 'failed' is a property of the run, and the
+	// board reads the run, not the agent row.
+	s.setAgentStatus(ctx, agent.ID, "active")
+	log.Error("blog: run failed", zap.Error(cause))
+}
+
 func (s *blogService) runGeneration(run *model.BlogRun, agent *model.Agent, req model.GenerateBlogRequest) {
 	ctx := context.Background()
 	log := s.logger.With(zap.String("blog_run_id", run.ID.String()))
 
 	tracker := &stepTracker{runID: run.ID, steps: run.Steps, repo: s.repo, logger: s.logger}
 	s.setAgentStatus(ctx, agent.ID, "active")
+
+	// A trending run has no subject yet — find one before anything else, and
+	// record it on the run so what it chose is visible while it writes rather
+	// than only once it finishes.
+	if req.Trending {
+		briefs, derr := s.discoverBriefs(ctx, run, req, tracker)
+		if derr != nil {
+			s.failRun(ctx, run, tracker, derr, log, agent)
+			return
+		}
+		req.Briefs = briefs
+		req.Normalize()
+		run.Briefs, run.Topics = req.Briefs, req.Topics
+		if uerr := s.repo.Update(ctx, run); uerr != nil {
+			log.Warn("blog_svc: failed to record discovered topics", zap.Error(uerr))
+		}
+	}
 
 	articles, err := s.runner.Generate(ctx, blog.GenerateRequest{
 		OrgID:       run.OrgID,
@@ -530,7 +663,10 @@ func (s *blogService) Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUI
 	startedAt := time.Now()
 	run.Status = model.BlogRunStatusRunning
 	run.AgentID = &agent.ID
-	run.Steps = initialSteps()
+	// A retry replays the topics the run already settled on, so it never
+	// rediscovers — even if the original run found them by discovery. Retrying
+	// into a different subject would make the button mean something else.
+	run.Steps = initialSteps(false)
 	run.Articles = []model.BlogRunArticle{}
 	run.ErrorMessage = nil
 	run.StartedAt = &startedAt

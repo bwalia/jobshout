@@ -20,6 +20,9 @@ const (
 // agent board maps onto its columns — see BlogStepActivity.
 const (
 	BlogStepQueued = "queued"
+	// BlogStepDiscovering runs only on a run that was not given a subject: it
+	// finds what is trending and turns it into topics before any writing.
+	BlogStepDiscovering = "discovering"
 	// The writing phases, in order. Each is its own step so a reader watching a
 	// run can see the agent research before it writes, and can tell a failure
 	// to find sources apart from a failure to draft from them.
@@ -279,13 +282,36 @@ func (r *GenerateBlogRequest) Normalize() {
 // topics, and `validate:"required"` cannot express that.
 func (r *GenerateBlogRequest) Validate() error {
 	if r.Trending {
-		// Accepting this now would mean silently writing about whatever the
-		// caller last sent, or nothing at all. Refusing is the honest answer
-		// until discovery is wired up.
-		return fmt.Errorf("trending topic discovery is not available yet; supply briefs instead")
+		// The topics do not exist yet — discovery finds them when the run
+		// starts — so there is nothing here to require.
+		if r.TrendingCount < 0 {
+			return fmt.Errorf("trending_count cannot be negative")
+		}
+		return nil
 	}
 	if len(r.Briefs) == 0 {
 		return fmt.Errorf("at least one brief with a topic is required")
 	}
 	return nil
+}
+
+// DefaultTrendingCount is how many articles a trending run writes when the
+// caller does not say. One, because a scheduled job that quietly produces five
+// articles a day is a bigger surprise than one that produces too few.
+const DefaultTrendingCount = 1
+
+// ResolvedTrendingCount is how many articles this request should discover
+// topics for, bounded by the same ceiling as an explicit batch.
+func (r *GenerateBlogRequest) ResolvedTrendingCount(hardMax int) int {
+	n := r.TrendingCount
+	if n <= 0 {
+		n = DefaultTrendingCount
+	}
+	if r.MaxArticles > 0 && n > r.MaxArticles {
+		n = r.MaxArticles
+	}
+	if hardMax > 0 && n > hardMax {
+		n = hardMax
+	}
+	return n
 }

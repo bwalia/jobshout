@@ -30,7 +30,7 @@ func newTracker() (*stepTracker, *stepRecorder) {
 	rec := &stepRecorder{}
 	return &stepTracker{
 		runID:  uuid.New(),
-		steps:  initialSteps(),
+		steps:  initialSteps(false),
 		repo:   rec,
 		logger: zap.NewNop(),
 	}, rec
@@ -152,7 +152,7 @@ func TestStepTracker_UnknownKeyIsAppended(t *testing.T) {
 // Publishing appends its phases only when a publish is requested, so a run that
 // is never published does not display steps it will never reach.
 func TestPublishStepsAreSeparate(t *testing.T) {
-	for _, s := range initialSteps() {
+	for _, s := range initialSteps(false) {
 		if s.Key == model.BlogStepPublishing || s.Key == model.BlogStepPublished {
 			t.Errorf("initialSteps must not contain publish phase %q", s.Key)
 		}

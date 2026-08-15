@@ -6,10 +6,16 @@ import {
   useCreateScheduledTask,
   useUpdateScheduledTask,
   useDeleteScheduledTask,
+  useScheduledTaskRuns,
 } from "@/lib/hooks/useScheduler";
 import { useAgents } from "@/lib/hooks/useAgents";
 import { useLLMProviders } from "@/lib/hooks/useLLMProviders";
-import type { CreateScheduledTaskRequest } from "@/lib/types/scheduler";
+import Link from "next/link";
+import type {
+  CreateScheduledTaskRequest,
+  ScheduledTask,
+  ScheduledTaskType,
+} from "@/lib/types/scheduler";
 
 const CRON_PRESETS = [
   { label: "Every 5 minutes", value: "*/5 * * * *" },
@@ -21,6 +27,9 @@ const CRON_PRESETS = [
   { label: "Weekly (Monday 9 AM)", value: "0 9 * * 1" },
   { label: "Custom", value: "" },
 ];
+
+/** Whether an article schedule writes a fixed subject or finds its own. */
+type BlogMode = "trending" | "fixed";
 
 const PRIORITY_COLORS: Record<string, string> = {
   low: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
@@ -45,6 +54,13 @@ export default function SchedulerPage() {
   const deleteMutation = useDeleteScheduledTask();
 
   const [showForm, setShowForm] = useState(false);
+  // Article-schedule state. Kept out of `form` because it does not map onto
+  // CreateScheduledTaskRequest directly — it is assembled into input_json on
+  // submit, which is the shape the dispatcher reads back on every fire.
+  const [blogMode, setBlogMode] = useState<BlogMode>("trending");
+  const [trendingCount, setTrendingCount] = useState(1);
+  const [blogTopic, setBlogTopic] = useState("");
+  const [blogContext, setBlogContext] = useState("");
   const [cronPreset, setCronPreset] = useState("0 * * * *");
   const [form, setForm] = useState<CreateScheduledTaskRequest>({
     name: "",
@@ -61,10 +77,37 @@ export default function SchedulerPage() {
   const agents = agentsResponse?.data ?? [];
   const tasks = tasksResponse?.data ?? [];
 
+  // A fixed-topic article schedule needs a topic; without one every fire would
+  // fail, so it is refused here rather than at dispatch time.
+  const canSubmit =
+    form.task_type !== "blog" || blogMode === "trending" || blogTopic.trim() !== "";
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    await createMutation.mutateAsync(form);
+
+    const payload: CreateScheduledTaskRequest = { ...form };
+    if (form.task_type === "blog") {
+      // input_json is the contract the server decodes into a generate request.
+      // Trending carries no topics on purpose — each run discovers its own.
+      payload.input_json =
+        blogMode === "trending"
+          ? { trending: true, trending_count: trendingCount }
+          : {
+              briefs: [
+                {
+                  topic: blogTopic.trim(),
+                  ...(blogContext.trim() ? { context: blogContext.trim() } : {}),
+                },
+              ],
+            };
+    }
+
+    await createMutation.mutateAsync(payload);
     setShowForm(false);
+    setBlogMode("trending");
+    setTrendingCount(1);
+    setBlogTopic("");
+    setBlogContext("");
     setForm({
       name: "",
       task_type: "agent",
@@ -134,12 +177,16 @@ export default function SchedulerPage() {
                 <select
                   value={form.task_type}
                   onChange={(e) =>
-                    setForm({ ...form, task_type: e.target.value as "agent" | "workflow" })
+                    setForm({
+                      ...form,
+                      task_type: e.target.value as ScheduledTaskType,
+                    })
                   }
                   className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <option value="agent">Agent Execution</option>
                   <option value="workflow">Workflow Execution</option>
+                  <option value="blog">Write articles</option>
                 </select>
               </div>
 
@@ -158,6 +205,76 @@ export default function SchedulerPage() {
                       </option>
                     ))}
                   </select>
+                </div>
+              )}
+
+              {form.task_type === "blog" && (
+                <div className="space-y-2 sm:col-span-2">
+                  <label className="text-sm font-medium">What to write about</label>
+                  <select
+                    value={blogMode}
+                    onChange={(e) => setBlogMode(e.target.value as BlogMode)}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <option value="trending">
+                      Whatever is trending in tech, AI and infrastructure
+                    </option>
+                    <option value="fixed">A topic I choose</option>
+                  </select>
+
+                  {blogMode === "trending" ? (
+                    <>
+                      <p className="text-xs text-muted-foreground">
+                        Each run looks at what is currently being published,
+                        picks a subject it has not covered in the last two
+                        weeks, researches it and writes it up.
+                      </p>
+                      <label className="text-sm font-medium">
+                        Articles per run
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={5}
+                        value={trendingCount}
+                        onChange={(e) =>
+                          setTrendingCount(Math.max(1, Number(e.target.value) || 1))
+                        }
+                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Each article takes a few minutes to research and write.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <label className="text-sm font-medium">Topic</label>
+                      <input
+                        type="text"
+                        value={blogTopic}
+                        onChange={(e) => setBlogTopic(e.target.value)}
+                        placeholder="Kubernetes Gateway API replacing Ingress"
+                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      />
+                      <label className="text-sm font-medium">
+                        Context{" "}
+                        <span className="font-normal text-muted-foreground">
+                          (optional)
+                        </span>
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={blogContext}
+                        onChange={(e) => setBlogContext(e.target.value)}
+                        placeholder="Angle, audience, points to cover, things to avoid"
+                        className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        The same topic every run — useful for a subject that
+                        keeps moving, less so otherwise.
+                      </p>
+                    </>
+                  )}
                 </div>
               )}
 
@@ -278,16 +395,21 @@ export default function SchedulerPage() {
               </div>
             </div>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Prompt / Input</label>
-              <textarea
-                value={form.input_prompt}
-                onChange={(e) => setForm({ ...form, input_prompt: e.target.value })}
-                placeholder="Describe the task for the agent..."
-                rows={3}
-                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              />
-            </div>
+            {/* An article schedule carries its instruction in the topic and
+                context fields above, so the generic prompt would be a second
+                place to say the same thing — and a confusing one. */}
+            {form.task_type !== "blog" && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Prompt / Input</label>
+                <textarea
+                  value={form.input_prompt}
+                  onChange={(e) => setForm({ ...form, input_prompt: e.target.value })}
+                  placeholder="Describe the task for the agent..."
+                  rows={3}
+                  className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+              </div>
+            )}
 
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2">
@@ -319,7 +441,7 @@ export default function SchedulerPage() {
 
             <button
               type="submit"
-              disabled={createMutation.isPending}
+              disabled={createMutation.isPending || !canSubmit}
               className="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
               {createMutation.isPending ? "Creating..." : "Create Scheduled Task"}
@@ -363,7 +485,7 @@ export default function SchedulerPage() {
                       {task.priority}
                     </span>
                     <span className="rounded-full bg-accent px-2 py-0.5 text-xs">
-                      {task.task_type}
+                      {task.task_type === "blog" ? "articles" : task.task_type}
                     </span>
                   </div>
                   {task.description && (
@@ -379,11 +501,21 @@ export default function SchedulerPage() {
                       <span>Next: {new Date(task.next_run_at).toLocaleString()}</span>
                     )}
                   </div>
-                  {task.input_prompt && (
+                  {task.task_type === "blog" ? (
                     <p className="mt-1 max-w-xl truncate text-xs text-muted-foreground">
-                      Prompt: {task.input_prompt}
+                      {describeBlogTask(task)}
                     </p>
+                  ) : (
+                    task.input_prompt && (
+                      <p className="mt-1 max-w-xl truncate text-xs text-muted-foreground">
+                        Prompt: {task.input_prompt}
+                      </p>
+                    )
                   )}
+                  {/* A schedule is only trustworthy if you can see it fired and
+                      what it produced, so history is shown inline rather than
+                      behind another page. */}
+                  <TaskRunHistory taskId={task.id} runCount={task.run_count} />
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -430,4 +562,115 @@ export default function SchedulerPage() {
       )}
     </div>
   );
+}
+
+/** One-line summary of what an article schedule writes each time it fires. */
+function describeBlogTask(task: ScheduledTask): string {
+  const input = task.input_json ?? {};
+  if (input.trending) {
+    const n = Number(input.trending_count) || 1;
+    return `Writes ${n} article${n === 1 ? "" : "s"} on whatever is trending, skipping subjects covered in the last two weeks`;
+  }
+  const briefs = Array.isArray(input.briefs) ? input.briefs : [];
+  const topic = briefs[0]?.topic;
+  return topic ? `Writes about: ${topic}` : "No topic configured";
+}
+
+/**
+ * Recent runs of one scheduled task, with a link through to what a blog run
+ * produced. The dispatcher stashes the blog run id in the run's output, which
+ * is the only thread connecting a schedule to its articles.
+ */
+function TaskRunHistory({
+  taskId,
+  runCount,
+}: {
+  taskId: string;
+  runCount: number;
+}) {
+  const [open, setOpen] = useState(false);
+  // Only fetched once opened — a page of twenty tasks should not fire twenty
+  // history requests nobody asked for.
+  const { data, isLoading } = useScheduledTaskRuns(open ? taskId : "");
+
+  if (runCount === 0) {
+    return (
+      <p className="mt-1 text-xs text-muted-foreground">Has not run yet.</p>
+    );
+  }
+
+  const runs = data?.data ?? [];
+
+  return (
+    <div className="mt-1">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="text-xs text-primary hover:underline"
+      >
+        {open ? "Hide history" : "Show history"}
+      </button>
+
+      {open && (
+        <div className="mt-2 space-y-1">
+          {isLoading && (
+            <p className="text-xs text-muted-foreground">Loading...</p>
+          )}
+          {!isLoading && runs.length === 0 && (
+            <p className="text-xs text-muted-foreground">No runs recorded.</p>
+          )}
+          {runs.map((run) => {
+            const blogRunId = blogRunIdOf(run.output);
+            return (
+              <div
+                key={run.id}
+                className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
+              >
+                <span
+                  className={
+                    run.status === "failed" ? "text-destructive" : "text-foreground"
+                  }
+                >
+                  {run.status}
+                </span>
+                <span>
+                  {run.started_at
+                    ? new Date(run.started_at).toLocaleString()
+                    : "—"}
+                </span>
+                {blogRunId && (
+                  <Link
+                    href={`/articles/${blogRunId}`}
+                    className="text-primary hover:underline"
+                  >
+                    View article
+                  </Link>
+                )}
+                {run.error_message && (
+                  <span className="text-destructive">{run.error_message}</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Pulls the blog run id out of a scheduled run's output.
+ *
+ * The dispatcher writes it as JSON, but output is a free-text column shared
+ * with every other task type — so anything unparseable simply means "no article
+ * to link to" rather than an error.
+ */
+function blogRunIdOf(output: string | null): string | null {
+  if (!output) return null;
+  try {
+    const parsed = JSON.parse(output);
+    return typeof parsed?.blog_run_id === "string" ? parsed.blog_run_id : null;
+  } catch {
+    return null;
+  }
 }

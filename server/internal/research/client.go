@@ -22,19 +22,57 @@ type Client struct {
 	logger    *zap.Logger
 }
 
-// New wires the default backends: Jina Reader for retrieval, Hacker News and
-// arXiv for search, and Hacker News, the blog feeds and arXiv for trending.
-func New(logger *zap.Logger) *Client {
+// New wires the default backends: GitHub's API and Jina Reader for retrieval,
+// Hacker News and arXiv for search, and Hacker News, the blog feeds and arXiv
+// for trending.
+//
+// githubToken is optional — GitHub's API works without one at 60 requests an
+// hour, and a token raises that to 5000.
+func New(logger *zap.Logger, githubToken string) *Client {
 	hn := NewHNClient()
 	arxiv := NewArxivClient(nil)
 	feeds := NewFeedClient(nil)
 
 	return &Client{
-		fetcher:   NewJinaFetcher(),
+		fetcher:   NewRoutingFetcher(NewGitHubFetcher(githubToken), NewJinaFetcher()),
 		searchers: []Searcher{hn, arxiv},
 		listers:   []Lister{hn, feeds, arxiv},
 		logger:    logger,
 	}
+}
+
+// RoutingFetcher sends each URL to whichever backend can actually read it.
+//
+// It exists for GitHub specifically: Jina Reader refuses github.com to
+// anonymous callers, so without this a large share of infrastructure sources
+// are simply unreadable. Rather than special-casing that inside the Jina
+// client, the decision lives here, where adding another specialised backend
+// later is one more branch instead of a rewrite.
+type RoutingFetcher struct {
+	github   *GitHubFetcher
+	fallback Fetcher
+}
+
+// NewRoutingFetcher builds a fetcher that prefers github for URLs it handles.
+func NewRoutingFetcher(github *GitHubFetcher, fallback Fetcher) *RoutingFetcher {
+	return &RoutingFetcher{github: github, fallback: fallback}
+}
+
+// Fetch routes to the GitHub API for URLs it can serve, and to the fallback
+// for everything else.
+//
+// A GitHub failure is returned rather than retried through the fallback: the
+// fallback is Jina, which blocks GitHub anyway, so retrying would only replace
+// a precise error ("rate limit exhausted; set GITHUB_TOKEN") with a vague one
+// after a slow round trip.
+func (r *RoutingFetcher) Fetch(ctx context.Context, rawURL string) (*Document, error) {
+	if r.github != nil && r.github.Handles(rawURL) {
+		return r.github.Fetch(ctx, rawURL)
+	}
+	if r.fallback == nil {
+		return nil, fmt.Errorf("research: no fetcher can handle %q", rawURL)
+	}
+	return r.fallback.Fetch(ctx, rawURL)
 }
 
 // NewWith builds a Client over explicit backends. Used by tests and by any
