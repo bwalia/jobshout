@@ -2,9 +2,10 @@ package blog
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
+
+	"go.uber.org/zap"
 
 	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/model"
@@ -56,14 +57,9 @@ Respond with JSON only, in exactly this shape:
 		formatFindings(rb.Findings),
 	)
 
-	resp, err := r.generateBounded(ctx, modelName, prompt, maxPlanTokens)
-	if err != nil {
-		return nil, fmt.Errorf("plan: %w", err)
-	}
-
 	var plan writePlan
-	if err := json.Unmarshal([]byte(extractJSON(resp)), &plan); err != nil {
-		return nil, fmt.Errorf("plan: parse response: %w", err)
+	if err := r.generateJSON(ctx, modelName, "plan", prompt, maxPlanTokens, &plan); err != nil {
+		return nil, err
 	}
 	plan.Title = strings.TrimSpace(plan.Title)
 	if plan.Title == "" {
@@ -197,14 +193,9 @@ Respond with JSON only, in exactly this shape:
 {"issues": ["...", "..."]}`,
 		plan.Title, plan.Angle, formatSources(rb), markdown)
 
-	resp, err := r.generateBounded(ctx, modelName, prompt, maxPlanTokens)
-	if err != nil {
-		return nil, fmt.Errorf("review: %w", err)
-	}
-
 	var c critique
-	if err := json.Unmarshal([]byte(extractJSON(resp)), &c); err != nil {
-		return nil, fmt.Errorf("review: parse response: %w", err)
+	if err := r.generateJSON(ctx, modelName, "review", prompt, maxPlanTokens, &c); err != nil {
+		return nil, err
 	}
 
 	out := make([]string, 0, len(c.Issues))
@@ -412,6 +403,26 @@ func (r *Runner) generate(ctx context.Context, modelName, prompt string) (string
 	return r.generateBounded(ctx, modelName, prompt, maxArticleTokens)
 }
 
+// generateJSON asks for a JSON reply and decodes it into v.
+//
+// The stages that ask for JSON used to fail the article outright on a reply
+// they could not parse, which made the choice of model hostage to one fragile
+// parse. Now a malformed reply is repaired where it can be and asked for again
+// where it cannot.
+func (r *Runner) generateJSON(
+	ctx context.Context, modelName, stage, prompt string, maxTokens int, v any,
+) error {
+	return llm.GenerateJSON(ctx, stage, prompt, v,
+		func(ctx context.Context, p string) (string, error) {
+			return r.generateBounded(ctx, modelName, p, maxTokens)
+		},
+		func(reply string, err error) {
+			r.logger.Warn("blog: could not parse the model's JSON, asking again",
+				zap.String("stage", stage), zap.String("model", modelName), zap.Error(err))
+		},
+	)
+}
+
 func (r *Runner) generateBounded(ctx context.Context, modelName, prompt string, maxTokens int) (string, error) {
 	resp, err := r.llm.Generate(ctx, llm.GenerateRequest{
 		Model:     modelName,
@@ -484,21 +495,4 @@ func orNone(s string) string {
 		return "(none given)"
 	}
 	return s
-}
-
-// extractJSON pulls a JSON object out of a model response that may be wrapped
-// in prose or a code fence.
-func extractJSON(s string) string {
-	s = strings.TrimSpace(s)
-	s = strings.TrimPrefix(s, "```json")
-	s = strings.TrimPrefix(s, "```")
-	s = strings.TrimSuffix(s, "```")
-	s = strings.TrimSpace(s)
-
-	start := strings.Index(s, "{")
-	end := strings.LastIndex(s, "}")
-	if start == -1 || end == -1 || end < start {
-		return s
-	}
-	return s[start : end+1]
 }

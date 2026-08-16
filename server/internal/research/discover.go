@@ -2,11 +2,12 @@ package research
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"go.uber.org/zap"
+
+	"github.com/jobshout/server/internal/llm"
 )
 
 // Topic is a subject worth writing about, discovered rather than supplied.
@@ -178,7 +179,7 @@ Respond with JSON only, in exactly this shape:
 			Seeds     []int  `json:"seeds"`
 		} `json:"topics"`
 	}
-	if err := json.Unmarshal([]byte(extractJSON(resp)), &parsed); err != nil {
+	if err := llm.DecodeJSON(resp, &parsed); err != nil {
 		return nil, fmt.Errorf("research: discover: parse response: %w", err)
 	}
 

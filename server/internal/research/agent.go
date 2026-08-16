@@ -2,7 +2,6 @@ package research
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -265,9 +264,10 @@ Respond with JSON only, in exactly this shape:
 	var parsed struct {
 		Queries []string `json:"queries"`
 	}
-	if err := json.Unmarshal([]byte(extractJSON(resp)), &parsed); err != nil {
-		// The topic itself is a serviceable query, so a planner that returns
-		// unparseable output degrades the research rather than ending it.
+	// No retry here: the topic itself is a serviceable query, so a planner that
+	// returns unparseable output degrades the research rather than ending it,
+	// and that fallback is cheaper than a second generation.
+	if err := llm.DecodeJSON(resp, &parsed); err != nil {
 		a.logger.Warn("research: could not parse plan, falling back to the topic",
 			zap.Error(err), zap.String("response", truncate(resp, 200)))
 		return []string{req.Topic}, nil
@@ -432,18 +432,13 @@ Respond with JSON only, in exactly this shape:
 {"selected": [0, 3, 7]}`,
 		req.Topic, b.String(), a.cfg.MaxSources*2)
 
-	resp, err := a.generate(ctx, req.Model, prompt)
-	if err != nil {
-		a.logger.Warn("research: source selection failed, reading in search order", zap.Error(err))
-		return candidates
-	}
-
+	// Worth a retry: falling back to search order means reading sources that
+	// are not about the topic, which is the failure this step exists to stop.
 	var parsed struct {
 		Selected []int `json:"selected"`
 	}
-	if err := json.Unmarshal([]byte(extractJSON(resp)), &parsed); err != nil {
-		a.logger.Warn("research: could not parse source selection, reading in search order",
-			zap.Error(err), zap.String("response", truncate(resp, 200)))
+	if err := a.generateJSON(ctx, req.Model, "source selection", prompt, maxResearchTokens, &parsed); err != nil {
+		a.logger.Warn("research: could not select sources, reading in search order", zap.Error(err))
 		return candidates
 	}
 
@@ -527,19 +522,14 @@ Respond with JSON only, in exactly this shape:
 {"findings": [{"claim": "...", "quote": "..."}]}`,
 		req.Topic, doc.URL, doc.Title, proseExcerpt(doc.Text, docExcerptChars))
 
-	resp, err := a.generate(ctx, req.Model, prompt)
-	if err != nil {
-		return nil, err
-	}
-
 	var parsed struct {
 		Findings []struct {
 			Claim string `json:"claim"`
 			Quote string `json:"quote"`
 		} `json:"findings"`
 	}
-	if err := json.Unmarshal([]byte(extractJSON(resp)), &parsed); err != nil {
-		return nil, fmt.Errorf("parse extraction: %w", err)
+	if err := a.generateJSON(ctx, req.Model, "extraction", prompt, maxResearchTokens, &parsed); err != nil {
+		return nil, err
 	}
 
 	out := make([]Finding, 0, len(parsed.Findings))
@@ -641,19 +631,14 @@ Accept only when the quote plainly establishes the claim.
 Respond with JSON only, in exactly this shape, including every index above:
 {"verdicts": [{"index": 0, "supported": true}, {"index": 1, "supported": false}]}`, b.String())
 
-	resp, err := a.generate(ctx, req.Model, prompt)
-	if err != nil {
-		return nil, err
-	}
-
 	var parsed struct {
 		Verdicts []struct {
 			Index     int  `json:"index"`
 			Supported bool `json:"supported"`
 		} `json:"verdicts"`
 	}
-	if err := json.Unmarshal([]byte(extractJSON(resp)), &parsed); err != nil {
-		return nil, fmt.Errorf("parse verdicts: %w", err)
+	if err := a.generateJSON(ctx, req.Model, "relevance judgement", prompt, maxResearchTokens, &parsed); err != nil {
+		return nil, err
 	}
 	if len(parsed.Verdicts) == 0 {
 		return nil, fmt.Errorf("judge returned no verdicts")
@@ -730,6 +715,23 @@ func (a *Agent) generate(ctx context.Context, model, prompt string) (string, err
 	return a.generateBounded(ctx, model, prompt, maxResearchTokens)
 }
 
+// generateJSON asks for a JSON reply and decodes it into v, repairing what it
+// can and asking again once when it cannot. See llm.GenerateJSON.
+func (a *Agent) generateJSON(
+	ctx context.Context, model, stage, prompt string, maxTokens int, v any,
+) error {
+	return llm.GenerateJSON(ctx, stage, prompt, v,
+		func(ctx context.Context, p string) (string, error) {
+			return a.generateBounded(ctx, model, p, maxTokens)
+		},
+		func(reply string, err error) {
+			a.logger.Warn("research: could not parse the model's JSON, asking again",
+				zap.String("stage", stage), zap.Error(err),
+				zap.String("response", truncate(reply, 200)))
+		},
+	)
+}
+
 func (a *Agent) generateBounded(ctx context.Context, model, prompt string, maxTokens int) (string, error) {
 	resp, err := a.llm.Generate(ctx, llm.GenerateRequest{
 		Model:     model,
@@ -770,21 +772,4 @@ func citedSources(findings []Finding, docs []Document) []Source {
 		out = append(out, doc.Source)
 	}
 	return out
-}
-
-// extractJSON pulls a JSON object out of a model response that may be wrapped
-// in prose or a code fence.
-func extractJSON(s string) string {
-	s = strings.TrimSpace(s)
-	s = strings.TrimPrefix(s, "```json")
-	s = strings.TrimPrefix(s, "```")
-	s = strings.TrimSuffix(s, "```")
-	s = strings.TrimSpace(s)
-
-	start := strings.Index(s, "{")
-	end := strings.LastIndex(s, "}")
-	if start == -1 || end == -1 || end < start {
-		return s
-	}
-	return s[start : end+1]
 }
