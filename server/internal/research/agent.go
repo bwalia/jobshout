@@ -697,7 +697,7 @@ Use only the findings above. Do not introduce facts that are not present in them
 Respond with the summary text only — no preamble, no JSON, no bullet points.`,
 		req.Topic, b.String())
 
-	resp, err := a.generate(ctx, req.Model, prompt)
+	resp, err := a.generateBounded(ctx, req.Model, prompt, maxSummaryTokens)
 	if err != nil {
 		return "", err
 	}
@@ -705,10 +705,35 @@ Respond with the summary text only — no preamble, no JSON, no bullet points.`,
 }
 
 // generate is the single point where this agent talks to the LLM.
+// Generation ceilings, in tokens.
+//
+// These exist to bound a runaway, not to shape the output — every value has
+// generous headroom over what the prompt actually asks for, so a normal
+// response is never truncated.
+//
+// A model that fails to emit a stop token generates until something stops it,
+// and with nothing set there is nothing to. That is not hypothetical: a runner
+// on the shared Ollama host was found mid-generation four days after a
+// 2,376-token prompt, having produced a quarter of a million tokens and still
+// climbing, holding that model's only slot the entire time. Every request for
+// it queued behind a task that was never going to finish.
+const (
+	// maxResearchTokens covers planning, source selection, extraction and
+	// judging — all short, structured JSON replies.
+	maxResearchTokens = 2000
+	// maxSummaryTokens covers the synthesis, which is a few sentences.
+	maxSummaryTokens = 800
+)
+
 func (a *Agent) generate(ctx context.Context, model, prompt string) (string, error) {
+	return a.generateBounded(ctx, model, prompt, maxResearchTokens)
+}
+
+func (a *Agent) generateBounded(ctx context.Context, model, prompt string, maxTokens int) (string, error) {
 	resp, err := a.llm.Generate(ctx, llm.GenerateRequest{
-		Model:    model,
-		Messages: []llm.Message{{Role: llm.RoleUser, Content: prompt}},
+		Model:     model,
+		MaxTokens: maxTokens,
+		Messages:  []llm.Message{{Role: llm.RoleUser, Content: prompt}},
 	})
 	if err != nil {
 		return "", err
