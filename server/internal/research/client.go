@@ -33,14 +33,18 @@ func New(logger *zap.Logger, githubToken string) *Client {
 	arxiv := NewArxivClient(nil)
 	feeds := NewFeedClient(nil)
 	reddit := NewRedditClient(nil)
+	youtube := NewYouTubeClient(nil)
 
 	return &Client{
-		fetcher: NewRoutingFetcher(NewGitHubFetcher(githubToken), NewJinaFetcher()),
+		fetcher: NewRoutingFetcher(NewGitHubFetcher(githubToken), youtube, NewJinaFetcher()),
 		// Reddit is listed last on both paths. Its public feeds throttle per IP
 		// and contribute nothing when they do, so the backends that always
 		// answer get to fill the result set first.
+		// YouTube is a lister but not a searcher: there is no free keyless
+		// route to YouTube search, so talks are discovered through channel
+		// feeds the same way the engineering blogs are.
 		searchers: []Searcher{hn, arxiv, reddit},
-		listers:   []Lister{hn, feeds, arxiv, reddit},
+		listers:   []Lister{hn, feeds, arxiv, reddit, youtube},
 		logger:    logger,
 	}
 }
@@ -54,12 +58,14 @@ func New(logger *zap.Logger, githubToken string) *Client {
 // later is one more branch instead of a rewrite.
 type RoutingFetcher struct {
 	github   *GitHubFetcher
+	youtube  *YouTubeClient
 	fallback Fetcher
 }
 
-// NewRoutingFetcher builds a fetcher that prefers github for URLs it handles.
-func NewRoutingFetcher(github *GitHubFetcher, fallback Fetcher) *RoutingFetcher {
-	return &RoutingFetcher{github: github, fallback: fallback}
+// NewRoutingFetcher builds a fetcher that prefers the specialised backends for
+// URLs they handle, and the fallback for everything else.
+func NewRoutingFetcher(github *GitHubFetcher, youtube *YouTubeClient, fallback Fetcher) *RoutingFetcher {
+	return &RoutingFetcher{github: github, youtube: youtube, fallback: fallback}
 }
 
 // Fetch routes to the GitHub API for URLs it can serve, and to the fallback
@@ -72,6 +78,11 @@ func NewRoutingFetcher(github *GitHubFetcher, fallback Fetcher) *RoutingFetcher 
 func (r *RoutingFetcher) Fetch(ctx context.Context, rawURL string) (*Document, error) {
 	if r.github != nil && r.github.Handles(rawURL) {
 		return r.github.Fetch(ctx, rawURL)
+	}
+	// Jina answers 401 on youtube.com, so a video URL that fell through would
+	// simply be unreadable.
+	if r.youtube != nil && r.youtube.Handles(rawURL) {
+		return r.youtube.Fetch(ctx, rawURL)
 	}
 	if r.fallback == nil {
 		return nil, fmt.Errorf("research: no fetcher can handle %q", rawURL)

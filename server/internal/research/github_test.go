@@ -240,7 +240,7 @@ func TestRoutingFetcher_SendsGitHubToTheAPIAndTheRestToFallback(t *testing.T) {
 		"/repos/o/r": `{"full_name":"o/r","description":"from the github api"}`,
 	})
 	fallback := stubFetcher{doc: &Document{Source: Source{URL: "x"}, Text: "from the fallback"}}
-	r := NewRoutingFetcher(gh, fallback)
+	r := NewRoutingFetcher(gh, nil, fallback)
 
 	ghDoc, err := r.Fetch(context.Background(), "https://github.com/o/r")
 	if err != nil {
@@ -265,7 +265,7 @@ func TestRoutingFetcher_SendsGitHubToTheAPIAndTheRestToFallback(t *testing.T) {
 func TestRoutingFetcher_DoesNotRetryGitHubThroughFallback(t *testing.T) {
 	gh := newGitHubStub(t, nil) // every path 404s
 	fallback := stubFetcher{doc: &Document{Text: "should not be reached"}}
-	r := NewRoutingFetcher(gh, fallback)
+	r := NewRoutingFetcher(gh, nil, fallback)
 
 	doc, err := r.Fetch(context.Background(), "https://github.com/o/r")
 	if err == nil {
@@ -281,7 +281,7 @@ func TestRoutingFetcher_DoesNotRetryGitHubThroughFallback(t *testing.T) {
 func TestRoutingFetcher_UnclaimedGitHubPathUsesFallback(t *testing.T) {
 	gh := newGitHubStub(t, nil)
 	fallback := stubFetcher{doc: &Document{Text: "fallback handled it"}}
-	r := NewRoutingFetcher(gh, fallback)
+	r := NewRoutingFetcher(gh, nil, fallback)
 
 	doc, err := r.Fetch(context.Background(), "https://github.com/o/r/wiki/Home")
 	if err != nil {
