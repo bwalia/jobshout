@@ -56,7 +56,7 @@ Respond with JSON only, in exactly this shape:
 		formatFindings(rb.Findings),
 	)
 
-	resp, err := r.generate(ctx, modelName, prompt)
+	resp, err := r.generateBounded(ctx, modelName, prompt, maxPlanTokens)
 	if err != nil {
 		return nil, fmt.Errorf("plan: %w", err)
 	}
@@ -188,7 +188,7 @@ Respond with JSON only, in exactly this shape:
 {"issues": ["...", "..."]}`,
 		plan.Title, plan.Angle, formatSources(rb), markdown)
 
-	resp, err := r.generate(ctx, modelName, prompt)
+	resp, err := r.generateBounded(ctx, modelName, prompt, maxPlanTokens)
 	if err != nil {
 		return nil, fmt.Errorf("review: %w", err)
 	}
@@ -325,10 +325,29 @@ Return only the expanded markdown article — no preamble, no commentary.`,
 func wordCount(markdown string) int { return len(strings.Fields(markdown)) }
 
 // generate is the single point where the writer talks to the LLM.
+// Generation ceilings, in tokens. See the note in research/agent.go — these
+// bound a runaway rather than shape the output.
+//
+// The article ceiling is deliberately roomy: MaxArticleWords is 1400, which is
+// roughly 1900 tokens of prose, and markdown structure and code blocks push it
+// higher. Truncating a finished article mid-sentence would be a worse failure
+// than the one this guards against.
+const (
+	// maxArticleTokens covers drafting, revising and expanding.
+	maxArticleTokens = 4000
+	// maxPlanTokens covers the outline and the review, both short JSON.
+	maxPlanTokens = 1500
+)
+
 func (r *Runner) generate(ctx context.Context, modelName, prompt string) (string, error) {
+	return r.generateBounded(ctx, modelName, prompt, maxArticleTokens)
+}
+
+func (r *Runner) generateBounded(ctx context.Context, modelName, prompt string, maxTokens int) (string, error) {
 	resp, err := r.llm.Generate(ctx, llm.GenerateRequest{
-		Model:    modelName,
-		Messages: []llm.Message{{Role: llm.RoleUser, Content: prompt}},
+		Model:     modelName,
+		MaxTokens: maxTokens,
+		Messages:  []llm.Message{{Role: llm.RoleUser, Content: prompt}},
 	})
 	if err != nil {
 		return "", err

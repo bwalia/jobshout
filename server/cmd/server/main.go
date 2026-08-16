@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -52,6 +53,49 @@ import (
 )
 
 const version = "0.3.0"
+
+// researchRequestTimeout bounds the synchronous research endpoint.
+//
+// It is deliberately far above the global request timeout: one research call
+// plans searches, retrieves several pages and makes a model call per source,
+// which is minutes of legitimate work rather than a stuck request. The
+// server's WriteTimeout is raised to match, or the response would be cut off
+// even when the handler finished in time.
+const researchRequestTimeout = 10 * time.Minute
+
+// defaultRequestTimeout bounds every route that is not doing something
+// legitimately slow. Thirty seconds is generous for a database round trip and
+// short enough that a stuck handler is not held open.
+const defaultRequestTimeout = 30 * time.Second
+
+// requestTimeout applies a per-route deadline.
+//
+// It replaces a single global chi Timeout because that cannot be relaxed for
+// one route: chi middleware nests, so a longer Timeout mounted inside a
+// shorter one never takes effect — the outer deadline has already been set on
+// the context and the inner one cannot extend it.
+//
+// The symptom that produced this was subtle. Synchronous research would return
+// after exactly thirty seconds reporting that it had read several sources and
+// extracted nothing from any of them, while each model call logged "context
+// deadline exceeded" — which reads as the model being slow, when in fact the
+// request context underneath it had been cancelled.
+func requestTimeout(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		timeout := defaultRequestTimeout
+		// Research answers synchronously: it plans searches, retrieves several
+		// pages and makes a model call per source. Minutes of real work, not a
+		// stuck request. Trending under the same prefix is only HTTP calls, so
+		// it keeps the default.
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/research") {
+			timeout = researchRequestTimeout
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), timeout)
+		defer cancel()
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
 
 func main() {
 	logger, _ := zap.NewProduction()
@@ -476,7 +520,7 @@ func main() {
 	r.Use(chimiddleware.RequestID)
 	r.Use(chimiddleware.RealIP)
 	r.Use(chimiddleware.Recoverer)
-	r.Use(chimiddleware.Timeout(30 * time.Second))
+	r.Use(requestTimeout)
 
 	// CORS
 	corsHandler := cors.New(cors.Options{
@@ -657,6 +701,10 @@ func main() {
 			// pipeline: "find out about X and come back with sources you have
 			// actually read" is a capability other callers want too.
 			r.Route("/research", func(r chi.Router) {
+				// The long budget this route needs is applied by
+				// requestTimeout below, not here — chi middleware nests rather
+				// than overrides, so an inner Timeout cannot lengthen an outer
+				// one that has already set a shorter deadline.
 				r.Post("/", researchHandler.Research)
 				r.Get("/trending", researchHandler.Trending)
 			})
@@ -910,10 +958,13 @@ func main() {
 	go schedulerRunner.Start(ctx)
 
 	srv := &http.Server{
-		Addr:         cfg.ServerPort,
-		Handler:      r,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 120 * time.Second, // increased for LLM calls
+		Addr:        cfg.ServerPort,
+		Handler:     r,
+		ReadTimeout: 15 * time.Second,
+		// Must exceed researchRequestTimeout: the synchronous research endpoint
+		// legitimately runs for minutes, and a shorter write deadline would cut
+		// the response off after the handler had done all the work.
+		WriteTimeout: researchRequestTimeout + time.Minute,
 		IdleTimeout:  60 * time.Second,
 	}
 
