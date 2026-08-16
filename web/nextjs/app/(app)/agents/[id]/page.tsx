@@ -19,6 +19,8 @@ import { toast } from "sonner";
 import { AgentStatusBadge } from "@/components/agent/AgentStatusBadge";
 import { useAgent, useUpdateAgent } from "@/lib/hooks/useAgents";
 import { ModelPicker } from "@/components/agent/ModelPicker";
+import { useBlogConfig } from "@/lib/hooks/useBlog";
+import type { ModelRecommendation, ModelRole } from "@/lib/types/blog";
 import { useTasks } from "@/lib/hooks/useTasks";
 import { KnowledgeFileList } from "@/components/agent/KnowledgeFileList";
 import { KnowledgeEditor } from "@/components/agent/KnowledgeEditor";
@@ -100,10 +102,21 @@ function DetailRow({
   );
 }
 
+const PICKER_CLASS =
+  "flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50";
+
+/** The engine_config key the server reads the structured model from. */
+const STRUCTURED_MODEL_KEY = "structured_model";
+
 /**
  * Editable model row. Saves on change — useUpdateAgent already invalidates the
  * detail and list queries and raises a toast either way, so a separate Save
  * button would add a step without adding feedback.
+ *
+ * The Article Writer gets a second picker, because it makes two kinds of call
+ * and a benchmark found different models are better at each: one writes the
+ * article, the other returns the title, outline and review as JSON. Every other
+ * agent makes one kind of call and keeps the single row.
  */
 function ModelRow({
   agent,
@@ -111,28 +124,142 @@ function ModelRow({
   agent: NonNullable<ReturnType<typeof useAgent>["data"]>;
 }) {
   const { mutate: updateAgent, isPending } = useUpdateAgent();
+  const { data: blogConfig } = useBlogConfig();
+
+  const isArticleWriter = agent.metadata?.builtin === "article_writer";
+  const advice = (role: ModelRole) =>
+    blogConfig?.recommended_models?.find((r) => r.role === role);
+
+  if (!isArticleWriter) {
+    return (
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <dt className="text-sm text-muted-foreground sm:w-40 sm:shrink-0">
+          Model
+        </dt>
+        <dd className="w-full sm:max-w-sm">
+          <ModelPicker
+            value={{
+              provider: agent.model_provider ?? "",
+              model: agent.model_name ?? "",
+            }}
+            disabled={isPending}
+            onChange={(v) =>
+              updateAgent({
+                id: agent.id,
+                payload: { model_provider: v.provider, model_name: v.model },
+              })
+            }
+            className={PICKER_CLASS}
+          />
+        </dd>
+      </div>
+    );
+  }
+
+  const prose = advice("prose");
+  const structured = advice("structured");
+  const structuredModel =
+    typeof agent.engine_config?.[STRUCTURED_MODEL_KEY] === "string"
+      ? (agent.engine_config[STRUCTURED_MODEL_KEY] as string)
+      : "";
 
   return (
-    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-      <dt className="text-sm text-muted-foreground sm:w-40 sm:shrink-0">
-        Model
-      </dt>
-      <dd className="w-full sm:max-w-sm">
-        <ModelPicker
-          value={{
-            provider: agent.model_provider ?? "",
-            model: agent.model_name ?? "",
-          }}
-          disabled={isPending}
-          onChange={(v) =>
-            updateAgent({
-              id: agent.id,
-              payload: { model_provider: v.provider, model_name: v.model },
-            })
-          }
-          className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-        />
-      </dd>
+    <div className="flex flex-col gap-5">
+      <ModelSetting
+        label={prose?.label ?? "Writing model"}
+        covers={prose?.covers}
+        advice={prose}
+        picker={
+          <ModelPicker
+            value={{
+              provider: agent.model_provider ?? "",
+              model: agent.model_name ?? "",
+            }}
+            disabled={isPending}
+            providerFilter={blogConfig?.provider}
+            recommended={prose?.model}
+            inheritedModel={blogConfig?.effective_models?.prose}
+            includeAuto={false}
+            onChange={(v) =>
+              updateAgent({
+                id: agent.id,
+                payload: { model_provider: v.provider, model_name: v.model },
+              })
+            }
+            className={PICKER_CLASS}
+          />
+        }
+      />
+
+      <ModelSetting
+        label={structured?.label ?? "Structured model"}
+        covers={structured?.covers}
+        advice={structured}
+        picker={
+          <ModelPicker
+            // Only the model name is stored: the pipeline talks to one
+            // provider, so a second provider field would be a setting that
+            // never applies.
+            value={{
+              provider: structuredModel ? (blogConfig?.provider ?? "") : "",
+              model: structuredModel,
+            }}
+            disabled={isPending}
+            providerFilter={blogConfig?.provider}
+            recommended={structured?.model}
+            inheritedModel={blogConfig?.effective_models?.structured}
+            includeAuto={false}
+            onChange={(v) =>
+              updateAgent({
+                id: agent.id,
+                payload: {
+                  engine_config: {
+                    ...(agent.engine_config ?? {}),
+                    [STRUCTURED_MODEL_KEY]: v.model,
+                  },
+                },
+              })
+            }
+            className={PICKER_CLASS}
+          />
+        }
+      />
+    </div>
+  );
+}
+
+/** One labelled model setting, with what it governs and the measured advice. */
+function ModelSetting({
+  label,
+  covers,
+  advice,
+  picker,
+}: {
+  label: string;
+  covers?: string;
+  advice?: ModelRecommendation;
+  picker: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex flex-col gap-0.5">
+        <span className="text-sm font-medium text-foreground">{label}</span>
+        {covers && (
+          <span className="text-xs text-muted-foreground">{covers}</span>
+        )}
+      </div>
+      <div className="sm:max-w-sm">{picker}</div>
+      {advice?.model && (
+        <p className="text-xs text-muted-foreground sm:max-w-sm">
+          <span className="font-medium text-foreground">
+            Recommended: {advice.model}
+          </span>{" "}
+          — {advice.reason}
+          {advice.caveat && (
+            <span className="text-muted-foreground"> {advice.caveat}</span>
+          )}
+        </p>
+      )}
     </div>
   );
 }

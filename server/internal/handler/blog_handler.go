@@ -8,6 +8,7 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 
+	"github.com/jobshout/server/internal/blog"
 	"github.com/jobshout/server/internal/middleware"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/service"
@@ -132,6 +133,16 @@ func (h *BlogHandler) Retry(w http.ResponseWriter, r *http.Request) {
 func (h *BlogHandler) Config(w http.ResponseWriter, r *http.Request) {
 	RespondJSON(w, http.StatusOK, map[string]any{
 		"can_publish": h.svc.CanPublish(),
+		// The provider the writing pipeline is bound to at startup. The model
+		// picker filters on it: the pipeline sends a bare model name to this one
+		// provider, so offering a model from another provider would save a
+		// choice that can only fail when the run starts.
+		"provider": h.svc.Provider(),
+		// What each role would use right now, so the picker can show the
+		// inherited value instead of an empty box that explains nothing.
+		"effective_models": h.svc.EffectiveModels(),
+		// Which model the benchmark favoured for each role, and why.
+		"recommended_models": blog.RecommendedModels(),
 	})
 }
 

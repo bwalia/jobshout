@@ -18,6 +18,18 @@ interface ModelPickerProps {
   /** Offer "Auto" when the server has auto-selection enabled. */
   includeAuto?: boolean;
   className?: string;
+  /**
+   * Restrict the list to one provider. Used where the consumer can only reach
+   * a single provider, so a choice it could never honour is never offered.
+   */
+  providerFilter?: string;
+  /**
+   * Model name to mark as recommended. Only labels a model that is actually
+   * installed — a badge on something you cannot select would be noise.
+   */
+  recommended?: string;
+  /** What an unset choice resolves to, shown on the default option. */
+  inheritedModel?: string;
 }
 
 /** How a provider key is titled in the dropdown. */
@@ -71,13 +83,18 @@ export function ModelPicker({
   disabled,
   includeAuto = true,
   className,
+  providerFilter,
+  recommended,
+  inheritedModel,
 }: ModelPickerProps) {
   const { data, isLoading, isError } = useAvailableModels();
 
   const options = useMemo<Option[]>(() => {
     const out: Option[] = [
       {
-        label: "Platform default",
+        label: inheritedModel
+          ? `Platform default (${inheritedModel})`
+          : "Platform default",
         selection: { provider: "", model: "" },
         group: "Default",
       },
@@ -92,10 +109,17 @@ export function ModelPicker({
     }
 
     for (const p of data?.providers ?? []) {
+      if (providerFilter && p.provider !== providerFilter) continue;
       const group = PROVIDER_LABELS[p.provider] ?? p.provider;
       for (const m of p.models) {
         out.push({
-          label: describe(m),
+          // The marker leads rather than trails: a closed <select> truncates on
+          // the right, and these labels are long enough that a suffix is the
+          // first thing to disappear — leaving a dangling dash and no badge.
+          label:
+            m.name === recommended
+              ? `Recommended · ${describe(m)}`
+              : describe(m),
           selection: { provider: p.provider, model: m.name },
           group,
         });
@@ -103,7 +127,7 @@ export function ModelPicker({
     }
 
     return out;
-  }, [data, includeAuto]);
+  }, [data, includeAuto, providerFilter, recommended, inheritedModel]);
 
   // An agent may hold a model that is no longer installed, or free text typed
   // before this picker existed. Surface it rather than silently rewriting the

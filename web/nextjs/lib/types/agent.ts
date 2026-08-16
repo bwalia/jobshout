@@ -17,8 +17,20 @@ export interface Agent {
   created_by: string | null;
   engine_type: EngineType;
   engine_config: Record<string, unknown>;
+  /** Platform-owned annotations. Not user-editable. */
+  metadata: AgentMetadata | null;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * Annotations the platform sets on an agent. `builtin` marks one it seeded
+ * itself — "article_writer", "researcher" — which is how the UI tells a
+ * built-in agent apart from one a user created.
+ */
+export interface AgentMetadata {
+  builtin?: string;
+  [key: string]: unknown;
 }
 
 export interface CreateAgentRequest {
@@ -43,4 +55,10 @@ export interface UpdateAgentRequest {
   model_name?: string;
   system_prompt?: string;
   manager_id?: string | null;
+  /**
+   * Per-agent engine settings. Sent whole — the server replaces the stored
+   * object rather than merging, so callers spread the existing config when
+   * changing one key.
+   */
+  engine_config?: Record<string, unknown>;
 }
