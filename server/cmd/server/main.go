@@ -341,12 +341,16 @@ func main() {
 			zap.Error(err))
 	} else {
 		blogRunner = blog.NewRunner(blog.Config{
-			ContentDir: cfg.BlogContentDir,
-			AuthorName: cfg.BlogAuthorName,
-			Model:      cfg.BlogModel,
+			ContentDir:      cfg.BlogContentDir,
+			AuthorName:      cfg.BlogAuthorName,
+			Model:           cfg.BlogModel,
+			ProseModel:      cfg.BlogProseModel,
+			StructuredModel: cfg.BlogStructuredModel,
 		}, blogLLM, cmsClient, researchSvc, logger)
+		writingModel := firstNonEmptyStr(cfg.BlogModel, cfg.OllamaDefaultModel)
 		logger.Info("article generator initialised",
-			zap.String("writing_model", firstNonEmptyStr(cfg.BlogModel, cfg.OllamaDefaultModel)),
+			zap.String("prose_model", firstNonEmptyStr(cfg.BlogProseModel, writingModel)),
+			zap.String("structured_model", firstNonEmptyStr(cfg.BlogStructuredModel, writingModel)),
 			zap.String("cms_namespace", cfg.OpsAPINamespace),
 			zap.Bool("can_publish", blogRunner.CanPublish()),
 		)

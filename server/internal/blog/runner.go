@@ -52,6 +52,25 @@ type Config struct {
 	// decide whether the article is worth publishing. A per-request Model on
 	// GenerateRequest still overrides this.
 	Model string
+
+	// ProseModel and StructuredModel split Model along the line that measurement
+	// found actually separates models, rather than along the pipeline's own
+	// stage names.
+	//
+	// Benchmarking two local models over three runs each produced a clean
+	// inversion: the better writer produced noticeably better prose — a concrete
+	// opening, diagrams placed where they were discussed, a genuinely useful
+	// section on trade-offs — while failing to return parseable JSON on two of
+	// six structured calls, where the other model went six for six. Prose
+	// quality and JSON reliability are simply not the same skill, and one
+	// setting could not express that.
+	//
+	// Both default to Model, so leaving them unset keeps the previous behaviour
+	// exactly. Diagrams are not a third setting because they are not a third
+	// call: the draft writes prose and diagrams together, and splitting them
+	// would break the requirement that a diagram agree with the text around it.
+	ProseModel      string
+	StructuredModel string
 }
 
 // CMSPublisher is the slice of the opsapi client this package uses. Declared
@@ -79,12 +98,27 @@ type Researcher interface {
 	Research(ctx context.Context, orgID uuid.UUID, req research.Request, progress research.ProgressFunc) (*research.Brief, error)
 }
 
-// writeModel picks the model for a writing call: the request's override if it
-// set one, otherwise the configured writing model, otherwise the provider
-// default.
-func (r *Runner) writeModel(requested string) string {
+// proseModel is the model for calls that produce article text.
+//
+// A per-request override still wins over both settings. Someone who names a
+// model in the UI is asking for that model, not for a routing policy.
+func (r *Runner) proseModel(requested string) string {
 	if strings.TrimSpace(requested) != "" {
 		return requested
+	}
+	if m := strings.TrimSpace(r.cfg.ProseModel); m != "" {
+		return m
+	}
+	return r.cfg.Model
+}
+
+// structuredModel is the model for calls that must return JSON.
+func (r *Runner) structuredModel(requested string) string {
+	if strings.TrimSpace(requested) != "" {
+		return requested
+	}
+	if m := strings.TrimSpace(r.cfg.StructuredModel); m != "" {
+		return m
 	}
 	return r.cfg.Model
 }

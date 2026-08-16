@@ -111,6 +111,19 @@ type Config struct {
 	// including whether it produces a valid diagram when asked.
 	BlogModel string `mapstructure:"BLOG_MODEL"`
 
+	// BlogProseModel and BlogStructuredModel split BLOG_MODEL for the two kinds
+	// of call the writing pipeline makes: the ones that produce article text
+	// (draft, revise, expand) and the ones that must return JSON (plan,
+	// review). Both fall back to BLOG_MODEL when unset, so the pair is opt-in.
+	//
+	// The split is there because measurement found the two abilities come apart.
+	// Benchmarking two local models three times each, the better writer returned
+	// unparseable JSON on two of six structured calls while the other managed
+	// six of six — and the better writer's prose was the better prose. Without
+	// this, using it at all meant accepting the failures.
+	BlogProseModel      string `mapstructure:"BLOG_PROSE_MODEL"`
+	BlogStructuredModel string `mapstructure:"BLOG_STRUCTURED_MODEL"`
+
 	// GitHubToken is optional. The research agent reads GitHub through its
 	// public API, which allows 60 requests an hour unauthenticated — enough to
 	// try, not enough for a busy schedule. A token raises the ceiling to 5000
@@ -213,6 +226,8 @@ func Load() (*Config, error) {
 		BlogContentDir:       viper.GetString("BLOG_CONTENT_DIR"),
 		BlogAuthorName:       viper.GetString("BLOG_AUTHOR_NAME"),
 		BlogModel:            viper.GetString("BLOG_MODEL"),
+		BlogProseModel:       viper.GetString("BLOG_PROSE_MODEL"),
+		BlogStructuredModel:  viper.GetString("BLOG_STRUCTURED_MODEL"),
 		GitHubToken:          viper.GetString("GITHUB_TOKEN"),
 
 		DatabaseConnectTimeout: viper.GetDuration("DATABASE_CONNECT_TIMEOUT"),
