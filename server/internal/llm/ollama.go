@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -110,12 +111,31 @@ type ollamaChatRequest struct {
 	Model    string          `json:"model"`
 	Messages []ollamaMessage `json:"messages"`
 	Stream   bool            `json:"stream"`
-	Options  ollamaOptions   `json:"options,omitempty"`
+	// Think turns off a reasoning model's visible thinking phase.
+	//
+	// It is always false because nothing here reads the thinking — only
+	// message.content is used — while the thinking costs real time and, worse,
+	// counts against num_predict. A reasoning model given a long prompt and a
+	// bounded budget can spend the whole budget thinking and return empty
+	// content, which surfaces as "empty response from ollama" and looks like
+	// the model failing rather than the request being mis-shaped.
+	//
+	// Measured on muse-glimmer, a reasoning model: the same prompt took 47s
+	// with thinking and 12s without, and the thinking it produced was
+	// degenerate — the prompt echoed back to itself.
+	//
+	// Models with no thinking phase ignore the field.
+	Think   bool          `json:"think"`
+	Options ollamaOptions `json:"options,omitempty"`
 }
 
 type ollamaMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
+	// Thinking is a reasoning model's internal monologue. It is decoded so a
+	// response that contains only thinking can be reported as such rather than
+	// as a mysteriously empty reply — see Generate.
+	Thinking string `json:"thinking,omitempty"`
 }
 
 type ollamaOptions struct {
@@ -155,6 +175,7 @@ func (c *OllamaClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 		Model:    model,
 		Messages: msgs,
 		Stream:   false,
+		Think:    false,
 		Options:  opts,
 	}
 
@@ -198,6 +219,16 @@ func (c *OllamaClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 	finishReason := "stop"
 	if !chatResp.Done {
 		finishReason = "length"
+	}
+
+	// A reply that is only thinking means the model spent its whole budget
+	// reasoning. Callers see an empty Content and report "empty response",
+	// which is true but says nothing about the cause — so name it here, where
+	// the evidence is.
+	if strings.TrimSpace(chatResp.Message.Content) == "" && chatResp.Message.Thinking != "" {
+		return nil, fmt.Errorf(
+			"ollama: model %q returned only reasoning and no content — it exhausted num_predict (%d) before answering",
+			model, opts.NumPredict)
 	}
 
 	return &GenerateResponse{
