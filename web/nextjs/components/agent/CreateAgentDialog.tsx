@@ -6,6 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { X } from "lucide-react";
 import { useCreateAgent } from "@/lib/hooks/useAgents";
+import { ModelPicker } from "@/components/agent/ModelPicker";
 import type { CreateAgentRequest } from "@/lib/types/agent";
 
 // ---------------------------------------------------------------------------
@@ -73,6 +74,8 @@ export function CreateAgentDialog({ open, onClose }: CreateAgentDialogProps) {
     register,
     handleSubmit,
     reset,
+    setValue,
+    watch,
     formState: { errors },
   } = useForm<CreateAgentFormValues>({
     resolver: zodResolver(createAgentSchema),
@@ -231,33 +234,29 @@ export function CreateAgentDialog({ open, onClose }: CreateAgentDialogProps) {
             <FieldError message={errors.description?.message} />
           </div>
 
-          {/* Model Provider + Model Name (side by side on wider screens) */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
-              <FieldLabel htmlFor="agent-model-provider">
-                Model Provider
-              </FieldLabel>
-              <input
-                id="agent-model-provider"
-                type="text"
-                placeholder="e.g. openai, anthropic"
-                {...register("model_provider")}
-                className="mt-1.5 flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              />
-              <FieldError message={errors.model_provider?.message} />
-            </div>
-
-            <div>
-              <FieldLabel htmlFor="agent-model-name">Model Name</FieldLabel>
-              <input
-                id="agent-model-name"
-                type="text"
-                placeholder="e.g. gpt-4o, claude-3-5"
-                {...register("model_name")}
-                className="mt-1.5 flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              />
-              <FieldError message={errors.model_name?.message} />
-            </div>
+          {/* Model */}
+          <div>
+            <FieldLabel htmlFor="agent-model">Model</FieldLabel>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Which LLM runs this agent. The list shows what each configured
+              provider can actually run.
+            </p>
+            <ModelPicker
+              id="agent-model"
+              value={{
+                provider: watch("model_provider") ?? "",
+                model: watch("model_name") ?? "",
+              }}
+              onChange={(v) => {
+                setValue("model_provider", v.provider, { shouldDirty: true });
+                setValue("model_name", v.model, { shouldDirty: true });
+              }}
+            />
+            <FieldError
+              message={
+                errors.model_provider?.message ?? errors.model_name?.message
+              }
+            />
           </div>
 
           {/* System Prompt */}

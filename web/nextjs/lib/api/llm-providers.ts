@@ -1,5 +1,6 @@
 import { apiClient } from "@/lib/api/client";
 import type {
+  AvailableModelsResponse,
   LLMProviderConfig,
   CreateLLMProviderRequest,
   UpdateLLMProviderRequest,
@@ -38,4 +39,13 @@ export async function updateLLMProvider(
 
 export async function deleteLLMProvider(id: string): Promise<void> {
   await apiClient.delete(`/llm-providers/${id}`);
+}
+
+/**
+ * Fetch the models each registered provider can actually run. Populates the
+ * per-agent model picker.
+ */
+export async function getAvailableProviderModels(): Promise<AvailableModelsResponse> {
+  const { data } = await apiClient.get<AvailableModelsResponse>("/llm-providers/models");
+  return data;
 }

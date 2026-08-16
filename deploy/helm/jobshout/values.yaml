@@ -102,6 +102,12 @@ ai:
   provider: ollama
   ollamaBaseURL: "https://ollama.workstation.co.uk"
   ollamaModel: "llama3:latest"
+  # Context window requested per call. Without num_ctx, Ollama applies its own
+  # server-side default and silently truncates a long prompt rather than
+  # refusing it — so it is always sent. Raise this to let agents use the larger
+  # windows big models support; model discovery caps it per model, so a value
+  # above what a model can hold is lowered rather than rejected.
+  ollamaNumCtx: 8192
   openaiBaseURL: "https://api.openai.com"
   openaiModel: "gpt-4o-mini"
   # Per-task model selection. When true, an agent whose modelProvider is "auto"

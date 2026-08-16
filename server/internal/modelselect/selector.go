@@ -87,11 +87,14 @@ type Pricer interface {
 	Calculate(provider, model string, inputTokens, outputTokens, latencyMs int) float64
 }
 
-// Selector picks a model per task from a fixed catalog.
+// Selector picks a model per task from a catalog.
 type Selector struct {
 	catalog []Candidate
 	reg     Registry
 	pricer  Pricer
+	// dynamic, when set, supplies live-discovered candidates merged over the
+	// static catalog on every Select. Nil keeps behaviour identical.
+	dynamic func() []Candidate
 }
 
 // New builds a Selector. A nil catalog uses DefaultCatalog. A nil pricer
@@ -102,6 +105,30 @@ func New(reg Registry, pricer Pricer, catalog []Candidate) *Selector {
 		catalog = DefaultCatalog()
 	}
 	return &Selector{catalog: catalog, reg: reg, pricer: pricer}
+}
+
+// WithDynamicCatalog adds a source of live-discovered candidates, merged over
+// the static catalog on every Select. A dynamic entry wins a provider+model
+// collision, and a provider that appears in the dynamic set replaces its static
+// entries entirely — otherwise uninstalled models would be resurrected.
+//
+// This is a setter rather than a New parameter so the existing constructor and
+// its tests are untouched, and so the static catalog keeps working as the
+// documented fallback.
+//
+// The source takes no context on purpose: it must be a pure in-memory read, as
+// Select runs on the execution path.
+func (s *Selector) WithDynamicCatalog(src func() []Candidate) *Selector {
+	s.dynamic = src
+	return s
+}
+
+// effectiveCatalog returns the candidates Select should consider.
+func (s *Selector) effectiveCatalog() []Candidate {
+	if s.dynamic == nil {
+		return s.catalog
+	}
+	return mergeCatalogs(s.catalog, s.dynamic())
 }
 
 // Select returns the best candidate for the task, or ErrNoCandidate.
@@ -127,13 +154,9 @@ func (s *Selector) Select(sig TaskSignals, cons Constraints) (Decision, error) {
 	}
 	var viable []scored
 
-	for _, c := range s.catalog {
+	for _, c := range s.effectiveCatalog() {
 		if !registered[c.Provider] {
 			unavailable = fmt.Sprintf("provider %q is not registered", c.Provider)
-			continue
-		}
-		if sig.NeedsTools && !s.toolCapable(c) {
-			reject("%s/%s cannot do native tool-calling", c.Provider, c.Model)
 			continue
 		}
 		if c.Quality < minQuality {
@@ -173,12 +196,22 @@ func (s *Selector) Select(sig TaskSignals, cons Constraints) (Decision, error) {
 		return Decision{}, fmt.Errorf("%w for kind %q: %s", ErrNoCandidate, sig.Kind, why)
 	}
 
-	// Cheapest first; then faster; then stronger; then by name so the result is
-	// deterministic for a given catalog rather than dependent on map ordering.
+	// Cheapest first; then native tool-calling when the task needs tools; then
+	// faster; then stronger; then by name so the result is deterministic for a
+	// given catalog rather than dependent on map ordering.
 	sort.SliceStable(viable, func(i, j int) bool {
 		a, b := viable[i], viable[j]
 		if a.cost != b.cost {
 			return a.cost < b.cost
+		}
+		if sig.NeedsTools {
+			// A preference, not a filter: a model without native tool-calling
+			// still does tool work through the executor's ReAct loop, so it is
+			// eligible — just second choice at equal cost.
+			at, bt := s.toolCapable(a.c), s.toolCapable(b.c)
+			if at != bt {
+				return at
+			}
 		}
 		if a.c.Speed != b.c.Speed {
 			return a.c.Speed > b.c.Speed
@@ -240,10 +273,15 @@ func (s *Selector) explain(c Candidate, cost float64, sig TaskSignals, minQualit
 	return b.String()
 }
 
-// toolCapable requires the model to advertise tool support AND its client to
-// implement llm.ToolCapableClient affirmatively. Either alone is insufficient:
-// the catalog describes the model, the client describes our implementation, and
-// a task needing tools must have both.
+// toolCapable reports whether the model can do NATIVE tool-calling: the model
+// must advertise it AND our client must implement it. The catalog describes the
+// model, the client describes our implementation, and native tool-calling needs
+// both.
+//
+// This is a ranking preference, not an eligibility test. A model that fails it
+// can still run tool tasks through the executor's ReAct JSON-in-prompt loop —
+// which is how every Ollama agent works today — so rejecting it outright would
+// exclude every local model from tool work for no reason.
 func (s *Selector) toolCapable(c Candidate) bool {
 	if !c.SupportsTools {
 		return false
