@@ -68,6 +68,17 @@ const researchRequestTimeout = 10 * time.Minute
 // short enough that a stuck handler is not held open.
 const defaultRequestTimeout = 30 * time.Second
 
+// firstNonEmptyStr returns the first non-empty value, for logging what a
+// setting actually resolved to rather than what was configured.
+func firstNonEmptyStr(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 // requestTimeout applies a per-route deadline.
 //
 // It replaces a single global chi Timeout because that cannot be relaxed for
@@ -332,8 +343,10 @@ func main() {
 		blogRunner = blog.NewRunner(blog.Config{
 			ContentDir: cfg.BlogContentDir,
 			AuthorName: cfg.BlogAuthorName,
+			Model:      cfg.BlogModel,
 		}, blogLLM, cmsClient, researchSvc, logger)
 		logger.Info("article generator initialised",
+			zap.String("writing_model", firstNonEmptyStr(cfg.BlogModel, cfg.OllamaDefaultModel)),
 			zap.String("cms_namespace", cfg.OpsAPINamespace),
 			zap.Bool("can_publish", blogRunner.CanPublish()),
 		)

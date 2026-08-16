@@ -138,21 +138,21 @@ func (r *Runner) writeOne(
 
 	// 2. Plan — the title comes from what the research found.
 	report(progress, model.BlogStepOutlining, "Planning "+label, model.AgentNameArticleWriter)
-	plan, err := r.plan(ctx, req.Model, brief, rb)
+	plan, err := r.plan(ctx, r.writeModel(req.Model), brief, rb)
 	if err != nil {
 		return nil, err
 	}
 
 	// 3. Draft.
 	report(progress, model.BlogStepGenerating, "Writing "+plan.Title, model.AgentNameArticleWriter)
-	markdown, err := r.draft(ctx, req.Model, brief, rb, plan)
+	markdown, err := r.draft(ctx, r.writeModel(req.Model), brief, rb, plan)
 	if err != nil {
 		return nil, err
 	}
 
 	// 4. Review, then 5. revise — but only when there is something to fix.
 	report(progress, model.BlogStepReviewing, "Reviewing "+plan.Title, model.AgentNameArticleWriter)
-	c, err := r.review(ctx, req.Model, rb, plan, markdown)
+	c, err := r.review(ctx, r.writeModel(req.Model), rb, plan, markdown)
 	switch {
 	case err != nil:
 		// A failed review costs the revision pass, not the article. The draft
@@ -167,7 +167,7 @@ func (r *Runner) writeOne(
 		report(progress, model.BlogStepRevising,
 			fmt.Sprintf("Revising %s (%d issue(s))", plan.Title, len(c.Issues)),
 			model.AgentNameArticleWriter)
-		revised, rerr := r.revise(ctx, req.Model, rb, plan, markdown, c)
+		revised, rerr := r.revise(ctx, r.writeModel(req.Model), rb, plan, markdown, c)
 		if rerr != nil {
 			r.logger.Warn("blog: revision failed, keeping the reviewed draft",
 				zap.String("title", plan.Title), zap.Error(rerr))
@@ -188,7 +188,7 @@ func (r *Runner) writeOne(
 			fmt.Sprintf("Expanding %s (%d words, target %d)", plan.Title, words, MinArticleWords),
 			model.AgentNameArticleWriter)
 
-		expanded, eerr := r.expand(ctx, req.Model, brief, rb, plan, markdown, words)
+		expanded, eerr := r.expand(ctx, r.writeModel(req.Model), brief, rb, plan, markdown, words)
 		switch {
 		case eerr != nil:
 			r.logger.Warn("blog: expansion failed, keeping the short article",

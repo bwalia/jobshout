@@ -102,6 +102,14 @@ type Config struct {
 	// is a label in the UI rather than a path on disk.
 	BlogContentDir string `mapstructure:"BLOG_CONTENT_DIR"`
 	BlogAuthorName string `mapstructure:"BLOG_AUTHOR_NAME"`
+	// BlogModel overrides the LLM used for writing articles, leaving research
+	// and every other agent on the default.
+	//
+	// They want different things. Research makes many short structured calls
+	// where speed compounds; writing makes a few long ones where prose quality
+	// and instruction-following decide whether the article is worth reading —
+	// including whether it produces a valid diagram when asked.
+	BlogModel string `mapstructure:"BLOG_MODEL"`
 
 	// GitHubToken is optional. The research agent reads GitHub through its
 	// public API, which allows 60 requests an hour unauthenticated — enough to
@@ -204,6 +212,7 @@ func Load() (*Config, error) {
 		OpsAPITimeout:        viper.GetDuration("OPSAPI_TIMEOUT"),
 		BlogContentDir:       viper.GetString("BLOG_CONTENT_DIR"),
 		BlogAuthorName:       viper.GetString("BLOG_AUTHOR_NAME"),
+		BlogModel:            viper.GetString("BLOG_MODEL"),
 		GitHubToken:          viper.GetString("GITHUB_TOKEN"),
 
 		DatabaseConnectTimeout: viper.GetDuration("DATABASE_CONNECT_TIMEOUT"),

@@ -43,6 +43,15 @@ type Config struct {
 	ContentDir string
 	// AuthorName is the byline attached to posts created in the CMS.
 	AuthorName string
+	// Model is the LLM used for writing — planning, drafting, reviewing,
+	// revising and expanding. Empty means the provider's default.
+	//
+	// It is deliberately separate from the model research uses. Research makes
+	// many short structured calls where speed compounds across a run; writing
+	// makes a few long ones where prose quality and instruction-following
+	// decide whether the article is worth publishing. A per-request Model on
+	// GenerateRequest still overrides this.
+	Model string
 }
 
 // CMSPublisher is the slice of the opsapi client this package uses. Declared
@@ -68,6 +77,16 @@ type GenerateRequest struct {
 // test can supply a brief without a network or an LLM.
 type Researcher interface {
 	Research(ctx context.Context, orgID uuid.UUID, req research.Request, progress research.ProgressFunc) (*research.Brief, error)
+}
+
+// writeModel picks the model for a writing call: the request's override if it
+// set one, otherwise the configured writing model, otherwise the provider
+// default.
+func (r *Runner) writeModel(requested string) string {
+	if strings.TrimSpace(requested) != "" {
+		return requested
+	}
+	return r.cfg.Model
 }
 
 // HardMaxArticles is the safety ceiling regardless of what the caller asks
