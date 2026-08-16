@@ -103,7 +103,7 @@ func (r *Runner) writeArticles(
 }
 
 // writeOne runs the full agent loop for a single brief:
-// research → plan → draft → review → revise → resolve citations.
+// research → plan → draft → review → revise → check diagrams → resolve citations.
 //
 // The sequence is fixed rather than being offered to the model as a set of
 // choices. Research and citation resolution are guarantees this pipeline makes
@@ -213,7 +213,16 @@ func (r *Runner) writeOne(
 		}
 	}
 
-	// 7. Resolve citations into a reference list. This drops markers pointing
+	// 7. Repair and check the diagrams. A diagram that will not parse reaches
+	// the reader as a block of raw Mermaid source, so it is worth settling here
+	// rather than in their browser.
+	var diagramNotes []string
+	markdown, diagramNotes = sanitiseDiagrams(markdown)
+	for _, note := range diagramNotes {
+		r.logger.Info("blog: "+note, zap.String("title", plan.Title))
+	}
+
+	// 8. Resolve citations into a reference list. This drops markers pointing
 	// at sources that were never offered and renumbers what survives, so the
 	// published article's references are exactly what it cites.
 	rawCitations := countCitations(markdown)
