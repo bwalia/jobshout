@@ -32,11 +32,15 @@ func New(logger *zap.Logger, githubToken string) *Client {
 	hn := NewHNClient()
 	arxiv := NewArxivClient(nil)
 	feeds := NewFeedClient(nil)
+	reddit := NewRedditClient(nil)
 
 	return &Client{
-		fetcher:   NewRoutingFetcher(NewGitHubFetcher(githubToken), NewJinaFetcher()),
-		searchers: []Searcher{hn, arxiv},
-		listers:   []Lister{hn, feeds, arxiv},
+		fetcher: NewRoutingFetcher(NewGitHubFetcher(githubToken), NewJinaFetcher()),
+		// Reddit is listed last on both paths. Its public feeds throttle per IP
+		// and contribute nothing when they do, so the backends that always
+		// answer get to fill the result set first.
+		searchers: []Searcher{hn, arxiv, reddit},
+		listers:   []Lister{hn, feeds, arxiv, reddit},
 		logger:    logger,
 	}
 }
