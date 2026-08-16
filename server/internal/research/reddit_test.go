@@ -142,3 +142,64 @@ func TestIsRedditThread(t *testing.T) {
 		})
 	}
 }
+
+const redlibPage = `<html><body>
+<div class="post">
+  <a href="/r/kubernetes/comments/abc123/migration_from_nginx/?sort=top">Migration from ingress-nginx to cilium: good/bad/ugly</a>
+  <a href="/r/kubernetes/comments/abc123/migration_from_nginx/#comments">45 comments</a>
+</div>
+<div class="post">
+  <a href="/r/devops/comments/def456/gateway_api_maintainer/">Gateway API for Ingress-NGINX - a Maintainer's Perspective</a>
+  <a href="/r/devops/comments/def456/gateway_api_maintainer/">my comment</a>
+</div>
+<a href="/r/kubernetes/">r/kubernetes</a>
+</body></html>`
+
+func TestParseRedlibThreads(t *testing.T) {
+	got := parseRedlibThreads(redlibPage, 10)
+
+	if len(got) != 2 {
+		t.Fatalf("got %d threads, want 2: %+v", len(got), got)
+	}
+
+	// Citations must point at reddit.com. Mirrors are a way of reading Reddit,
+	// not a place to send a reader — they come and go, and a citation pointing
+	// at one rots with it.
+	for _, s := range got {
+		if !strings.HasPrefix(s.URL, "https://www.reddit.com/r/") {
+			t.Errorf("URL %q was not rewritten back to reddit.com", s.URL)
+		}
+		if strings.ContainsAny(s.URL, "?#") {
+			t.Errorf("URL %q kept the mirror's query parameters", s.URL)
+		}
+		if s.Site != "reddit.com" {
+			t.Errorf("site = %q", s.Site)
+		}
+	}
+	if !strings.Contains(got[0].Title, "Migration from ingress-nginx") {
+		t.Errorf("first title = %q", got[0].Title)
+	}
+}
+
+// "45 comments" and "my comment" are links to the same thread, not titles.
+func TestParseRedlibThreads_SkipsNonTitleLinks(t *testing.T) {
+	for _, s := range parseRedlibThreads(redlibPage, 10) {
+		if strings.Contains(s.Title, "comments") || s.Title == "my comment" {
+			t.Errorf("kept a non-title link as a source: %q", s.Title)
+		}
+	}
+}
+
+func TestParseRedlibThreads_RespectsLimit(t *testing.T) {
+	if got := parseRedlibThreads(redlibPage, 1); len(got) != 1 {
+		t.Errorf("got %d threads, want 1", len(got))
+	}
+}
+
+// Markup we do not recognise returns nothing, so the caller falls back to
+// reddit.com rather than inventing results.
+func TestParseRedlibThreads_UnknownMarkupReturnsNothing(t *testing.T) {
+	if got := parseRedlibThreads("<html><body><p>nothing here</p></body></html>", 10); len(got) != 0 {
+		t.Errorf("got %+v, want nothing from unrecognised markup", got)
+	}
+}
