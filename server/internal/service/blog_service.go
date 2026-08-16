@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -33,6 +34,12 @@ type BlogService interface {
 	// CanPublish reports whether the CMS connection is configured, so the UI
 	// can disable the action instead of offering a button that always fails.
 	CanPublish() bool
+	// Provider is the LLM provider the writing pipeline is bound to, and
+	// EffectiveModels what each role falls back to. Both are for the model
+	// picker, so it can offer only models that will work and show what an
+	// unset choice resolves to.
+	Provider() string
+	EffectiveModels() map[string]string
 	// EnsureArticleWriter resolves the org's built-in Article Writer, creating
 	// it if it is missing. Runs are attributed to it.
 	EnsureArticleWriter(ctx context.Context, orgID uuid.UUID) (*model.Agent, error)
@@ -70,6 +77,23 @@ func (s *blogService) CanPublish() bool {
 	return s.runner != nil && s.runner.CanPublish()
 }
 
+func (s *blogService) Provider() string {
+	if s.runner == nil {
+		return ""
+	}
+	return s.runner.ProviderName()
+}
+
+// EffectiveModels returns an empty map rather than nil when there is no runner,
+// so the UI receives {} and renders no inherited value — instead of null, which
+// it would have to special-case.
+func (s *blogService) EffectiveModels() map[string]string {
+	if s.runner == nil {
+		return map[string]string{}
+	}
+	return s.runner.EffectiveModels()
+}
+
 // articleWriterSeed is the built-in agent definition. It must stay in step with
 // the backfill in migration 000019 — that covers organizations which already
 // existed, this covers everything created since.
@@ -90,6 +114,28 @@ func articleWriterSeed(orgID uuid.UUID) *model.Agent {
 		EngineConfig: map[string]any{},
 		Metadata:     map[string]any{model.MetadataKeyBuiltin: model.BuiltinArticleWriter},
 	}
+}
+
+// agentModels reads the model choices set on the Article Writer in the UI.
+//
+// Both are optional and a blank one simply falls through to the server's
+// settings, so an org that has never opened the agent page is unaffected. The
+// values are not validated against the installed models here: the picker offers
+// what the provider actually has, and a stale name is better surfaced as a
+// clear failure from the provider than silently swapped for something else.
+func agentModels(agent *model.Agent) (prose, structured string) {
+	if agent == nil {
+		return "", ""
+	}
+	if agent.ModelName != nil {
+		prose = strings.TrimSpace(*agent.ModelName)
+	}
+	if agent.EngineConfig != nil {
+		if v, ok := agent.EngineConfig[model.EngineConfigStructuredModel].(string); ok {
+			structured = strings.TrimSpace(v)
+		}
+	}
+	return prose, structured
 }
 
 func (s *blogService) EnsureArticleWriter(ctx context.Context, orgID uuid.UUID) (*model.Agent, error) {
@@ -418,11 +464,17 @@ func (s *blogService) runGeneration(run *model.BlogRun, agent *model.Agent, req 
 		}
 	}
 
+	// What the org configured on the agent in the UI. A model named on this
+	// particular run still wins; see blog.GenerateRequest for the full order.
+	agentProse, agentStructured := agentModels(agent)
+
 	articles, err := s.runner.Generate(ctx, blog.GenerateRequest{
-		OrgID:       run.OrgID,
-		Briefs:      req.Briefs,
-		Model:       req.Model,
-		MaxArticles: req.MaxArticles,
+		OrgID:                run.OrgID,
+		Briefs:               req.Briefs,
+		Model:                req.Model,
+		MaxArticles:          req.MaxArticles,
+		AgentProseModel:      agentProse,
+		AgentStructuredModel: agentStructured,
 	}, tracker.advance)
 
 	completedAt := time.Now()

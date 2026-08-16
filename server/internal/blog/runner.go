@@ -89,6 +89,21 @@ type GenerateRequest struct {
 	Briefs      []model.BlogBrief `json:"briefs"`
 	Model       string            `json:"model,omitempty"`        // optional override for the LLM
 	MaxArticles int               `json:"max_articles,omitempty"` // safety cap; 0 = no cap below hard limit
+
+	// AgentProseModel and AgentStructuredModel are what the org configured on
+	// the Article Writer agent itself, in the UI.
+	//
+	// They are filled in by the caller that knows about agents rather than read
+	// here, because this package deliberately knows nothing about the agent
+	// registry — it is handed a request and writes an article.
+	//
+	// These sit between the per-run override and the server's environment
+	// settings: a model chosen for this one run beats the agent's standing
+	// choice, and the agent's standing choice beats what the server was started
+	// with. Until this existed the UI's model picker saved a value nothing ever
+	// read, which is worse than not offering the control at all.
+	AgentProseModel      string
+	AgentStructuredModel string
 }
 
 // Researcher is the slice of service.ResearchService this package consumes.
@@ -98,29 +113,32 @@ type Researcher interface {
 	Research(ctx context.Context, orgID uuid.UUID, req research.Request, progress research.ProgressFunc) (*research.Brief, error)
 }
 
-// proseModel is the model for calls that produce article text.
+// Model choice runs through one order of precedence, most specific first:
 //
-// A per-request override still wins over both settings. Someone who names a
-// model in the UI is asking for that model, not for a routing policy.
-func (r *Runner) proseModel(requested string) string {
-	if strings.TrimSpace(requested) != "" {
-		return requested
+//  1. the model named on this run          — "use this, just now"
+//  2. the model set on the agent in the UI  — "this is what this agent uses"
+//  3. the matching environment setting      — how the server was started
+//  4. BLOG_MODEL, then the provider default
+//
+// Each step is a narrower statement of intent than the one below it, so the
+// more specific answer wins.
+func firstNonBlank(values ...string) string {
+	for _, v := range values {
+		if s := strings.TrimSpace(v); s != "" {
+			return s
+		}
 	}
-	if m := strings.TrimSpace(r.cfg.ProseModel); m != "" {
-		return m
-	}
-	return r.cfg.Model
+	return ""
+}
+
+// proseModel is the model for calls that produce article text.
+func (r *Runner) proseModel(req GenerateRequest) string {
+	return firstNonBlank(req.Model, req.AgentProseModel, r.cfg.ProseModel, r.cfg.Model)
 }
 
 // structuredModel is the model for calls that must return JSON.
-func (r *Runner) structuredModel(requested string) string {
-	if strings.TrimSpace(requested) != "" {
-		return requested
-	}
-	if m := strings.TrimSpace(r.cfg.StructuredModel); m != "" {
-		return m
-	}
-	return r.cfg.Model
+func (r *Runner) structuredModel(req GenerateRequest) string {
+	return firstNonBlank(req.Model, req.AgentStructuredModel, r.cfg.StructuredModel, r.cfg.Model)
 }
 
 // HardMaxArticles is the safety ceiling regardless of what the caller asks
