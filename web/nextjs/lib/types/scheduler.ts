@@ -1,9 +1,15 @@
+/**
+ * What a scheduled task fires. "blog" runs the article pipeline, which can
+ * either write supplied topics or discover a trending one each time it fires.
+ */
+export type ScheduledTaskType = "agent" | "workflow" | "blog";
+
 export interface ScheduledTask {
   id: string;
   org_id: string;
   name: string;
   description: string | null;
-  task_type: "agent" | "workflow";
+  task_type: ScheduledTaskType;
   agent_id: string | null;
   workflow_id: string | null;
   input_prompt: string;
@@ -31,7 +37,7 @@ export interface ScheduledTask {
 export interface CreateScheduledTaskRequest {
   name: string;
   description?: string;
-  task_type: "agent" | "workflow";
+  task_type: ScheduledTaskType;
   agent_id?: string;
   workflow_id?: string;
   input_prompt: string;

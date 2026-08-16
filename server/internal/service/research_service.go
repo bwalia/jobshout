@@ -27,6 +27,10 @@ type ResearchService interface {
 	// and infrastructure, for callers that need a subject rather than research
 	// on one they already have.
 	Trending(ctx context.Context, limit int) ([]research.TrendingItem, error)
+	// Discover turns what is trending into subjects worth writing about,
+	// skipping anything in avoid. This is the raw material a scheduled run
+	// works from when nobody supplied a topic.
+	Discover(ctx context.Context, orgID uuid.UUID, req research.DiscoverRequest, progress research.ProgressFunc) ([]research.Topic, error)
 	// EnsureResearcher resolves the org's built-in Research Agent, creating it
 	// if missing, so research runs are attributed and visible on the board.
 	EnsureResearcher(ctx context.Context, orgID uuid.UUID) (*model.Agent, error)
@@ -129,6 +133,30 @@ func (s *researchService) Research(
 		)
 	}
 	return brief, nil
+}
+
+func (s *researchService) Discover(
+	ctx context.Context,
+	orgID uuid.UUID,
+	req research.DiscoverRequest,
+	progress research.ProgressFunc,
+) ([]research.Topic, error) {
+	if !s.Available() {
+		return nil, fmt.Errorf("research_svc: topic discovery is not configured (an LLM provider must be reachable)")
+	}
+	// Best-effort, for the same reason as Research: attribution should not be
+	// able to fail the work it is describing.
+	if _, err := s.EnsureResearcher(ctx, orgID); err != nil {
+		s.logger.Warn("research: could not resolve the built-in agent for discovery", zap.Error(err))
+	}
+
+	topics, err := s.agent.Discover(ctx, req, progress)
+	if err != nil {
+		return nil, err
+	}
+	s.logger.Info("research: discovery complete",
+		zap.Int("topics", len(topics)), zap.Int("avoided", len(req.Avoid)))
+	return topics, nil
 }
 
 func (s *researchService) Trending(ctx context.Context, limit int) ([]research.TrendingItem, error) {

@@ -1,7 +1,8 @@
 // Package scheduler provides a background cron dispatcher that executes
-// due model.ScheduledTask rows. Tasks whose input_json contains a "blog"
-// key trigger the blog pipeline; everything else routes to the existing
-// WorkflowService/ExecutionService paths.
+// due model.ScheduledTask rows. Tasks of type "blog" trigger the article
+// pipeline — including runs that discover their own trending topic — and
+// everything else routes to the existing WorkflowService/ExecutionService
+// paths.
 //
 // The dispatcher ticks every 30s. That cadence matches typical "run every
 // hour / run every Monday" schedules with negligible overhead, without
@@ -279,6 +280,12 @@ func (r *Runner) dispatchMultiAgent(ctx context.Context, t model.ScheduledTask, 
 }
 
 func isBlogTask(t model.ScheduledTask) bool {
+	// The task type is the current way to say this. The tag and the input
+	// marker below predate it and are still honoured, because tasks created
+	// that way are sitting in the database and must keep firing.
+	if t.TaskType == "blog" {
+		return true
+	}
 	if len(t.Tags) > 0 {
 		for _, tag := range t.Tags {
 			if tag == "blog" {
@@ -311,4 +318,3 @@ func blogRequestFromInput(in map[string]any) (model.GenerateBlogRequest, error) 
 	}
 	return req, nil
 }
-

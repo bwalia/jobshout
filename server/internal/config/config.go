@@ -98,6 +98,12 @@ type Config struct {
 	// is a label in the UI rather than a path on disk.
 	BlogContentDir string `mapstructure:"BLOG_CONTENT_DIR"`
 	BlogAuthorName string `mapstructure:"BLOG_AUTHOR_NAME"`
+
+	// GitHubToken is optional. The research agent reads GitHub through its
+	// public API, which allows 60 requests an hour unauthenticated — enough to
+	// try, not enough for a busy schedule. A token raises the ceiling to 5000
+	// and needs no scopes for public repositories.
+	GitHubToken string `mapstructure:"GITHUB_TOKEN"`
 }
 
 // AccessTokenExpiry returns the access token expiry duration.
@@ -192,6 +198,7 @@ func Load() (*Config, error) {
 		OpsAPITimeout:        viper.GetDuration("OPSAPI_TIMEOUT"),
 		BlogContentDir:       viper.GetString("BLOG_CONTENT_DIR"),
 		BlogAuthorName:       viper.GetString("BLOG_AUTHOR_NAME"),
+		GitHubToken:          viper.GetString("GITHUB_TOKEN"),
 
 		DatabaseConnectTimeout: viper.GetDuration("DATABASE_CONNECT_TIMEOUT"),
 		AutoModelSelection:     viper.GetBool("AUTO_MODEL_SELECTION"),

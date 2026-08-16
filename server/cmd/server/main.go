@@ -155,7 +155,7 @@ func main() {
 	// access. They need no credentials, so they register unconditionally — any
 	// agent can be granted them through its tool permissions, and the Article
 	// Writer is built on them.
-	researchClient := research.New(logger)
+	researchClient := research.New(logger, cfg.GitHubToken)
 	for _, rt := range tools.NewResearchTools(researchClient) {
 		toolRegistry.Register(rt)
 	}
@@ -284,7 +284,7 @@ func main() {
 				"(set OPSAPI_BASE_URL, OPSAPI_TOKEN and OPSAPI_NAMESPACE)")
 		}
 	}
-	blogSvc := service.NewBlogService(blogRunner, blogRepo, agentRepo, logger)
+	blogSvc := service.NewBlogService(blogRunner, blogRepo, researchSvc, agentRepo, logger)
 
 	// ─── Autonomous agent engine ────────────────────────────────────────────
 	autonomousExec := executor.NewAutonomousExecutor(goNativeExec, llmRouter, memoryRepo, goalRepo, logger).WithAutoSelect(autoSelector)

@@ -119,10 +119,15 @@ func TestGenerateBlogRequest_Validate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			// Reserved in the contract but not yet honoured. Refusing is the
-			// honest answer — accepting it would silently write nothing.
-			name:    "trending is refused until discovery lands",
+			// A trending run has no topics yet — discovery finds them when it
+			// starts — so there is nothing to require here.
+			name:    "trending needs no briefs",
 			req:     GenerateBlogRequest{Trending: true, TrendingCount: 3},
+			wantErr: false,
+		},
+		{
+			name:    "negative trending count is refused",
+			req:     GenerateBlogRequest{Trending: true, TrendingCount: -1},
 			wantErr: true,
 		},
 	}
@@ -135,6 +140,35 @@ func TestGenerateBlogRequest_Validate(t *testing.T) {
 			}
 			if !tt.wantErr && err != nil {
 				t.Errorf("Validate() = %v, want nil", err)
+			}
+		})
+	}
+}
+
+func TestResolvedTrendingCount(t *testing.T) {
+	tests := []struct {
+		name    string
+		req     GenerateBlogRequest
+		hardMax int
+		want    int
+	}{
+		{"unset uses the default", GenerateBlogRequest{Trending: true}, 10, DefaultTrendingCount},
+		{"explicit count honoured", GenerateBlogRequest{Trending: true, TrendingCount: 3}, 10, 3},
+		{"capped by the hard max", GenerateBlogRequest{Trending: true, TrendingCount: 50}, 10, 10},
+		{
+			// A caller that set both meant the stricter of the two.
+			name:    "capped by max_articles",
+			req:     GenerateBlogRequest{Trending: true, TrendingCount: 8, MaxArticles: 2},
+			hardMax: 10,
+			want:    2,
+		},
+		{"zero uses the default", GenerateBlogRequest{Trending: true, TrendingCount: 0}, 10, DefaultTrendingCount},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.req.ResolvedTrendingCount(tt.hardMax); got != tt.want {
+				t.Errorf("ResolvedTrendingCount(%d) = %d, want %d", tt.hardMax, got, tt.want)
 			}
 		})
 	}

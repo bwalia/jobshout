@@ -129,6 +129,9 @@ func (p ProgressFunc) report(phase, detail string) {
 
 // Research phases, reported through ProgressFunc.
 const (
+	// PhaseDiscovering is the topic-discovery sweep, which runs before any
+	// research when the caller has not supplied a subject.
+	PhaseDiscovering = "researching_discover"
 	PhasePlanning    = "researching_plan"
 	PhaseSearching   = "researching_search"
 	PhaseReading     = "researching_read"

@@ -22,6 +22,15 @@ type BlogRepository interface {
 	// transition, so it is deliberately narrow — a full Update would race with
 	// the terminal write that happens at the end of a run.
 	UpdateSteps(ctx context.Context, runID uuid.UUID, steps []model.BlogStep) error
+	// UpdateBriefs persists what a run is writing about, for runs that did not
+	// know at creation time.
+	//
+	// A trending run is created with no topics and discovers them once it
+	// starts, and Update deliberately does not touch briefs — it is the
+	// terminal write, and a run's subject is not something it should be able to
+	// change on completion. So discovery gets its own narrow writer, for the
+	// same reason UpdateSteps has one.
+	UpdateBriefs(ctx context.Context, runID uuid.UUID, briefs []model.BlogBrief, topics []string) error
 	GetByID(ctx context.Context, id uuid.UUID) (*model.BlogRun, error)
 	ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.BlogRun], error)
 	// Delete removes a run. Its articles go with it via ON DELETE CASCADE.
@@ -183,6 +192,28 @@ func (r *blogRepository) UpdateSteps(ctx context.Context, runID uuid.UUID, steps
 	return nil
 }
 
+func (r *blogRepository) UpdateBriefs(
+	ctx context.Context, runID uuid.UUID, briefs []model.BlogBrief, topics []string,
+) error {
+	briefsJSON, err := json.Marshal(briefs)
+	if err != nil {
+		return fmt.Errorf("blog_repo: marshal briefs: %w", err)
+	}
+	topicsJSON, err := json.Marshal(topics)
+	if err != nil {
+		return fmt.Errorf("blog_repo: marshal topics: %w", err)
+	}
+
+	// Both columns move together: topics is the topic-only projection of
+	// briefs, and letting them disagree would give the legacy readers a
+	// different answer than the current ones.
+	const sql = `UPDATE blog_runs SET briefs = $2, topics = $3 WHERE id = $1`
+	if _, err := r.pool.Exec(ctx, sql, runID, briefsJSON, topicsJSON); err != nil {
+		return fmt.Errorf("blog_repo: update briefs: %w", err)
+	}
+	return nil
+}
+
 func (r *blogRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.BlogRun, error) {
 	sql := `SELECT ` + blogRunColumns + ` FROM blog_runs WHERE id = $1`
 	run, err := scanBlogRun(r.pool.QueryRow(ctx, sql, id))
@@ -308,15 +339,40 @@ func (r *blogRepository) GetArticle(ctx context.Context, id uuid.UUID) (*model.B
 }
 
 func (r *blogRepository) RecentTopics(ctx context.Context, orgID uuid.UUID, since time.Time) ([]string, error) {
+	// Two sources, unioned, because an article is written minutes after the
+	// topic is chosen.
+	//
+	// blog_articles alone is what a finished piece looks like — but a run that
+	// has picked a subject and is still writing it has no article yet, so a
+	// second run starting in that window sees nothing and picks the same thing.
+	// That is not hypothetical: two runs 44 seconds apart produced the same
+	// article during testing. A claimed topic has to count as taken from the
+	// moment it is claimed.
+	//
+	// Failed runs are excluded on purpose. Their subject was attempted and not
+	// delivered, so it should be available again rather than locked out for a
+	// fortnight by a run that produced nothing.
+	//
 	// DISTINCT ON collapses repeats of the same topic to its most recent
-	// article, so a subject written three times contributes one row. The outer
+	// mention, so a subject seen three times contributes one row. The outer
 	// ordering is what the caller asked for; the inner one is what DISTINCT ON
 	// requires to pick which duplicate survives.
 	const sql = `
 		SELECT topic FROM (
-		    SELECT DISTINCT ON (topic) topic, created_at
-		    FROM blog_articles
-		    WHERE org_id = $1 AND created_at >= $2
+		    SELECT DISTINCT ON (topic) topic, created_at FROM (
+		        SELECT topic, created_at
+		        FROM blog_articles
+		        WHERE org_id = $1 AND created_at >= $2
+
+		        UNION ALL
+
+		        SELECT b->>'topic' AS topic, r.created_at
+		        FROM blog_runs r, jsonb_array_elements(r.briefs) b
+		        WHERE r.org_id = $1
+		          AND r.created_at >= $2
+		          AND r.status <> 'failed'
+		          AND COALESCE(b->>'topic', '') <> ''
+		    ) all_topics
 		    ORDER BY topic, created_at DESC
 		) t
 		ORDER BY created_at DESC`
