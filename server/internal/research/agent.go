@@ -472,7 +472,8 @@ Respond with JSON only, in exactly this shape:
 
 // docExcerptChars bounds how much of a document is shown to the model during
 // extraction. Enough to cover an article's substance without spending the
-// context window on one long page.
+// context window on one long page. Which slice of the document that is, is
+// decided by proseExcerpt rather than by taking the head — see excerpt.go.
 const docExcerptChars = 6000
 
 // extractAll pulls claims from every document.
@@ -524,7 +525,7 @@ Rules:
 
 Respond with JSON only, in exactly this shape:
 {"findings": [{"claim": "...", "quote": "..."}]}`,
-		req.Topic, doc.URL, doc.Title, truncate(doc.Text, docExcerptChars))
+		req.Topic, doc.URL, doc.Title, proseExcerpt(doc.Text, docExcerptChars))
 
 	resp, err := a.generate(ctx, req.Model, prompt)
 	if err != nil {
