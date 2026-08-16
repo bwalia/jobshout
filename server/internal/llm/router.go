@@ -18,6 +18,11 @@ type Router struct {
 	embedders map[string]Embedder
 	// defaultEmbeddingProvider is used when no explicit provider is requested.
 	defaultEmbeddingProvider string
+
+	// modelCache memoises per-provider model discovery. It is a value, not a
+	// pointer, so a Router built as a composite literal (NewTestRouter) is
+	// usable without further initialisation.
+	modelCache modelCache
 }
 
 // NewRouter builds a Router pre-populated with the configured LLM providers.
@@ -36,7 +41,7 @@ func NewRouter(cfg *config.Config) *Router {
 	// every request carries a freshly minted JWT.
 	r.clients["ollama"] = NewOllamaClientWithAuth(
 		cfg.OllamaBaseURL, cfg.OllamaDefaultModel, cfg.OllamaJWTSecret, cfg.OllamaTimeout,
-	)
+	).WithNumCtx(cfg.OllamaNumCtx)
 
 	// OpenAI (and compatible endpoints) are registered when an API key is set.
 	openAIBase := cfg.OpenAIBaseURL

@@ -17,7 +17,8 @@ import {
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AgentStatusBadge } from "@/components/agent/AgentStatusBadge";
-import { useAgent } from "@/lib/hooks/useAgents";
+import { useAgent, useUpdateAgent } from "@/lib/hooks/useAgents";
+import { ModelPicker } from "@/components/agent/ModelPicker";
 import { useTasks } from "@/lib/hooks/useTasks";
 import { KnowledgeFileList } from "@/components/agent/KnowledgeFileList";
 import { KnowledgeEditor } from "@/components/agent/KnowledgeEditor";
@@ -99,6 +100,43 @@ function DetailRow({
   );
 }
 
+/**
+ * Editable model row. Saves on change — useUpdateAgent already invalidates the
+ * detail and list queries and raises a toast either way, so a separate Save
+ * button would add a step without adding feedback.
+ */
+function ModelRow({
+  agent,
+}: {
+  agent: NonNullable<ReturnType<typeof useAgent>["data"]>;
+}) {
+  const { mutate: updateAgent, isPending } = useUpdateAgent();
+
+  return (
+    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+      <dt className="text-sm text-muted-foreground sm:w-40 sm:shrink-0">
+        Model
+      </dt>
+      <dd className="w-full sm:max-w-sm">
+        <ModelPicker
+          value={{
+            provider: agent.model_provider ?? "",
+            model: agent.model_name ?? "",
+          }}
+          disabled={isPending}
+          onChange={(v) =>
+            updateAgent({
+              id: agent.id,
+              payload: { model_provider: v.provider, model_name: v.model },
+            })
+          }
+          className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+        />
+      </dd>
+    </div>
+  );
+}
+
 /** Overview tab: agent details, description, system prompt. */
 function OverviewTab({ agent }: { agent: NonNullable<ReturnType<typeof useAgent>["data"]> }) {
   return (
@@ -110,8 +148,7 @@ function OverviewTab({ agent }: { agent: NonNullable<ReturnType<typeof useAgent>
         </h3>
         <dl className="space-y-3 rounded-lg border border-border bg-card p-5">
           <DetailRow label="Role" value={agent.role} />
-          <DetailRow label="Model Provider" value={agent.model_provider} />
-          <DetailRow label="Model Name" value={agent.model_name} />
+          <ModelRow agent={agent} />
           <DetailRow
             label="Created"
             value={new Date(agent.created_at).toLocaleDateString()}

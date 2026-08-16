@@ -6,7 +6,45 @@
 fallback ordering), the `"auto"` sentinel, wiring into both the ReAct executor and the
 autonomous planner/reflector, the `AUTO_MODEL_SELECTION` config flag, and chart plumbing.
 
+**Landed since (live model discovery):**
+
+- `llm.ModelLister` + `OllamaClient.ListModels` probe `/api/tags`, so the models a
+  provider can actually run are discovered rather than hardcoded. `Router.AvailableModels`
+  caches per provider with a 60s TTL and degrades to a static list per provider on error;
+  `Router.CachedModels` is the non-blocking accessor the selector uses, so selection never
+  makes a network call.
+- `Selector.WithDynamicCatalog` merges discovered candidates over the static catalog. A
+  provider with live discovery replaces its static entries entirely, so uninstalled models
+  are not resurrected. `New(...)` is unchanged, and the static catalog remains the fallback.
+- `GET /api/v1/llm-providers/models` exposes the list, and the agent create dialog and
+  agent detail page both render it as a grouped picker with an `Auto` option.
+- Native tool-calling is now a **ranking preference, not a filter**. It was rejecting every
+  local model from any task needing tools, even though the executor's ReAct
+  JSON-in-prompt loop handles exactly that case — which is how Ollama agents already run.
+- `OLLAMA_NUM_CTX` (default 8192) is now sent on every call. Without it Ollama applies its
+  own server-side default and *silently truncates* a long prompt instead of refusing it,
+  which would have made the discovered context window a fiction. `FromModelInfo` applies
+  the same ceiling so the selector believes exactly what the client will request.
+
+Quality and Speed for discovered models come from a parameter-count heuristic in
+`modelselect/discovery.go`. It has no measurement behind it and is documented as such:
+it ignores model age, training quality and quantization, and it needs an explicit
+adjustment for mixture-of-experts models. `maxLocalQuality = 6` caps it so a wrong score
+can only ever misroute cheap work — a heuristically-scored local model can take
+classify/summarize/step/reflect/chat, but never `code` (bar 7) or `plan` (bar 8).
+
 **Not yet built** — deliberately deferred, each worth its own change:
+
+- Real Ollama native tool-calling. `ollamaChatRequest` has no `tools` field and
+  `ollamaChatResponse` no `tool_calls`, so `OllamaClient.SupportsTools()` correctly stays
+  `false` — a false negative costs only the ReAct fallback, which works, whereas a false
+  positive silently breaks a run. Implementing it needs a model-aware capability interface
+  (Ollama tool support is per-*model*), a `ToolName` on `llm.Message` (Ollama emits no
+  tool-call IDs and correlates by name), and `ToolCalls` on `ollamaMessage` — without which
+  the assistant turn is echoed back stripped of its tool calls and the model re-requests
+  the same tool until `MaxIterations`, a silent loop rather than an error. It must also be
+  preceded by fixing the approval gate: `runNative` hard-fails on any gated tool
+  (`executor.go:683-691`) where the ReAct path pauses and resumes correctly.
 
 - Persisting the decision (provider/model/reason) on the execution record. Needs
   migration `000019`, a model field, and repository plumbing. Today the reason is

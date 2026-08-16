@@ -14,18 +14,96 @@ import (
 )
 
 type LLMProviderHandler struct {
-	repo      repository.LLMProviderRepository
-	router    *llm.Router
-	validate  *validator.Validate
+	repo     repository.LLMProviderRepository
+	router   *llm.Router
+	validate *validator.Validate
+	// autoEnabled mirrors AUTO_MODEL_SELECTION so the model picker only offers
+	// "Auto" when the server would actually honour it.
+	autoEnabled bool
 }
 
-func NewLLMProviderHandler(repo repository.LLMProviderRepository, router *llm.Router) *LLMProviderHandler {
-	return &LLMProviderHandler{repo: repo, router: router, validate: validator.New()}
+func NewLLMProviderHandler(repo repository.LLMProviderRepository, router *llm.Router, autoEnabled bool) *LLMProviderHandler {
+	return &LLMProviderHandler{repo: repo, router: router, validate: validator.New(), autoEnabled: autoEnabled}
 }
 
 // ListBuiltin returns the providers registered in the LLM router (env-based).
 func (h *LLMProviderHandler) ListBuiltin(w http.ResponseWriter, r *http.Request) {
 	RespondJSON(w, http.StatusOK, h.router.RegisteredProviders())
+}
+
+// AvailableModelsResponse is the payload behind the per-agent model picker.
+type AvailableModelsResponse struct {
+	Auto      AutoOption           `json:"auto"`
+	Providers []ProviderModelGroup `json:"providers"`
+}
+
+// AutoOption describes the "let the platform choose" entry.
+type AutoOption struct {
+	Available bool   `json:"available"`
+	Label     string `json:"label"`
+}
+
+// ProviderModelGroup is one provider's models, ready to render as an optgroup.
+type ProviderModelGroup struct {
+	Provider  string           `json:"provider"`
+	IsDefault bool             `json:"is_default"`
+	Source    string           `json:"source"`
+	Models    []AvailableModel `json:"models"`
+	Error     string           `json:"error,omitempty"`
+}
+
+// AvailableModel is one selectable model.
+type AvailableModel struct {
+	Name           string   `json:"name"`
+	ContextTokens  int      `json:"context_tokens"`
+	ParameterSize  string   `json:"parameter_size,omitempty"`
+	Capabilities   []string `json:"capabilities"`
+	SupportsTools  bool     `json:"supports_tools"`
+	SupportsVision bool     `json:"supports_vision"`
+}
+
+// ListModels returns every model each registered provider can actually run, for
+// the per-agent model picker.
+//
+// Embedding-only models are filtered out here rather than in discovery, so the
+// llm layer stays faithful to what a provider reported and the embedder code can
+// still use it. Providers that are not registered never appear at all; Error is
+// reserved for a registered provider whose probe failed.
+func (h *LLMProviderHandler) ListModels(w http.ResponseWriter, r *http.Request) {
+	discovered := h.router.AvailableModels(r.Context())
+
+	groups := make([]ProviderModelGroup, 0, len(discovered))
+	for _, pm := range discovered {
+		models := make([]AvailableModel, 0, len(pm.Models))
+		for _, m := range pm.Models {
+			if m.IsEmbeddingOnly() {
+				continue
+			}
+			models = append(models, AvailableModel{
+				Name:           m.Name,
+				ContextTokens:  m.ContextTokens,
+				ParameterSize:  m.ParameterSize,
+				Capabilities:   m.Capabilities,
+				SupportsTools:  m.SupportsTools(),
+				SupportsVision: m.SupportsVision(),
+			})
+		}
+		groups = append(groups, ProviderModelGroup{
+			Provider:  pm.Provider,
+			IsDefault: pm.IsDefault,
+			Source:    pm.Source,
+			Models:    models,
+			Error:     pm.Error,
+		})
+	}
+
+	RespondJSON(w, http.StatusOK, AvailableModelsResponse{
+		Auto: AutoOption{
+			Available: h.autoEnabled,
+			Label:     "Auto — best model per task",
+		},
+		Providers: groups,
+	})
 }
 
 // List returns all user-managed LLM provider configs for the org.

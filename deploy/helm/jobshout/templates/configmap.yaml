@@ -21,6 +21,7 @@ data:
   OLLAMA_BASE_URL: {{ .Values.ai.ollamaBaseURL | quote }}
   OLLAMA_DEFAULT_MODEL: {{ .Values.ai.ollamaModel | quote }}
   OLLAMA_TIMEOUT: {{ .Values.ai.ollamaTimeout | default "3m" | quote }}
+  OLLAMA_NUM_CTX: {{ .Values.ai.ollamaNumCtx | default 8192 | quote }}
   OPENAI_BASE_URL: {{ .Values.ai.openaiBaseURL | quote }}
   OPENAI_DEFAULT_MODEL: {{ .Values.ai.openaiModel | quote }}
   PYTHON_SIDECAR_URL: "http://python-runtime:8001"

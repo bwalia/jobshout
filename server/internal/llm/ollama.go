@@ -19,8 +19,16 @@ import (
 type OllamaClient struct {
 	BaseURL      string
 	DefaultModel string
-	auth         *ollamaAuth
-	httpClient   *http.Client
+	// NumCtx is the context window requested per call via Ollama's num_ctx
+	// option. Without it Ollama silently applies its own server-side default
+	// regardless of what the model supports, so a large prompt is truncated
+	// rather than refused — see effectiveNumCtx.
+	NumCtx     int
+	auth       *ollamaAuth
+	httpClient *http.Client
+	// models caches what ListModels learned, so per-model capability and
+	// context questions can be answered without another round trip.
+	models ollamaModelCache
 }
 
 // NewOllamaClient creates an OllamaClient talking to a plain Ollama server.
@@ -51,6 +59,42 @@ func NewOllamaClientWithAuth(baseURL, defaultModel, gatewaySecret string, timeou
 // defaultOllamaTimeout applies when none is configured.
 const defaultOllamaTimeout = 3 * time.Minute
 
+// DefaultOllamaNumCtx is the context window requested when none is configured.
+// It matches Ollama's own historical default, so behaviour is unchanged for
+// anyone who does not set OLLAMA_NUM_CTX.
+const DefaultOllamaNumCtx = 8192
+
+// effectiveNumCtx decides the num_ctx to request for a model.
+//
+// It is the configured ceiling, lowered to the model's architectural limit when
+// discovery knows it — asking for more than a model can hold is an error on some
+// Ollama builds and wasted VRAM on the rest. When the model is unknown the
+// configured value is used as-is.
+//
+// modelselect applies this SAME ceiling when building candidates, so the
+// selector's belief about a context window matches what will actually be
+// requested. If these two ever disagree, the selector will approve prompts that
+// get silently truncated.
+func (c *OllamaClient) effectiveNumCtx(model string) int {
+	want := c.NumCtx
+	if want <= 0 {
+		want = DefaultOllamaNumCtx
+	}
+	if limit := c.ContextTokensFor(model); limit > 0 && limit < want {
+		return limit
+	}
+	return want
+}
+
+// WithNumCtx sets the context window requested per call. Zero or negative keeps
+// DefaultOllamaNumCtx. Returns the client so it can be chained onto a
+// constructor, which is why this is a setter rather than another positional
+// parameter on NewOllamaClientWithAuth.
+func (c *OllamaClient) WithNumCtx(n int) *OllamaClient {
+	c.NumCtx = n
+	return c
+}
+
 // UsesGateway reports whether requests are being signed for a JWT gateway.
 // Surfaced so startup logging can state which mode is in effect.
 func (c *OllamaClient) UsesGateway() bool { return c.auth.enabled() }
@@ -76,6 +120,7 @@ type ollamaMessage struct {
 
 type ollamaOptions struct {
 	NumPredict  int     `json:"num_predict,omitempty"`
+	NumCtx      int     `json:"num_ctx,omitempty"`
 	Temperature float64 `json:"temperature,omitempty"`
 }
 
@@ -104,6 +149,7 @@ func (c *OllamaClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 	if req.MaxTokens > 0 {
 		opts.NumPredict = req.MaxTokens
 	}
+	opts.NumCtx = c.effectiveNumCtx(model)
 
 	body := ollamaChatRequest{
 		Model:    model,

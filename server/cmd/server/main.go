@@ -124,7 +124,14 @@ func main() {
 		// Whether the secret is set, never the secret itself.
 		zap.Bool("ollama_gateway_auth", cfg.OllamaJWTSecret != ""),
 		zap.Duration("ollama_timeout", cfg.OllamaTimeout),
+		zap.Int("ollama_num_ctx", cfg.OllamaNumCtx),
 	)
+
+	// Warm the model-discovery cache so the picker and auto-selection have a
+	// live answer from the first request, then keep it fresh in the background.
+	// Best-effort throughout: a provider that cannot be probed degrades to its
+	// static list rather than failing startup.
+	startModelDiscovery(llmRouter, logger)
 
 	// ─── Embedding + knowledge ingestion (RAG foundation) ────────────────────
 	knowledgeChunkRepo := repository.NewKnowledgeChunkRepository(pool)
@@ -218,7 +225,14 @@ func main() {
 	// a provider ignore this entirely; only ModelProvider="auto" consults it.
 	var autoSelector *modelselect.Selector
 	if cfg.AutoModelSelection {
-		autoSelector = modelselect.New(llmRouter, costEng, nil)
+		// The dynamic catalog reads the router's discovery cache, so Auto can
+		// reach the models actually installed rather than the single hardcoded
+		// entry the static catalog carries. It uses the non-blocking accessor:
+		// selection runs on the execution path and must never make a network
+		// call. OllamaNumCtx is passed as the context ceiling so the selector
+		// believes exactly what the client will request.
+		autoSelector = modelselect.New(llmRouter, costEng, nil).
+			WithDynamicCatalog(modelselect.LiveCatalog(llmRouter, cfg.OllamaNumCtx))
 		goNativeExec.WithAutoSelect(autoSelector)
 		logger.Info("auto model selection enabled")
 	} else {
@@ -419,7 +433,7 @@ func main() {
 	engineHandler := handler.NewEngineHandler(lcClient, lgClient, logger)
 	pluginHandler := handler.NewPluginHandler(pluginSvc)
 	streamHandler := handler.NewStreamHandler(bridgeClient, logger)
-	llmProviderHandler := handler.NewLLMProviderHandler(llmProviderRepo, llmRouter)
+	llmProviderHandler := handler.NewLLMProviderHandler(llmProviderRepo, llmRouter, cfg.AutoModelSelection)
 	schedulerHandler := handler.NewSchedulerHandler(schedulerRepo)
 	sessionHandler := handler.NewSessionHandler(sessionRepo)
 	integHandler := handler.NewIntegrationHandler(integSvc)
@@ -667,6 +681,8 @@ func main() {
 			// LLM Provider Configs
 			r.Route("/llm-providers", func(r chi.Router) {
 				r.Get("/builtin", llmProviderHandler.ListBuiltin)
+				// Models actually available to run, for the per-agent picker.
+				r.Get("/models", llmProviderHandler.ListModels)
 				r.Get("/", llmProviderHandler.List)
 				r.Post("/", llmProviderHandler.Create)
 				r.Route("/{providerID}", func(r chi.Router) {
@@ -926,4 +942,44 @@ func main() {
 	}
 
 	logger.Info("server stopped")
+}
+
+// modelDiscoveryInterval is how often the model list is re-probed. Models are
+// installed rarely, so this only needs to be faster than a user's patience after
+// running `ollama pull`.
+const modelDiscoveryInterval = 5 * time.Minute
+
+// startModelDiscovery warms the router's model cache and refreshes it on a
+// ticker.
+//
+// The warm-up is synchronous but bounded, so the first request to the picker
+// does not pay for discovery; the refresh runs for the process lifetime. Every
+// failure is logged and swallowed — a provider that cannot be reached degrades
+// to its static model list, which is far better than refusing to start.
+func startModelDiscovery(router *llm.Router, logger *zap.Logger) {
+	warmCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	for _, pm := range router.RefreshModels(warmCtx) {
+		fields := []zap.Field{
+			zap.String("provider", pm.Provider),
+			zap.String("source", pm.Source),
+			zap.Int("models", len(pm.Models)),
+		}
+		if pm.Error != "" {
+			logger.Warn("model discovery degraded", append(fields, zap.String("error", pm.Error))...)
+			continue
+		}
+		logger.Info("model discovery", fields...)
+	}
+
+	go func() {
+		ticker := time.NewTicker(modelDiscoveryInterval)
+		defer ticker.Stop()
+		for range ticker.C {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			router.RefreshModels(ctx)
+			cancel()
+		}
+	}()
 }

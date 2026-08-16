@@ -26,8 +26,16 @@ test.describe("Agents", () => {
     await page.fill("#agent-name", "Playwright Test Agent");
     await page.fill("#agent-role", "e2e-tester");
     await page.fill("#agent-description", "Created by Playwright E2E test");
-    await page.fill("#agent-model-provider", "ollama");
-    await page.fill("#agent-model-name", "llama3");
+    // The model list is discovered from whichever providers this machine has
+    // configured, so it is environment-dependent by design. Assert on structure
+    // rather than on a model name, and pick the last real option so the test
+    // exercises a genuine selection without requiring a live Ollama.
+    const modelPicker = page.locator("#agent-model");
+    await expect(modelPicker).toBeVisible();
+    const optionCount = await modelPicker.locator("option").count();
+    expect(optionCount).toBeGreaterThan(0);
+    await modelPicker.selectOption({ index: optionCount - 1 });
+
     await page.fill(
       "#agent-system-prompt",
       "You are a test agent for E2E testing.",

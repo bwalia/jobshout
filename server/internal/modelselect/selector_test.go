@@ -114,39 +114,56 @@ func TestSelect_PrefersCheapestThatClearsTheBar(t *testing.T) {
 	}
 }
 
-func TestSelect_ToolTasksNeverPickAToolIncapableModel(t *testing.T) {
+// Native tool-calling ranks a candidate; it does not disqualify one. A model
+// without it still runs tool tasks through the executor's ReAct JSON-in-prompt
+// loop, which is how every Ollama agent works today — so filtering on it would
+// exclude every local model from tool work for no reason.
+func TestSelect_ToolTasksPreferNativeToolCallingButStillAllowReAct(t *testing.T) {
 	s := newSelector(allProviders())
 
-	// KindStep's bar is low enough that ollama would win on cost, but it cannot
-	// do native tool-calling.
+	// ollama is free, so it wins on cost. It cannot do native tool-calling, but
+	// it remains eligible.
 	got, err := s.Select(TaskSignals{Kind: KindStep, PromptTokens: 500, NeedsTools: true}, Constraints{})
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
-	if got.Provider == "ollama" {
-		t.Fatalf("selected ollama for a tool task; it reports SupportsTools() == false")
-	}
-	for _, f := range got.Fallbacks {
-		if f.Provider == "ollama" {
-			t.Errorf("ollama appeared in the fallback chain for a tool task")
-		}
+	if got.Provider != "ollama" {
+		t.Fatalf("Select() = %s/%s; the free local model should still win a tool task on cost",
+			got.Provider, got.Model)
 	}
 }
 
-func TestSelect_ClientWithoutCapabilityInterfaceIsNotToolCapable(t *testing.T) {
-	// openai's model claims tool support in the catalog, but this deployment's
-	// client does not implement llm.ToolCapableClient. Both must agree.
-	reg := fakeRegistry{clients: map[string]llm.Client{
-		"openai": plainClient{name: "openai"},
-	}}
-	s := newSelector(reg)
-
-	_, err := s.Select(TaskSignals{Kind: KindStep, NeedsTools: true}, Constraints{})
-	if !errors.Is(err, ErrNoCandidate) {
-		t.Fatalf("err = %v, want ErrNoCandidate", err)
+// At equal cost, the tie-break must favour the model that can do it natively.
+func TestSelect_ToolTasksBreakTiesTowardNativeToolCalling(t *testing.T) {
+	// Two candidates, same provider and therefore the same (zero) price, but
+	// only one advertises tools.
+	catalog := []Candidate{
+		{Provider: "ollama", Model: "no-tools", ContextTokens: 32_000, SupportsTools: false, Quality: 5, Speed: 7},
+		{Provider: "ollama", Model: "has-tools", ContextTokens: 32_000, SupportsTools: true, Quality: 5, Speed: 7},
 	}
-	if !strings.Contains(err.Error(), "tool-calling") {
-		t.Errorf("error should name the tool-calling rejection, got: %v", err)
+	// The ollama client reports no native tool support, so neither candidate is
+	// natively capable and the tie falls through to the later keys.
+	s := New(allProviders(), costengine.New(), catalog)
+	got, err := s.Select(TaskSignals{Kind: KindStep, NeedsTools: true}, Constraints{})
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if got.Model != "has-tools" && got.Model != "no-tools" {
+		t.Fatalf("unexpected model %q", got.Model)
+	}
+
+	// Now with a client that DOES implement the capability, the tools-capable
+	// candidate must come first.
+	reg := fakeRegistry{clients: map[string]llm.Client{
+		"ollama": toolClient{name: "ollama"},
+	}}
+	got, err = New(reg, costengine.New(), catalog).
+		Select(TaskSignals{Kind: KindStep, NeedsTools: true}, Constraints{})
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if got.Model != "has-tools" {
+		t.Errorf("Select() = %q, want has-tools to win the tie-break", got.Model)
 	}
 }
 

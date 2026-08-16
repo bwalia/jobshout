@@ -5,6 +5,7 @@ import {
 } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
+  getAvailableProviderModels,
   getBuiltinProviders,
   getLLMProviders,
   createLLMProvider,
@@ -17,12 +18,25 @@ export const llmProviderKeys = {
   all: ["llm-providers"] as const,
   builtin: () => [...llmProviderKeys.all, "builtin"] as const,
   list: () => [...llmProviderKeys.all, "list"] as const,
+  models: () => [...llmProviderKeys.all, "models"] as const,
 };
 
 export function useBuiltinProviders() {
   return useQuery({
     queryKey: llmProviderKeys.builtin(),
     queryFn: getBuiltinProviders,
+  });
+}
+
+/**
+ * Models each registered provider can actually run. Kept fresh for five
+ * minutes: the server already caches discovery, and installing a model is rare.
+ */
+export function useAvailableModels() {
+  return useQuery({
+    queryKey: llmProviderKeys.models(),
+    queryFn: getAvailableProviderModels,
+    staleTime: 5 * 60 * 1000,
   });
 }
 
