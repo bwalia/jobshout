@@ -31,6 +31,12 @@ type Topic struct {
 	// citations — research runs independently and finds its own sources — but
 	// they show where the idea came from.
 	Seeds []string `json:"seeds"`
+	// InFocus reports whether this subject sits inside the requested focus
+	// areas. False means it was the closest thing available on a night when
+	// nothing on-target was trending — worth surfacing, because an article
+	// nobody asked about is the kind of thing that should be noticed rather
+	// than quietly published.
+	InFocus bool `json:"in_focus"`
 }
 
 // DiscoverRequest bounds a discovery sweep.
@@ -41,6 +47,16 @@ type DiscoverRequest struct {
 	// a schedule, and a story stays on the front page for days — without this a
 	// daily job writes the same article all week.
 	Avoid []string
+	// Focus narrows discovery to particular subject areas — "Postgres",
+	// "Kubernetes networking", "AI infrastructure". Empty means anything in the
+	// blog's remit, which is the original behaviour.
+	//
+	// Focus areas steer what gets *gathered*, not only what gets picked. The
+	// trending sweep returns whatever is popular tonight, and on most nights
+	// none of it will be about any one narrow subject — so filtering a generic
+	// sweep would return nothing nearly every time. Each area is therefore also
+	// searched directly, and the results merged into the pool.
+	Focus []string
 	// Model optionally overrides the LLM.
 	Model string
 }
@@ -68,9 +84,14 @@ func (a *Agent) Discover(ctx context.Context, req DiscoverRequest, progress Prog
 		count = 1
 	}
 
-	progress.report(PhaseDiscovering, "Looking at what is trending")
+	if len(req.Focus) > 0 {
+		progress.report(PhaseDiscovering,
+			fmt.Sprintf("Looking at what is trending in %s", strings.Join(req.Focus, ", ")))
+	} else {
+		progress.report(PhaseDiscovering, "Looking at what is trending")
+	}
 
-	items, err := a.sources.Trending(ctx, discoverCandidates)
+	items, err := a.gatherCandidates(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("research: discover: %w", err)
 	}
@@ -106,6 +127,55 @@ func (a *Agent) Discover(ctx context.Context, req DiscoverRequest, progress Prog
 	return topics, nil
 }
 
+// focusSearchLimit is how many results each focus area contributes. Modest per
+// area: the point is to guarantee the pool contains something on-subject, not
+// to drown the trending sweep that catches what you did not think to ask for.
+const focusSearchLimit = 8
+
+// gatherCandidates builds the pool of things discovery chooses between.
+//
+// Without focus areas this is the plain trending sweep. With them, each area is
+// also searched and the results folded in, because a generic sweep on any given
+// night usually contains nothing about any one narrow subject — filtering alone
+// would return an empty list most nights and turn a scheduled job into a
+// nightly failure.
+//
+// A failing search degrades the pool rather than the run: the trending sweep is
+// still there, and one backend being down is not a reason to write nothing.
+func (a *Agent) gatherCandidates(ctx context.Context, req DiscoverRequest) ([]TrendingItem, error) {
+	items, err := a.sources.Trending(ctx, discoverCandidates)
+	if err != nil {
+		// With focus areas there is another way to fill the pool, so a failed
+		// sweep is survivable. Without them there is nothing else to try.
+		if len(req.Focus) == 0 {
+			return nil, err
+		}
+		a.logger.Warn("research: trending sweep failed, falling back to focus searches",
+			zap.Error(err))
+		items = nil
+	}
+
+	for _, area := range req.Focus {
+		area = strings.TrimSpace(area)
+		if area == "" {
+			continue
+		}
+		found, serr := a.sources.Search(ctx, area, focusSearchLimit)
+		if serr != nil {
+			a.logger.Warn("research: focus search failed",
+				zap.String("area", area), zap.Error(serr))
+			continue
+		}
+		for _, s := range found {
+			// Channel records where this came from, which is what keeps the
+			// ranker from treating every searched result as one crowded feed.
+			items = append(items, TrendingItem{Source: s, Channel: "search:" + area})
+		}
+	}
+
+	return dedupeTrending(items), nil
+}
+
 // chooseTopics asks the model to turn trending items into writable subjects.
 func (a *Agent) chooseTopics(ctx context.Context, req DiscoverRequest, items []TrendingItem, count int) ([]Topic, error) {
 	var b strings.Builder
@@ -129,6 +199,13 @@ func (a *Agent) chooseTopics(ctx context.Context, req DiscoverRequest, items []T
 		avoid = "- " + strings.Join(req.Avoid, "\n- ")
 	}
 
+	// With no focus areas the model is told so explicitly, rather than being
+	// shown an empty heading it has to interpret.
+	focus := "(no restriction — anything in the blog's remit)"
+	if len(req.Focus) > 0 {
+		focus = "- " + strings.Join(req.Focus, "\n- ")
+	}
+
 	prompt := fmt.Sprintf(`You are choosing what a technical blog should write about this week. The blog
 covers software engineering, AI and infrastructure, for a developer audience.
 
@@ -138,7 +215,16 @@ WHAT IS TRENDING RIGHT NOW:
 ALREADY WRITTEN ABOUT RECENTLY — do not propose these again, or close variants:
 %s
 
+FOCUS AREAS — what this blog wants to cover:
+%s
+
 Choose the %d best subjects to write about.
+
+Prefer subjects that sit squarely inside the focus areas above, and mark those
+with "in_focus": true. If nothing in the candidates is really about those areas,
+choose the closest subjects you can and mark them "in_focus": false — do not
+pretend something is on-subject when it is not. The honesty of that flag matters
+more than filling the quota.
 
 Turn each into a TOPIC, not a headline. A trending item is one event; a topic is
 something an engineer can read 1000 words about and come away more capable.
@@ -163,8 +249,8 @@ writing now.
 Reference the candidate numbers you drew on in "seeds".
 
 Respond with JSON only, in exactly this shape:
-{"topics": [{"topic": "...", "context": "...", "rationale": "...", "seeds": [0, 4]}]}`,
-		b.String(), avoid, count)
+{"topics": [{"topic": "...", "context": "...", "rationale": "...", "seeds": [0, 4], "in_focus": true}]}`,
+		b.String(), avoid, focus, count)
 
 	resp, err := a.generate(ctx, req.Model, prompt)
 	if err != nil {
@@ -177,6 +263,7 @@ Respond with JSON only, in exactly this shape:
 			Context   string `json:"context"`
 			Rationale string `json:"rationale"`
 			Seeds     []int  `json:"seeds"`
+			InFocus   bool   `json:"in_focus"`
 		} `json:"topics"`
 	}
 	if err := llm.DecodeJSON(resp, &parsed); err != nil {
@@ -210,12 +297,52 @@ Respond with JSON only, in exactly this shape:
 			Context:   strings.TrimSpace(t.Context),
 			Rationale: strings.TrimSpace(t.Rationale),
 			Seeds:     seeds,
+			InFocus:   t.InFocus,
 		})
-		if len(out) >= count {
+	}
+	return selectByFocus(out, count, len(req.Focus) > 0), nil
+}
+
+// selectByFocus takes up to count topics, preferring ones inside the focus
+// areas.
+//
+// The whole list is collected before any of it is discarded, because the model
+// returns topics in its own order: capping while reading would let an
+// off-subject proposal listed first crowd out an on-subject one further down,
+// and the caller would never know an on-subject option existed.
+//
+// When nothing is on-subject the closest matches are used rather than nothing
+// at all — a scheduled job that writes something slightly adjacent is more
+// useful than one that silently produces nothing — and the InFocus flag on each
+// topic is what lets the caller say so afterwards.
+func selectByFocus(topics []Topic, count int, focused bool) []Topic {
+	if count <= 0 || len(topics) == 0 {
+		return nil
+	}
+	if !focused {
+		return topics[:min(count, len(topics))]
+	}
+
+	out := make([]Topic, 0, count)
+	for _, t := range topics {
+		if t.InFocus {
+			out = append(out, t)
+			if len(out) == count {
+				return out
+			}
+		}
+	}
+	// Top up with the closest available, keeping the model's own ordering.
+	for _, t := range topics {
+		if t.InFocus {
+			continue
+		}
+		out = append(out, t)
+		if len(out) == count {
 			break
 		}
 	}
-	return out, nil
+	return out
 }
 
 // dropSeenTitles removes trending items whose headline restates something

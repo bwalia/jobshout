@@ -385,6 +385,7 @@ func (s *blogService) discoverBriefs(
 	topics, err := s.research.Discover(ctx, run.OrgID, research.DiscoverRequest{
 		Count: count,
 		Avoid: avoid,
+		Focus: req.Focus,
 		Model: req.Model,
 	}, func(_, detail string) {
 		tracker.advance(model.BlogStepDiscovering, detail, model.AgentNameResearcher)
@@ -401,11 +402,28 @@ func (s *blogService) discoverBriefs(
 		return nil, fmt.Errorf("blog_svc: discovery returned no topics")
 	}
 
-	tracker.advance(model.BlogStepDiscovering,
-		fmt.Sprintf("Chose %d topic(s)", len(briefs)), model.AgentNameResearcher)
+	// Say so when a focused run had to settle. The articles still get written —
+	// that is the requested behaviour — but "nothing you asked about was
+	// trending tonight" is the kind of thing someone reading the run the next
+	// morning needs to see, rather than wondering why the subject drifted.
+	offTarget := 0
+	for _, t := range topics {
+		if !t.InFocus {
+			offTarget++
+		}
+	}
+	detail := fmt.Sprintf("Chose %d topic(s)", len(briefs))
+	if len(req.Focus) > 0 && offTarget > 0 {
+		detail = fmt.Sprintf(
+			"Chose %d topic(s) — %d outside %s, which had nothing trending tonight",
+			len(briefs), offTarget, strings.Join(req.Focus, ", "))
+	}
+
+	tracker.advance(model.BlogStepDiscovering, detail, model.AgentNameResearcher)
 	s.logger.Info("blog: discovered topics for a trending run",
 		zap.String("blog_run_id", run.ID.String()),
-		zap.Int("count", len(briefs)), zap.Int("avoided", len(avoid)))
+		zap.Int("count", len(briefs)), zap.Int("avoided", len(avoid)),
+		zap.Strings("focus", req.Focus), zap.Int("off_target", offTarget))
 
 	return briefs, nil
 }
@@ -540,6 +558,20 @@ func (s *blogService) runGeneration(run *model.BlogRun, agent *model.Agent, req 
 	}
 	s.setAgentStatus(ctx, agent.ID, "active")
 	log.Info("blog: generation complete", zap.Int("articles", len(articles)))
+
+	// Filing happens after the run is recorded as completed, never instead of
+	// it. A CMS that is down or misconfigured must not turn articles that were
+	// written, stored and are readable in the UI into a failed run — the work
+	// survives and someone can press the button later.
+	if req.AutoPublish {
+		if _, perr := s.Publish(ctx, run.OrgID, run.ID); perr != nil {
+			log.Warn("blog: automatic filing to the CMS failed, the articles are still here",
+				zap.Error(perr))
+		} else {
+			log.Info("blog: filed articles in the CMS as drafts automatically",
+				zap.Int("articles", len(articles)))
+		}
+	}
 }
 
 func (s *blogService) Publish(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) (*model.BlogRun, error) {
