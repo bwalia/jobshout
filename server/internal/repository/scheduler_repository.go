@@ -143,13 +143,27 @@ func (r *schedulerRepository) UpdateTask(ctx context.Context, id uuid.UUID, req 
 		    max_runs = COALESCE($8, max_runs),
 		    priority = COALESCE($9, priority),
 		    model_override = COALESCE($10, model_override),
+		    input_json = COALESCE($11, input_json),
 		    updated_at = NOW()
 		WHERE id = $1`
+
+	// A nil map means "not changing this" and leaves the stored value alone;
+	// anything else replaces it wholesale, so a task can drop a setting it used
+	// to have. Marshalled here rather than passed as a map because COALESCE
+	// needs a typed NULL to fall through to the existing column.
+	var inputJSON []byte
+	if req.InputJSON != nil {
+		encoded, err := json.Marshal(req.InputJSON)
+		if err != nil {
+			return nil, fmt.Errorf("scheduler_repo: update: encode input_json: %w", err)
+		}
+		inputJSON = encoded
+	}
 
 	_, err := r.pool.Exec(ctx, sql,
 		id, req.Name, req.Description, req.InputPrompt,
 		req.CronExpression, req.IntervalSeconds, req.Status,
-		req.MaxRuns, req.Priority, req.ModelOverride,
+		req.MaxRuns, req.Priority, req.ModelOverride, inputJSON,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("scheduler_repo: update: %w", err)
