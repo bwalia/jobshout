@@ -5,19 +5,22 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
-	"time"
 
-	"github.com/golang-jwt/jwt/v5"
+	"github.com/jobshout/server/internal/gatewayauth"
 )
 
 // AppName identifies this application in the JWT presented to the Ollama
 // gateway. It is the value of the "app" claim.
-const AppName = "jobshout"
+//
+// Ollama is no longer the only workstation service JobShout authenticates to —
+// the image service uses the same scheme — so the signing itself now lives in
+// gatewayauth and this package re-exports the name it has always exported.
+const AppName = gatewayauth.AppName
 
 // ollamaTokenTTL is how long a minted gateway token stays valid. Short on
 // purpose: a token is used for exactly one request, so it never needs to
 // outlive that request by much.
-const ollamaTokenTTL = 10 * time.Minute
+const ollamaTokenTTL = gatewayauth.TokenTTL
 
 // ollamaAuth signs requests to an Ollama deployment that sits behind a
 // JWT-verifying gateway.
@@ -25,21 +28,28 @@ const ollamaTokenTTL = 10 * time.Minute
 // A nil *ollamaAuth (or one with no secret) is valid and means "talk to Ollama
 // directly" — a plain local Ollama has no gateway and rejects nothing, so the
 // same client works for both without a second code path.
+//
+// It is a thin shell over gatewayauth.Signer, kept so this package's callers
+// keep their unexported spelling while the scheme has one implementation.
 type ollamaAuth struct {
-	secret []byte
+	*gatewayauth.Signer
 }
 
 // newOllamaAuth returns nil when no secret is configured, so callers can hold
 // a possibly-nil *ollamaAuth and call apply on it unconditionally.
 func newOllamaAuth(secret string) *ollamaAuth {
-	if secret == "" {
+	signer := gatewayauth.New(secret)
+	if signer == nil {
 		return nil
 	}
-	return &ollamaAuth{secret: []byte(secret)}
+	return &ollamaAuth{Signer: signer}
 }
 
 // enabled reports whether requests will be signed.
-func (a *ollamaAuth) enabled() bool { return a != nil && len(a.secret) > 0 }
+//
+// Written against a nil receiver rather than promoted from the embedded Signer
+// because a nil *ollamaAuth has no embedded value to promote through.
+func (a *ollamaAuth) enabled() bool { return a != nil && a.Signer.Enabled() }
 
 // apply mints a fresh token and attaches it to req.
 //
@@ -50,21 +60,9 @@ func (a *ollamaAuth) apply(req *http.Request) error {
 	if !a.enabled() {
 		return nil
 	}
-
-	now := time.Now()
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"app": AppName,
-		"iat": now.Unix(),
-		"exp": now.Add(ollamaTokenTTL).Unix(),
-	})
-
-	signed, err := token.SignedString(a.secret)
-	if err != nil {
-		return fmt.Errorf("ollama: sign gateway token: %w", err)
+	if err := a.Signer.Apply(req); err != nil {
+		return fmt.Errorf("ollama: %w", err)
 	}
-
-	// The gateway expects the bare token — no "Bearer " prefix.
-	req.Header.Set("x-api-key", signed)
 	return nil
 }
 

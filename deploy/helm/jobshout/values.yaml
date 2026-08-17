@@ -116,6 +116,26 @@ ai:
   # unaffected; setting this false just makes "auto" fall back to the default.
   autoModelSelection: true
 
+  # Image generation. mflux runs on Apple MLX, which needs a Metal GPU, so
+  # unlike everything else in this chart the image model CANNOT be scheduled
+  # onto the cluster — the k3s1 nodes are amd64 Linux. It runs on the
+  # workstation (see image-service/ in this repository) and every ring reaches
+  # that one instance, exactly as every ring reaches one Ollama.
+  #
+  # imageBaseURL is empty by default so a deploy that has not stood the service
+  # up does not spend a timeout discovering that. Set it per ring, or here once
+  # the workstation host is registered on the edge.
+  imageProvider: mflux
+  imageBaseURL: ""
+  imageModel: "z-image-turbo"
+  imageTimeout: "10m"
+  imageOpenaiModel: "gpt-image-1"
+  imageBucket: "images"
+  # Off by default: a cover costs roughly 25 seconds of a single shared GPU per
+  # article, and that is a cost an operator should choose to pay. Image
+  # generation stays available on demand either way.
+  blogCoverImages: false
+
 logLevel: info
 
 storage:

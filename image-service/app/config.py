@@ -1,0 +1,56 @@
+"""Configuration for the image service.
+
+Read from the environment once at import. The service is a single process on a
+single machine, so there is no reload path and nothing to invalidate.
+"""
+
+import os
+
+# The model used when a request does not name one. Z-Image-Turbo is a few-step
+# turbo model, so it answers in seconds rather than minutes, which is what makes
+# generating a cover image an acceptable step inside an article run rather than
+# something that has to happen out of band.
+DEFAULT_MODEL = os.getenv("IMAGE_DEFAULT_MODEL", "z-image-turbo")
+
+DEFAULT_STEPS = int(os.getenv("IMAGE_DEFAULT_STEPS", "8"))
+
+# Ceilings. This service is one process in front of one GPU, so an unbounded
+# step count or dimension is not merely a slow request — it is a denial of
+# service against every other caller waiting on the lock.
+MAX_STEPS = int(os.getenv("IMAGE_MAX_STEPS", "50"))
+MAX_DIMENSION = int(os.getenv("IMAGE_MAX_DIMENSION", "1536"))
+
+# Dimensions must be multiples of this. The VAE downsamples by 8 and the
+# transformer patches by 2, so anything else is silently rounded somewhere deep
+# in the model and comes back a different size than was asked for. Rejecting it
+# up front is more honest than returning an image of unrequested dimensions.
+DIMENSION_MULTIPLE = 16
+
+# How long a request waits for the generation lock before giving up. Long,
+# because the queue is expected to be short and a real generation takes tens of
+# seconds; bounded, because a caller blocked forever is worse than one told to
+# come back.
+QUEUE_TIMEOUT_SECONDS = float(os.getenv("IMAGE_QUEUE_TIMEOUT", "600"))
+
+# How many loaded models stay resident. One, by default, because a single image
+# model peaks near the memory of the whole machine and a second resident copy is
+# how this process gets OOM-killed.
+MAX_LOADED_MODELS = max(1, int(os.getenv("IMAGE_MAX_LOADED_MODELS", "1")))
+
+# Optional quantisation applied at load (3/4/5/6/8). Trades image fidelity for
+# memory. Unset means load at the model's native precision.
+_quantize_raw = os.getenv("IMAGE_QUANTIZE", "").strip()
+QUANTIZE = int(_quantize_raw) if _quantize_raw else None
+
+# Shared secret for the gateway JWT. Unset means the service authenticates
+# nothing — see auth.py for why that is the documented local-development
+# behaviour rather than an oversight.
+JWT_SECRET = os.getenv("IMAGE_JWT_SECRET", "")
+
+HOST = os.getenv("IMAGE_HOST", "0.0.0.0")
+
+# 11435 sits one above Ollama's 11434 — deliberately adjacent, so the two
+# workstation model services are obviously a pair.
+PORT = int(os.getenv("IMAGE_PORT", "11435"))
+
+LOG_LEVEL = os.getenv("IMAGE_LOG_LEVEL", "info")

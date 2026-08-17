@@ -36,6 +36,18 @@ type GeneratedArticle struct {
 	// WordCount is a rough size indicator shown in the UI so a reader can spot
 	// a truncated or runaway article without opening it.
 	WordCount int
+
+	// The cover image, empty on a run that drew none. The provider, model and
+	// seed are carried alongside the URL because the seed is the only way to
+	// reproduce a cover that came out well — regenerating without it gives a
+	// different picture.
+	CoverImageURL      string
+	CoverImagePrompt   string
+	CoverImageProvider string
+	CoverImageModel    string
+	CoverImageSeed     int64
+	CoverImageWidth    int
+	CoverImageHeight   int
 }
 
 // render fills HTML and Excerpt from Markdown. Separate from generation so the

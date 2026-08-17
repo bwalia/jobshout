@@ -24,6 +24,20 @@ data:
   OLLAMA_NUM_CTX: {{ .Values.ai.ollamaNumCtx | default 8192 | quote }}
   OPENAI_BASE_URL: {{ .Values.ai.openaiBaseURL | quote }}
   OPENAI_DEFAULT_MODEL: {{ .Values.ai.openaiModel | quote }}
+  # Image generation. Like Ollama, the local image model runs OUTSIDE the
+  # cluster — mflux needs Apple MLX and the nodes are amd64 Linux — so every
+  # ring points at the one workstation service. An empty imageBaseURL disables
+  # the local path; the server then falls back to OpenAI images if a key is set,
+  # and to no image generation at all if not.
+  IMAGE_PROVIDER: {{ .Values.ai.imageProvider | default "mflux" | quote }}
+  IMAGE_BASE_URL: {{ .Values.ai.imageBaseURL | default "" | quote }}
+  IMAGE_DEFAULT_MODEL: {{ .Values.ai.imageModel | default "z-image-turbo" | quote }}
+  IMAGE_TIMEOUT: {{ .Values.ai.imageTimeout | default "10m" | quote }}
+  IMAGE_OPENAI_MODEL: {{ .Values.ai.imageOpenaiModel | default "gpt-image-1" | quote }}
+  # Whether every article run pays for a cover image. Off leaves generation
+  # available on demand through the API and the generate_image tool.
+  BLOG_COVER_IMAGES: {{ .Values.ai.blogCoverImages | default false | quote }}
+  MINIO_BUCKET_IMAGES: {{ .Values.ai.imageBucket | default "images" | quote }}
   PYTHON_SIDECAR_URL: "http://python-runtime:8001"
   # opsapi CMS — where the Article Writer files generated posts as drafts. The
   # token is a secret and lives in the Secret, not here.

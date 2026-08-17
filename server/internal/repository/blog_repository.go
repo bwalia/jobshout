@@ -108,7 +108,8 @@ func scanBlogRun(row pgx.Row) (*model.BlogRun, error) {
 // blogRunColumns pairs with scanBlogRun.
 const blogArticleColumns = `
 	id, run_id, org_id, topic, title, slug, path, references_json, markdown, html,
-	post_uuid, post_status, posted_at, word_count, created_at`
+	post_uuid, post_status, posted_at, word_count, created_at,
+	cover_image_url, cover_image_prompt, cover_image_meta`
 
 // scanBlogArticle reads one row in blogArticleColumns order.
 func scanBlogArticle(row pgx.Row) (*model.BlogArticle, error) {
@@ -117,10 +118,16 @@ func scanBlogArticle(row pgx.Row) (*model.BlogArticle, error) {
 	// no H1 for the backfill to find have none.
 	var title *string
 	var referencesRaw []byte
+	// The cover columns are nullable: every article written before image
+	// generation existed has none, and so does every run in an environment that
+	// leaves cover images switched off.
+	var coverURL, coverPrompt *string
+	var coverMetaRaw []byte
 	err := row.Scan(
 		&a.ID, &a.RunID, &a.OrgID, &a.Topic, &title, &a.Slug, &a.Path, &referencesRaw,
 		&a.Markdown, &a.HTML,
 		&a.PostUUID, &a.PostStatus, &a.PostedAt, &a.WordCount, &a.CreatedAt,
+		&coverURL, &coverPrompt, &coverMetaRaw,
 	)
 	if err != nil {
 		return nil, err
@@ -128,6 +135,15 @@ func scanBlogArticle(row pgx.Row) (*model.BlogArticle, error) {
 	if title != nil {
 		a.Title = *title
 	}
+	if coverURL != nil {
+		a.CoverImageURL = *coverURL
+	}
+	if coverPrompt != nil {
+		a.CoverImagePrompt = *coverPrompt
+	}
+	// Ignored on error, like references above: a malformed meta blob costs the
+	// seed, not the article.
+	_ = json.Unmarshal(coverMetaRaw, &a.CoverImageMeta)
 	// Fall back to the topic so the UI always has something to show, matching
 	// what articleTitle did when the title was derived on every read.
 	if a.Title == "" {
@@ -283,15 +299,21 @@ func (r *blogRepository) CreateArticles(ctx context.Context, articles []model.Bl
 	batch := &pgx.Batch{}
 	const sql = `
 		INSERT INTO blog_articles
-		    (id, run_id, org_id, topic, title, slug, path, references_json, markdown, html, word_count, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, NOW())`
+		    (id, run_id, org_id, topic, title, slug, path, references_json, markdown, html, word_count,
+		     cover_image_url, cover_image_prompt, cover_image_meta, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, NOW())`
 	for _, a := range articles {
 		refsJSON, err := json.Marshal(a.References)
 		if err != nil {
 			return fmt.Errorf("blog_repo: marshal references for %q: %w", a.Slug, err)
 		}
+		coverJSON, err := json.Marshal(a.CoverImageMeta)
+		if err != nil {
+			return fmt.Errorf("blog_repo: marshal cover image meta for %q: %w", a.Slug, err)
+		}
 		batch.Queue(sql, a.ID, a.RunID, a.OrgID, a.Topic, a.Title, a.Slug, a.Path,
-			refsJSON, a.Markdown, a.HTML, a.WordCount)
+			refsJSON, a.Markdown, a.HTML, a.WordCount,
+			a.CoverImageURL, a.CoverImagePrompt, coverJSON)
 	}
 
 	br := r.pool.SendBatch(ctx, batch)

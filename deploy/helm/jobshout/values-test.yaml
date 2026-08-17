@@ -6,6 +6,9 @@ ai:
   enabled: true
   ollamaBaseURL: "https://ollama.workstation.co.uk"
   ollamaModel: "llama3:latest"
+  imageBaseURL: "https://images.workstation.co.uk"
+  imageModel: "z-image-turbo"
+  blogCoverImages: false
 
 api:
   replicas: 1
