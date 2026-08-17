@@ -28,8 +28,40 @@ const CRON_PRESETS = [
   { label: "Custom", value: "" },
 ];
 
-/** Whether an article schedule writes a fixed subject or finds its own. */
-type BlogMode = "trending" | "fixed";
+/**
+ * How an article schedule decides what to write about.
+ *
+ * "focused" is the middle ground people actually want from a nightly job:
+ * "trending" writes about whatever is popular and cannot be steered, while
+ * "fixed" writes the same subject every single night.
+ */
+type BlogMode = "trending" | "focused" | "fixed";
+
+const BLOG_MODES: { value: BlogMode; label: string; hint: string }[] = [
+  {
+    value: "trending",
+    label: "Anything trending",
+    hint: "Finds its own subjects from Hacker News, arXiv and blog feeds.",
+  },
+  {
+    value: "focused",
+    label: "Trending, in my areas",
+    hint: "Searches your areas as well as the trending list, and writes what is current in them.",
+  },
+  {
+    value: "fixed",
+    label: "A fixed subject",
+    hint: "Writes the same subject on every run — best for one-off or weekly schedules.",
+  },
+];
+
+/** Splits the focus-areas box on commas and newlines. */
+function parseFocusAreas(raw: string): string[] {
+  return raw
+    .split(/[\n,]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
 
 const PRIORITY_COLORS: Record<string, string> = {
   low: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
@@ -61,6 +93,10 @@ export default function SchedulerPage() {
   const [trendingCount, setTrendingCount] = useState(1);
   const [blogTopic, setBlogTopic] = useState("");
   const [blogContext, setBlogContext] = useState("");
+  const [focusAreas, setFocusAreas] = useState("");
+  const [autoPublish, setAutoPublish] = useState(false);
+  // Set while editing an existing schedule; null means the form creates one.
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [cronPreset, setCronPreset] = useState("0 * * * *");
   const [form, setForm] = useState<CreateScheduledTaskRequest>({
     name: "",
@@ -77,37 +113,47 @@ export default function SchedulerPage() {
   const agents = agentsResponse?.data ?? [];
   const tasks = tasksResponse?.data ?? [];
 
-  // A fixed-topic article schedule needs a topic; without one every fire would
-  // fail, so it is refused here rather than at dispatch time.
+  // Each article mode needs its own thing filled in; without it every fire
+  // would fail, so it is refused here rather than at dispatch time.
   const canSubmit =
-    form.task_type !== "blog" || blogMode === "trending" || blogTopic.trim() !== "";
+    form.task_type !== "blog" ||
+    (blogMode === "trending" && true) ||
+    (blogMode === "focused" && parseFocusAreas(focusAreas).length > 0) ||
+    (blogMode === "fixed" && blogTopic.trim() !== "");
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-
-    const payload: CreateScheduledTaskRequest = { ...form };
-    if (form.task_type === "blog") {
-      // input_json is the contract the server decodes into a generate request.
-      // Trending carries no topics on purpose — each run discovers its own.
-      payload.input_json =
-        blogMode === "trending"
-          ? { trending: true, trending_count: trendingCount }
-          : {
-              briefs: [
-                {
-                  topic: blogTopic.trim(),
-                  ...(blogContext.trim() ? { context: blogContext.trim() } : {}),
-                },
-              ],
-            };
+  /** The generate request a fire will decode. */
+  function buildBlogInput(): Record<string, unknown> {
+    const base = { auto_publish: autoPublish };
+    if (blogMode === "fixed") {
+      return {
+        ...base,
+        briefs: [
+          {
+            topic: blogTopic.trim(),
+            ...(blogContext.trim() ? { context: blogContext.trim() } : {}),
+          },
+        ],
+      };
     }
+    // Trending carries no topics on purpose — each run discovers its own.
+    return {
+      ...base,
+      trending: true,
+      trending_count: trendingCount,
+      ...(blogMode === "focused" ? { focus: parseFocusAreas(focusAreas) } : {}),
+    };
+  }
 
-    await createMutation.mutateAsync(payload);
+  function resetForm() {
     setShowForm(false);
+    setEditingId(null);
     setBlogMode("trending");
     setTrendingCount(1);
     setBlogTopic("");
     setBlogContext("");
+    setFocusAreas("");
+    setAutoPublish(false);
+    setCronPreset("0 * * * *");
     setForm({
       name: "",
       task_type: "agent",
@@ -119,6 +165,89 @@ export default function SchedulerPage() {
       max_retries: 3,
       tags: [],
     });
+  }
+
+  /** Loads an existing schedule into the form so it can be changed. */
+  function startEditing(task: ScheduledTask) {
+    const input = task.input_json ?? {};
+    const focus = Array.isArray(input.focus) ? (input.focus as string[]) : [];
+    const briefs = Array.isArray(input.briefs)
+      ? (input.briefs as { topic?: string; context?: string }[])
+      : [];
+
+    setEditingId(task.id);
+    setForm({
+      name: task.name,
+      description: task.description ?? undefined,
+      task_type: task.task_type,
+      agent_id: task.agent_id ?? undefined,
+      workflow_id: task.workflow_id ?? undefined,
+      input_prompt: task.input_prompt,
+      schedule_type: task.schedule_type,
+      cron_expression: task.cron_expression ?? undefined,
+      interval_seconds: task.interval_seconds ?? undefined,
+      priority: task.priority,
+      retry_on_failure: task.retry_on_failure,
+      max_retries: task.max_retries,
+      tags: task.tags ?? [],
+    });
+
+    // Show the cron in the dropdown when it matches a preset, and as custom
+    // text when it does not, rather than silently rewriting the user's spec.
+    const preset = CRON_PRESETS.find((p) => p.value === task.cron_expression);
+    setCronPreset(preset ? preset.value : "");
+
+    setAutoPublish(input.auto_publish === true);
+    if (input.trending === true) {
+      setBlogMode(focus.length > 0 ? "focused" : "trending");
+      setTrendingCount(
+        typeof input.trending_count === "number" ? input.trending_count : 1
+      );
+      setFocusAreas(focus.join(", "));
+      setBlogTopic("");
+      setBlogContext("");
+    } else if (briefs.length > 0) {
+      setBlogMode("fixed");
+      setBlogTopic(briefs[0].topic ?? "");
+      setBlogContext(briefs[0].context ?? "");
+      setFocusAreas("");
+    }
+    setShowForm(true);
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+
+    const inputJSON =
+      form.task_type === "blog" ? buildBlogInput() : form.input_json;
+
+    if (editingId) {
+      // Only the fields an edit may change. task_type and schedule_type are
+      // not among them: changing what a task is would leave its stored input
+      // meaningless, and deleting it is the honest way to do that.
+      await updateMutation.mutateAsync({
+        id: editingId,
+        payload: {
+          name: form.name,
+          description: form.description,
+          input_prompt: form.input_prompt,
+          ...(inputJSON ? { input_json: inputJSON } : {}),
+          ...(form.cron_expression
+            ? { cron_expression: form.cron_expression }
+            : {}),
+          ...(form.interval_seconds
+            ? { interval_seconds: form.interval_seconds }
+            : {}),
+          priority: form.priority,
+        },
+      });
+    } else {
+      const payload: CreateScheduledTaskRequest = { ...form };
+      if (inputJSON) payload.input_json = inputJSON;
+      await createMutation.mutateAsync(payload);
+    }
+
+    resetForm();
   }
 
   function formatSchedule(task: (typeof tasks)[0]): string {
@@ -147,7 +276,7 @@ export default function SchedulerPage() {
           </p>
         </div>
         <button
-          onClick={() => setShowForm(!showForm)}
+          onClick={() => (showForm ? resetForm() : setShowForm(true))}
           className="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
         >
           {showForm ? "Cancel" : "Schedule Task"}
@@ -157,7 +286,9 @@ export default function SchedulerPage() {
       {/* Create form */}
       {showForm && (
         <section className="rounded-xl border border-border bg-card p-6">
-          <h2 className="text-base font-semibold">New Scheduled Task</h2>
+          <h2 className="text-base font-semibold">
+            {editingId ? "Edit schedule" : "New Scheduled Task"}
+          </h2>
           <form onSubmit={handleSubmit} className="mt-4 space-y-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-2">
@@ -216,18 +347,41 @@ export default function SchedulerPage() {
                     onChange={(e) => setBlogMode(e.target.value as BlogMode)}
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
-                    <option value="trending">
-                      Whatever is trending in tech, AI and infrastructure
-                    </option>
-                    <option value="fixed">A topic I choose</option>
+                    {BLOG_MODES.map((m) => (
+                      <option key={m.value} value={m.value}>
+                        {m.label}
+                      </option>
+                    ))}
                   </select>
+                  <p className="text-xs text-muted-foreground">
+                    {BLOG_MODES.find((m) => m.value === blogMode)?.hint}
+                  </p>
 
-                  {blogMode === "trending" ? (
+                  {blogMode !== "fixed" ? (
                     <>
+                      {blogMode === "focused" && (
+                        <>
+                          <label className="text-sm font-medium">
+                            My areas
+                          </label>
+                          <textarea
+                            rows={2}
+                            value={focusAreas}
+                            onChange={(e) => setFocusAreas(e.target.value)}
+                            placeholder="Postgres, Kubernetes networking, AI infrastructure"
+                            className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            One per line, or separated by commas. If nothing in
+                            your areas is current on a given night, it writes
+                            about the closest thing it found and says so on the
+                            run.
+                          </p>
+                        </>
+                      )}
                       <p className="text-xs text-muted-foreground">
-                        Each run looks at what is currently being published,
-                        picks a subject it has not covered in the last two
-                        weeks, researches it and writes it up.
+                        Each run picks a subject it has not covered in the last
+                        two weeks, researches it and writes it up.
                       </p>
                       <label className="text-sm font-medium">
                         Articles per run
@@ -275,6 +429,23 @@ export default function SchedulerPage() {
                       </p>
                     </>
                   )}
+
+                  <label className="flex items-start gap-2 pt-2">
+                    <input
+                      type="checkbox"
+                      checked={autoPublish}
+                      onChange={(e) => setAutoPublish(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-input"
+                    />
+                    <span className="text-sm">
+                      Send to the CMS automatically
+                      <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
+                        Files each finished article as a draft, so it is waiting
+                        for you in the morning. Nothing goes live until someone
+                        publishes it in the CMS.
+                      </span>
+                    </span>
+                  </label>
                 </div>
               )}
 
@@ -441,10 +612,18 @@ export default function SchedulerPage() {
 
             <button
               type="submit"
-              disabled={createMutation.isPending || !canSubmit}
+              disabled={
+                createMutation.isPending || updateMutation.isPending || !canSubmit
+              }
               className="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
-              {createMutation.isPending ? "Creating..." : "Create Scheduled Task"}
+              {editingId
+                ? updateMutation.isPending
+                  ? "Saving..."
+                  : "Save changes"
+                : createMutation.isPending
+                  ? "Creating..."
+                  : "Create Scheduled Task"}
             </button>
           </form>
         </section>
@@ -546,6 +725,15 @@ export default function SchedulerPage() {
                   ) : null}
                   <button
                     onClick={() => {
+                      startEditing(task);
+                      window.scrollTo({ top: 0, behavior: "smooth" });
+                    }}
+                    className="inline-flex h-8 items-center rounded-md border border-input bg-background px-3 text-xs font-medium hover:bg-accent"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => {
                       if (confirm("Delete this scheduled task?")) {
                         deleteMutation.mutate(task.id);
                       }
@@ -567,13 +755,24 @@ export default function SchedulerPage() {
 /** One-line summary of what an article schedule writes each time it fires. */
 function describeBlogTask(task: ScheduledTask): string {
   const input = task.input_json ?? {};
+  const filed = input.auto_publish === true ? ", filed in the CMS as drafts" : "";
+
   if (input.trending) {
     const n = Number(input.trending_count) || 1;
-    return `Writes ${n} article${n === 1 ? "" : "s"} on whatever is trending, skipping subjects covered in the last two weeks`;
+    const articles = `Writes ${n} article${n === 1 ? "" : "s"}`;
+    const focus = Array.isArray(input.focus) ? (input.focus as string[]) : [];
+    // Naming the areas matters more than the generic sentence: two nightly
+    // schedules differing only by subject are otherwise indistinguishable here.
+    const subject =
+      focus.length > 0
+        ? ` on what is current in ${focus.join(", ")}`
+        : " on whatever is trending";
+    return `${articles}${subject}, skipping subjects covered in the last two weeks${filed}`;
   }
+
   const briefs = Array.isArray(input.briefs) ? input.briefs : [];
   const topic = briefs[0]?.topic;
-  return topic ? `Writes about: ${topic}` : "No topic configured";
+  return topic ? `Writes about: ${topic}${filed}` : "No topic configured";
 }
 
 /**

@@ -43,6 +43,34 @@ type Config struct {
 	ContentDir string
 	// AuthorName is the byline attached to posts created in the CMS.
 	AuthorName string
+	// Model is the LLM used for writing — planning, drafting, reviewing,
+	// revising and expanding. Empty means the provider's default.
+	//
+	// It is deliberately separate from the model research uses. Research makes
+	// many short structured calls where speed compounds across a run; writing
+	// makes a few long ones where prose quality and instruction-following
+	// decide whether the article is worth publishing. A per-request Model on
+	// GenerateRequest still overrides this.
+	Model string
+
+	// ProseModel and StructuredModel split Model along the line that measurement
+	// found actually separates models, rather than along the pipeline's own
+	// stage names.
+	//
+	// Benchmarking two local models over three runs each produced a clean
+	// inversion: the better writer produced noticeably better prose — a concrete
+	// opening, diagrams placed where they were discussed, a genuinely useful
+	// section on trade-offs — while failing to return parseable JSON on two of
+	// six structured calls, where the other model went six for six. Prose
+	// quality and JSON reliability are simply not the same skill, and one
+	// setting could not express that.
+	//
+	// Both default to Model, so leaving them unset keeps the previous behaviour
+	// exactly. Diagrams are not a third setting because they are not a third
+	// call: the draft writes prose and diagrams together, and splitting them
+	// would break the requirement that a diagram agree with the text around it.
+	ProseModel      string
+	StructuredModel string
 }
 
 // CMSPublisher is the slice of the opsapi client this package uses. Declared
@@ -61,6 +89,21 @@ type GenerateRequest struct {
 	Briefs      []model.BlogBrief `json:"briefs"`
 	Model       string            `json:"model,omitempty"`        // optional override for the LLM
 	MaxArticles int               `json:"max_articles,omitempty"` // safety cap; 0 = no cap below hard limit
+
+	// AgentProseModel and AgentStructuredModel are what the org configured on
+	// the Article Writer agent itself, in the UI.
+	//
+	// They are filled in by the caller that knows about agents rather than read
+	// here, because this package deliberately knows nothing about the agent
+	// registry — it is handed a request and writes an article.
+	//
+	// These sit between the per-run override and the server's environment
+	// settings: a model chosen for this one run beats the agent's standing
+	// choice, and the agent's standing choice beats what the server was started
+	// with. Until this existed the UI's model picker saved a value nothing ever
+	// read, which is worse than not offering the control at all.
+	AgentProseModel      string
+	AgentStructuredModel string
 }
 
 // Researcher is the slice of service.ResearchService this package consumes.
@@ -68,6 +111,34 @@ type GenerateRequest struct {
 // test can supply a brief without a network or an LLM.
 type Researcher interface {
 	Research(ctx context.Context, orgID uuid.UUID, req research.Request, progress research.ProgressFunc) (*research.Brief, error)
+}
+
+// Model choice runs through one order of precedence, most specific first:
+//
+//  1. the model named on this run          — "use this, just now"
+//  2. the model set on the agent in the UI  — "this is what this agent uses"
+//  3. the matching environment setting      — how the server was started
+//  4. BLOG_MODEL, then the provider default
+//
+// Each step is a narrower statement of intent than the one below it, so the
+// more specific answer wins.
+func firstNonBlank(values ...string) string {
+	for _, v := range values {
+		if s := strings.TrimSpace(v); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+// proseModel is the model for calls that produce article text.
+func (r *Runner) proseModel(req GenerateRequest) string {
+	return firstNonBlank(req.Model, req.AgentProseModel, r.cfg.ProseModel, r.cfg.Model)
+}
+
+// structuredModel is the model for calls that must return JSON.
+func (r *Runner) structuredModel(req GenerateRequest) string {
+	return firstNonBlank(req.Model, req.AgentStructuredModel, r.cfg.StructuredModel, r.cfg.Model)
 }
 
 // HardMaxArticles is the safety ceiling regardless of what the caller asks

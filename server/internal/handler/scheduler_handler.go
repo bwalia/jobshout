@@ -240,11 +240,45 @@ func (h *SchedulerHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Checked before the write, so a typo is refused rather than stored and
+	// then discovered by a dispatcher that can no longer schedule the task.
+	var rescheduled *time.Time
+	if req.CronExpression != nil && *req.CronExpression != "" {
+		sched, perr := h.cronParser.Parse(*req.CronExpression)
+		if perr != nil {
+			RespondError(w, http.StatusBadRequest, "invalid cron expression: "+perr.Error())
+			return
+		}
+		next := sched.Next(time.Now())
+		rescheduled = &next
+	} else if req.IntervalSeconds != nil {
+		if *req.IntervalSeconds <= 0 {
+			RespondError(w, http.StatusBadRequest, "interval_seconds must be positive")
+			return
+		}
+		next := time.Now().Add(time.Duration(*req.IntervalSeconds) * time.Second)
+		rescheduled = &next
+	}
+
 	t, err := h.repo.UpdateTask(r.Context(), id, req)
 	if err != nil {
 		RespondError(w, http.StatusInternalServerError, "failed to update: "+err.Error())
 		return
 	}
+
+	// Changing when a task runs has to move when it next runs, or the edit
+	// looks ignored: next_run_at was computed from the old schedule and is only
+	// recomputed after a fire, so the task would run once more at the very time
+	// the user just changed away from.
+	if rescheduled != nil {
+		if serr := h.repo.SetNextRunAt(r.Context(), t.ID, *rescheduled); serr != nil {
+			RespondError(w, http.StatusInternalServerError,
+				"schedule saved but the next run time could not be updated: "+serr.Error())
+			return
+		}
+		t.NextRunAt = rescheduled
+	}
+
 	RespondJSON(w, http.StatusOK, t)
 }
 

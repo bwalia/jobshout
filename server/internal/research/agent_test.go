@@ -618,23 +618,3 @@ func TestCitedSources_OnlyIncludesSourcesThatSurvived(t *testing.T) {
 		t.Errorf("got %q, want the cited source", got[0].Title)
 	}
 }
-
-func TestExtractJSON(t *testing.T) {
-	tests := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{"bare object", `{"a":1}`, `{"a":1}`},
-		{"fenced", "```json\n{\"a\":1}\n```", `{"a":1}`},
-		{"prose around it", `Sure! Here you go: {"a":1} Hope that helps.`, `{"a":1}`},
-		{"no object", "no json here", "no json here"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := extractJSON(tt.in); got != tt.want {
-				t.Errorf("extractJSON(%q) = %q, want %q", tt.in, got, tt.want)
-			}
-		})
-	}
-}

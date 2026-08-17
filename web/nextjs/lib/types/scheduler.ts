@@ -59,6 +59,11 @@ export interface UpdateScheduledTaskRequest {
   name?: string;
   description?: string;
   input_prompt?: string;
+  /**
+   * Replaced whole, not merged — send the complete object. Omit the field to
+   * leave what is stored untouched.
+   */
+  input_json?: Record<string, unknown>;
   cron_expression?: string;
   interval_seconds?: number;
   status?: "active" | "paused" | "completed";

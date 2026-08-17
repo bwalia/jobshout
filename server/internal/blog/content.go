@@ -103,7 +103,7 @@ func (r *Runner) writeArticles(
 }
 
 // writeOne runs the full agent loop for a single brief:
-// research → plan → draft → review → revise → resolve citations.
+// research → plan → draft → review → revise → check diagrams → resolve citations.
 //
 // The sequence is fixed rather than being offered to the model as a set of
 // choices. Research and citation resolution are guarantees this pipeline makes
@@ -138,21 +138,21 @@ func (r *Runner) writeOne(
 
 	// 2. Plan — the title comes from what the research found.
 	report(progress, model.BlogStepOutlining, "Planning "+label, model.AgentNameArticleWriter)
-	plan, err := r.plan(ctx, req.Model, brief, rb)
+	plan, err := r.plan(ctx, r.structuredModel(req), brief, rb)
 	if err != nil {
 		return nil, err
 	}
 
 	// 3. Draft.
 	report(progress, model.BlogStepGenerating, "Writing "+plan.Title, model.AgentNameArticleWriter)
-	markdown, err := r.draft(ctx, req.Model, brief, rb, plan)
+	markdown, err := r.draft(ctx, r.proseModel(req), brief, rb, plan)
 	if err != nil {
 		return nil, err
 	}
 
 	// 4. Review, then 5. revise — but only when there is something to fix.
 	report(progress, model.BlogStepReviewing, "Reviewing "+plan.Title, model.AgentNameArticleWriter)
-	c, err := r.review(ctx, req.Model, rb, plan, markdown)
+	c, err := r.review(ctx, r.structuredModel(req), rb, plan, markdown)
 	switch {
 	case err != nil:
 		// A failed review costs the revision pass, not the article. The draft
@@ -167,7 +167,7 @@ func (r *Runner) writeOne(
 		report(progress, model.BlogStepRevising,
 			fmt.Sprintf("Revising %s (%d issue(s))", plan.Title, len(c.Issues)),
 			model.AgentNameArticleWriter)
-		revised, rerr := r.revise(ctx, req.Model, rb, plan, markdown, c)
+		revised, rerr := r.revise(ctx, r.proseModel(req), rb, plan, markdown, c)
 		if rerr != nil {
 			r.logger.Warn("blog: revision failed, keeping the reviewed draft",
 				zap.String("title", plan.Title), zap.Error(rerr))
@@ -188,7 +188,7 @@ func (r *Runner) writeOne(
 			fmt.Sprintf("Expanding %s (%d words, target %d)", plan.Title, words, MinArticleWords),
 			model.AgentNameArticleWriter)
 
-		expanded, eerr := r.expand(ctx, req.Model, brief, rb, plan, markdown, words)
+		expanded, eerr := r.expand(ctx, r.proseModel(req), brief, rb, plan, markdown, words)
 		switch {
 		case eerr != nil:
 			r.logger.Warn("blog: expansion failed, keeping the short article",
@@ -213,7 +213,16 @@ func (r *Runner) writeOne(
 		}
 	}
 
-	// 7. Resolve citations into a reference list. This drops markers pointing
+	// 7. Repair and check the diagrams. A diagram that will not parse reaches
+	// the reader as a block of raw Mermaid source, so it is worth settling here
+	// rather than in their browser.
+	var diagramNotes []string
+	markdown, diagramNotes = sanitiseDiagrams(markdown)
+	for _, note := range diagramNotes {
+		r.logger.Info("blog: "+note, zap.String("title", plan.Title))
+	}
+
+	// 8. Resolve citations into a reference list. This drops markers pointing
 	// at sources that were never offered and renumbers what survives, so the
 	// published article's references are exactly what it cites.
 	rawCitations := countCitations(markdown)

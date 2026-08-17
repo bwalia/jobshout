@@ -147,3 +147,60 @@ func TestArticleExcerpt(t *testing.T) {
 		}
 	})
 }
+
+// goldmark has no idea what mermaid is and renders the fence as a code block,
+// which would publish the diagram's source as literal text. The div is what
+// mermaid.js scans for.
+func TestRenderHTML_MermaidBecomesADiv(t *testing.T) {
+	md := "# Title\n\nBefore.\n\n```mermaid\nsequenceDiagram\n    A->>B: hi\n```\n\nAfter."
+
+	got, err := renderHTML(md)
+	if err != nil {
+		t.Fatalf("renderHTML: %v", err)
+	}
+	if !strings.Contains(got, `<div class="mermaid">`) {
+		t.Errorf("mermaid fence was not converted:\n%s", got)
+	}
+	if strings.Contains(got, `class="language-mermaid"`) {
+		t.Errorf("the code block survived:\n%s", got)
+	}
+	if !strings.Contains(got, "sequenceDiagram") {
+		t.Errorf("diagram source was lost:\n%s", got)
+	}
+}
+
+// Only mermaid is rewritten. An article's shell and Go snippets must keep
+// rendering as code.
+func TestRenderHTML_OtherCodeBlocksAreUntouched(t *testing.T) {
+	md := "# T\n\n```go\nfunc main() {}\n```\n\n```bash\nkubectl get pods\n```"
+
+	got, err := renderHTML(md)
+	if err != nil {
+		t.Fatalf("renderHTML: %v", err)
+	}
+	for _, want := range []string{`class="language-go"`, `class="language-bash"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %s to survive:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, `class="mermaid"`) {
+		t.Error("a non-mermaid block was converted")
+	}
+}
+
+// A label containing a < must not become markup. goldmark escapes on the way
+// in and mermaid reads text content, which the browser unescapes.
+func TestRenderHTML_MermaidStaysEscaped(t *testing.T) {
+	md := "# T\n\n```mermaid\nflowchart LR\n    A[\"a < b\"] --> B\n```"
+
+	got, err := renderHTML(md)
+	if err != nil {
+		t.Fatalf("renderHTML: %v", err)
+	}
+	if strings.Contains(got, `A["a < b"]`) {
+		t.Errorf("raw < survived into the markup:\n%s", got)
+	}
+	if !strings.Contains(got, "&lt;") {
+		t.Errorf("expected the < to stay escaped:\n%s", got)
+	}
+}

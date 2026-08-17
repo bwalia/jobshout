@@ -141,4 +141,36 @@ export interface GenerateBlogRequest {
  */
 export interface BlogConfig {
   can_publish: boolean;
+  /**
+   * The provider the writing pipeline is bound to at startup. The model picker
+   * filters on it: the pipeline sends a bare model name to this one provider,
+   * so a model from any other provider could only fail once a run started.
+   */
+  provider: string;
+  /** Which model each role uses when neither the agent nor the run names one. */
+  effective_models: Partial<Record<ModelRole, string>>;
+  /** Which model the benchmark favoured for each role, and why. */
+  recommended_models: ModelRecommendation[];
+}
+
+/** The two kinds of call the writing pipeline makes. */
+export type ModelRole = "prose" | "structured";
+
+/**
+ * A measured suggestion for one role.
+ *
+ * Advice, not a default — the picker labels the suggested model, it does not
+ * select it. `model` may name something this deployment has never pulled, in
+ * which case no badge is shown rather than a recommendation you cannot take.
+ */
+export interface ModelRecommendation {
+  role: ModelRole;
+  /** What the setting is called in the UI. */
+  label: string;
+  model: string;
+  reason: string;
+  /** The cost of taking the advice, where there is one. */
+  caveat?: string;
+  /** Which calls the setting governs. */
+  covers: string;
 }

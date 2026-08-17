@@ -108,6 +108,12 @@ func (s *agentService) Update(ctx context.Context, id uuid.UUID, req model.Updat
 		}
 		agent.ManagerID = &parsed
 	}
+	// Replaced whole rather than merged: a nil map means "not changing this",
+	// and callers that are changing one key send the rest back with it. Merging
+	// instead would make removing a key impossible.
+	if req.EngineConfig != nil {
+		agent.EngineConfig = req.EngineConfig
+	}
 
 	if err := s.repo.Update(ctx, agent); err != nil {
 		return nil, fmt.Errorf("updating agent: %w", err)

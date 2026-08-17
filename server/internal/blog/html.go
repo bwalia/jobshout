@@ -40,7 +40,29 @@ func renderHTML(markdown string) (string, error) {
 	if err := markdownConverter.Convert([]byte(stripLeadingH1(markdown)), &buf); err != nil {
 		return "", fmt.Errorf("blog: render markdown to html: %w", err)
 	}
-	return strings.TrimSpace(buf.String()), nil
+	return strings.TrimSpace(mermaidToDiv(buf.String())), nil
+}
+
+// mermaidCodeBlock matches the HTML goldmark emits for a ```mermaid fence.
+var mermaidCodeBlock = regexp.MustCompile(
+	`(?s)<pre><code class="language-mermaid">(.*?)</code></pre>`)
+
+// mermaidToDiv rewrites a fenced mermaid block into the markup mermaid.js
+// looks for.
+//
+// goldmark has no idea what mermaid is, so it renders the fence as a code
+// block — which publishes the diagram's source as literal text on the page.
+// `<div class="mermaid">` is the convention mermaid.js scans for, so a CMS
+// theme that loads the library renders a diagram, and one that does not shows
+// the same text it would have shown anyway. Nothing gets worse; it can only
+// get better.
+//
+// The source is left HTML-escaped. goldmark escaped it on the way in, and
+// mermaid reads the element's text content, which the browser unescapes.
+// Unescaping here would instead let a label containing a < become markup.
+func mermaidToDiv(html string) string {
+	return mermaidCodeBlock.ReplaceAllString(html,
+		`<div class="mermaid">$1</div>`)
 }
 
 var (

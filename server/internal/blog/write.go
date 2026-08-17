@@ -2,9 +2,10 @@ package blog
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
+
+	"go.uber.org/zap"
 
 	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/model"
@@ -56,14 +57,9 @@ Respond with JSON only, in exactly this shape:
 		formatFindings(rb.Findings),
 	)
 
-	resp, err := r.generateBounded(ctx, modelName, prompt, maxPlanTokens)
-	if err != nil {
-		return nil, fmt.Errorf("plan: %w", err)
-	}
-
 	var plan writePlan
-	if err := json.Unmarshal([]byte(extractJSON(resp)), &plan); err != nil {
-		return nil, fmt.Errorf("plan: parse response: %w", err)
+	if err := r.generateJSON(ctx, modelName, "plan", prompt, maxPlanTokens, &plan); err != nil {
+		return nil, err
 	}
 	plan.Title = strings.TrimSpace(plan.Title)
 	if plan.Title == "" {
@@ -103,6 +99,7 @@ Requirements:
 - Use H2/H3 headings for the sections above.
 - 900-1400 words.
 - Include at least one code block where it genuinely helps.
+- Include a DIAGRAM where one genuinely helps — see the diagram rules below.
 - Cite a source with [n] wherever you state a specific fact, version, number or
   quotation drawn from it. Do not cite a number that is not in the list above.
 - Anything describing HOW A TECHNOLOGY WORKS is a factual claim and needs a
@@ -115,6 +112,8 @@ Requirements:
 - Do NOT write a "Further Reading" or "References" section. The reference list
   is generated separately from the citations you use.
 
+%s
+
 Return only the markdown article — no preamble, no meta commentary.`,
 		plan.Title,
 		plan.Angle,
@@ -122,6 +121,7 @@ Return only the markdown article — no preamble, no meta commentary.`,
 		guidanceOrNone(brief.Context),
 		formatSources(rb),
 		plan.Title,
+		diagramRules,
 	)
 
 	resp, err := r.generate(ctx, modelName, prompt)
@@ -180,6 +180,11 @@ Find concrete problems. Look specifically for:
 - Missing or broken code blocks, or code that would not run.
 - Sections that are too thin to be useful — a heading with one short paragraph
   under it.
+- Diagrams drawn as ASCII art instead of a mermaid fence — boxes made of dashes,
+  arrows made of hyphens. Flag every one.
+- Decision nodes in a diagram whose branches all lead to the same place, which
+  makes the decision meaningless.
+- A diagram that contradicts the prose around it, or that no sentence refers to.
 
 List each problem as one specific, actionable sentence naming where it occurs.
 If the draft has no real problems, return an empty list — do not invent work.
@@ -188,14 +193,9 @@ Respond with JSON only, in exactly this shape:
 {"issues": ["...", "..."]}`,
 		plan.Title, plan.Angle, formatSources(rb), markdown)
 
-	resp, err := r.generateBounded(ctx, modelName, prompt, maxPlanTokens)
-	if err != nil {
-		return nil, fmt.Errorf("review: %w", err)
-	}
-
 	var c critique
-	if err := json.Unmarshal([]byte(extractJSON(resp)), &c); err != nil {
-		return nil, fmt.Errorf("review: parse response: %w", err)
+	if err := r.generateJSON(ctx, modelName, "review", prompt, maxPlanTokens, &c); err != nil {
+		return nil, err
 	}
 
 	out := make([]string, 0, len(c.Issues))
@@ -234,7 +234,10 @@ claim into vagueness to avoid having to support it — a sentence that survives 
 saying nothing is worse than one that is gone.
 
 Keep everything that was already working. Preserve the H1 title, the markdown
-structure and the length. Do not add a "Further Reading" or "References" section.
+structure, the length, and any mermaid diagrams that were fine. If a diagram was
+flagged, fix it in place — redraw it as a mermaid fence if it was ASCII art, or
+delete it if it was not earning its space. Never convert a mermaid fence back
+into text. Do not add a "Further Reading" or "References" section.
 
 Return only the revised markdown article — no preamble, no commentary on what
 you changed.`,
@@ -250,6 +253,63 @@ you changed.`,
 	}
 	return md, nil
 }
+
+// diagramRules is appended to the drafting and revision prompts.
+//
+// Every rule here comes from watching the models actually try. Both were asked
+// for six diagrams and both produced six that render, but what they are good at
+// differs sharply, and the failures are specific rather than general:
+//
+//   - Sequence, state and entity-relationship diagrams come out well. Those
+//     three have distinctive syntax that is hard to fake, and the models used
+//     it correctly — real participants and aliases, real [*] terminals, real
+//     cardinality markers.
+//   - Class diagrams do not. Asked for one, both models produced a flowchart
+//     instead, and one of them wired it into a meaningless ring: Agent to
+//     Searcher to Fetcher to Document to Finding and back to Agent. So class
+//     diagrams are steered away from entirely.
+//   - Decision nodes are the reliable failure. Both models drew "TLS
+//     terminate?" with the Yes branch and the No branch going to the same
+//     node — a question whose answer changes nothing. Hence the explicit rule.
+//
+// The ban on ASCII art is the point of the whole feature: a diagram made of
+// dashes and arrows in a code fence is worse than no diagram, because it
+// survives review looking deliberate.
+const diagramRules = `
+DIAGRAMS:
+
+Include one or two Mermaid diagrams where a diagram genuinely explains
+something faster than a paragraph — a request path, a protocol exchange, a
+lifecycle, a data model. Do not add one to every section, and do not add one
+that merely restates a list.
+
+Write them as a mermaid code fence:
+
+  ` + "```" + `mermaid
+  sequenceDiagram
+      participant C as Client
+      participant S as Server
+      C->>S: request
+      S-->>C: response
+  ` + "```" + `
+
+Use whichever of these fits:
+  sequenceDiagram    an exchange between parties over time
+  stateDiagram-v2    a lifecycle, with [*] as the start and end
+  erDiagram          a data model, with cardinality and typed attributes
+  flowchart LR/TD    a path through a system
+
+Rules:
+- NEVER draw a diagram with ASCII art — no boxes made of dashes and pipes, no
+  arrows made of hyphens and angle brackets. A mermaid fence or nothing.
+- Do not use classDiagram. Model structure as a flowchart instead.
+- Every decision node must have branches that lead somewhere DIFFERENT. If both
+  answers go to the same place, it is not a decision — delete the node.
+- Label nodes with short readable text: A[Load Balancer], not just LB.
+- Keep it under about twelve nodes. A diagram nobody can read helps nobody.
+- The diagram must agree with the surrounding prose and with the sources. It is
+  a claim like any other, not decoration.
+`
 
 // Target article length. The draft prompt asks for this range, but asking is
 // not getting: a live run against a local model produced 382 words against the
@@ -343,6 +403,26 @@ func (r *Runner) generate(ctx context.Context, modelName, prompt string) (string
 	return r.generateBounded(ctx, modelName, prompt, maxArticleTokens)
 }
 
+// generateJSON asks for a JSON reply and decodes it into v.
+//
+// The stages that ask for JSON used to fail the article outright on a reply
+// they could not parse, which made the choice of model hostage to one fragile
+// parse. Now a malformed reply is repaired where it can be and asked for again
+// where it cannot.
+func (r *Runner) generateJSON(
+	ctx context.Context, modelName, stage, prompt string, maxTokens int, v any,
+) error {
+	return llm.GenerateJSON(ctx, stage, prompt, v,
+		func(ctx context.Context, p string) (string, error) {
+			return r.generateBounded(ctx, modelName, p, maxTokens)
+		},
+		func(reply string, err error) {
+			r.logger.Warn("blog: could not parse the model's JSON, asking again",
+				zap.String("stage", stage), zap.String("model", modelName), zap.Error(err))
+		},
+	)
+}
+
 func (r *Runner) generateBounded(ctx context.Context, modelName, prompt string, maxTokens int) (string, error) {
 	resp, err := r.llm.Generate(ctx, llm.GenerateRequest{
 		Model:     modelName,
@@ -415,21 +495,4 @@ func orNone(s string) string {
 		return "(none given)"
 	}
 	return s
-}
-
-// extractJSON pulls a JSON object out of a model response that may be wrapped
-// in prose or a code fence.
-func extractJSON(s string) string {
-	s = strings.TrimSpace(s)
-	s = strings.TrimPrefix(s, "```json")
-	s = strings.TrimPrefix(s, "```")
-	s = strings.TrimSuffix(s, "```")
-	s = strings.TrimSpace(s)
-
-	start := strings.Index(s, "{")
-	end := strings.LastIndex(s, "}")
-	if start == -1 || end == -1 || end < start {
-		return s
-	}
-	return s[start : end+1]
 }

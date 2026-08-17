@@ -52,6 +52,17 @@ const (
 	BuiltinResearcher = "researcher"
 )
 
+// EngineConfigStructuredModel is the EngineConfig key holding the Article
+// Writer's model for calls that must return JSON — choosing the title and
+// outline, and reviewing the draft.
+//
+// The agent's own ModelName is the writing model, because that is the field the
+// Agents UI has always shown and the one a user setting "the model for this
+// agent" means. The second model lives in EngineConfig instead of getting its
+// own column: it is configuration for how this particular agent runs, which is
+// exactly what EngineConfig is for, and it needs no migration.
+const EngineConfigStructuredModel = "structured_model"
+
 // IsBuiltin reports whether the agent was seeded by the platform under the
 // given builtin name.
 func (a *Agent) IsBuiltin(name string) bool {

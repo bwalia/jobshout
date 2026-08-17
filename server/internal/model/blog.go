@@ -225,7 +225,19 @@ type GenerateBlogRequest struct {
 	Trending bool `json:"trending,omitempty"`
 	// TrendingCount is how many articles to write when Trending is set.
 	TrendingCount int `json:"trending_count,omitempty"`
-	MaxArticles   int `json:"max_articles,omitempty"`
+	// Focus narrows a trending run to particular subject areas. Meaningless
+	// without Trending — a run given its topics outright is already focused —
+	// and rejected in that combination rather than quietly ignored.
+	Focus       []string `json:"focus,omitempty"`
+	MaxArticles int      `json:"max_articles,omitempty"`
+	// AutoPublish files the finished articles in the CMS without waiting for
+	// someone to press the button.
+	//
+	// It exists for scheduled runs, where there is nobody at the keyboard at
+	// 2am. It creates drafts, exactly as the manual action does — nothing goes
+	// live without a human approving it in the CMS — so the worst case is a
+	// draft somebody deletes rather than a bad article published to readers.
+	AutoPublish bool `json:"auto_publish,omitempty"`
 }
 
 // Normalize folds the legacy Topics field into Briefs and trims empties, so
@@ -273,6 +285,27 @@ func (r *GenerateBlogRequest) Normalize() {
 		topics = append(topics, b.Topic)
 	}
 	r.Topics = topics
+
+	// Focus areas arrive from a text box, so blanks and repeats are normal
+	// input rather than caller error. Cleaning them here keeps Normalize
+	// idempotent and means the discovery prompt never shows an empty bullet.
+	if len(r.Focus) > 0 {
+		seen := make(map[string]struct{}, len(r.Focus))
+		focus := make([]string, 0, len(r.Focus))
+		for _, f := range r.Focus {
+			area := strings.TrimSpace(f)
+			if area == "" {
+				continue
+			}
+			key := strings.ToLower(area)
+			if _, dup := seen[key]; dup {
+				continue
+			}
+			seen[key] = struct{}{}
+			focus = append(focus, area)
+		}
+		r.Focus = focus
+	}
 }
 
 // Validate reports why a request cannot be run, after Normalize.
@@ -288,6 +321,12 @@ func (r *GenerateBlogRequest) Validate() error {
 			return fmt.Errorf("trending_count cannot be negative")
 		}
 		return nil
+	}
+	// Rejected rather than ignored: a focus area silently dropped would look
+	// like it was applied, and the run would write about anything at all while
+	// the caller believed it was steering.
+	if len(r.Focus) > 0 {
+		return fmt.Errorf("focus areas only apply to a trending run")
 	}
 	if len(r.Briefs) == 0 {
 		return fmt.Errorf("at least one brief with a topic is required")

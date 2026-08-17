@@ -14,6 +14,7 @@ import {
   Newspaper,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
+import { MermaidDiagram } from "@/components/blog/MermaidDiagram";
 import type { BlogArticle, BlogReference } from "@/lib/types/blog";
 
 type Tab = "article" | "sources" | "markdown" | "html";
@@ -149,7 +150,24 @@ export function ArticleViewer({ article }: { article: BlogArticle }) {
               "prose-th:text-foreground prose-blockquote:border-l-primary/40"
             )}
           >
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                // A ```mermaid fence becomes a rendered diagram. Every other
+                // fence keeps the default code rendering — an article's shell
+                // and Go snippets must not go anywhere near a diagram parser.
+                code({ className, children, ...props }) {
+                  if (/language-mermaid/.test(className ?? "")) {
+                    return <MermaidDiagram chart={String(children)} />;
+                  }
+                  return (
+                    <code className={className} {...props}>
+                      {children}
+                    </code>
+                  );
+                },
+              }}
+            >
               {article.markdown}
             </ReactMarkdown>
           </article>
