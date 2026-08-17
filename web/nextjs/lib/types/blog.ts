@@ -93,6 +93,18 @@ export interface BlogArticle {
   posted_at: string | null;
   word_count: number;
   created_at: string;
+  /** Where the generated cover image lives; absent when the run drew none. */
+  cover_image_url?: string;
+  /** What the cover was asked for, so a reader can see why it looks as it does. */
+  cover_image_prompt?: string;
+  /** The settings behind the cover. The seed is what makes it reproducible. */
+  cover_image_meta?: {
+    provider?: string;
+    model?: string;
+    seed?: number;
+    width?: number;
+    height?: number;
+  };
 }
 
 export interface BlogRun {

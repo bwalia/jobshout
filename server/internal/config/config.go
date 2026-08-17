@@ -32,6 +32,10 @@ type Config struct {
 	MinIOUseSSL          bool   `mapstructure:"MINIO_USE_SSL"`
 	MinIOBucketAvatars   string `mapstructure:"MINIO_BUCKET_AVATARS"`
 	MinIOBucketKnowledge string `mapstructure:"MINIO_BUCKET_KNOWLEDGE"`
+	// MinIOBucketImages holds generated images. Its own bucket rather than a
+	// prefix inside another, so a retention or access rule can be applied to
+	// machine-generated pictures without touching user uploads.
+	MinIOBucketImages string `mapstructure:"MINIO_BUCKET_IMAGES"`
 
 	// LLM provider selection. Defaults to "ollama".
 	LLMProvider string `mapstructure:"LLM_PROVIDER"`
@@ -64,6 +68,34 @@ type Config struct {
 	ClaudeAPIKey       string `mapstructure:"CLAUDE_API_KEY"`
 	ClaudeBaseURL      string `mapstructure:"CLAUDE_BASE_URL"`
 	ClaudeDefaultModel string `mapstructure:"CLAUDE_DEFAULT_MODEL"`
+
+	// Image generation configuration.
+	//
+	// The local provider ("mflux") is the workstation image service in
+	// image-service/, which runs on Apple MLX and therefore cannot be scheduled
+	// onto the cluster — every ring reaches one instance of it over the network,
+	// exactly as every ring reaches one Ollama. Leaving IMAGE_BASE_URL empty
+	// disables the local path; leaving both it and OPENAI_API_KEY empty disables
+	// image generation altogether, which callers handle by skipping the work
+	// rather than failing.
+	ImageProvider     string `mapstructure:"IMAGE_PROVIDER"`
+	ImageBaseURL      string `mapstructure:"IMAGE_BASE_URL"`
+	ImageDefaultModel string `mapstructure:"IMAGE_DEFAULT_MODEL"`
+	// ImageJWTSecret is the shared secret for the gateway fronting the image
+	// service. Empty means no gateway, matching OLLAMA_JWT_SECRET's meaning.
+	ImageJWTSecret string `mapstructure:"IMAGE_JWT_SECRET"`
+	// ImageTimeout bounds one generation. Long by HTTP standards because a cold
+	// model load plus a queue wait legitimately takes minutes.
+	ImageTimeout time.Duration `mapstructure:"IMAGE_TIMEOUT"`
+	// ImageOpenAIModel is the hosted image model, kept separate from
+	// OPENAI_DEFAULT_MODEL because a chat model name in an image request is an
+	// error that is hard to read.
+	ImageOpenAIModel string `mapstructure:"IMAGE_OPENAI_MODEL"`
+	// BlogCoverImages turns on cover-image generation inside article runs. Off
+	// leaves the rest of image generation available on demand — the toggle is
+	// about whether every article pays for a picture, not about whether the
+	// platform can draw.
+	BlogCoverImages bool `mapstructure:"BLOG_COVER_IMAGES"`
 
 	// Embedding configuration (used for RAG / knowledge retrieval).
 	// The default provider is OpenAI with text-embedding-3-small (1536 dims).
@@ -153,6 +185,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("MINIO_USE_SSL", false)
 	viper.SetDefault("MINIO_BUCKET_AVATARS", "avatars")
 	viper.SetDefault("MINIO_BUCKET_KNOWLEDGE", "knowledge")
+	viper.SetDefault("MINIO_BUCKET_IMAGES", "images")
 	viper.SetDefault("CORS_ORIGINS", "http://localhost:3001")
 
 	// LLM defaults — Ollama running locally is the out-of-the-box provider.
@@ -166,6 +199,23 @@ func Load() (*Config, error) {
 	viper.SetDefault("OPENAI_DEFAULT_MODEL", "gpt-4o-mini")
 	viper.SetDefault("CLAUDE_BASE_URL", "https://api.anthropic.com")
 	viper.SetDefault("CLAUDE_DEFAULT_MODEL", "claude-sonnet-4-20250514")
+
+	// Image generation defaults. The local image service is the out-of-the-box
+	// provider, on 11435 — one above Ollama's 11434, because the two workstation
+	// model services are a pair.
+	//
+	// IMAGE_BASE_URL has no default on purpose: defaulting it to localhost would
+	// mean every deployed ring quietly tries to reach an image service inside its
+	// own pod, and spends the timeout finding out there isn't one. An unset value
+	// says "no local image generation here", which is the truth everywhere the
+	// operator has not said otherwise.
+	viper.SetDefault("IMAGE_PROVIDER", "mflux")
+	viper.SetDefault("IMAGE_DEFAULT_MODEL", "z-image-turbo")
+	viper.SetDefault("IMAGE_TIMEOUT", "10m")
+	viper.SetDefault("IMAGE_OPENAI_MODEL", "gpt-image-1")
+	// Off by default: a cover image costs 25 seconds of a shared GPU per
+	// article, and an operator should opt into spending that on every run.
+	viper.SetDefault("BLOG_COVER_IMAGES", false)
 
 	// Embedding defaults — OpenAI text-embedding-3-small (1536 dims).
 	viper.SetDefault("EMBEDDING_PROVIDER", "openai")
@@ -197,6 +247,7 @@ func Load() (*Config, error) {
 		MinIOUseSSL:          viper.GetBool("MINIO_USE_SSL"),
 		MinIOBucketAvatars:   viper.GetString("MINIO_BUCKET_AVATARS"),
 		MinIOBucketKnowledge: viper.GetString("MINIO_BUCKET_KNOWLEDGE"),
+		MinIOBucketImages:    viper.GetString("MINIO_BUCKET_IMAGES"),
 		LLMProvider:          viper.GetString("LLM_PROVIDER"),
 		OllamaBaseURL:        viper.GetString("OLLAMA_BASE_URL"),
 		OllamaDefaultModel:   viper.GetString("OLLAMA_DEFAULT_MODEL"),
@@ -209,6 +260,13 @@ func Load() (*Config, error) {
 		ClaudeAPIKey:         viper.GetString("CLAUDE_API_KEY"),
 		ClaudeBaseURL:        viper.GetString("CLAUDE_BASE_URL"),
 		ClaudeDefaultModel:   viper.GetString("CLAUDE_DEFAULT_MODEL"),
+		ImageProvider:        viper.GetString("IMAGE_PROVIDER"),
+		ImageBaseURL:         viper.GetString("IMAGE_BASE_URL"),
+		ImageDefaultModel:    viper.GetString("IMAGE_DEFAULT_MODEL"),
+		ImageJWTSecret:       viper.GetString("IMAGE_JWT_SECRET"),
+		ImageTimeout:         viper.GetDuration("IMAGE_TIMEOUT"),
+		ImageOpenAIModel:     viper.GetString("IMAGE_OPENAI_MODEL"),
+		BlogCoverImages:      viper.GetBool("BLOG_COVER_IMAGES"),
 		EmbeddingProvider:    viper.GetString("EMBEDDING_PROVIDER"),
 		EmbeddingModel:       viper.GetString("EMBEDDING_MODEL"),
 		EmbeddingDimensions:  viper.GetInt("EMBEDDING_DIMENSIONS"),

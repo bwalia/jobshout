@@ -121,7 +121,7 @@ Return only the markdown article — no preamble, no meta commentary.`,
 		guidanceOrNone(brief.Context),
 		formatSources(rb),
 		plan.Title,
-		diagramRules,
+		r.visualRules(),
 	)
 
 	resp, err := r.generate(ctx, modelName, prompt)
@@ -310,6 +310,52 @@ Rules:
 - The diagram must agree with the surrounding prose and with the sources. It is
   a claim like any other, not decoration.
 `
+
+// illustrationRules is appended to the diagram rules only when the run can
+// actually draw.
+//
+// Offering it unconditionally would be worse than not offering it: a model told
+// it may request pictures will request them, illustrateBody would strip every
+// block on a server with no image provider, and the article would arrive with
+// paragraphs referring to figures that are not there.
+//
+// It is deliberately stingier than the diagram rules. A diagram costs the model
+// a few hundred tokens; an illustration costs tens of seconds of a single
+// shared GPU, and an article does not need three of them.
+const illustrationRules = `
+ILLUSTRATIONS:
+
+You may request AT MOST ONE generated illustration, and only where a picture
+genuinely sets up the subject — an opening image for a long piece, or a single
+concrete scene the prose then unpacks. Most articles need none. A diagram is
+almost always the better choice: a diagram carries information, an illustration
+carries atmosphere.
+
+Request one by writing an illustration fence whose body describes the picture:
+
+  ` + "```" + `illustration
+  A lighthouse on a rocky shore at dawn, seen from the water
+  ` + "```" + `
+
+Rules:
+- Describe a CONCRETE SCENE — a thing that could be photographed. "A lighthouse
+  at dawn" works. "The concept of reliability" does not, and produces a muddle.
+- Do not ask for text, labels, diagrams, charts or UI in an illustration. Image
+  models render lettering badly, and a diagram belongs in a mermaid fence.
+- Do not use one to replace a diagram, and never to illustrate a claim that
+  needs a source.
+- The description becomes the image's alt text, so write it as a sentence a
+  screen-reader user would find useful.
+`
+
+// visualRules is the visual half of the drafting prompt: diagrams always, plus
+// illustrations when this run has a generator behind it.
+func (r *Runner) visualRules() string {
+	if !r.canIllustrate() {
+		return diagramRules
+	}
+	return diagramRules + illustrationRules
+}
 
 // Target article length. The draft prompt asks for this range, but asking is
 // not getting: a live run against a local model produced 382 words against the

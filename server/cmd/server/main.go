@@ -27,6 +27,8 @@ import (
 	"github.com/jobshout/server/internal/engine"
 	"github.com/jobshout/server/internal/executor"
 	"github.com/jobshout/server/internal/handler"
+	"github.com/jobshout/server/internal/imagegen"
+	"github.com/jobshout/server/internal/imagestore"
 	integ "github.com/jobshout/server/internal/integration"
 	emailAdapter "github.com/jobshout/server/internal/integration/adapters/email"
 	githubAdapter "github.com/jobshout/server/internal/integration/adapters/github"
@@ -204,6 +206,52 @@ func main() {
 	// back to ILIKE when embedder is nil.
 	memoryRepo = memoryRepo.WithEmbedder(embedder)
 
+	// ─── Object storage ─────────────────────────────────────────────────────
+	// Built here rather than alongside the upload handler further down because
+	// generated images need somewhere to live, and both the tool registry below
+	// and the article generator after it need to know whether image generation
+	// is available before they are assembled.
+	var minioClient *miniogo.Client
+	if cfg.MinIOEndpoint != "" {
+		client, err := miniogo.New(cfg.MinIOEndpoint, &miniogo.Options{
+			Creds:  credentials.NewStaticV4(cfg.MinIOAccessKey, cfg.MinIOSecretKey, ""),
+			Secure: cfg.MinIOUseSSL,
+		})
+		if err != nil {
+			logger.Warn("failed to create minio client — uploads and image storage disabled", zap.Error(err))
+		} else {
+			minioClient = client
+		}
+	}
+
+	// ─── Image generation ───────────────────────────────────────────────────
+	// The local provider runs on the workstation (see image-service/), outside
+	// the cluster, because Apple MLX cannot be scheduled onto amd64 nodes —
+	// the same arrangement Ollama already uses.
+	imageRouter := imagegen.NewRouter(cfg)
+	var imgStore imagestore.Store
+	if minioClient != nil {
+		imgStore = imagestore.NewMinIOStore(minioClient, cfg.MinIOBucketImages)
+	}
+	imageSvc := service.NewImageService(imageRouter, imgStore, repository.NewImageRepository(pool), logger)
+	if imageSvc.Enabled() {
+		logger.Info("image generation initialised",
+			zap.Strings("providers", imageRouter.Providers()),
+			zap.String("default_provider", imageRouter.DefaultProvider()),
+			zap.Bool("storage", imgStore != nil),
+			zap.Bool("blog_covers", cfg.BlogCoverImages))
+		// Warm the model list so the first person to open the picker does not
+		// wait on discovery. Bounded and best-effort: a workstation that is
+		// asleep at boot must not hold up the server.
+		warmCtx, cancelWarm := context.WithTimeout(ctx, 10*time.Second)
+		go func() {
+			defer cancelWarm()
+			imageRouter.Warm(warmCtx)
+		}()
+	} else {
+		logger.Info("image generation not configured — set IMAGE_BASE_URL or OPENAI_API_KEY to enable it")
+	}
+
 	// ─── Tool registry ───────────────────────────────────────────────────────
 	toolRegistry := tools.NewRegistry()
 	toolRegistry.Register(tools.NewHTTPTool())
@@ -220,6 +268,12 @@ func main() {
 	researchClient := research.New(logger, cfg.GitHubToken)
 	for _, rt := range tools.NewResearchTools(researchClient) {
 		toolRegistry.Register(rt)
+	}
+	// generate_image is registered whenever a provider is configured. An agent
+	// granted a tool that always answers "not configured" learns nothing useful,
+	// so the tool is absent rather than present-and-broken.
+	if imageSvc.Enabled() {
+		toolRegistry.Register(tools.NewGenerateImageTool(&toolImageGenerator{images: imageSvc}))
 	}
 	logger.Info("tool registry initialised", zap.Int("tools", len(toolRegistry.All())))
 
@@ -347,6 +401,12 @@ func main() {
 			ProseModel:      cfg.BlogProseModel,
 			StructuredModel: cfg.BlogStructuredModel,
 		}, blogLLM, cmsClient, researchSvc, logger)
+		// Cover images and in-article illustrations are opt-in per environment:
+		// each costs tens of seconds on a single shared GPU, so an operator
+		// decides whether every article pays for one.
+		if cfg.BlogCoverImages && imageSvc.Enabled() {
+			blogRunner = blogRunner.WithIllustrator(&blogIllustrator{images: imageSvc})
+		}
 		writingModel := firstNonEmptyStr(cfg.BlogModel, cfg.OllamaDefaultModel)
 		logger.Info("article generator initialised",
 			zap.String("prose_model", firstNonEmptyStr(cfg.BlogProseModel, writingModel)),
@@ -465,22 +525,16 @@ func main() {
 	hub := ws.NewHub(logger)
 	go hub.Run()
 
-	// ─── MinIO client (optional) ─────────────────────────────────────────────
+	// ─── Uploads ─────────────────────────────────────────────────────────────
+	// The MinIO client itself is built earlier, where image storage needs it.
 	var uploadHandler *handler.UploadHandler
-	if cfg.MinIOEndpoint != "" {
-		minioClient, err := miniogo.New(cfg.MinIOEndpoint, &miniogo.Options{
-			Creds:  credentials.NewStaticV4(cfg.MinIOAccessKey, cfg.MinIOSecretKey, ""),
-			Secure: cfg.MinIOUseSSL,
-		})
-		if err != nil {
-			logger.Warn("failed to create minio client — uploads disabled", zap.Error(err))
-		} else {
-			uploadHandler = handler.NewUploadHandler(minioClient, cfg.MinIOBucketAvatars, logger)
-		}
+	if minioClient != nil {
+		uploadHandler = handler.NewUploadHandler(minioClient, cfg.MinIOBucketAvatars, logger)
 	}
 
 	// ─── Handlers ────────────────────────────────────────────────────────────
 	authHandler := handler.NewAuthHandler(authSvc)
+	imageHandler := handler.NewImageHandler(imageSvc)
 	agentHandler := handler.NewAgentHandler(agentSvc)
 	projectHandler := handler.NewProjectHandler(projectSvc)
 	taskHandler := handler.NewTaskHandler(taskSvc)
@@ -962,6 +1016,17 @@ func main() {
 				r.Post("/uploads/avatar", uploadHandler.UploadAvatar)
 				r.Get("/uploads/avatar/*", uploadHandler.ServeAvatar)
 			}
+
+			// Image generation. Registered unconditionally: /models answers
+			// "enabled: false" when nothing is configured, which the UI renders
+			// as a disabled control — a 404 there would look like a broken
+			// deployment rather than a switched-off feature.
+			r.Route("/images", func(r chi.Router) {
+				r.Get("/models", imageHandler.ListModels)
+				r.Post("/generate", imageHandler.Generate)
+				r.Get("/file/*", imageHandler.Serve)
+				r.Get("/", imageHandler.List)
+			})
 
 			// WebSocket
 			r.Get("/ws", wsHandler.Connect)

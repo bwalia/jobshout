@@ -34,9 +34,14 @@ const (
 	// BlogStepExpanding runs only when the finished draft came in under the
 	// target length. Its own step so a short article that had to be filled out
 	// is visible rather than hidden inside "writing".
-	BlogStepExpanding  = "expanding"
-	BlogStepConverting = "converting"
-	BlogStepGenerated  = "generated"
+	BlogStepExpanding = "expanding"
+	// BlogStepIllustrating runs only when image generation is switched on. Its
+	// own step because it is the slowest thing in the pipeline after the writing
+	// itself — a cover costs tens of seconds on a shared GPU — and a run that
+	// looks stalled inside "converting" for a minute is a run someone cancels.
+	BlogStepIllustrating = "illustrating"
+	BlogStepConverting   = "converting"
+	BlogStepGenerated    = "generated"
 	BlogStepPublishing = "publishing"
 	BlogStepPublished  = "published"
 )
@@ -195,6 +200,18 @@ type BlogArticle struct {
 	PostedAt   *time.Time `json:"posted_at"`
 	WordCount  int        `json:"word_count"`
 	CreatedAt  time.Time  `json:"created_at"`
+
+	// CoverImageURL is where the article's cover image is served from, empty
+	// when the run generated none — cover images are opt-in per environment, and
+	// a run that could not draw one still produces a publishable article.
+	CoverImageURL string `json:"cover_image_url,omitempty"`
+	// CoverImagePrompt is what the image was asked for, kept so a reader can see
+	// why the picture looks the way it does and so it can be edited and redrawn.
+	CoverImagePrompt string `json:"cover_image_prompt,omitempty"`
+	// CoverImageMeta is the provider, model and seed behind the cover. The seed
+	// is the part that matters: without it a cover that came out well can be
+	// regenerated but never reproduced.
+	CoverImageMeta CoverImageMeta `json:"cover_image_meta,omitempty"`
 }
 
 // BlogArticlePost is the result of posting one article, written back to

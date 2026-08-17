@@ -530,6 +530,15 @@ func (s *blogService) runGeneration(run *model.BlogRun, agent *model.Agent, req 
 			Topic: a.Topic, Title: a.Title, Slug: a.Slug, Path: a.Path,
 			References: refs,
 			Markdown:   a.Markdown, HTML: a.HTML, WordCount: a.WordCount,
+			CoverImageURL:    a.CoverImageURL,
+			CoverImagePrompt: a.CoverImagePrompt,
+			CoverImageMeta: model.CoverImageMeta{
+				Provider: a.CoverImageProvider,
+				Model:    a.CoverImageModel,
+				Seed:     a.CoverImageSeed,
+				Width:    a.CoverImageWidth,
+				Height:   a.CoverImageHeight,
+			},
 		})
 		summaries = append(summaries, model.BlogRunArticle{
 			ID: id, Topic: a.Topic, Title: a.Title, Slug: a.Slug, Path: a.Path,

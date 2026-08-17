@@ -188,8 +188,28 @@ type Runner struct {
 	cms      CMSPublisher
 	research Researcher
 	logger   *zap.Logger
+	// images draws cover images and in-article illustrations. Nil, or present
+	// but disabled, means a run produces text only — which is the default, and
+	// a complete article either way.
+	images Illustrator
 	// clock lets tests inject a deterministic time.
 	clock func() time.Time
+}
+
+// WithIllustrator enables image generation for runs.
+//
+// Separate from NewRunner because it is optional and arrived later: every
+// existing caller builds a Runner that writes text, and adding a seventh
+// positional argument to say "no images" would touch all of them to express a
+// default.
+func (r *Runner) WithIllustrator(images Illustrator) *Runner {
+	r.images = images
+	return r
+}
+
+// canIllustrate reports whether this run can draw.
+func (r *Runner) canIllustrate() bool {
+	return r.images != nil && r.images.Enabled()
 }
 
 // NewRunner wires the Runner with its dependencies. cms may be nil — generation
@@ -273,6 +293,35 @@ func (r *Runner) Generate(ctx context.Context, req GenerateRequest, progress Pro
 	articles, err := r.writeArticles(ctx, req, briefs, progress)
 	if err != nil {
 		return nil, err
+	}
+
+	// Illustration runs before conversion so the generated images are part of
+	// the markdown that gets rendered, rather than something bolted onto the
+	// HTML afterwards.
+	//
+	// Nothing here can fail the run. An article without a picture is a complete
+	// article; an article that was thrown away because a GPU was busy is not.
+	// So every failure is reported into the trace and the run carries on — the
+	// reader can see what happened without losing the writing.
+	if r.canIllustrate() {
+		report(progress, model.BlogStepIllustrating,
+			fmt.Sprintf("Illustrating %d article(s)", len(articles)), model.AgentNameArticleWriter)
+
+		for i := range articles {
+			body, notes := r.illustrateBody(ctx, req.OrgID, articles[i].Markdown)
+			articles[i].Markdown = body
+			for _, note := range notes {
+				r.logger.Info("blog: "+note, zap.String("title", articles[i].Title))
+			}
+
+			if err := r.generateCover(ctx, req.OrgID, &articles[i]); err != nil {
+				r.logger.Warn("blog: could not draw a cover image",
+					zap.String("title", articles[i].Title), zap.Error(err))
+				report(progress, model.BlogStepIllustrating,
+					fmt.Sprintf("No cover image for %q: %v", articles[i].Title, err),
+					model.AgentNameArticleWriter)
+			}
+		}
 	}
 
 	// Rendering is its own step rather than part of generation: it is the point

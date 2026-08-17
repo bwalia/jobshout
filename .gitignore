@@ -47,3 +47,8 @@ minio_data/
 coverage/
 *.cover
 *.prof
+
+# Python bytecode and virtualenvs (python-sidecar/, image-service/)
+__pycache__/
+*.pyc
+.venv/

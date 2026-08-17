@@ -1,0 +1,5 @@
+# Only what the mflux tool environment does not already provide. mflux itself,
+# MLX, Pillow and the Hugging Face stack come from that environment — see run.sh.
+fastapi>=0.115,<0.116
+uvicorn[standard]>=0.30,<0.31
+PyJWT>=2.9,<3

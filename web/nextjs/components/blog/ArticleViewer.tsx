@@ -67,6 +67,20 @@ export function ArticleViewer({ article }: { article: BlogArticle }) {
 
   return (
     <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col">
+      {/* The cover image, when the run drew one. Above the header rather than
+          inside it: it is the article's opening image, and a reader scanning a
+          list of articles recognises the picture before the filename. */}
+      {article.cover_image_url && (
+        // eslint-disable-next-line @next/next/no-img-element -- served by this
+        // app's own API path; next/image would need it registered as a remote
+        // pattern to no benefit.
+        <img
+          src={article.cover_image_url}
+          alt={article.cover_image_prompt || article.title || article.topic}
+          className="mb-3 aspect-video w-full rounded-lg border border-border object-cover"
+        />
+      )}
+
       {/* Header: file path + actions */}
       <div className="flex items-start justify-between gap-4 border-b border-border pb-3">
         <div className="min-w-0">

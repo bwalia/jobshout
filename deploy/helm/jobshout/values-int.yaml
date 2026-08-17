@@ -24,6 +24,16 @@ ai:
   enabled: true
   ollamaBaseURL: "https://ollama.workstation.co.uk"
   ollamaModel: "llama3:latest"
+  imageBaseURL: "https://images.workstation.co.uk"
+  imageModel: "z-image-turbo"
+  # Off until images.workstation.co.uk is actually registered on the edge.
+  # Leaving it on would have every article run reach for a cover, fail to
+  # resolve the host, and file that failure into its trace — harmless, since a
+  # run carries on and still produces a complete article, but it would fill int
+  # with a recurring error that looks like a bug rather than a missing endpoint.
+  # Turn this on once the host is live and generation has been tried by hand
+  # through the Images page.
+  blogCoverImages: false
 
 api:
   replicas: 1
