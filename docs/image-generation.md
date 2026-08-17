@@ -86,12 +86,18 @@ to agents, and the Images page renders a disabled control rather than an error.
 
 ### Per-ring defaults
 
-All four rings point at `https://images.workstation.co.uk`. `BLOG_COVER_IMAGES`
-is **on in int and off everywhere else** — covers cost about 25 seconds of a
-single shared GPU per article, so the rollout starts where it can be watched.
+All four rings point at `https://images.workstation.co.uk`, and
+`BLOG_COVER_IMAGES` is **off in every one of them** for now, because that host is
+not registered on the edge yet. With it on, every article run would reach for a
+cover, fail to resolve the host, and file that failure into its trace — harmless,
+since the run carries on and still produces a complete article, but it fills a
+ring with a recurring error that reads as a bug rather than a missing endpoint.
 
-Turn it on further along the pipeline by setting `ai.blogCoverImages: true` in
-that ring's values file.
+The intended rollout, once the host is live, is int first: generate an image by
+hand from the Images page to confirm the endpoint answers, then set
+`ai.blogCoverImages: true` in `values-int.yaml` and watch a run. Advance ring by
+ring from there. A cover costs about 25 seconds of a single shared GPU per
+article, so this is a cost worth turning on where it can be observed.
 
 ### The gateway secret
 
