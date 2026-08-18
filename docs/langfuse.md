@@ -1,10 +1,21 @@
 # Langfuse LLM observability
 
-Every LLM call the python-sidecar makes — LangChain runs, LangGraph workflows,
-and both SSE streaming variants — can be traced to a self-hosted
-[Langfuse](https://langfuse.com): full prompts and completions, per-model token
-counts, latency, estimated cost, and errors, grouped per execution and per
-agent.
+Every LLM call JobShout makes can be traced to a self-hosted
+[Langfuse](https://langfuse.com): per-model token counts, latency, estimated
+cost, and errors, grouped per execution and per agent.
+
+Two processes report, because JobShout runs agents on two engines:
+
+| Engine | Runs in | Reported by |
+|---|---|---|
+| `langchain`, `langgraph` (incl. both SSE streaming variants) | python-sidecar | `python-sidecar/app/observability.py`, via the Langfuse SDK |
+| `go_native` — the article writer, the research agent, scheduled tasks | the Go API | `server/internal/langfuse`, via OTLP |
+
+Both halves matter: **`go_native` is the default engine**, so a deployment that
+traces only the sidecar shows an almost empty dashboard while the product is
+busy. Each engine is reported by exactly one process — the Go client skips
+sidecar-backed engines rather than emitting a second trace that would double
+their tokens and cost.
 
 ## Deployment on k3s (the main path)
 
@@ -66,7 +77,8 @@ second attempt deploys against cached images.
 # 1. Start the Langfuse stack (opt-in compose profile; UI on :3002)
 docker compose --profile langfuse up -d
 
-# 2. Turn tracing on in the sidecar — add to .env, then restart python-sidecar
+# 2. Turn tracing on — add to .env, then restart python-sidecar AND
+#    jobshout-server (the Go API traces go-native runs and reads the same keys)
 LANGFUSE_PUBLIC_KEY=pk-lf-jobshout-local
 LANGFUSE_SECRET_KEY=sk-lf-jobshout-local
 
@@ -86,9 +98,13 @@ value in `.env` before pointing anything shared at it.
 
 ## What gets traced, and how it's labelled
 
-`python-sidecar/app/observability.py` is the whole integration. Tracing is off
-unless both keys are set; without them every code path behaves exactly as
-before. When on:
+Tracing is off in both processes unless `LANGFUSE_HOST` and both keys are set;
+without them every code path behaves exactly as before, and neither process
+requires a Langfuse deployment to exist.
+
+### Sidecar runs (`langchain`, `langgraph`)
+
+`python-sidecar/app/observability.py` is the whole integration. When on:
 
 | Langfuse field | JobShout value | Why |
 |---|---|---|
@@ -101,6 +117,33 @@ Attributes are applied with `propagate_attributes(...)` around the run rather
 than invoke metadata, because only the context manager reaches *child* spans —
 a LangGraph run nests its generations under per-node chains, and metadata-only
 attribution leaves them showing as `n/a` in the by-agent widget.
+
+### Go-native runs
+
+`server/internal/langfuse` reports from `GovernanceService.RecordUsage` — the
+one point every engine converges on, with model, token counts, latency and
+cost already resolved by the cost engine. One execution becomes one generation
+span:
+
+| Langfuse field | JobShout value | Why |
+|---|---|---|
+| Trace name | `go-native-run` | which engine ran |
+| Trace id | the execution UUID's bytes | a trace is findable from an execution row, with no second identifier stored |
+| Session | `execution_id` | matches the sidecar's convention, so retries group together |
+| User | `agent_id` | the by-agent widgets work across both engines |
+| Environment | ring namespace (`int`/`test`/`acc`/`prod`) | rings stay separable in a shared project |
+| `usage_details` / `cost_details` | token counts and cost from the cost engine | per-model spend is charted from the same numbers the budget system enforces on |
+
+It posts OTLP/HTTP+JSON to `/api/public/otel/v1/traces` rather than using the
+batch ingestion API, because Langfuse 4.x defaults to
+`LANGFUSE_MIGRATION_V4_WRITE_MODE=events_only`, under which
+`/api/public/ingestion` accepts only score and log events — a `trace-create`
+there is rejected with `400 Event type not accepted`. OTLP is the only write
+path for spans on a v4 deployment.
+
+Export is asynchronous and best-effort: spans are queued (dropped if the queue
+is full), batched, and flushed on shutdown. A Langfuse outage can never fail,
+slow, or change the outcome of a run.
 
 ## The dashboard
 
@@ -143,10 +186,12 @@ A sidecar running *outside* compose (e.g. `uvicorn` during development) needs
 
 ## Pointing a ring at an external Langfuse instead
 
-The sidecar only needs `LANGFUSE_HOST`, `LANGFUSE_PUBLIC_KEY` and
-`LANGFUSE_SECRET_KEY`. In a ring with `langfuse.enabled: false` the chart sets
-none of them, so an operator-created `extraSecretRefs` secret carrying those
-three keys points tracing at any external Langfuse (another ring's, or cloud)
-without deploying the stack there. Both scripts accept
+Both the sidecar and the Go API only need `LANGFUSE_HOST`,
+`LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`. In a ring with
+`langfuse.enabled: false` the chart sets none of them, so an operator-created
+`extraSecretRefs` secret carrying those three keys points tracing at any
+external Langfuse (another ring's, or cloud) without deploying the stack there.
+Supply them to both deployments to keep coverage complete — a secret given only
+to the sidecar leaves go-native runs, the bulk of real traffic, untraced. Both scripts accept
 `--host/--public-key/--secret-key` to provision the dashboard and model prices
 on whatever host is used.

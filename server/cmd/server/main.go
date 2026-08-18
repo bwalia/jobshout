@@ -38,6 +38,7 @@ import (
 	teamsAdapter "github.com/jobshout/server/internal/integration/adapters/teams"
 	telegramBot "github.com/jobshout/server/internal/integration/adapters/telegram"
 	"github.com/jobshout/server/internal/langchain"
+	"github.com/jobshout/server/internal/langfuse"
 	"github.com/jobshout/server/internal/langgraph"
 	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/middleware"
@@ -354,7 +355,14 @@ func main() {
 	agentSvc := service.NewAgentService(agentRepo, logger)
 	projectSvc := service.NewProjectService(projectRepo, logger)
 	taskSvc := service.NewTaskService(taskRepo, logger)
-	govSvc := service.NewGovernanceService(budgetRepo, policyRepo, usageRepo, execRepo, costEng, logger)
+	// Langfuse tracing for executions the Python sidecar does not see. Nil when
+	// unconfigured, which disables tracing without any other code path caring.
+	// Closed in the shutdown path below rather than deferred: the Fatal calls
+	// on the way there use os.Exit, which would skip a defer anyway.
+	tracer := langfuse.New(cfg.LangfuseHost, cfg.LangfusePublicKey, cfg.LangfuseSecretKey,
+		cfg.LangfuseEnvironment, logger)
+
+	govSvc := service.NewGovernanceService(budgetRepo, policyRepo, usageRepo, execRepo, costEng, tracer, logger)
 	analyticsSvc := service.NewAnalyticsService(usageRepo, logger)
 	rbacSvc := service.NewRBACService(rbacRepo, logger)
 	ssoSvc := service.NewSSOService(ssoRepo, userRepo, rbacRepo, auditRepo, logger)
@@ -1073,6 +1081,10 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		logger.Fatal("server forced shutdown", zap.Error(err))
 	}
+
+	// Flush queued spans before exit. Without this the last few executions of a
+	// deploy are lost, which is exactly when traces are most worth having.
+	tracer.Close()
 
 	logger.Info("server stopped")
 }

@@ -109,6 +109,16 @@ type Config struct {
 	PythonSidecarURL    string `mapstructure:"PYTHON_SIDECAR_URL"`
 	PythonSidecarSecret string `mapstructure:"PYTHON_SIDECAR_SECRET"`
 
+	// Langfuse tracing for go-native executions. The sidecar reads the same
+	// three variables; setting them here extends tracing to every engine
+	// rather than only LangChain/LangGraph runs. Unset means tracing is off.
+	LangfuseHost      string `mapstructure:"LANGFUSE_HOST"`
+	LangfusePublicKey string `mapstructure:"LANGFUSE_PUBLIC_KEY"`
+	LangfuseSecretKey string `mapstructure:"LANGFUSE_SECRET_KEY"`
+	// Ring name stamped on every span, so int/test/acc/prod traces stay
+	// separable in a shared Langfuse project. Langfuse's own variable name.
+	LangfuseEnvironment string `mapstructure:"LANGFUSE_TRACING_ENVIRONMENT"`
+
 	// Telegram Bot integration (optional).
 	TelegramBotToken    string `mapstructure:"TELEGRAM_BOT_TOKEN"`
 	TelegramWebhookURL  string `mapstructure:"TELEGRAM_WEBHOOK_URL"`
@@ -272,6 +282,10 @@ func Load() (*Config, error) {
 		EmbeddingDimensions:  viper.GetInt("EMBEDDING_DIMENSIONS"),
 		PythonSidecarURL:     viper.GetString("PYTHON_SIDECAR_URL"),
 		PythonSidecarSecret:  viper.GetString("PYTHON_SIDECAR_SECRET"),
+		LangfuseHost:         viper.GetString("LANGFUSE_HOST"),
+		LangfusePublicKey:    viper.GetString("LANGFUSE_PUBLIC_KEY"),
+		LangfuseSecretKey:    viper.GetString("LANGFUSE_SECRET_KEY"),
+		LangfuseEnvironment:  viper.GetString("LANGFUSE_TRACING_ENVIRONMENT"),
 		TelegramBotToken:     viper.GetString("TELEGRAM_BOT_TOKEN"),
 		TelegramWebhookURL:   viper.GetString("TELEGRAM_WEBHOOK_URL"),
 		TelegramSecretToken:  viper.GetString("TELEGRAM_WEBHOOK_SECRET"),

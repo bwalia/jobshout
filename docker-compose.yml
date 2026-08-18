@@ -98,6 +98,13 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       PYTHON_SIDECAR_URL: ${PYTHON_SIDECAR_URL:-http://python-sidecar:8001}
       PYTHON_SIDECAR_SECRET: ${PYTHON_SIDECAR_SECRET:-change-me-sidecar-secret}
+      # Same keys as the sidecar: this process traces the go-native engine,
+      # which is what the article writer, research agent and scheduled tasks
+      # actually run on. Empty keys leave tracing off.
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-http://langfuse-web:3000}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_TRACING_ENVIRONMENT: ${LANGFUSE_TRACING_ENVIRONMENT:-local}
       # Automated blog generator. Writing always works; publishing to the
       # opsapi CMS needs all three OPSAPI_* values, and is disabled without them.
       OPSAPI_BASE_URL: ${OPSAPI_BASE_URL:-}
