@@ -260,6 +260,10 @@ langfuse:
   # a wslproxy vhost (deploy/edge/wslproxy-server-langfuse-<env>.json) — run the
   # register-edge-vhost workflow with health_path=/auth/sign-in.
   host: ""
+  # Value of the Langfuse "environment" dimension stamped on every span this
+  # ring emits. Defaults to the release namespace (int/test/acc/prod), which is
+  # what keeps rings separable if they ever share one Langfuse project.
+  tracingEnvironment: ""
   webImage: langfuse/langfuse:4
   workerImage: langfuse/langfuse-worker:4
   web:

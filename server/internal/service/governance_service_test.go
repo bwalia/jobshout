@@ -131,7 +131,8 @@ func (m *mockExecRepo) ListLangGraphSnapshots(_ context.Context, _ uuid.UUID) ([
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 func newTestService(policyRepo *mockPolicyRepo, budgetRepo *mockBudgetRepo, usageRepo *mockUsageRepo) GovernanceService {
-	return NewGovernanceService(budgetRepo, policyRepo, usageRepo, &mockExecRepo{}, costengine.New(), nil)
+	// nil tracer: Langfuse unconfigured, so RecordUsage's span emit is a no-op.
+	return NewGovernanceService(budgetRepo, policyRepo, usageRepo, &mockExecRepo{}, costengine.New(), nil, nil)
 }
 
 func TestEnforcePolicy_NoPolicyAllowsAll(t *testing.T) {

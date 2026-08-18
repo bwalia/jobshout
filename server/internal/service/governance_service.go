@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/jobshout/server/internal/costengine"
+	"github.com/jobshout/server/internal/langfuse"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/repository"
 )
@@ -48,6 +49,7 @@ type governanceService struct {
 	usageRepo  repository.UsageRepository
 	execRepo   repository.ExecutionRepository
 	costEngine *costengine.Engine
+	tracer     *langfuse.Client
 	logger     *zap.Logger
 }
 
@@ -58,6 +60,7 @@ func NewGovernanceService(
 	usageRepo repository.UsageRepository,
 	execRepo repository.ExecutionRepository,
 	costEngine *costengine.Engine,
+	tracer *langfuse.Client,
 	logger *zap.Logger,
 ) GovernanceService {
 	return &governanceService{
@@ -66,6 +69,7 @@ func NewGovernanceService(
 		usageRepo:  usageRepo,
 		execRepo:   execRepo,
 		costEngine: costEngine,
+		tracer:     tracer,
 		logger:     logger,
 	}
 }
@@ -206,6 +210,13 @@ func (s *governanceService) RecordUsage(ctx context.Context, exec *model.AgentEx
 
 	// Check budget thresholds and record alerts.
 	s.checkBudgetThresholds(ctx, exec.OrgID)
+
+	// Report the run to Langfuse. This is the one place every engine converges
+	// on — go-native, LangChain and LangGraph runs all land here with their
+	// model, token counts and cost already resolved — so tracing here covers
+	// the whole product rather than only the sidecar-backed engines. A nil
+	// tracer (Langfuse unconfigured) makes this a no-op.
+	s.tracer.RecordExecution(exec)
 
 	return nil
 }

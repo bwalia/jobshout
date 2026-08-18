@@ -75,6 +75,29 @@ spec:
           env:
             - name: DATABASE_URL
               value: "postgres://$(DATABASE_USER):$(DATABASE_PASSWORD)@$(DATABASE_HOST):$(DATABASE_PORT)/$(DATABASE_NAME)?sslmode=$(DATABASE_SSLMODE)"
+            {{- if .Values.langfuse.enabled }}
+            # Tracing for go-native executions. The sidecar traces its own
+            # LangChain/LangGraph runs; everything else — the article writer,
+            # the research agent, scheduled tasks — executes in this process and
+            # is invisible to Langfuse unless the API can report it too. Same
+            # three variables and same generated Secret the sidecar reads.
+            - name: LANGFUSE_HOST
+              value: "http://langfuse-web:3000"
+            - name: LANGFUSE_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: jobshout-langfuse-secrets
+                  key: LANGFUSE_PUBLIC_KEY
+            - name: LANGFUSE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: jobshout-langfuse-secrets
+                  key: LANGFUSE_SECRET_KEY
+            # Keeps int/test/acc/prod traces separable if rings ever share a
+            # Langfuse project.
+            - name: LANGFUSE_TRACING_ENVIRONMENT
+              value: {{ .Values.langfuse.tracingEnvironment | default .Release.Namespace | quote }}
+            {{- end }}
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}
           # The API retries its first Postgres connection for up to
