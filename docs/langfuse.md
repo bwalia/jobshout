@@ -6,7 +6,61 @@ and both SSE streaming variants — can be traced to a self-hosted
 counts, latency, estimated cost, and errors, grouped per execution and per
 agent.
 
-## Quick start (local)
+## Deployment on k3s (the main path)
+
+The Helm chart deploys the whole Langfuse stack per ring behind
+`langfuse.enabled` — langfuse web + worker, ClickHouse, and a dedicated
+Postgres, Redis and MinIO (see the `langfuse:` block in
+`deploy/helm/jobshout/values.yaml` for why each is separate from the app's).
+It is **on in int, off elsewhere**; enabling another ring is a one-line change
+in that ring's `values-<env>.yaml`.
+
+Merging to master deploys it through the usual pipeline (CI → Ring Promoter
+int → `helm upgrade`). On first deploy every credential — SALT, encryption
+key, store passwords, the admin login, the project API keys — is generated
+in-cluster and persisted in the `jobshout-langfuse-secrets` Secret, so nothing
+secret lives in this public repo and there is no bootstrap step. The sidecar
+reads the same Secret, so tracing is live ring-wide immediately.
+
+The UI is served on its own host, `https://int-langfuse.jobshout.co.uk`
+(login: `admin@jobshout.local`; password from the Secret):
+
+```bash
+kubectl -n int get secret jobshout-langfuse-secrets \
+  -o jsonpath='{.data.LANGFUSE_INIT_USER_PASSWORD}' | base64 -d
+```
+
+Two one-time steps after the first deploy of a ring:
+
+1. **Edge registration** (until then the host answers "Host not configured"):
+   run the *Register edge vhost* workflow with
+   `host=int-langfuse.jobshout.co.uk`,
+   `server_spec=deploy/edge/wslproxy-server-langfuse-int.json`,
+   `health_path=/auth/sign-in`.
+2. **Provision the dashboard + model prices** against the public host, with
+   the keys read from the same Secret:
+
+   ```bash
+   PK=$(kubectl -n int get secret jobshout-langfuse-secrets -o jsonpath='{.data.LANGFUSE_PUBLIC_KEY}' | base64 -d)
+   SK=$(kubectl -n int get secret jobshout-langfuse-secrets -o jsonpath='{.data.LANGFUSE_SECRET_KEY}' | base64 -d)
+   ./scripts/langfuse_dashboard.py --host https://int-langfuse.jobshout.co.uk --public-key "$PK" --secret-key "$SK"
+   ./scripts/langfuse_models.py    --host https://int-langfuse.jobshout.co.uk --public-key "$PK" --secret-key "$SK"
+   ```
+
+   Dashboards live in Langfuse's own Postgres, so this survives every
+   subsequent deploy — it is per ring, not per release.
+
+The dashboard is then at **Dashboards → JobShout LLM Observability** on that
+host.
+
+Note on the very first deploy: it pulls ~2.5 GB of new images (ClickHouse,
+langfuse web/worker) onto the nodes, which can overrun Ring Promoter's
+`helm --wait` 5-minute budget and mark the release failed while the pods go on
+to converge — the same cosmetic failure mode the API's startup-probe comment
+in values.yaml describes. If that happens, re-seed the same version; the
+second attempt deploys against cached images.
+
+## Quick start (local, docker compose)
 
 ```bash
 # 1. Start the Langfuse stack (opt-in compose profile; UI on :3002)
@@ -87,9 +141,12 @@ A sidecar running *outside* compose (e.g. `uvicorn` during development) needs
 `LANGFUSE_HOST=http://localhost:3002`; the compose default is the in-network
 `http://langfuse-web:3000`.
 
-## Deployment note
+## Pointing a ring at an external Langfuse instead
 
-The k8s/helm chart intentionally doesn't deploy Langfuse yet. The sidecar
-only needs the three `LANGFUSE_*` env vars pointed at any Langfuse deployment
-(self-hosted or cloud), and both scripts accept `--host`/`--public-key`/
-`--secret-key` to provision the dashboard and model prices there.
+The sidecar only needs `LANGFUSE_HOST`, `LANGFUSE_PUBLIC_KEY` and
+`LANGFUSE_SECRET_KEY`. In a ring with `langfuse.enabled: false` the chart sets
+none of them, so an operator-created `extraSecretRefs` secret carrying those
+three keys points tracing at any external Langfuse (another ring's, or cloud)
+without deploying the stack there. Both scripts accept
+`--host/--public-key/--secret-key` to provision the dashboard and model prices
+on whatever host is used.

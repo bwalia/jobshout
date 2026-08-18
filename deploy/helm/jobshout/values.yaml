@@ -229,3 +229,67 @@ redis:
   resources:
     requests: { cpu: 100m, memory: 128Mi }
     limits: { cpu: 500m, memory: 512Mi }
+
+# ─── Langfuse LLM observability ───────────────────────────────────────────────
+# Traces every LLM call the python-sidecar makes: prompts, completions, tokens,
+# latency, cost, per agent and per execution. See docs/langfuse.md.
+#
+# Off by default and enabled per ring (values-<env>.yaml), because it brings a
+# real stack with it: langfuse web + worker, ClickHouse, and its own Postgres,
+# Redis and MinIO. Its Redis must be separate from the app one — Langfuse runs
+# BullMQ queues that require noeviction, while the app redis is an allkeys-lru
+# cache; sharing would silently drop queued trace events. Postgres is separate
+# because Langfuse wants a plain-Postgres database of its own, and MinIO exists
+# only here because nothing else in the cluster needs S3.
+#
+# Every credential (SALT, encryption key, ClickHouse/Redis/MinIO passwords, the
+# admin login, the project API keys) is generated in-cluster on first deploy
+# and persisted in the jobshout-langfuse-secrets Secret — this repo is public,
+# so nothing secret is committed, and there is no manual bootstrap step. Read
+# the admin login with:
+#
+#   kubectl -n <ring> get secret jobshout-langfuse-secrets \
+#     -o jsonpath='{.data.LANGFUSE_INIT_USER_PASSWORD}' | base64 -d
+#
+# The python-sidecar picks the project API keys out of the same Secret, so
+# tracing turns on ring-wide the moment this is enabled. When disabled, the
+# sidecar's key refs are optional and tracing stays off — behaviour unchanged.
+langfuse:
+  enabled: false
+  # Public host for the Langfuse UI. Like .host it needs a Cloudflare CNAME and
+  # a wslproxy vhost (deploy/edge/wslproxy-server-langfuse-<env>.json) — run the
+  # register-edge-vhost workflow with health_path=/auth/sign-in.
+  host: ""
+  webImage: langfuse/langfuse:4
+  workerImage: langfuse/langfuse-worker:4
+  web:
+    resources:
+      requests: { cpu: 200m, memory: 512Mi }
+      limits: { cpu: "1", memory: 1536Mi }
+  worker:
+    resources:
+      requests: { cpu: 100m, memory: 512Mi }
+      limits: { cpu: "1", memory: 1536Mi }
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.12
+    storage: 8Gi
+    resources:
+      requests: { cpu: 200m, memory: 768Mi }
+      limits: { cpu: "1", memory: 2Gi }
+  postgres:
+    image: postgres:16-alpine
+    storage: 5Gi
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits: { cpu: 500m, memory: 512Mi }
+  redis:
+    image: redis:7-alpine
+    resources:
+      requests: { cpu: 50m, memory: 128Mi }
+      limits: { cpu: 250m, memory: 384Mi }
+  minio:
+    image: minio/minio:latest
+    storage: 5Gi
+    resources:
+      requests: { cpu: 50m, memory: 128Mi }
+      limits: { cpu: 250m, memory: 512Mi }

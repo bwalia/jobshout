@@ -1,0 +1,42 @@
+{{- if .Values.langfuse.enabled }}
+# Ingestion worker: drains the Redis queues into ClickHouse. Same env as the
+# web pod minus everything auth/UI.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse-worker
+  labels:
+    {{- include "jobshout.labels" . | nindent 4 }}
+    {{- include "jobshout.selector" (dict "name" "langfuse-worker") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "jobshout.selector" (dict "name" "langfuse-worker") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "jobshout.selector" (dict "name" "langfuse-worker") | nindent 8 }}
+    spec:
+      containers:
+        - name: langfuse-worker
+          image: {{ .Values.langfuse.workerImage }}
+          ports:
+            - containerPort: 3030
+              name: http
+          env:
+            {{- include "jobshout.langfuseSharedEnv" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.langfuse.worker.resources | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: 3030
+            periodSeconds: 10
+            failureThreshold: 24
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3030
+            periodSeconds: 15
+{{- end }}

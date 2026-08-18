@@ -48,3 +48,13 @@ pythonRuntime:
 
 storage:
   postgres: 10Gi
+
+# Langfuse LLM observability — int is the proving ring; other rings stay off
+# until promoted deliberately. The UI host needs its edge registration once:
+# run the register-edge-vhost workflow with host=int-langfuse.jobshout.co.uk,
+# server_spec=deploy/edge/wslproxy-server-langfuse-int.json,
+# health_path=/auth/sign-in. Credentials are generated in-cluster on first
+# deploy; read the admin login from the jobshout-langfuse-secrets Secret.
+langfuse:
+  enabled: true
+  host: int-langfuse.jobshout.co.uk

@@ -1,0 +1,74 @@
+{{- if .Values.langfuse.enabled }}
+# Langfuse's Redis, NOT the app one. Langfuse runs BullMQ ingestion queues in
+# here, which require maxmemory-policy noeviction — the app redis is an
+# allkeys-lru cache, and eviction there would silently drop queued trace
+# events. maxmemory sits below the container limit so pressure surfaces as
+# a queue write error, not an OOM kill.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse-redis
+  labels:
+    {{- include "jobshout.labels" . | nindent 4 }}
+    {{- include "jobshout.selector" (dict "name" "langfuse-redis") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "jobshout.selector" (dict "name" "langfuse-redis") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "jobshout.selector" (dict "name" "langfuse-redis") | nindent 8 }}
+    spec:
+      containers:
+        - name: redis
+          image: {{ .Values.langfuse.redis.image }}
+          ports:
+            - containerPort: 6379
+              name: redis
+          env:
+            - name: REDIS_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: jobshout-langfuse-secrets
+                  key: REDIS_AUTH
+          command:
+            - sh
+            - -c
+            - exec redis-server --requirepass "$REDIS_AUTH" --appendonly yes --maxmemory 256mb --maxmemory-policy noeviction
+          resources:
+            {{- toYaml .Values.langfuse.redis.resources | nindent 12 }}
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "redis-cli -a \"$REDIS_AUTH\" ping | grep PONG"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "redis-cli -a \"$REDIS_AUTH\" ping | grep PONG"]
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse-redis
+  labels:
+    {{- include "jobshout.labels" . | nindent 4 }}
+    {{- include "jobshout.selector" (dict "name" "langfuse-redis") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 6379
+      targetPort: 6379
+      name: redis
+  selector:
+    {{- include "jobshout.selector" (dict "name" "langfuse-redis") | nindent 4 }}
+{{- end }}
