@@ -1,0 +1,138 @@
+{{- if .Values.langfuse.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse-web
+  labels:
+    {{- include "jobshout.labels" . | nindent 4 }}
+    {{- include "jobshout.selector" (dict "name" "langfuse-web") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "jobshout.selector" (dict "name" "langfuse-web") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "jobshout.selector" (dict "name" "langfuse-web") | nindent 8 }}
+    spec:
+      containers:
+        - name: langfuse-web
+          image: {{ .Values.langfuse.webImage }}
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            {{- include "jobshout.langfuseSharedEnv" . | nindent 12 }}
+            - name: NEXTAUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: jobshout-langfuse-secrets
+                  key: NEXTAUTH_SECRET
+            # Headless first-boot provisioning: org -> project -> API keys +
+            # admin user, all idempotent (skipped once they exist). The keys
+            # and password come from the generated Secret, so the sidecar and
+            # the UI login line up without anyone copying values around.
+            - name: LANGFUSE_INIT_ORG_ID
+              value: jobshout
+            - name: LANGFUSE_INIT_ORG_NAME
+              value: JobShout
+            - name: LANGFUSE_INIT_PROJECT_ID
+              value: jobshout
+            - name: LANGFUSE_INIT_PROJECT_NAME
+              value: JobShout
+            - name: LANGFUSE_INIT_PROJECT_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: jobshout-langfuse-secrets
+                  key: LANGFUSE_PUBLIC_KEY
+            - name: LANGFUSE_INIT_PROJECT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: jobshout-langfuse-secrets
+                  key: LANGFUSE_SECRET_KEY
+            - name: LANGFUSE_INIT_USER_EMAIL
+              value: admin@jobshout.local
+            - name: LANGFUSE_INIT_USER_NAME
+              value: JobShout Admin
+            - name: LANGFUSE_INIT_USER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: jobshout-langfuse-secrets
+                  key: LANGFUSE_INIT_USER_PASSWORD
+          resources:
+            {{- toYaml .Values.langfuse.web.resources | nindent 12 }}
+          # First boot runs Postgres + ClickHouse migrations before listening;
+          # the startup probe gives that its own budget so the liveness probe
+          # never kills a pod that is legitimately migrating.
+          startupProbe:
+            httpGet:
+              path: /api/public/health
+              port: 3000
+            periodSeconds: 10
+            failureThreshold: 24 # 240s, inside helm --wait's 300s
+          readinessProbe:
+            httpGet:
+              path: /api/public/health
+              port: 3000
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/public/health
+              port: 3000
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse-web
+  labels:
+    {{- include "jobshout.labels" . | nindent 4 }}
+    {{- include "jobshout.selector" (dict "name" "langfuse-web") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3000
+      targetPort: 3000
+      name: http
+  selector:
+    {{- include "jobshout.selector" (dict "name" "langfuse-web") | nindent 4 }}
+---
+{{- if .Values.ingress.enabled }}
+# Langfuse gets its own host (the wslproxy edge routes a whole host to one
+# backend), pointing straight at langfuse-web — no nginx fan-out needed since
+# there is only one service behind it.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: jobshout-langfuse-ingress
+  labels:
+    {{- include "jobshout.labels" . | nindent 4 }}
+  annotations:
+    {{- if .Values.ingress.tls }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.clusterIssuer }}
+    {{- end }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ required "langfuse.host is required when langfuse.enabled" .Values.langfuse.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: langfuse-web
+                port:
+                  number: 3000
+  {{- if .Values.ingress.tls }}
+  tls:
+    - hosts:
+        - {{ .Values.langfuse.host }}
+      secretName: jobshout-langfuse-tls
+  {{- end }}
+{{- end }}
+{{- end }}

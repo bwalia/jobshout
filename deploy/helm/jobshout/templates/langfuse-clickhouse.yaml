@@ -1,0 +1,98 @@
+{{- if .Values.langfuse.enabled }}
+# Single-node ClickHouse — Langfuse's analytical store (traces/observations
+# land here; Postgres only keeps transactional state). Cluster mode stays off
+# (CLICKHOUSE_CLUSTER_ENABLED=false on the langfuse pods) to match.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: langfuse-clickhouse
+  labels:
+    {{- include "jobshout.labels" . | nindent 4 }}
+    {{- include "jobshout.selector" (dict "name" "langfuse-clickhouse") | nindent 4 }}
+spec:
+  serviceName: langfuse-clickhouse
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "jobshout.selector" (dict "name" "langfuse-clickhouse") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "jobshout.selector" (dict "name" "langfuse-clickhouse") | nindent 8 }}
+    spec:
+      # The clickhouse image runs as uid/gid 101; fsGroup makes the local-path
+      # volume writable for it.
+      securityContext:
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+      containers:
+        - name: clickhouse
+          image: {{ .Values.langfuse.clickhouse.image }}
+          ports:
+            - containerPort: 8123
+              name: http
+            - containerPort: 9000
+              name: native
+          env:
+            - name: CLICKHOUSE_DB
+              value: default
+            - name: CLICKHOUSE_USER
+              value: clickhouse
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: jobshout-langfuse-secrets
+                  key: CLICKHOUSE_PASSWORD
+          resources:
+            {{- toYaml .Values.langfuse.clickhouse.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: 8123
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: 8123
+            initialDelaySeconds: 60
+            periodSeconds: 15
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/clickhouse
+            - name: logs
+              mountPath: /var/log/clickhouse-server
+      volumes:
+        - name: logs
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: {{ .Values.storage.className }}
+        resources:
+          requests:
+            storage: {{ .Values.langfuse.clickhouse.storage }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse-clickhouse
+  labels:
+    {{- include "jobshout.labels" . | nindent 4 }}
+    {{- include "jobshout.selector" (dict "name" "langfuse-clickhouse") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8123
+      targetPort: 8123
+      name: http
+    - port: 9000
+      targetPort: 9000
+      name: native
+  selector:
+    {{- include "jobshout.selector" (dict "name" "langfuse-clickhouse") | nindent 4 }}
+{{- end }}

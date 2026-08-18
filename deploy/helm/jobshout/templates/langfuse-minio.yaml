@@ -1,0 +1,94 @@
+{{- if .Values.langfuse.enabled }}
+# Langfuse's S3 store (raw trace events + media). Nothing else in the cluster
+# needs S3, which is why MinIO exists only under the langfuse flag. The
+# langfuse bucket is created before the server starts — MinIO treats a
+# top-level directory in the data root as a bucket, same trick as Langfuse's
+# own reference compose file.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse-minio
+  labels:
+    {{- include "jobshout.labels" . | nindent 4 }}
+    {{- include "jobshout.selector" (dict "name" "langfuse-minio") | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # single PVC; a rolling update would deadlock on the volume
+  selector:
+    matchLabels:
+      {{- include "jobshout.selector" (dict "name" "langfuse-minio") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "jobshout.selector" (dict "name" "langfuse-minio") | nindent 8 }}
+    spec:
+      containers:
+        - name: minio
+          image: {{ .Values.langfuse.minio.image }}
+          command:
+            - sh
+            - -c
+            - mkdir -p /data/langfuse && exec minio server --address ":9000" /data
+          ports:
+            - containerPort: 9000
+              name: s3
+          env:
+            - name: MINIO_ROOT_USER
+              value: langfuse
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: jobshout-langfuse-secrets
+                  key: MINIO_ROOT_PASSWORD
+          resources:
+            {{- toYaml .Values.langfuse.minio.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: 9000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: 9000
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: langfuse-minio-data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: langfuse-minio-data
+  labels:
+    {{- include "jobshout.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: {{ .Values.storage.className }}
+  resources:
+    requests:
+      storage: {{ .Values.langfuse.minio.storage }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse-minio
+  labels:
+    {{- include "jobshout.labels" . | nindent 4 }}
+    {{- include "jobshout.selector" (dict "name" "langfuse-minio") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9000
+      targetPort: 9000
+      name: s3
+  selector:
+    {{- include "jobshout.selector" (dict "name" "langfuse-minio") | nindent 4 }}
+{{- end }}

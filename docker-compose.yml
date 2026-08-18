@@ -49,11 +49,19 @@ services:
     environment:
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       OLLAMA_DEFAULT_MODEL: ${OLLAMA_DEFAULT_MODEL:-llama3:latest}
+      # Same gateway signing secret the Go server uses (see gatewayauth). Empty
+      # means "no gateway": requests to Ollama go out unsigned.
+      OLLAMA_JWT_SECRET: ${OLLAMA_JWT_SECRET:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       OPENAI_DEFAULT_MODEL: ${OPENAI_DEFAULT_MODEL:-gpt-4o-mini}
       SIDECAR_SECRET: ${PYTHON_SIDECAR_SECRET:-change-me-sidecar-secret}
       LOG_LEVEL: ${SIDECAR_LOG_LEVEL:-info}
+      # LLM tracing. Off unless both keys are set in .env — copy them from the
+      # langfuse profile's LANGFUSE_INIT_* defaults. See docs/langfuse.md.
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-http://langfuse-web:3000}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health')\""]
       interval: 10s
@@ -123,6 +131,144 @@ services:
     depends_on:
       - jobshout-server
 
+  # ─── Langfuse LLM observability (opt-in) ───────────────────────────────────
+  # Started only with `docker compose --profile langfuse up`, so the default
+  # stack stays as light as it is today. Langfuse v3+ needs ClickHouse, Redis,
+  # Postgres and an S3 store; it gets its own Postgres (the app one is pgvector
+  # with a single database) and reuses the app MinIO with a dedicated bucket.
+  # First boot self-provisions the org/project/user/API keys below via
+  # LANGFUSE_INIT_* — see docs/langfuse.md. All secrets are dev defaults;
+  # override them in .env for anything shared.
+  langfuse-postgres:
+    profiles: ["langfuse"]
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${LANGFUSE_POSTGRES_USER:-langfuse}
+      POSTGRES_PASSWORD: ${LANGFUSE_POSTGRES_PASSWORD:-langfuse}
+      POSTGRES_DB: ${LANGFUSE_POSTGRES_DB:-langfuse}
+    volumes:
+      - langfuse_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${LANGFUSE_POSTGRES_USER:-langfuse}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  langfuse-clickhouse:
+    profiles: ["langfuse"]
+    image: clickhouse/clickhouse-server:25.12
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: ${LANGFUSE_CLICKHOUSE_USER:-clickhouse}
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse}
+    volumes:
+      - langfuse_clickhouse_data:/var/lib/clickhouse
+      - langfuse_clickhouse_logs:/var/log/clickhouse-server
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  langfuse-redis:
+    profiles: ["langfuse"]
+    image: redis:7
+    # noeviction because Langfuse runs BullMQ queues in here — evicting a queue
+    # entry under memory pressure silently loses ingested events.
+    command: >
+      --requirepass ${LANGFUSE_REDIS_AUTH:-langfuse-redis-secret}
+      --maxmemory-policy noeviction
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a ${LANGFUSE_REDIS_AUTH:-langfuse-redis-secret} ping | grep PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot: creates the langfuse bucket in the shared app MinIO, then exits.
+  langfuse-minio-init:
+    profiles: ["langfuse"]
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ACCESS_KEY:-minioadmin} ${MINIO_SECRET_KEY:-minioadmin} &&
+      mc mb --ignore-existing local/${LANGFUSE_S3_BUCKET:-langfuse}
+      "
+
+  langfuse-worker:
+    profiles: ["langfuse"]
+    image: langfuse/langfuse-worker:4
+    depends_on: &langfuse-depends-on
+      langfuse-postgres:
+        condition: service_healthy
+      langfuse-clickhouse:
+        condition: service_healthy
+      langfuse-redis:
+        condition: service_healthy
+      langfuse-minio-init:
+        condition: service_completed_successfully
+    environment: &langfuse-env
+      DATABASE_URL: postgresql://${LANGFUSE_POSTGRES_USER:-langfuse}:${LANGFUSE_POSTGRES_PASSWORD:-langfuse}@langfuse-postgres:5432/${LANGFUSE_POSTGRES_DB:-langfuse}
+      NEXTAUTH_URL: ${LANGFUSE_PUBLIC_URL:-http://localhost:3002}
+      SALT: ${LANGFUSE_SALT:-jobshout-local-salt}
+      # Must be exactly 64 hex chars (openssl rand -hex 32). Dev default only.
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-2f9c1e4b8a7d6c5f3e2d1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d}
+      TELEMETRY_ENABLED: ${LANGFUSE_TELEMETRY_ENABLED:-false}
+      CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
+      CLICKHOUSE_URL: http://langfuse-clickhouse:8123
+      CLICKHOUSE_USER: ${LANGFUSE_CLICKHOUSE_USER:-clickhouse}
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse}
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      REDIS_HOST: langfuse-redis
+      REDIS_PORT: 6379
+      REDIS_AUTH: ${LANGFUSE_REDIS_AUTH:-langfuse-redis-secret}
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: ${LANGFUSE_S3_BUCKET:-langfuse}
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY:-minioadmin}
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: ${LANGFUSE_S3_BUCKET:-langfuse}
+      LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY:-minioadmin}
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+
+  langfuse-web:
+    profiles: ["langfuse"]
+    image: langfuse/langfuse:4
+    depends_on: *langfuse-depends-on
+    ports:
+      - "${LANGFUSE_HOST_PORT:-3002}:3000"
+    environment:
+      <<: *langfuse-env
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-jobshout-local-nextauth-secret}
+      # Media presigned URLs are fetched by the browser, so the web container
+      # must hand out the host-reachable MinIO address, not the in-network one.
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://localhost:${MINIO_API_HOST_PORT:-9100}
+      # Headless first-boot provisioning: org → project → API keys + admin
+      # user. Runs only when these resources don't already exist. Values are
+      # deliberately unquoted — Langfuse docs warn quoting breaks them.
+      LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID:-jobshout}
+      LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME:-JobShout}
+      LANGFUSE_INIT_PROJECT_ID: ${LANGFUSE_INIT_PROJECT_ID:-jobshout}
+      LANGFUSE_INIT_PROJECT_NAME: ${LANGFUSE_INIT_PROJECT_NAME:-JobShout}
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_INIT_PROJECT_PUBLIC_KEY:-pk-lf-jobshout-local}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_INIT_PROJECT_SECRET_KEY:-sk-lf-jobshout-local}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-admin@jobshout.local}
+      LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME:-JobShout Admin}
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-jobshout-langfuse}
+
 volumes:
   postgres_data:
   minio_data:
+  langfuse_postgres_data:
+  langfuse_clickhouse_data:
+  langfuse_clickhouse_logs:

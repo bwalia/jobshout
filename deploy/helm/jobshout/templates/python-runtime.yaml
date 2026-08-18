@@ -27,6 +27,21 @@ spec:
           ports:
             - containerPort: {{ .Values.pythonRuntime.port }}
               name: http
+          # Same layering as the API: chart-managed secrets first, then the
+          # operator-created extraSecretRefs so their keys win. This is how the
+          # sidecar receives OLLAMA_JWT_SECRET — its OLLAMA_BASE_URL points at
+          # the workstation gateway in every ring, and unsigned requests there
+          # are rejected; before this the sidecar could not reach it at all.
+          # (Explicit env: entries below still beat envFrom, so only keys not
+          # listed there are operator-overridable.)
+          envFrom:
+            - secretRef:
+                name: jobshout-secrets
+            {{- range .Values.extraSecretRefs }}
+            - secretRef:
+                name: {{ . }}
+                optional: true
+            {{- end }}
           env:
             - name: OLLAMA_BASE_URL
               valueFrom:
@@ -58,6 +73,25 @@ spec:
                 secretKeyRef:
                   name: jobshout-secrets
                   key: PYTHON_SIDECAR_SECRET
+            {{- if .Values.langfuse.enabled }}
+            # LLM tracing against this ring's langfuse stack, keyed by the same
+            # generated Secret that langfuse-web's headless init provisions the
+            # project with. Rendered only when the stack is enabled, so a ring
+            # without it can still point tracing at an external Langfuse purely
+            # via extraSecretRefs (LANGFUSE_HOST/_PUBLIC_KEY/_SECRET_KEY).
+            - name: LANGFUSE_HOST
+              value: "http://langfuse-web:3000"
+            - name: LANGFUSE_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: jobshout-langfuse-secrets
+                  key: LANGFUSE_PUBLIC_KEY
+            - name: LANGFUSE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: jobshout-langfuse-secrets
+                  key: LANGFUSE_SECRET_KEY
+            {{- end }}
           resources:
             {{- toYaml .Values.pythonRuntime.resources | nindent 12 }}
           livenessProbe:

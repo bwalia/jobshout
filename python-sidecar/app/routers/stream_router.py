@@ -8,7 +8,9 @@ from typing import Any, AsyncGenerator
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from app import observability
 from app.config import settings
+from app.llm import get_llm
 from app.models import RunRequest
 
 logger = logging.getLogger(__name__)
@@ -28,37 +30,12 @@ def _sse_event(event_type: str, data: Any) -> str:
     return f"data: {payload}\n\n"
 
 
-def _get_llm(req: RunRequest) -> Any:
-    """Resolve the LLM backend."""
-    provider = req.provider or "ollama"
-    model_name = req.model
-
-    if provider == "openai":
-        from langchain_openai import ChatOpenAI
-
-        return ChatOpenAI(
-            model=model_name or settings.openai_default_model,
-            api_key=settings.openai_api_key,
-            base_url=settings.openai_base_url,
-            temperature=0.2,
-        )
-
-    from langchain_ollama import ChatOllama
-
-    ollama_url = req.config.get("ollama_base_url", settings.ollama_base_url)
-    return ChatOllama(
-        model=model_name or settings.ollama_default_model,
-        base_url=ollama_url,
-        temperature=0.2,
-    )
-
-
 async def _stream_langchain(req: RunRequest) -> AsyncGenerator[str, None]:
     """Stream LangChain execution events."""
     from langchain_core.messages import HumanMessage, SystemMessage
 
     try:
-        llm = _get_llm(req)
+        llm = get_llm(req)
         messages: list[Any] = []
         if req.system_prompt:
             messages.append(SystemMessage(content=req.system_prompt))
@@ -67,7 +44,8 @@ async def _stream_langchain(req: RunRequest) -> AsyncGenerator[str, None]:
         yield _sse_event("thought", {"iteration": 1, "thought": "Processing with LangChain..."})
 
         start = time.monotonic()
-        result = llm.invoke(messages)
+        with observability.run_context(req, "langchain-stream"):
+            result = llm.invoke(messages, config=observability.invoke_config(req, "langchain-stream"))
         elapsed_ms = int((time.monotonic() - start) * 1000)
 
         content = result.content if hasattr(result, "content") else str(result)
@@ -87,6 +65,8 @@ async def _stream_langchain(req: RunRequest) -> AsyncGenerator[str, None]:
     except Exception as exc:
         logger.exception("LangChain streaming failed")
         yield _sse_event("error", {"message": str(exc)})
+    finally:
+        observability.flush()
 
     yield "data: [DONE]\n\n"
 
@@ -97,7 +77,7 @@ async def _stream_langgraph(req: RunRequest) -> AsyncGenerator[str, None]:
     from langgraph.graph import END, StateGraph
 
     try:
-        llm = _get_llm(req)
+        llm = get_llm(req)
         system_prompt = req.system_prompt or "You are a helpful AI assistant."
 
         # Check for custom graph definition.
@@ -164,27 +144,30 @@ async def _stream_langgraph(req: RunRequest) -> AsyncGenerator[str, None]:
             "iterations": 0,
         }
 
+        run_config = observability.invoke_config(req, "langgraph-stream")
+
         step_num = 0
         final_state = initial_state
-        for state in compiled.stream(initial_state):
-            for node_name, node_state in state.items():
-                step_num += 1
-                final_state = node_state
+        with observability.run_context(req, "langgraph-stream"):
+            for state in compiled.stream(initial_state, config=run_config or None):
+                for node_name, node_state in state.items():
+                    step_num += 1
+                    final_state = node_state
 
-                yield _sse_event("node_start", {
-                    "node_name": node_name,
-                    "step_number": step_num,
-                })
+                    yield _sse_event("node_start", {
+                        "node_name": node_name,
+                        "step_number": step_num,
+                    })
 
-                yield _sse_event("node_end", {
-                    "node_name": node_name,
-                    "step_number": step_num,
-                    "state": {
-                        "current_step": node_state.get("current_step", ""),
-                        "iterations": node_state.get("iterations", 0),
-                        "final_answer_preview": node_state.get("final_answer", "")[:200],
-                    },
-                })
+                    yield _sse_event("node_end", {
+                        "node_name": node_name,
+                        "step_number": step_num,
+                        "state": {
+                            "current_step": node_state.get("current_step", ""),
+                            "iterations": node_state.get("iterations", 0),
+                            "final_answer_preview": node_state.get("final_answer", "")[:200],
+                        },
+                    })
 
         final_answer = final_state.get("final_answer", "")
         yield _sse_event("final_answer", {
@@ -196,6 +179,8 @@ async def _stream_langgraph(req: RunRequest) -> AsyncGenerator[str, None]:
     except Exception as exc:
         logger.exception("LangGraph streaming failed")
         yield _sse_event("error", {"message": str(exc)})
+    finally:
+        observability.flush()
 
     yield "data: [DONE]\n\n"
 

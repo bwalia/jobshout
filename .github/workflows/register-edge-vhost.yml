@@ -35,6 +35,10 @@ on:
         description: "Path to the wslproxy server spec JSON"
         required: true
         default: deploy/edge/wslproxy-server-int.json
+      health_path:
+        description: "Path that must return 200 through the edge (/login for the app, /auth/sign-in for Langfuse)"
+        required: false
+        default: /login
 
 env:
   CNAME_TARGET: pop0.wslproxy.com
@@ -129,15 +133,17 @@ jobs:
       - name: Verify public health
         env:
           HOST: ${{ inputs.host }}
+          HEALTH_PATH: ${{ inputs.health_path || '/login' }}
         run: |
           set -euo pipefail
           # pop0 picks up the new vhost within ~1 min via its config-sync cron.
-          # /login is a real public page that returns 200 (the web app's /health
-          # is allowlisted but unimplemented — it 404s).
+          # The path must be a real public page that returns 200: /login for the
+          # web app (its /health is allowlisted but unimplemented — it 404s),
+          # /auth/sign-in for Langfuse.
           for i in $(seq 1 20); do
-            code=$(curl -sS -o /tmp/body -m 10 -w '%{http_code}' "https://${HOST}/login" || echo 000)
+            code=$(curl -sS -o /tmp/body -m 10 -w '%{http_code}' "https://${HOST}${HEALTH_PATH}" || echo 000)
             body=$(head -c 120 /tmp/body | tr -d '\n')
-            echo "[$i] https://${HOST}/login -> $code :: $body"
+            echo "[$i] https://${HOST}${HEALTH_PATH} -> $code :: $body"
             if [ "$code" = "200" ] && ! grep -qi 'Host not configured' /tmp/body; then
               echo "✅ ${HOST} is live through the edge."; exit 0
             fi
