@@ -9,7 +9,8 @@ from typing import Any, TypedDict
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import END, StateGraph
 
-from app.config import settings
+from app import observability
+from app.llm import get_llm
 from app.models import RunRequest, RunResponse, StateSnapshotRecord, ToolCallRecord
 
 logger = logging.getLogger(__name__)
@@ -22,31 +23,6 @@ class AgentState(TypedDict):
     final_answer: str
     current_step: str
     iterations: int
-
-
-def _get_llm(req: RunRequest) -> Any:
-    """Resolve the LLM backend based on provider."""
-    provider = req.provider or "ollama"
-    model_name = req.model
-
-    if provider == "openai":
-        from langchain_openai import ChatOpenAI
-
-        return ChatOpenAI(
-            model=model_name or settings.openai_default_model,
-            api_key=settings.openai_api_key,
-            base_url=settings.openai_base_url,
-            temperature=0.2,
-        )
-
-    from langchain_ollama import ChatOllama
-
-    ollama_url = req.config.get("ollama_base_url", settings.ollama_base_url)
-    return ChatOllama(
-        model=model_name or settings.ollama_default_model,
-        base_url=ollama_url,
-        temperature=0.2,
-    )
 
 
 def _build_default_graph(
@@ -176,7 +152,7 @@ def run(req: RunRequest) -> RunResponse:
     snapshots: list[StateSnapshotRecord] = []
 
     try:
-        llm = _get_llm(req)
+        llm = get_llm(req)
         system_prompt = req.system_prompt or "You are a helpful AI assistant."
 
         # Build the graph.
@@ -196,27 +172,32 @@ def run(req: RunRequest) -> RunResponse:
             "iterations": 0,
         }
 
-        # Execute the graph.
+        # Execute the graph. Callbacks in the graph-level config propagate to
+        # the llm.invoke calls inside nodes via langchain's contextvars, so one
+        # trace shows the whole graph with nested generations.
+        run_config = observability.invoke_config(req, "langgraph-run")
+
         step_num = 0
         final_state = initial_state
-        for state in compiled.stream(initial_state):
-            # state is a dict of {node_name: updated_state}
-            for node_name, node_state in state.items():
-                step_num += 1
-                final_state = node_state
-                snapshots.append(
-                    StateSnapshotRecord(
-                        step_number=step_num,
-                        node_name=node_name,
-                        state_json={
-                            "current_step": node_state.get("current_step", ""),
-                            "iterations": node_state.get("iterations", 0),
-                            "final_answer_preview": (
-                                node_state.get("final_answer", "")[:200]
-                            ),
-                        },
+        with observability.run_context(req, "langgraph-run"):
+            for state in compiled.stream(initial_state, config=run_config or None):
+                # state is a dict of {node_name: updated_state}
+                for node_name, node_state in state.items():
+                    step_num += 1
+                    final_state = node_state
+                    snapshots.append(
+                        StateSnapshotRecord(
+                            step_number=step_num,
+                            node_name=node_name,
+                            state_json={
+                                "current_step": node_state.get("current_step", ""),
+                                "iterations": node_state.get("iterations", 0),
+                                "final_answer_preview": (
+                                    node_state.get("final_answer", "")[:200]
+                                ),
+                            },
+                        )
                     )
-                )
 
         elapsed_ms = int((time.monotonic() - start) * 1000)
         final_answer = final_state.get("final_answer", "")
@@ -245,3 +226,5 @@ def run(req: RunRequest) -> RunResponse:
             error=str(exc),
             snapshots=snapshots,
         )
+    finally:
+        observability.flush()

@@ -9,36 +9,11 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 
-from app.config import settings
+from app import observability
+from app.llm import get_llm
 from app.models import RunRequest, RunResponse, ToolCallRecord
 
 logger = logging.getLogger(__name__)
-
-
-def _get_llm(req: RunRequest) -> Any:
-    """Resolve the LLM backend based on provider."""
-    provider = req.provider or "ollama"
-    model_name = req.model
-
-    if provider == "openai":
-        from langchain_openai import ChatOpenAI
-
-        return ChatOpenAI(
-            model=model_name or settings.openai_default_model,
-            api_key=settings.openai_api_key,
-            base_url=settings.openai_base_url,
-            temperature=0.2,
-        )
-
-    # Default: Ollama (local-first).
-    from langchain_ollama import ChatOllama
-
-    ollama_url = req.config.get("ollama_base_url", settings.ollama_base_url)
-    return ChatOllama(
-        model=model_name or settings.ollama_default_model,
-        base_url=ollama_url,
-        temperature=0.2,
-    )
 
 
 def run(req: RunRequest) -> RunResponse:
@@ -46,7 +21,8 @@ def run(req: RunRequest) -> RunResponse:
     start = time.monotonic()
 
     try:
-        llm = _get_llm(req)
+        llm = get_llm(req)
+        run_config = observability.invoke_config(req, "langchain-run")
 
         # Build a simple prompt chain.
         messages: list[Any] = []
@@ -56,13 +32,14 @@ def run(req: RunRequest) -> RunResponse:
 
         # Check for template in config.
         template_str = req.config.get("template")
-        if template_str:
-            template_inputs = req.config.get("template_inputs", {})
-            prompt = ChatPromptTemplate.from_template(template_str)
-            chain = prompt | llm
-            result = chain.invoke(template_inputs)
-        else:
-            result = llm.invoke(messages)
+        with observability.run_context(req, "langchain-run"):
+            if template_str:
+                template_inputs = req.config.get("template_inputs", {})
+                prompt = ChatPromptTemplate.from_template(template_str)
+                chain = prompt | llm
+                result = chain.invoke(template_inputs, config=run_config)
+            else:
+                result = llm.invoke(messages, config=run_config)
 
         # Extract content from the response.
         if hasattr(result, "content"):
@@ -100,3 +77,5 @@ def run(req: RunRequest) -> RunResponse:
             execution_id=req.execution_id,
             error=str(exc),
         )
+    finally:
+        observability.flush()

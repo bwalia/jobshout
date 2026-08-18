@@ -25,6 +25,10 @@ docker compose up --build
 # - UI:         http://localhost:3001
 # - PostgreSQL: localhost:5432
 # - MinIO:      http://localhost:9000 (console: http://localhost:9001)
+
+# Optional: LLM observability (traces, tokens, cost, latency dashboards).
+# See docs/langfuse.md
+docker compose --profile langfuse up -d   # Langfuse UI: http://localhost:3002
 ```
 
 ## Development
