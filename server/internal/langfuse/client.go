@@ -1,5 +1,9 @@
 // Package langfuse reports finished agent executions to Langfuse as OpenTelemetry
-// spans, so the Go-native engine is observable alongside the Python sidecar.
+// rollup spans, so per-execution cost — the cost engine's numbers, the ones the
+// budget system enforces on — is visible alongside the per-call generations
+// that internal/llmtrace emits. The spans are deliberately not generations:
+// the execution's individual LLM calls are already generations, and a second
+// one here would double every token and cost sum in the dashboard.
 //
 // Why OTLP rather than the batch ingestion API: Langfuse 4.x defaults to
 // LANGFUSE_MIGRATION_V4_WRITE_MODE=events_only, under which
@@ -92,7 +96,7 @@ func New(host, publicKey, secretKey, environment string, logger *zap.Logger) *Cl
 // Enabled reports whether spans will actually be sent.
 func (c *Client) Enabled() bool { return c != nil }
 
-// RecordExecution queues one finished execution as a generation span. It never
+// RecordExecution queues one finished execution as a rollup span. It never
 // blocks and never returns an error: a failure to report telemetry must not
 // change the outcome of the run that produced it.
 func (c *Client) RecordExecution(exec *model.AgentExecution) {
@@ -244,7 +248,14 @@ func newSpan(exec *model.AgentExecution, env string) span {
 	name := engineType + "-run"
 
 	attrs := []attribute{
-		str("langfuse.observation.type", "generation"),
+		// A plain span, deliberately not a generation: the execution's
+		// individual LLM calls are already reported as generations by
+		// internal/llmtrace, and the dashboard's token/cost widgets sum
+		// generations — a generation here would count every run twice. The
+		// explicit type also overrides Langfuse's "span with a model attribute
+		// is a generation" heuristic. This span is the per-execution rollup:
+		// the cost engine's numbers, the ones the budget system enforces on.
+		str("langfuse.observation.type", "span"),
 		str("langfuse.trace.name", name),
 		str("langfuse.session.id", exec.ID.String()),
 		str("langfuse.user.id", exec.AgentID.String()),
