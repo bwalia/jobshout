@@ -67,6 +67,18 @@ const version = "0.3.0"
 // even when the handler finished in time.
 const researchRequestTimeout = 10 * time.Minute
 
+// imageRequestTimeout bounds a synchronous image generation.
+//
+// Drawing one 1024x576 cover is around forty seconds of GPU time on a warm
+// model and minutes on a cold one, and generation is serialised behind a single
+// lock because two of these models do not fit in memory at once — so a request
+// may also be queueing behind the one in front of it. Under the default
+// timeout every generation failed at thirty seconds with "context deadline
+// exceeded", which reads as an unreachable image service rather than a request
+// that was cut off while it was working. IMAGE_TIMEOUT still bounds the call
+// downstream; this only stops the ceiling being lower than the floor.
+const imageRequestTimeout = 10 * time.Minute
+
 // defaultRequestTimeout bounds every route that is not doing something
 // legitimately slow. Thirty seconds is generous for a database round trip and
 // short enough that a stuck handler is not held open.
@@ -104,6 +116,12 @@ func requestTimeout(next http.Handler) http.Handler {
 		// it keeps the default.
 		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/research") {
 			timeout = researchRequestTimeout
+		}
+		// One call to a single GPU, which draws for tens of seconds and may
+		// queue behind another generation first. Listing models is only an
+		// HTTP call to that service, so it keeps the default.
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/images/generate") {
+			timeout = imageRequestTimeout
 		}
 
 		ctx, cancel := context.WithTimeout(r.Context(), timeout)

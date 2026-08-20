@@ -38,7 +38,12 @@ def require_auth(x_api_key: str = Header(default="")) -> str:
         )
 
     try:
-        claims = jwt.decode(x_api_key, config.JWT_SECRET, algorithms=["HS256"])
+        claims = jwt.decode(
+            x_api_key,
+            config.JWT_SECRET,
+            algorithms=["HS256"],
+            leeway=config.JWT_LEEWAY,
+        )
     except jwt.ExpiredSignatureError:
         # Called out separately from a bad signature because the fix is
         # different: an expired token from a correctly configured caller means

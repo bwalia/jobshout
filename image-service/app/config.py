@@ -47,6 +47,15 @@ QUANTIZE = int(_quantize_raw) if _quantize_raw else None
 # behaviour rather than an oversight.
 JWT_SECRET = os.getenv("IMAGE_JWT_SECRET", "")
 
+# Slack allowed when checking the token's time claims, in seconds. The caller
+# mints `iat` by truncating its clock down to a whole second, so a verifier
+# whose own clock is a few milliseconds behind sees an `iat` in the future and
+# rejects a perfectly good token. Two NTP-synced machines are close enough for
+# that to happen intermittently and nothing else, which is the worst kind of
+# failure to debug. A minute is far below the ten-minute token lifetime, so it
+# costs nothing worth having.
+JWT_LEEWAY = int(os.getenv("IMAGE_JWT_LEEWAY", "60"))
+
 HOST = os.getenv("IMAGE_HOST", "0.0.0.0")
 
 # 11435 sits one above Ollama's 11434 — deliberately adjacent, so the two
