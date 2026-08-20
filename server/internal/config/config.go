@@ -50,7 +50,8 @@ type Config struct {
 	// or .env, which is gitignored.
 	OllamaJWTSecret string `mapstructure:"OLLAMA_JWT_SECRET"`
 	// OllamaTimeout bounds a single Ollama request. Large models that are not
-	// resident must be loaded before the first token, so this needs headroom.
+	// resident must be loaded before the first token, and long streamed drafts
+	// (article generation) can take several minutes on a shared CPU host.
 	OllamaTimeout time.Duration `mapstructure:"OLLAMA_TIMEOUT"`
 	// OllamaNumCtx is the context window requested per call. Ollama applies its
 	// own server-side default when num_ctx is absent, which silently truncates
@@ -206,7 +207,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("OLLAMA_BASE_URL", "http://localhost:11434")
 	viper.SetDefault("OLLAMA_DEFAULT_MODEL", "llama3")
 	// No OLLAMA_JWT_SECRET default on purpose — see the field comment.
-	viper.SetDefault("OLLAMA_TIMEOUT", "3m")
+	viper.SetDefault("OLLAMA_TIMEOUT", "10m")
 	viper.SetDefault("OLLAMA_NUM_CTX", 8192)
 	viper.SetDefault("OPENAI_BASE_URL", "https://api.openai.com")
 	viper.SetDefault("OPENAI_DEFAULT_MODEL", "gpt-4o-mini")

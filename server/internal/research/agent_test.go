@@ -365,6 +365,47 @@ func TestResearch_FailsWhenNothingVerifies(t *testing.T) {
 	}
 }
 
+// MinFindings is a quality target. Two verified claims used to abort the whole
+// article ("only 2 of 4 … need 3") even though Brief.IsUsable only requires one.
+func TestResearch_AcceptsThinBriefBelowMinFindings(t *testing.T) {
+	model := &scriptedLLM{responses: []scriptedResponse{
+		{trigger: "planning research", content: `{"queries": ["q"]}`},
+		{trigger: "extracting citable facts", content: `{"findings": [
+			{"claim": "Real one.", "quote": "Kubernetes 1.31 promoted the Gateway API to general availability after an extended beta period."},
+			{"claim": "Real two.", "quote": "Teams migrating large Ingress estates can use the ingress2gateway conversion tool"},
+			{"claim": "Invented.", "quote": "This sentence does not appear anywhere in the source document at all."},
+			{"claim": "Also invented.", "quote": "Gateway API will become mandatory for all clusters in Kubernetes 1.35."}
+		]}`},
+		{trigger: "fact-checking citations", content: `{"verdicts": [
+			{"index": 0, "supported": true},
+			{"index": 1, "supported": true}
+		]}`},
+		{trigger: "Summarise the current state", content: "summary"},
+	}}
+
+	client := NewWith(defaultBackend(), []Searcher{defaultBackend()}, nil, zap.NewNop())
+	cfg := DefaultAgentConfig()
+	cfg.MinFindings = 3
+	agent := NewAgent(client, model, cfg, zap.NewNop())
+
+	brief, err := agent.Research(context.Background(), Request{Topic: "Gateway API"}, nil)
+	if err != nil {
+		t.Fatalf("Research failed a usable thin brief: %v", err)
+	}
+	if len(brief.Findings) != 2 {
+		t.Fatalf("got %d findings, want the 2 that verified", len(brief.Findings))
+	}
+	var noted bool
+	for _, w := range brief.Warnings {
+		if strings.Contains(w, "proceeding with what verified") {
+			noted = true
+		}
+	}
+	if !noted {
+		t.Errorf("thin brief was not disclosed in warnings: %v", brief.Warnings)
+	}
+}
+
 // A planner that returns unparseable output should degrade to searching the
 // topic itself rather than failing the run.
 func TestResearch_FallsBackWhenThePlannerIsUnparseable(t *testing.T) {
@@ -498,22 +539,69 @@ func TestResearch_SetsAsideSourcesThatAreNotAboutTheTopic(t *testing.T) {
 	}
 }
 
-// If nothing found is actually about the topic, that is an error about the
-// topic — not licence to write from whatever ranked highest.
-func TestResearch_FailsWhenNothingIsOnTopic(t *testing.T) {
+// If the selector rejects every hit, research must recover rather than fail the
+// article. Niche topics (and flaky local models) routinely produce an empty
+// selection even when an on-topic page is in the candidate list — falling back
+// to search order lets extraction and quote verification drop the rest.
+func TestResearch_RecoversWhenSelectionFindsNothingOnTopic(t *testing.T) {
 	model := &scriptedLLM{responses: []scriptedResponse{
 		{trigger: "planning research", content: `{"queries": ["q"]}`},
+		// Both selection passes (initial + recovery) return empty.
 		{trigger: "choosing which search results", content: `{"selected": []}`},
+		{trigger: "extracting citable facts", content: `{"findings": [{"claim": "Gateway API reached GA.", "quote": "Kubernetes 1.31 promoted the Gateway API to general availability"}]}`},
+		{trigger: "fact-checking citations", content: `{"verdicts": [{"index": 0, "supported": true}]}`},
+		{trigger: "Summarise the current state", content: "summary"},
 	}}
 
 	agent := newTestAgent(t, offTopicBackend(), model)
 
+	brief, err := agent.Research(context.Background(), Request{Topic: "Kubernetes Gateway API"}, nil)
+	if err != nil {
+		t.Fatalf("Research failed instead of recovering from an empty selection: %v", err)
+	}
+	if !brief.IsUsable() {
+		t.Fatal("brief reports itself unusable after selection recovery")
+	}
+	var noted bool
+	for _, w := range brief.Warnings {
+		if strings.Contains(w, "reading top") || strings.Contains(w, "broader search") {
+			noted = true
+		}
+	}
+	if !noted {
+		t.Errorf("recovery was not disclosed in warnings: %v", brief.Warnings)
+	}
+}
+
+// When every candidate is off-topic and nothing verifies, research must still
+// fail — recovery is not a licence to invent a brief from irrelevant pages.
+func TestResearch_FailsWhenFallbackSourcesDoNotVerify(t *testing.T) {
+	backend := &fixedBackend{
+		sources: []Source{
+			{URL: "https://zuplo.com/blog/openapi-native", Title: "Zuplo OpenAPI", Site: "zuplo.com"},
+		},
+		docs: map[string]*Document{
+			"https://zuplo.com/blog/openapi-native": {
+				Source: Source{URL: "https://zuplo.com/blog/openapi-native", Site: "zuplo.com"},
+				Text:   "Zuplo now uses the OpenAPI specification standard at its core.",
+			},
+		},
+	}
+	model := &scriptedLLM{responses: []scriptedResponse{
+		{trigger: "planning research", content: `{"queries": ["q"]}`},
+		{trigger: "choosing which search results", content: `{"selected": []}`},
+		// Quote is not in the off-topic page → mechanical verify drops it.
+		{trigger: "extracting citable facts", content: `{"findings": [{"claim": "Invented.", "quote": "Kubernetes 1.31 promoted the Gateway API to general availability"}]}`},
+	}}
+
+	agent := newTestAgent(t, backend, model)
+
 	_, err := agent.Research(context.Background(), Request{Topic: "Kubernetes Gateway API"}, nil)
 	if err == nil {
-		t.Fatal("Research succeeded with no on-topic sources")
+		t.Fatal("Research succeeded with nothing verifiable after selection fallback")
 	}
-	if !strings.Contains(err.Error(), "actually about") {
-		t.Errorf("error %q does not explain that nothing was on topic", err)
+	if !strings.Contains(err.Error(), "none of the") && !strings.Contains(err.Error(), "no claims") {
+		t.Errorf("error %q should say nothing verified", err)
 	}
 }
 

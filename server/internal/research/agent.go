@@ -174,8 +174,8 @@ func (a *Agent) Research(ctx context.Context, req Request, progress ProgressFunc
 
 	// 2. Search — gather candidates across every backend.
 	progress.report(PhaseSearching, fmt.Sprintf("Searching %d queries", len(queries)))
-	candidates := a.gather(ctx, queries, brief)
-	if len(candidates) == 0 {
+	searched := a.gather(ctx, queries, brief)
+	if len(searched) == 0 {
 		return nil, fmt.Errorf("research: no sources found for %q", topic)
 	}
 
@@ -187,14 +187,23 @@ func (a *Agent) Research(ctx context.Context, req Request, progress ProgressFunc
 	// share every keyword and none of the subject. Reading whichever URL ranked
 	// highest is how an article ends up citing a real, well-written page about
 	// something else entirely.
-	candidates = a.selectSources(ctx, req, candidates, brief)
+	candidates := a.selectSources(ctx, req, searched, brief)
+	if len(candidates) == 0 {
+		// An empty selection is often the model being too strict (or wrong) on a
+		// niche topic, not proof that nothing exists — live runs of
+		// "ai agents for tax return" failed here after a broader research call
+		// on the same subject had already found sources. Broaden once, then
+		// fall back to search order and let extraction/verification drop
+		// anything that is not actually about the topic.
+		candidates = a.recoverEmptySelection(ctx, req, searched, brief, progress)
+	}
 	if len(candidates) == 0 {
 		return nil, fmt.Errorf("research: no sources found that are actually about %q", topic)
 	}
 
 	// 4. Read — retrieve the most promising candidates.
 	progress.report(PhaseReading, fmt.Sprintf("Reading %d of %d sources", min(len(candidates), a.cfg.MaxSources), len(candidates)))
-	docs := a.read(ctx, candidates, brief)
+	docs := a.read(ctx, candidates, brief, a.cfg.MaxSources)
 	if len(docs) == 0 {
 		return nil, fmt.Errorf("research: none of the %d candidate sources could be retrieved", len(candidates))
 	}
@@ -209,10 +218,33 @@ func (a *Agent) Research(ctx context.Context, req Request, progress ProgressFunc
 	// 6. Verify — drop anything the source does not actually support.
 	progress.report(PhaseVerifying, fmt.Sprintf("Verifying %d claims against their sources", len(findings)))
 	verified := a.verify(ctx, req, findings, docs, brief)
+
+	// A thin first pass is common on niche topics: one readable page yields a
+	// handful of claims, the mechanical quote check drops half of them, and
+	// stopping there throws away a usable brief. Read unread candidates and
+	// try again before deciding the research failed.
 	if len(verified) < a.cfg.MinFindings {
+		verified, docs, findings = a.recoverFindings(ctx, req, candidates, docs, findings, verified, brief, progress)
+	}
+
+	if len(verified) == 0 {
 		return nil, fmt.Errorf(
-			"research: only %d of %d claims about %q could be verified against their sources (need %d)",
+			"research: none of the %d claims about %q could be verified against their sources",
+			len(findings), topic)
+	}
+	// MinFindings is a quality target, not a hard cliff. One or two verified
+	// citations are enough to write from (see Brief.IsUsable); failing the
+	// whole article over a missing third produces the recurring
+	// "only 2 of 4 claims" error while discarding grounded material.
+	if len(verified) < a.cfg.MinFindings {
+		msg := fmt.Sprintf(
+			"only %d of %d claims about %q could be verified (wanted %d); proceeding with what verified",
 			len(verified), len(findings), topic, a.cfg.MinFindings)
+		brief.Warnings = append(brief.Warnings, msg)
+		a.logger.Warn("research: thin brief accepted",
+			zap.Int("verified", len(verified)),
+			zap.Int("wanted", a.cfg.MinFindings),
+			zap.String("topic", topic))
 	}
 	brief.Findings = verified
 	brief.Sources = citedSources(verified, docs)
@@ -331,22 +363,25 @@ func (a *Agent) runQueries(ctx context.Context, queries []string, brief *Brief) 
 	return all
 }
 
-// read retrieves candidates until MaxSources have been read successfully.
+// read retrieves candidates until limit documents have been read successfully.
 //
 // Retrieval failure is the normal case, not the exception: search results
 // routinely include long-dead blogs and sites that time out. So this walks the
 // candidate list in batches and keeps going until it has enough documents or
-// runs out of candidates, rather than fetching exactly MaxSources URLs and
+// runs out of candidates, rather than fetching exactly limit URLs and
 // accepting whatever fraction succeeds.
-func (a *Agent) read(ctx context.Context, candidates []Source, brief *Brief) []Document {
+func (a *Agent) read(ctx context.Context, candidates []Source, brief *Brief, limit int) []Document {
+	if limit <= 0 {
+		limit = a.cfg.MaxSources
+	}
 	var (
 		mu   sync.Mutex
 		docs []Document
 	)
 
-	for i := 0; i < len(candidates) && len(docs) < a.cfg.MaxSources; {
+	for i := 0; i < len(candidates) && len(docs) < limit; {
 		// Take the next batch, sized to what is still missing.
-		need := a.cfg.MaxSources - len(docs)
+		need := limit - len(docs)
 		batch := candidates[i:min(i+max(need, a.cfg.FetchConcurrency), len(candidates))]
 		i += len(batch)
 
@@ -379,10 +414,69 @@ func (a *Agent) read(ctx context.Context, candidates []Source, brief *Brief) []D
 		wg.Wait()
 	}
 
-	if len(docs) > a.cfg.MaxSources {
-		docs = docs[:a.cfg.MaxSources]
+	if len(docs) > limit {
+		docs = docs[:limit]
 	}
 	return docs
+}
+
+// recoverExtraSources is how many additional pages a thin first pass may open
+// before accepting fewer than MinFindings. Enough to usually clear the floor
+// without turning a niche topic into an unbounded crawl.
+const recoverExtraSources = 4
+
+// recoverFindings reads unread candidates and merges any newly verified claims
+// when the first pass came up short of MinFindings.
+func (a *Agent) recoverFindings(
+	ctx context.Context,
+	req Request,
+	candidates []Source,
+	docs []Document,
+	findings, verified []Finding,
+	brief *Brief,
+	progress ProgressFunc,
+) ([]Finding, []Document, []Finding) {
+	remaining := unreadSources(candidates, docs)
+	if len(remaining) == 0 {
+		return verified, docs, findings
+	}
+
+	progress.report(PhaseReading, fmt.Sprintf(
+		"Only %d verified finding(s); reading %d more source(s)",
+		len(verified), min(len(remaining), recoverExtraSources)))
+	extra := a.read(ctx, remaining, brief, recoverExtraSources)
+	if len(extra) == 0 {
+		return verified, docs, findings
+	}
+
+	docs = append(docs, extra...)
+	moreFindings := a.extractAll(ctx, req, extra, brief)
+	if len(moreFindings) == 0 {
+		return verified, docs, findings
+	}
+	findings = append(findings, moreFindings...)
+
+	progress.report(PhaseVerifying, fmt.Sprintf(
+		"Verifying %d additional claim(s) against their sources", len(moreFindings)))
+	moreVerified := a.verify(ctx, req, moreFindings, extra, brief)
+	verified = append(verified, moreVerified...)
+	return verified, docs, findings
+}
+
+// unreadSources returns candidates whose URLs are not already in docs.
+func unreadSources(candidates []Source, docs []Document) []Source {
+	seen := make(map[string]struct{}, len(docs))
+	for _, d := range docs {
+		seen[d.URL] = struct{}{}
+	}
+	out := make([]Source, 0, len(candidates))
+	for _, s := range candidates {
+		if _, ok := seen[s.URL]; ok {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
 }
 
 // selectCandidates is how many search hits are put in front of the model for
@@ -426,12 +520,13 @@ CANDIDATE SOURCES:
 
 Select the sources that are genuinely about the article topic, best first.
 
-Be strict about the subject. Technical terms are ambiguous and search engines
+Be careful about the subject. Technical terms are ambiguous and search engines
 match on keywords, so results often share vocabulary with the topic while being
 about something else — reject those. Prefer primary sources (project
 documentation, release notes, engineering blogs, papers) and recent material.
 
-Select at most %d. If none of them are really about the topic, return an empty list.
+Select at most %d. Prefer a plausible, related source over an empty list: return
+[] only when every result is clearly about a different subject.
 
 Respond with JSON only, in exactly this shape:
 {"selected": [0, 3, 7]}`,
@@ -460,12 +555,79 @@ Respond with JSON only, in exactly this shape:
 		out = append(out, shortlist[idx])
 	}
 
-	// An empty selection is a real answer — the search genuinely found nothing
-	// on topic — and is returned as such so the caller fails with a message
-	// about the topic rather than writing from irrelevant sources.
-	if dropped := len(shortlist) - len(out); dropped > 0 {
+	if dropped := len(shortlist) - len(out); dropped > 0 && len(out) > 0 {
 		brief.Warnings = append(brief.Warnings,
 			fmt.Sprintf("set aside %d search result(s) as not being about the topic", dropped))
+	}
+	return out
+}
+
+// recoverEmptySelection runs when the relevance pass rejected every hit.
+//
+// First it searches broader phrasings of the topic and selects again. If that
+// is still empty, it returns the top search hits so extraction can filter —
+// the same degradation used when the selector itself fails to parse. Hard-
+// failing here was the recurring "no sources found that are actually about"
+// error on niche topics the same agent had already researched successfully.
+func (a *Agent) recoverEmptySelection(
+	ctx context.Context, req Request, searched []Source, brief *Brief, progress ProgressFunc,
+) []Source {
+	progress.report(PhaseSearching, fmt.Sprintf(
+		"Selection found nothing on-topic for %q; broadening search", req.Topic))
+
+	broaderQueries := broadenQueries(req.Topic, brief.Queries)
+	broader := dedupeSources(a.runQueries(ctx, broaderQueries, brief))
+	pool := dedupeSources(append(append([]Source{}, searched...), broader...))
+	if len(pool) == 0 {
+		return nil
+	}
+
+	selected := a.selectSources(ctx, req, pool, brief)
+	if len(selected) > 0 {
+		brief.Warnings = append(brief.Warnings,
+			"initial source selection was empty; recovered after a broader search")
+		return selected
+	}
+
+	limit := min(len(pool), a.cfg.MaxSources*2)
+	brief.Warnings = append(brief.Warnings,
+		fmt.Sprintf("source selection found nothing on-topic; reading top %d search result(s) and filtering at extraction", limit))
+	a.logger.Warn("research: empty selection, falling back to search order",
+		zap.String("topic", req.Topic), zap.Int("candidates", limit))
+	return pool[:limit]
+}
+
+// broadenQueries builds follow-up searches when the first pass selected nothing.
+// The topic itself is always included; planned queries that were overly narrow
+// are replaced with shorter keyword forms of the topic.
+func broadenQueries(topic string, planned []string) []string {
+	out := []string{topic}
+	words := strings.Fields(strings.ToLower(topic))
+	if len(words) > 2 {
+		// Drop filler words that inflate queries into zero-hit phrases.
+		var keep []string
+		for _, w := range words {
+			switch w {
+			case "a", "an", "the", "for", "of", "and", "or", "to", "in", "on":
+				continue
+			}
+			keep = append(keep, w)
+		}
+		if len(keep) >= 2 {
+			out = append(out, strings.Join(keep, " "))
+		}
+		if len(keep) >= 3 {
+			out = append(out, strings.Join(keep[:3], " "))
+		}
+	}
+	for _, q := range planned {
+		if s := strings.TrimSpace(q); s != "" && !strings.EqualFold(s, topic) {
+			out = append(out, s)
+		}
+	}
+	// Cap so a bad planner cannot explode the recovery into dozens of searches.
+	if len(out) > 6 {
+		out = out[:6]
 	}
 	return out
 }
