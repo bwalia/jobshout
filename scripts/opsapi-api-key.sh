@@ -22,6 +22,21 @@
 
 set -euo pipefail
 
+# Fail before the first prompt: nobody should type their password only to
+# learn a dependency is missing.
+command -v jq >/dev/null 2>&1 || {
+    echo "error: jq is required" >&2
+    exit 1
+}
+
+# die <label> <response>: report a failed step with the server's response,
+# pretty-printed when it is JSON.
+die() {
+    echo "$1:" >&2
+    printf '%s\n' "$2" | jq . >&2 2>/dev/null || printf '%s\n' "$2" >&2
+    exit 1
+}
+
 BASE_URL="${OPSAPI_BASE_URL:-}"
 USER_ID="${OPSAPI_USER:-}"
 NAMESPACE="${OPSAPI_NAMESPACE:-}"
@@ -44,14 +59,6 @@ fi
 read -r -s -p "Password: " PASSWORD
 echo
 
-require_jq() {
-    command -v jq >/dev/null 2>&1 || {
-        echo "error: jq is required" >&2
-        exit 1
-    }
-}
-require_jq
-
 # Step 1 — password. This route reads self.params, so it wants a form body
 # rather than JSON; sending JSON gets a "identifier required" 400.
 login=$(curl -sS -m 30 -X POST "$BASE_URL/auth/login" \
@@ -59,11 +66,7 @@ login=$(curl -sS -m 30 -X POST "$BASE_URL/auth/login" \
     --data-urlencode "password=$PASSWORD")
 
 session=$(printf '%s' "$login" | jq -r '.session_token // empty')
-if [[ -z "$session" ]]; then
-    echo "login failed:" >&2
-    printf '%s\n' "$login" | jq . >&2 2>/dev/null || printf '%s\n' "$login" >&2
-    exit 1
-fi
+[[ -n "$session" ]] || die "login failed" "$login"
 
 echo "Password accepted. A verification code was sent to the account's email." >&2
 read -r -p "Verification code: " CODE
@@ -74,11 +77,7 @@ verify=$(curl -sS -m 30 -X POST "$BASE_URL/auth/2fa/verify" \
     -d "$(jq -nc --arg s "$session" --arg c "$CODE" '{session_token:$s, code:$c}')")
 
 jwt=$(printf '%s' "$verify" | jq -r '.token // empty')
-if [[ -z "$jwt" ]]; then
-    echo "verification failed:" >&2
-    printf '%s\n' "$verify" | jq . >&2 2>/dev/null || printf '%s\n' "$verify" >&2
-    exit 1
-fi
+[[ -n "$jwt" ]] || die "verification failed" "$verify"
 
 # Step 3 — mint the key. Scoped to creating CMS posts and nothing else; a
 # leaked key cannot read data or touch any other module.
@@ -89,13 +88,12 @@ created=$(curl -sS -m 30 -X POST "$BASE_URL/api/v2/api-keys" \
     -d "$(jq -nc --arg n "$KEY_NAME" '{name:$n, scopes:{cms:["create"]}}')")
 
 key=$(printf '%s' "$created" | jq -r '.data.key // empty')
-if [[ -z "$key" ]]; then
-    echo "key creation failed:" >&2
-    printf '%s\n' "$created" | jq . >&2 2>/dev/null || printf '%s\n' "$created" >&2
-    exit 1
-fi
+[[ -n "$key" ]] || die "key creation failed" "$created"
 
-printf '%s' "$created" | jq -r \
-    '"\nCreated API key \"\(.data.name)\" (\(.data.uuid)) in namespace '"$NAMESPACE"', scope cms:create.\nThis is the only time the key is shown. Set OPSAPI_API_KEY to it and OPSAPI_NAMESPACE to '"$NAMESPACE"'.\nRevoke it any time: DELETE '"$BASE_URL"'/api/v2/api-keys/\(.data.uuid)\n"' >&2
+# Informational only — guarded with || true so a formatting failure can never
+# suppress the key below, which is shown exactly once.
+printf '%s' "$created" | jq -r --arg ns "$NAMESPACE" --arg base "$BASE_URL" \
+    '"\nCreated API key \"\(.data.name)\" (\(.data.uuid)) in namespace \($ns), scope cms:create.\nThis is the only time the key is shown. Set OPSAPI_API_KEY to it and OPSAPI_NAMESPACE to \($ns).\nRevoke it any time: DELETE \($base)/api/v2/api-keys/\(.data.uuid)\n"' >&2 \
+    || true
 
 echo "$key"

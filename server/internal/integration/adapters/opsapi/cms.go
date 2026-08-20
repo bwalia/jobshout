@@ -58,10 +58,14 @@ type Client struct {
 // callers can hold a possibly-nil *Client and treat nil as "publishing is not
 // configured" rather than carrying a separate flag.
 func NewClient(cfg Config) *Client {
+	cfg.BaseURL = strings.TrimRight(cfg.BaseURL, "/")
+	// A key pasted into a secret store often arrives with a trailing newline,
+	// which Go rejects as an invalid header value on every request. Trimmed
+	// before Complete() so a whitespace-only key reads as "not configured".
+	cfg.APIKey = strings.TrimSpace(cfg.APIKey)
 	if !cfg.Complete() {
 		return nil
 	}
-	cfg.BaseURL = strings.TrimRight(cfg.BaseURL, "/")
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = DefaultTimeout
 	}
@@ -156,8 +160,9 @@ func (c *Client) CreatePost(ctx context.Context, req CreatePostRequest) (*Post, 
 }
 
 // postError turns a rejection into something that names the likely cause.
-// opsapi returns 403 for both "namespace not enabled for cms" and "user lacks
-// the cms module", which are different fixes, so the message points at both.
+// opsapi returns 403 for a key missing the cms scope, a key used against a
+// namespace it does not belong to, and a namespace without the cms feature —
+// different fixes, so the message points at all of them.
 func (c *Client) postError(resp *http.Response, title string) error {
 	body := readBodySnippet(resp)
 	switch resp.StatusCode {
