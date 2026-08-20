@@ -279,6 +279,55 @@ func TestResearch_ToleratesUnreadableSources(t *testing.T) {
 	}
 }
 
+// Selection can narrow to a single URL that then fails to fetch — the live
+// "none of the 1 candidate sources could be retrieved" case. Research must
+// fall back to other search hits instead of aborting.
+func TestResearch_RecoversWhenSelectedSourcesAreUnreadable(t *testing.T) {
+	backend := &fixedBackend{
+		sources: []Source{
+			{URL: "https://dead.example/gone", Title: "Dead but selected"},
+			{URL: "https://kubernetes.io/blog/gateway-ga", Title: "Gateway API is GA"},
+		},
+		docs: map[string]*Document{
+			"https://kubernetes.io/blog/gateway-ga": {
+				Source: Source{URL: "https://kubernetes.io/blog/gateway-ga", Site: "kubernetes.io"},
+				Text:   testDocText,
+			},
+		},
+		fetchErrs: map[string]error{
+			"https://dead.example/gone": fmt.Errorf("target returned HTTP 404"),
+		},
+	}
+
+	model := &scriptedLLM{responses: []scriptedResponse{
+		{trigger: "planning research", content: `{"queries": ["q"]}`},
+		// Selector picks only the dead URL — the failure mode from production.
+		{trigger: "choosing which search results", content: `{"selected": [0]}`},
+		{trigger: "extracting citable facts", content: `{"findings": [{"claim": "c", "quote": "Kubernetes 1.31 promoted the Gateway API to general availability"}]}`},
+		{trigger: "fact-checking citations", content: `{"verdicts": [{"index": 0, "supported": true}]}`},
+		{trigger: "Summarise the current state", content: "summary"},
+	}}
+
+	agent := newTestAgent(t, backend, model)
+
+	brief, err := agent.Research(context.Background(), Request{Topic: "Gateway API"}, nil)
+	if err != nil {
+		t.Fatalf("Research failed instead of recovering from an unreadable selection: %v", err)
+	}
+	if len(brief.Findings) == 0 {
+		t.Fatal("expected findings from the readable search hit")
+	}
+	var noted bool
+	for _, w := range brief.Warnings {
+		if strings.Contains(w, "reading") && strings.Contains(w, "other search") {
+			noted = true
+		}
+	}
+	if !noted {
+		t.Errorf("fetch recovery was not disclosed in warnings: %v", brief.Warnings)
+	}
+}
+
 // A planner can write queries that are individually reasonable and jointly too
 // narrow — long natural-language phrases are the common case, and they match
 // nothing. The topic itself is the last resort rather than giving up.

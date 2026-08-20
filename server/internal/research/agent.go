@@ -202,8 +202,16 @@ func (a *Agent) Research(ctx context.Context, req Request, progress ProgressFunc
 	}
 
 	// 4. Read — retrieve the most promising candidates.
+	//
+	// Retrieval failure is routine (dead blogs, paywalls, HN item pages Jina
+	// cannot render). tried tracks every URL already attempted so recovery can
+	// walk the wider search pool without refetching the same dead links.
+	tried := make(map[string]struct{})
 	progress.report(PhaseReading, fmt.Sprintf("Reading %d of %d sources", min(len(candidates), a.cfg.MaxSources), len(candidates)))
-	docs := a.read(ctx, candidates, brief, a.cfg.MaxSources)
+	docs := a.read(ctx, candidates, brief, a.cfg.MaxSources, tried)
+	if len(docs) == 0 {
+		docs = a.recoverEmptyRead(ctx, req, searched, brief, progress, tried)
+	}
 	if len(docs) == 0 {
 		return nil, fmt.Errorf("research: none of the %d candidate sources could be retrieved", len(candidates))
 	}
@@ -224,7 +232,8 @@ func (a *Agent) Research(ctx context.Context, req Request, progress ProgressFunc
 	// stopping there throws away a usable brief. Read unread candidates and
 	// try again before deciding the research failed.
 	if len(verified) < a.cfg.MinFindings {
-		verified, docs, findings = a.recoverFindings(ctx, req, candidates, docs, findings, verified, brief, progress)
+		pool := dedupeSources(append(append([]Source{}, candidates...), searched...))
+		verified, docs, findings = a.recoverFindings(ctx, req, pool, docs, findings, verified, brief, progress, tried)
 	}
 
 	if len(verified) == 0 {
@@ -370,10 +379,18 @@ func (a *Agent) runQueries(ctx context.Context, queries []string, brief *Brief) 
 // candidate list in batches and keeps going until it has enough documents or
 // runs out of candidates, rather than fetching exactly limit URLs and
 // accepting whatever fraction succeeds.
-func (a *Agent) read(ctx context.Context, candidates []Source, brief *Brief, limit int) []Document {
+//
+// tried records every URL already attempted (success or failure) so a later
+// recovery pass can skip them. It must not be nil.
+func (a *Agent) read(ctx context.Context, candidates []Source, brief *Brief, limit int, tried map[string]struct{}) []Document {
 	if limit <= 0 {
 		limit = a.cfg.MaxSources
 	}
+	if tried == nil {
+		tried = make(map[string]struct{})
+	}
+	candidates = skipTried(candidates, tried)
+
 	var (
 		mu   sync.Mutex
 		docs []Document
@@ -389,6 +406,7 @@ func (a *Agent) read(ctx context.Context, candidates []Source, brief *Brief, lim
 		var wg sync.WaitGroup
 
 		for _, src := range batch {
+			tried[src.URL] = struct{}{}
 			wg.Add(1)
 			go func(src Source) {
 				defer wg.Done()
@@ -420,6 +438,33 @@ func (a *Agent) read(ctx context.Context, candidates []Source, brief *Brief, lim
 	return docs
 }
 
+// recoverEmptyRead runs when every selected candidate failed to fetch.
+//
+// Selection often narrows to a single URL that then 404s or times out — the
+// live "none of the 1 candidate sources could be retrieved" failure — while
+// the wider search pool still has readable pages. Try those next, then a
+// broadened search, before giving up.
+func (a *Agent) recoverEmptyRead(
+	ctx context.Context, req Request, searched []Source, brief *Brief, progress ProgressFunc, tried map[string]struct{},
+) []Document {
+	progress.report(PhaseReading, "Selected sources were unreadable; trying other search results")
+
+	pool := skipTried(searched, tried)
+	if len(pool) == 0 {
+		broader := dedupeSources(a.runQueries(ctx, broadenQueries(req.Topic, brief.Queries), brief))
+		pool = skipTried(broader, tried)
+	}
+	if len(pool) == 0 {
+		return nil
+	}
+
+	brief.Warnings = append(brief.Warnings,
+		fmt.Sprintf("could not retrieve selected sources; reading %d other search result(s)", min(len(pool), a.cfg.MaxSources)))
+	a.logger.Warn("research: selected sources unreadable, trying search pool",
+		zap.String("topic", req.Topic), zap.Int("remaining", len(pool)))
+	return a.read(ctx, pool, brief, a.cfg.MaxSources, tried)
+}
+
 // recoverExtraSources is how many additional pages a thin first pass may open
 // before accepting fewer than MinFindings. Enough to usually clear the floor
 // without turning a niche topic into an unbounded crawl.
@@ -435,8 +480,9 @@ func (a *Agent) recoverFindings(
 	findings, verified []Finding,
 	brief *Brief,
 	progress ProgressFunc,
+	tried map[string]struct{},
 ) ([]Finding, []Document, []Finding) {
-	remaining := unreadSources(candidates, docs)
+	remaining := skipTried(candidates, tried)
 	if len(remaining) == 0 {
 		return verified, docs, findings
 	}
@@ -444,7 +490,7 @@ func (a *Agent) recoverFindings(
 	progress.report(PhaseReading, fmt.Sprintf(
 		"Only %d verified finding(s); reading %d more source(s)",
 		len(verified), min(len(remaining), recoverExtraSources)))
-	extra := a.read(ctx, remaining, brief, recoverExtraSources)
+	extra := a.read(ctx, remaining, brief, recoverExtraSources, tried)
 	if len(extra) == 0 {
 		return verified, docs, findings
 	}
@@ -463,20 +509,28 @@ func (a *Agent) recoverFindings(
 	return verified, docs, findings
 }
 
+// skipTried returns candidates whose URLs are not in tried.
+func skipTried(candidates []Source, tried map[string]struct{}) []Source {
+	if len(tried) == 0 {
+		return candidates
+	}
+	out := make([]Source, 0, len(candidates))
+	for _, s := range candidates {
+		if _, ok := tried[s.URL]; ok {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
 // unreadSources returns candidates whose URLs are not already in docs.
 func unreadSources(candidates []Source, docs []Document) []Source {
 	seen := make(map[string]struct{}, len(docs))
 	for _, d := range docs {
 		seen[d.URL] = struct{}{}
 	}
-	out := make([]Source, 0, len(candidates))
-	for _, s := range candidates {
-		if _, ok := seen[s.URL]; ok {
-			continue
-		}
-		out = append(out, s)
-	}
-	return out
+	return skipTried(candidates, seen)
 }
 
 // selectCandidates is how many search hits are put in front of the model for
