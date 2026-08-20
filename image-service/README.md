@@ -90,14 +90,40 @@ launchctl list | grep jobshout
 
 ## Models
 
-`GET /api/models` reports every model mflux can run, each marked with whether
-its weights are already in the local Hugging Face cache. Only cached models
-generate promptly; the rest download tens of gigabytes on first use, which is
-why the distinction is reported rather than hidden.
+`GET /api/models` reports every model this service will run, each marked with
+whether its weights are already in the local Hugging Face cache. Only cached
+models generate promptly; the rest download tens of gigabytes on first use,
+which is why the distinction is reported rather than hidden. Each entry also
+carries `default_steps` — what that model gets when a request names no count.
 
-The default is **`z-image-turbo`** (`Tongyi-MAI/Z-Image-Turbo`): it is a
-few-step turbo model, so it produces a 1024×576 cover in seconds rather than
-minutes, and it is the model whose weights are already on this machine.
+Two models have weights on this machine:
+
+| Name              | Repo                                | Steps | 1024×576 |
+| ----------------- | ----------------------------------- | ----- | -------- |
+| `z-image-turbo`   | `Tongyi-MAI/Z-Image-Turbo`          | 8     | ~40 s    |
+| `qwen-image-2512` | `mlx-community/Qwen-Image-2512-4bit`| 20    | ~3.5 min |
+
+`z-image-turbo` is the service's own default — the one a bare request with no
+model gets — because a caller that did not choose is better served waiting
+seconds than minutes. The platform names its model explicitly, so what an
+article cover uses is set by `ai.imageModel` in the Helm values, not here.
+
+### Third-party models
+
+`qwen-image-2512` is not one of mflux's built-in entries. It is a community
+4-bit MLX build of Qwen-Image-2512, reached on the command line as
+`--model mlx-community/Qwen-Image-2512-4bit --base-model qwen`; `_CUSTOM_MODELS`
+in `app/models.py` is that same pair given a name. Adding another third-party
+repo means adding a row there and nothing else.
+
+It is deliberately **not** called `qwen-image`. mflux already uses that name for
+`Qwen/Qwen-Image` — a different, unquantised, roughly 60 GB repo that is not on
+this disk. Collapsing the two into one name would mean a request either
+generating in minutes or downloading for an hour, with nothing in the request to
+say which.
+
+Because the published repo is already 4-bit, `IMAGE_QUANTIZE` is ignored for it:
+quantising an already-quantised tensor does not make it smaller, only worse.
 
 ## Concurrency and memory
 
@@ -120,7 +146,7 @@ is a good way to run the machine out of memory.
 | `IMAGE_PORT`              | `11435`         | Bind port (11434 is Ollama's).               |
 | `IMAGE_JWT_SECRET`        | *(unset)*       | Shared secret. Unset means no auth.          |
 | `IMAGE_DEFAULT_MODEL`     | `z-image-turbo` | Model used when a request names none.        |
-| `IMAGE_DEFAULT_STEPS`     | `8`             | Steps when a request names none.             |
+| `IMAGE_DEFAULT_STEPS`     | *(unset)*       | Steps when a request names none. Unset means the model's own — 8 for turbo, 20 otherwise. Setting it overrides every model at once. |
 | `IMAGE_MAX_STEPS`         | `50`            | Ceiling; a huge step count is a denial of service against a single-GPU host. |
 | `IMAGE_MAX_DIMENSION`     | `1536`          | Ceiling on width and height.                 |
 | `IMAGE_QUEUE_TIMEOUT`     | `600`           | Seconds a queued request waits for the lock. |

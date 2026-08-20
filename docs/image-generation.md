@@ -52,8 +52,23 @@ text. Image *output* needs a diffusion runtime, which is what mflux is.
 ### Providers
 
 **`mflux`** — the workstation service. Local weights, nothing leaves the network,
-free per image, and unavailable whenever that Mac is asleep. Default model
-`z-image-turbo`, which draws a 1024×576 cover in roughly 25 seconds.
+free per image, and unavailable whenever that Mac is asleep. Two models have
+weights on that machine:
+
+| Model             | 1024×576 | Notes                                          |
+| ----------------- | -------- | ---------------------------------------------- |
+| `qwen-image-2512` | ~3.5 min | Qwen-Image-2512, 4-bit MLX. What the rings use. |
+| `z-image-turbo`   | ~40 s    | Few-step turbo. The fast one.                   |
+
+The rings draw covers with `qwen-image-2512` — twenty diffusion steps at roughly
+nine seconds each against z-image-turbo's eight fast ones, for a better picture.
+A cover is drawn once per article rather than once per request, so that is where
+the extra time is affordable; anything wanting a picture back promptly should
+name `z-image-turbo` explicitly.
+
+`qwen-image-2512` is a community 4-bit build rather than one of mflux's built-in
+entries, and is deliberately distinct from mflux's `qwen-image`, which is a
+different 60 GB repo that is not downloaded. See `image-service/README.md`.
 
 **`openai`** — OpenAI's image API, using the same `OPENAI_API_KEY` as chat. Always
 reachable, costs per image, and the prompt leaves the network. Registered
@@ -86,18 +101,20 @@ to agents, and the Images page renders a disabled control rather than an error.
 
 ### Per-ring defaults
 
-All four rings point at `https://images.workstation.co.uk`, and
-`BLOG_COVER_IMAGES` is **off in every one of them** for now, because that host is
-not registered on the edge yet. With it on, every article run would reach for a
-cover, fail to resolve the host, and file that failure into its trace — harmless,
-since the run carries on and still produces a complete article, but it fills a
-ring with a recurring error that reads as a bug rather than a missing endpoint.
+All four rings point at `https://images.workstation.co.uk` and set
+`ai.imageModel: qwen-image-2512`. The host is registered on the edge behind the
+JWT gateway, and an image has been drawn through that whole path — edge,
+gateway, workstation GPU.
 
-The intended rollout, once the host is live, is int first: generate an image by
-hand from the Images page to confirm the endpoint answers, then set
-`ai.blogCoverImages: true` in `values-int.yaml` and watch a run. Advance ring by
-ring from there. A cover costs about 25 seconds of a single shared GPU per
-article, so this is a cost worth turning on where it can be observed.
+`BLOG_COVER_IMAGES` is **on in int only**. The rollout is one ring at a time:
+generate an image by hand from the Images page to confirm the endpoint answers,
+then set `ai.blogCoverImages: true` in that ring's values and watch a run. A
+cover costs about three and a half minutes of a single shared GPU per article,
+so this is a cost worth turning on where it can be observed first.
+
+The chart default in `values.yaml` stays `z-image-turbo`. A ring that has not
+been configured at all is better off with the model that answers in seconds than
+one that occupies the GPU for minutes.
 
 ### The gateway secret
 
@@ -137,9 +154,9 @@ The result shows its seed, which is the only way to reproduce that exact image
 later.
 
 The picker marks models that are known but **not downloaded**. mflux knows about
-thirty models and has weights for one; selecting another starts a
-multi-gigabyte download that looks, from the UI, exactly like a generation that
-never finishes.
+thirty models and this machine has weights for two — `qwen-image-2512` and
+`z-image-turbo`; selecting any other starts a multi-gigabyte download that looks,
+from the UI, exactly like a generation that never finishes.
 
 ### From an agent
 
@@ -195,8 +212,7 @@ new key. They are served with a one-year immutable cache header.
 - **No batch generation.** One image per request, because one GPU.
 - **No prompt rewriting.** The house style is appended to article prompts, but
   nothing sends the user's prompt to an LLM to "improve" it first.
-- **The workstation host is not registered on the edge yet.** The chart points
-  every ring at `images.workstation.co.uk`; provisioning that host and putting
-  the JWT gateway in front of it is an infrastructure step outside this
-  repository, and until it is done the deployed rings will find the local
-  provider unreachable and fall back to OpenAI where a key is set.
+- **No second hostname per model.** One host, `images.workstation.co.uk`, serves
+  every model, because the model is a field in the request and there is one GPU
+  behind all of them. A hostname per model would be a second edge vhost, a
+  second certificate and a second route, all pointing at the same process.

@@ -57,6 +57,7 @@ class ModelEntry(BaseModel):
     repo: str
     downloaded: bool
     turbo: bool
+    default_steps: int
 
 
 class ModelsResponse(BaseModel):
@@ -119,7 +120,10 @@ async def generate(req: GenerateRequest, caller: str = Depends(require_auth)):
     width = _validate_dimension(req.width, "width")
     height = _validate_dimension(req.height, "height")
 
-    steps = req.steps if req.steps > 0 else config.DEFAULT_STEPS
+    # An unasked-for step count falls to the model's own, not to one number for
+    # every model — eight steps is right for a turbo model and noise from a
+    # standard one. IMAGE_DEFAULT_STEPS, when set, overrides both.
+    steps = req.steps if req.steps > 0 else (config.DEFAULT_STEPS or models.default_steps(model_name))
     if steps > config.MAX_STEPS:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,

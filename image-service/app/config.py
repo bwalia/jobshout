@@ -12,7 +12,14 @@ import os
 # something that has to happen out of band.
 DEFAULT_MODEL = os.getenv("IMAGE_DEFAULT_MODEL", "z-image-turbo")
 
-DEFAULT_STEPS = int(os.getenv("IMAGE_DEFAULT_STEPS", "8"))
+# Steps when a request names none. Unset — the normal case — means "ask the
+# model", because the right count is a property of the model and not of the
+# service: a turbo model converges in eight steps and a standard one needs
+# around twenty, so any single number here is wrong for one of them. Setting it
+# overrides every model at once, which is useful for a bulk experiment and
+# nothing else.
+_default_steps_raw = os.getenv("IMAGE_DEFAULT_STEPS", "").strip()
+DEFAULT_STEPS = int(_default_steps_raw) if _default_steps_raw else None
 
 # Ceilings. This service is one process in front of one GPU, so an unbounded
 # step count or dimension is not merely a slow request — it is a denial of
