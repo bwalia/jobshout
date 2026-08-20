@@ -89,7 +89,15 @@ def _variant_class(name: str):
 
 def _model_config(name: str):
     """Resolve an mflux ModelConfig from a model name."""
-    from mflux.models.common.config.model_config import AVAILABLE_MODELS
+    from mflux.models.common.config.model_config import AVAILABLE_MODELS, ModelConfig
+
+    from app import models as catalogue
+
+    # A third-party repo is absent from mflux's table, so it is resolved from
+    # the repo path plus the family whose architecture loads it — the same pair
+    # `mflux-generate-qwen --model org/repo --base-model qwen` takes.
+    if (custom := catalogue.custom(name)) is not None:
+        return ModelConfig.from_name(custom.repo, base_model=custom.base_model)
 
     cfg = AVAILABLE_MODELS.get(name)
     if cfg is None:
@@ -113,8 +121,24 @@ class Generator:
 
     def _load(self, name: str):
         """Load `name`, evicting whatever no longer fits. Caller holds _gpu."""
+        from app import models as catalogue
+
         cfg = _model_config(name)
         cls = _variant_class(name)
+
+        # A repo published pre-quantised is already as small as it gets.
+        # Quantising it again on load does not halve it a second time; it
+        # re-quantises tensors that have already lost that precision, so the
+        # service's own setting is dropped rather than applied twice.
+        quantize = config.QUANTIZE
+        custom = catalogue.custom(name)
+        if custom is not None and custom.quantized_bits is not None:
+            if quantize is not None:
+                logger.info(
+                    "ignoring IMAGE_QUANTIZE=%d for %s — the repo ships at %d-bit",
+                    quantize, name, custom.quantized_bits,
+                )
+            quantize = None
 
         # Evict before loading, not after. Loading first would briefly hold both
         # the outgoing and incoming model in memory, which is exactly the state
@@ -126,7 +150,7 @@ class Generator:
 
         logger.info("loading model %s (%s)", name, cfg.model_name)
         started = time.monotonic()
-        model = cls(model_config=cfg, quantize=config.QUANTIZE)
+        model = cls(model_config=cfg, quantize=quantize)
         logger.info("loaded %s in %.1fs", name, time.monotonic() - started)
 
         with self._registry_lock:
