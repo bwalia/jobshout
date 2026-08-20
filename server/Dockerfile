@@ -1,7 +1,7 @@
 # Pin the builder to the NATIVE build platform so the Go toolchain runs
 # un-emulated (the amd64 Go compiler segfaults under QEMU on an arm64 host).
 # Go then cross-compiles to the target arch via GOARCH below.
-FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
 
 RUN apk add --no-cache git ca-certificates
 
