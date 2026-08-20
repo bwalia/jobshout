@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { MermaidDiagram } from "@/components/blog/MermaidDiagram";
+import { StoredImage } from "@/components/image/StoredImage";
 import type { BlogArticle, BlogReference } from "@/lib/types/blog";
 
 type Tab = "article" | "sources" | "markdown" | "html";
@@ -71,10 +72,7 @@ export function ArticleViewer({ article }: { article: BlogArticle }) {
           inside it: it is the article's opening image, and a reader scanning a
           list of articles recognises the picture before the filename. */}
       {article.cover_image_url && (
-        // eslint-disable-next-line @next/next/no-img-element -- served by this
-        // app's own API path; next/image would need it registered as a remote
-        // pattern to no benefit.
-        <img
+        <StoredImage
           src={article.cover_image_url}
           alt={article.cover_image_prompt || article.title || article.topic}
           className="mb-3 aspect-video w-full rounded-lg border border-border object-cover"

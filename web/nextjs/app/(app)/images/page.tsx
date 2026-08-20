@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ImageModelPicker, type ImageModelSelection } from "@/components/image/ImageModelPicker";
+import { StoredImage } from "@/components/image/StoredImage";
 import {
   useGeneratedImages,
   useGenerateImage,
@@ -153,10 +154,7 @@ export default function ImagesPage() {
       {result && resultSrc && (
         <section className="rounded-xl border border-border bg-card p-6">
           <h2 className="text-base font-semibold">Result</h2>
-          {/* eslint-disable-next-line @next/next/no-img-element -- the source is
-              either a data URL or an API path this app serves; next/image would
-              need both registered as remote patterns to no benefit. */}
-          <img
+          <StoredImage
             src={resultSrc}
             alt={prompt}
             className="mt-4 w-full rounded-lg border border-border"
@@ -203,8 +201,7 @@ export default function ImagesPage() {
             {history.map((img) => (
               <figure key={img.id} className="rounded-lg border border-border p-3">
                 {img.url ? (
-                  // eslint-disable-next-line @next/next/no-img-element -- as above
-                  <img
+                  <StoredImage
                     src={img.url}
                     alt={img.prompt}
                     loading="lazy"
