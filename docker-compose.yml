@@ -94,7 +94,7 @@ services:
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       OLLAMA_DEFAULT_MODEL: ${OLLAMA_DEFAULT_MODEL:-llama3:latest}
       OLLAMA_JWT_SECRET: ${OLLAMA_JWT_SECRET:-}
-      OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-3m}
+      OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-10m}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       PYTHON_SIDECAR_URL: ${PYTHON_SIDECAR_URL:-http://python-sidecar:8001}
       PYTHON_SIDECAR_SECRET: ${PYTHON_SIDECAR_SECRET:-change-me-sidecar-secret}

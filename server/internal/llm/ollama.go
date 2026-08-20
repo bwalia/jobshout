@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -58,7 +59,13 @@ func NewOllamaClientWithAuth(baseURL, defaultModel, gatewaySecret string, timeou
 }
 
 // defaultOllamaTimeout applies when none is configured.
-const defaultOllamaTimeout = 3 * time.Minute
+//
+// Ten minutes matches the shared workstation host: it is CPU-only, cold model
+// loads take minutes, and a long article draft (streamed, 900–1400 words) can
+// legitimately sit past three minutes while queued behind other callers. The
+// previous 3m default produced recurring
+// "Client.Timeout exceeded while awaiting headers" failures on draft.
+const defaultOllamaTimeout = 10 * time.Minute
 
 // DefaultOllamaNumCtx is the context window requested when none is configured.
 // It matches Ollama's own historical default, so behaviour is unchanged for
@@ -144,7 +151,8 @@ type ollamaOptions struct {
 	Temperature float64 `json:"temperature,omitempty"`
 }
 
-// ollamaChatResponse mirrors the Ollama /api/chat response body (stream:false).
+// ollamaChatResponse mirrors one Ollama /api/chat NDJSON chunk (stream:true)
+// or the single object returned when stream:false.
 type ollamaChatResponse struct {
 	Model   string        `json:"model"`
 	Message ollamaMessage `json:"message"`
@@ -171,10 +179,15 @@ func (c *OllamaClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 	}
 	opts.NumCtx = c.effectiveNumCtx(model)
 
+	// Stream so response headers arrive with the first token. With stream:false
+	// Ollama holds the connection silent until the whole reply is ready, and
+	// Go's Client.Timeout then reports "awaiting headers" on long drafts even
+	// when the host is working — which is exactly the article-generator
+	// failure mode on the shared CPU box.
 	body := ollamaChatRequest{
 		Model:    model,
 		Messages: msgs,
-		Stream:   false,
+		Stream:   true,
 		Think:    false,
 		Options:  opts,
 	}
@@ -199,43 +212,75 @@ func (c *OllamaClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 	}
 	defer resp.Body.Close()
 
-	rawBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("ollama: read response body: %w", err)
-	}
-
 	if isAuthStatus(resp.StatusCode) {
+		rawBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
 		return nil, authError(resp.StatusCode, rawBody)
 	}
 	if resp.StatusCode != http.StatusOK {
+		rawBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
 		return nil, fmt.Errorf("ollama: unexpected status %d: %s", resp.StatusCode, upstreamSnippet(rawBody))
 	}
 
-	var chatResp ollamaChatResponse
-	if err := json.Unmarshal(rawBody, &chatResp); err != nil {
-		return nil, fmt.Errorf("ollama: decode response: %w", err)
+	return c.readStream(resp.Body, model, opts.NumPredict)
+}
+
+// readStream accumulates an Ollama NDJSON chat stream into one GenerateResponse.
+func (c *OllamaClient) readStream(body io.Reader, model string, numPredict int) (*GenerateResponse, error) {
+	var (
+		content  strings.Builder
+		thinking strings.Builder
+		done     bool
+		inTok    int
+		outTok   int
+	)
+
+	scanner := bufio.NewScanner(body)
+	// Article drafts can emit large single-line JSON chunks; the default
+	// 64 KiB scanner buffer truncates them mid-object.
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var chunk ollamaChatResponse
+		if err := json.Unmarshal(line, &chunk); err != nil {
+			return nil, fmt.Errorf("ollama: decode stream chunk: %w", err)
+		}
+		content.WriteString(chunk.Message.Content)
+		thinking.WriteString(chunk.Message.Thinking)
+		if chunk.Done {
+			done = true
+			inTok = chunk.PromptEvalCount
+			outTok = chunk.EvalCount
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("ollama: read stream: %w", err)
 	}
 
 	finishReason := "stop"
-	if !chatResp.Done {
+	if !done {
 		finishReason = "length"
 	}
 
+	text := content.String()
 	// A reply that is only thinking means the model spent its whole budget
 	// reasoning. Callers see an empty Content and report "empty response",
 	// which is true but says nothing about the cause — so name it here, where
 	// the evidence is.
-	if strings.TrimSpace(chatResp.Message.Content) == "" && chatResp.Message.Thinking != "" {
+	if strings.TrimSpace(text) == "" && thinking.Len() > 0 {
 		return nil, fmt.Errorf(
 			"ollama: model %q returned only reasoning and no content — it exhausted num_predict (%d) before answering",
-			model, opts.NumPredict)
+			model, numPredict)
 	}
 
 	return &GenerateResponse{
-		Content:      chatResp.Message.Content,
+		Content:      text,
 		FinishReason: finishReason,
 		Model:        model,
-		InputTokens:  chatResp.PromptEvalCount,
-		OutputTokens: chatResp.EvalCount,
+		InputTokens:  inTok,
+		OutputTokens: outTok,
 	}, nil
 }
