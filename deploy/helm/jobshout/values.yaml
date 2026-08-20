@@ -43,7 +43,7 @@ externalSecret:
 # cluster once and name it here:
 #
 #   kubectl -n <ring> create secret generic jobshout-cms \
-#     --from-literal=OPSAPI_TOKEN=<token> \
+#     --from-literal=OPSAPI_API_KEY=<key> \
 #     --dry-run=client -o yaml | kubectl apply -f -
 #
 # Missing secrets are tolerated (optional: true), so naming one before it exists
@@ -61,13 +61,13 @@ secrets:
   openaiApiKey: ""
   # Set via --set-string or Vault; never committed here.
   ollamaJwtSecret: ""
-  opsapiToken: ""
+  opsapiApiKey: ""
   pythonSidecarSecret: ""
   registryUsername: ""
   registryPassword: ""
 
 # opsapi CMS — the Article Writer files generated posts there as drafts. All of
-# baseURL, namespace and secrets.opsapiToken must be set before the Publish
+# baseURL, namespace and secrets.opsapiApiKey must be set before the Publish
 # action appears; empty leaves the agent generate-only, which is the default so
 # a deploy cannot accidentally start writing into someone else's namespace.
 cms:

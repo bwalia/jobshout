@@ -132,14 +132,14 @@ type Config struct {
 	FrontendBaseURL string `mapstructure:"FRONTEND_BASE_URL"`
 
 	// opsapi CMS — where generated articles are filed as drafts. All three of
-	// URL, token and namespace are needed before publishing is offered at all;
-	// generation works without any of them.
+	// URL, API key and namespace are needed before publishing is offered at
+	// all; generation works without any of them.
 	//
-	// OpsAPIToken is a seed JWT, not a permanent credential: opsapi's login
-	// requires an emailed OTP, so a token is obtained once by hand and the
-	// server keeps it alive through /auth/refresh.
+	// OpsAPIKey is a namespace-scoped opsapi API key ("opsk_..."), minted
+	// once via opsapi's POST /api/v2/api-keys with scope {"cms":["create"]}.
+	// It is a long-lived machine credential — nothing to refresh or reseed.
 	OpsAPIBaseURL   string        `mapstructure:"OPSAPI_BASE_URL"`
-	OpsAPIToken     string        `mapstructure:"OPSAPI_TOKEN"`
+	OpsAPIKey       string        `mapstructure:"OPSAPI_API_KEY"`
 	OpsAPINamespace string        `mapstructure:"OPSAPI_NAMESPACE"`
 	OpsAPITimeout   time.Duration `mapstructure:"OPSAPI_TIMEOUT"`
 
@@ -301,7 +301,7 @@ func Load() (*Config, error) {
 		TelegramRatePerMin:   viper.GetInt("TELEGRAM_RATE_PER_MIN"),
 		FrontendBaseURL:      viper.GetString("FRONTEND_BASE_URL"),
 		OpsAPIBaseURL:        viper.GetString("OPSAPI_BASE_URL"),
-		OpsAPIToken:          viper.GetString("OPSAPI_TOKEN"),
+		OpsAPIKey:            viper.GetString("OPSAPI_API_KEY"),
 		OpsAPINamespace:      viper.GetString("OPSAPI_NAMESPACE"),
 		OpsAPITimeout:        viper.GetDuration("OPSAPI_TIMEOUT"),
 		BlogContentDir:       viper.GetString("BLOG_CONTENT_DIR"),

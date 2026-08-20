@@ -32,44 +32,46 @@ type Config struct {
 	// BaseURL is the API root, e.g. https://opsapi.example.com — no trailing
 	// slash and no /api/v2 suffix; both are added where needed.
 	BaseURL string
-	// Token is a seed opsapi JWT. It is exchanged for a fresh one before it
-	// expires; see tokenSource.
-	Token string
+	// APIKey is a namespace-scoped opsapi API key ("opsk_..."), minted via
+	// opsapi's POST /api/v2/api-keys with scope {"cms":["create"]}. It is a
+	// long-lived machine credential — no refresh dance, no expiry to babysit.
+	APIKey string
 	// Namespace is the opsapi namespace slug that owns the posts. Sent as
-	// X-Namespace-Slug, which is how opsapi's namespace middleware scopes the
-	// request.
+	// X-Namespace-Slug; it must be the namespace the API key belongs to, or
+	// opsapi refuses the request with a 403.
 	Namespace string
 	Timeout   time.Duration
 }
 
 // Complete reports whether enough is configured to talk to opsapi at all.
 func (c Config) Complete() bool {
-	return c.BaseURL != "" && c.Token != "" && c.Namespace != ""
+	return c.BaseURL != "" && c.APIKey != "" && c.Namespace != ""
 }
 
 // Client talks to opsapi's CMS endpoints.
 type Client struct {
-	cfg    Config
-	http   *http.Client
-	tokens *tokenSource
+	cfg  Config
+	http *http.Client
 }
 
 // NewClient builds a Client. Returns nil when the config is incomplete, so
 // callers can hold a possibly-nil *Client and treat nil as "publishing is not
 // configured" rather than carrying a separate flag.
 func NewClient(cfg Config) *Client {
+	cfg.BaseURL = strings.TrimRight(cfg.BaseURL, "/")
+	// A key pasted into a secret store often arrives with a trailing newline,
+	// which Go rejects as an invalid header value on every request. Trimmed
+	// before Complete() so a whitespace-only key reads as "not configured".
+	cfg.APIKey = strings.TrimSpace(cfg.APIKey)
 	if !cfg.Complete() {
 		return nil
 	}
-	cfg.BaseURL = strings.TrimRight(cfg.BaseURL, "/")
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = DefaultTimeout
 	}
-	httpClient := &http.Client{Timeout: cfg.Timeout}
 	return &Client{
-		cfg:    cfg,
-		http:   httpClient,
-		tokens: newTokenSource(cfg.BaseURL, cfg.Token, httpClient),
+		cfg:  cfg,
+		http: &http.Client{Timeout: cfg.Timeout},
 	}
 }
 
@@ -114,87 +116,64 @@ type postEnvelope struct {
 
 // CreatePost creates one blog post and returns what opsapi stored.
 //
-// A 401 is retried once against a freshly minted token: our cached expiry is a
-// guess made without the signing secret, so opsapi rejecting a token we thought
-// was good is expected rather than exceptional. Every other status is returned
-// as-is — a 400 from validation or a 403 from RBAC will say the same thing on
-// the second attempt.
+// No status is retried: the API key either works or it doesn't. A 401 means
+// the key was revoked or expired, and a 400/403 will say the same thing on a
+// second attempt.
 func (c *Client) CreatePost(ctx context.Context, req CreatePostRequest) (*Post, error) {
 	if req.Status == "" {
 		req.Status = StatusDraft
 	}
 
-	token, err := c.tokens.get(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	post, status, err := c.createPost(ctx, token, req)
-	if err == nil {
-		return post, nil
-	}
-	if status != http.StatusUnauthorized {
-		return nil, err
-	}
-
-	token, refreshErr := c.tokens.forceRefresh(ctx)
-	if refreshErr != nil {
-		return nil, refreshErr
-	}
-	post, _, err = c.createPost(ctx, token, req)
-	return post, err
-}
-
-// createPost performs one attempt and reports the HTTP status alongside the
-// error so CreatePost can decide whether a retry is worth anything.
-func (c *Client) createPost(ctx context.Context, token string, req CreatePostRequest) (*Post, int, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
-		return nil, 0, fmt.Errorf("opsapi: encode post: %w", err)
+		return nil, fmt.Errorf("opsapi: encode post: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.cfg.BaseURL+"/api/v2/cms/posts", bytes.NewReader(body))
 	if err != nil {
-		return nil, 0, fmt.Errorf("opsapi: build post request: %w", err)
+		return nil, fmt.Errorf("opsapi: build post request: %w", err)
 	}
-	httpReq.Header.Set("Authorization", "Bearer "+token)
+	httpReq.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json")
 	httpReq.Header.Set("X-Namespace-Slug", c.cfg.Namespace)
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
-		return nil, 0, fmt.Errorf("opsapi: create post %q: %w", req.Title, err)
+		return nil, fmt.Errorf("opsapi: create post %q: %w", req.Title, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		return nil, resp.StatusCode, c.postError(resp, req.Title)
+		return nil, c.postError(resp, req.Title)
 	}
 
 	var env postEnvelope
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
-		return nil, resp.StatusCode, fmt.Errorf("opsapi: decode post response: %w", err)
+		return nil, fmt.Errorf("opsapi: decode post response: %w", err)
 	}
 	if !env.Success {
-		return nil, resp.StatusCode, fmt.Errorf("opsapi: create post %q: %s", req.Title, env.Error)
+		return nil, fmt.Errorf("opsapi: create post %q: %s", req.Title, env.Error)
 	}
-	return &env.Data, resp.StatusCode, nil
+	return &env.Data, nil
 }
 
 // postError turns a rejection into something that names the likely cause.
-// opsapi returns 403 for both "namespace not enabled for cms" and "user lacks
-// the cms module", which are different fixes, so the message points at both.
+// opsapi returns 403 for a key missing the cms scope, a key used against a
+// namespace it does not belong to, and a namespace without the cms feature —
+// different fixes, so the message points at all of them.
 func (c *Client) postError(resp *http.Response, title string) error {
 	body := readBodySnippet(resp)
 	switch resp.StatusCode {
 	case http.StatusUnauthorized:
-		return fmt.Errorf("opsapi: create post %q rejected (401): %s", title, body)
+		return fmt.Errorf(
+			"opsapi: create post %q rejected (401) — OPSAPI_API_KEY is invalid, revoked or expired. "+
+				"Mint a new key via opsapi's POST /api/v2/api-keys. Response: %s", title, body)
 	case http.StatusForbidden:
 		return fmt.Errorf(
-			"opsapi: create post %q forbidden (403) — the token's user needs the \"cms\" module in namespace %q, "+
-				"and that namespace must have the cms feature enabled. Response: %s",
+			"opsapi: create post %q forbidden (403) — the API key needs the cms:create scope, must belong to "+
+				"namespace %q, and that namespace must have the cms feature enabled. Response: %s",
 			title, c.cfg.Namespace, body)
 	case http.StatusNotFound:
 		return fmt.Errorf(

@@ -108,7 +108,7 @@ services:
       # Automated blog generator. Writing always works; publishing to the
       # opsapi CMS needs all three OPSAPI_* values, and is disabled without them.
       OPSAPI_BASE_URL: ${OPSAPI_BASE_URL:-}
-      OPSAPI_TOKEN: ${OPSAPI_TOKEN:-}
+      OPSAPI_API_KEY: ${OPSAPI_API_KEY:-}
       OPSAPI_NAMESPACE: ${OPSAPI_NAMESPACE:-}
       OPSAPI_TIMEOUT: ${OPSAPI_TIMEOUT:-30s}
       BLOG_AUTHOR_NAME: ${BLOG_AUTHOR_NAME:-JobShout Article Writer}

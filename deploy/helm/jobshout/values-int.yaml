@@ -5,17 +5,17 @@ logLevel: debug
 image:
   tag: 89f91ac  # Pinned: working web image after jobshout-web build regression (beba970)
 
-# Cluster-side secret holding OPSAPI_TOKEN (and any other real credential) for
-# this ring. Only the name lives here; create it with:
+# Cluster-side secret holding OPSAPI_API_KEY (and any other real credential)
+# for this ring. Only the name lives here; create it with:
 #   kubectl -n int create secret generic jobshout-cms \
-#     --from-literal=OPSAPI_TOKEN=<token> --dry-run=client -o yaml | kubectl apply -f -
+#     --from-literal=OPSAPI_API_KEY=<key> --dry-run=client -o yaml | kubectl apply -f -
 extraSecretRefs:
   - jobshout-cms
 
 # opsapi CMS — the Article Writer files generated articles there as drafts.
-# The host and namespace slug are not secret; the token is, and comes from the
-# jobshout-cms secret above. int-opsapi-ui.workstation.co.uk is the dashboard;
-# this is the API behind it.
+# The host and namespace slug are not secret; the API key is, and comes from
+# the jobshout-cms secret above. int-opsapi-ui.workstation.co.uk is the
+# dashboard; this is the API behind it.
 cms:
   baseURL: "https://int-opsapi.workstation.co.uk"
   namespace: "workstation"
