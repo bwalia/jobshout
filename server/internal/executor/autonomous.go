@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/jobshout/server/internal/llm"
+	"github.com/jobshout/server/internal/llmtrace"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/modelselect"
 )
@@ -95,6 +96,16 @@ func (a *AutonomousExecutor) RunGoal(
 		zap.String("goal_id", goalID.String()),
 		zap.String("agent_id", agent.ID.String()),
 	)
+
+	// Label the goal's own LLM calls (plan, reflect) for Langfuse. Steps
+	// delegated to Executor.Run re-label themselves as executor runs with
+	// their own execution session, which is what they are.
+	ctx = llmtrace.WithTrace(ctx, llmtrace.TraceInfo{
+		TraceName: "go-autonomous-run",
+		SessionID: goalID.String(),
+		AgentID:   agent.ID.String(),
+		OrgID:     agent.OrgID.String(),
+	})
 
 	goal, err := a.goalRepo.GetByID(ctx, goalID)
 	if err != nil {

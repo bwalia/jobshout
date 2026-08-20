@@ -81,6 +81,9 @@ echo "[start-local] API on :$API_PORT  (logs: $LOG_DIR/server.log)"
   CORS_ORIGINS="${CORS_ORIGINS:-http://localhost:$UI_PORT}" \
   MINIO_ENDPOINT="${MINIO_ENDPOINT:-}" \
   PYTHON_SIDECAR_URL="${PYTHON_SIDECAR_URL:-}" \
+  LANGFUSE_HOST="${LANGFUSE_HOST:-http://localhost:3002}" \
+  LANGFUSE_PUBLIC_KEY="${LANGFUSE_PUBLIC_KEY:-}" \
+  LANGFUSE_SECRET_KEY="${LANGFUSE_SECRET_KEY:-}" \
   ./bin/jobshout-server
 ) >"$LOG_DIR/server.log" 2>&1 &
 PIDS+=($!)

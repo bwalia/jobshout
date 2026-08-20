@@ -76,11 +76,13 @@ spec:
             - name: DATABASE_URL
               value: "postgres://$(DATABASE_USER):$(DATABASE_PASSWORD)@$(DATABASE_HOST):$(DATABASE_PORT)/$(DATABASE_NAME)?sslmode=$(DATABASE_SSLMODE)"
             {{- if .Values.langfuse.enabled }}
-            # Tracing for go-native executions. The sidecar traces its own
-            # LangChain/LangGraph runs; everything else — the article writer,
-            # the research agent, scheduled tasks — executes in this process and
-            # is invisible to Langfuse unless the API can report it too. Same
-            # three variables and same generated Secret the sidecar reads.
+            # LLM tracing for everything this process runs — the sidecar only
+            # traces its own LangChain/LangGraph runs; the article writer, the
+            # research agent, agent executions and chat all execute here. Same
+            # three variables and same generated Secret the sidecar reads (see
+            # python-runtime.yaml). Rendered only when the stack is enabled, so
+            # a ring without it can still point tracing at an external Langfuse
+            # purely via extraSecretRefs (LANGFUSE_HOST/_PUBLIC_KEY/_SECRET_KEY).
             - name: LANGFUSE_HOST
               value: "http://langfuse-web:3000"
             - name: LANGFUSE_PUBLIC_KEY

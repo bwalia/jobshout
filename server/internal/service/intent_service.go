@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/jobshout/server/internal/llm"
+	"github.com/jobshout/server/internal/llmtrace"
 )
 
 // Supported intent actions.
@@ -61,6 +62,9 @@ func NewIntentService(llmRouter *llm.Router, logger *zap.Logger) IntentService {
 }
 
 func (s *intentService) Parse(ctx context.Context, userMessage string) (*ParsedIntent, error) {
+	// Name-only Langfuse label: intent parsing runs under whatever session the
+	// caller established (if any) but counts as its own engine.
+	ctx = llmtrace.WithTraceName(ctx, "go-intent-run")
 	client := s.llmRouter.Default()
 
 	prompt := llm.BuildIntentPrompt(userMessage, AllIntentActions)

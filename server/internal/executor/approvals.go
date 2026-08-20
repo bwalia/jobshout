@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/jobshout/server/internal/llm"
+	"github.com/jobshout/server/internal/llmtrace"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/tools"
 )
@@ -186,6 +187,15 @@ func (e *Executor) Resume(ctx context.Context, approval *model.Approval) Result 
 	// Restore org/agent scoping so org- and agent-aware tools resolve correctly.
 	ctx = tools.WithOrg(ctx, approval.OrgID)
 	ctx = tools.WithAgent(ctx, approval.AgentID)
+	// Re-label the run's LLM calls for Langfuse too — Resume crosses the pause
+	// boundary with a fresh ctx, and the resumed calls belong to the same
+	// execution session as the ones before the gate.
+	ctx = llmtrace.WithTrace(ctx, llmtrace.TraceInfo{
+		TraceName: "go-executor-run",
+		SessionID: approval.ExecutionID.String(),
+		AgentID:   approval.AgentID.String(),
+		OrgID:     approval.OrgID.String(),
+	})
 
 	client, err := e.llmRouter.For(rs.Provider)
 	if err != nil {

@@ -220,6 +220,7 @@ func (c *ClaudeClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 	return &GenerateResponse{
 		Content:      content,
 		FinishReason: chatResp.StopReason,
+		Model:        model,
 		InputTokens:  chatResp.Usage.InputTokens,
 		OutputTokens: chatResp.Usage.OutputTokens,
 		ToolCalls:    toolCalls,

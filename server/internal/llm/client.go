@@ -71,6 +71,10 @@ type GenerateResponse struct {
 	Content string
 	// FinishReason indicates why generation stopped ("stop", "length", etc.).
 	FinishReason string
+	// Model is the effective model that served the call — the client's default
+	// when GenerateRequest.Model was empty. Telemetry reads it so the model a
+	// call is attributed to is the one that actually ran.
+	Model string
 	// InputTokens is the number of tokens in the prompt (if reported).
 	InputTokens int
 	// OutputTokens is the number of tokens in the completion (if reported).

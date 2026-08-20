@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/jobshout/server/internal/blog"
+	"github.com/jobshout/server/internal/llmtrace"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/repository"
 	"github.com/jobshout/server/internal/research"
@@ -455,7 +456,15 @@ func (s *blogService) failRun(
 }
 
 func (s *blogService) runGeneration(run *model.BlogRun, agent *model.Agent, req model.GenerateBlogRequest) {
-	ctx := context.Background()
+	// Label the run's LLM calls for Langfuse: the blog run is the session, so
+	// every drafting/planning call (and the research nested inside) groups
+	// under it in the tracing view.
+	ctx := llmtrace.WithTrace(context.Background(), llmtrace.TraceInfo{
+		TraceName: "go-blog-run",
+		SessionID: run.ID.String(),
+		AgentID:   agent.ID.String(),
+		OrgID:     run.OrgID.String(),
+	})
 	log := s.logger.With(zap.String("blog_run_id", run.ID.String()))
 
 	tracker := &stepTracker{runID: run.ID, steps: run.Steps, repo: s.repo, logger: s.logger}

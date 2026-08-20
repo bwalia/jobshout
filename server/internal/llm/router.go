@@ -107,6 +107,18 @@ type ProviderInfo struct {
 	IsDefault bool   `json:"is_default"`
 }
 
+// WrapClients replaces every registered chat client with wrap(client). Main
+// uses it to install cross-cutting decorators (LLM tracing) before any
+// consumer resolves a client, so one call covers them all. Embedders are
+// deliberately untouched — they are a different interface with different
+// telemetry semantics. Call before the router is shared across goroutines;
+// the map is not guarded.
+func (r *Router) WrapClients(wrap func(Client) Client) {
+	for name, c := range r.clients {
+		r.clients[name] = wrap(c)
+	}
+}
+
 // For returns the Client for the given provider name, falling back to the
 // default provider when providerName is empty.
 func (r *Router) For(providerName string) (Client, error) {
