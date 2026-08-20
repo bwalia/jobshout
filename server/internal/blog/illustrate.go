@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -70,99 +71,149 @@ const maxInlineIllustrations = 3
 // block whose body is a description rather than code.
 var illustrationFence = regexp.MustCompile("(?s)```illustration[ \t]*\r?\n(.*?)```")
 
-// coverPromptStyle is appended to every generated prompt.
+// coverPromptStyle is the visual house style pinned onto every cover prompt.
 //
-// A house style is applied here rather than left to the model because the
-// covers have to look like a set. Left to write its own style, the same model
-// produces a photograph for one article and a cartoon for the next, and a blog
-// whose header images disagree about what kind of publication it is looks
-// worse than one with no images at all.
-const coverPromptStyle = ", flat vector editorial illustration, minimal, warm amber and deep ink tones, no text, no words, no lettering"
+// Covers have to look like a set. Left to invent its own style, the same model
+// produces a photograph for one article and a cartoon for the next.
+const coverPromptStyle = "refined flat vector editorial illustration, soft geometric forms, limited palette of warm amber, cream and deep ink blue-black, subtle paper texture, generous negative space, high clarity"
+
+// coverModel is the only model blog covers may use. Quality matters more than
+// speed here: a cover is drawn once per article. Transient upstream failures
+// are retried against this same model rather than silently downgraded.
+const coverModel = "qwen-image-2512"
+
+// coverMaxAttempts bounds how many times a cover may be asked of the image
+// service. Each attempt can take several minutes on a cold qwen load, so this
+// is a real budget — high enough to ride out a WSL-proxy 502 or a busy GPU,
+// low enough that a permanently broken image host cannot hold a blog run open
+// for half an hour.
+const coverMaxAttempts = 5
 
 // coverPrompt turns an article title and topic into something worth drawing.
 //
 // The title alone is a poor prompt: "What the Gateway API Actually Changes"
-// describes an argument, not a picture. Naming the subject and then pinning the
-// style gives the model something concrete to draw and keeps the result on
-// house style.
+// describes an argument, not a picture, and diffusion models asked to
+// "illustrate" a headline often render the words themselves. The topic is the
+// subject; the title is context the model must not letter onto the image.
 func coverPrompt(title, topic string) string {
-	subject := strings.TrimSpace(title)
+	topic = strings.TrimSpace(topic)
+	title = strings.TrimSpace(title)
+
+	subject := topic
 	if subject == "" {
-		subject = strings.TrimSpace(topic)
+		subject = title
 	}
-	return "An illustration representing: " + subject + coverPromptStyle
+	if subject == "" {
+		subject = "software engineering"
+	}
+
+	headline := title
+	if headline == "" || strings.EqualFold(headline, subject) {
+		headline = subject
+	}
+
+	return fmt.Sprintf(
+		"Wide 16:9 magazine cover illustration for a technical essay about %s. "+
+			"Depict one concrete visual metaphor — tools, documents, agents, networks or machines as simple shapes — "+
+			"that communicates the subject at a glance. Do not illustrate the headline wording literally. "+
+			"Headline for context only (never draw it): %q. "+
+			"Composition: a single clear focal subject, balanced for a blog hero, readable at small sizes. "+
+			"Style: %s. "+
+			"Strictly no text, letters, numbers, logos, watermarks, UI chrome, screenshots or diagrams with labels.",
+		subject, headline, coverPromptStyle,
+	)
 }
 
-// coverFallbackModel is what a cover falls back to when the configured default
-// cannot be drawn. qwen-image-2512 is the quality default (~3.5 min) but a
-// cold load or a WSL-proxy blip returns 502 within seconds and used to leave
-// the article with no cover at all. z-image-turbo answers in ~40s and is the
-// model that already produced working covers in int before the qwen cutover.
-const coverFallbackModel = "z-image-turbo"
-
-// generateCover draws an article's cover image.
+// generateCover draws an article's cover image with coverModel.
 //
-// A failure is returned, not swallowed — the caller decides whether an article
-// without a picture is still an article. It is: see Runner.Generate.
+// Transient upstream failures (WSL-proxy 502s, busy GPU, timeouts) are retried
+// with backoff against the same qwen model. There is deliberately no fallback
+// to a faster model: the rings chose qwen for cover quality, and a turbo
+// substitute would silently undo that choice.
 //
-// Transient upstream failures are retried once on the default model, then once
-// on coverFallbackModel. A cover is worth a couple of extra attempts; an
-// article with no picture because the proxy hiccuped once is not.
+// A failure after every attempt is returned, not swallowed — the caller decides
+// whether an article without a picture is still an article. It is: see
+// Runner.Generate.
 func (r *Runner) generateCover(ctx context.Context, orgID uuid.UUID, a *GeneratedArticle) error {
 	prompt := coverPrompt(a.Title, a.Topic)
 
-	img, err := r.drawCover(ctx, orgID, prompt, "")
-	if err != nil {
-		if r.logger != nil {
-			r.logger.Warn("blog: cover with default model failed, trying fallback",
-				zap.String("fallback", coverFallbackModel), zap.Error(err))
+	var lastErr error
+	for attempt := 1; attempt <= coverMaxAttempts; attempt++ {
+		img, err := r.images.Generate(ctx, IllustrationRequest{
+			OrgID:  orgID,
+			Prompt: prompt,
+			Model:  coverModel,
+			Width:  coverWidth,
+			Height: coverHeight,
+			Source: "blog_cover",
+		})
+		if err == nil && img != nil && img.URL != "" {
+			a.CoverImageURL = img.URL
+			a.CoverImagePrompt = prompt
+			a.CoverImageProvider = img.Provider
+			a.CoverImageModel = img.Model
+			a.CoverImageSeed = img.Seed
+			a.CoverImageWidth = img.Width
+			a.CoverImageHeight = img.Height
+			if attempt > 1 && r.logger != nil {
+				r.logger.Info("blog: cover succeeded after retry",
+					zap.String("model", img.Model), zap.Int("attempt", attempt))
+			}
+			return nil
 		}
-		img, err = r.drawCover(ctx, orgID, prompt, coverFallbackModel)
-		if err != nil {
-			return err
-		}
-	}
-	if img.URL == "" {
-		// Generated but unstored. A cover with no URL is not a cover — the CMS
-		// would receive an empty src — so this counts as a failure rather than
-		// a success with a blank field.
-		return fmt.Errorf("blog: cover image was generated but there is nowhere to serve it from")
-	}
 
-	a.CoverImageURL = img.URL
-	a.CoverImagePrompt = prompt
-	a.CoverImageProvider = img.Provider
-	a.CoverImageModel = img.Model
-	a.CoverImageSeed = img.Seed
-	a.CoverImageWidth = img.Width
-	a.CoverImageHeight = img.Height
-	return nil
+		switch {
+		case err != nil:
+			lastErr = err
+		case img == nil || img.URL == "":
+			// Generated but unstored. A cover with no URL is not a cover — the
+			// CMS would receive an empty src. This is a configuration problem
+			// (no object store), not a blip worth retrying.
+			return fmt.Errorf("blog: cover image was generated but there is nowhere to serve it from")
+		}
+
+		if !transientImageErr(lastErr) {
+			return lastErr
+		}
+		if attempt == coverMaxAttempts {
+			break
+		}
+		wait := coverRetryWaitFn(attempt)
+		if r.logger != nil {
+			r.logger.Warn("blog: cover generation failed, retrying with qwen",
+				zap.String("model", coverModel),
+				zap.Int("attempt", attempt),
+				zap.Duration("backoff", wait),
+				zap.Error(lastErr))
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return fmt.Errorf("blog: cover with %s failed after %d attempts: %w", coverModel, coverMaxAttempts, lastErr)
 }
 
-// drawCover asks the illustrator for one cover, retrying once on a failure that
-// looks like a transient upstream problem (502/503/timeout) rather than a
-// permanent misconfiguration.
-func (r *Runner) drawCover(ctx context.Context, orgID uuid.UUID, prompt, model string) (*Illustration, error) {
-	req := IllustrationRequest{
-		OrgID:  orgID,
-		Prompt: prompt,
-		Model:  model,
-		Width:  coverWidth,
-		Height: coverHeight,
-		Source: "blog_cover",
+// coverRetryWaitFn is the pause before the next cover attempt. Tests replace it
+// so a retry suite does not sleep for real.
+var coverRetryWaitFn = coverRetryWait
+
+// coverRetryWait is the pause before attempt n+1. Short at first (a proxy blip),
+// then longer so a busy GPU has time to finish whatever is ahead of us.
+func coverRetryWait(attempt int) time.Duration {
+	switch attempt {
+	case 1:
+		return 5 * time.Second
+	case 2:
+		return 15 * time.Second
+	case 3:
+		return 30 * time.Second
+	default:
+		return 60 * time.Second
 	}
-	img, err := r.images.Generate(ctx, req)
-	if err == nil {
-		return img, nil
-	}
-	if !transientImageErr(err) {
-		return nil, err
-	}
-	if r.logger != nil {
-		r.logger.Warn("blog: transient cover failure, retrying once",
-			zap.String("model", model), zap.Error(err))
-	}
-	return r.images.Generate(ctx, req)
 }
 
 // transientImageErr reports whether an image-generation failure is worth
@@ -223,7 +274,7 @@ func (r *Runner) illustrateBody(ctx context.Context, orgID uuid.UUID, markdown s
 
 		img, err := r.images.Generate(ctx, IllustrationRequest{
 			OrgID:  orgID,
-			Prompt: description + coverPromptStyle,
+			Prompt: description + ". Style: " + coverPromptStyle + ". Strictly no text, letters, logos or watermarks.",
 			Width:  inlineWidth,
 			Height: inlineHeight,
 			Source: "blog_inline",

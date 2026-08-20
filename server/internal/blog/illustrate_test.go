@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -32,8 +33,12 @@ func (f *fakeIllustrator) Generate(ctx context.Context, req IllustrationRequest)
 	if f.noURL {
 		url = ""
 	}
+	model := req.Model
+	if model == "" {
+		model = "z-image-turbo"
+	}
 	return &Illustration{
-		URL: url, Provider: "mflux", Model: "z-image-turbo",
+		URL: url, Provider: "mflux", Model: model,
 		Seed: int64(len(f.calls)), Width: req.Width, Height: req.Height,
 	}, nil
 }
@@ -148,16 +153,21 @@ func TestEscapeAlt_NeutralisesBracketsAndNewlines(t *testing.T) {
 
 func TestCoverPrompt_NamesASubjectAndPinsTheStyle(t *testing.T) {
 	got := coverPrompt("What the Gateway API Actually Changes", "kubernetes networking")
-	if !strings.Contains(got, "What the Gateway API Actually Changes") {
-		t.Errorf("prompt lost the title: %q", got)
+	if !strings.Contains(got, "kubernetes networking") {
+		t.Errorf("prompt lost the topic subject: %q", got)
 	}
-	// The house style is what keeps a blog's covers looking like a set.
+	// The title is context the model must not letter onto the image.
+	if !strings.Contains(got, "What the Gateway API Actually Changes") {
+		t.Errorf("prompt lost the headline context: %q", got)
+	}
+	if !strings.Contains(got, "never draw it") && !strings.Contains(got, "Strictly no text") {
+		t.Errorf("prompt should forbid lettering: %q", got)
+	}
 	if !strings.Contains(got, "flat vector editorial illustration") {
 		t.Errorf("prompt lost the house style: %q", got)
 	}
-	// Diffusion models render text badly; asking for none is deliberate.
-	if !strings.Contains(got, "no text") {
-		t.Errorf("prompt should ask for no lettering: %q", got)
+	if !strings.Contains(got, "16:9") {
+		t.Errorf("prompt should ask for a wide cover: %q", got)
 	}
 
 	// An article with no title falls back to the topic rather than asking for
@@ -198,32 +208,41 @@ func TestGenerateCover_RecordsTheSeedForReproduction(t *testing.T) {
 	if article.CoverImageSeed == 0 {
 		t.Error("the seed must be stored — it is the only way to reproduce the cover")
 	}
-	if article.CoverImageProvider != "mflux" || article.CoverImageModel != "z-image-turbo" {
+	if article.CoverImageProvider != "mflux" || article.CoverImageModel != coverModel {
 		t.Errorf("provider/model not recorded: %+v", article)
+	}
+	if len(r.images.(*fakeIllustrator).calls) != 1 {
+		t.Fatalf("want one generation call")
+	}
+	if r.images.(*fakeIllustrator).calls[0].Model != coverModel {
+		t.Errorf("cover must pin %q, got %q", coverModel, r.images.(*fakeIllustrator).calls[0].Model)
 	}
 }
 
-// A transient 502 on the default model must not leave the article coverless
-// when the turbo fallback can still draw one.
-func TestGenerateCover_FallsBackWhenDefaultModelFails(t *testing.T) {
-	fake := &failThenSucceedIllustrator{
-		failOnEmptyModel: true,
-		fallbackModel:    coverFallbackModel,
-	}
+// A transient 502 must be retried against qwen — never silently swapped for a
+// faster model.
+func TestGenerateCover_RetriesQwenUntilItSucceeds(t *testing.T) {
+	prev := coverRetryWaitFn
+	coverRetryWaitFn = func(int) time.Duration { return 0 }
+	t.Cleanup(func() { coverRetryWaitFn = prev })
+
+	fake := &failNThenSucceedIllustrator{failures: 2}
 	r := testRunner(fake)
 
-	article := &GeneratedArticle{Title: "A Title", Topic: "a topic"}
+	article := &GeneratedArticle{Title: "A Title", Topic: "ai agents for tax return"}
 	if err := r.generateCover(context.Background(), uuid.New(), article); err != nil {
 		t.Fatalf("generateCover: %v", err)
 	}
-	if article.CoverImageModel != coverFallbackModel {
-		t.Errorf("cover model = %q, want fallback %q", article.CoverImageModel, coverFallbackModel)
+	if article.CoverImageModel != coverModel {
+		t.Errorf("cover model = %q, want %q", article.CoverImageModel, coverModel)
 	}
-	if article.CoverImageURL == "" {
-		t.Error("cover URL missing after fallback")
+	if fake.calls != 3 {
+		t.Errorf("got %d calls, want 3 (2 failures + success)", fake.calls)
 	}
-	if len(fake.models) < 2 || fake.models[len(fake.models)-1] != coverFallbackModel {
-		t.Errorf("expected a fallback call for %q, got models %v", coverFallbackModel, fake.models)
+	for i, m := range fake.models {
+		if m != coverModel {
+			t.Errorf("call %d used %q, want %q every time", i, m, coverModel)
+		}
 	}
 }
 
@@ -236,28 +255,24 @@ func TestTransientImageErr(t *testing.T) {
 	}
 }
 
-// failThenSucceedIllustrator fails when Model is empty (the configured default)
-// and succeeds when asked for fallbackModel — the shape of a qwen 502 followed
-// by a working turbo cover.
-type failThenSucceedIllustrator struct {
-	failOnEmptyModel bool
-	fallbackModel    string
-	models           []string
+// failNThenSucceedIllustrator fails the first N calls with a transient error,
+// then draws successfully — always on whatever model was requested.
+type failNThenSucceedIllustrator struct {
+	failures int
+	calls    int
+	models   []string
 }
 
-func (f *failThenSucceedIllustrator) Enabled() bool { return true }
+func (f *failNThenSucceedIllustrator) Enabled() bool { return true }
 
-func (f *failThenSucceedIllustrator) Generate(_ context.Context, req IllustrationRequest) (*Illustration, error) {
+func (f *failNThenSucceedIllustrator) Generate(_ context.Context, req IllustrationRequest) (*Illustration, error) {
+	f.calls++
 	f.models = append(f.models, req.Model)
-	if f.failOnEmptyModel && req.Model == "" {
+	if f.calls <= f.failures {
 		return nil, fmt.Errorf("imagegen: image service returned 502: Server Error | WSL Proxy")
 	}
-	model := req.Model
-	if model == "" {
-		model = "default-model"
-	}
 	return &Illustration{
-		URL: "/api/v1/images/file/ok.png", Provider: "mflux", Model: model,
+		URL: "/api/v1/images/file/ok.png", Provider: "mflux", Model: req.Model,
 		Seed: 42, Width: req.Width, Height: req.Height,
 	}, nil
 }
