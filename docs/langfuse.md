@@ -1,21 +1,21 @@
 # Langfuse LLM observability
 
-Every LLM call JobShout makes can be traced to a self-hosted
-[Langfuse](https://langfuse.com): per-model token counts, latency, estimated
-cost, and errors, grouped per execution and per agent.
+Every LLM call the platform makes can be traced to a self-hosted
+[Langfuse](https://langfuse.com): full prompts and completions, per-model token
+counts, latency, estimated cost, and errors, grouped per run and per agent.
+Two processes report:
 
-Two processes report, because JobShout runs agents on two engines:
-
-| Engine | Runs in | Reported by |
+| What | Runs in | Reported by |
 |---|---|---|
-| `langchain`, `langgraph` (incl. both SSE streaming variants) | python-sidecar | `python-sidecar/app/observability.py`, via the Langfuse SDK |
-| `go_native` — the article writer, the research agent, scheduled tasks | the Go API | `server/internal/langfuse`, via OTLP |
+| `langchain`, `langgraph` runs (incl. both SSE streaming variants) | python-sidecar | `python-sidecar/app/observability.py`, via the Langfuse SDK |
+| Every other LLM call — article writing, research, `go_native` agent executions (the default engine), autonomous goals, chat routing, intent parsing | the Go API | `server/internal/llmtrace` (per-call generations) + `server/internal/langfuse` (per-execution rollup spans), via OTLP |
 
-Both halves matter: **`go_native` is the default engine**, so a deployment that
-traces only the sidecar shows an almost empty dashboard while the product is
-busy. Each engine is reported by exactly one process — the Go client skips
-sidecar-backed engines rather than emitting a second trace that would double
-their tokens and cost.
+Both halves matter: **`go_native` is the default engine** and the article
+writer never leaves the Go process, so a deployment that traces only the
+sidecar shows an almost empty dashboard while the product is busy. Each LLM
+call is reported as a generation by exactly one process — the sidecar for its
+own engines, the Go per-call tracer for everything else — and the Go rollup
+reporter emits plain spans, not generations, so nothing is counted twice.
 
 ## Deployment on k3s (the main path)
 
@@ -30,8 +30,8 @@ Merging to master deploys it through the usual pipeline (CI → Ring Promoter
 int → `helm upgrade`). On first deploy every credential — SALT, encryption
 key, store passwords, the admin login, the project API keys — is generated
 in-cluster and persisted in the `jobshout-langfuse-secrets` Secret, so nothing
-secret lives in this public repo and there is no bootstrap step. The sidecar
-reads the same Secret, so tracing is live ring-wide immediately.
+secret lives in this public repo and there is no bootstrap step. The API and
+the sidecar read the same Secret, so tracing is live ring-wide immediately.
 
 The UI is served on its own host, `https://int-langfuse.jobshout.co.uk`
 (login: `admin@jobshout.local`; password from the Secret):
@@ -78,7 +78,7 @@ second attempt deploys against cached images.
 docker compose --profile langfuse up -d
 
 # 2. Turn tracing on — add to .env, then restart python-sidecar AND
-#    jobshout-server (the Go API traces go-native runs and reads the same keys)
+#    jobshout-server (the Go API reads the same keys)
 LANGFUSE_PUBLIC_KEY=pk-lf-jobshout-local
 LANGFUSE_SECRET_KEY=sk-lf-jobshout-local
 
@@ -100,30 +100,53 @@ value in `.env` before pointing anything shared at it.
 
 Tracing is off in both processes unless `LANGFUSE_HOST` and both keys are set;
 without them every code path behaves exactly as before, and neither process
-requires a Langfuse deployment to exist.
+requires a Langfuse deployment to exist. The integrations share one labelling
+convention:
 
-### Sidecar runs (`langchain`, `langgraph`)
+**Go server, per LLM call** — `server/internal/llmtrace` wraps every
+`llm.Client` the router registers (see `WrapClients` in
+`cmd/server/main.go`), so all consumers are covered by one decorator. Each
+`Generate` call becomes one trace holding one GENERATION observation —
+prompts, completion, token usage, per-call latency, errors — shipped over
+OTLP/HTTP to `/api/public/otel` (the deployed Langfuse v4 no longer accepts
+the legacy ingestion events). Calls of one run share a session, so they group
+in the session view exactly as the sidecar's do.
 
-`python-sidecar/app/observability.py` is the whole integration. When on:
+**Go server, per execution** — `server/internal/langfuse` additionally
+reports each finished go-native execution from
+`GovernanceService.RecordUsage` as a **plain span** (not a generation, so
+token/cost widgets never count a run twice) carrying the cost engine's
+numbers — the same figures the budget system enforces on.
+
+**python-sidecar** — `python-sidecar/app/observability.py`, via the Langfuse
+Python SDK's LangChain callback.
 
 | Langfuse field | JobShout value | Why |
 |---|---|---|
-| Trace name | `langchain-run`, `langgraph-run`, `langchain-stream`, `langgraph-stream` | which engine + endpoint ran |
-| Session | `execution_id` | retries of one execution group together |
+| Trace name | Go: `go-executor-run`, `go-autonomous-run`, `go-blog-run`, `go-research-run`, `go-chat-run`, `go-intent-run` (fallback `go-llm`); sidecar: `langchain-run`, `langgraph-run`, `langchain-stream`, `langgraph-stream` | which engine ran |
+| Session | execution / blog-run / goal / chat-session id | the calls of one run group together |
 | User | `agent_id` | the dashboard slices call volume by agent |
-| Tags | provider, model | quick filtering |
+| Tags | provider, model (Go adds `org:<id>`) | quick filtering |
 
-Attributes are applied with `propagate_attributes(...)` around the run rather
-than invoke metadata, because only the context manager reaches *child* spans —
-a LangGraph run nests its generations under per-node chains, and metadata-only
-attribution leaves them showing as `n/a` in the by-agent widget.
+Research nested inside a blog run keeps the blog run's session and agent but
+relabels its calls `go-research-run`, so the by-engine widget separates
+writing from research while the session view still shows the whole run.
 
-### Go-native runs
+In the sidecar, attributes are applied with `propagate_attributes(...)` around
+the run rather than invoke metadata, because only the context manager reaches
+*child* spans — a LangGraph run nests its generations under per-node chains,
+and metadata-only attribution leaves them showing as `n/a` in the by-agent
+widget. The Go decorator has no child spans, so it stamps every attribute on
+the generation span itself.
+
+### Go-native execution rollups
 
 `server/internal/langfuse` reports from `GovernanceService.RecordUsage` — the
 one point every engine converges on, with model, token counts, latency and
-cost already resolved by the cost engine. One execution becomes one generation
-span:
+cost already resolved by the cost engine. One execution becomes one **plain
+span** (not a generation: the execution's individual LLM calls are already
+generations via `llmtrace`, and a generation here would double their tokens
+and cost in every widget that sums them):
 
 | Langfuse field | JobShout value | Why |
 |---|---|---|
@@ -192,6 +215,7 @@ Both the sidecar and the Go API only need `LANGFUSE_HOST`,
 `extraSecretRefs` secret carrying those three keys points tracing at any
 external Langfuse (another ring's, or cloud) without deploying the stack there.
 Supply them to both deployments to keep coverage complete — a secret given only
-to the sidecar leaves go-native runs, the bulk of real traffic, untraced. Both scripts accept
+to the sidecar leaves the Go server's calls, the bulk of real traffic,
+untraced. Both scripts accept
 `--host/--public-key/--secret-key` to provision the dashboard and model prices
 on whatever host is used.

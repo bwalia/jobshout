@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/jobshout/server/internal/llm"
+	"github.com/jobshout/server/internal/llmtrace"
 )
 
 // Finding is one factual statement the agent is prepared to stand behind,
@@ -150,6 +151,10 @@ func (a *Agent) Research(ctx context.Context, req Request, progress ProgressFunc
 	if topic == "" {
 		return nil, fmt.Errorf("research: topic is required")
 	}
+	// Re-label only the engine for Langfuse: when research runs inside a blog
+	// pipeline this keeps its calls grouped under the blog run's session while
+	// still counting as research in the by-engine widget.
+	ctx = llmtrace.WithTraceName(ctx, "go-research-run")
 	if a.llm == nil {
 		return nil, fmt.Errorf("research: llm client is nil")
 	}

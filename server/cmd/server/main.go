@@ -41,6 +41,7 @@ import (
 	"github.com/jobshout/server/internal/langfuse"
 	"github.com/jobshout/server/internal/langgraph"
 	"github.com/jobshout/server/internal/llm"
+	"github.com/jobshout/server/internal/llmtrace"
 	"github.com/jobshout/server/internal/middleware"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/modelselect"
@@ -184,6 +185,15 @@ func main() {
 		zap.Duration("ollama_timeout", cfg.OllamaTimeout),
 		zap.Int("ollama_num_ctx", cfg.OllamaNumCtx),
 	)
+
+	// Langfuse tracing wraps every registered client before anything resolves
+	// one, so a single call here covers the executor, blog, research, chat and
+	// intent paths alike. Disabled tracing wraps with the identity function.
+	tracing := llmtrace.Init(cfg, logger)
+	if tracing.Enabled() {
+		llmRouter.WrapClients(tracing.Wrap)
+		logger.Info("LLM tracing enabled", zap.String("langfuse_host", cfg.LangfuseHost))
+	}
 
 	// Warm the model-discovery cache so the picker and auto-selection have a
 	// live answer from the first request, then keep it fresh in the background.
@@ -1082,9 +1092,12 @@ func main() {
 		logger.Fatal("server forced shutdown", zap.Error(err))
 	}
 
-	// Flush queued spans before exit. Without this the last few executions of a
-	// deploy are lost, which is exactly when traces are most worth having.
+	// Flush queued spans before exit. Without this the last few traces of a
+	// deploy are lost, which is exactly when they are most worth having.
 	tracer.Close()
+	if err := tracing.Shutdown(shutdownCtx); err != nil {
+		logger.Warn("langfuse flush failed", zap.Error(err))
+	}
 
 	logger.Info("server stopped")
 }

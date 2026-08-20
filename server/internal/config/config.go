@@ -109,9 +109,12 @@ type Config struct {
 	PythonSidecarURL    string `mapstructure:"PYTHON_SIDECAR_URL"`
 	PythonSidecarSecret string `mapstructure:"PYTHON_SIDECAR_SECRET"`
 
-	// Langfuse tracing for go-native executions. The sidecar reads the same
-	// three variables; setting them here extends tracing to every engine
-	// rather than only LangChain/LangGraph runs. Unset means tracing is off.
+	// Langfuse LLM observability. The sidecar reads the same three variables;
+	// setting them here extends tracing to everything this process runs — each
+	// LLM call becomes a generation (internal/llmtrace) and each finished
+	// go-native execution a rollup span (internal/langfuse). Tracing is on
+	// only when both keys are set; unset, every code path behaves exactly as
+	// before. Like OLLAMA_JWT_SECRET, the keys deliberately have no defaults.
 	LangfuseHost      string `mapstructure:"LANGFUSE_HOST"`
 	LangfusePublicKey string `mapstructure:"LANGFUSE_PUBLIC_KEY"`
 	LangfuseSecretKey string `mapstructure:"LANGFUSE_SECRET_KEY"`
@@ -233,6 +236,12 @@ func Load() (*Config, error) {
 	viper.SetDefault("EMBEDDING_DIMENSIONS", 1536)
 	viper.SetDefault("PYTHON_SIDECAR_URL", "http://localhost:8001")
 	viper.SetDefault("PYTHON_SIDECAR_SECRET", "change-me-sidecar-secret")
+
+	// Langfuse default host is the compose profile's host-mapped port, which is
+	// where a natively-run server finds it; compose and the Helm chart override
+	// it with the in-network address. No key defaults on purpose — unset keys
+	// are the tracing off-switch, matching the python-sidecar.
+	viper.SetDefault("LANGFUSE_HOST", "http://localhost:3002")
 
 	// Telegram defaults.
 	viper.SetDefault("TELEGRAM_RATE_PER_MIN", 20)

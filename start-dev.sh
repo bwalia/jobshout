@@ -71,6 +71,9 @@ echo "[start-dev] Starting Go backend on :8080 (logs: $LOG_DIR/server.log)"
   MINIO_SECRET_KEY="${MINIO_SECRET_KEY:-minioadmin}" \
   PYTHON_SIDECAR_URL="${PYTHON_SIDECAR_URL:-http://localhost:8001}" \
   OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://localhost:11434}" \
+  LANGFUSE_HOST="${LANGFUSE_HOST:-http://localhost:3002}" \
+  LANGFUSE_PUBLIC_KEY="${LANGFUSE_PUBLIC_KEY:-}" \
+  LANGFUSE_SECRET_KEY="${LANGFUSE_SECRET_KEY:-}" \
   "$SERVER_BIN"
 ) >>"$LOG_DIR/server.log" 2>&1 &
 PIDS+=($!)

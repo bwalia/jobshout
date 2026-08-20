@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/jobshout/server/internal/llm"
+	"github.com/jobshout/server/internal/llmtrace"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/repository"
 )
@@ -74,6 +75,13 @@ func NewChatRouterService(
 }
 
 func (s *chatRouterService) Route(ctx context.Context, orgID, userID, sessionID uuid.UUID, message string, history []model.ChatMessage) (*ChatRouteResult, error) {
+	// Label the routing LLM calls for Langfuse. The chat session is the
+	// natural grouping; there is no agent yet at routing time.
+	ctx = llmtrace.WithTrace(ctx, llmtrace.TraceInfo{
+		TraceName: "go-chat-run",
+		SessionID: sessionID.String(),
+		OrgID:     orgID.String(),
+	})
 	message = strings.TrimSpace(message)
 	if message == "" {
 		return &ChatRouteResult{

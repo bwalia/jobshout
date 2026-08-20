@@ -15,6 +15,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/jobshout/server/internal/llm"
+	"github.com/jobshout/server/internal/llmtrace"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/modelselect"
 	"github.com/jobshout/server/internal/tools"
@@ -158,6 +159,14 @@ func (e *Executor) Run(
 	// so agent-aware tools (knowledge_search) resolve this agent's own knowledge.
 	ctx = tools.WithOrg(ctx, agent.OrgID)
 	ctx = tools.WithAgent(ctx, agent.ID)
+	// Label every LLM call of this run for Langfuse: the execution groups the
+	// calls, the agent feeds the by-agent widget.
+	ctx = llmtrace.WithTrace(ctx, llmtrace.TraceInfo{
+		TraceName: "go-executor-run",
+		SessionID: execID.String(),
+		AgentID:   agent.ID.String(),
+		OrgID:     agent.OrgID.String(),
+	})
 
 	// The LLM client is resolved further down, once the tool set is known:
 	// auto-selection needs to know whether this run requires native

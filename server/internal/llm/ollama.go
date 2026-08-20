@@ -234,6 +234,7 @@ func (c *OllamaClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 	return &GenerateResponse{
 		Content:      chatResp.Message.Content,
 		FinishReason: finishReason,
+		Model:        model,
 		InputTokens:  chatResp.PromptEvalCount,
 		OutputTokens: chatResp.EvalCount,
 	}, nil

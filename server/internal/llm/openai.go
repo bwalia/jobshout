@@ -195,6 +195,7 @@ func (c *OpenAIClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 	return &GenerateResponse{
 		Content:      choice.Message.Content,
 		FinishReason: choice.FinishReason,
+		Model:        model,
 		InputTokens:  chatResp.Usage.PromptTokens,
 		OutputTokens: chatResp.Usage.CompletionTokens,
 		ToolCalls:    toolCalls,
