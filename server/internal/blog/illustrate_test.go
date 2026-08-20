@@ -203,6 +203,65 @@ func TestGenerateCover_RecordsTheSeedForReproduction(t *testing.T) {
 	}
 }
 
+// A transient 502 on the default model must not leave the article coverless
+// when the turbo fallback can still draw one.
+func TestGenerateCover_FallsBackWhenDefaultModelFails(t *testing.T) {
+	fake := &failThenSucceedIllustrator{
+		failOnEmptyModel: true,
+		fallbackModel:    coverFallbackModel,
+	}
+	r := testRunner(fake)
+
+	article := &GeneratedArticle{Title: "A Title", Topic: "a topic"}
+	if err := r.generateCover(context.Background(), uuid.New(), article); err != nil {
+		t.Fatalf("generateCover: %v", err)
+	}
+	if article.CoverImageModel != coverFallbackModel {
+		t.Errorf("cover model = %q, want fallback %q", article.CoverImageModel, coverFallbackModel)
+	}
+	if article.CoverImageURL == "" {
+		t.Error("cover URL missing after fallback")
+	}
+	if len(fake.models) < 2 || fake.models[len(fake.models)-1] != coverFallbackModel {
+		t.Errorf("expected a fallback call for %q, got models %v", coverFallbackModel, fake.models)
+	}
+}
+
+func TestTransientImageErr(t *testing.T) {
+	if !transientImageErr(fmt.Errorf("imagegen: image service returned 502: Server Error | WSL Proxy")) {
+		t.Error("502 from the WSL proxy should be transient")
+	}
+	if transientImageErr(fmt.Errorf("imagegen: the image gateway rejected the request (status 401)")) {
+		t.Error("auth rejection must not be retried")
+	}
+}
+
+// failThenSucceedIllustrator fails when Model is empty (the configured default)
+// and succeeds when asked for fallbackModel — the shape of a qwen 502 followed
+// by a working turbo cover.
+type failThenSucceedIllustrator struct {
+	failOnEmptyModel bool
+	fallbackModel    string
+	models           []string
+}
+
+func (f *failThenSucceedIllustrator) Enabled() bool { return true }
+
+func (f *failThenSucceedIllustrator) Generate(_ context.Context, req IllustrationRequest) (*Illustration, error) {
+	f.models = append(f.models, req.Model)
+	if f.failOnEmptyModel && req.Model == "" {
+		return nil, fmt.Errorf("imagegen: image service returned 502: Server Error | WSL Proxy")
+	}
+	model := req.Model
+	if model == "" {
+		model = "default-model"
+	}
+	return &Illustration{
+		URL: "/api/v1/images/file/ok.png", Provider: "mflux", Model: model,
+		Seed: 42, Width: req.Width, Height: req.Height,
+	}, nil
+}
+
 // A runner with no illustrator, or a disabled one, must not try to draw.
 func TestCanIllustrate(t *testing.T) {
 	if (&Runner{}).canIllustrate() {

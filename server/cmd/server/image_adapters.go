@@ -31,6 +31,7 @@ func (b *blogIllustrator) Generate(ctx context.Context, req blog.IllustrationReq
 	result, err := b.images.Generate(ctx, service.GenerateImageRequest{
 		OrgID:  req.OrgID,
 		Prompt: req.Prompt,
+		Model:  req.Model,
 		Width:  req.Width,
 		Height: req.Height,
 		// Unseeded: two articles about the same subject should not get the same

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 // Illustrator is the slice of the platform's image service this package
@@ -21,6 +22,9 @@ type Illustrator interface {
 type IllustrationRequest struct {
 	OrgID  uuid.UUID
 	Prompt string
+	// Model optionally names which image model to use. Empty means the
+	// service's configured default (IMAGE_DEFAULT_MODEL).
+	Model  string
 	Width  int
 	Height int
 	Source string
@@ -89,22 +93,34 @@ func coverPrompt(title, topic string) string {
 	return "An illustration representing: " + subject + coverPromptStyle
 }
 
+// coverFallbackModel is what a cover falls back to when the configured default
+// cannot be drawn. qwen-image-2512 is the quality default (~3.5 min) but a
+// cold load or a WSL-proxy blip returns 502 within seconds and used to leave
+// the article with no cover at all. z-image-turbo answers in ~40s and is the
+// model that already produced working covers in int before the qwen cutover.
+const coverFallbackModel = "z-image-turbo"
+
 // generateCover draws an article's cover image.
 //
 // A failure is returned, not swallowed — the caller decides whether an article
 // without a picture is still an article. It is: see Runner.Generate.
+//
+// Transient upstream failures are retried once on the default model, then once
+// on coverFallbackModel. A cover is worth a couple of extra attempts; an
+// article with no picture because the proxy hiccuped once is not.
 func (r *Runner) generateCover(ctx context.Context, orgID uuid.UUID, a *GeneratedArticle) error {
 	prompt := coverPrompt(a.Title, a.Topic)
 
-	img, err := r.images.Generate(ctx, IllustrationRequest{
-		OrgID:  orgID,
-		Prompt: prompt,
-		Width:  coverWidth,
-		Height: coverHeight,
-		Source: "blog_cover",
-	})
+	img, err := r.drawCover(ctx, orgID, prompt, "")
 	if err != nil {
-		return err
+		if r.logger != nil {
+			r.logger.Warn("blog: cover with default model failed, trying fallback",
+				zap.String("fallback", coverFallbackModel), zap.Error(err))
+		}
+		img, err = r.drawCover(ctx, orgID, prompt, coverFallbackModel)
+		if err != nil {
+			return err
+		}
 	}
 	if img.URL == "" {
 		// Generated but unstored. A cover with no URL is not a cover — the CMS
@@ -121,6 +137,53 @@ func (r *Runner) generateCover(ctx context.Context, orgID uuid.UUID, a *Generate
 	a.CoverImageWidth = img.Width
 	a.CoverImageHeight = img.Height
 	return nil
+}
+
+// drawCover asks the illustrator for one cover, retrying once on a failure that
+// looks like a transient upstream problem (502/503/timeout) rather than a
+// permanent misconfiguration.
+func (r *Runner) drawCover(ctx context.Context, orgID uuid.UUID, prompt, model string) (*Illustration, error) {
+	req := IllustrationRequest{
+		OrgID:  orgID,
+		Prompt: prompt,
+		Model:  model,
+		Width:  coverWidth,
+		Height: coverHeight,
+		Source: "blog_cover",
+	}
+	img, err := r.images.Generate(ctx, req)
+	if err == nil {
+		return img, nil
+	}
+	if !transientImageErr(err) {
+		return nil, err
+	}
+	if r.logger != nil {
+		r.logger.Warn("blog: transient cover failure, retrying once",
+			zap.String("model", model), zap.Error(err))
+	}
+	return r.images.Generate(ctx, req)
+}
+
+// transientImageErr reports whether an image-generation failure is worth
+// retrying. Gateway HTML 502s and "busy" answers come and go; auth failures and
+// bad prompts do not.
+func transientImageErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, needle := range []string{
+		"502", "503", "504",
+		"timeout", "deadline exceeded",
+		"connection reset", "connection refused",
+		"busy", "server error", "wsl proxy",
+	} {
+		if strings.Contains(msg, needle) {
+			return true
+		}
+	}
+	return false
 }
 
 // illustrateBody replaces the article's ```illustration blocks with generated
