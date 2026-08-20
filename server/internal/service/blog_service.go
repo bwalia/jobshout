@@ -594,7 +594,7 @@ func (s *blogService) runGeneration(run *model.BlogRun, agent *model.Agent, req 
 
 func (s *blogService) Publish(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) (*model.BlogRun, error) {
 	if !s.CanPublish() {
-		return nil, fmt.Errorf("blog_svc: publishing is not configured (OPSAPI_BASE_URL, OPSAPI_TOKEN and OPSAPI_NAMESPACE must all be set)")
+		return nil, fmt.Errorf("blog_svc: publishing is not configured (OPSAPI_BASE_URL, OPSAPI_API_KEY and OPSAPI_NAMESPACE must all be set)")
 	}
 
 	run, err := s.repo.GetByID(ctx, runID)

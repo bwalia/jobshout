@@ -349,7 +349,7 @@ func (r *Runner) Generate(ctx context.Context, req GenerateRequest, progress Pro
 // all-or-nothing rollback, is not something the CMS API offers anyway.
 func (r *Runner) Publish(ctx context.Context, articles []GeneratedArticle, progress ProgressFunc) (*PublishResult, error) {
 	if !r.CanPublish() {
-		return nil, fmt.Errorf("blog: publishing is not configured (set OPSAPI_BASE_URL, OPSAPI_TOKEN and OPSAPI_NAMESPACE)")
+		return nil, fmt.Errorf("blog: publishing is not configured (set OPSAPI_BASE_URL, OPSAPI_API_KEY and OPSAPI_NAMESPACE)")
 	}
 	if len(articles) == 0 {
 		return nil, fmt.Errorf("blog: nothing to publish")

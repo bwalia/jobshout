@@ -123,14 +123,15 @@ jobs:
 
           # Blog generator — optional. Writing articles always works; only
           # filing them in the opsapi CMS as drafts needs these, and all three
-          # must be present or publishing stays disabled. OPSAPI_TOKEN is a
-          # seed JWT the server keeps alive via /auth/refresh; its opsapi user
-          # needs the "cms" module in OPSAPI_NAMESPACE.
+          # must be present or publishing stays disabled. OPSAPI_API_KEY is a
+          # namespace-scoped opsapi API key ("opsk_...") minted via
+          # POST /api/v2/api-keys with scope {"cms":["create"]}; it must belong
+          # to OPSAPI_NAMESPACE.
           # Host and namespace are not secret, so they sit here like the other
-          # service hosts above; only the token comes from a repo secret.
+          # service hosts above; only the key comes from a repo secret.
           OPSAPI_BASE_URL=https://int-opsapi.workstation.co.uk
           OPSAPI_NAMESPACE=workstation
-          OPSAPI_TOKEN=${{ secrets.OPSAPI_TOKEN }}
+          OPSAPI_API_KEY=${{ secrets.OPSAPI_API_KEY }}
           BLOG_AUTHOR_NAME=JobShout Article Writer
           EOF
           chmod 600 .env

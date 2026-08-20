@@ -408,7 +408,7 @@ func main() {
 	// runner reads as "publishing is not configured".
 	cmsClient := opsapi.NewClient(opsapi.Config{
 		BaseURL:   cfg.OpsAPIBaseURL,
-		Token:     cfg.OpsAPIToken,
+		APIKey:    cfg.OpsAPIKey,
 		Namespace: cfg.OpsAPINamespace,
 		Timeout:   cfg.OpsAPITimeout,
 	})
@@ -452,7 +452,7 @@ func main() {
 		)
 		if !blogRunner.CanPublish() {
 			logger.Info("blog: opsapi CMS not configured — articles can be generated and read, but not published " +
-				"(set OPSAPI_BASE_URL, OPSAPI_TOKEN and OPSAPI_NAMESPACE)")
+				"(set OPSAPI_BASE_URL, OPSAPI_API_KEY and OPSAPI_NAMESPACE)")
 		}
 	}
 	blogSvc := service.NewBlogService(blogRunner, blogRepo, researchSvc, agentRepo, logger)
