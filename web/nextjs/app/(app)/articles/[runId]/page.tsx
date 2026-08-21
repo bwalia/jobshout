@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
+  Ban,
   CheckCircle2,
   Newspaper,
   RotateCw,
@@ -15,6 +16,7 @@ import {
   useBlogArticles,
   useBlogConfig,
   useBlogRun,
+  useCancelBlogRun,
   useDeleteBlogRun,
   usePublishBlogRun,
   useRetryBlogRun,
@@ -32,6 +34,7 @@ export default function ArticleRunPage() {
   const { data: config } = useBlogConfig();
   const publish = usePublishBlogRun();
   const retry = useRetryBlogRun();
+  const cancel = useCancelBlogRun();
   const remove = useDeleteBlogRun();
 
   // No point asking for bodies until generation has produced them.
@@ -91,6 +94,24 @@ export default function ArticleRunPage() {
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
+            {(run.status === "running" || run.status === "pending") && (
+              <button
+                type="button"
+                disabled={cancel.isPending}
+                onClick={() => {
+                  if (confirm("Stop this run? Work in progress will be lost.")) {
+                    cancel.mutate(runId);
+                  }
+                }}
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:border-destructive/40 hover:text-destructive",
+                  "disabled:cursor-not-allowed disabled:opacity-50"
+                )}
+              >
+                <Ban className="h-4 w-4" />
+                {cancel.isPending ? "Stopping..." : "Cancel"}
+              </button>
+            )}
             {run.status === "failed" && (
               <button
                 type="button"

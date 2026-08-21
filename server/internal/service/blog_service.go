@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,6 +16,14 @@ import (
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/repository"
 	"github.com/jobshout/server/internal/research"
+)
+
+// Terminal reasons written onto a run that did not fail on its own. Shown in
+// the UI as error_message, so they are written for a person, not a log line.
+var (
+	errRunCancelled   = errors.New("cancelled")
+	errRunInterrupted = errors.New("interrupted: server shutting down")
+	errRunStopping    = errors.New("blog_svc: server is shutting down")
 )
 
 // BlogService orchestrates blog.Runner invocations and persists each run.
@@ -29,6 +39,14 @@ type BlogService interface {
 	// Retry re-runs a failed run's original topics in place, so a transient
 	// failure does not leave a dead card the user has to clean up by hand.
 	Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) (*model.BlogRun, error)
+	// Cancel stops an in-flight run and marks it failed so Retry and Delete
+	// work. A run left `running` by a previous process (a deploy killed the
+	// goroutine) has no writer to abort; Cancel still marks it failed.
+	Cancel(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) (*model.BlogRun, error)
+	// InterruptAll cancels every generation this process is writing and marks
+	// those runs failed. Called on SIGTERM so a deploy does not leave rows
+	// stuck at running.
+	InterruptAll(reason error)
 	ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.BlogRun], error)
 	ListArticles(ctx context.Context, runID uuid.UUID) ([]model.BlogArticle, error)
 	GetArticle(ctx context.Context, id uuid.UUID) (*model.BlogArticle, error)
@@ -46,6 +64,14 @@ type BlogService interface {
 	EnsureArticleWriter(ctx context.Context, orgID uuid.UUID) (*model.Agent, error)
 }
 
+// trackedRun is one in-process generation. The cancel func aborts LLM/HTTP
+// work; reason is why, so the goroutine can write that onto the run rather
+// than a generic context.Canceled.
+type trackedRun struct {
+	cancel context.CancelFunc
+	reason error
+}
+
 type blogService struct {
 	runner *blog.Runner
 	repo   repository.BlogRepository
@@ -55,6 +81,13 @@ type blogService struct {
 	research  ResearchService
 	agentRepo repository.AgentRepository
 	logger    *zap.Logger
+
+	mu       sync.Mutex
+	active   map[uuid.UUID]*trackedRun
+	stopping bool
+	// finishMu serialises the terminal write (failed vs completed) so Cancel,
+	// SIGTERM and the generation goroutine cannot overwrite each other.
+	finishMu sync.Mutex
 }
 
 // NewBlogService creates a BlogService.
@@ -71,11 +104,86 @@ func NewBlogService(
 		research:  research,
 		agentRepo: agentRepo,
 		logger:    logger,
+		active:    make(map[uuid.UUID]*trackedRun),
 	}
 }
 
 func (s *blogService) CanPublish() bool {
 	return s.runner != nil && s.runner.CanPublish()
+}
+
+// persistCtx is used for terminal writes after a run is cancelled. The
+// generation ctx is dead by then, and a cancelled ctx would leave the row
+// stuck at running — the failure we are trying to record.
+func persistCtx() context.Context {
+	return context.Background()
+}
+
+// beginGeneration registers the run and starts it, or refuses if this process
+// is already shutting down. Must be called after the row exists so InterruptAll
+// can find it if the goroutine has not started yet.
+func (s *blogService) beginGeneration(run *model.BlogRun, agent *model.Agent, req model.GenerateBlogRequest) error {
+	s.mu.Lock()
+	if s.stopping {
+		s.mu.Unlock()
+		return errRunStopping
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	if s.active == nil {
+		s.active = make(map[uuid.UUID]*trackedRun)
+	}
+	s.active[run.ID] = &trackedRun{cancel: cancel}
+	s.mu.Unlock()
+
+	go func() {
+		defer s.untrack(run.ID)
+		s.runGeneration(ctx, run, agent, req)
+	}()
+	return nil
+}
+
+func (s *blogService) untrack(id uuid.UUID) {
+	s.mu.Lock()
+	delete(s.active, id)
+	s.mu.Unlock()
+}
+
+func (s *blogService) signalCancel(id uuid.UUID, reason error) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t, ok := s.active[id]
+	if !ok {
+		return false
+	}
+	t.reason = reason
+	t.cancel()
+	return true
+}
+
+func (s *blogService) consumeReason(id uuid.UUID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if t, ok := s.active[id]; ok && t.reason != nil {
+		return t.reason
+	}
+	return nil
+}
+
+// settle serialises the terminal write so Cancel, shutdown and the generation
+// goroutine cannot flip a completed run back to failed, or a cancelled run
+// back to completed.
+func (s *blogService) settle(runID uuid.UUID, write func()) bool {
+	s.finishMu.Lock()
+	defer s.finishMu.Unlock()
+	current, err := s.repo.GetByID(persistCtx(), runID)
+	if err == nil && current != nil {
+		switch current.Status {
+		case model.BlogRunStatusCompleted, model.BlogRunStatusFailed:
+			return false
+		}
+	}
+	write()
+	return true
 }
 
 func (s *blogService) Provider() string {
@@ -347,7 +455,10 @@ func (s *blogService) Generate(
 	// Run in the background. Generation is 10-30s per topic on a warm host and
 	// the request budget is 120s, so a full batch cannot fit in the response
 	// — the caller polls the run instead.
-	go s.runGeneration(run, agent, req)
+	if err := s.beginGeneration(run, agent, req); err != nil {
+		s.failCreatedRun(run, errRunInterrupted)
+		return nil, err
+	}
 
 	return run, nil
 }
@@ -432,34 +543,46 @@ func (s *blogService) discoverBriefs(
 // failRun records a terminal failure on a run. Shared by the discovery and
 // generation paths so the two cannot record it differently.
 func (s *blogService) failRun(
-	ctx context.Context,
 	run *model.BlogRun,
 	tracker *stepTracker,
 	cause error,
 	log *zap.Logger,
 	agent *model.Agent,
 ) {
-	tracker.fail(cause)
-	run.Steps = tracker.steps
-	completedAt := time.Now()
-	run.CompletedAt = &completedAt
-	msg := cause.Error()
-	run.Status = model.BlogRunStatusFailed
-	run.ErrorMessage = &msg
-	if uerr := s.repo.Update(ctx, run); uerr != nil {
-		log.Error("blog_svc: failed to record failure", zap.Error(uerr))
-	}
+	s.settle(run.ID, func() {
+		tracker.fail(cause)
+		run.Steps = tracker.steps
+		completedAt := time.Now()
+		run.CompletedAt = &completedAt
+		msg := cause.Error()
+		run.Status = model.BlogRunStatusFailed
+		run.ErrorMessage = &msg
+		if uerr := s.repo.Update(persistCtx(), run); uerr != nil {
+			log.Error("blog_svc: failed to record failure", zap.Error(uerr))
+		}
+	})
 	// Leave the agent active — 'failed' is a property of the run, and the
 	// board reads the run, not the agent row.
-	s.setAgentStatus(ctx, agent.ID, "active")
+	if agent != nil {
+		s.setAgentStatus(persistCtx(), agent.ID, "active")
+	}
+	if errors.Is(cause, errRunCancelled) || errors.Is(cause, errRunInterrupted) {
+		log.Info("blog: run interrupted", zap.Error(cause))
+		return
+	}
 	log.Error("blog: run failed", zap.Error(cause))
 }
 
-func (s *blogService) runGeneration(run *model.BlogRun, agent *model.Agent, req model.GenerateBlogRequest) {
+func (s *blogService) failCreatedRun(run *model.BlogRun, cause error) {
+	tracker := &stepTracker{runID: run.ID, steps: run.Steps, repo: s.repo, logger: s.logger}
+	s.failRun(run, tracker, cause, s.logger, nil)
+}
+
+func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, agent *model.Agent, req model.GenerateBlogRequest) {
 	// Label the run's LLM calls for Langfuse: the blog run is the session, so
 	// every drafting/planning call (and the research nested inside) groups
 	// under it in the tracing view.
-	ctx := llmtrace.WithTrace(context.Background(), llmtrace.TraceInfo{
+	ctx = llmtrace.WithTrace(ctx, llmtrace.TraceInfo{
 		TraceName: "go-blog-run",
 		SessionID: run.ID.String(),
 		AgentID:   agent.ID.String(),
@@ -468,7 +591,12 @@ func (s *blogService) runGeneration(run *model.BlogRun, agent *model.Agent, req 
 	log := s.logger.With(zap.String("blog_run_id", run.ID.String()))
 
 	tracker := &stepTracker{runID: run.ID, steps: run.Steps, repo: s.repo, logger: s.logger}
-	s.setAgentStatus(ctx, agent.ID, "active")
+	s.setAgentStatus(persistCtx(), agent.ID, "active")
+
+	if ctx.Err() != nil {
+		s.failRun(run, tracker, s.interruptCause(run.ID, ctx.Err()), log, agent)
+		return
+	}
 
 	// A trending run has no subject yet — find one before anything else, and
 	// record it on the run so what it chose is visible while it writes rather
@@ -476,7 +604,7 @@ func (s *blogService) runGeneration(run *model.BlogRun, agent *model.Agent, req 
 	if req.Trending {
 		briefs, derr := s.discoverBriefs(ctx, run, req, tracker)
 		if derr != nil {
-			s.failRun(ctx, run, tracker, derr, log, agent)
+			s.failRun(run, tracker, s.interruptCause(run.ID, derr), log, agent)
 			return
 		}
 		req.Briefs = briefs
@@ -486,7 +614,7 @@ func (s *blogService) runGeneration(run *model.BlogRun, agent *model.Agent, req 
 		// discovered subject needs its own narrow one. Without it the run
 		// finishes with an empty topic list, which leaves the page headerless
 		// and makes Retry refuse the run for having nothing to retry.
-		if uerr := s.repo.UpdateBriefs(ctx, run.ID, run.Briefs, run.Topics); uerr != nil {
+		if uerr := s.repo.UpdateBriefs(persistCtx(), run.ID, run.Briefs, run.Topics); uerr != nil {
 			log.Warn("blog_svc: failed to record discovered topics", zap.Error(uerr))
 		}
 	}
@@ -504,27 +632,15 @@ func (s *blogService) runGeneration(run *model.BlogRun, agent *model.Agent, req 
 		AgentStructuredModel: agentStructured,
 	}, tracker.advance)
 
-	completedAt := time.Now()
-	run.CompletedAt = &completedAt
-
-	if err != nil {
-		tracker.fail(err)
-		run.Steps = tracker.steps
-		msg := err.Error()
-		run.Status = model.BlogRunStatusFailed
-		run.ErrorMessage = &msg
-		if uerr := s.repo.Update(ctx, run); uerr != nil {
-			log.Error("blog_svc: failed to record failure", zap.Error(uerr))
-		}
-		// Leave the agent active — 'failed' is a property of the run, and the
-		// board reads the run, not the agent row.
-		s.setAgentStatus(ctx, agent.ID, "active")
-		log.Error("blog: generation failed", zap.Error(err))
+	if ctx.Err() != nil {
+		s.failRun(run, tracker, s.interruptCause(run.ID, ctx.Err()), log, agent)
 		return
 	}
 
-	tracker.finish()
-	run.Steps = tracker.steps
+	if err != nil {
+		s.failRun(run, tracker, err, log, agent)
+		return
+	}
 
 	persisted := make([]model.BlogArticle, 0, len(articles))
 	summaries := make([]model.BlogRunArticle, 0, len(articles))
@@ -555,26 +671,30 @@ func (s *blogService) runGeneration(run *model.BlogRun, agent *model.Agent, req 
 		})
 	}
 
-	if err := s.repo.CreateArticles(ctx, persisted); err != nil {
-		// The articles are the whole point of the run — if they cannot be
-		// stored the run has not succeeded, however well generation went.
-		msg := err.Error()
-		run.Status = model.BlogRunStatusFailed
-		run.ErrorMessage = &msg
-		if uerr := s.repo.Update(ctx, run); uerr != nil {
-			log.Error("blog_svc: failed to record failure", zap.Error(uerr))
-		}
+	if err := s.repo.CreateArticles(persistCtx(), persisted); err != nil {
+		s.failRun(run, tracker, err, log, agent)
 		log.Error("blog: storing articles failed", zap.Error(err))
-		s.setAgentStatus(ctx, agent.ID, "active")
 		return
 	}
 
-	run.Status = model.BlogRunStatusCompleted
-	run.Articles = summaries
-	if err := s.repo.Update(ctx, run); err != nil {
-		log.Error("blog_svc: failed to persist success", zap.Error(err))
+	wrote := false
+	s.settle(run.ID, func() {
+		tracker.finish()
+		run.Steps = tracker.steps
+		completedAt := time.Now()
+		run.CompletedAt = &completedAt
+		run.Status = model.BlogRunStatusCompleted
+		run.Articles = summaries
+		if uerr := s.repo.Update(persistCtx(), run); uerr != nil {
+			log.Error("blog_svc: failed to persist success", zap.Error(uerr))
+			return
+		}
+		wrote = true
+	})
+	if !wrote {
+		return
 	}
-	s.setAgentStatus(ctx, agent.ID, "active")
+	s.setAgentStatus(persistCtx(), agent.ID, "active")
 	log.Info("blog: generation complete", zap.Int("articles", len(articles)))
 
 	// Filing happens after the run is recorded as completed, never instead of
@@ -582,7 +702,7 @@ func (s *blogService) runGeneration(run *model.BlogRun, agent *model.Agent, req 
 	// written, stored and are readable in the UI into a failed run — the work
 	// survives and someone can press the button later.
 	if req.AutoPublish {
-		if _, perr := s.Publish(ctx, run.OrgID, run.ID); perr != nil {
+		if _, perr := s.Publish(persistCtx(), run.OrgID, run.ID); perr != nil {
 			log.Warn("blog: automatic filing to the CMS failed, the articles are still here",
 				zap.Error(perr))
 		} else {
@@ -590,6 +710,16 @@ func (s *blogService) runGeneration(run *model.BlogRun, agent *model.Agent, req 
 				zap.Int("articles", len(articles)))
 		}
 	}
+}
+
+func (s *blogService) interruptCause(runID uuid.UUID, err error) error {
+	if reason := s.consumeReason(runID); reason != nil {
+		return reason
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return errRunCancelled
+	}
+	return err
 }
 
 func (s *blogService) Publish(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) (*model.BlogRun, error) {
@@ -795,13 +925,73 @@ func (s *blogService) Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUI
 	if run.Model != nil {
 		req.Model = *run.Model
 	}
-	go s.runGeneration(run, agent, req)
+	if err := s.beginGeneration(run, agent, req); err != nil {
+		s.failCreatedRun(run, errRunInterrupted)
+		return nil, err
+	}
 
 	return run, nil
 }
 
+// Cancel stops an in-flight run. The row is marked failed immediately so the
+// UI stops polling; the generation goroutine is then aborted if this process
+// is the one writing it. A run stuck at running after a deploy has no
+// goroutine here — it is still marked failed, which is what unlocks Retry.
+func (s *blogService) Cancel(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) (*model.BlogRun, error) {
+	run, err := s.repo.GetByID(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	if run.OrgID != orgID {
+		return nil, fmt.Errorf("blog_svc: run does not belong to this organization")
+	}
+	if run.Status != model.BlogRunStatusRunning && run.Status != model.BlogRunStatusPending {
+		return nil, fmt.Errorf("blog_svc: only a running run can be cancelled (status is %q)", run.Status)
+	}
+
+	s.signalCancel(runID, errRunCancelled)
+	s.failCreatedRun(run, errRunCancelled)
+
+	updated, err := s.repo.GetByID(persistCtx(), runID)
+	if err != nil {
+		return run, nil
+	}
+	return updated, nil
+}
+
+// InterruptAll is the deploy path: refuse new generations, abort the ones this
+// process is writing, and persist them as failed before the process exits.
+func (s *blogService) InterruptAll(reason error) {
+	if reason == nil {
+		reason = errRunInterrupted
+	}
+	s.mu.Lock()
+	s.stopping = true
+	ids := make([]uuid.UUID, 0, len(s.active))
+	for id, t := range s.active {
+		t.reason = reason
+		t.cancel()
+		ids = append(ids, id)
+	}
+	s.mu.Unlock()
+
+	for _, id := range ids {
+		run, err := s.repo.GetByID(persistCtx(), id)
+		if err != nil || run == nil {
+			continue
+		}
+		if run.Status != model.BlogRunStatusRunning && run.Status != model.BlogRunStatusPending {
+			continue
+		}
+		s.failCreatedRun(run, reason)
+	}
+}
+
 // setAgentStatus is best-effort: a status write failing must not fail the run.
 func (s *blogService) setAgentStatus(ctx context.Context, agentID uuid.UUID, status string) {
+	if s.agentRepo == nil {
+		return
+	}
 	if err := s.agentRepo.UpdateStatus(ctx, agentID, status); err != nil {
 		s.logger.Warn("blog: failed to update agent status", zap.Error(err))
 	}
