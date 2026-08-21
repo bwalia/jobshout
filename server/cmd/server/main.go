@@ -460,30 +460,24 @@ func main() {
 	}
 	blogSvc := service.NewBlogService(blogRunner, blogRepo, researchSvc, agentRepo, logger)
 
-	// ─── Penetration Testing (Strix integration) ─────────────────────────────
+	// ─── Penetration Testing (Strix on the workstation) ──────────────────────
+	// The scanner runs on the Mac Studio behind the same JWT-gated HTTP endpoint
+	// as Ollama and the image service. CreateRun only queues a row; the
+	// reconciler below claims queued runs off Postgres and drives them, so a
+	// scan survives any deploy and multiple replicas share the work safely.
 	strixConfig := strix.LoadConfig(logger)
-	strixClient := strix.NewClient(
-		strixConfig.StrixPath,
-		strixConfig.RunsDir,
-		strixConfig.LLMModel,
-		strixConfig.LLMKey,
-		strixConfig.LLMAPIBase,
-		logger,
-	)
-	pentestSvc := service.NewPentestService(
-		pentestRunRepo,
-		pentestFindingRepo,
-		agentRepo,
-		strixClient,
-		logger,
-	)
-	if strixConfig.Enabled {
-		logger.Info("penetration testing agent initialised",
-			zap.String("llm_model", strixConfig.LLMModel),
-			zap.String("runs_dir", strixConfig.RunsDir),
+	strixClient := strix.NewClient(strixConfig.BaseURL, strixConfig.JWTSecret, strixConfig.Timeout, logger)
+	pentestSvc := service.NewPentestService(pentestRunRepo, pentestFindingRepo, agentRepo, logger)
+	pentestReconciler := service.NewPentestReconciler(pentestRunRepo, strixClient, strixConfig, logger)
+	if strixConfig.Configured() {
+		logger.Info("penetration testing enabled",
+			zap.String("base_url", strixConfig.BaseURL),
+			zap.Bool("gateway_auth", strixClient.UsesGateway()),
+			zap.Int("allowlist_size", len(strixConfig.TargetAllowlist)),
+			zap.Duration("poll_interval", strixConfig.PollInterval),
 		)
 	} else {
-		logger.Info("penetration testing agent disabled")
+		logger.Info("penetration testing disabled (STRIX_BASE_URL empty)")
 	}
 
 	// ─── Autonomous agent engine ────────────────────────────────────────────
@@ -1114,6 +1108,12 @@ func main() {
 	// the appropriate path (blog pipeline / workflow / agent).
 	schedulerRunner := scheduler.NewRunner(schedulerRepo, blogSvc, workflowSvc, execSvc, multiAgentSvc, logger)
 	go schedulerRunner.Start(ctx)
+
+	// ─── Pentest reconciler ─────────────────────────────────────────────────
+	// Ticks every STRIX_POLL_INTERVAL, claims due pentest runs with FOR UPDATE
+	// SKIP LOCKED, and advances each by polling the workstation service. A no-op
+	// when STRIX_BASE_URL is unset. Stops when ctx is cancelled on shutdown.
+	go pentestReconciler.Start(ctx)
 
 	srv := &http.Server{
 		Addr:        cfg.ServerPort,

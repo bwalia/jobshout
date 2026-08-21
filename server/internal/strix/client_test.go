@@ -1,92 +1,215 @@
 package strix
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 )
 
-func TestClientInitialization(t *testing.T) {
-	logger := zap.NewNop()
+func testClient(t *testing.T, srv *httptest.Server) *Client {
+	t.Helper()
+	c := NewClient(srv.URL, "", time.Second, zap.NewNop())
+	return c
+}
 
-	client := NewClient(
-		"strix",
-		"./strix_runs",
-		"ollama_chat/qwen3-coder:30b",
-		"",
-		"http://localhost:11434",
-		logger,
-	)
-
-	if client == nil {
-		t.Fatal("NewClient returned nil")
+func TestClientEnabled(t *testing.T) {
+	if NewClient("", "", time.Second, nil).Enabled() {
+		t.Error("client with empty base URL should report disabled")
 	}
-
-	if client.strixPath != "strix" {
-		t.Errorf("expected strixPath 'strix', got %q", client.strixPath)
+	if !NewClient("https://strix.example", "", time.Second, nil).Enabled() {
+		t.Error("client with a base URL should report enabled")
 	}
-
-	if client.runsDir != "./strix_runs" {
-		t.Errorf("expected runsDir './strix_runs', got %q", client.runsDir)
-	}
-
-	if client.llmModel != "ollama_chat/qwen3-coder:30b" {
-		t.Errorf("expected llmModel 'ollama_chat/qwen3-coder:30b', got %q", client.llmModel)
-	}
-
-	if client.llmAPIBase != "http://localhost:11434" {
-		t.Errorf("expected llmAPIBase 'http://localhost:11434', got %q", client.llmAPIBase)
+	// Methods on a disabled client fail fast rather than dialling nothing.
+	if _, err := NewClient("", "", time.Second, nil).Start(context.Background(), StartRequest{}); err == nil {
+		t.Error("Start on a disabled client should error")
 	}
 }
 
-func TestClientInitializationWithDefaults(t *testing.T) {
-	logger := zap.NewNop()
+func TestStartAndPollToCompletion(t *testing.T) {
+	var startBody startRequestWire
+	var gotAuthHeader string
 
-	client := NewClient("", "", "openai/gpt-4o", "test-key", "", logger)
-
-	if client == nil {
-		t.Fatal("NewClient returned nil")
-	}
-
-	// Should use defaults
-	if client.strixPath != "strix" {
-		t.Errorf("expected default strixPath 'strix', got %q", client.strixPath)
-	}
-
-	if client.runsDir != "./strix_runs" {
-		t.Errorf("expected default runsDir './strix_runs', got %q", client.runsDir)
-	}
-}
-
-func TestExtractRunID(t *testing.T) {
-	testCases := []struct {
-		name     string
-		output   string
-		expected string
-	}{
-		{
-			name:     "valid run id",
-			output:   "Scan complete. Results saved to strix_runs/2024-01-15T10-30-45-abc123 successfully.",
-			expected: "2024-01-15T10-30-45-abc123",
-		},
-		{
-			name:     "run id in middle of output",
-			output:   "Starting scan...\nScan complete. Results saved to strix_runs/test-run-id-xyz\nDone!",
-			expected: "test-run-id-xyz",
-		},
-		{
-			name:     "no run id",
-			output:   "No run results found",
-			expected: "",
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			result := extractRunID(tc.output)
-			if result != tc.expected {
-				t.Errorf("expected %q, got %q", tc.expected, result)
+	polls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuthHeader = r.Header.Get("x-api-key")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/scan":
+			_ = json.NewDecoder(r.Body).Decode(&startBody)
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(scanAcceptedWire{
+				RunID: "remote-1", RunRef: startBody.RunRef, Status: "queued", QueuePosition: 2,
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/scan/remote-1":
+			polls++
+			if polls < 2 {
+				_ = json.NewEncoder(w).Encode(scanStatusWire{
+					RunID: "remote-1", Status: "running", Target: "https://juice.local",
+				})
+				return
 			}
+			started := "2026-08-21T10:00:00+00:00"
+			completed := "2026-08-21T10:05:00+00:00"
+			exit := 2
+			_ = json.NewEncoder(w).Encode(scanStatusWire{
+				RunID: "remote-1", RunRef: "run-ref-1", Status: "completed",
+				Target: "https://juice.local", ScanMode: "quick",
+				StartedAt: &started, CompletedAt: &completed, DurationMS: 300000, ExitCode: &exit,
+				FindingCount: 1,
+				Findings: []Finding{{
+					ID: "V-1", Title: "SQLi", Severity: "high", CVSSScore: 8.1,
+					Category: "injection", ReproductionSteps: "…",
+				}},
+			})
+		default:
+			http.Error(w, "unexpected "+r.Method+" "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	// A signing secret so we can assert the token is attached.
+	c := NewClient(srv.URL, "shared-secret", time.Second, zap.NewNop())
+	ctx := context.Background()
+
+	handle, err := c.Start(ctx, StartRequest{
+		Target: "https://juice.local", ScanMode: "quick", MaxBudget: 10,
+		RunRef: "run-ref-1", RequestedBy: "user-1",
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if handle.RemoteRunID != "remote-1" || handle.Status != "queued" || handle.QueuePosition != 2 {
+		t.Fatalf("unexpected handle: %+v", handle)
+	}
+	if startBody.RunRef != "run-ref-1" || startBody.RequestedBy != "user-1" || startBody.MaxBudget != 10 {
+		t.Errorf("request body not forwarded: %+v", startBody)
+	}
+	if gotAuthHeader == "" {
+		t.Error("expected a signed x-api-key header when a secret is configured")
+	}
+
+	// First poll: still running, not terminal.
+	res, err := c.Status(ctx, handle.RemoteRunID)
+	if err != nil {
+		t.Fatalf("Status (first): %v", err)
+	}
+	if res.Terminal() {
+		t.Fatalf("first poll should be non-terminal, got %q", res.Status)
+	}
+
+	// Second poll: completed with a finding and parsed timestamps.
+	res, err = c.Status(ctx, handle.RemoteRunID)
+	if err != nil {
+		t.Fatalf("Status (second): %v", err)
+	}
+	if !res.Terminal() || res.Status != "completed" {
+		t.Fatalf("expected terminal completed, got %q", res.Status)
+	}
+	if len(res.Findings) != 1 || res.Findings[0].ID != "V-1" || res.Findings[0].CVSSScore != 8.1 {
+		t.Errorf("finding not decoded: %+v", res.Findings)
+	}
+	if res.StartedAt == nil || res.CompletedAt == nil {
+		t.Fatal("expected timestamps to parse")
+	}
+	if res.ExitCode == nil || *res.ExitCode != 2 {
+		t.Errorf("exit code not decoded: %v", res.ExitCode)
+	}
+}
+
+func TestStartOutOfScopeIsPermanent(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"detail": "target 'http://10.0.0.1' resolves to internal address 10.0.0.1; name that range in STRIX_TARGET_ALLOWLIST to scan it",
 		})
+	}))
+	defer srv.Close()
+
+	_, err := testClient(t, srv).Start(context.Background(), StartRequest{Target: "http://10.0.0.1"})
+	if !errors.Is(err, ErrOutOfScope) {
+		t.Fatalf("expected ErrOutOfScope, got %v", err)
+	}
+	if errors.Is(err, ErrUnauthorized) {
+		t.Fatal("a scope 403 must not be read as an auth failure")
+	}
+}
+
+func TestStartBusyIsTransient(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "60")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]string{"detail": "8 scans already queued (limit 8)"})
+	}))
+	defer srv.Close()
+
+	_, err := testClient(t, srv).Start(context.Background(), StartRequest{Target: "https://ok.local"})
+	if !errors.Is(err, ErrBusy) {
+		t.Fatalf("expected ErrBusy, got %v", err)
+	}
+}
+
+func TestForbiddenAuthBodyIsUnauthorized(t *testing.T) {
+	// A 403 whose body is about the token, not the target, is an auth failure.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"detail": "token expired — check the clock on the calling host",
+		})
+	}))
+	defer srv.Close()
+
+	_, err := testClient(t, srv).Status(context.Background(), "remote-1")
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("expected ErrUnauthorized for an expired-token 403, got %v", err)
+	}
+	if errors.Is(err, ErrOutOfScope) {
+		t.Fatal("an auth 403 must not be read as out of scope")
+	}
+}
+
+func TestUnauthorizedStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "missing x-api-key header", http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	err := testClient(t, srv).Cancel(context.Background(), "remote-1")
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("expected ErrUnauthorized, got %v", err)
+	}
+}
+
+func TestNetworkFailureIsPlainError(t *testing.T) {
+	// A dead service: closed immediately so the dial fails. Must surface as a
+	// plain error, distinct from the scope/busy/auth sentinels.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	url := srv.URL
+	srv.Close()
+
+	c := NewClient(url, "", 200*time.Millisecond, zap.NewNop())
+	_, err := c.Status(context.Background(), "remote-1")
+	if err == nil {
+		t.Fatal("expected an error reaching a closed server")
+	}
+	if errors.Is(err, ErrOutOfScope) || errors.Is(err, ErrBusy) || errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("network failure misclassified as a typed error: %v", err)
+	}
+}
+
+func TestTimeoutBoundsOneCall(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		_ = json.NewEncoder(w).Encode(scanStatusWire{RunID: "remote-1", Status: "running"})
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "", 50*time.Millisecond, zap.NewNop())
+	if _, err := c.Status(context.Background(), "remote-1"); err == nil {
+		t.Fatal("expected the per-call timeout to fire")
 	}
 }
