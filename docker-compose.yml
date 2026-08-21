@@ -113,6 +113,20 @@ services:
       OPSAPI_TIMEOUT: ${OPSAPI_TIMEOUT:-30s}
       BLOG_AUTHOR_NAME: ${BLOG_AUTHOR_NAME:-JobShout Article Writer}
       BLOG_CONTENT_DIR: ${BLOG_CONTENT_DIR:-content/blogs}
+      # Image generation on the workstation (port 11435). Empty URL disables it.
+      IMAGE_PROVIDER: ${IMAGE_PROVIDER:-mflux}
+      IMAGE_BASE_URL: ${IMAGE_BASE_URL:-http://host.docker.internal:11435}
+      IMAGE_JWT_SECRET: ${IMAGE_JWT_SECRET:-}
+      IMAGE_DEFAULT_MODEL: ${IMAGE_DEFAULT_MODEL:-z-image-turbo}
+      IMAGE_TIMEOUT: ${IMAGE_TIMEOUT:-30m}
+      # Pentest: workstation strix-service on 11436. Empty URL disables it.
+      STRIX_ENABLED: ${STRIX_ENABLED:-true}
+      STRIX_BASE_URL: ${STRIX_BASE_URL:-http://host.docker.internal:11436}
+      STRIX_JWT_SECRET: ${STRIX_JWT_SECRET:-}
+      STRIX_TIMEOUT: ${STRIX_TIMEOUT:-60s}
+      STRIX_POLL_INTERVAL: ${STRIX_POLL_INTERVAL:-15s}
+      STRIX_MAX_RUNTIME: ${STRIX_MAX_RUNTIME:-2h}
+      STRIX_TARGET_ALLOWLIST: ${STRIX_TARGET_ALLOWLIST:-}
     ports:
       - "${SERVER_HOST_PORT:-8190}:8080"
     depends_on:
