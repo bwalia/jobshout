@@ -22,6 +22,7 @@ import {
   Goal,
   Sparkles,
   Newspaper,
+  ShieldAlert,
   Image as ImageIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
@@ -49,6 +50,7 @@ const NAV_SECTIONS: NavSection[] = [
     title: "AI Team",
     items: [
       { label: "Agents", href: "/agents", icon: Bot },
+      { label: "Security Tester", href: "/agents/pentest", icon: ShieldAlert },
       { label: "Agent Board", href: "/agent-board", icon: Kanban },
       { label: "Sprints", href: "/sprints", icon: Goal },
       { label: "Sessions", href: "/sessions", icon: MessageSquare },
