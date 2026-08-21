@@ -37,6 +37,8 @@ data:
   # Whether every article run pays for a cover image. Off leaves generation
   # available on demand through the API and the generate_image tool.
   BLOG_COVER_IMAGES: {{ .Values.ai.blogCoverImages | default false | quote }}
+  BLOG_ORPHAN_TIMEOUT: {{ .Values.ai.blogOrphanTimeout | default "45m" | quote }}
+  BLOG_MAX_RUNTIME: {{ .Values.ai.blogMaxRuntime | default "25m" | quote }}
   MINIO_BUCKET_IMAGES: {{ .Values.ai.imageBucket | default "images" | quote }}
   PYTHON_SIDECAR_URL: "http://python-runtime:8001"
   # opsapi CMS — where the Article Writer files generated posts as drafts. The

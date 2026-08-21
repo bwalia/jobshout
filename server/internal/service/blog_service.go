@@ -23,6 +23,8 @@ import (
 var (
 	errRunCancelled   = errors.New("cancelled")
 	errRunInterrupted = errors.New("interrupted: server shutting down")
+	errRunOrphaned    = errors.New("interrupted: timed out or server restarted")
+	errRunTimedOut    = errors.New("interrupted: run exceeded maximum runtime")
 	errRunStopping    = errors.New("blog_svc: server is shutting down")
 )
 
@@ -47,6 +49,9 @@ type BlogService interface {
 	// those runs failed. Called on SIGTERM so a deploy does not leave rows
 	// stuck at running.
 	InterruptAll(reason error)
+	// ReapOrphans fails in-flight runs whose writer is gone (heartbeat older
+	// than BLOG_ORPHAN_TIMEOUT). It does not restart them.
+	ReapOrphans(ctx context.Context) (int, error)
 	ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.BlogRun], error)
 	ListArticles(ctx context.Context, runID uuid.UUID) ([]model.BlogArticle, error)
 	GetArticle(ctx context.Context, id uuid.UUID) (*model.BlogArticle, error)
@@ -88,6 +93,9 @@ type blogService struct {
 	// finishMu serialises the terminal write (failed vs completed) so Cancel,
 	// SIGTERM and the generation goroutine cannot overwrite each other.
 	finishMu sync.Mutex
+
+	orphanTimeout time.Duration
+	maxRuntime    time.Duration
 }
 
 // NewBlogService creates a BlogService.
@@ -97,14 +105,24 @@ func NewBlogService(
 	research ResearchService,
 	agentRepo repository.AgentRepository,
 	logger *zap.Logger,
+	orphanTimeout time.Duration,
+	maxRuntime time.Duration,
 ) BlogService {
+	if orphanTimeout <= 0 {
+		orphanTimeout = 45 * time.Minute
+	}
+	if maxRuntime <= 0 {
+		maxRuntime = 25 * time.Minute
+	}
 	return &blogService{
-		runner:    runner,
-		repo:      repo,
-		research:  research,
-		agentRepo: agentRepo,
-		logger:    logger,
-		active:    make(map[uuid.UUID]*trackedRun),
+		runner:        runner,
+		repo:          repo,
+		research:      research,
+		agentRepo:     agentRepo,
+		logger:        logger,
+		active:        make(map[uuid.UUID]*trackedRun),
+		orphanTimeout: orphanTimeout,
+		maxRuntime:    maxRuntime,
 	}
 }
 
@@ -129,6 +147,15 @@ func (s *blogService) beginGeneration(run *model.BlogRun, agent *model.Agent, re
 		return errRunStopping
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	if s.maxRuntime > 0 {
+		var timeoutCancel context.CancelFunc
+		ctx, timeoutCancel = context.WithTimeout(ctx, s.maxRuntime)
+		prev := cancel
+		cancel = func() {
+			timeoutCancel()
+			prev()
+		}
+	}
 	if s.active == nil {
 		s.active = make(map[uuid.UUID]*trackedRun)
 	}
@@ -566,7 +593,8 @@ func (s *blogService) failRun(
 	if agent != nil {
 		s.setAgentStatus(persistCtx(), agent.ID, "active")
 	}
-	if errors.Is(cause, errRunCancelled) || errors.Is(cause, errRunInterrupted) {
+	if errors.Is(cause, errRunCancelled) || errors.Is(cause, errRunInterrupted) ||
+		errors.Is(cause, errRunOrphaned) || errors.Is(cause, errRunTimedOut) {
 		log.Info("blog: run interrupted", zap.Error(cause))
 		return
 	}
@@ -589,6 +617,10 @@ func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, age
 		OrgID:     run.OrgID.String(),
 	})
 	log := s.logger.With(zap.String("blog_run_id", run.ID.String()))
+
+	stopHB := make(chan struct{})
+	defer close(stopHB)
+	go s.heartbeatLoop(run.ID, stopHB)
 
 	tracker := &stepTracker{runID: run.ID, steps: run.Steps, repo: s.repo, logger: s.logger}
 	s.setAgentStatus(persistCtx(), agent.ID, "active")
@@ -716,7 +748,10 @@ func (s *blogService) interruptCause(runID uuid.UUID, err error) error {
 	if reason := s.consumeReason(runID); reason != nil {
 		return reason
 	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return errRunTimedOut
+	}
+	if errors.Is(err, context.Canceled) {
 		return errRunCancelled
 	}
 	return err
@@ -985,6 +1020,65 @@ func (s *blogService) InterruptAll(reason error) {
 		}
 		s.failCreatedRun(run, reason)
 	}
+}
+
+const heartbeatInterval = 30 * time.Second
+
+func (s *blogService) heartbeatLoop(runID uuid.UUID, stop <-chan struct{}) {
+	if s.repo == nil {
+		return
+	}
+	_ = s.repo.TouchHeartbeat(persistCtx(), runID)
+	t := time.NewTicker(heartbeatInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-t.C:
+			if err := s.repo.TouchHeartbeat(persistCtx(), runID); err != nil {
+				s.logger.Warn("blog: heartbeat failed", zap.String("blog_run_id", runID.String()), zap.Error(err))
+			}
+		}
+	}
+}
+
+func (s *blogService) isActive(id uuid.UUID) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.active[id]
+	return ok
+}
+
+// ReapOrphans fails running rows whose writer is gone. Live goroutines in
+// this process are skipped — their heartbeat may have just missed a tick.
+func (s *blogService) ReapOrphans(ctx context.Context) (int, error) {
+	if s.repo == nil {
+		return 0, nil
+	}
+	olderThan := s.orphanTimeout
+	if olderThan <= 0 {
+		olderThan = 45 * time.Minute
+	}
+	stale, err := s.repo.ListStaleRunning(ctx, time.Now().Add(-olderThan))
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, run := range stale {
+		if run == nil {
+			continue
+		}
+		if run.Status != model.BlogRunStatusRunning && run.Status != model.BlogRunStatusPending {
+			continue
+		}
+		if s.isActive(run.ID) {
+			continue
+		}
+		s.failCreatedRun(run, errRunOrphaned)
+		n++
+	}
+	return n, nil
 }
 
 // setAgentStatus is best-effort: a status write failing must not fail the run.

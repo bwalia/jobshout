@@ -458,7 +458,11 @@ func main() {
 				"(set OPSAPI_BASE_URL, OPSAPI_API_KEY and OPSAPI_NAMESPACE)")
 		}
 	}
-	blogSvc := service.NewBlogService(blogRunner, blogRepo, researchSvc, agentRepo, logger)
+	blogSvc := service.NewBlogService(
+		blogRunner, blogRepo, researchSvc, agentRepo, logger,
+		cfg.BlogOrphanTimeout, cfg.BlogMaxRuntime,
+	)
+	blogReconciler := service.NewBlogReconciler(blogSvc, 0, logger)
 
 	// ─── Penetration Testing (Strix on the workstation) ──────────────────────
 	// The scanner runs on the Mac Studio behind the same JWT-gated HTTP endpoint
@@ -1116,6 +1120,12 @@ func main() {
 	// SKIP LOCKED, and advances each by polling the workstation service. A no-op
 	// when STRIX_BASE_URL is unset. Stops when ctx is cancelled on shutdown.
 	go pentestReconciler.Start(ctx)
+
+	// ─── Blog orphan reconciler ─────────────────────────────────────────────
+	// Fails running rows whose writer died (SIGKILL, OOM, node drain). SIGTERM
+	// is handled by InterruptAll below; this loop covers the rest. Does not
+	// restart generation — Retry is the user's action.
+	go blogReconciler.Start(ctx)
 
 	srv := &http.Server{
 		Addr:        cfg.ServerPort,
