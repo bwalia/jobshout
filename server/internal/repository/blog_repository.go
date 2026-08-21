@@ -39,6 +39,10 @@ type BlogRepository interface {
 	CreateArticles(ctx context.Context, articles []model.BlogArticle) error
 	ListArticlesByRun(ctx context.Context, runID uuid.UUID) ([]model.BlogArticle, error)
 	GetArticle(ctx context.Context, id uuid.UUID) (*model.BlogArticle, error)
+	// UpdateArticles writes the run's lightweight per-article summaries, so a
+	// brief can be persisted without a full terminal Update racing the step
+	// trace.
+	UpdateArticles(ctx context.Context, runID uuid.UUID, articles []model.BlogRunArticle) error
 	// MarkArticlesPosted records where each article landed in the CMS, after a
 	// publish has already succeeded.
 	MarkArticlesPosted(ctx context.Context, posts []model.BlogArticlePost) error
@@ -201,6 +205,21 @@ func (r *blogRepository) Update(ctx context.Context, run *model.BlogRun) error {
 	)
 	if err != nil {
 		return fmt.Errorf("blog_repo: update: %w", err)
+	}
+	return nil
+}
+
+func (r *blogRepository) UpdateArticles(ctx context.Context, runID uuid.UUID, articles []model.BlogRunArticle) error {
+	if articles == nil {
+		articles = []model.BlogRunArticle{}
+	}
+	articlesJSON, err := json.Marshal(articles)
+	if err != nil {
+		return fmt.Errorf("blog_repo: marshal articles: %w", err)
+	}
+	_, err = r.pool.Exec(ctx, `UPDATE blog_runs SET articles = $2 WHERE id = $1`, runID, articlesJSON)
+	if err != nil {
+		return fmt.Errorf("blog_repo: update articles: %w", err)
 	}
 	return nil
 }

@@ -37,10 +37,14 @@ export default function ArticleRunPage() {
   const cancel = useCancelBlogRun();
   const remove = useDeleteBlogRun();
 
-  // No point asking for bodies until generation has produced them.
+  const writing = run?.status === "running" || run?.status === "pending";
   const { data: articles } = useBlogArticles(
     runId,
-    run?.status === "completed"
+    Boolean(run) &&
+      (run.status === "completed" ||
+        run.status === "failed" ||
+        (run.articles?.length ?? 0) > 0),
+    writing && (run?.articles?.length ?? 0) > 0
   );
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -99,7 +103,7 @@ export default function ArticleRunPage() {
                 type="button"
                 disabled={cancel.isPending}
                 onClick={() => {
-                  if (confirm("Stop this run? Work in progress will be lost.")) {
+                  if (confirm("Stop this run? Articles already written are kept.")) {
                     cancel.mutate(runId);
                   }
                 }}
@@ -258,7 +262,7 @@ export default function ArticleRunPage() {
               <p className="mt-3 text-sm text-muted-foreground">
                 {run.status === "running" || run.status === "pending"
                   ? "The Article Writer is still working. This updates automatically."
-                  : run.status === "failed"
+                  : run.status === "failed" && (articles?.length ?? 0) === 0
                     ? "This run failed before producing an article."
                     : "No articles were produced."}
               </p>

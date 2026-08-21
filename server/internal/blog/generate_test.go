@@ -293,3 +293,33 @@ func TestPublish_RecomputesDerivedFieldsFromStoredArticle(t *testing.T) {
 		t.Errorf("ContentHTML = %q, want the stored HTML %q", got.ContentHTML, stored.HTML)
 	}
 }
+
+func TestGenerate_ContinuesAfterBriefFailure(t *testing.T) {
+	r := newTestRunnerWith(nil, &fakeResearcher{failAfter: 2}, writeScript("One", "# One\n\nBody.")...)
+	var persisted []string
+	arts, err := r.Generate(context.Background(), GenerateRequest{
+		Briefs: briefsFor("alpha", "beta"),
+		OnArticle: func(a GeneratedArticle) error {
+			persisted = append(persisted, a.Topic)
+			return nil
+		},
+	}, nil)
+	if err == nil {
+		t.Fatal("expected the second brief's failure to be returned")
+	}
+	if !strings.Contains(err.Error(), "beta") {
+		t.Errorf("error should name the failed brief, got: %v", err)
+	}
+	if len(arts) != 1 {
+		t.Fatalf("got %d articles, want the first brief only", len(arts))
+	}
+	if arts[0].Topic != "alpha" {
+		t.Errorf("kept topic = %q, want alpha", arts[0].Topic)
+	}
+	if arts[0].HTML == "" {
+		t.Error("the stored article should already be rendered to HTML")
+	}
+	if len(persisted) != 1 || persisted[0] != "alpha" {
+		t.Errorf("OnArticle = %v, want alpha persisted before the failure", persisted)
+	}
+}

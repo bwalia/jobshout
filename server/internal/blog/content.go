@@ -2,6 +2,7 @@ package blog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -68,12 +69,9 @@ func (a *GeneratedArticle) render() error {
 
 // writeArticles produces one article per brief, in order.
 //
-// Any single brief failing aborts the batch — we prefer an all-or-nothing run
-// over silently publishing half of what was asked for.
-//
-// progress fires at each phase of each article, so a long batch reports which
-// article it is on and what it is doing rather than sitting on a single opaque
-// "generating" step for several minutes.
+// A brief that fails is recorded and skipped; the rest of the batch still
+// runs. Cancel (ctx.Err) stops remaining briefs immediately and returns
+// whatever was already written. progress fires at each phase of each article.
 func (r *Runner) writeArticles(
 	ctx context.Context,
 	req GenerateRequest,
@@ -83,16 +81,18 @@ func (r *Runner) writeArticles(
 	now := r.clock()
 	out := make([]GeneratedArticle, 0, len(briefs))
 	seenSlugs := map[string]int{}
+	var errs []error
 
 	for i, brief := range briefs {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return out, err
 		}
 		label := fmt.Sprintf("%d/%d — %s", i+1, len(briefs), brief.Topic)
 
 		article, err := r.writeOne(ctx, req, brief, label, progress)
 		if err != nil {
-			return nil, fmt.Errorf("blog: %q: %w", brief.Topic, err)
+			errs = append(errs, fmt.Errorf("blog: %q: %w", brief.Topic, err))
+			continue
 		}
 
 		// Slugs come from the agent's title rather than the topic now: the
@@ -111,10 +111,56 @@ func (r *Runner) writeArticles(
 		article.Slug = slug
 		article.Path = strings.TrimRight(r.cfg.ContentDir, "/") + "/" + filename
 
+		if ferr := r.finalizeArticle(ctx, req, article, progress); ferr != nil {
+			errs = append(errs, fmt.Errorf("blog: %q: %w", brief.Topic, ferr))
+			continue
+		}
+
+		if req.OnArticle != nil {
+			if perr := req.OnArticle(*article); perr != nil {
+				errs = append(errs, fmt.Errorf("blog: store %q: %w", brief.Topic, perr))
+				continue
+			}
+		}
+
 		out = append(out, *article)
 	}
 
-	return out, nil
+	return out, errors.Join(errs...)
+}
+
+// finalizeArticle draws optional covers and converts markdown to HTML so a
+// brief can be persisted as a finished article before the next one starts.
+func (r *Runner) finalizeArticle(
+	ctx context.Context,
+	req GenerateRequest,
+	article *GeneratedArticle,
+	progress ProgressFunc,
+) error {
+	// Illustration cannot fail the article: a piece without a picture is
+	// still complete; throwing it away because a GPU was busy is not.
+	if r.canIllustrate() {
+		report(progress, model.BlogStepIllustrating,
+			fmt.Sprintf("Illustrating %s", article.Title), model.AgentNameArticleWriter)
+
+		body, notes := r.illustrateBody(ctx, req.OrgID, article.Markdown)
+		article.Markdown = body
+		for _, note := range notes {
+			r.logger.Info("blog: "+note, zap.String("title", article.Title))
+		}
+
+		if err := r.generateCover(ctx, req.OrgID, article); err != nil {
+			r.logger.Warn("blog: could not draw a cover image",
+				zap.String("title", article.Title), zap.Error(err))
+			report(progress, model.BlogStepIllustrating,
+				fmt.Sprintf("No cover image for %q: %v", article.Title, err),
+				model.AgentNameArticleWriter)
+		}
+	}
+
+	report(progress, model.BlogStepConverting,
+		fmt.Sprintf("Converting %s to HTML", article.Title), model.AgentNameArticleWriter)
+	return article.render()
 }
 
 // writeOne runs the full agent loop for a single brief:

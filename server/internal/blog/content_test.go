@@ -74,6 +74,8 @@ const testDoc = "Kubernetes 1.31 promoted the Gateway API to general availabilit
 type fakeResearcher struct {
 	brief *research.Brief
 	err   error
+	// failAfter, when >0, makes the Nth Research call fail (1-based).
+	failAfter int
 	// requests records what the writer asked to have researched.
 	requests []research.Request
 }
@@ -84,6 +86,9 @@ func (f *fakeResearcher) Research(
 	f.requests = append(f.requests, req)
 	if progress != nil {
 		progress(research.PhaseSearching, "searching")
+	}
+	if f.failAfter > 0 && len(f.requests) >= f.failAfter {
+		return nil, fmt.Errorf("research boom")
 	}
 	if f.err != nil {
 		return nil, f.err
