@@ -208,7 +208,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("OLLAMA_BASE_URL", "http://localhost:11434")
 	viper.SetDefault("OLLAMA_DEFAULT_MODEL", "llama3")
 	// No OLLAMA_JWT_SECRET default on purpose — see the field comment.
-	viper.SetDefault("OLLAMA_TIMEOUT", "10m")
+	viper.SetDefault("OLLAMA_TIMEOUT", "30m")
 	viper.SetDefault("OLLAMA_NUM_CTX", 8192)
 	viper.SetDefault("OPENAI_BASE_URL", "https://api.openai.com")
 	viper.SetDefault("OPENAI_DEFAULT_MODEL", "gpt-4o-mini")

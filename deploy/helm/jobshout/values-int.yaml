@@ -24,6 +24,9 @@ ai:
   enabled: true
   ollamaBaseURL: "https://ollama.workstation.co.uk"
   ollamaModel: "llama3:latest"
+  # Shared workstation Ollama is CPU-heavy and often queued; research/draft
+  # calls were dying at 10m with "awaiting headers". Match imageTimeout headroom.
+  ollamaTimeout: "30m"
   imageBaseURL: "https://images.workstation.co.uk"
   # Qwen-Image-2512, 4-bit on MLX. Covers run at 1536×864 / 28 steps and can
   # take well over 10 minutes on a cold load — keep imageTimeout above that.

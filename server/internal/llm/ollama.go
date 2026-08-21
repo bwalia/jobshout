@@ -65,7 +65,7 @@ func NewOllamaClientWithAuth(baseURL, defaultModel, gatewaySecret string, timeou
 // legitimately sit past three minutes while queued behind other callers. The
 // previous 3m default produced recurring
 // "Client.Timeout exceeded while awaiting headers" failures on draft.
-const defaultOllamaTimeout = 10 * time.Minute
+const defaultOllamaTimeout = 30 * time.Minute
 
 // DefaultOllamaNumCtx is the context window requested when none is configured.
 // It matches Ollama's own historical default, so behaviour is unchanged for
