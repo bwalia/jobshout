@@ -74,9 +74,17 @@ jobs:
           # failed on the cluster with "no match for platform in manifest"
           # (ImagePullBackOff). A docker-container builder is required for
           # --platform cross-builds; create it once (idempotent).
+          #
+          # Provenance/SBOM attestations are off on purpose. buildx otherwise
+          # pushes an OCI index with an unknown/unknown attestation that k3s
+          # containerd rejects with the same "no match for platform" error —
+          # which is what happened to web/server:40e5c53 on int.
           docker buildx inspect jsbuilder >/dev/null 2>&1 \
             || docker buildx create --name jsbuilder --driver docker-container --bootstrap
-          bx() { docker buildx build --builder jsbuilder --platform linux/amd64 --push "$@"; }
+          bx() {
+            docker buildx build --builder jsbuilder --platform linux/amd64 \
+              --provenance=false --sbom=false --push "$@"
+          }
 
           bx -f server/Dockerfile -t "$NS/server:$SHA" -t "$NS/server:latest" server
 
