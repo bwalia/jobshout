@@ -45,3 +45,17 @@ def test_build_env_puts_patches_on_pythonpath(runner, monkeypatch):
     assert env["PYTHONPATH"].endswith("patches") or "/patches:" in env["PYTHONPATH"]
     from pathlib import Path
     assert (Path(env["PYTHONPATH"].split(":")[0]) / "sitecustomize.py").is_file()
+
+
+def test_sitecustomize_extra_data_does_not_recurse():
+    # Patching transformation.json.loads also patches json.loads. The wrapper
+    # must call the original loader, not itself.
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "patches" / "sitecustomize.py"
+    spec = importlib.util.spec_from_file_location("strix_sitecustomize", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert mod._tolerant_loads('{"a":1}{"b":2}') == {"a": 1}
+    assert mod._tolerant_loads('{"ok":true}') == {"ok": True}
