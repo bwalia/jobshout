@@ -12,6 +12,25 @@ import os
 # something that has to happen out of band.
 DEFAULT_MODEL = os.getenv("IMAGE_DEFAULT_MODEL", "z-image-turbo")
 
+# Catalogue entries this service refuses to run, comma-separated. Empty — the
+# default — means everything mflux offers is available.
+#
+# The catalogue answers what mflux can run and what is on this disk; it does not
+# answer what this machine can afford to run. A model whose weights are cached
+# still has to fit in the GPU beside whatever else the workstation is doing, and
+# the largest entries evict the small turbo model that nearly every request
+# actually wants. Naming one here leaves the code that loads it untouched, so
+# the capability stays for a host with room for it, and only becomes unreachable
+# on a host without.
+#
+# Matched on the exact catalogue name, so a family with more than one entry
+# needs each listed: `qwen-image` (mflux's unquantised ~60 GB Qwen/Qwen-Image)
+# and `qwen-image-2512` (the 4-bit repo in models.py) are two different
+# downloads, and disabling either alone leaves the other reachable.
+DISABLED_MODELS = frozenset(
+    name.strip() for name in os.getenv("IMAGE_DISABLED_MODELS", "").split(",") if name.strip()
+)
+
 # Steps when a request names none. Unset — the normal case — means "ask the
 # model", because the right count is a property of the model and not of the
 # service: a turbo model converges in eight steps and a standard one needs
