@@ -125,6 +125,35 @@ say which.
 Because the published repo is already 4-bit, `IMAGE_QUANTIZE` is ignored for it:
 quantising an already-quantised tensor does not make it smaller, only worse.
 
+### Disabling a model on one host
+
+The catalogue answers what mflux can run and what is on this disk. It does not
+answer what *this machine* can afford to run: a model whose weights are cached
+still has to fit in the GPU beside everything else the workstation is doing, and
+the largest entries evict the small turbo model that nearly every request
+actually wants.
+
+`IMAGE_DISABLED_MODELS` names catalogue entries this host refuses:
+
+```bash
+IMAGE_DISABLED_MODELS=qwen-image,qwen-image-2512 ./run.sh
+```
+
+Filtering happens in `catalogue()`, which `is_known()` reads — so a disabled
+model is missing from `GET /api/models` **and** rejected by `POST /api/generate`,
+rather than merely hidden from the picker while still loadable by anyone who
+names it directly.
+
+The code that loads these models is untouched, so the capability stays for a host
+with room for it. Matching is on the exact catalogue name, so a family with more
+than one entry needs each listed: `qwen-image` (mflux's unquantised ~60 GB
+Qwen/Qwen-Image) and `qwen-image-2512` (the 4-bit repo in `models.py`) are two
+different downloads, and disabling either alone leaves the other reachable.
+
+`install-launchd.sh` writes both into the plist by default, because the
+workstation agent runs with `IMAGE_MAX_LOADED_MODELS=1` and a Qwen load there
+costs the next cover request a cold start.
+
 ## Concurrency and memory
 
 Generation is **serialised behind a single lock**. A 27B-parameter image model
@@ -156,6 +185,7 @@ is a good way to run the machine out of memory.
 | `IMAGE_MAX_STEPS`         | `50`            | Ceiling; a huge step count is a denial of service against a single-GPU host. |
 | `IMAGE_MAX_DIMENSION`     | `1536`          | Ceiling on width and height.                 |
 | `IMAGE_QUEUE_TIMEOUT`     | `600`           | Seconds a queued request waits for the lock. |
+| `IMAGE_DISABLED_MODELS`   | *(unset)*       | Comma-separated catalogue names this host refuses to run. |
 | `IMAGE_MAX_LOADED_MODELS` | `1`             | How many models stay resident.               |
 | `IMAGE_QUANTIZE`          | *(unset)*       | 3/4/5/6/8 — quantise on load to cut memory.  |
 | `IMAGE_LOG_LEVEL`         | `info`          | Log level.                                   |
