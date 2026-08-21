@@ -86,7 +86,7 @@ exists if that one did not register.
 | `IMAGE_BASE_URL`      | *(unset)*       | Workstation image service. Unset disables it. |
 | `IMAGE_DEFAULT_MODEL` | `z-image-turbo` | Model when a request names none.               |
 | `IMAGE_JWT_SECRET`    | *(unset)*       | Gateway secret. Unset means unsigned requests. |
-| `IMAGE_TIMEOUT`       | `10m`           | Bounds one generation.                         |
+| `IMAGE_TIMEOUT`       | `30m`           | Bounds one generation.                         |
 | `IMAGE_OPENAI_MODEL`  | `gpt-image-1`   | Hosted image model.                            |
 | `MINIO_BUCKET_IMAGES` | `images`        | Where generated PNGs are stored.               |
 | `BLOG_COVER_IMAGES`   | `false`         | Whether every article run draws a cover.       |

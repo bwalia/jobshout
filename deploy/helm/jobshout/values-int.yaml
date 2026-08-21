@@ -25,13 +25,11 @@ ai:
   ollamaBaseURL: "https://ollama.workstation.co.uk"
   ollamaModel: "llama3:latest"
   imageBaseURL: "https://images.workstation.co.uk"
-  # Qwen-Image-2512, 4-bit on MLX. It draws a better cover than z-image-turbo
-  # and takes about three and a half minutes to do it against roughly forty
-  # seconds — twenty diffusion steps at ~9s each rather than eight fast ones.
-  # That is comfortably inside imageTimeout, and a cover is drawn once per
-  # article rather than per request, so the wait is paid where it is affordable.
+  # Qwen-Image-2512, 4-bit on MLX. Covers run at 1536×864 / 28 steps and can
+  # take well over 10 minutes on a cold load — keep imageTimeout above that.
   # z-image-turbo remains in the catalogue for anyone who wants the fast one.
   imageModel: "qwen-image-2512"
+  imageTimeout: "30m"
   # On. images.workstation.co.uk is registered on the edge behind the JWT
   # gateway, and a 1024x576 image has been drawn through that whole path — edge,
   # gateway, workstation GPU. int is the ring where a cover is worth watching

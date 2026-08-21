@@ -131,7 +131,8 @@ ai:
   imageProvider: mflux
   imageBaseURL: ""
   imageModel: "z-image-turbo"
-  imageTimeout: "10m"
+  # Covers at 1536×864 / 28 steps need headroom past a cold qwen load.
+  imageTimeout: "30m"
   imageOpenaiModel: "gpt-image-1"
   imageBucket: "images"
   # Off by default: a cover costs roughly 25 seconds of a single shared GPU per
