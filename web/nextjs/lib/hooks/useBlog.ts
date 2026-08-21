@@ -12,6 +12,7 @@ import {
   getBlogRuns,
   publishBlogRun,
   retryBlogRun,
+  cancelBlogRun,
   deleteBlogRun,
 } from "@/lib/api/blog";
 import { apiErrorMessage } from "@/lib/api/client";
@@ -115,6 +116,19 @@ export function useRetryBlogRun() {
       toast.success("Article Writer is trying again");
     },
     onError: (e) => toast.error(apiErrorMessage(e, "Failed to retry")),
+  });
+}
+
+export function useCancelBlogRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => cancelBlogRun(id),
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: blogKeys.detail(id) });
+      qc.invalidateQueries({ queryKey: blogKeys.lists() });
+      toast.success("Run cancelled");
+    },
+    onError: (e) => toast.error(apiErrorMessage(e, "Failed to cancel")),
   });
 }
 

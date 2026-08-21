@@ -85,6 +85,9 @@ func (r *Runner) writeArticles(
 	seenSlugs := map[string]int{}
 
 	for i, brief := range briefs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		label := fmt.Sprintf("%d/%d — %s", i+1, len(briefs), brief.Topic)
 
 		article, err := r.writeOne(ctx, req, brief, label, progress)

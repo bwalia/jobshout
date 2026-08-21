@@ -128,7 +128,28 @@ func (h *BlogHandler) Retry(w http.ResponseWriter, r *http.Request) {
 	RespondJSON(w, http.StatusAccepted, run)
 }
 
-// Config handles GET /api/v1/blogs/config — what the UI needs to decide which
+// Cancel handles POST /api/v1/blogs/runs/{runID}/cancel — stops a run that is
+// still writing. Returns the failed run; poll is not required.
+func (h *BlogHandler) Cancel(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "runID"))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid run ID")
+		return
+	}
+	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid org_id in token")
+		return
+	}
+
+	run, err := h.svc.Cancel(r.Context(), orgID, id)
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	RespondJSON(w, http.StatusOK, run)
+}
+
 // actions to offer.
 func (h *BlogHandler) Config(w http.ResponseWriter, r *http.Request) {
 	RespondJSON(w, http.StatusOK, map[string]any{

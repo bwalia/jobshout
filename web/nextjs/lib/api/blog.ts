@@ -47,6 +47,12 @@ export async function retryBlogRun(id: string): Promise<BlogRun> {
   return data;
 }
 
+/** Stops a run that is still writing. The run is marked failed so it can be retried or deleted. */
+export async function cancelBlogRun(id: string): Promise<BlogRun> {
+  const { data } = await apiClient.post<BlogRun>(`/blogs/runs/${id}/cancel`);
+  return data;
+}
+
 /** Forgets a run and its articles. Drafts already in the CMS are untouched. */
 export async function deleteBlogRun(id: string): Promise<void> {
   await apiClient.delete(`/blogs/runs/${id}`);

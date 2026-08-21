@@ -823,6 +823,7 @@ func main() {
 					r.Get("/articles", blogHandler.ListArticles)
 					r.Post("/publish", blogHandler.Publish)
 					r.Post("/retry", blogHandler.Retry)
+					r.Post("/cancel", blogHandler.Cancel)
 					r.Delete("/", blogHandler.Delete)
 				})
 				r.Get("/articles/{articleID}", blogHandler.GetArticle)
@@ -1143,6 +1144,13 @@ func main() {
 	<-quit
 
 	logger.Info("shutting down server...")
+	// Fail in-flight article runs before the process dies, otherwise they stay
+	// `running` forever and the UI cannot Retry or Delete them. stopping is
+	// set first so a Generate that is still inside its HTTP handler cannot
+	// start a new goroutine after we have cancelled the ones we know about.
+	blogSvc.InterruptAll(nil)
+	cancel()
+
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 

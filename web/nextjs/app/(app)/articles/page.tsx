@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
+  Ban,
   CheckCircle2,
   Clock,
   FileText,
@@ -16,6 +17,7 @@ import {
 } from "lucide-react";
 import {
   useBlogRuns,
+  useCancelBlogRun,
   useDeleteBlogRun,
   useRetryBlogRun,
 } from "@/lib/hooks/useBlog";
@@ -74,6 +76,7 @@ function currentStepLabel(run: BlogRun): string | null {
 function RunCard({ run }: { run: BlogRun }) {
   const step = currentStepLabel(run);
   const retry = useRetryBlogRun();
+  const cancel = useCancelBlogRun();
   const remove = useDeleteBlogRun();
 
   // The whole card is a link, so an action inside it has to claim the click
@@ -139,8 +142,27 @@ function RunCard({ run }: { run: BlogRun }) {
         )}
       </div>
 
-      {/* A run that is still writing offers neither: the server refuses to
-          delete one mid-flight, and there is nothing yet to retry. */}
+      {/* A run that is still writing can be cancelled. Retry and delete wait
+          until it is no longer in flight. */}
+      {(run.status === "running" || run.status === "pending") && (
+        <div className="mt-3 flex items-center gap-2 border-t border-border pt-3">
+          <button
+            type="button"
+            disabled={cancel.isPending}
+            onClick={(e) =>
+              act(e, () => {
+                if (confirm("Stop this run? Work in progress will be lost.")) {
+                  cancel.mutate(run.id);
+                }
+              })
+            }
+            className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-2xs text-muted-foreground transition-colors hover:border-destructive/40 hover:text-destructive disabled:opacity-50"
+          >
+            <Ban className="h-3 w-3" />
+            {cancel.isPending ? "Stopping..." : "Cancel"}
+          </button>
+        </div>
+      )}
       {run.status !== "running" && run.status !== "pending" && (
         <div className="mt-3 flex items-center gap-2 border-t border-border pt-3">
           {run.status === "failed" && (
