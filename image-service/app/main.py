@@ -10,7 +10,7 @@ import random
 from fastapi import Depends, FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 
-from app import config, models
+from app import config
 from app.auth import require_auth
 from app.generator import GenerationBusy, UnknownModel, generator
 
@@ -90,7 +90,10 @@ async def root():
 @app.get("/api/models", response_model=ModelsResponse)
 async def list_models(caller: str = Depends(require_auth)):
     """The catalogue, with local availability per model."""
-    entries = await asyncio.to_thread(models.catalogue)
+    # Through the generator so the mflux import shares the dedicated MLX
+    # thread — same affinity rule as generate, otherwise listing models can
+    # initialise Metal on a random pool worker.
+    entries = await asyncio.to_thread(generator.catalogue)
     return ModelsResponse(
         models=[ModelEntry(**vars(m)) for m in entries],
         default=config.DEFAULT_MODEL,
@@ -140,9 +143,11 @@ async def generate(req: GenerateRequest, caller: str = Depends(require_auth)):
     )
 
     try:
-        # to_thread because generation is a long synchronous CPU/GPU call.
-        # Running it on the event loop would block every other request,
-        # including /health, for its whole duration.
+        # Off the event loop so /health stays responsive during a long
+        # generate. generator.generate itself re-dispatches MLX load/infer
+        # onto a single dedicated worker thread — required because MLX GPU
+        # streams are thread-local and asyncio.to_thread's default pool
+        # would otherwise reuse a cached model from the wrong thread.
         result = await asyncio.to_thread(
             generator.generate,
             prompt=req.prompt,
