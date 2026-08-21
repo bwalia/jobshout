@@ -11,6 +11,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from app import config
+
 logger = logging.getLogger(__name__)
 
 # Models that take an input image rather than only a prompt (editing, upscaling,
@@ -144,11 +146,19 @@ def catalogue() -> list[ImageModel]:
 
     Downloaded models sort first, then turbo models, then by name — so the entry
     a caller most likely wants is the one at the top of the list.
+
+    Entries named in IMAGE_DISABLED_MODELS are omitted. Filtering here rather
+    than at the request handler is what makes the setting airtight: `is_known()`
+    reads this list, so a disabled model is missing from GET /api/models *and*
+    rejected by POST /api/generate, instead of being merely hidden from the
+    picker while still loadable by anyone who names it directly.
     """
     from mflux.models.common.config.model_config import AVAILABLE_MODELS
 
     out: list[ImageModel] = []
     for name, cfg in AVAILABLE_MODELS.items():
+        if name in config.DISABLED_MODELS:
+            continue
         if any(marker in name for marker in _NON_TEXT_TO_IMAGE_MARKERS):
             continue
         repo = cfg.model_name
@@ -172,6 +182,7 @@ def catalogue() -> list[ImageModel]:
             default_steps=custom.steps,
         )
         for custom in _CUSTOM_MODELS
+        if custom.name not in config.DISABLED_MODELS
     )
 
     out.sort(key=lambda m: (not m.downloaded, not m.turbo, m.name))

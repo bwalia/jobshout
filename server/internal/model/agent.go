@@ -50,6 +50,9 @@ const (
 	// come back with sources you have actually read" is a capability worth
 	// having on its own, and it appears on the board in its own right.
 	BuiltinResearcher = "researcher"
+	// BuiltinPentester is the Penetration Testing Agent: autonomous security testing
+	// powered by Strix. Tests live APIs, applications, and codebases for vulnerabilities.
+	BuiltinPentester = "pentester"
 )
 
 // EngineConfigStructuredModel is the EngineConfig key holding the Article
