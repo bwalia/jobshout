@@ -1,8 +1,8 @@
 name: Deploy JobShout
 
+# Compose stack on the self-hosted runner. Not the k3s path — do not run on
+# every master push (it contended with deploy-k3s buildx on the same Mac).
 on:
-  push:
-    branches: [master]
   workflow_dispatch:
 
 concurrency:
@@ -158,6 +158,7 @@ jobs:
         run: |
           set -e
           echo "Waiting up to 3 minutes for services to become healthy..."
+          ok=0
           for i in $(seq 1 36); do
             unhealthy="$(docker compose -p jobshout ps --format json \
               | (command -v jq >/dev/null && jq -r 'select(.Health != "" and .Health != "healthy") | .Name' \
@@ -165,12 +166,17 @@ jobs:
               || true)"
             if [ -z "$unhealthy" ]; then
               echo "All healthchecked services are healthy."
+              ok=1
               break
             fi
             echo "Still waiting on: $unhealthy"
             sleep 5
           done
           docker compose -p jobshout ps
+          if [ "$ok" != 1 ]; then
+            echo "::error::timed out waiting for compose healthchecks"
+            exit 1
+          fi
 
       - name: Smoke-test exposed ports
         run: |

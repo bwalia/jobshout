@@ -6,6 +6,9 @@ name: Build & deploy JobShout to k3s
 # ring-exec namespace (git-clone this repo at the seeded tag + helm upgrade into
 # the ring's namespace) — the DTAP control plane owns the deploy, not this CI.
 #
+# This workflow is green only after Ring Promoter reports the seeded version
+# healthy on the target ring — not when the seed HTTP call is merely accepted.
+#
 # Continuous deployment: every push to master builds the images and seeds the
 # int ring. Promotion int -> test -> acc -> prod is done from the Ring Promoter
 # UI (rp.workstation.co.uk/?app=jobshout). workflow_dispatch can build-only, or
@@ -50,6 +53,9 @@ jobs:
   build:
     name: Build & push images
     runs-on: self-hosted
+    timeout-minutes: 60
+    outputs:
+      sha: ${{ steps.tag.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
 
@@ -97,12 +103,68 @@ jobs:
           bx -f python-sidecar/Dockerfile \
             -t "$NS/python-sidecar:$SHA" -t "$NS/python-sidecar:latest" python-sidecar
 
+      - name: Assert pushed images are linux/amd64
+        if: ${{ env.DEPLOYMENT_TYPE == 'build' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+        run: |
+          set -euo pipefail
+          SHA="${{ steps.tag.outputs.sha }}"
+          NS="$IMAGE_REGISTRY/$IMAGE_NAMESPACE"
+
+          assert_amd64() {
+            local img="$1"
+            echo "Inspecting $img"
+            docker buildx imagetools inspect "$img"
+            python3 - "$img" <<'PY'
+          import json, subprocess, sys
+          img = sys.argv[1]
+          raw = subprocess.check_output(
+              ["docker", "buildx", "imagetools", "inspect", "--raw", img]
+          )
+          m = json.loads(raw)
+          mt = m.get("mediaType") or ""
+          def fail(msg):
+              print(f"::error::{img}: {msg}", file=sys.stderr)
+              sys.exit(1)
+          if "index" in mt or "manifest.list" in mt:
+              plats = []
+              for e in m.get("manifests") or []:
+                  p = e.get("platform") or {}
+                  os_, arch = p.get("os") or "", p.get("architecture") or ""
+                  if os_ == "unknown" or arch == "unknown":
+                      fail(f"attestation/unknown platform in index: {p}")
+                  plats.append(f"{os_}/{arch}")
+              if plats != ["linux/amd64"]:
+                  fail(f"expected a single linux/amd64 manifest, got {plats}")
+          text = subprocess.check_output(
+              ["docker", "buildx", "imagetools", "inspect", img], text=True
+          )
+          if "linux/amd64" not in text and "linux/amd64" not in json.dumps(m):
+              fail("missing linux/amd64 in inspect output")
+          if "linux/arm64" in text or "linux/arm64" in json.dumps(m):
+              fail("image includes linux/arm64")
+          print(f"OK {img} is linux/amd64")
+          PY
+          }
+
+          assert_amd64 "$NS/server:$SHA"
+          assert_amd64 "$NS/web:$SHA"
+          assert_amd64 "$NS/python-sidecar:$SHA"
+
+          echo "Runtime arch smoke (uname -m must be x86_64 under --platform=linux/amd64)"
+          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh "$NS/server:$SHA" \
+            -c 'test -x /app/jobshout-server && uname -m | grep -qx x86_64'
+          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh "$NS/web:$SHA" \
+            -c 'uname -m | grep -qx x86_64'
+          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh "$NS/python-sidecar:$SHA" \
+            -c 'uname -m | grep -qx x86_64'
+
   deploy:
     name: Seed Ring Promoter (${{ github.event.inputs.TARGET_ENV || 'int' }})
     needs: [build]
     runs-on: self-hosted
+    timeout-minutes: 25
     steps:
-      - name: Seed Ring Promoter — RP runs the k8sjob deploy
+      - name: Seed Ring Promoter and wait until the ring is healthy
         if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
         env:
           RP_API_TOKEN: ${{ secrets.RP_API_TOKEN }}
@@ -110,7 +172,7 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${{ github.event.inputs.IMAGE_TAG }}"
-          [ -z "$TAG" ] && TAG="${GITHUB_SHA::7}"
+          [ -z "$TAG" ] && TAG="${{ needs.build.outputs.sha }}"
           RP="${RP_URL:-https://rp.workstation.co.uk}"
           if [ -z "${RP_API_TOKEN:-}" ]; then
             echo "::error::RP_API_TOKEN is not set — cannot seed Ring Promoter."
@@ -128,6 +190,69 @@ jobs:
             -d "$(printf '{"ring":"%s","version":"%s"}' "$TARGET_ENV" "$TAG")" || echo 000)
           echo "seed -> HTTP ${code} :: $(cat /tmp/seed.out)"
           case "${code}" in
-            200|202) echo "Seeded — Ring Promoter is running the deploy. Track: ${RP}/?app=jobshout" ;;
+            200|202) ;;
             *) echo "::error::Ring Promoter seed failed (HTTP ${code})"; exit 1 ;;
           esac
+
+          JOB_ID=$(python3 -c 'import json,sys; print(json.load(open("/tmp/seed.out")).get("job_id") or "")')
+          if [ -z "$JOB_ID" ]; then
+            echo "::error::seed response had no job_id — cannot wait for rollout"
+            exit 1
+          fi
+          echo "Waiting for Ring Promoter job ${JOB_ID} (version ${TAG})…"
+          echo "Track: ${RP}/?app=jobshout"
+
+          python3 - "$RP" "$RP_API_TOKEN" "$JOB_ID" "$TAG" <<'PY'
+          import json, sys, time, urllib.error, urllib.request
+
+          rp, token, job_id, tag = sys.argv[1:5]
+          url = f"{rp}/api/apps/jobshout/jobs/{job_id}"
+          deadline = time.time() + 15 * 60
+          last = None
+
+          def dump_logs(body):
+              for step in body.get("steps") or []:
+                  print(f"--- step {step.get('id')} status={step.get('status')} ---")
+                  for line in step.get("logs") or []:
+                      print(line)
+
+          while time.time() < deadline:
+              req = urllib.request.Request(
+                  url, headers={"Authorization": f"Bearer {token}"}
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as resp:
+                      body = json.load(resp)
+              except urllib.error.HTTPError as e:
+                  print(f"::warning::job poll HTTP {e.code}")
+                  time.sleep(15)
+                  continue
+              status = (body.get("status") or "").lower()
+              if body != last:
+                  print(f"RP job {job_id} status={status}")
+                  last = {k: body.get(k) for k in ("status", "finished_at")}
+              if status == "success":
+                  result = body.get("result") or {}
+                  state = result.get("state") or {}
+                  current = state.get("current_version") or ""
+                  dump_logs(body)
+                  if result.get("success") is False:
+                      print("::error::RP job marked success but result.success is false")
+                      sys.exit(1)
+                  if current and current != tag:
+                      print(f"::error::int current_version={current} != seeded {tag}")
+                      sys.exit(1)
+                  if not current:
+                      print("::warning::RP did not return current_version; trusting job success")
+                  print(f"Deployed {tag} and healthy (current_version={current or tag})")
+                  sys.exit(0)
+              if status in ("failed", "failure", "error"):
+                  dump_logs(body)
+                  msg = (body.get("result") or {}).get("message") or status
+                  print(f"::error::Ring Promoter deploy failed: {msg}")
+                  sys.exit(1)
+              time.sleep(15)
+
+          print("::error::timed out waiting for Ring Promoter job (15m)")
+          sys.exit(1)
+          PY

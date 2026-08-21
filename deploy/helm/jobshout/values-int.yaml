@@ -2,8 +2,8 @@ env: int
 host: int.jobshout.co.uk
 logLevel: debug
 
-image:
-  tag: 89f91ac  # Pinned: working web image after jobshout-web build regression (beba970)
+# image.tag is injected by Ring Promoter (--set image.tag=<sha>). Do not pin a
+# stale SHA here; a forgotten --set would roll int back to that commit.
 
 # Cluster-side secret holding OPSAPI_API_KEY (and any other real credential)
 # for this ring. Only the name lives here; create it with:

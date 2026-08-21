@@ -1,4 +1,8 @@
-FROM python:3.12-slim
+# Pin TARGETPLATFORM so buildx on an arm64 Mac cannot tag an arm64 python
+# image as linux/amd64 (same class of bug as jobshout-web / jobshout-server).
+FROM --platform=$TARGETPLATFORM python:3.12-slim
+ARG TARGETARCH
+RUN if [ "$TARGETARCH" = "amd64" ]; then uname -m | grep -qx x86_64; fi
 
 WORKDIR /app
 
