@@ -91,8 +91,17 @@ interface SidebarProps {
   onToggle: () => void;
 }
 
+/** The most specific nav href that matches this path — so /agents/pentest
+ *  highlights Security Tester, not Agents. */
+function activeHref(pathname: string): string | undefined {
+  return NAV_SECTIONS.flatMap((s) => s.items.map((i) => i.href))
+    .filter((href) => pathname === href || pathname.startsWith(`${href}/`))
+    .sort((a, b) => b.length - a.length)[0];
+}
+
 export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const pathname = usePathname();
+  const current = activeHref(pathname);
 
   return (
     <aside
@@ -137,8 +146,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             )}
             <ul className="space-y-0.5">
               {section.items.map(({ label, href, icon: Icon }) => {
-                const isActive =
-                  pathname === href || pathname.startsWith(`${href}/`);
+                const isActive = href === current;
 
                 return (
                   <li key={href}>

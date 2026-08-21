@@ -50,6 +50,12 @@ var (
 	// problem, not a scan problem: retrying with the same secret produces the
 	// same verdict.
 	ErrUnauthorized = errors.New("strix: pentest gateway rejected the request")
+
+	// ErrGateway is the edge in front of the service returning 502/504 (or an
+	// HTML 503) — typically WSL Proxy while the Mac is still scanning. Transient:
+	// the reconciler must keep polling, not fail the run after a handful of
+	// flaps. Distinct from ErrBusy, which is the FastAPI queue being full.
+	ErrGateway = errors.New("strix: edge gateway temporarily unavailable")
 )
 
 // Finding mirrors the service's FindingOut, in the field names the Go side
@@ -356,7 +362,14 @@ func (c *Client) do(ctx context.Context, method, path string, body any) ([]byte,
 // reconciler branches on.
 func classifyError(status int, body []byte) error {
 	switch status {
+	case http.StatusBadGateway, http.StatusGatewayTimeout:
+		return fmt.Errorf("%w (status %d): %s", ErrGateway, status, gatewaySnippet(body))
 	case http.StatusServiceUnavailable:
+		// FastAPI's queue-full 503 is JSON. An HTML 503 is the edge in front of
+		// it (WSL Proxy), which is a flap, not a full queue.
+		if isGatewayBody(body) {
+			return fmt.Errorf("%w (status 503): %s", ErrGateway, gatewaySnippet(body))
+		}
 		return fmt.Errorf("%w: %s", ErrBusy, snippet(body))
 	case http.StatusUnauthorized:
 		return fmt.Errorf(
@@ -380,8 +393,29 @@ func classifyError(status int, body []byte) error {
 		}
 		return fmt.Errorf("%w: %s", ErrOutOfScope, snippet(body))
 	default:
+		if isGatewayBody(body) {
+			return fmt.Errorf("%w (status %d): %s", ErrGateway, status, gatewaySnippet(body))
+		}
 		return fmt.Errorf("strix: pentest service returned %d: %s", status, snippet(body))
 	}
+}
+
+// isGatewayBody is true when the response is an HTML error page from the edge
+// (WSL Proxy / nginx) rather than JSON from FastAPI.
+func isGatewayBody(body []byte) bool {
+	lower := strings.ToLower(string(body))
+	return strings.Contains(lower, "wsl proxy") ||
+		strings.Contains(lower, "<!doctype html") ||
+		strings.Contains(lower, "<html")
+}
+
+// gatewaySnippet keeps HTML error pages out of the UI. Operators need to know
+// it was the edge, not a 240-character dump of <!DOCTYPE html>.
+func gatewaySnippet(body []byte) string {
+	if isGatewayBody(body) {
+		return "WSL Proxy / edge returned an HTML error page (the scanner on the workstation is likely still running)"
+	}
+	return snippet(body)
 }
 
 // isAuthBody distinguishes an auth rejection from a scope rejection when both
