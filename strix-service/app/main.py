@@ -43,6 +43,11 @@ async def lifespan(app: FastAPI):
             "STRIX_TARGET_ALLOWLIST is empty — every scan request will be refused. "
             "This is the safe default, not a malfunction."
         )
+    elif any(r.kind == "any" for r in scope.RULES):
+        logger.warning(
+            "STRIX_TARGET_ALLOWLIST includes * — any public host may be scanned. "
+            "Private / loopback / metadata addresses are still refused unless named."
+        )
     logger.info(
         "pentest service ready: llm=%s api_base=%s concurrency=%d allowlist=%d rule(s) auth=%s",
         config.LLM, config.LLM_API_BASE, config.MAX_CONCURRENT,

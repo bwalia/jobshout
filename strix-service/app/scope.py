@@ -71,7 +71,7 @@ class Target:
 
 @dataclass(frozen=True)
 class Rule:
-    kind: str  # "host" | "wildcard" | "network" | "url"
+    kind: str  # "any" | "host" | "wildcard" | "network" | "url"
     host: str = ""
     port: int | None = None
     path: str = ""
@@ -87,6 +87,10 @@ def parse_rules(raw: str) -> list[Rule]:
     A single typo in a comma-separated list must not stop the service booting —
     but it must also not silently widen scope, and dropping an entry only ever
     narrows it.
+
+    A lone ``*`` means any public host (private / loopback / metadata still need
+    an explicit network rule or STRIX_ALLOW_PRIVATE_TARGETS). Empty still denies
+    everything — open scanning is opt-in.
     """
     rules: list[Rule] = []
     for entry in (e.strip() for e in raw.split(",")):
@@ -100,6 +104,9 @@ def parse_rules(raw: str) -> list[Rule]:
 
 
 def _parse_rule(entry: str) -> Rule:
+    if entry == "*":
+        return Rule(kind="any", source=entry)
+
     # CIDR or bare IP first: "10.0.0.0/24" and "10.0.0.5" are unambiguous, and
     # trying them before URL parsing avoids urlsplit's opinions about colons.
     try:
@@ -210,6 +217,8 @@ def _resolve(host: str) -> tuple[str, ...]:
 
 
 def _host_matches(target: Target, rule: Rule) -> bool:
+    if rule.kind == "any":
+        return True
     if rule.kind == "host":
         if rule.port is not None and rule.port != target.port:
             return False
@@ -337,5 +346,5 @@ def describe() -> dict:
         "allowlist": [rule.source for rule in RULES],
         "rule_count": len(RULES),
         "allow_private_targets": config.ALLOW_PRIVATE_TARGETS,
-        "scans_anything": False,
+        "scans_anything": any(rule.kind == "any" for rule in RULES),
     }
