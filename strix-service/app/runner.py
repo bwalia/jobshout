@@ -184,6 +184,11 @@ class Runner:
         # endpoint instead of being pointed at an empty string.
         if config.LLM_API_BASE:
             env["LLM_API_BASE"] = config.LLM_API_BASE
+        # sitecustomize.py: qwen3-coder concatenates tool-call JSON; LiteLLM
+        # 1.97 json.loads that and kills the scan. See patches/sitecustomize.py.
+        patch_dir = str(Path(__file__).resolve().parent.parent / "patches")
+        existing = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = patch_dir if not existing else patch_dir + os.pathsep + existing
         return env
 
     async def _execute(self, run: Run) -> None:
