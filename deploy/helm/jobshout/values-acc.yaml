@@ -7,7 +7,7 @@ ai:
   ollamaBaseURL: "https://ollama.workstation.co.uk"
   ollamaModel: "llama3:latest"
   imageBaseURL: "https://images.workstation.co.uk"
-  imageModel: "qwen-image-2512"
+  imageModel: "z-image-turbo"
   blogCoverImages: false
 
 api:

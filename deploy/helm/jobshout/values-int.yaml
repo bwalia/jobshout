@@ -28,15 +28,12 @@ ai:
   # calls were dying at 10m with "awaiting headers". Match imageTimeout headroom.
   ollamaTimeout: "30m"
   imageBaseURL: "https://images.workstation.co.uk"
-  # Qwen-Image-2512, 4-bit on MLX. Covers run at 1536×864 / 28 steps and can
-  # take well over 10 minutes on a cold load — keep imageTimeout above that.
-  # z-image-turbo remains in the catalogue for anyone who wants the fast one.
-  imageModel: "qwen-image-2512"
+  # Blog covers use z-image-turbo (dark editorial template, ~8 steps, ~1 min).
+  imageModel: "z-image-turbo"
   imageTimeout: "30m"
   # On. images.workstation.co.uk is registered on the edge behind the JWT
-  # gateway, and a 1024x576 image has been drawn through that whole path — edge,
-  # gateway, workstation GPU. int is the ring where a cover is worth watching
-  # before the rest follow.
+  # gateway. int is the ring where a cover is worth watching before the rest
+  # follow.
   blogCoverImages: true
 
 api:
