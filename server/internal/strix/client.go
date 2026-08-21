@@ -16,11 +16,12 @@ import (
 )
 
 type Client struct {
-	strixPath string
-	runsDir   string
-	llmKey    string
-	llmModel  string
-	logger    *zap.Logger
+	strixPath  string
+	runsDir    string
+	llmKey     string
+	llmModel   string
+	llmAPIBase string
+	logger     *zap.Logger
 }
 
 type RunResult struct {
@@ -63,7 +64,7 @@ type RunJSON struct {
 	ExecutedAtRaw string `json:"executed_at"`
 }
 
-func NewClient(strixPath, runsDir, llmModel, llmKey string, logger *zap.Logger) *Client {
+func NewClient(strixPath, runsDir, llmModel, llmKey, llmAPIBase string, logger *zap.Logger) *Client {
 	if strixPath == "" {
 		strixPath = "strix"
 	}
@@ -74,11 +75,12 @@ func NewClient(strixPath, runsDir, llmModel, llmKey string, logger *zap.Logger) 
 		logger = zap.NewNop()
 	}
 	return &Client{
-		strixPath: strixPath,
-		runsDir:   runsDir,
-		llmModel:  llmModel,
-		llmKey:    llmKey,
-		logger:    logger,
+		strixPath:  strixPath,
+		runsDir:    runsDir,
+		llmModel:   llmModel,
+		llmKey:     llmKey,
+		llmAPIBase: llmAPIBase,
+		logger:     logger,
 	}
 }
 
@@ -106,6 +108,12 @@ func (c *Client) Scan(ctx context.Context, target, scanMode string, maxBudget in
 	env := os.Environ()
 	env = append(env, fmt.Sprintf("STRIX_LLM=%s", c.llmModel))
 	env = append(env, fmt.Sprintf("LLM_API_KEY=%s", c.llmKey))
+	// LLM_API_BASE points Strix (via LiteLLM) at a local model server — an
+	// Ollama / LMStudio endpoint — instead of a hosted provider. Only set when
+	// configured, so hosted providers keep their own default endpoint.
+	if c.llmAPIBase != "" {
+		env = append(env, fmt.Sprintf("LLM_API_BASE=%s", c.llmAPIBase))
+	}
 	cmd.Env = env
 
 	// Run command
