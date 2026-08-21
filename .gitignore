@@ -48,7 +48,12 @@ coverage/
 *.cover
 *.prof
 
-# Python bytecode and virtualenvs (python-sidecar/, image-service/)
+# Python bytecode and virtualenvs (python-sidecar/, image-service/, strix-service/)
 __pycache__/
 *.pyc
 .venv/
+
+# Pentest scan artifacts. Strix output can contain credentials it discovered, so
+# it is deliberately never committed — see strix-service/README.md on retention.
+strix-service/strix_runs/
+strix_runs/

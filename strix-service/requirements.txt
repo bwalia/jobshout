@@ -1,0 +1,6 @@
+# Runtime dependencies. Unlike image-service this has no heavyweight environment
+# to borrow — Strix is invoked as a subprocess, not imported — so the service
+# gets its own small virtualenv.
+fastapi>=0.115,<0.116
+uvicorn[standard]>=0.30,<0.31
+PyJWT>=2.9,<3
