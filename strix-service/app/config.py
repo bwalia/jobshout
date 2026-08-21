@@ -48,6 +48,8 @@ LLM_API_KEY = os.getenv("STRIX_LLM_API_KEY", "")
 # ─── Scope ──────────────────────────────────────────────────────────────────
 
 # Comma-separated hosts, wildcards, CIDRs or URL prefixes that may be scanned.
+# A lone "*" allows any public host (private ranges still need an explicit
+# network rule or STRIX_ALLOW_PRIVATE_TARGETS).
 #
 # EMPTY MEANS DENY EVERYTHING. This is the one setting that must be wrong in the
 # safe direction: an unconfigured scanner that scans nothing is a non-event,
