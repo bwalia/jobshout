@@ -156,28 +156,36 @@ func TestCoverPrompt_NamesASubjectAndPinsTheStyle(t *testing.T) {
 	if !strings.Contains(got, "kubernetes networking") {
 		t.Errorf("prompt lost the topic subject: %q", got)
 	}
-	// The title is context the model must not letter onto the image.
-	if !strings.Contains(got, "What the Gateway API Actually Changes") {
-		t.Errorf("prompt lost the headline context: %q", got)
+	// Short title lettering is intentional for z-image-turbo dark covers.
+	if !strings.Contains(got, `"WHAT THE GATEWAY API ACTUALLY"`) {
+		t.Errorf("prompt should letter a ≤5-word title: %q", got)
 	}
-	if !strings.Contains(got, "never draw it") && !strings.Contains(got, "Strictly no text") {
-		t.Errorf("prompt should forbid lettering: %q", got)
+	if !strings.Contains(got, "charcoal navy") || !strings.Contains(got, "dark-mode") {
+		t.Errorf("prompt should pin the dark cover template: %q", got)
 	}
-	if !strings.Contains(got, "flat vector editorial illustration") {
-		t.Errorf("prompt lost the house style: %q", got)
-	}
-	if !strings.Contains(got, "crisp edges") || strings.Contains(got, "paper texture") {
-		t.Errorf("prompt should ask for crisp edges without paper texture: %q", got)
+	if !strings.Contains(strings.ToLower(got), "flat vector") {
+		t.Errorf("prompt lost the flat vector style: %q", got)
 	}
 	if !strings.Contains(got, "16:9") {
 		t.Errorf("prompt should ask for a wide cover: %q", got)
 	}
+	if !strings.Contains(got, "LEFT") {
+		t.Errorf("prompt should place title text on the left: %q", got)
+	}
 
-	// An article with no title falls back to the topic rather than asking for
-	// an illustration of nothing.
 	fallback := coverPrompt("", "kubernetes networking")
 	if !strings.Contains(fallback, "kubernetes networking") {
 		t.Errorf("empty title should fall back to the topic: %q", fallback)
+	}
+	if !strings.Contains(fallback, `"KUBERNETES NETWORKING"`) {
+		t.Errorf("empty title should letter the topic as the title: %q", fallback)
+	}
+}
+
+func TestCoverTitleText_CapsAtFiveWords(t *testing.T) {
+	got := coverTitleText("What the Gateway API Actually Changes Today", "ignored")
+	if got != "WHAT THE GATEWAY API ACTUALLY" {
+		t.Errorf("title text = %q", got)
 	}
 }
 

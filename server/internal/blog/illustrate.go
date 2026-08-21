@@ -52,10 +52,9 @@ const (
 	coverHeight = 864
 )
 
-// coverSteps is how many denoising passes a cover gets. Above the service
-// default of 20; still under IMAGE_MAX_STEPS (50). More steps refine edges
-// without switching to a heavier quantized build.
-const coverSteps = 28
+// coverSteps is how many denoising passes a cover gets. z-image-turbo is a
+// few-step distilled model; eight matches its catalogue default.
+const coverSteps = 8
 
 // inlineWidth and inlineHeight are 3:2 — a body illustration sits in the text
 // column rather than spanning a hero area, so it wants less extreme a shape.
@@ -79,29 +78,67 @@ const maxInlineIllustrations = 3
 // block whose body is a description rather than code.
 var illustrationFence = regexp.MustCompile("(?s)```illustration[ \t]*\r?\n(.*?)```")
 
-// coverPromptStyle is the visual house style pinned onto every cover prompt.
-//
-// Covers have to look like a set. Left to invent its own style, the same model
-// produces a photograph for one article and a cartoon for the next.
-const coverPromptStyle = "refined flat vector editorial illustration, crisp edges, clean geometric shapes, sharp contrast, limited palette of warm amber, cream and deep ink blue-black, generous negative space, high clarity, no paper grain or soft blur"
+// coverPromptStyle is the visual house style pinned onto inline body
+// illustrations (not the dark cover template). Covers have to look like a set;
+// left to invent its own style, the same model produces a photograph for one
+// article and a cartoon for the next.
+const coverPromptStyle = "refined flat vector editorial illustration, crisp edges, clean geometric shapes, sharp contrast, teal and coral accents, high clarity"
 
-// coverModel is the only model blog covers may use. Quality matters more than
-// speed here: a cover is drawn once per article. Transient upstream failures
-// are retried against this same model rather than silently downgraded.
-const coverModel = "qwen-image-2512"
+// coverModel is the only model blog covers may use. z-image-turbo is the
+// workstation default: fast enough for retries, strong at short title text,
+// and good enough for dark editorial covers when the prompt is structured.
+const coverModel = "z-image-turbo"
 
 // coverMaxAttempts bounds how many times a cover may be asked of the image
-// service. Each attempt can take many minutes on a cold qwen load at cover
-// resolution, so this is a real budget — enough to ride out a WSL-proxy 502 or
-// a busy GPU, not enough to burn three full timeouts on a dead image host.
+// service. Three is enough to ride out a WSL-proxy 502 or a busy GPU without
+// holding a blog run open through a dead image host.
 const coverMaxAttempts = 3
 
-// coverPrompt turns an article title and topic into something worth drawing.
+// coverTitleMaxWords caps on-image title lettering. Z-Image-Turbo renders short
+// quoted titles reliably; long headlines turn into gibberish.
+const coverTitleMaxWords = 5
+
+// coverSubtitleMaxWords keeps the subtitle thin and readable under the title.
+const coverSubtitleMaxWords = 6
+
+// coverTitleText is the large on-image headline: at most coverTitleMaxWords,
+// uppercased for cover contrast.
+func coverTitleText(title, topic string) string {
+	s := strings.TrimSpace(title)
+	if s == "" {
+		s = strings.TrimSpace(topic)
+	}
+	if s == "" {
+		s = "Tech Briefing"
+	}
+	words := strings.Fields(s)
+	if len(words) > coverTitleMaxWords {
+		words = words[:coverTitleMaxWords]
+	}
+	return strings.ToUpper(strings.Join(words, " "))
+}
+
+// coverSubtitleText is the thin accent line under the title.
+func coverSubtitleText(title, topic string) string {
+	topic = strings.TrimSpace(topic)
+	title = strings.TrimSpace(title)
+	s := topic
+	if s == "" || strings.EqualFold(s, title) {
+		s = "A closer look"
+	}
+	words := strings.Fields(s)
+	if len(words) > coverSubtitleMaxWords {
+		words = words[:coverSubtitleMaxWords]
+	}
+	// Title-case-ish without pulling in cases: leave as written for readability.
+	return strings.Join(words, " ")
+}
+
+// coverPrompt fills the dark-mode editorial cover template for z-image-turbo.
 //
-// The title alone is a poor prompt: "What the Gateway API Actually Changes"
-// describes an argument, not a picture, and diffusion models asked to
-// "illustrate" a headline often render the words themselves. The topic is the
-// subject; the title is context the model must not letter onto the image.
+// Turbo ignores separate negative prompts, so exclusions and exact title
+// strings live in the positive prompt. The topic drives the metaphor; the
+// title (trimmed) is lettered on the left.
 func coverPrompt(title, topic string) string {
 	topic = strings.TrimSpace(topic)
 	title = strings.TrimSpace(title)
@@ -114,29 +151,34 @@ func coverPrompt(title, topic string) string {
 		subject = "software engineering"
 	}
 
-	headline := title
-	if headline == "" || strings.EqualFold(headline, subject) {
-		headline = subject
-	}
+	headline := coverTitleText(title, topic)
+	subtitle := coverSubtitleText(title, topic)
 
 	return fmt.Sprintf(
-		"Wide 16:9 magazine cover illustration for a technical essay about %s. "+
-			"Depict one concrete visual metaphor — tools, documents, agents, networks or machines as simple shapes — "+
-			"that communicates the subject at a glance. Do not illustrate the headline wording literally. "+
-			"Headline for context only (never draw it): %q. "+
-			"Composition: a single clear focal subject, balanced for a blog hero, readable at small sizes. "+
-			"Style: %s. "+
-			"Strictly no text, letters, numbers, logos, watermarks, UI chrome, screenshots or diagrams with labels.",
-		subject, headline, coverPromptStyle,
+		"A high-quality, ultra-detailed modern editorial blog cover illustration "+
+			"about %s on a deep charcoal navy background with a subtle dark gradient. "+
+			"Large bold white sans-serif title text on the LEFT side that says %q, "+
+			"with a smaller thin teal subtitle below it that says %q, "+
+			"both razor-sharp, crisp, high contrast, and easy to read. "+
+			"On the opposite side, one or two glowing visual objects as the focal point — "+
+			"a concrete visual metaphor for the topic using tools, documents, agents, networks or machines as simple shapes — "+
+			"emitting soft teal and cyan light that gently illuminates the dark surroundings, "+
+			"small coral accent dots and thin geometric lines floating nearby. "+
+			"Flat vector illustration style with finely detailed subtle grain texture and smooth polished gradient shading, "+
+			"soft rim glow around the subject, gentle ambient light falloff, crisp clean edges, "+
+			"meticulous professional finish, balanced asymmetric composition, wide 16:9 landscape framing, "+
+			"sharp high-resolution rendering, premium dark-mode tech-blog aesthetic, "+
+			"uncluttered layout with generous breathing room around the text. "+
+			"No logos, no watermarks, no UI chrome, no extra text beyond the title and subtitle.",
+		subject, headline, subtitle,
 	)
 }
 
 // generateCover draws an article's cover image with coverModel.
 //
 // Transient upstream failures (WSL-proxy 502s, busy GPU, timeouts) are retried
-// with backoff against the same qwen model. There is deliberately no fallback
-// to a faster model: the rings chose qwen for cover quality, and a turbo
-// substitute would silently undo that choice.
+// with backoff against the same z-image-turbo model. There is deliberately no
+// silent swap to another model.
 //
 // A failure after every attempt is returned, not swallowed — the caller decides
 // whether an article without a picture is still an article. It is: see
@@ -188,7 +230,7 @@ func (r *Runner) generateCover(ctx context.Context, orgID uuid.UUID, a *Generate
 		}
 		wait := coverRetryWaitFn(attempt)
 		if r.logger != nil {
-			r.logger.Warn("blog: cover generation failed, retrying with qwen",
+			r.logger.Warn("blog: cover generation failed, retrying with z-image-turbo",
 				zap.String("model", coverModel),
 				zap.Int("attempt", attempt),
 				zap.Duration("backoff", wait),

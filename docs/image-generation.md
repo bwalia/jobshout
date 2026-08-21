@@ -57,14 +57,13 @@ weights on that machine:
 
 | Model             | 1024×576 | Notes                                          |
 | ----------------- | -------- | ---------------------------------------------- |
-| `qwen-image-2512` | ~3.5 min | Qwen-Image-2512, 4-bit MLX. What the rings use. |
-| `z-image-turbo`   | ~40 s    | Few-step turbo. The fast one.                   |
+| `z-image-turbo`   | ~40–90 s | Few-step turbo. What blog covers use.          |
+| `qwen-image-2512` | ~3.5 min | Qwen-Image-2512, 4-bit MLX. Available for experiments. |
 
-The rings draw covers with `qwen-image-2512` — twenty diffusion steps at roughly
-nine seconds each against z-image-turbo's eight fast ones, for a better picture.
-A cover is drawn once per article rather than once per request, so that is where
-the extra time is affordable; anything wanting a picture back promptly should
-name `z-image-turbo` explicitly.
+Blog covers pin `z-image-turbo` in code (`coverModel`) with a dark editorial
+template, 1536×864, and eight steps. That is fast enough for retries and strong
+enough at short on-image titles. Name `qwen-image-2512` explicitly only when
+you want the slower Qwen path.
 
 `qwen-image-2512` is a community 4-bit build rather than one of mflux's built-in
 entries, and is deliberately distinct from mflux's `qwen-image`, which is a
@@ -102,19 +101,17 @@ to agents, and the Images page renders a disabled control rather than an error.
 ### Per-ring defaults
 
 All four rings point at `https://images.workstation.co.uk` and set
-`ai.imageModel: qwen-image-2512`. The host is registered on the edge behind the
+`ai.imageModel: z-image-turbo`. The host is registered on the edge behind the
 JWT gateway, and an image has been drawn through that whole path — edge,
 gateway, workstation GPU.
 
 `BLOG_COVER_IMAGES` is **on in int only**. The rollout is one ring at a time:
 generate an image by hand from the Images page to confirm the endpoint answers,
 then set `ai.blogCoverImages: true` in that ring's values and watch a run. A
-cover costs about three and a half minutes of a single shared GPU per article,
-so this is a cost worth turning on where it can be observed first.
+z-image-turbo cover is usually under two minutes of a single shared GPU per
+article.
 
-The chart default in `values.yaml` stays `z-image-turbo`. A ring that has not
-been configured at all is better off with the model that answers in seconds than
-one that occupies the GPU for minutes.
+The chart default in `values.yaml` is also `z-image-turbo`.
 
 ### The gateway secret
 
