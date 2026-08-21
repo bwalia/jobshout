@@ -25,9 +25,11 @@ type IllustrationRequest struct {
 	Prompt string
 	// Model optionally names which image model to use. Empty means the
 	// service's configured default (IMAGE_DEFAULT_MODEL).
-	Model  string
+	Model string
 	Width  int
 	Height int
+	// Steps is the number of denoising steps. Zero means the provider default.
+	Steps  int
 	Source string
 }
 
@@ -43,11 +45,17 @@ type Illustration struct {
 
 // coverWidth and coverHeight are 16:9, which is the shape a cover is displayed
 // in. Generating square and letting CSS crop would throw away pixels the model
-// spent time on.
+// spent time on. 1536×864 matches typical full-width hero display better than
+// 1024×576, which softens when stretched.
 const (
-	coverWidth  = 1024
-	coverHeight = 576
+	coverWidth  = 1536
+	coverHeight = 864
 )
+
+// coverSteps is how many denoising passes a cover gets. Above the service
+// default of 20; still under IMAGE_MAX_STEPS (50). More steps refine edges
+// without switching to a heavier quantized build.
+const coverSteps = 28
 
 // inlineWidth and inlineHeight are 3:2 — a body illustration sits in the text
 // column rather than spanning a hero area, so it wants less extreme a shape.
@@ -75,7 +83,7 @@ var illustrationFence = regexp.MustCompile("(?s)```illustration[ \t]*\r?\n(.*?)`
 //
 // Covers have to look like a set. Left to invent its own style, the same model
 // produces a photograph for one article and a cartoon for the next.
-const coverPromptStyle = "refined flat vector editorial illustration, soft geometric forms, limited palette of warm amber, cream and deep ink blue-black, subtle paper texture, generous negative space, high clarity"
+const coverPromptStyle = "refined flat vector editorial illustration, crisp edges, clean geometric shapes, sharp contrast, limited palette of warm amber, cream and deep ink blue-black, generous negative space, high clarity, no paper grain or soft blur"
 
 // coverModel is the only model blog covers may use. Quality matters more than
 // speed here: a cover is drawn once per article. Transient upstream failures
@@ -145,6 +153,7 @@ func (r *Runner) generateCover(ctx context.Context, orgID uuid.UUID, a *Generate
 			Model:  coverModel,
 			Width:  coverWidth,
 			Height: coverHeight,
+			Steps:  coverSteps,
 			Source: "blog_cover",
 		})
 		if err == nil && img != nil && img.URL != "" {

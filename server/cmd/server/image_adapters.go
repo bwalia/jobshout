@@ -34,6 +34,7 @@ func (b *blogIllustrator) Generate(ctx context.Context, req blog.IllustrationReq
 		Model:  req.Model,
 		Width:  req.Width,
 		Height: req.Height,
+		Steps:  req.Steps,
 		// Unseeded: two articles about the same subject should not get the same
 		// picture, which is what a fixed seed would produce.
 		Seed:   -1,
