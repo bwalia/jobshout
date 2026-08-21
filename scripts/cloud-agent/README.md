@@ -5,19 +5,20 @@ without Docker. They run the core stack natively: **PostgreSQL 16 + pgvector**,
 the **Go API**, and the **Next.js** UI. MinIO and the Python sidecar are
 optional and left disabled by default (the API runs fine without them).
 
-## Base environment
+The scripts are self-contained: `install.sh` provisions the system toolchains
+that are not in the default base image, so no custom base snapshot is required.
 
-The environment's base snapshot provides the system toolchains:
+## Toolchains (provisioned by `install.sh`)
 
 - **Go 1.25** at `/usr/local/go` (also on `PATH` via `/etc/profile.d/go.sh`)
-- **PostgreSQL 16** + **pgvector 0.8** (from the PGDG apt repo)
-- **Node 20+** (from the default image)
+- **PostgreSQL 16** + **pgvector** (from the PGDG apt repo)
+- **Node** (from the default base image)
 
 ## Lifecycle scripts
 
 | Phase | Command | What it does |
 | --- | --- | --- |
-| `install` | `bash scripts/cloud-agent/install.sh` | Idempotent: `go mod download`, build the server, `npm ci`. |
+| `install` | `bash scripts/cloud-agent/install.sh` | Idempotent: installs Go 1.25 and PostgreSQL 16 + pgvector if missing, then `go mod download`, builds the server, and runs `npm ci`. |
 | `start` | `bash scripts/cloud-agent/start.sh` | Starts PostgreSQL, ensures the `jobshout` db + `vector` extension, and launches the API (`:8080`) and UI (`:3001`) in the background (logs in `.dev-logs/`). |
 
 `run-api.sh` and `run-web.sh` run a single service in the foreground and are used
