@@ -134,6 +134,12 @@ the whole service with it. Requests queue instead, and `IMAGE_QUEUE_TIMEOUT`
 bounds how long a caller waits for the lock before being told the service is
 busy.
 
+MLX GPU streams are **thread-local**. Load and generate therefore run on one
+dedicated worker thread for the process lifetime. Dispatching each request onto
+`asyncio.to_thread`'s default multi-worker pool (without that pin) reuses a
+cached model from the wrong thread and fails with
+`There is no Stream(gpu, N) in current thread`.
+
 Loaded models are cached in memory, keyed by name. `IMAGE_MAX_LOADED_MODELS`
 (default 1) bounds that cache — raising it lets a second model stay resident and
 is a good way to run the machine out of memory.
