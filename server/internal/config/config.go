@@ -170,6 +170,13 @@ type Config struct {
 	// this, using it at all meant accepting the failures.
 	BlogProseModel      string `mapstructure:"BLOG_PROSE_MODEL"`
 	BlogStructuredModel string `mapstructure:"BLOG_STRUCTURED_MODEL"`
+	// BlogOrphanTimeout is how stale a running run's heartbeat may be before
+	// the reconciler marks it failed. Must outlast a legitimate long LLM call.
+	BlogOrphanTimeout time.Duration `mapstructure:"BLOG_ORPHAN_TIMEOUT"`
+	// BlogMaxRuntime is a wall-clock cap on one generation goroutine, below
+	// OLLAMA_TIMEOUT so a hung call is cancelled here rather than sitting
+	// running until the HTTP client gives up.
+	BlogMaxRuntime time.Duration `mapstructure:"BLOG_MAX_RUNTIME"`
 
 	// GitHubToken is optional. The research agent reads GitHub through its
 	// public API, which allows 60 requests an hour unauthenticated — enough to
@@ -256,6 +263,8 @@ func Load() (*Config, error) {
 	viper.SetDefault("OPSAPI_TIMEOUT", "30s")
 	viper.SetDefault("BLOG_CONTENT_DIR", "content/blogs")
 	viper.SetDefault("BLOG_AUTHOR_NAME", "JobShout Article Writer")
+	viper.SetDefault("BLOG_ORPHAN_TIMEOUT", "45m")
+	viper.SetDefault("BLOG_MAX_RUNTIME", "25m")
 
 	cfg := &Config{
 		DatabaseURL:          viper.GetString("DATABASE_URL"),
@@ -312,6 +321,8 @@ func Load() (*Config, error) {
 		BlogModel:            viper.GetString("BLOG_MODEL"),
 		BlogProseModel:       viper.GetString("BLOG_PROSE_MODEL"),
 		BlogStructuredModel:  viper.GetString("BLOG_STRUCTURED_MODEL"),
+		BlogOrphanTimeout:    viper.GetDuration("BLOG_ORPHAN_TIMEOUT"),
+		BlogMaxRuntime:       viper.GetDuration("BLOG_MAX_RUNTIME"),
 		GitHubToken:          viper.GetString("GITHUB_TOKEN"),
 
 		DatabaseConnectTimeout: viper.GetDuration("DATABASE_CONNECT_TIMEOUT"),

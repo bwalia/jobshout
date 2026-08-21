@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -19,6 +20,7 @@ import (
 type runStore struct {
 	repository.BlogRepository
 	run             *model.BlogRun
+	stale           []*model.BlogRun
 	deleted         bool
 	articlesCleared bool
 }
@@ -44,6 +46,13 @@ func (s *runStore) UpdateSteps(_ context.Context, _ uuid.UUID, steps []model.Blo
 		s.run.Steps = append([]model.BlogStep(nil), steps...)
 	}
 	return nil
+}
+func (s *runStore) TouchHeartbeat(_ context.Context, _ uuid.UUID) error { return nil }
+func (s *runStore) ListStaleRunning(_ context.Context, _ time.Time) ([]*model.BlogRun, error) {
+	if s.stale == nil {
+		return nil, nil
+	}
+	return s.stale, nil
 }
 
 func newLifecycleSvc(run *model.BlogRun) (*blogService, *runStore) {
@@ -294,5 +303,80 @@ func TestBeginGeneration_RefusesWhenStopping(t *testing.T) {
 	err := svc.beginGeneration(run, &model.Agent{ID: uuid.New()}, model.GenerateBlogRequest{})
 	if !errors.Is(err, errRunStopping) {
 		t.Fatalf("beginGeneration = %v, want errRunStopping", err)
+	}
+}
+
+func TestReapOrphans_FailsStaleNotActive(t *testing.T) {
+	org := uuid.New()
+	run := aRun(org, model.BlogRunStatusRunning, "t")
+	svc, store := newLifecycleSvc(run)
+	store.stale = []*model.BlogRun{run}
+
+	n, err := svc.ReapOrphans(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("reaped %d, want 1", n)
+	}
+	if store.run.Status != model.BlogRunStatusFailed {
+		t.Errorf("status = %q, want failed", store.run.Status)
+	}
+	if store.run.ErrorMessage == nil || *store.run.ErrorMessage != errRunOrphaned.Error() {
+		t.Errorf("error_message = %v, want %q", store.run.ErrorMessage, errRunOrphaned.Error())
+	}
+}
+
+func TestReapOrphans_SkipsLiveTrackedRun(t *testing.T) {
+	org := uuid.New()
+	run := aRun(org, model.BlogRunStatusRunning, "t")
+	svc, store := newLifecycleSvc(run)
+	store.stale = []*model.BlogRun{run}
+	_, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	svc.active = map[uuid.UUID]*trackedRun{run.ID: {cancel: cancel}}
+
+	n, err := svc.ReapOrphans(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("reaped %d, want 0 (live run)", n)
+	}
+	if store.run.Status != model.BlogRunStatusRunning {
+		t.Errorf("status = %q, want still running", store.run.Status)
+	}
+}
+
+func TestReapOrphans_CompletedUntouched(t *testing.T) {
+	org := uuid.New()
+	run := aRun(org, model.BlogRunStatusCompleted, "t")
+	svc, store := newLifecycleSvc(run)
+	store.stale = []*model.BlogRun{run}
+
+	n, err := svc.ReapOrphans(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("reaped %d, want 0 (completed is not an orphan)", n)
+	}
+	if store.run.Status != model.BlogRunStatusCompleted {
+		t.Errorf("status = %q, want still completed", store.run.Status)
+	}
+}
+
+func TestBlogReconciler_TickReaps(t *testing.T) {
+	org := uuid.New()
+	run := aRun(org, model.BlogRunStatusRunning, "t")
+	svc, store := newLifecycleSvc(run)
+	store.stale = []*model.BlogRun{run}
+
+	rc := NewBlogReconciler(svc, time.Minute, zap.NewNop())
+	if err := rc.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if store.run.Status != model.BlogRunStatusFailed {
+		t.Errorf("status = %q, want failed", store.run.Status)
 	}
 }

@@ -42,8 +42,8 @@ const (
 	BlogStepIllustrating = "illustrating"
 	BlogStepConverting   = "converting"
 	BlogStepGenerated    = "generated"
-	BlogStepPublishing = "publishing"
-	BlogStepPublished  = "published"
+	BlogStepPublishing   = "publishing"
+	BlogStepPublished    = "published"
 )
 
 // Step statuses. A step is pending until it starts, running while it is the
@@ -127,9 +127,13 @@ type BlogRun struct {
 	Steps        []BlogStep       `json:"steps"`
 	ErrorMessage *string          `json:"error_message"`
 	StartedAt    *time.Time       `json:"started_at"`
-	CompletedAt  *time.Time       `json:"completed_at"`
-	PublishedAt  *time.Time       `json:"published_at"`
-	CreatedAt    time.Time        `json:"created_at"`
+	// HeartbeatAt is refreshed while this process is still writing, so a
+	// reconciler can fail a run whose writer died (deploy SIGKILL, OOM)
+	// without false-positiving a healthy long Ollama call.
+	HeartbeatAt *time.Time `json:"heartbeat_at,omitempty"`
+	CompletedAt *time.Time `json:"completed_at"`
+	PublishedAt *time.Time `json:"published_at"`
+	CreatedAt   time.Time  `json:"created_at"`
 }
 
 // CurrentStep returns the step the run is on, or nil when nothing is running.

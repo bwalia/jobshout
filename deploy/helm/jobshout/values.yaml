@@ -142,6 +142,11 @@ ai:
   # article, and that is a cost an operator should choose to pay. Image
   # generation stays available on demand either way.
   blogCoverImages: false
+  # How long a running row may sit without a heartbeat before the reconciler
+  # marks it failed. Must outlast a legitimate long LLM call. Max runtime is
+  # a wall-clock cap on the generation goroutine, kept below ollamaTimeout.
+  blogOrphanTimeout: "45m"
+  blogMaxRuntime: "25m"
 
 # Penetration testing. Strix runs on the workstation (needs a real Docker
 # daemon — a k3s pod has none, and privileged DinD is not an acceptable trade).
