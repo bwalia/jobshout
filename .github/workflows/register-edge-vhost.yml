@@ -1,24 +1,12 @@
 name: Register edge vhost (Cloudflare + wslproxy)
 
-# Make a JobShout k3s environment publicly reachable through the wslproxy edge.
-# Borrowed from ring-promoter's register-edge-vhost workflow — the same two edge
-# steps that put rp.workstation.co.uk on pop0, adapted for the jobshout.co.uk
-# zone. The Helm-deployed Deployment/Service/Ingress are assumed already applied
-# in-cluster (see deploy/helm/jobshout); this only wires up DNS + the pop0 vhost.
+# Make a JobShout host publicly reachable through the wslproxy edge.
+# k3s app hosts (int.jobshout.co.uk, …) stay on the default pop0 CNAME.
+# Workstation services (strix.workstation.co.uk) must register on **pop1**.
 #
-# Steps:
-#   1. Cloudflare CNAME  <host> -> pop0.wslproxy.com   (idempotent; soft-skips
-#      without CF_API_TOKEN — external-dns normally maintains this already).
-#   2. wslproxy vhost (pop0) for <host> via the admin API, from the checked-in
-#      server spec. Until this exists the edge answers "Host not configured".
-#   3. Verify https://<host>/login returns 200. The web app's /health path is
-#      only allowlisted in middleware.ts, not implemented (it 404s); /login is a
-#      real public page and the ingress serves it from the web app at "/".
-#
-# Secrets (configure on this repo, shared with the k3s deploy):
-#   WSLPROXY_USER / WSLPROXY_PASSWORD / WSLPROXY_GATEWAY_URL   wslproxy admin API
-#   CF_API_TOKEN   (optional) Cloudflare token that can edit the jobshout.co.uk
-#                  zone (Zone:Read + DNS:Edit).
+# Secrets:
+#   WSLPROXY_USER / WSLPROXY_PASSWORD / WSLPROXY_GATEWAY_URL
+#   CF_API_TOKEN (optional)
 
 on:
   workflow_dispatch:
@@ -36,12 +24,17 @@ on:
         required: true
         default: deploy/edge/wslproxy-server-int.json
       health_path:
-        description: "Path that must return 200 through the edge (/login for the app, /auth/sign-in for Langfuse)"
+        description: "Path to probe (/login, /auth/sign-in, /health)"
         required: false
         default: /login
-
-env:
-  CNAME_TARGET: pop0.wslproxy.com
+      cname_target:
+        description: "CNAME target (pop0.wslproxy.com for k3s apps; pop1.wslproxy.com for workstation services)"
+        required: false
+        default: pop0.wslproxy.com
+      gateway_url:
+        description: "wslproxy admin URL override (empty = WSLPROXY_GATEWAY_URL secret). pop1 = https://pop1.diytaxreturn.co.uk"
+        required: false
+        default: ""
 
 jobs:
   register:
@@ -50,25 +43,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Ensure Cloudflare CNAME -> pop0
+      - name: Ensure Cloudflare CNAME
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           HOST: ${{ inputs.host }}
           ZONE: ${{ inputs.zone }}
+          CNAME_TARGET: ${{ inputs.cname_target || 'pop0.wslproxy.com' }}
         run: |
           set -euo pipefail
-          # DNS is normally maintained by external-dns from the Ingress
-          # annotations; this is an idempotent belt-and-suspenders and soft-skips
-          # when no token is configured or the zone is not on this account.
           if [ -z "${CF_API_TOKEN:-}" ]; then
-            echo "::notice::CF_API_TOKEN not set — relying on external-dns / existing DNS for ${HOST} -> ${CNAME_TARGET}."
+            echo "::notice::CF_API_TOKEN not set — relying on existing DNS for ${HOST} -> ${CNAME_TARGET}."
             exit 0
           fi
           api="https://api.cloudflare.com/client/v4"
           auth=(-H "Authorization: Bearer ${CF_API_TOKEN}" -H "Content-Type: application/json")
           zone_id=$(curl -fsS "${auth[@]}" "$api/zones?name=${ZONE}" | jq -r '.result[0].id // empty')
           if [ -z "$zone_id" ]; then
-            echo "::notice::zone ${ZONE} not found for this Cloudflare token — leaving DNS to external-dns."
+            echo "::notice::zone ${ZONE} not found for this Cloudflare token — leaving DNS as-is."
             exit 0
           fi
           rec=$(curl -fsS "${auth[@]}" "$api/zones/$zone_id/dns_records?type=CNAME&name=${HOST}")
@@ -83,29 +74,32 @@ jobs:
             echo "created CNAME ${HOST} -> ${CNAME_TARGET}"
           fi
 
-      - name: Register wslproxy vhost (pop0)
+      - name: Register wslproxy vhost
         env:
           WSLPROXY_USER: ${{ secrets.WSLPROXY_USER }}
           WSLPROXY_PASSWORD: ${{ secrets.WSLPROXY_PASSWORD }}
           WSLPROXY_GATEWAY_URL: ${{ secrets.WSLPROXY_GATEWAY_URL }}
+          GATEWAY_URL_INPUT: ${{ inputs.gateway_url }}
           HOST: ${{ inputs.host }}
           SPEC: ${{ inputs.server_spec }}
         run: |
           set -euo pipefail
-          if [ -z "${WSLPROXY_USER:-}" ] || [ -z "${WSLPROXY_PASSWORD:-}" ] || [ -z "${WSLPROXY_GATEWAY_URL:-}" ]; then
-            echo "::error::WSLPROXY_USER / WSLPROXY_PASSWORD / WSLPROXY_GATEWAY_URL must all be set."
+          GW="${GATEWAY_URL_INPUT:-}"
+          if [ -z "$GW" ]; then
+            GW="${WSLPROXY_GATEWAY_URL:-}"
+          fi
+          if [ -z "${WSLPROXY_USER:-}" ] || [ -z "${WSLPROXY_PASSWORD:-}" ] || [ -z "$GW" ]; then
+            echo "::error::WSLPROXY_USER / WSLPROXY_PASSWORD / gateway URL must all be set."
             exit 1
           fi
           if [ ! -f "$SPEC" ]; then
             echo "::error::server spec not found: $SPEC"; exit 1
           fi
-          # Guard: the spec's server_name must match the host we are registering.
           spec_host=$(jq -r '.server_name' "$SPEC")
           if [ "$spec_host" != "$HOST" ]; then
             echo "::error::spec server_name ($spec_host) != host ($HOST)"; exit 1
           fi
-          GW="$WSLPROXY_GATEWAY_URL"
-          # 1) Login (email + password) -> JWT accessToken.
+          echo "admin API: $GW"
           TOKEN=$(curl -fsS -X POST "$GW/api/user/login" \
             -H "Content-Type: application/json" \
             -d "$(jq -nc --arg e "$WSLPROXY_USER" --arg p "$WSLPROXY_PASSWORD" '{email:$e,password:$p}')" \
@@ -113,18 +107,63 @@ jobs:
           if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
             echo "::error::wslproxy login failed for ${WSLPROXY_USER} at ${GW}."; exit 1
           fi
-          # 2) Idempotent upsert: skip if a server for HOST already exists.
+
           existing=$(curl -fsS -X GET "$GW/api/servers" -H "Authorization: Bearer $TOKEN" \
             | jq -r --arg h "$HOST" '.data[]? | select(.server_name==$h) | .id' | head -1)
           if [ -n "$existing" ]; then
             echo "wslproxy vhost for ${HOST} already exists (id=$existing) — nothing to do."
             exit 0
           fi
-          # 3) Create the vhost from the checked-in spec.
-          resp=$(curl -fsS -X POST "$GW/api/servers" \
-            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-            -d @"$SPEC")
-          sid=$(echo "$resp" | jq -r '.data.id // empty')
+
+          CLONE=$(jq -r '.clone_from // empty' "$SPEC")
+          if [ -n "$CLONE" ]; then
+            echo "cloning vhost from ${CLONE}"
+            PORT_FROM=$(jq -r '.origin_port_from // "11435"' "$SPEC")
+            PORT_TO=$(jq -r '.origin_port_to // "11436"' "$SPEC")
+            LIST=$(curl -fsS -X GET "$GW/api/servers" -H "Authorization: Bearer $TOKEN")
+            TMPL=$(echo "$LIST" | jq --arg h "$CLONE" '.data[]? | select(.server_name==$h)')
+            if [ -z "$TMPL" ] || [ "$TMPL" = "null" ]; then
+              echo "::error::clone_from ${CLONE} not found on ${GW}"; exit 1
+            fi
+            echo "template pops: $(echo "$TMPL" | jq -c '.pop_ids // []')"
+            NEW_RULES='[]'
+            for rid in $(echo "$TMPL" | jq -r '.rules[]? // empty'); do
+              RULE=$(curl -fsS -X GET "$GW/api/rules/$rid" -H "Authorization: Bearer $TOKEN")
+              # API may wrap in .data
+              RULE_BODY=$(echo "$RULE" | jq 'if .data then .data else . end')
+              PATCHED=$(echo "$RULE_BODY" | jq \
+                --arg from "$PORT_FROM" --arg to "$PORT_TO" '
+                walk(if type=="string" then gsub($from; $to) else . end)
+                | del(.id, .created_at, .updated_at, .servers)
+              ')
+              echo "creating cloned rule (port ${PORT_FROM} -> ${PORT_TO})"
+              CREATED=$(curl -fsS -X POST "$GW/api/rules" \
+                -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+                -d "$PATCHED")
+              nid=$(echo "$CREATED" | jq -r '.data.id // .id // empty')
+              if [ -z "$nid" ]; then
+                echo "::error::rule clone failed: $CREATED"; exit 1
+              fi
+              NEW_RULES=$(echo "$NEW_RULES" | jq --arg id "$nid" '. + [$id]')
+            done
+            BODY=$(jq -n \
+              --argjson tmpl "$TMPL" \
+              --argjson spec "$(jq 'del(.clone_from, .origin_port_from, .origin_port_to)' "$SPEC")" \
+              --argjson rules "$NEW_RULES" '
+              ($tmpl + $spec)
+              | del(.id, .created_at, .updated_at)
+              | .rules = (if ($rules|length)>0 then $rules else .rules end)
+              | .config_status = true
+            ')
+            resp=$(curl -fsS -X POST "$GW/api/servers" \
+              -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+              -d "$BODY")
+          else
+            resp=$(curl -fsS -X POST "$GW/api/servers" \
+              -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+              -d @"$SPEC")
+          fi
+          sid=$(echo "$resp" | jq -r '.data.id // .id // empty')
           if [ -z "$sid" ]; then
             echo "::error::wslproxy server create failed: $resp"; exit 1
           fi
@@ -136,16 +175,19 @@ jobs:
           HEALTH_PATH: ${{ inputs.health_path || '/login' }}
         run: |
           set -euo pipefail
-          # pop0 picks up the new vhost within ~1 min via its config-sync cron.
-          # The path must be a real public page that returns 200: /login for the
-          # web app (its /health is allowlisted but unimplemented — it 404s),
-          # /auth/sign-in for Langfuse.
+          # JWT-gated workstation hosts (images/strix) return 403 until x-api-key
+          # is presented — that still means the vhost exists. "Host not configured"
+          # is the failure.
           for i in $(seq 1 20); do
             code=$(curl -sS -o /tmp/body -m 10 -w '%{http_code}' "https://${HOST}${HEALTH_PATH}" || echo 000)
-            body=$(head -c 120 /tmp/body | tr -d '\n')
+            body=$(head -c 160 /tmp/body | tr -d '\n')
             echo "[$i] https://${HOST}${HEALTH_PATH} -> $code :: $body"
-            if [ "$code" = "200" ] && ! grep -qi 'Host not configured' /tmp/body; then
-              echo "✅ ${HOST} is live through the edge."; exit 0
+            if grep -qi 'Host not configured' /tmp/body; then
+              sleep 15
+              continue
+            fi
+            if [ "$code" = "200" ] || [ "$code" = "401" ] || [ "$code" = "403" ]; then
+              echo "✅ ${HOST} is live through the edge (HTTP ${code})."; exit 0
             fi
             sleep 15
           done
