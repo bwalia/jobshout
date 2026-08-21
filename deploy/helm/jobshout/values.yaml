@@ -104,7 +104,7 @@ ai:
   ollamaModel: "llama3:latest"
   # Bounds one Ollama call end-to-end. Article drafts are streamed but still
   # take minutes on the shared CPU host (cold load + queue + 900–1400 words).
-  ollamaTimeout: "10m"
+  ollamaTimeout: "30m"
   # Context window requested per call. Without num_ctx, Ollama applies its own
   # server-side default and silently truncates a long prompt rather than
   # refusing it — so it is always sent. Raise this to let agents use the larger
