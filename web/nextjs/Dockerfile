@@ -35,10 +35,16 @@ RUN npm run build
 # the next stage report a missing path and leave the cause to guesswork.
 RUN test -d .next/standalone && test -d .next/static
 
-# Runtime: the target architecture. Pulled, never built.
-FROM node:20-alpine AS runner
+# Runtime: the TARGET architecture. Pulled, never built. Pinning
+# $TARGETPLATFORM is required — without it, buildx on an arm64 Mac has
+# shipped an arm64 node image tagged as linux/amd64. k3s then CrashLoops
+# with `exec docker-entrypoint.sh: no such file or directory` (the musl
+# loader for aarch64 is missing on the node).
+FROM --platform=$TARGETPLATFORM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
+ARG TARGETARCH
+RUN if [ "$TARGETARCH" = "amd64" ]; then uname -m | grep -qx x86_64; fi
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
