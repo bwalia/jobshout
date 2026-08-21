@@ -166,6 +166,9 @@ func TestCoverPrompt_NamesASubjectAndPinsTheStyle(t *testing.T) {
 	if !strings.Contains(got, "flat vector editorial illustration") {
 		t.Errorf("prompt lost the house style: %q", got)
 	}
+	if !strings.Contains(got, "crisp edges") || strings.Contains(got, "paper texture") {
+		t.Errorf("prompt should ask for crisp edges without paper texture: %q", got)
+	}
 	if !strings.Contains(got, "16:9") {
 		t.Errorf("prompt should ask for a wide cover: %q", got)
 	}
@@ -214,8 +217,15 @@ func TestGenerateCover_RecordsTheSeedForReproduction(t *testing.T) {
 	if len(r.images.(*fakeIllustrator).calls) != 1 {
 		t.Fatalf("want one generation call")
 	}
-	if r.images.(*fakeIllustrator).calls[0].Model != coverModel {
-		t.Errorf("cover must pin %q, got %q", coverModel, r.images.(*fakeIllustrator).calls[0].Model)
+	call := r.images.(*fakeIllustrator).calls[0]
+	if call.Model != coverModel {
+		t.Errorf("cover must pin %q, got %q", coverModel, call.Model)
+	}
+	if call.Width != coverWidth || call.Height != coverHeight {
+		t.Errorf("cover size = %dx%d, want %dx%d", call.Width, call.Height, coverWidth, coverHeight)
+	}
+	if call.Steps != coverSteps {
+		t.Errorf("cover steps = %d, want %d", call.Steps, coverSteps)
 	}
 }
 
