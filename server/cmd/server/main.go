@@ -77,7 +77,7 @@ const researchRequestTimeout = 10 * time.Minute
 // exceeded", which reads as an unreachable image service rather than a request
 // that was cut off while it was working. IMAGE_TIMEOUT still bounds the call
 // downstream; this only stops the ceiling being lower than the floor.
-const imageRequestTimeout = 10 * time.Minute
+const imageRequestTimeout = 30 * time.Minute
 
 // defaultRequestTimeout bounds every route that is not doing something
 // legitimately slow. Thirty seconds is generous for a database round trip and
@@ -1079,10 +1079,9 @@ func main() {
 		Addr:        cfg.ServerPort,
 		Handler:     r,
 		ReadTimeout: 15 * time.Second,
-		// Must exceed researchRequestTimeout: the synchronous research endpoint
-		// legitimately runs for minutes, and a shorter write deadline would cut
-		// the response off after the handler had done all the work.
-		WriteTimeout: researchRequestTimeout + time.Minute,
+		// Must exceed the longest per-route handler deadline (research or sync
+		// image generation), or the response is cut off after the work is done.
+		WriteTimeout: max(researchRequestTimeout, imageRequestTimeout) + time.Minute,
 		IdleTimeout:  60 * time.Second,
 	}
 

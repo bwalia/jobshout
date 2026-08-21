@@ -86,7 +86,8 @@ type Config struct {
 	// service. Empty means no gateway, matching OLLAMA_JWT_SECRET's meaning.
 	ImageJWTSecret string `mapstructure:"IMAGE_JWT_SECRET"`
 	// ImageTimeout bounds one generation. Long by HTTP standards because a cold
-	// model load plus a queue wait legitimately takes minutes.
+	// model load plus a queue wait legitimately takes minutes; cover canvases
+	// at 1536×864 / 28 steps often need well past 10m.
 	ImageTimeout time.Duration `mapstructure:"IMAGE_TIMEOUT"`
 	// ImageOpenAIModel is the hosted image model, kept separate from
 	// OPENAI_DEFAULT_MODEL because a chat model name in an image request is an
@@ -225,7 +226,8 @@ func Load() (*Config, error) {
 	// operator has not said otherwise.
 	viper.SetDefault("IMAGE_PROVIDER", "mflux")
 	viper.SetDefault("IMAGE_DEFAULT_MODEL", "z-image-turbo")
-	viper.SetDefault("IMAGE_TIMEOUT", "10m")
+	// Covers at 1536×864 / 28 steps routinely exceed 10m on a cold qwen load.
+	viper.SetDefault("IMAGE_TIMEOUT", "30m")
 	viper.SetDefault("IMAGE_OPENAI_MODEL", "gpt-image-1")
 	// Off by default: a cover image costs 25 seconds of a shared GPU per
 	// article, and an operator should opt into spending that on every run.

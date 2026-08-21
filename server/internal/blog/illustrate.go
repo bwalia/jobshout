@@ -91,11 +91,10 @@ const coverPromptStyle = "refined flat vector editorial illustration, crisp edge
 const coverModel = "qwen-image-2512"
 
 // coverMaxAttempts bounds how many times a cover may be asked of the image
-// service. Each attempt can take several minutes on a cold qwen load, so this
-// is a real budget — high enough to ride out a WSL-proxy 502 or a busy GPU,
-// low enough that a permanently broken image host cannot hold a blog run open
-// for half an hour.
-const coverMaxAttempts = 5
+// service. Each attempt can take many minutes on a cold qwen load at cover
+// resolution, so this is a real budget — enough to ride out a WSL-proxy 502 or
+// a busy GPU, not enough to burn three full timeouts on a dead image host.
+const coverMaxAttempts = 3
 
 // coverPrompt turns an article title and topic into something worth drawing.
 //

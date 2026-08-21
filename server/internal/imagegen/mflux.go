@@ -21,7 +21,7 @@ import (
 // waits behind whatever is already on the GPU. Bounded anyway, because a
 // request that will never come back should fail rather than hold a blog run
 // open indefinitely.
-const mfluxDefaultTimeout = 10 * time.Minute
+const mfluxDefaultTimeout = 30 * time.Minute
 
 // MFluxClient talks to the workstation image service (image-service/ in this
 // repository), which runs mflux on Apple MLX.
