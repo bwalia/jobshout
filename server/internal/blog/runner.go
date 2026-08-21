@@ -104,6 +104,11 @@ type GenerateRequest struct {
 	// read, which is worse than not offering the control at all.
 	AgentProseModel      string
 	AgentStructuredModel string
+
+	// OnArticle is invoked after each brief is fully written (markdown, HTML,
+	// optional cover) so the caller can persist it before the next brief
+	// starts. A later failure then cannot throw away work already done.
+	OnArticle func(GeneratedArticle) error
 }
 
 // Researcher is the slice of service.ResearchService this package consumes.
@@ -258,8 +263,9 @@ func (r *Runner) CMSNamespace() string {
 // Generate produces markdown for every requested topic, renders each to HTML,
 // and returns both. It needs no CMS credentials.
 //
-// Any single topic failing aborts the batch — we prefer an all-or-nothing run
-// over silently publishing half of what was asked for.
+// A brief that fails is skipped; remaining briefs still run. The returned
+// error is a join of those failures. Zero successes is the only total failure
+// (aside from cancel, which stops the rest immediately).
 func (r *Runner) Generate(ctx context.Context, req GenerateRequest, progress ProgressFunc) ([]GeneratedArticle, error) {
 	if r.llm == nil {
 		return nil, fmt.Errorf("blog: llm client is nil")
@@ -291,51 +297,17 @@ func (r *Runner) Generate(ctx context.Context, req GenerateRequest, progress Pro
 	}
 
 	articles, err := r.writeArticles(ctx, req, briefs, progress)
-	if err != nil {
-		return nil, err
+	if len(articles) > 0 {
+		report(progress, model.BlogStepGenerated,
+			fmt.Sprintf("Generated %d article(s)", len(articles)), model.AgentNameArticleWriter)
 	}
-
-	// Illustration runs before conversion so the generated images are part of
-	// the markdown that gets rendered, rather than something bolted onto the
-	// HTML afterwards.
-	//
-	// Nothing here can fail the run. An article without a picture is a complete
-	// article; an article that was thrown away because a GPU was busy is not.
-	// So every failure is reported into the trace and the run carries on — the
-	// reader can see what happened without losing the writing.
-	if r.canIllustrate() {
-		report(progress, model.BlogStepIllustrating,
-			fmt.Sprintf("Illustrating %d article(s)", len(articles)), model.AgentNameArticleWriter)
-
-		for i := range articles {
-			body, notes := r.illustrateBody(ctx, req.OrgID, articles[i].Markdown)
-			articles[i].Markdown = body
-			for _, note := range notes {
-				r.logger.Info("blog: "+note, zap.String("title", articles[i].Title))
-			}
-
-			if err := r.generateCover(ctx, req.OrgID, &articles[i]); err != nil {
-				r.logger.Warn("blog: could not draw a cover image",
-					zap.String("title", articles[i].Title), zap.Error(err))
-				report(progress, model.BlogStepIllustrating,
-					fmt.Sprintf("No cover image for %q: %v", articles[i].Title, err),
-					model.AgentNameArticleWriter)
-			}
-		}
-	}
-
-	// Rendering is its own step rather than part of generation: it is the point
-	// where a malformed article stops being the LLM's problem and starts being
-	// ours, and a reader watching the trace should see which one failed.
-	report(progress, model.BlogStepConverting, fmt.Sprintf("Converting %d article(s) to HTML", len(articles)), model.AgentNameArticleWriter)
-	for i := range articles {
-		if err := articles[i].render(); err != nil {
+	if len(articles) == 0 {
+		if err != nil {
 			return nil, err
 		}
+		return nil, fmt.Errorf("blog: no articles produced")
 	}
-
-	report(progress, model.BlogStepGenerated, fmt.Sprintf("Generated %d article(s)", len(articles)), model.AgentNameArticleWriter)
-	return articles, nil
+	return articles, err
 }
 
 // Publish creates one CMS draft per article.
