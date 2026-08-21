@@ -49,6 +49,7 @@ import (
 	"github.com/jobshout/server/internal/research"
 	"github.com/jobshout/server/internal/selector"
 	"github.com/jobshout/server/internal/service"
+	"github.com/jobshout/server/internal/strix"
 	"github.com/jobshout/server/internal/tools"
 	ws "github.com/jobshout/server/internal/websocket"
 	wfengine "github.com/jobshout/server/internal/workflow"
@@ -181,6 +182,8 @@ func main() {
 	auditRepo := repository.NewAuditRepository(pool)
 	pricingRepo := repository.NewPricingRepository(pool)
 	blogRepo := repository.NewBlogRepository(pool)
+	pentestRunRepo := repository.NewPentestRunRepository(pool)
+	pentestFindingRepo := repository.NewPentestFindingRepository(pool)
 
 	// Autonomous agents + chat + Telegram repositories
 	memoryRepo := repository.NewMemoryRepository(pool)
@@ -457,6 +460,31 @@ func main() {
 	}
 	blogSvc := service.NewBlogService(blogRunner, blogRepo, researchSvc, agentRepo, logger)
 
+	// ─── Penetration Testing (Strix integration) ─────────────────────────────
+	strixConfig := strix.LoadConfig(logger)
+	strixClient := strix.NewClient(
+		strixConfig.StrixPath,
+		strixConfig.RunsDir,
+		strixConfig.LLMModel,
+		strixConfig.LLMKey,
+		logger,
+	)
+	pentestSvc := service.NewPentestService(
+		pentestRunRepo,
+		pentestFindingRepo,
+		agentRepo,
+		strixClient,
+		logger,
+	)
+	if strixConfig.Enabled {
+		logger.Info("penetration testing agent initialised",
+			zap.String("llm_model", strixConfig.LLMModel),
+			zap.String("runs_dir", strixConfig.RunsDir),
+		)
+	} else {
+		logger.Info("penetration testing agent disabled")
+	}
+
 	// ─── Autonomous agent engine ────────────────────────────────────────────
 	autonomousExec := executor.NewAutonomousExecutor(goNativeExec, llmRouter, memoryRepo, goalRepo, logger).WithAutoSelect(autoSelector)
 	memorySvc := service.NewMemoryService(memoryRepo, logger)
@@ -601,6 +629,7 @@ func main() {
 	leaderboardHandler := handler.NewLeaderboardHandler(leaderboardSvc)
 	blogHandler := handler.NewBlogHandler(blogSvc)
 	researchHandler := handler.NewResearchHandler(researchSvc)
+	pentestHandler := handler.NewPentestHandler(pentestSvc)
 
 	// Chat, goal, multi-agent, and Telegram handlers
 	chatHandler := handler.NewChatHandler(chatSvc)
@@ -814,6 +843,16 @@ func main() {
 				// one that has already set a shorter deadline.
 				r.Post("/", researchHandler.Research)
 				r.Get("/trending", researchHandler.Trending)
+			})
+
+			// Penetration Testing (Strix)
+			r.Route("/pentest-runs", func(r chi.Router) {
+				r.Get("/", pentestHandler.ListRuns)
+				r.Post("/", pentestHandler.CreateRun)
+				r.Route("/{runID}", func(r chi.Router) {
+					r.Get("/", pentestHandler.GetRun)
+					r.Get("/findings", pentestHandler.ListFindings)
+				})
 			})
 
 			// Plugins (user-defined LangGraph/LangChain workflows)
