@@ -12,8 +12,9 @@ func TestClientInitialization(t *testing.T) {
 	client := NewClient(
 		"strix",
 		"./strix_runs",
-		"openai/gpt-4o",
-		"test-key",
+		"ollama_chat/qwen3-coder:30b",
+		"",
+		"http://localhost:11434",
 		logger,
 	)
 
@@ -29,15 +30,19 @@ func TestClientInitialization(t *testing.T) {
 		t.Errorf("expected runsDir './strix_runs', got %q", client.runsDir)
 	}
 
-	if client.llmModel != "openai/gpt-4o" {
-		t.Errorf("expected llmModel 'openai/gpt-4o', got %q", client.llmModel)
+	if client.llmModel != "ollama_chat/qwen3-coder:30b" {
+		t.Errorf("expected llmModel 'ollama_chat/qwen3-coder:30b', got %q", client.llmModel)
+	}
+
+	if client.llmAPIBase != "http://localhost:11434" {
+		t.Errorf("expected llmAPIBase 'http://localhost:11434', got %q", client.llmAPIBase)
 	}
 }
 
 func TestClientInitializationWithDefaults(t *testing.T) {
 	logger := zap.NewNop()
 
-	client := NewClient("", "", "openai/gpt-4o", "test-key", logger)
+	client := NewClient("", "", "openai/gpt-4o", "test-key", "", logger)
 
 	if client == nil {
 		t.Fatal("NewClient returned nil")

@@ -467,6 +467,7 @@ func main() {
 		strixConfig.RunsDir,
 		strixConfig.LLMModel,
 		strixConfig.LLMKey,
+		strixConfig.LLMAPIBase,
 		logger,
 	)
 	pentestSvc := service.NewPentestService(
