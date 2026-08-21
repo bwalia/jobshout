@@ -9,41 +9,41 @@ import (
 // AgentExecution is a single invocation of an agent against a task prompt.
 // It records the full lifecycle: input → iterations → output.
 type AgentExecution struct {
-	ID             uuid.UUID  `json:"id"`
-	AgentID        uuid.UUID  `json:"agent_id"`
-	OrgID          uuid.UUID  `json:"org_id"`
-	WorkflowRunID  *uuid.UUID `json:"workflow_run_id"`
-	StepID         *uuid.UUID `json:"step_id"`
-	InputPrompt    string     `json:"input_prompt"`
-	Output         *string    `json:"output"`
-	Status         string     `json:"status"`
-	ErrorMessage   *string    `json:"error_message"`
-	TotalTokens    int        `json:"total_tokens"`
-	InputTokens    int        `json:"input_tokens"`
-	OutputTokens   int        `json:"output_tokens"`
-	LatencyMs      int        `json:"latency_ms"`
-	CostUSD        float64    `json:"cost_usd"`
-	ModelName      *string    `json:"model_name"`
-	ModelProvider  *string    `json:"model_provider"`
-	Iterations     int        `json:"iterations"`
-	EngineType     string     `json:"engine_type"`
-	StartedAt      *time.Time `json:"started_at"`
-	CompletedAt    *time.Time `json:"completed_at"`
-	CreatedAt      time.Time  `json:"created_at"`
+	ID            uuid.UUID  `json:"id"`
+	AgentID       uuid.UUID  `json:"agent_id"`
+	OrgID         uuid.UUID  `json:"org_id"`
+	WorkflowRunID *uuid.UUID `json:"workflow_run_id"`
+	StepID        *uuid.UUID `json:"step_id"`
+	InputPrompt   string     `json:"input_prompt"`
+	Output        *string    `json:"output"`
+	Status        string     `json:"status"`
+	ErrorMessage  *string    `json:"error_message"`
+	TotalTokens   int        `json:"total_tokens"`
+	InputTokens   int        `json:"input_tokens"`
+	OutputTokens  int        `json:"output_tokens"`
+	LatencyMs     int        `json:"latency_ms"`
+	CostUSD       float64    `json:"cost_usd"`
+	ModelName     *string    `json:"model_name"`
+	ModelProvider *string    `json:"model_provider"`
+	Iterations    int        `json:"iterations"`
+	EngineType    string     `json:"engine_type"`
+	StartedAt     *time.Time `json:"started_at"`
+	CompletedAt   *time.Time `json:"completed_at"`
+	CreatedAt     time.Time  `json:"created_at"`
 	// ToolCalls is populated on read — not stored inline.
 	ToolCalls []ExecutionToolCall `json:"tool_calls,omitempty"`
 }
 
 // ExecutionToolCall records a single tool invocation during an execution.
 type ExecutionToolCall struct {
-	ID           uuid.UUID `json:"id"`
-	ExecutionID  uuid.UUID `json:"execution_id"`
-	ToolName     string    `json:"tool_name"`
+	ID           uuid.UUID      `json:"id"`
+	ExecutionID  uuid.UUID      `json:"execution_id"`
+	ToolName     string         `json:"tool_name"`
 	Input        map[string]any `json:"input"`
-	Output       *string   `json:"output"`
-	ErrorMessage *string   `json:"error_message"`
-	DurationMs   int       `json:"duration_ms"`
-	CalledAt     time.Time `json:"called_at"`
+	Output       *string        `json:"output"`
+	ErrorMessage *string        `json:"error_message"`
+	DurationMs   int            `json:"duration_ms"`
+	CalledAt     time.Time      `json:"called_at"`
 }
 
 // Execution status values.
@@ -69,6 +69,13 @@ type ExecuteAgentRequest struct {
 	Prompt string `json:"prompt" validate:"required,min=1"`
 	// EngineOverride allows per-call engine selection without changing the agent record.
 	EngineOverride *string `json:"engine_override,omitempty" validate:"omitempty,oneof=go_native langchain langgraph"`
+	// ModelProvider / ModelName override the agent's model for this call only,
+	// without mutating the agent record. Both empty leaves the agent's model.
+	ModelProvider *string `json:"model_provider,omitempty"`
+	ModelName     *string `json:"model_name,omitempty"`
+	// SkillSlugs are extra skills to load for this call, on top of the agent's
+	// enabled skills. Resolved by slug; unknown slugs are ignored.
+	SkillSlugs []string `json:"skill_slugs,omitempty"`
 }
 
 // LangChainRunTrace records a single chain step during a LangChain execution.
