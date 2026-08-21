@@ -73,7 +73,8 @@ class ScanRequest(BaseModel):
     max_budget: int | None = Field(default=None, ge=1, le=10000)
     # The caller's own run id. Doubles as the idempotency key — see below.
     run_ref: str = Field(default="", max_length=128)
-    # Recorded against the run for the audit trail; not passed to the scanner.
+    # Operator scope note. Combined with a standing engagement prompt and
+    # passed to Strix as --instruction (confirmed via strix --help).
     instruction: str = Field(default="", max_length=4000)
     requested_by: str = Field(default="", max_length=128)
 
@@ -111,6 +112,10 @@ class ScanStatus(BaseModel):
     findings: list[FindingOut] = []
     error: str | None = None
     log_tail: str = ""
+    report_markdown: str = ""
+    target_engaged: bool | None = None
+    # Audit fields kept out of the response model by omission; to_dict includes
+    # them but Pydantic ignores extras when building ScanStatus unless configured.
 
 
 # ─── health ─────────────────────────────────────────────────────────────────

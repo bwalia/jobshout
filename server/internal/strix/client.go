@@ -90,19 +90,21 @@ type RunHandle struct {
 
 // RunResult is one poll of a scan. The reconciler finalises a run from it.
 type RunResult struct {
-	RemoteRunID  string
-	RunRef       string
-	Status       string // queued|running|completed|failed|budget_exceeded|cancelled
-	Target       string
-	ScanMode     string
-	StartedAt    *time.Time
-	CompletedAt  *time.Time
-	DurationMS   int
-	ExitCode     *int
-	FindingCount int
-	Findings     []Finding
-	Error        string
-	LogTail      string
+	RemoteRunID    string
+	RunRef         string
+	Status         string // queued|running|completed|failed|budget_exceeded|cancelled
+	Target         string
+	ScanMode       string
+	StartedAt      *time.Time
+	CompletedAt    *time.Time
+	DurationMS     int
+	ExitCode       *int
+	FindingCount   int
+	Findings       []Finding
+	Error          string
+	LogTail        string
+	ReportMarkdown string
+	TargetEngaged  *bool
 }
 
 // Terminal reports whether the run has reached a state that will not change.
@@ -225,19 +227,21 @@ func (c *Client) Status(ctx context.Context, remoteRunID string) (*RunResult, er
 		return nil, fmt.Errorf("strix: decode scan status: %w", err)
 	}
 	return &RunResult{
-		RemoteRunID:  parsed.RunID,
-		RunRef:       parsed.RunRef,
-		Status:       parsed.Status,
-		Target:       parsed.Target,
-		ScanMode:     parsed.ScanMode,
-		StartedAt:    parseTime(parsed.StartedAt),
-		CompletedAt:  parseTime(parsed.CompletedAt),
-		DurationMS:   parsed.DurationMS,
-		ExitCode:     parsed.ExitCode,
-		FindingCount: parsed.FindingCount,
-		Findings:     parsed.Findings,
-		Error:        parsed.Error,
-		LogTail:      parsed.LogTail,
+		RemoteRunID:    parsed.RunID,
+		RunRef:         parsed.RunRef,
+		Status:         parsed.Status,
+		Target:         parsed.Target,
+		ScanMode:       parsed.ScanMode,
+		StartedAt:      parseTime(parsed.StartedAt),
+		CompletedAt:    parseTime(parsed.CompletedAt),
+		DurationMS:     parsed.DurationMS,
+		ExitCode:       parsed.ExitCode,
+		FindingCount:   parsed.FindingCount,
+		Findings:       parsed.Findings,
+		Error:          parsed.Error,
+		LogTail:        parsed.LogTail,
+		ReportMarkdown: parsed.ReportMarkdown,
+		TargetEngaged:  parsed.TargetEngaged,
 	}, nil
 }
 
@@ -289,19 +293,21 @@ type scanAcceptedWire struct {
 }
 
 type scanStatusWire struct {
-	RunID        string    `json:"run_id"`
-	RunRef       string    `json:"run_ref"`
-	Status       string    `json:"status"`
-	Target       string    `json:"target"`
-	ScanMode     string    `json:"scan_mode"`
-	StartedAt    *string   `json:"started_at"`
-	CompletedAt  *string   `json:"completed_at"`
-	DurationMS   int       `json:"duration_ms"`
-	ExitCode     *int      `json:"exit_code"`
-	FindingCount int       `json:"finding_count"`
-	Findings     []Finding `json:"findings"`
-	Error        string    `json:"error"`
-	LogTail      string    `json:"log_tail"`
+	RunID          string    `json:"run_id"`
+	RunRef         string    `json:"run_ref"`
+	Status         string    `json:"status"`
+	Target         string    `json:"target"`
+	ScanMode       string    `json:"scan_mode"`
+	StartedAt      *string   `json:"started_at"`
+	CompletedAt    *string   `json:"completed_at"`
+	DurationMS     int       `json:"duration_ms"`
+	ExitCode       *int      `json:"exit_code"`
+	FindingCount   int       `json:"finding_count"`
+	Findings       []Finding `json:"findings"`
+	Error          string    `json:"error"`
+	LogTail        string    `json:"log_tail"`
+	ReportMarkdown string    `json:"report_markdown"`
+	TargetEngaged  *bool     `json:"target_engaged"`
 }
 
 // ─── transport ──────────────────────────────────────────────────────────────
