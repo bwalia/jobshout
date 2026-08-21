@@ -36,6 +36,22 @@ ai:
   # follow.
   blogCoverImages: true
 
+# Penetration testing against the workstation strix-service. int is the proving
+# ring — other rings stay off until a scan has been watched end-to-end here,
+# including an API-pod restart mid-scan. The host must be registered on the
+# edge (see docs/pentest-agent.md) and STRIX_JWT_SECRET must match the gateway
+# (Vault / extraSecretRefs), distinct from IMAGE_JWT_SECRET.
+pentest:
+  enabled: true
+  baseURL: "https://strix.workstation.co.uk"
+  timeout: "60s"
+  pollInterval: "15s"
+  maxRuntime: "2h"
+  # Narrow: only the deliberately-vulnerable app you own. Empty refuses
+  # nothing on the API side; scope.py on the workstation still defaults to deny.
+  # Example once Juice Shop is up: "juice.local,127.0.0.1"
+  targetAllowlist: ""
+
 api:
   replicas: 1
 

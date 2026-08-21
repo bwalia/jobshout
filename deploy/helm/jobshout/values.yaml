@@ -61,6 +61,9 @@ secrets:
   openaiApiKey: ""
   # Set via --set-string or Vault; never committed here.
   ollamaJwtSecret: ""
+  # Gateway secret for strix-service. Distinct from ollama/image on purpose.
+  strixJwtSecret: ""
+  imageJwtSecret: ""
   opsapiApiKey: ""
   pythonSidecarSecret: ""
   registryUsername: ""
@@ -139,6 +142,22 @@ ai:
   # article, and that is a cost an operator should choose to pay. Image
   # generation stays available on demand either way.
   blogCoverImages: false
+
+# Penetration testing. Strix runs on the workstation (needs a real Docker
+# daemon — a k3s pod has none, and privileged DinD is not an acceptable trade).
+# Same shape as image generation: one service on the Mac, every ring reaches it
+# over a JWT-gated public endpoint. Off by default — empty baseURL means the
+# feature is disabled without spending a timeout discovering that.
+pentest:
+  enabled: false
+  baseURL: ""
+  # Bounds one HTTP call (start/status/cancel), not one scan.
+  timeout: "60s"
+  pollInterval: "15s"
+  maxRuntime: "2h"
+  # Defence in depth. scope.py on the workstation is the real boundary.
+  # Comma-separated hosts, wildcards, CIDRs or URL prefixes.
+  targetAllowlist: ""
 
 logLevel: info
 

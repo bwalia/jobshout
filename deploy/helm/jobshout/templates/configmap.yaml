@@ -45,3 +45,11 @@ data:
   OPSAPI_NAMESPACE: {{ .Values.cms.namespace | quote }}
   OPSAPI_TIMEOUT: {{ .Values.cms.timeout | default "30s" | quote }}
   BLOG_AUTHOR_NAME: {{ .Values.cms.authorName | default "JobShout Article Writer" | quote }}
+  # Penetration testing. Empty baseURL disables the feature (same pattern as
+  # IMAGE_BASE_URL). The scanner itself lives on the workstation.
+  STRIX_ENABLED: {{ .Values.pentest.enabled | default false | quote }}
+  STRIX_BASE_URL: {{ .Values.pentest.baseURL | default "" | quote }}
+  STRIX_TIMEOUT: {{ .Values.pentest.timeout | default "60s" | quote }}
+  STRIX_POLL_INTERVAL: {{ .Values.pentest.pollInterval | default "15s" | quote }}
+  STRIX_MAX_RUNTIME: {{ .Values.pentest.maxRuntime | default "2h" | quote }}
+  STRIX_TARGET_ALLOWLIST: {{ .Values.pentest.targetAllowlist | default "" | quote }}

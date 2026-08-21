@@ -1,0 +1,17 @@
+{
+  "server_name": "strix.workstation.co.uk",
+  "pop_ids": ["pop1"],
+  "dns_record_type": "CNAME",
+  "dns_cname_target": "pop1.wslproxy.com",
+  "clone_from": "images.workstation.co.uk",
+  "origin_port_from": "11435",
+  "origin_port_to": "11436",
+  "profile_id": "prod",
+  "ssl_enabled": true,
+  "ssl_force_https": true,
+  "ssl_auto_renew": true,
+  "ssl_staging": false,
+  "ssl_email": "balinder.walia@gmail.com",
+  "listens": [ { "listen": "80" } ],
+  "match_cases": {}
+}
