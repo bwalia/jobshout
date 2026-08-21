@@ -24,6 +24,11 @@ type SkillRepository interface {
 	EnableForAgent(ctx context.Context, agentID, skillID uuid.UUID, override map[string]any) error
 	DisableForAgent(ctx context.Context, agentID, skillID uuid.UUID) error
 	ListForAgent(ctx context.Context, agentID uuid.UUID) ([]model.Skill, error)
+	// ListBySlugs resolves skills by slug that are visible to orgID — built-in
+	// skills (org_id IS NULL) plus org-private ones. Used for per-run skill
+	// overrides. Deprecated skills are excluded; unknown slugs are simply absent
+	// from the result rather than an error.
+	ListBySlugs(ctx context.Context, orgID uuid.UUID, slugs []string) ([]model.Skill, error)
 }
 
 type skillRepository struct {
@@ -170,6 +175,33 @@ func (r *skillRepository) ListForAgent(ctx context.Context, agentID uuid.UUID) (
 		var s model.Skill
 		if err := scanSkill(rows, &s); err != nil {
 			return nil, fmt.Errorf("skill_repo: list for agent scan: %w", err)
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+func (r *skillRepository) ListBySlugs(ctx context.Context, orgID uuid.UUID, slugs []string) ([]model.Skill, error) {
+	if len(slugs) == 0 {
+		return nil, nil
+	}
+	sql := `SELECT ` + skillColumns + ` FROM skills
+		WHERE slug = ANY($1)
+		  AND (org_id = $2 OR org_id IS NULL)
+		  AND status <> 'deprecated'
+		ORDER BY name`
+
+	rows, err := r.pool.Query(ctx, sql, slugs, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("skill_repo: list by slugs: %w", err)
+	}
+	defer rows.Close()
+
+	out := []model.Skill{}
+	for rows.Next() {
+		var s model.Skill
+		if err := scanSkill(rows, &s); err != nil {
+			return nil, fmt.Errorf("skill_repo: list by slugs scan: %w", err)
 		}
 		out = append(out, s)
 	}

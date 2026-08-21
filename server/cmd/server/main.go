@@ -184,6 +184,7 @@ func main() {
 	blogRepo := repository.NewBlogRepository(pool)
 	pentestRunRepo := repository.NewPentestRunRepository(pool)
 	pentestFindingRepo := repository.NewPentestFindingRepository(pool)
+	taskRunRepo := repository.NewTaskRunRepository(pool)
 
 	// Autonomous agents + chat + Telegram repositories
 	memoryRepo := repository.NewMemoryRepository(pool)
@@ -399,6 +400,7 @@ func main() {
 	ssoSvc := service.NewSSOService(ssoRepo, userRepo, rbacRepo, auditRepo, logger)
 	leaderboardSvc := service.NewLeaderboardService(usageRepo, logger)
 	execSvc := service.NewExecutionService(agentRepo, execRepo, toolPermRepo, engineRouter, govSvc, logger)
+	taskRunSvc := service.NewTaskRunService(taskRunRepo, taskRepo, projectRepo, agentRepo, execSvc, logger)
 	workflowSvc := service.NewWorkflowService(workflowRepo, agentRepo, execRepo, toolPermRepo, dagEngine, logger)
 	pluginSvc := service.NewPluginService(pluginRepo, agentRepo, engineRouter, logger)
 
@@ -601,6 +603,7 @@ func main() {
 	agentHandler := handler.NewAgentHandler(agentSvc)
 	projectHandler := handler.NewProjectHandler(projectSvc)
 	taskHandler := handler.NewTaskHandler(taskSvc)
+	taskRunHandler := handler.NewTaskRunHandler(taskRunSvc)
 	orgHandler := handler.NewOrganizationHandler(orgRepo)
 	marketplaceHandler := handler.NewMarketplaceHandler(pool, logger)
 	knowledgeHandler := handler.NewKnowledgeHandler(pool, knowledgeIngestSvc, logger)
@@ -762,8 +765,14 @@ func main() {
 					r.Put("/position", taskHandler.Reorder)
 					r.Get("/comments", taskHandler.ListComments)
 					r.Post("/comments", taskHandler.AddComment)
+					// On-demand agent runs of this task.
+					r.Post("/run", taskRunHandler.CreateRun)
+					r.Get("/runs", taskRunHandler.ListRuns)
 				})
 			})
+
+			// A single task run, looked up by its own ID (the poll target).
+			r.Get("/task-runs/{runID}", taskRunHandler.GetRun)
 
 			// Organizations
 			r.Route("/organizations/{orgID}", func(r chi.Router) {

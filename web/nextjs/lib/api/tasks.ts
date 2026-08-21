@@ -101,7 +101,7 @@ export async function transitionTask(
   id: string,
   payload: TransitionTaskRequest
 ): Promise<Task> {
-  const { data } = await apiClient.post<Task>(
+  const { data } = await apiClient.patch<Task>(
     `/tasks/${id}/transition`,
     payload
   );
