@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/jobshout/server/internal/engine"
+	"github.com/jobshout/server/internal/executor"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/repository"
 )
@@ -26,12 +27,12 @@ type ExecutionService interface {
 }
 
 type executionService struct {
-	agentRepo     repository.AgentRepository
-	execRepo      repository.ExecutionRepository
-	toolPermRepo  repository.AgentToolRepository
-	engineRouter  *engine.Router
-	govSvc        GovernanceService
-	logger        *zap.Logger
+	agentRepo    repository.AgentRepository
+	execRepo     repository.ExecutionRepository
+	toolPermRepo repository.AgentToolRepository
+	engineRouter *engine.Router
+	govSvc       GovernanceService
+	logger       *zap.Logger
 }
 
 // NewExecutionService creates an ExecutionService.
@@ -61,6 +62,26 @@ func (s *executionService) Execute(ctx context.Context, orgID uuid.UUID, agentID
 	}
 	if agent == nil {
 		return nil, ErrAgentNotFound
+	}
+
+	// Apply a per-call model override without touching the agent record: work on
+	// a shallow copy so governance, engine resolution and the runner all see the
+	// overridden model, while the persisted agent is unchanged.
+	if req.ModelProvider != nil && *req.ModelProvider != "" {
+		clone := *agent
+		clone.ModelProvider = req.ModelProvider
+		if req.ModelName != nil && *req.ModelName != "" {
+			clone.ModelName = req.ModelName
+		}
+		agent = &clone
+	}
+
+	// Carry per-run skill overrides on the context so the go-native executor can
+	// fold in run-scoped skills. Absent overrides leave the run unchanged.
+	if len(req.SkillSlugs) > 0 {
+		ctx = executor.WithRunOptions(ctx, executor.RunOptions{
+			SkillSlugs: req.SkillSlugs,
+		})
 	}
 
 	// Enforce governance policies before execution.
@@ -132,14 +153,14 @@ func (s *executionService) Execute(ctx context.Context, orgID uuid.UUID, agentID
 	// Record usage and cost asynchronously.
 	if s.govSvc != nil {
 		usageExec := &model.AgentExecution{
-			ID:            execID,
-			AgentID:       agentID,
-			OrgID:         orgID,
-			TotalTokens:   result.TotalTokens,
-			InputTokens:   result.InputTokens,
-			OutputTokens:  result.OutputTokens,
-			LatencyMs:     result.LatencyMs,
-			Status:        model.ExecutionStatusCompleted,
+			ID:           execID,
+			AgentID:      agentID,
+			OrgID:        orgID,
+			TotalTokens:  result.TotalTokens,
+			InputTokens:  result.InputTokens,
+			OutputTokens: result.OutputTokens,
+			LatencyMs:    result.LatencyMs,
+			Status:       model.ExecutionStatusCompleted,
 		}
 		if result.ModelProvider != "" {
 			usageExec.ModelProvider = &result.ModelProvider

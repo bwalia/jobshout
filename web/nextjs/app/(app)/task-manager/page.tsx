@@ -1,412 +1,391 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { useTasks } from "@/lib/hooks/useTasks";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import {
+  Bot,
+  ListTree,
+  Pencil,
+  Plus,
+  Rocket,
+  Trash2,
+} from "lucide-react";
+
+import { TaskEditorDialog } from "@/components/task-manager/TaskEditorDialog";
+import { RunTaskDialog } from "@/components/task-manager/RunTaskDialog";
+import { TaskRunView } from "@/components/task-manager/TaskRunView";
 import { useAgents } from "@/lib/hooks/useAgents";
-import { apiClient } from "@/lib/api/client";
-import { toast } from "sonner";
+import { useProjects } from "@/lib/hooks/useProjects";
+import {
+  useDeleteTask,
+  useProjectTasks,
+  useTransitionTask,
+} from "@/lib/hooks/useTasks";
+import type { Agent } from "@/lib/types/agent";
+import type { TaskStatus } from "@/lib/types/common";
+import type { Task } from "@/lib/types/project";
+import type { TaskRun } from "@/lib/types/task-run";
 
-interface TaskNode {
-  id: string;
-  title: string;
-  description: string | null;
-  status: string;
-  priority: string;
-  parent_id: string | null;
-  assigned_agent_id: string | null;
-  due_date: string | null;
-  story_points: number | null;
-  depth: number;
-  children: TaskNode[];
-  expanded: boolean;
-}
+const STATUSES: TaskStatus[] = [
+  "backlog",
+  "todo",
+  "in_progress",
+  "review",
+  "done",
+];
 
-const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
-  backlog: { label: "Backlog", color: "text-gray-600", bg: "bg-gray-100 dark:bg-gray-800" },
-  todo: { label: "To Do", color: "text-blue-600", bg: "bg-blue-100 dark:bg-blue-900/30" },
-  in_progress: { label: "In Progress", color: "text-yellow-600", bg: "bg-yellow-100 dark:bg-yellow-900/30" },
-  review: { label: "Review", color: "text-purple-600", bg: "bg-purple-100 dark:bg-purple-900/30" },
-  done: { label: "Done", color: "text-green-600", bg: "bg-green-100 dark:bg-green-900/30" },
+const STATUS_DOT: Record<TaskStatus, string> = {
+  backlog: "bg-muted-foreground",
+  todo: "bg-signal-info",
+  in_progress: "bg-signal-live",
+  review: "bg-signal-warn",
+  done: "bg-signal",
 };
 
-const PRIORITY_CONFIG: Record<string, { label: string; color: string }> = {
-  low: { label: "Low", color: "text-gray-500" },
-  medium: { label: "Med", color: "text-blue-500" },
-  high: { label: "High", color: "text-orange-500" },
-  critical: { label: "Crit", color: "text-red-500" },
+const PRIORITY_CLS: Record<string, string> = {
+  low: "text-muted-foreground",
+  medium: "text-signal-info",
+  high: "text-signal-warn",
+  critical: "text-signal-error",
 };
 
 export default function TaskManagerPage() {
-  const { data: tasksResponse, isLoading, refetch } = useTasks();
-  const { data: agentsResponse } = useAgents();
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
-  const [filterStatus, setFilterStatus] = useState<string>("all");
-  const [filterPriority, setFilterPriority] = useState<string>("all");
-  const [showAddForm, setShowAddForm] = useState<string | null>(null); // parent_id or "root"
-  const [newTaskTitle, setNewTaskTitle] = useState("");
-  const [newTaskPriority, setNewTaskPriority] = useState("medium");
+  const { data: projectsResp } = useProjects({ per_page: 100 });
+  const projects = useMemo(() => projectsResp?.data ?? [], [projectsResp]);
 
-  const agents = agentsResponse?.data ?? [];
-  const rawTasks = tasksResponse?.data ?? [];
+  const { data: agentsResp } = useAgents({ per_page: 100 });
+  const agents = useMemo(() => agentsResp?.data ?? [], [agentsResp]);
 
-  // Build hierarchical tree
-  const taskTree = useMemo(() => {
-    const taskMap = new Map<string, TaskNode>();
-    const roots: TaskNode[] = [];
+  const [projectId, setProjectId] = useState<string>("");
+  useEffect(() => {
+    if (!projectId && projects.length > 0) setProjectId(projects[0].id);
+  }, [projects, projectId]);
 
-    // Create nodes
-    for (const t of rawTasks) {
-      taskMap.set(t.id, {
-        id: t.id,
-        title: t.title,
-        description: t.description,
-        status: t.status,
-        priority: t.priority,
-        parent_id: t.parent_id,
-        assigned_agent_id: t.assigned_agent_id,
-        due_date: t.due_date,
-        story_points: t.story_points,
-        depth: 0,
-        children: [],
-        expanded: expandedIds.has(t.id),
-      });
+  const { data: tasksResp, isLoading: tasksLoading } = useProjectTasks(projectId);
+  const tasks = useMemo(() => tasksResp?.data ?? [], [tasksResp]);
+
+  const [statusFilter, setStatusFilter] = useState<TaskStatus | "all">("all");
+  const filtered = useMemo(
+    () =>
+      statusFilter === "all"
+        ? tasks
+        : tasks.filter((t) => t.status === statusFilter),
+    [tasks, statusFilter]
+  );
+
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selected = tasks.find((t) => t.id === selectedId) ?? null;
+  useEffect(() => {
+    // Keep a valid selection as the list changes.
+    if (selectedId && !tasks.some((t) => t.id === selectedId)) {
+      setSelectedId(null);
     }
+  }, [tasks, selectedId]);
 
-    // Build tree
-    for (const node of Array.from(taskMap.values())) {
-      if (node.parent_id && taskMap.has(node.parent_id)) {
-        const parent = taskMap.get(node.parent_id)!;
-        node.depth = parent.depth + 1;
-        parent.children.push(node);
-      } else {
-        roots.push(node);
-      }
-    }
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorTask, setEditorTask] = useState<Task | undefined>(undefined);
+  const [runOpen, setRunOpen] = useState(false);
+  const [focusRunId, setFocusRunId] = useState<string | null>(null);
 
-    // Calculate depths recursively
-    function setDepths(nodes: TaskNode[], depth: number) {
-      for (const n of nodes) {
-        n.depth = depth;
-        setDepths(n.children, depth + 1);
-      }
-    }
-    setDepths(roots, 0);
+  const transition = useTransitionTask();
+  const deleteTask = useDeleteTask();
 
-    return roots;
-  }, [rawTasks, expandedIds]);
-
-  // Flatten for display (respecting expanded state)
-  const flatList = useMemo(() => {
-    const result: TaskNode[] = [];
-    function traverse(nodes: TaskNode[]) {
-      for (const node of nodes) {
-        // Apply filters
-        if (filterStatus !== "all" && node.status !== filterStatus) continue;
-        if (filterPriority !== "all" && node.priority !== filterPriority) continue;
-        result.push(node);
-        if (expandedIds.has(node.id) && node.children.length > 0) {
-          traverse(node.children);
-        }
-      }
-    }
-    traverse(taskTree);
-    return result;
-  }, [taskTree, expandedIds, filterStatus, filterPriority]);
-
-  function toggleExpand(id: string) {
-    setExpandedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  function openCreate() {
+    setEditorTask(undefined);
+    setEditorOpen(true);
   }
-
-  function expandAll() {
-    const allIds = new Set(rawTasks.map((t) => t.id));
-    setExpandedIds(allIds);
+  function openEdit(task: Task) {
+    setEditorTask(task);
+    setEditorOpen(true);
   }
-
-  function collapseAll() {
-    setExpandedIds(new Set());
-  }
-
-  async function handleAddSubtask(parentId: string | null) {
-    if (!newTaskTitle.trim()) return;
-    // Need a project_id - use the first task's project_id or fallback
-    const projectId = rawTasks[0]?.project_id;
-    if (!projectId) {
-      toast.error("No project found. Create a project first.");
-      return;
-    }
-
-    try {
-      await apiClient.post("/tasks", {
-        project_id: projectId,
-        title: newTaskTitle,
-        priority: newTaskPriority,
-        parent_id: parentId === "root" ? undefined : parentId,
-      });
-      toast.success("Task created.");
-      setNewTaskTitle("");
-      setShowAddForm(null);
-      refetch();
-    } catch {
-      toast.error("Failed to create task.");
-    }
-  }
-
-  async function handleStatusChange(taskId: string, newStatus: string) {
-    try {
-      await apiClient.patch(`/tasks/${taskId}/transition`, { status: newStatus });
-      refetch();
-    } catch {
-      toast.error("Failed to update status.");
-    }
-  }
-
-  // Stats
-  const stats = useMemo(() => {
-    const total = rawTasks.length;
-    const done = rawTasks.filter((t) => t.status === "done").length;
-    const inProgress = rawTasks.filter((t) => t.status === "in_progress").length;
-    const rootCount = rawTasks.filter((t) => !t.parent_id).length;
-    const maxDepth = Math.max(0, ...rawTasks.map(() => 0)); // simplified
-    return { total, done, inProgress, rootCount, maxDepth };
-  }, [rawTasks]);
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
-      <div className="flex items-center justify-between">
+      {/* Header */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Multi-Level Task Manager</h1>
+          <h1 className="flex items-center gap-2 font-display text-2xl font-semibold">
+            <ListTree className="h-6 w-6 text-primary" />
+            Task Manager
+          </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Hierarchical task management with parent-child relationships and dependencies.
+            Write a task, assign an agent, and run it — with per-run skills,
+            model, inputs and debug overrides.
           </p>
         </div>
-        <button
-          onClick={() => setShowAddForm(showAddForm === "root" ? null : "root")}
-          className="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-        >
-          {showAddForm === "root" ? "Cancel" : "Add Root Task"}
-        </button>
-      </div>
-
-      {/* Stats bar */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div className="rounded-lg border border-border bg-card p-3 text-center">
-          <p className="text-2xl font-bold">{stats.total}</p>
-          <p className="text-xs text-muted-foreground">Total Tasks</p>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-3 text-center">
-          <p className="text-2xl font-bold text-green-600">{stats.done}</p>
-          <p className="text-xs text-muted-foreground">Completed</p>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-3 text-center">
-          <p className="text-2xl font-bold text-yellow-600">{stats.inProgress}</p>
-          <p className="text-xs text-muted-foreground">In Progress</p>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-3 text-center">
-          <p className="text-2xl font-bold">{stats.rootCount}</p>
-          <p className="text-xs text-muted-foreground">Root Tasks</p>
-        </div>
-      </div>
-
-      {/* Filters & controls */}
-      <div className="flex flex-wrap items-center gap-3">
-        <select
-          value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value)}
-          className="flex h-8 rounded-md border border-input bg-background px-2 text-xs"
-        >
-          <option value="all">All Status</option>
-          {Object.entries(STATUS_CONFIG).map(([k, v]) => (
-            <option key={k} value={k}>{v.label}</option>
-          ))}
-        </select>
-        <select
-          value={filterPriority}
-          onChange={(e) => setFilterPriority(e.target.value)}
-          className="flex h-8 rounded-md border border-input bg-background px-2 text-xs"
-        >
-          <option value="all">All Priority</option>
-          {Object.entries(PRIORITY_CONFIG).map(([k, v]) => (
-            <option key={k} value={k}>{v.label}</option>
-          ))}
-        </select>
-        <button onClick={expandAll} className="inline-flex h-8 items-center rounded-md border border-input bg-background px-3 text-xs hover:bg-accent">
-          Expand All
-        </button>
-        <button onClick={collapseAll} className="inline-flex h-8 items-center rounded-md border border-input bg-background px-3 text-xs hover:bg-accent">
-          Collapse All
-        </button>
-      </div>
-
-      {/* Add root task form */}
-      {showAddForm === "root" && (
-        <div className="flex items-center gap-2 rounded-lg border border-border bg-card p-3">
-          <input
-            type="text"
-            value={newTaskTitle}
-            onChange={(e) => setNewTaskTitle(e.target.value)}
-            placeholder="New task title..."
-            autoFocus
-            onKeyDown={(e) => e.key === "Enter" && handleAddSubtask(null)}
-            className="flex h-8 flex-1 rounded-md border border-input bg-background px-3 text-sm"
-          />
+        <div className="flex items-center gap-2">
           <select
-            value={newTaskPriority}
-            onChange={(e) => setNewTaskPriority(e.target.value)}
-            className="flex h-8 rounded-md border border-input bg-background px-2 text-xs"
+            value={projectId}
+            onChange={(e) => {
+              setProjectId(e.target.value);
+              setSelectedId(null);
+            }}
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-            <option value="critical">Critical</option>
+            {projects.length === 0 && <option value="">No projects</option>}
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
           </select>
           <button
-            onClick={() => handleAddSubtask(null)}
-            className="inline-flex h-8 items-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+            onClick={openCreate}
+            disabled={!projectId}
+            className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
           >
-            Add
+            <Plus className="h-4 w-4" /> New Task
           </button>
         </div>
-      )}
+      </div>
 
-      {/* Task tree */}
-      {isLoading ? (
-        <div className="flex items-center justify-center py-12">
-          <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-        </div>
-      ) : flatList.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border p-12 text-center">
-          <p className="text-sm text-muted-foreground">No tasks found.</p>
+      {projects.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border bg-card/50 p-8 text-center text-sm text-muted-foreground">
+          No projects yet.{" "}
+          <Link href="/projects" className="text-primary hover:underline">
+            Create a project
+          </Link>{" "}
+          to start adding tasks.
         </div>
       ) : (
-        <div className="rounded-xl border border-border bg-card">
-          {/* Header */}
-          <div className="grid grid-cols-12 gap-2 border-b border-border px-4 py-2 text-xs font-medium text-muted-foreground">
-            <div className="col-span-5">Task</div>
-            <div className="col-span-2">Status</div>
-            <div className="col-span-1">Priority</div>
-            <div className="col-span-2">Agent</div>
-            <div className="col-span-2 text-right">Actions</div>
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[320px_1fr]">
+          {/* Task list */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <select
+                value={statusFilter}
+                onChange={(e) =>
+                  setStatusFilter(e.target.value as TaskStatus | "all")
+                }
+                className="h-8 rounded-md border border-input bg-background px-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="all">All statuses</option>
+                {STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {s.replace("_", " ")}
+                  </option>
+                ))}
+              </select>
+              <span className="text-xs text-muted-foreground">
+                {filtered.length} task{filtered.length === 1 ? "" : "s"}
+              </span>
+            </div>
+
+            {tasksLoading ? (
+              <div className="rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
+                Loading tasks…
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-border bg-card/50 p-6 text-center text-sm text-muted-foreground">
+                No tasks here yet.
+              </div>
+            ) : (
+              <ul className="space-y-1.5">
+                {filtered.map((task) => {
+                  const active = task.id === selectedId;
+                  const agent = agents.find(
+                    (a) => a.id === task.assigned_agent_id
+                  );
+                  return (
+                    <li key={task.id}>
+                      <button
+                        onClick={() => {
+                          setSelectedId(task.id);
+                          setFocusRunId(null);
+                        }}
+                        className={
+                          "w-full rounded-md border px-3 py-2.5 text-left transition-colors " +
+                          (active
+                            ? "border-primary bg-primary/10"
+                            : "border-border bg-card hover:bg-accent")
+                        }
+                      >
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={
+                              "h-2 w-2 shrink-0 rounded-full " +
+                              STATUS_DOT[task.status]
+                            }
+                          />
+                          <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                            {task.title}
+                          </span>
+                          <span
+                            className={
+                              "shrink-0 text-xs font-medium " +
+                              (PRIORITY_CLS[task.priority] ?? "")
+                            }
+                          >
+                            {task.priority}
+                          </span>
+                        </div>
+                        <div className="mt-1 flex items-center gap-2 pl-4 text-xs text-muted-foreground">
+                          {agent ? (
+                            <span className="inline-flex items-center gap-1">
+                              <Bot className="h-3 w-3" /> {agent.name}
+                            </span>
+                          ) : (
+                            <span className="italic">unassigned</span>
+                          )}
+                        </div>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </div>
 
-          {/* Rows */}
-          {flatList.map((task) => (
-            <div key={task.id}>
-              <div className="grid grid-cols-12 items-center gap-2 border-b border-border/50 px-4 py-2 hover:bg-accent/30">
-                {/* Task name with indent */}
-                <div className="col-span-5 flex items-center gap-1">
-                  <div style={{ width: `${task.depth * 24}px` }} className="flex-shrink-0" />
-                  {task.children.length > 0 ? (
-                    <button
-                      onClick={() => toggleExpand(task.id)}
-                      className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-xs text-muted-foreground hover:bg-accent"
-                    >
-                      {expandedIds.has(task.id) ? "v" : ">"}
-                    </button>
-                  ) : (
-                    <div className="w-5 flex-shrink-0" />
-                  )}
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{task.title}</p>
-                    {task.children.length > 0 && (
-                      <p className="text-xs text-muted-foreground">
-                        {task.children.length} subtask{task.children.length > 1 ? "s" : ""}
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Status */}
-                <div className="col-span-2">
-                  <select
-                    value={task.status}
-                    onChange={(e) => handleStatusChange(task.id, e.target.value)}
-                    className={`h-7 rounded-md border-0 px-2 text-xs font-medium ${STATUS_CONFIG[task.status]?.bg ?? ""} ${STATUS_CONFIG[task.status]?.color ?? ""}`}
-                  >
-                    {Object.entries(STATUS_CONFIG).map(([k, v]) => (
-                      <option key={k} value={k}>{v.label}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Priority */}
-                <div className="col-span-1">
-                  <span className={`text-xs font-medium ${PRIORITY_CONFIG[task.priority]?.color ?? ""}`}>
-                    {PRIORITY_CONFIG[task.priority]?.label ?? task.priority}
-                  </span>
-                </div>
-
-                {/* Agent */}
-                <div className="col-span-2">
-                  {task.assigned_agent_id ? (
-                    <span className="text-xs">
-                      {agents.find((a) => a.id === task.assigned_agent_id)?.name ?? "Agent"}
-                    </span>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">Unassigned</span>
-                  )}
-                </div>
-
-                {/* Actions */}
-                <div className="col-span-2 flex items-center justify-end gap-1">
-                  <button
-                    onClick={() =>
-                      setShowAddForm(showAddForm === task.id ? null : task.id)
-                    }
-                    title="Add subtask"
-                    className="inline-flex h-6 items-center rounded border border-input bg-background px-2 text-xs hover:bg-accent"
-                  >
-                    + Sub
-                  </button>
-                  {task.due_date && (
-                    <span className="text-xs text-muted-foreground">
-                      {new Date(task.due_date).toLocaleDateString()}
-                    </span>
-                  )}
-                </div>
+          {/* Detail */}
+          <div>
+            {selected ? (
+              <TaskDetail
+                task={selected}
+                agents={agents}
+                focusRunId={focusRunId}
+                onEdit={() => openEdit(selected)}
+                onRun={() => setRunOpen(true)}
+                onDelete={async () => {
+                  if (
+                    confirm(`Delete "${selected.title}"? This cannot be undone.`)
+                  ) {
+                    await deleteTask.mutateAsync(selected.id);
+                    setSelectedId(null);
+                  }
+                }}
+                onTransition={(status) =>
+                  transition.mutate({ id: selected.id, payload: { status } })
+                }
+              />
+            ) : (
+              <div className="flex h-full min-h-[240px] items-center justify-center rounded-lg border border-dashed border-border bg-card/50 text-sm text-muted-foreground">
+                Select a task to edit and run it.
               </div>
-
-              {/* Inline add subtask form */}
-              {showAddForm === task.id && (
-                <div
-                  className="flex items-center gap-2 border-b border-border/50 bg-accent/20 px-4 py-2"
-                  style={{ paddingLeft: `${(task.depth + 1) * 24 + 40}px` }}
-                >
-                  <input
-                    type="text"
-                    value={newTaskTitle}
-                    onChange={(e) => setNewTaskTitle(e.target.value)}
-                    placeholder={`Add subtask under "${task.title}"...`}
-                    autoFocus
-                    onKeyDown={(e) => e.key === "Enter" && handleAddSubtask(task.id)}
-                    className="flex h-7 flex-1 rounded-md border border-input bg-background px-2 text-xs"
-                  />
-                  <select
-                    value={newTaskPriority}
-                    onChange={(e) => setNewTaskPriority(e.target.value)}
-                    className="flex h-7 rounded-md border border-input bg-background px-2 text-xs"
-                  >
-                    <option value="low">Low</option>
-                    <option value="medium">Med</option>
-                    <option value="high">High</option>
-                    <option value="critical">Crit</option>
-                  </select>
-                  <button
-                    onClick={() => handleAddSubtask(task.id)}
-                    className="inline-flex h-7 items-center rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground"
-                  >
-                    Add
-                  </button>
-                </div>
-              )}
-            </div>
-          ))}
+            )}
+          </div>
         </div>
       )}
+
+      {/* Dialogs */}
+      {editorOpen && (
+        <TaskEditorDialog
+          task={editorTask}
+          projectId={projectId}
+          agents={agents}
+          onClose={() => setEditorOpen(false)}
+          onSaved={(t) => setSelectedId(t.id)}
+        />
+      )}
+      {runOpen && selected && (
+        <RunTaskDialog
+          task={selected}
+          agents={agents}
+          onClose={() => setRunOpen(false)}
+          onLaunched={(run: TaskRun) => setFocusRunId(run.id)}
+        />
+      )}
+    </div>
+  );
+}
+
+function TaskDetail({
+  task,
+  agents,
+  focusRunId,
+  onEdit,
+  onRun,
+  onDelete,
+  onTransition,
+}: {
+  task: Task;
+  agents: Agent[];
+  focusRunId: string | null;
+  onEdit: () => void;
+  onRun: () => void;
+  onDelete: () => void;
+  onTransition: (status: TaskStatus) => void;
+}) {
+  const agent = agents.find((a) => a.id === task.assigned_agent_id);
+
+  return (
+    <div className="space-y-5 rounded-lg border border-border bg-card p-5">
+      {/* Title + actions */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="font-display text-xl font-semibold">{task.title}</h2>
+          {task.description && (
+            <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">
+              {task.description}
+            </p>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            onClick={onEdit}
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-sm hover:bg-accent"
+          >
+            <Pencil className="h-4 w-4" /> Edit
+          </button>
+          <button
+            onClick={onDelete}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-accent hover:text-signal-error"
+            aria-label="Delete task"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+          <button
+            onClick={onRun}
+            className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          >
+            <Rocket className="h-4 w-4" /> Run now
+          </button>
+        </div>
+      </div>
+
+      {/* Meta row */}
+      <div className="flex flex-wrap items-center gap-4 text-sm">
+        <label className="flex items-center gap-1.5">
+          <span className="text-muted-foreground">Status</span>
+          <select
+            value={task.status}
+            onChange={(e) => onTransition(e.target.value as TaskStatus)}
+            className="h-8 rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {s.replace("_", " ")}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span className="text-muted-foreground">
+          Priority{" "}
+          <span
+            className={"font-medium " + (PRIORITY_CLS[task.priority] ?? "")}
+          >
+            {task.priority}
+          </span>
+        </span>
+        <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+          <Bot className="h-4 w-4" />
+          {agent ? (
+            <span className="font-medium text-foreground">{agent.name}</span>
+          ) : (
+            <span className="italic">unassigned</span>
+          )}
+        </span>
+        {task.due_date && (
+          <span className="text-muted-foreground">
+            Due {new Date(task.due_date).toLocaleDateString()}
+          </span>
+        )}
+      </div>
+
+      {/* Runs */}
+      <div className="space-y-2 border-t border-border pt-4">
+        <h3 className="text-sm font-medium">Runs</h3>
+        <TaskRunView task={task} agents={agents} focusRunId={focusRunId} />
+      </div>
     </div>
   );
 }
