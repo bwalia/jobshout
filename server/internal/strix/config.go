@@ -2,37 +2,89 @@ package strix
 
 import (
 	"os"
+	"strings"
+	"time"
 
 	"go.uber.org/zap"
 )
 
+// Defaults for the workstation pentest service.
+const (
+	// DefaultTimeout bounds ONE HTTP call, not one scan. Conflating the two is
+	// how a two-hour client timeout hides a dead service for two hours.
+	DefaultTimeout = 60 * time.Second
+	// DefaultPollInterval is how often a non-terminal run is re-checked.
+	DefaultPollInterval = 15 * time.Second
+	// DefaultMaxRuntime is when the reconciler gives up on a run the service
+	// never finished. The service enforces its own ceiling; this is the backstop
+	// for the case where it stops answering altogether.
+	DefaultMaxRuntime = 2 * time.Hour
+)
+
 type Config struct {
-	Enabled   bool
-	StrixPath string
-	RunsDir   string
-	LLMModel  string
-	LLMKey    string
-	// LLMAPIBase overrides the LLM endpoint (LiteLLM's LLM_API_BASE). It is how a
-	// local model is used instead of a hosted provider: point it at an Ollama /
-	// LMStudio server and set LLMModel to e.g. "ollama_chat/qwen3-coder:30b".
-	// Empty means the provider's default endpoint (the hosted APIs).
-	LLMAPIBase string
+	Enabled bool
+	// BaseURL is the workstation pentest service, e.g.
+	// https://strix.workstation.co.uk. Empty means the feature is off: a ring
+	// that has not stood the service up should not spend a timeout discovering
+	// that on every scan request.
+	BaseURL string
+	// JWTSecret signs requests to the service. Deliberately distinct from the
+	// Ollama and image-service secrets — those front a language model and a GPU,
+	// this fronts a vulnerability scanner, and a leak of one credential should
+	// not hand over all three.
+	JWTSecret    string
+	Timeout      time.Duration
+	PollInterval time.Duration
+	MaxRuntime   time.Duration
+	// TargetAllowlist is defence in depth. scope.py on the workstation is the
+	// real boundary — it cannot be bypassed by anyone holding a token, because
+	// it is the code path that decides whether a subprocess runs. This copy
+	// refuses obviously out-of-scope work before it crosses the network.
+	TargetAllowlist []string
 }
+
+// Configured reports whether scans can actually be dispatched.
+func (c Config) Configured() bool { return c.Enabled && c.BaseURL != "" }
 
 func LoadConfig(logger *zap.Logger) Config {
-	return Config{
-		Enabled:    os.Getenv("STRIX_ENABLED") != "false",
-		StrixPath:  getEnvOrDefault("STRIX_PATH", "strix"),
-		RunsDir:    getEnvOrDefault("STRIX_RUNS_DIR", "./strix_runs"),
-		LLMModel:   os.Getenv("STRIX_LLM"),
-		LLMKey:     os.Getenv("STRIX_LLM_API_KEY"),
-		LLMAPIBase: os.Getenv("STRIX_LLM_API_BASE"),
+	cfg := Config{
+		Enabled:         os.Getenv("STRIX_ENABLED") != "false",
+		BaseURL:         strings.TrimRight(os.Getenv("STRIX_BASE_URL"), "/"),
+		JWTSecret:       os.Getenv("STRIX_JWT_SECRET"),
+		Timeout:         durationOrDefault("STRIX_TIMEOUT", DefaultTimeout, logger),
+		PollInterval:    durationOrDefault("STRIX_POLL_INTERVAL", DefaultPollInterval, logger),
+		MaxRuntime:      durationOrDefault("STRIX_MAX_RUNTIME", DefaultMaxRuntime, logger),
+		TargetAllowlist: splitList(os.Getenv("STRIX_TARGET_ALLOWLIST")),
 	}
+	return cfg
 }
 
-func getEnvOrDefault(key, defaultVal string) string {
-	if val := os.Getenv(key); val != "" {
-		return val
+func durationOrDefault(key string, fallback time.Duration, logger *zap.Logger) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
 	}
-	return defaultVal
+	parsed, err := time.ParseDuration(raw)
+	if err != nil || parsed <= 0 {
+		// Falls back rather than failing to boot: a malformed duration is a
+		// typo in one setting, not a reason for the whole server to refuse to
+		// start with every other feature working.
+		if logger != nil {
+			logger.Warn("ignoring unparseable duration, using default",
+				zap.String("key", key), zap.String("value", raw),
+				zap.Duration("default", fallback))
+		}
+		return fallback
+	}
+	return parsed
+}
+
+func splitList(raw string) []string {
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
