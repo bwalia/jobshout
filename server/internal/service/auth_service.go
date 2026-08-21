@@ -113,8 +113,9 @@ func (s *authService) seedBuiltinAgents(ctx context.Context, orgID, createdBy uu
 	// Each built-in is seeded independently so one failing does not deprive the
 	// organization of the others.
 	seeds := map[string]*model.Agent{
-		"Article Writer": articleWriterSeed(orgID),
-		"Research Agent": researcherSeed(orgID),
+		"Article Writer":     articleWriterSeed(orgID),
+		"Research Agent":     researcherSeed(orgID),
+		"Security Tester":    pentestSeed(orgID),
 	}
 	seeded := 0
 	for name, agent := range seeds {
@@ -246,6 +247,23 @@ func slugify(name string) string {
 	slug = nonAlphaRegex.ReplaceAllString(slug, "-")
 	slug = strings.Trim(slug, "-")
 	return slug
+}
+
+func pentestSeed(orgID uuid.UUID) *model.Agent {
+	desc := "Autonomous security testing agent powered by Strix. Tests live APIs, applications, and codebases for vulnerabilities including OWASP Top 10 and beyond."
+	prompt := "You are a security expert assisting with penetration testing. Use the Strix tool to run security scans against applications and APIs. Report findings clearly with severity levels and proof-of-concepts."
+	return &model.Agent{
+		ID:           uuid.New(),
+		OrgID:        orgID,
+		Name:         "Security Tester",
+		Role:         "Penetration Testing Agent",
+		Description:  &desc,
+		SystemPrompt: &prompt,
+		Status:       "active",
+		EngineType:   model.EngineGoNative,
+		EngineConfig: map[string]any{},
+		Metadata:     map[string]any{model.MetadataKeyBuiltin: model.BuiltinPentester},
+	}
 }
 
 // Sentinel errors for auth operations.
