@@ -38,13 +38,14 @@ export default function ArticleRunPage() {
   const remove = useDeleteBlogRun();
 
   const writing = run?.status === "running" || run?.status === "pending";
+  const articleCount = run?.articles?.length ?? 0;
   const { data: articles } = useBlogArticles(
     runId,
     Boolean(run) &&
-      (run.status === "completed" ||
-        run.status === "failed" ||
-        (run.articles?.length ?? 0) > 0),
-    writing && (run?.articles?.length ?? 0) > 0
+      (run?.status === "completed" ||
+        run?.status === "failed" ||
+        articleCount > 0),
+    writing && articleCount > 0
   );
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
