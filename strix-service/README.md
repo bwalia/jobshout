@@ -100,6 +100,10 @@ Entries may be hosts, wildcards, CIDRs or URL prefixes:
 STRIX_TARGET_ALLOWLIST='juice.internal,*.staging.example.com,10.13.0.0/24,https://app.example.com/beta'
 ```
 
+A literal `*` allows any **public** host (private / metadata still refused). Use
+it only for short bring-up windows. Int Product Phase 2 restores named hosts,
+e.g. `int.jobshout.co.uk`.
+
 Two independent gates, both of which must pass:
 
 1. **The target matches a rule.** `*.example.com` covers `api.example.com` and

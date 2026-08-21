@@ -20,6 +20,7 @@ import signal
 from pathlib import Path
 
 from app import config, store as store_module
+from app.engagement import compose_instruction, read_report_markdown, target_engaged
 from app.store import BUDGET_EXCEEDED, CANCELLED, COMPLETED, FAILED, RUNNING, Finding, Run
 
 logger = logging.getLogger(__name__)
@@ -164,14 +165,14 @@ class Runner:
             self._cancelled.discard(run.run_id)
 
     def build_args(self, run: Run) -> list[str]:
-        # Only flags the Go client already used against a real Strix. The
-        # instruction is deliberately not passed: this service has no verified
-        # flag for it, and an invented one would fail every scan rather than
-        # just ignoring the field. It is kept on the run record for the audit
-        # trail, and STRIX_EXTRA_ARGS exists for operators who know better.
+        # Flags confirmed by `strix --help` on the workstation. --instruction is
+        # real; we always pass a standing engagement prompt so the model cannot
+        # "finish" after only listing the sandbox.
         args = [config.BIN, "-n", "--target", run.target, "--scan-mode", run.scan_mode]
         if run.max_budget:
             args += ["--max-budget", str(run.max_budget)]
+        instruction = compose_instruction(run.target, run.instruction)
+        args += ["--instruction", instruction]
         args += config.EXTRA_ARGS
         return args
 
@@ -255,7 +256,9 @@ class Runner:
             return
 
         findings = parse_findings(run_dir)
-        status, error = self._classify(exit_code, tail, findings)
+        report = read_report_markdown(run_dir)
+        engaged = target_engaged(run_dir, run.target, tail)
+        status, error = self._classify(exit_code, tail, findings, engaged)
         self.store.finish(
             run, status,
             exit_code=exit_code,
@@ -263,21 +266,32 @@ class Runner:
             finding_count=len(findings),
             log_tail=tail,
             error=error,
+            report_markdown=report,
+            target_engaged=engaged,
         )
         logger.info(
-            "scan %s finished: status=%s exit=%s findings=%d",
-            run.run_id, status, exit_code, len(findings),
+            "scan %s finished: status=%s exit=%s findings=%d engaged=%s",
+            run.run_id, status, exit_code, len(findings), engaged,
         )
 
     def _classify(self, exit_code: int | None, output: str,
-                  findings: list[Finding]) -> tuple[str, str | None]:
+                  findings: list[Finding], engaged: bool) -> tuple[str, str | None]:
         """Turn an exit code into a status.
 
         Strix documents 0 as a clean scan and 2 as "vulnerabilities found" —
         both are successful scans, and conflating 2 with failure would report
         every scan that actually found something as broken.
+
+        A clean exit with zero findings and no evidence the target was reached
+        is a hollow run — fail closed so History never shows fake "Clean".
         """
         if exit_code in (0, 2):
+            if not engaged and not findings:
+                return FAILED, (
+                    "scanner did not engage the target: no HTTP (or equivalent) "
+                    "interaction with the host was recorded. Re-run the scan; if "
+                    "this persists, check Docker networking and the model."
+                )
             return COMPLETED, None
 
         lowered = output.lower()
