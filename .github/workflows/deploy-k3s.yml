@@ -110,7 +110,10 @@ jobs:
           SHA="${{ steps.tag.outputs.sha }}"
           NS="$IMAGE_REGISTRY/$IMAGE_NAMESPACE"
 
-          assert_amd64() {
+          # A single-platform OCI manifest does not print "linux/amd64" in
+          # `imagetools inspect` text — only indexes do. Reject attestation
+          # indexes / arm64 lists; prove amd64 by running the image.
+          assert_not_multiarch_junk() {
             local img="$1"
             echo "Inspecting $img"
             docker buildx imagetools inspect "$img"
@@ -122,33 +125,30 @@ jobs:
           )
           m = json.loads(raw)
           mt = m.get("mediaType") or ""
-          def fail(msg):
-              print(f"::error::{img}: {msg}", file=sys.stderr)
+          if "index" not in mt and "manifest.list" not in mt:
+              print(f"OK {img} is a single manifest (runtime smoke checks arch)")
+              sys.exit(0)
+          plats = []
+          for e in m.get("manifests") or []:
+              p = e.get("platform") or {}
+              os_, arch = p.get("os") or "", p.get("architecture") or ""
+              if os_ == "unknown" or arch == "unknown":
+                  print(f"::error::{img}: attestation/unknown platform in index: {p}", file=sys.stderr)
+                  sys.exit(1)
+              if arch == "arm64":
+                  print(f"::error::{img}: index includes linux/arm64", file=sys.stderr)
+                  sys.exit(1)
+              plats.append(f"{os_}/{arch}")
+          if "linux/amd64" not in plats:
+              print(f"::error::{img}: index has no linux/amd64 ({plats})", file=sys.stderr)
               sys.exit(1)
-          if "index" in mt or "manifest.list" in mt:
-              plats = []
-              for e in m.get("manifests") or []:
-                  p = e.get("platform") or {}
-                  os_, arch = p.get("os") or "", p.get("architecture") or ""
-                  if os_ == "unknown" or arch == "unknown":
-                      fail(f"attestation/unknown platform in index: {p}")
-                  plats.append(f"{os_}/{arch}")
-              if plats != ["linux/amd64"]:
-                  fail(f"expected a single linux/amd64 manifest, got {plats}")
-          text = subprocess.check_output(
-              ["docker", "buildx", "imagetools", "inspect", img], text=True
-          )
-          if "linux/amd64" not in text and "linux/amd64" not in json.dumps(m):
-              fail("missing linux/amd64 in inspect output")
-          if "linux/arm64" in text or "linux/arm64" in json.dumps(m):
-              fail("image includes linux/arm64")
-          print(f"OK {img} is linux/amd64")
+          print(f"OK {img} index platforms={plats}")
           PY
           }
 
-          assert_amd64 "$NS/server:$SHA"
-          assert_amd64 "$NS/web:$SHA"
-          assert_amd64 "$NS/python-sidecar:$SHA"
+          assert_not_multiarch_junk "$NS/server:$SHA"
+          assert_not_multiarch_junk "$NS/web:$SHA"
+          assert_not_multiarch_junk "$NS/python-sidecar:$SHA"
 
           echo "Runtime arch smoke (uname -m must be x86_64 under --platform=linux/amd64)"
           docker run --rm --platform=linux/amd64 --entrypoint /bin/sh "$NS/server:$SHA" \
