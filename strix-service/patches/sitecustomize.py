@@ -10,15 +10,21 @@ from __future__ import annotations
 
 import json
 
+# Hold the real stdlib loader. Patching transformation.json.loads also
+# patches json.loads (same module object), so calling json.loads inside
+# the wrapper would recurse until RecursionError — which is worse than
+# the Extra data crash this file exists to stop.
+_ORIG_LOADS = json.loads
+
 
 def _tolerant_loads(s, *args, **kwargs):
     if isinstance(s, (dict, list)):
         return s
     if not isinstance(s, (str, bytes, bytearray)):
-        return json.loads(s, *args, **kwargs)  # type: ignore[arg-type]
+        return _ORIG_LOADS(s, *args, **kwargs)  # type: ignore[arg-type]
     text = s.decode() if isinstance(s, (bytes, bytearray)) else s
     try:
-        return json.loads(text, *args, **kwargs)
+        return _ORIG_LOADS(text, *args, **kwargs)
     except json.JSONDecodeError as exc:
         if exc.msg != "Extra data":
             raise
