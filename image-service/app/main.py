@@ -10,7 +10,11 @@ import random
 from fastapi import Depends, FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 
-from app import config
+# models is needed for default_steps below. It is safe to call from the request
+# thread — unlike catalogue(), it derives the count from the model name and never
+# touches mflux or the Hugging Face cache, so it does not belong on the dedicated
+# MLX thread that the rest of this module now routes work to.
+from app import config, models
 from app.auth import require_auth
 from app.generator import GenerationBusy, UnknownModel, generator
 
