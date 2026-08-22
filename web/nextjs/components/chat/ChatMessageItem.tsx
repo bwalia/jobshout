@@ -47,6 +47,7 @@ export function ChatMessageItem({
   const agentName = meta.agent_id
     ? agents.find((a) => a.id === meta.agent_id)?.name
     : undefined;
+  const [copiedMsg, setCopiedMsg] = useState(false);
 
   return (
     <div className={"flex gap-3 " + (isUser ? "flex-row-reverse" : "")}>
@@ -100,6 +101,29 @@ export function ChatMessageItem({
             </div>
           )}
         </div>
+
+        {/* Actions (assistant only) */}
+        {!isUser && !isError && (
+          <div className="mt-1 flex items-center gap-1">
+            <button
+              onClick={() => {
+                navigator.clipboard?.writeText(message.content).then(() => {
+                  setCopiedMsg(true);
+                  setTimeout(() => setCopiedMsg(false), 1500);
+                });
+              }}
+              className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+              aria-label="Copy message"
+            >
+              {copiedMsg ? (
+                <Check className="h-3 w-3" />
+              ) : (
+                <Copy className="h-3 w-3" />
+              )}
+              {copiedMsg ? "Copied" : "Copy"}
+            </button>
+          </div>
+        )}
 
         {/* Rich reference cards (assistant only) */}
         {!isUser && (
