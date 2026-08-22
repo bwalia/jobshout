@@ -4,10 +4,12 @@ import { useEffect, useRef } from "react";
 import { Loader2, Sparkles } from "lucide-react";
 
 import { ChatMessageItem } from "@/components/chat/ChatMessageItem";
+import type { Agent } from "@/lib/types/agent";
 import type { ChatMessage } from "@/lib/types/chat";
 
 interface ChatMessageListProps {
   messages: ChatMessage[];
+  agents?: Agent[];
   /** An in-flight optimistic user message not yet persisted. */
   pendingUser?: string | null;
   thinking?: boolean;
@@ -22,6 +24,7 @@ const SUGGESTIONS = [
 
 export function ChatMessageList({
   messages,
+  agents = [],
   pendingUser,
   thinking,
 }: ChatMessageListProps) {
@@ -63,7 +66,7 @@ export function ChatMessageList({
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-4 py-6">
       {messages.map((m) => (
-        <ChatMessageItem key={m.id} message={m} />
+        <ChatMessageItem key={m.id} message={m} agents={agents} />
       ))}
       {pendingUser && (
         <ChatMessageItem

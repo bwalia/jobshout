@@ -3,8 +3,11 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Bot, Check, Copy, User, Workflow, Zap } from "lucide-react";
+import { Bot, Check, Copy, User } from "lucide-react";
 
+import { ExecutionCard } from "@/components/chat/ExecutionCard";
+import { WorkflowCard } from "@/components/chat/WorkflowCard";
+import type { Agent } from "@/lib/types/agent";
 import type { ChatMessage } from "@/lib/types/chat";
 
 function CodeBlock({ children }: { children: string }) {
@@ -31,29 +34,19 @@ function CodeBlock({ children }: { children: string }) {
   );
 }
 
-/** A reference chip pointing at the canonical work a turn produced. */
-function RefChip({
-  icon,
-  label,
-  value,
+export function ChatMessageItem({
+  message,
+  agents = [],
 }: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
+  message: ChatMessage;
+  agents?: Agent[];
 }) {
-  return (
-    <span className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-0.5 text-xs">
-      {icon}
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-mono text-foreground">{value.slice(0, 8)}</span>
-    </span>
-  );
-}
-
-export function ChatMessageItem({ message }: { message: ChatMessage }) {
   const isUser = message.role === "user";
   const meta = message.metadata ?? {};
   const isError = meta.error === true;
+  const agentName = meta.agent_id
+    ? agents.find((a) => a.id === meta.agent_id)?.name
+    : undefined;
 
   return (
     <div className={"flex gap-3 " + (isUser ? "flex-row-reverse" : "")}>
@@ -108,29 +101,26 @@ export function ChatMessageItem({ message }: { message: ChatMessage }) {
           )}
         </div>
 
-        {/* Reference chips (assistant only) */}
-        {!isUser && (meta.execution_id || meta.workflow_run_id || meta.intent) && (
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
+        {/* Rich reference cards (assistant only) */}
+        {!isUser && (
+          <>
             {meta.intent && (
-              <span className="inline-flex items-center rounded-md bg-accent px-2 py-0.5 font-mono text-xs text-muted-foreground">
-                {String(meta.intent)}
-              </span>
+              <div className="mt-1.5">
+                <span className="inline-flex items-center rounded-md bg-accent px-2 py-0.5 font-mono text-xs text-muted-foreground">
+                  {String(meta.intent)}
+                </span>
+              </div>
             )}
             {meta.execution_id && (
-              <RefChip
-                icon={<Zap className="h-3 w-3" />}
-                label="run"
-                value={String(meta.execution_id)}
+              <ExecutionCard
+                executionId={String(meta.execution_id)}
+                agentName={agentName}
               />
             )}
             {meta.workflow_run_id && (
-              <RefChip
-                icon={<Workflow className="h-3 w-3" />}
-                label="workflow"
-                value={String(meta.workflow_run_id)}
-              />
+              <WorkflowCard runId={String(meta.workflow_run_id)} />
             )}
-          </div>
+          </>
         )}
       </div>
     </div>

@@ -13,9 +13,8 @@ export interface ExecutionToolCall {
 }
 
 /**
- * A single agent execution. Mirrors server/internal/model/execution.go. This is
- * the rich telemetry a task run links to via execution_id — the debug view
- * renders its tool_calls timeline and token/cost breakdown.
+ * A single agent execution — the rich telemetry a chat turn references via
+ * metadata.execution_id. Mirrors server/internal/model/execution.go.
  */
 export interface AgentExecution {
   id: string;

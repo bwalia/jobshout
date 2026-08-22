@@ -80,6 +80,7 @@ export default function ChatPage() {
         <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
           <ChatMessageList
             messages={messages ?? []}
+            agents={agents}
             pendingUser={pendingUser}
             thinking={sendMessage.isPending}
           />

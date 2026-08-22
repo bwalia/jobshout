@@ -1,9 +1,19 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { ArrowUp, Bot, Loader2 } from "lucide-react";
+import { ArrowUp, Bot, Loader2, Slash } from "lucide-react";
 
 import type { Agent } from "@/lib/types/agent";
+
+// Slash commands expand to the natural-language query the existing router
+// already understands — they are discoverable shortcuts, not a separate parser.
+const SLASH_COMMANDS: { cmd: string; desc: string; send: string }[] = [
+  { cmd: "/agents", desc: "List your agents", send: "List my agents" },
+  { cmd: "/tasks", desc: "Show your tasks", send: "Show my tasks" },
+  { cmd: "/workflows", desc: "List your workflows", send: "List my workflows" },
+  { cmd: "/status", desc: "Status of recent work", send: "Show the status of my recent tasks" },
+  { cmd: "/help", desc: "What can JobShout do?", send: "help" },
+];
 
 interface ChatComposerProps {
   agents: Agent[];
@@ -30,12 +40,23 @@ export function ChatComposer({
   const [value, setValue] = useState("");
   const taRef = useRef<HTMLTextAreaElement>(null);
 
-  function submit() {
-    const content = value.trim();
-    if (!content || sending || disabled) return;
-    onSend(content);
+  const slashQuery = value.startsWith("/") ? value.slice(1).toLowerCase() : null;
+  const slashMatches =
+    slashQuery !== null
+      ? SLASH_COMMANDS.filter((c) => c.cmd.slice(1).startsWith(slashQuery))
+      : [];
+  const showSlash = slashQuery !== null && slashMatches.length > 0;
+
+  function send(content: string) {
+    const trimmed = content.trim();
+    if (!trimmed || sending || disabled) return;
+    onSend(trimmed);
     setValue("");
     if (taRef.current) taRef.current.style.height = "auto";
+  }
+
+  function submit() {
+    send(value);
   }
 
   function autosize(el: HTMLTextAreaElement) {
@@ -44,7 +65,22 @@ export function ChatComposer({
   }
 
   return (
-    <div className="rounded-2xl border border-border bg-card p-2 shadow-signal">
+    <div className="relative rounded-2xl border border-border bg-card p-2 shadow-signal">
+      {showSlash && (
+        <div className="absolute bottom-full left-0 mb-2 w-full overflow-hidden rounded-lg border border-border bg-popover shadow-signal">
+          {slashMatches.map((c) => (
+            <button
+              key={c.cmd}
+              onClick={() => send(c.send)}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent"
+            >
+              <Slash className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="font-mono">{c.cmd}</span>
+              <span className="text-xs text-muted-foreground">{c.desc}</span>
+            </button>
+          ))}
+        </div>
+      )}
       <textarea
         ref={taRef}
         rows={1}
