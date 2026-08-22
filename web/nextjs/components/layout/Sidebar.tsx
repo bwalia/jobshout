@@ -14,6 +14,7 @@ import {
   Clock,
   ListTree,
   MessageSquare,
+  MessagesSquare,
   Workflow,
   Puzzle,
   ChevronLeft,
@@ -49,6 +50,7 @@ const NAV_SECTIONS: NavSection[] = [
   {
     title: "AI Team",
     items: [
+      { label: "Chat", href: "/chat", icon: MessagesSquare },
       { label: "Agents", href: "/agents", icon: Bot },
       { label: "Security Tester", href: "/agents/pentest", icon: ShieldAlert },
       { label: "Agent Board", href: "/agent-board", icon: Kanban },
