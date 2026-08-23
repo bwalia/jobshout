@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/jobshout/server/internal/chatstream"
 	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/llmtrace"
 	"github.com/jobshout/server/internal/model"
@@ -194,6 +195,13 @@ func (e *Executor) Run(
 		SessionID: execID.String(),
 		AgentID:   agent.ID.String(),
 		OrgID:     agent.OrgID.String(),
+	})
+
+	// Stream a safe "executing" signal for any listening SSE handler (chat).
+	// No-op when no emitter is on the context.
+	chatstream.Status(ctx, "executing", map[string]any{
+		"agent_id":   agent.ID.String(),
+		"agent_name": agent.Name,
 	})
 
 	// The LLM client is resolved further down, once the tool set is known:
@@ -403,11 +411,13 @@ func (e *Executor) reactLoop(ctx context.Context, st *reactLoopState) Result {
 		}
 
 		// Execute the tool with a 60-second timeout.
+		chatstream.Emit(ctx, chatstream.Event{Type: chatstream.EventTool, Data: map[string]any{"name": toolName, "state": "start"}})
 		toolCtx, toolCancel := context.WithTimeout(ctx, 60*time.Second)
 		start := time.Now()
 		toolOutput, toolErr := tool.Execute(toolCtx, toolInput)
 		toolCancel()
 		durationMs := int(time.Since(start).Milliseconds())
+		chatstream.Emit(ctx, chatstream.Event{Type: chatstream.EventTool, Data: map[string]any{"name": toolName, "state": "end", "duration_ms": durationMs, "ok": toolErr == nil}})
 
 		record := ToolCallRecord{
 			ToolName:   toolName,
@@ -750,11 +760,13 @@ func (e *Executor) runNative(
 			}
 
 			// Execute the tool with a 60-second timeout.
+			chatstream.Emit(ctx, chatstream.Event{Type: chatstream.EventTool, Data: map[string]any{"name": tc.Name, "state": "start"}})
 			toolCtx, toolCancel := context.WithTimeout(ctx, 60*time.Second)
 			start := time.Now()
 			toolOutput, toolErr := tool.Execute(toolCtx, input)
 			toolCancel()
 			durationMs := int(time.Since(start).Milliseconds())
+			chatstream.Emit(ctx, chatstream.Event{Type: chatstream.EventTool, Data: map[string]any{"name": tc.Name, "state": "end", "duration_ms": durationMs, "ok": toolErr == nil}})
 
 			toolCalls = append(toolCalls, ToolCallRecord{
 				ToolName:   tc.Name,

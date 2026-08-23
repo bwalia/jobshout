@@ -1,16 +1,20 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { Menu, RefreshCw, X } from "lucide-react";
 
+import { ChatActivity, type ToolActivity } from "@/components/chat/ChatActivity";
 import { ChatComposer } from "@/components/chat/ChatComposer";
 import { ChatMessageList } from "@/components/chat/ChatMessageList";
 import { ChatSessionSidebar } from "@/components/chat/ChatSessionSidebar";
+import { streamChatMessage } from "@/lib/api/chat";
 import { useAgents } from "@/lib/hooks/useAgents";
 import {
+  chatKeys,
   useChatMessages,
   useChatSessions,
-  useSendChatMessage,
   useStartChatSession,
 } from "@/lib/hooks/useChat";
 
@@ -21,14 +25,17 @@ export default function ChatPage() {
   const { data: agentsResp } = useAgents({ per_page: 100 });
   const agents = useMemo(() => agentsResp?.data ?? [], [agentsResp]);
 
+  const queryClient = useQueryClient();
   const [activeId, setActiveId] = useState<string | null>(null);
   const [agentId, setAgentId] = useState("");
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [streaming, setStreaming] = useState(false);
+  const [stage, setStage] = useState<string | null>(null);
+  const [tools, setTools] = useState<ToolActivity[]>([]);
 
   const { data: messages } = useChatMessages(activeId);
   const startSession = useStartChatSession();
-  const sendMessage = useSendChatMessage();
 
   useEffect(() => {
     if (!activeId && sessions.length > 0) setActiveId(sessions[0].id);
@@ -50,7 +57,7 @@ export default function ChatPage() {
   }, [messages]);
 
   const canRegenerate =
-    !sendMessage.isPending &&
+    !streaming &&
     !pendingUser &&
     (messages?.length ?? 0) > 0 &&
     messages?.[messages.length - 1].role === "agent" &&
@@ -76,10 +83,51 @@ export default function ChatPage() {
 
   async function runTurn(sessionId: string, content: string) {
     setPendingUser(content);
+    setStreaming(true);
+    setStage("planning");
+    setTools([]);
     try {
-      await sendMessage.mutateAsync({ sessionId, content });
+      await streamChatMessage(sessionId, content, {
+        onStatus: (state) => setStage(state),
+        onTool: (d) => {
+          const name = String(d.name ?? "tool");
+          if (d.state === "start") {
+            setTools((t) => [...t, { name, running: true }]);
+          } else {
+            setTools((t) => {
+              const next = [...t];
+              // Mark the most recent still-running call of this tool as done.
+              for (let i = next.length - 1; i >= 0; i--) {
+                if (next[i].name === name && next[i].running) {
+                  next[i] = {
+                    name,
+                    running: false,
+                    ok: d.ok !== false,
+                    durationMs:
+                      typeof d.duration_ms === "number"
+                        ? (d.duration_ms as number)
+                        : undefined,
+                  };
+                  break;
+                }
+              }
+              return next;
+            });
+          }
+        },
+        onError: (m) => toast.error(m),
+      });
+    } catch {
+      toast.error("Chat stream interrupted");
     } finally {
+      setStreaming(false);
       setPendingUser(null);
+      setStage(null);
+      setTools([]);
+      // The turn was persisted server-side while streaming; pull the canonical
+      // messages (and refresh the session list's recency).
+      queryClient.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
+      queryClient.invalidateQueries({ queryKey: chatKeys.sessions() });
     }
   }
 
@@ -154,8 +202,9 @@ export default function ChatPage() {
             messages={messages ?? []}
             agents={agents}
             pendingUser={pendingUser}
-            thinking={sendMessage.isPending}
+            thinking={false}
           />
+          {streaming && <ChatActivity stage={stage} tools={tools} />}
           {canRegenerate && (
             <div className="mx-auto flex max-w-3xl justify-center px-4 pb-2">
               <button
@@ -176,7 +225,7 @@ export default function ChatPage() {
               agentId={agentId}
               onAgentChange={setAgentId}
               onSend={handleSend}
-              sending={sendMessage.isPending}
+              sending={streaming}
             />
             <p className="mt-1.5 text-center text-[11px] text-muted-foreground">
               JobShout picks an agent, runs the task, and shows the result. Auto

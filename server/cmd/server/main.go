@@ -1038,6 +1038,8 @@ func main() {
 				r.Route("/{sessionID}", func(r chi.Router) {
 					r.Get("/messages", chatHandler.GetHistory)
 					r.Post("/messages", chatHandler.SendMessage)
+					// SSE variant: same routing/execution, streamed live.
+					r.Post("/messages/stream", chatHandler.StreamMessage)
 				})
 			})
 
