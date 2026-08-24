@@ -285,6 +285,16 @@ func (a *Agent) loop(ctx context.Context, req TurnRequest, meta map[string]any, 
 
 		if len(llmResp.ToolCalls) == 0 {
 			text := SanitiseMessage(llmResp.Content)
+			// Fabrication guard: scaffolding in a turn that executed zero tools
+			// means the model invented a tool result. Phases 1–2 make this
+			// unreachable by construction; if a regression reopens the path it
+			// must be loud in the log and harmless to the user.
+			if len(actions) == 0 && ContainsToolScaffolding(llmResp.Content) {
+				a.logger.Error("chatagent: model fabricated tool scaffolding with no tool executed",
+					zap.String("model", llmResp.Model),
+					zap.String("raw", snippet(llmResp.Content)))
+				text = "I couldn't complete that action — the tool step didn't run. Please try again."
+			}
 			if anyFailed && looksAffirmativeSuccess(text) {
 				text = lastFailureMessage(actions)
 			}
