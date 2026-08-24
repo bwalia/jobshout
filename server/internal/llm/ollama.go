@@ -305,11 +305,11 @@ func (c *OllamaClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 		return nil, fmt.Errorf("ollama: unexpected status %d: %s", resp.StatusCode, upstreamSnippet(rawBody))
 	}
 
-	return c.readStream(resp.Body, model, opts.NumPredict)
+	return c.readStream(resp.Body, model, opts.NumPredict, req.OnToken)
 }
 
 // readStream accumulates an Ollama NDJSON chat stream into one GenerateResponse.
-func (c *OllamaClient) readStream(body io.Reader, model string, numPredict int) (*GenerateResponse, error) {
+func (c *OllamaClient) readStream(body io.Reader, model string, numPredict int, onToken func(string)) (*GenerateResponse, error) {
 	var (
 		content   strings.Builder
 		thinking  strings.Builder
@@ -334,6 +334,9 @@ func (c *OllamaClient) readStream(body io.Reader, model string, numPredict int) 
 			return nil, fmt.Errorf("ollama: decode stream chunk: %w", err)
 		}
 		content.WriteString(chunk.Message.Content)
+		if onToken != nil && chunk.Message.Content != "" {
+			onToken(chunk.Message.Content)
+		}
 		thinking.WriteString(chunk.Message.Thinking)
 		// Usually one chunk carries every tool call, but append rather than
 		// overwrite in case they arrive split across chunks.

@@ -17,7 +17,10 @@ import (
 // tool-calling or the ReAct JSON-in-prompt fallback. Both implementations
 // return tool requests as llm.ToolCall values, which is all the loop reads.
 type turnCaller interface {
-	next(ctx context.Context, messages []llm.Message, defs []llm.ToolDef) (*llm.GenerateResponse, error)
+	// onToken, when non-nil, receives streamed content chunks. Only the native
+	// caller forwards it: on the ReAct path the raw stream is protocol JSON,
+	// which must never reach the user token by token.
+	next(ctx context.Context, messages []llm.Message, defs []llm.ToolDef, onToken func(string)) (*llm.GenerateResponse, error)
 }
 
 // nativeCaller drives models whose client supports native tool-calling.
@@ -25,12 +28,13 @@ type nativeCaller struct {
 	client llm.Client
 }
 
-func (n nativeCaller) next(ctx context.Context, messages []llm.Message, defs []llm.ToolDef) (*llm.GenerateResponse, error) {
+func (n nativeCaller) next(ctx context.Context, messages []llm.Message, defs []llm.ToolDef, onToken func(string)) (*llm.GenerateResponse, error) {
 	return n.client.Generate(ctx, llm.GenerateRequest{
 		Messages:    messages,
 		MaxTokens:   2048,
 		Temperature: 0.2,
 		ToolDefs:    defs,
+		OnToken:     onToken,
 	})
 }
 
@@ -47,7 +51,7 @@ const reactRetryNudge = "Your previous reply was not a single valid JSON object.
 	`Reply with ONLY one JSON object — either {"tool":"<name>","args":{...}} to call a tool, ` +
 	`or {"final":"<your answer>"} to answer the user. No prose, no code fence.`
 
-func (r reactCaller) next(ctx context.Context, messages []llm.Message, defs []llm.ToolDef) (*llm.GenerateResponse, error) {
+func (r reactCaller) next(ctx context.Context, messages []llm.Message, defs []llm.ToolDef, _ func(string)) (*llm.GenerateResponse, error) {
 	msgs := reactMessages(messages, defs)
 
 	resp, err := r.client.Generate(ctx, llm.GenerateRequest{

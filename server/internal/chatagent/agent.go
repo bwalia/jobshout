@@ -260,6 +260,18 @@ func (a *Agent) loop(ctx context.Context, req TurnRequest, meta map[string]any, 
 	}
 
 	caller, mode := turnCallerFor(a.client, a.logger)
+	// Forward streamed content chunks to the client as they arrive. Content
+	// that precedes tool calls ("Let me check…") streams too — that is normal
+	// chat UX. The done event still carries the authoritative sanitised
+	// envelope, which the web client swaps in over the streamed text.
+	var streamedTokens bool
+	onToken := func(chunk string) {
+		if chunk == "" {
+			return
+		}
+		streamedTokens = true
+		emit(req.Stream, Event{Type: EventToken, Token: chunk})
+	}
 	if len(req.History) == 0 {
 		a.logger.Info("chatagent: tool mode selected",
 			zap.String("mode", mode),
@@ -271,7 +283,7 @@ func (a *Agent) loop(ctx context.Context, req TurnRequest, meta map[string]any, 
 		toolsForTurn := a.reg.SelectForTurn(platformtools.PermissionsFrom(ctx), disclosed)
 		defs := platformtools.ToolDefs(toolsForTurn)
 
-		llmResp, err := caller.next(ctx, messages, defs)
+		llmResp, err := caller.next(ctx, messages, defs, onToken)
 		if err != nil {
 			resp := failResponse(HumaniseError(err), start)
 			emit(req.Stream, Event{Type: EventError, Error: resp.Message})
@@ -313,7 +325,9 @@ func (a *Agent) loop(ctx context.Context, req TurnRequest, meta map[string]any, 
 				resp.Message = "I'm not sure how to help with that. Try asking me to list agents, create a task, or run a workflow."
 			}
 			resp.Usage = &model.UsageInfo{Model: modelName, InputTokens: inputTokens, OutputTokens: outputTokens, LatencyMs: time.Since(start).Milliseconds()}
-			if len(resp.Message) > 0 {
+			// When nothing streamed (ReAct mode, or a synthesized message), emit
+			// the whole reply as one token so non-streaming turns still render.
+			if !streamedTokens && len(resp.Message) > 0 {
 				emit(req.Stream, Event{Type: EventToken, Token: resp.Message})
 			}
 			emit(req.Stream, Event{Type: EventDone, Response: &resp})
