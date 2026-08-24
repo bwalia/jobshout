@@ -18,6 +18,8 @@ import (
 
 	"github.com/jobshout/server/internal/blog"
 	"github.com/jobshout/server/internal/bridge"
+	"github.com/jobshout/server/internal/chatagent"
+	"github.com/jobshout/server/internal/chatsvc"
 	"github.com/jobshout/server/internal/config"
 	"github.com/jobshout/server/internal/costengine"
 	"github.com/jobshout/server/internal/scheduler"
@@ -45,6 +47,7 @@ import (
 	"github.com/jobshout/server/internal/middleware"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/modelselect"
+	"github.com/jobshout/server/internal/platformtools"
 	"github.com/jobshout/server/internal/repository"
 	"github.com/jobshout/server/internal/research"
 	"github.com/jobshout/server/internal/selector"
@@ -483,47 +486,9 @@ func main() {
 	// ─── Autonomous agent engine ────────────────────────────────────────────
 	autonomousExec := executor.NewAutonomousExecutor(goNativeExec, llmRouter, memoryRepo, goalRepo, logger).WithAutoSelect(autoSelector)
 	memorySvc := service.NewMemoryService(memoryRepo, logger)
-	intentSvc := service.NewIntentService(llmRouter, logger)
 	goalSvc := service.NewGoalService(goalRepo, agentRepo, toolPermRepo, autonomousExec, logger)
 	multiAgentSvc := service.NewMultiAgentService(multiAgentRepo, agentRepo, toolPermRepo, goalRepo, autonomousExec, logger)
 	sprintSvc := service.NewSprintService(sprintRepo)
-	chatSvc := service.NewChatService(chatRepo, intentSvc, memorySvc, goalSvc, logger)
-	_ = memorySvc // used by chatSvc
-
-	// 12-stage LLM chat router: intent → policy → clarify/select/plan/execute.
-	// Wired after chatSvc so the two services can reference each other.
-	chatRouterSvc := service.NewChatRouterService(
-		llmRouter,
-		agentSvc,
-		execSvc,
-		workflowSvc,
-		taskRepo,
-		nil, // policies — populate from config/DB when governance wires them through
-		logger,
-	)
-	chatSvc.SetRouter(chatRouterSvc)
-
-	// ─── Telegram bot (conditional on config) ───────────────────────────────
-	var telegramSvc service.TelegramService
-	var tgBot *telegramBot.BotClient
-	if cfg.TelegramBotToken != "" {
-		tgBot = telegramBot.NewBotClient(cfg.TelegramBotToken)
-		telegramSvc = service.NewTelegramService(
-			tgBot, telegramRepo, chatSvc,
-			cfg.TelegramRatePerMin, cfg.FrontendBaseURL, logger,
-		)
-		// Register webhook at startup.
-		if cfg.TelegramWebhookURL != "" {
-			go func() {
-				if err := tgBot.SetWebhook(ctx, cfg.TelegramWebhookURL, cfg.TelegramSecretToken); err != nil {
-					logger.Warn("failed to register telegram webhook", zap.Error(err))
-				} else {
-					logger.Info("telegram webhook registered", zap.String("url", cfg.TelegramWebhookURL))
-				}
-			}()
-		}
-		logger.Info("Telegram bot initialised")
-	}
 
 	// ─── Integration framework ──────────────────────────────────────────────
 	adapterRegistry := integ.NewRegistry()
@@ -573,6 +538,85 @@ func main() {
 		zap.Int("task_adapters", 2),
 		zap.Int("notification_adapters", 3),
 	)
+
+	// ─── Chat agent (tool-calling loop over platform tools) ─────────────────
+	var knowledgeSearch tools.KnowledgeSearcher
+	if knowledgeChunkRepo != nil {
+		knowledgeSearch = knowledgeChunkRepo
+	}
+	var toolEmbedder tools.Embedder
+	if embedder != nil {
+		toolEmbedder = embedder
+	}
+	platformReg := platformtools.NewRegistryWithTools(platformtools.Deps{
+		Agents:          agentSvc,
+		Exec:            execSvc,
+		Workflows:       workflowSvc,
+		Tasks:           taskSvc,
+		Projects:        projectSvc,
+		Goals:           goalSvc,
+		Research:        researchSvc,
+		Blog:            blogSvc,
+		Pentest:         pentestSvc,
+		Images:          imageSvc,
+		MultiAgent:      multiAgentSvc,
+		Sprints:         sprintSvc,
+		Plugins:         pluginSvc,
+		MCP:             mcpSvc,
+		Integrations:    integSvc,
+		Notifications:   notifSvc,
+		Approvals:       approvalSvc,
+		Analytics:       analyticsSvc,
+		Leaderboard:     leaderboardSvc,
+		Governance:      govSvc,
+		RBAC:            rbacSvc,
+		Scheduler:       schedulerRepo,
+		Skills:          skillRepo,
+		LLMProviders:    llmProviderRepo,
+		Audit:           auditRepo,
+		Sessions:        sessionRepo,
+		Knowledge:       knowledgeIngestSvc,
+		KnowledgeSearch: knowledgeSearch,
+		Embedder:        toolEmbedder,
+		Pool:            pool,
+		Memory:          memorySvc,
+	})
+	chatGuard := platformtools.NewGuard(rbacSvc, govSvc)
+	chatAgent := chatagent.New(llmRouter.Default(), platformReg, chatGuard, memorySvc, logger)
+	chatSvc := chatsvc.NewChatService(chatRepo, chatAgent, logger)
+	chatRouterSvc := chatsvc.NewChatRouterService(chatAgent, logger)
+	logger.Info("chat agent initialised", zap.Int("platform_tools", len(platformReg.Names())))
+	if chatClient := llmRouter.Default(); chatClient != nil {
+		if tc, ok := chatClient.(llm.ToolCapableClient); !ok || !tc.SupportsTools() {
+			logger.Warn("chat agent: model has no native tool-calling — using ReAct fallback",
+				zap.String("provider", chatClient.ProviderName()))
+		} else {
+			logger.Info("chat agent: native tool-calling active",
+				zap.String("provider", chatClient.ProviderName()))
+		}
+	}
+
+	// ─── Telegram bot (conditional on config) ───────────────────────────────
+	// Telegram uses a deterministic session per chat ID, separate from web.
+	var telegramSvc service.TelegramService
+	var tgBot *telegramBot.BotClient
+	if cfg.TelegramBotToken != "" {
+		tgBot = telegramBot.NewBotClient(cfg.TelegramBotToken)
+		telegramSvc = service.NewTelegramService(
+			tgBot, telegramRepo, chatSvc,
+			cfg.TelegramRatePerMin, cfg.FrontendBaseURL, logger,
+		)
+		if cfg.TelegramWebhookURL != "" {
+			go func() {
+				if err := tgBot.SetWebhook(ctx, cfg.TelegramWebhookURL, cfg.TelegramSecretToken); err != nil {
+					logger.Warn("failed to register telegram webhook", zap.Error(err))
+				} else {
+					logger.Info("telegram webhook registered", zap.String("url", cfg.TelegramWebhookURL))
+				}
+			}()
+		}
+		logger.Info("Telegram bot initialised")
+	}
 
 	// ─── Bridge client (SSE streaming) ──────────────────────────────────────
 	var bridgeClient *bridge.Client
@@ -1023,8 +1067,10 @@ func main() {
 				r.Get("/", chatHandler.ListSessions)
 				r.Post("/", chatHandler.StartSession)
 				r.Route("/{sessionID}", func(r chi.Router) {
+					r.Delete("/", chatHandler.DeleteSession)
 					r.Get("/messages", chatHandler.GetHistory)
 					r.Post("/messages", chatHandler.SendMessage)
+					r.Post("/messages/stream", chatHandler.StreamMessage)
 				})
 			})
 
