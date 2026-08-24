@@ -1,7 +1,16 @@
-"""Cluster HTTP API for JobShout: start/poll reviews over JSON.
+"""Cluster HTTP API for JobShout: start/poll reviews over JSON, plus MCP.
 
-Keep mcp_server.py for the Mac. This process is what k3s runs: /health for
-probes, /api/* behind a shared bearer token, same JobRunner as MCP.
+This process is what k3s runs. It serves two things off the same JobRunner (one
+review queue):
+  - REST on REVIEW_BOT_PORT (8765): /health for probes, /api/* behind a shared
+    bearer token. The JobShout reconciler talks to this, cluster-internal only.
+  - MCP (Streamable HTTP) on REVIEW_BOT_MCP_PORT (8766): the same four tools as
+    the Mac's mcp_server, for editor CLIs (Claude Code / Cursor). nginx exposes
+    only /mcp publicly; the REST port stays internal.
+
+Both share ONE JobRunner on purpose: two runners would race on the git-worktree
+prune (see jobs.py). MCP runs in a background thread; uvicorn skips signal
+handlers off the main thread, so mcp.run() there is safe.
 
 OpenCode talks to a loopback JWT proxy so Ollama gateway tokens do not expire
 mid-review. Watch is not started.
@@ -12,10 +21,12 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import threading
 from dataclasses import replace
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -23,10 +34,12 @@ from starlette.routing import Route
 
 from app.config.settings import ConfigError, Settings, load_settings
 from app.jobs import JobRunner
+from app.mcp_app import build_mcp
 from app.ollama_proxy import proxy_base_url, start_proxy
 from app.repos import RepoNotAllowed, RepoRegistry
 
 DEFAULT_PORT = 8765
+DEFAULT_MCP_PORT = 8766
 PROXY_LISTEN = ("127.0.0.1", 11434)
 
 load_dotenv()
@@ -186,6 +199,50 @@ def _needs_jwt_proxy(upstream: str, secret: str) -> bool:
     return host not in {"127.0.0.1", "localhost"}
 
 
+def _mcp_allowed_hosts() -> list[str]:
+    """Host-header values the MCP DNS-rebinding guard accepts.
+
+    Requests arrive via nginx with Host set to the public ingress host, so that
+    name (from REVIEW_BOT_ALLOWED_HOSTS) must be present or MCP returns 421. The
+    SDK matches case-sensitively, so add each name lowered too.
+    """
+    names = {"localhost", "127.0.0.1", "jobshout-review-bot"}
+    for raw in os.getenv("REVIEW_BOT_ALLOWED_HOSTS", "").split(","):
+        name = raw.strip()
+        if name:
+            names.update({name, name.lower()})
+    # nginx forwards a port-less Host, so the bare name must be an exact allow;
+    # the ":*" form additionally covers host:port (local curl, port-forward).
+    hosts: set[str] = set()
+    for name in names:
+        hosts.update({name, f"{name}:*"})
+    return sorted(hosts)
+
+
+def _start_mcp(runner: JobRunner, registry: RepoRegistry) -> None:
+    """Serve the MCP tools in a daemon thread on REVIEW_BOT_MCP_PORT, sharing runner.
+
+    The public URL (for the MCP auth metadata) is REVIEW_BOT_PUBLIC_URL when set,
+    else the internal REVIEW_BOT_URL. mcp.run() runs its own uvicorn; off the main
+    thread uvicorn skips signal handlers, so this does not fight the REST server.
+    """
+    mcp_port = int(os.getenv("REVIEW_BOT_MCP_PORT", str(DEFAULT_MCP_PORT)))
+    public_url = (os.getenv("REVIEW_BOT_PUBLIC_URL", "").strip() or os.getenv("REVIEW_BOT_URL", "").strip()).rstrip("/")
+    mcp = build_mcp(runner, registry, public_url or f"http://localhost:{mcp_port}")
+    allowed = _mcp_allowed_hosts()
+
+    def run() -> None:
+        mcp.run(
+            transport="streamable-http",
+            host="0.0.0.0",
+            port=mcp_port,
+            streamable_http_path="/mcp",
+            transport_security=TransportSecuritySettings(allowed_hosts=allowed),
+        )
+
+    threading.Thread(target=run, name="review-mcp", daemon=True).start()
+
+
 def main() -> None:
     global _runner, _registry, _settings, _token
     token = os.getenv("REVIEW_BOT_TOKEN", "").strip()
@@ -210,6 +267,9 @@ def main() -> None:
     runner = JobRunner(settings, registry)
     app = create_app(runner, registry, settings, token)
     port = int(os.getenv("REVIEW_BOT_PORT", str(DEFAULT_PORT)))
+
+    # Same runner (one review queue) served over MCP for editor CLIs.
+    _start_mcp(runner, registry)
 
     import uvicorn
 

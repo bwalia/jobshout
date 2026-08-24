@@ -179,6 +179,9 @@ pentest:
 reviewBot:
   enabled: false
   port: 8765
+  # MCP (Streamable HTTP) port, served by the same pod/process as the REST API.
+  # nginx exposes this at /mcp; the REST port stays cluster-internal.
+  mcpPort: 8766
   model: "qwen3-coder:30b"
   ollamaHost: "https://ollama.workstation.co.uk"
   timeout: "60s"

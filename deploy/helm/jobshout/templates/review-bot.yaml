@@ -55,6 +55,8 @@ spec:
           ports:
             - containerPort: {{ .Values.reviewBot.port }}
               name: http
+            - containerPort: {{ .Values.reviewBot.mcpPort | default 8766 }}
+              name: mcp
           envFrom:
             - secretRef:
                 name: jobshout-secrets
@@ -76,6 +78,13 @@ spec:
               value: /data/cache
             - name: REVIEW_BOT_URL
               value: "http://jobshout-review-bot:{{ .Values.reviewBot.port }}"
+            - name: REVIEW_BOT_MCP_PORT
+              value: {{ .Values.reviewBot.mcpPort | default 8766 | quote }}
+            # Public URL clients use for MCP; also the DNS-rebinding allowlist host.
+            - name: REVIEW_BOT_PUBLIC_URL
+              value: "https://{{ .Values.host }}"
+            - name: REVIEW_BOT_ALLOWED_HOSTS
+              value: {{ .Values.host | quote }}
           volumeMounts:
             - name: data
               mountPath: /data
@@ -120,6 +129,9 @@ spec:
     - port: {{ .Values.reviewBot.port }}
       targetPort: {{ .Values.reviewBot.port }}
       name: http
+    - port: {{ .Values.reviewBot.mcpPort | default 8766 }}
+      targetPort: {{ .Values.reviewBot.mcpPort | default 8766 }}
+      name: mcp
   selector:
     {{- include "jobshout.selector" (dict "name" "review-bot") | nindent 4 }}
 {{- end }}
