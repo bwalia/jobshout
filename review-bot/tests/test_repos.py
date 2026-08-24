@@ -6,7 +6,7 @@ import pytest
 from git import Repo
 
 from app.config.settings import ConfigError
-from app.repos import DEFAULT_CLONES_DIR, RepoNotAllowed, RepoRegistry
+from app.repos import DEFAULT_CLONES_DIR, RepoNotAllowed, RepoRegistry, github_clone_url
 from app.reviewer.workspace import WorkspaceError
 from tests.conftest import make_git_repo
 
@@ -86,3 +86,34 @@ def test_clone_dir_naming_uses_double_underscore(settings, tmp_path):
     Repo.clone_from(str(upstream), clones / "o__n")
     registry = RepoRegistry(settings, allowed={"o/n"}, clones_dir=clones)
     assert registry.ensure_clone("o/n") == clones / "o__n"
+
+
+def test_github_clone_url_embeds_token():
+    assert github_clone_url("acme/widgets") == "https://github.com/acme/widgets.git"
+    assert github_clone_url("acme/widgets", "tok") == "https://x-access-token:tok@github.com/acme/widgets.git"
+
+
+def test_allowlist_only_when_local_repo_path_is_none(tmp_path):
+    from app.config.settings import Settings
+
+    base = Settings(
+        github_token="tok",
+        local_repo_path=None,
+        ollama_host="http://localhost:11434",
+        model="m",
+        map_refresh_commits=30,
+    )
+    config = tmp_path / "repos.json"
+    config.write_text('{"allowed": ["acme/widgets"]}')
+    registry = RepoRegistry.load(base, config_path=config)
+    assert registry.allowed_slugs() == ["acme/widgets"]
+    with pytest.raises(RepoNotAllowed):
+        registry.require("other/repo")
+
+
+def test_clones_dir_env_overrides_json(settings, tmp_path, monkeypatch):
+    config = tmp_path / "repos.json"
+    config.write_text(json.dumps({"allowed": ["other/repo"], "clones_dir": str(tmp_path / "from-json")}))
+    monkeypatch.setenv("REVIEW_BOT_CLONES_DIR", str(tmp_path / "from-env"))
+    registry = RepoRegistry.load(settings, config_path=config)
+    assert registry.clones_dir == tmp_path / "from-env"

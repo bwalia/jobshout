@@ -17,8 +17,8 @@ image:
   # the NodePort's auth realm is int-spectoncr.diytaxreturn.co.uk.
   registry: int-spectoncr.diytaxreturn.co.uk
   namespace: jobshout
-  # server / web / python-sidecar images share this tag (git SHA), injected at
-  # deploy time via --set image.tag=<sha>.
+  # server / web / python-sidecar / review-bot images share this tag (git SHA),
+  # injected at deploy time via --set image.tag=<sha>.
   tag: latest
   pullPolicy: IfNotPresent
   pullSecret: jobshout-registry
@@ -163,6 +163,32 @@ pentest:
   # Defence in depth. scope.py on the workstation is the real boundary.
   # Comma-separated hosts, wildcards, CIDRs or URL prefixes.
   targetAllowlist: ""
+
+# In-cluster PR reviewer (OpenCode + git clones in the pod; Ollama on the Mac
+# via ollama.workstation.co.uk). Off by default — int opts in. No public URL:
+# the API reaches it at http://jobshout-review-bot:8765. Create the operator
+# secret once per ring that enables this:
+#
+#   kubectl -n <ring> create secret generic jobshout-review \
+#     --from-literal=GITHUB_TOKEN=<repo-scope-bot> \
+#     --from-literal=REVIEW_BOT_TOKEN=$(openssl rand -hex 32) \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#
+# and name it in extraSecretRefs. The sidecar also needs OLLAMA_JWT_SECRET from
+# jobshout-secrets (same gateway as articles).
+reviewBot:
+  enabled: false
+  port: 8765
+  model: "qwen3-coder:30b"
+  ollamaHost: "https://ollama.workstation.co.uk"
+  timeout: "60s"
+  pollInterval: "15s"
+  maxRuntime: "40m"
+  storage: 20Gi
+  allowedRepos: []
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { cpu: "2", memory: 2Gi }
 
 logLevel: info
 

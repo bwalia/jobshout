@@ -23,6 +23,7 @@ import {
   Sparkles,
   Newspaper,
   ShieldAlert,
+  GitPullRequest,
   Image as ImageIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
@@ -51,6 +52,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: "Agents", href: "/agents", icon: Bot },
       { label: "Security Tester", href: "/agents/pentest", icon: ShieldAlert },
+      { label: "PR Reviewer", href: "/agents/review", icon: GitPullRequest },
       { label: "Agent Board", href: "/agent-board", icon: Kanban },
       { label: "Sprints", href: "/sprints", icon: Goal },
       { label: "Sessions", href: "/sessions", icon: MessageSquare },
@@ -92,7 +94,8 @@ interface SidebarProps {
 }
 
 /** The most specific nav href that matches this path — so /agents/pentest
- *  highlights Security Tester, not Agents. */
+ *  highlights Security Tester, not Agents, and /agents/review highlights
+ *  PR Reviewer. */
 function activeHref(pathname: string): string | undefined {
   return NAV_SECTIONS.flatMap((s) => s.items.map((i) => i.href))
     .filter((href) => pathname === href || pathname.startsWith(`${href}/`))

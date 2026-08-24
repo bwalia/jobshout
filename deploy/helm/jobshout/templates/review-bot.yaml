@@ -1,0 +1,125 @@
+{{- if .Values.reviewBot.enabled }}
+# In-cluster PR reviewer. ClusterIP only — no new public host. OpenCode and
+# git clones live in this pod; thinking goes to the workstation Ollama gateway.
+# replicas=1 Recreate: the in-memory job queue and git worktree prune cannot
+# share a clone across two copies.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jobshout-review-bot-repos
+  labels:
+    {{- include "jobshout.labels" . | nindent 4 }}
+    {{- include "jobshout.selector" (dict "name" "review-bot") | nindent 4 }}
+data:
+  repos.json: |
+    {"allowed": {{ .Values.reviewBot.allowedRepos | default list | toJson }}, "clones_dir": "/data/clones"}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jobshout-review-bot-data
+  labels:
+    {{- include "jobshout.labels" . | nindent 4 }}
+    {{- include "jobshout.selector" (dict "name" "review-bot") | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: {{ .Values.storage.className }}
+  resources:
+    requests:
+      storage: {{ .Values.reviewBot.storage | default "20Gi" }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jobshout-review-bot
+  labels:
+    {{- include "jobshout.labels" . | nindent 4 }}
+    {{- include "jobshout.selector" (dict "name" "review-bot") | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "jobshout.selector" (dict "name" "review-bot") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "jobshout.selector" (dict "name" "review-bot") | nindent 8 }}
+    spec:
+      {{- include "jobshout.imagePullSecrets" . | nindent 6 }}
+      containers:
+        - name: review-bot
+          image: {{ include "jobshout.image" (dict "ctx" . "repo" "review-bot") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.reviewBot.port }}
+              name: http
+          envFrom:
+            - secretRef:
+                name: jobshout-secrets
+            {{- range .Values.extraSecretRefs }}
+            - secretRef:
+                name: {{ . }}
+                optional: true
+            {{- end }}
+          env:
+            - name: OLLAMA_HOST
+              value: {{ .Values.reviewBot.ollamaHost | quote }}
+            - name: MODEL
+              value: {{ .Values.reviewBot.model | quote }}
+            - name: REVIEW_BOT_PORT
+              value: {{ .Values.reviewBot.port | quote }}
+            - name: REVIEW_BOT_CLONES_DIR
+              value: /data/clones
+            - name: REVIEW_BOT_CACHE_DIR
+              value: /data/cache
+            - name: REVIEW_BOT_URL
+              value: "http://jobshout-review-bot:{{ .Values.reviewBot.port }}"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: repos
+              mountPath: /app/repos.json
+              subPath: repos.json
+              readOnly: true
+          resources:
+            {{- toYaml .Values.reviewBot.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.reviewBot.port }}
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.reviewBot.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: jobshout-review-bot-data
+        - name: repos
+          configMap:
+            name: jobshout-review-bot-repos
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jobshout-review-bot
+  labels:
+    {{- include "jobshout.labels" . | nindent 4 }}
+    {{- include "jobshout.selector" (dict "name" "review-bot") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.reviewBot.port }}
+      targetPort: {{ .Values.reviewBot.port }}
+      name: http
+  selector:
+    {{- include "jobshout.selector" (dict "name" "review-bot") | nindent 4 }}
+{{- end }}

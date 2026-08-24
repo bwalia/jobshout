@@ -47,6 +47,7 @@ import (
 	"github.com/jobshout/server/internal/modelselect"
 	"github.com/jobshout/server/internal/repository"
 	"github.com/jobshout/server/internal/research"
+	"github.com/jobshout/server/internal/reviewbot"
 	"github.com/jobshout/server/internal/selector"
 	"github.com/jobshout/server/internal/service"
 	"github.com/jobshout/server/internal/strix"
@@ -184,6 +185,7 @@ func main() {
 	blogRepo := repository.NewBlogRepository(pool)
 	pentestRunRepo := repository.NewPentestRunRepository(pool)
 	pentestFindingRepo := repository.NewPentestFindingRepository(pool)
+	reviewRunRepo := repository.NewReviewRunRepository(pool)
 	taskRunRepo := repository.NewTaskRunRepository(pool)
 
 	// Autonomous agents + chat + Telegram repositories
@@ -486,6 +488,21 @@ func main() {
 		logger.Info("penetration testing disabled (STRIX_BASE_URL empty)")
 	}
 
+	reviewCfg := reviewbot.LoadConfig(logger)
+	reviewClient := reviewbot.NewClient(reviewCfg.BaseURL, reviewCfg.Token, reviewCfg.Timeout, logger)
+	reviewSvc := service.NewReviewService(reviewRunRepo, reviewCfg, logger)
+	reviewReconciler := service.NewReviewReconciler(reviewRunRepo, reviewClient, reviewCfg, logger)
+	if reviewCfg.Configured() {
+		toolRegistry.Register(tools.NewReviewPullRequestTool(reviewSvc))
+		logger.Info("PR review enabled",
+			zap.String("base_url", reviewCfg.BaseURL),
+			zap.Int("allowlist_size", len(reviewCfg.AllowedRepos)),
+			zap.Duration("poll_interval", reviewCfg.PollInterval),
+		)
+	} else {
+		logger.Info("PR review disabled (REVIEW_BOT_BASE_URL empty)")
+	}
+
 	// ─── Autonomous agent engine ────────────────────────────────────────────
 	autonomousExec := executor.NewAutonomousExecutor(goNativeExec, llmRouter, memoryRepo, goalRepo, logger).WithAutoSelect(autoSelector)
 	memorySvc := service.NewMemoryService(memoryRepo, logger)
@@ -632,6 +649,7 @@ func main() {
 	blogHandler := handler.NewBlogHandler(blogSvc)
 	researchHandler := handler.NewResearchHandler(researchSvc)
 	pentestHandler := handler.NewPentestHandler(pentestSvc)
+	reviewHandler := handler.NewReviewHandler(reviewSvc)
 
 	// Chat, goal, multi-agent, and Telegram handlers
 	chatHandler := handler.NewChatHandler(chatSvc)
@@ -863,6 +881,13 @@ func main() {
 					r.Get("/findings", pentestHandler.ListFindings)
 					r.Post("/cancel", pentestHandler.CancelRun)
 				})
+			})
+
+			r.Route("/review-runs", func(r chi.Router) {
+				r.Get("/repos", reviewHandler.ListRepos)
+				r.Get("/", reviewHandler.ListRuns)
+				r.Post("/", reviewHandler.CreateRun)
+				r.Get("/{runID}", reviewHandler.GetRun)
 			})
 
 			// Plugins (user-defined LangGraph/LangChain workflows)
@@ -1129,6 +1154,9 @@ func main() {
 	// SKIP LOCKED, and advances each by polling the workstation service. A no-op
 	// when STRIX_BASE_URL is unset. Stops when ctx is cancelled on shutdown.
 	go pentestReconciler.Start(ctx)
+	// Same durable-queue shape as pentest: Postgres is the system of record,
+	// the ClusterIP sidecar holds in-memory OpenCode jobs.
+	go reviewReconciler.Start(ctx)
 
 	// ─── Blog orphan reconciler ─────────────────────────────────────────────
 	// Fails running rows whose writer died (SIGKILL, OOM, node drain). SIGTERM
