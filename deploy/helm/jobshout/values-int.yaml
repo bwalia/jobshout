@@ -59,6 +59,8 @@ reviewBot:
   enabled: true
   allowedRepos:
     - bwalia/jobshout
+    - bwalia/diy-tax-return-uk
+    - bwalia/opsapi
 
 api:
   replicas: 1
