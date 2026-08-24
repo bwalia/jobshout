@@ -385,7 +385,7 @@ func main() {
 
 	// ─── Services ────────────────────────────────────────────────────────────
 	jwtSvc := service.NewJWTService(cfg)
-	authSvc := service.NewAuthService(userRepo, tokenRepo, orgRepo, agentRepo, jwtSvc, logger)
+	authSvc := service.NewAuthService(userRepo, tokenRepo, orgRepo, agentRepo, rbacRepo, jwtSvc, logger)
 	agentSvc := service.NewAgentService(agentRepo, logger)
 	projectSvc := service.NewProjectService(projectRepo, logger)
 	taskSvc := service.NewTaskService(taskRepo, logger)
