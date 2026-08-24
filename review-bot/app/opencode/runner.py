@@ -7,13 +7,17 @@ import os
 import re
 import subprocess
 from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from app.config.settings import Settings
 from app.opencode.provider import AGENT_ID, config_file, model_ref
+from app.prompts.review import build_coercion_prompt
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]")
 
 DEFAULT_TIMEOUT = 900  # A 30B model exploring a repo is slow; don't cut it off early.
+COERCE_TIMEOUT = 180  # The reformat pass is a single, tool-free completion — it is quick.
 
 
 class OpenCodeError(RuntimeError):
@@ -115,15 +119,58 @@ def run_agent(settings: Settings, workdir: Path, prompt: str, timeout: int = DEF
     return result.stdout
 
 
+def coerce_review_json(settings: Settings, review_text: str, timeout: int = COERCE_TIMEOUT) -> dict:
+    """Reformat a prose review into the review schema via one tool-free completion.
+
+    OpenCode is not involved here: this is a direct OpenAI-compatible call to the
+    same Ollama endpoint the agent uses (settings.ollama_host is the in-pod proxy at
+    runtime, so gateway auth is handled). temperature=0 keeps the reformat faithful.
+    """
+    url = f"{settings.ollama_host}/v1/chat/completions"
+    body = json.dumps(
+        {
+            "model": settings.model,
+            "messages": [{"role": "user", "content": build_coercion_prompt(review_text)}],
+            "stream": False,
+            "temperature": 0,
+        }
+    ).encode()
+    request = Request(url, data=body, method="POST")
+    request.add_header("Content-Type", "application/json")
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            data = json.loads(response.read())
+    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
+        raise OpenCodeError(f"JSON reformat call to Ollama failed: {exc}") from exc
+
+    choices = data.get("choices") or [{}]
+    content = choices[0].get("message", {}).get("content", "") or ""
+    return extract_review_json(content)
+
+
 def run_review(settings: Settings, workdir: Path, prompt: str, timeout: int = DEFAULT_TIMEOUT) -> dict:
     """Run OpenCode in workdir; it explores the repo and returns the review JSON.
 
-    qwen3-coder intermittently emits a tool call as literal text instead of invoking
-    it, which yields no review JSON. That failure is stochastic, so we retry once
-    before giving up rather than failing an otherwise-good review.
+    qwen3-coder follows the long review prompt's "explore and explain" framing and
+    reliably answers in prose, dropping the trailing "output JSON" rule — a
+    deterministic failure on clean PRs, so retrying the same prompt just fails again.
+    Instead we take the prose it produced and reformat it into the schema with a
+    short, single-purpose call the model does obey. Only if both the first pass and
+    the reformat yield nothing usable do we re-run the agent once.
     """
+    raw = run_agent(settings, workdir, prompt, timeout)
     try:
-        return extract_review_json(run_agent(settings, workdir, prompt, timeout))
+        return extract_review_json(raw)
     except NoReviewJSON:
-        # Retry only this failure mode — not timeouts or process errors.
-        return extract_review_json(run_agent(settings, workdir, prompt, timeout))
+        pass
+
+    prose = _ANSI_RE.sub("", raw).strip()
+    if prose:
+        try:
+            return coerce_review_json(settings, prose)
+        except NoReviewJSON:
+            pass
+
+    # First pass was empty or garbled and the reformat had nothing to work with.
+    # A fresh run is the only remaining option.
+    return extract_review_json(run_agent(settings, workdir, prompt, timeout))

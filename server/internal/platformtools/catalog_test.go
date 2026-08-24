@@ -60,3 +60,10 @@ func TestAlwaysLoadIncludesImageGenerate(t *testing.T) {
 		t.Fatal("image_generate must be always-load so chat does not route pictures to agent_execute")
 	}
 }
+
+func TestCatalogScore_ReviewTokens(t *testing.T) {
+	blob := "review_pull_request queue an ai review of a github pull request via review-bot security"
+	if catalogScore("review this pull request", blob) < 2 {
+		t.Fatalf("expected review tokens to score, got %d", catalogScore("review this pull request", blob))
+	}
+}

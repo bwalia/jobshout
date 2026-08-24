@@ -37,6 +37,8 @@ data:
   # Whether every article run pays for a cover image. Off leaves generation
   # available on demand through the API and the generate_image tool.
   BLOG_COVER_IMAGES: {{ .Values.ai.blogCoverImages | default false | quote }}
+  BLOG_ORPHAN_TIMEOUT: {{ .Values.ai.blogOrphanTimeout | default "45m" | quote }}
+  BLOG_MAX_RUNTIME: {{ .Values.ai.blogMaxRuntime | default "25m" | quote }}
   MINIO_BUCKET_IMAGES: {{ .Values.ai.imageBucket | default "images" | quote }}
   PYTHON_SIDECAR_URL: "http://python-runtime:8001"
   # opsapi CMS — where the Article Writer files generated posts as drafts. The
@@ -53,3 +55,16 @@ data:
   STRIX_POLL_INTERVAL: {{ .Values.pentest.pollInterval | default "15s" | quote }}
   STRIX_MAX_RUNTIME: {{ .Values.pentest.maxRuntime | default "2h" | quote }}
   STRIX_TARGET_ALLOWLIST: {{ .Values.pentest.targetAllowlist | default "" | quote }}
+  # In-cluster PR reviewer sidecar. Empty base URL disables the feature (same
+  # pattern as STRIX_BASE_URL). The sidecar is ClusterIP-only; the API talks
+  # to it with REVIEW_BOT_TOKEN from extraSecretRefs, not a workstation JWT.
+  REVIEW_BOT_ENABLED: {{ .Values.reviewBot.enabled | default false | quote }}
+  {{- if .Values.reviewBot.enabled }}
+  REVIEW_BOT_BASE_URL: "http://jobshout-review-bot:{{ .Values.reviewBot.port }}"
+  {{- else }}
+  REVIEW_BOT_BASE_URL: ""
+  {{- end }}
+  REVIEW_BOT_TIMEOUT: {{ .Values.reviewBot.timeout | default "60s" | quote }}
+  REVIEW_BOT_POLL_INTERVAL: {{ .Values.reviewBot.pollInterval | default "15s" | quote }}
+  REVIEW_BOT_MAX_RUNTIME: {{ .Values.reviewBot.maxRuntime | default "40m" | quote }}
+  REVIEW_BOT_ALLOWED_REPOS: {{ join "," (.Values.reviewBot.allowedRepos | default list) | quote }}

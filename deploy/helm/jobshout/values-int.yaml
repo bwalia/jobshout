@@ -11,6 +11,7 @@ logLevel: debug
 #     --from-literal=OPSAPI_API_KEY=<key> --dry-run=client -o yaml | kubectl apply -f -
 extraSecretRefs:
   - jobshout-cms
+  - jobshout-review
 
 # opsapi CMS — the Article Writer files generated articles there as drafts.
 # The host and namespace slug are not secret; the API key is, and comes from
@@ -51,6 +52,15 @@ pentest:
   # nothing on the API side; scope.py on the workstation still defaults to deny.
   # Example once Juice Shop is up: "juice.local,127.0.0.1"
   targetAllowlist: ""
+
+# int is the proving ring for PR review. Other rings stay off until a dry-run
+# has been watched end-to-end here, including an API-pod restart mid-review.
+reviewBot:
+  enabled: true
+  allowedRepos:
+    - bwalia/jobshout
+    - bwalia/diy-tax-return-uk
+    - bwalia/opsapi
 
 api:
   replicas: 1

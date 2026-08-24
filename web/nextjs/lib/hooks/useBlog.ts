@@ -69,14 +69,15 @@ export function useBlogRun(id: string) {
 }
 
 /**
- * Article bodies for a run. Only fetched once the run has produced them —
- * there is nothing to load while it is still writing.
+ * Article bodies for a run. Fetched while writing once any row exists, and
+ * after a failed/partial run so work that did land is still readable.
  */
-export function useBlogArticles(runId: string, enabled = true) {
+export function useBlogArticles(runId: string, enabled = true, poll = false) {
   return useQuery({
     queryKey: blogKeys.articles(runId),
     queryFn: () => getBlogArticles(runId),
     enabled: Boolean(runId) && enabled,
+    refetchInterval: poll ? 2000 : false,
   });
 }
 

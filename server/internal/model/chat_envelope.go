@@ -55,6 +55,7 @@ const (
 	EntityGoal        = "goal"
 	EntityArticle     = "article_run"
 	EntityPentest     = "pentest_run"
+	EntityReviewRun   = "review_run"
 	EntityImage       = "image"
 	EntitySprint      = "sprint"
 	EntitySkill       = "skill"

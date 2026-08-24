@@ -113,6 +113,8 @@ services:
       OPSAPI_TIMEOUT: ${OPSAPI_TIMEOUT:-30s}
       BLOG_AUTHOR_NAME: ${BLOG_AUTHOR_NAME:-JobShout Article Writer}
       BLOG_CONTENT_DIR: ${BLOG_CONTENT_DIR:-content/blogs}
+      BLOG_ORPHAN_TIMEOUT: ${BLOG_ORPHAN_TIMEOUT:-45m}
+      BLOG_MAX_RUNTIME: ${BLOG_MAX_RUNTIME:-25m}
       # Image generation on the workstation (port 11435). Empty URL disables it.
       IMAGE_PROVIDER: ${IMAGE_PROVIDER:-mflux}
       IMAGE_BASE_URL: ${IMAGE_BASE_URL:-http://host.docker.internal:11435}

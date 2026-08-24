@@ -24,6 +24,7 @@ Rules:
 - If a tool fails, say so plainly. Never claim it worked.
 - Prefer short, direct replies. Name entities, not identifiers.
 - To draw, generate, or create a picture, call image_generate with the prompt. Do not pick an agent for image requests.
+- To review a GitHub pull request, call review_pull_request with repo (owner/name) and pr_number. Default dry_run=true so nothing is posted. Do not pick an agent for PR review. Poll with review_run_get until status is completed or failed.
 
 `)
 	if extra != "" {

@@ -128,3 +128,39 @@ def build_prompt(
         file_list=file_list,
         diff=diff,
     )
+
+
+# Second pass. The long review prompt above asks the model to explore, reason, and
+# write for a human; qwen3-coder follows that framing and reliably answers in prose,
+# ignoring the trailing "output JSON" rule — especially on a clean PR with nothing to
+# flag. A short, single-purpose reformatting prompt is one the model does obey, so we
+# feed it the prose review it just wrote and ask only for the JSON.
+COERCION_TEMPLATE = """The following is a code review written in prose. Convert it, faithfully, \
+into a single JSON object. Output the JSON object and NOTHING else — no markdown fences, no \
+commentary before or after.
+
+Use EXACTLY this shape:
+{{"verdict": "<one plain sentence: will this PR do what it set out to do?>",
+  "summary": "<2-3 plain sentences: what the PR does and the overall assessment>",
+  "issues": [
+    {{"severity": "high|medium|low",
+      "category": "breaks|intent|other",
+      "file": "<path exactly as named in the review>",
+      "line": <integer line number>,
+      "title": "<short, plain-language problem statement>",
+      "reason": "<plain English: what goes wrong, and when>",
+      "suggestion": "<plain English: the concrete fix>"}}
+  ]}}
+
+Rules:
+- Include an issue only if the prose review actually raised it. Do NOT invent issues.
+- If the review raises no real problems, return an empty "issues" array. That is valid.
+- Do not add, soften, or embellish findings — only restructure what the review says.
+
+## Prose review to convert
+{review}
+"""
+
+
+def build_coercion_prompt(review_text: str) -> str:
+    return COERCION_TEMPLATE.format(review=review_text.strip())

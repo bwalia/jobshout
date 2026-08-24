@@ -11,14 +11,14 @@ import (
 
 // fnTool is a compact PlatformTool implementation.
 type fnTool struct {
-	name         string
-	desc         string
-	domain       string
-	perm         string
-	destructive  bool
-	readOnly     bool
-	schema       map[string]any
-	run          func(ctx context.Context, input map[string]any) (*Result, error)
+	name        string
+	desc        string
+	domain      string
+	perm        string
+	destructive bool
+	readOnly    bool
+	schema      map[string]any
+	run         func(ctx context.Context, input map[string]any) (*Result, error)
 }
 
 func newTool(name, desc, domain, perm string, destructive, readOnly bool, schema map[string]any, run func(ctx context.Context, input map[string]any) (*Result, error)) PlatformTool {
@@ -80,6 +80,28 @@ func strArg(input map[string]any, key string) string {
 	default:
 		return strings.TrimSpace(fmt.Sprint(x))
 	}
+}
+
+func boolArg(input map[string]any, key string, fallback bool) bool {
+	if input == nil {
+		return fallback
+	}
+	v, ok := input[key]
+	if !ok || v == nil {
+		return fallback
+	}
+	switch x := v.(type) {
+	case bool:
+		return x
+	case string:
+		switch strings.ToLower(strings.TrimSpace(x)) {
+		case "true", "1", "yes":
+			return true
+		case "false", "0", "no":
+			return false
+		}
+	}
+	return fallback
 }
 
 func intArg(input map[string]any, key string, fallback int) int {

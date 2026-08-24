@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/jobshout/server/internal/chatstream"
 	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/llmtrace"
 	"github.com/jobshout/server/internal/model"
@@ -71,11 +72,39 @@ type Result struct {
 // injects as context before a run's loop starts.
 const knowledgeTopK = 5
 
-// SkillProvider yields the skills currently enabled for an agent. It is
-// satisfied by repository.SkillRepository; the executor depends on this narrow
-// interface so it never imports the repository package directly.
+// SkillProvider yields the skills for an agent. It is satisfied by
+// repository.SkillRepository; the executor depends on this narrow interface so
+// it never imports the repository package directly.
 type SkillProvider interface {
+	// ListForAgent returns the skills persistently enabled for an agent.
 	ListForAgent(ctx context.Context, agentID uuid.UUID) ([]model.Skill, error)
+	// ListBySlugs resolves skills by slug within an org (plus built-in skills),
+	// for per-run overrides that load a skill without enabling it on the agent.
+	ListBySlugs(ctx context.Context, orgID uuid.UUID, slugs []string) ([]model.Skill, error)
+}
+
+// RunOptions are per-run overrides carried on the context into a run. They let a
+// single invocation load extra skills without mutating the agent record. Absent
+// options (the zero value) leave a run unchanged.
+type RunOptions struct {
+	// SkillSlugs are extra skills to fold into this run, on top of the agent's
+	// enabled skills. Resolved by slug; unknown slugs are ignored.
+	SkillSlugs []string
+}
+
+type runOptionsKey struct{}
+
+// WithRunOptions returns a context carrying per-run overrides for the executor.
+func WithRunOptions(ctx context.Context, opts RunOptions) context.Context {
+	return context.WithValue(ctx, runOptionsKey{}, opts)
+}
+
+// runOptionsFrom extracts per-run overrides from the context, or the zero value.
+func runOptionsFrom(ctx context.Context) RunOptions {
+	if opts, ok := ctx.Value(runOptionsKey{}).(RunOptions); ok {
+		return opts
+	}
+	return RunOptions{}
 }
 
 // Executor runs the ReAct loop for a single agent against a given task prompt.
@@ -168,6 +197,13 @@ func (e *Executor) Run(
 		OrgID:     agent.OrgID.String(),
 	})
 
+	// Stream a safe "executing" signal for any listening SSE handler (chat).
+	// No-op when no emitter is on the context.
+	chatstream.Status(ctx, "executing", map[string]any{
+		"agent_id":   agent.ID.String(),
+		"agent_name": agent.Name,
+	})
+
 	// The LLM client is resolved further down, once the tool set is known:
 	// auto-selection needs to know whether this run requires native
 	// tool-calling before it can rule models in or out.
@@ -193,6 +229,28 @@ func (e *Executor) Run(
 			}
 			log.Info("applied agent skills",
 				zap.Int("skills", len(skills)),
+				zap.Int("effective_tools", len(agentTools)),
+			)
+		}
+	}
+
+	// Fold in any per-run skill overrides: skills named for THIS run only, on
+	// top of the agent's enabled skills, resolved by slug. Same non-fatal
+	// contract as the enabled skills above — a bad slug or a registry hiccup
+	// must never break the run.
+	if opts := runOptionsFrom(ctx); len(opts.SkillSlugs) > 0 && e.skills != nil {
+		overrides, oerr := e.skills.ListBySlugs(ctx, agent.OrgID, opts.SkillSlugs)
+		if oerr != nil {
+			log.Warn("failed to load run-scoped skill overrides; continuing without them", zap.Error(oerr))
+		} else if len(overrides) > 0 {
+			var promptPatch string
+			agentTools, promptPatch = applySkills(agentTools, overrides)
+			if promptPatch != "" {
+				systemPromptText = strings.TrimSpace(systemPromptText + "\n\n" + promptPatch)
+			}
+			log.Info("applied run-scoped skill overrides",
+				zap.Strings("requested", opts.SkillSlugs),
+				zap.Int("resolved", len(overrides)),
 				zap.Int("effective_tools", len(agentTools)),
 			)
 		}
@@ -353,11 +411,13 @@ func (e *Executor) reactLoop(ctx context.Context, st *reactLoopState) Result {
 		}
 
 		// Execute the tool with a 60-second timeout.
+		chatstream.Emit(ctx, chatstream.Event{Type: chatstream.EventTool, Data: map[string]any{"name": toolName, "state": "start"}})
 		toolCtx, toolCancel := context.WithTimeout(ctx, 60*time.Second)
 		start := time.Now()
 		toolOutput, toolErr := tool.Execute(toolCtx, toolInput)
 		toolCancel()
 		durationMs := int(time.Since(start).Milliseconds())
+		chatstream.Emit(ctx, chatstream.Event{Type: chatstream.EventTool, Data: map[string]any{"name": toolName, "state": "end", "duration_ms": durationMs, "ok": toolErr == nil}})
 
 		record := ToolCallRecord{
 			ToolName:   toolName,
@@ -700,11 +760,13 @@ func (e *Executor) runNative(
 			}
 
 			// Execute the tool with a 60-second timeout.
+			chatstream.Emit(ctx, chatstream.Event{Type: chatstream.EventTool, Data: map[string]any{"name": tc.Name, "state": "start"}})
 			toolCtx, toolCancel := context.WithTimeout(ctx, 60*time.Second)
 			start := time.Now()
 			toolOutput, toolErr := tool.Execute(toolCtx, input)
 			toolCancel()
 			durationMs := int(time.Since(start).Milliseconds())
+			chatstream.Emit(ctx, chatstream.Event{Type: chatstream.EventTool, Data: map[string]any{"name": tc.Name, "state": "end", "duration_ms": durationMs, "ok": toolErr == nil}})
 
 			toolCalls = append(toolCalls, ToolCallRecord{
 				ToolName:   tc.Name,

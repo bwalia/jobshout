@@ -18,6 +18,7 @@ func executionHref(agentID uuid.UUID) string {
 }
 func articleHref(id uuid.UUID) string { return "/articles/" + id.String() }
 func pentestHref() string             { return "/agents/pentest" }
+func reviewHref() string              { return "/agents/review" }
 func sprintHref() string              { return "/sprints" }
 
 func agentRef(a model.Agent) model.EntityRef {
@@ -42,6 +43,11 @@ func executionRef(e model.AgentExecution, agentName string) model.EntityRef {
 		label = "execution"
 	}
 	return model.EntityRef{Kind: model.EntityExecution, ID: e.ID.String(), Label: label, Href: executionHref(e.AgentID)}
+}
+
+func reviewRef(run model.ReviewRun) model.EntityRef {
+	label := fmt.Sprintf("%s#%d", run.Repo, run.PRNumber)
+	return model.EntityRef{Kind: model.EntityReviewRun, ID: run.ID.String(), Label: label, Href: reviewHref()}
 }
 
 func imageRef(id, url string) model.EntityRef {

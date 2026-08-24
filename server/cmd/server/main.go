@@ -50,6 +50,7 @@ import (
 	"github.com/jobshout/server/internal/platformtools"
 	"github.com/jobshout/server/internal/repository"
 	"github.com/jobshout/server/internal/research"
+	"github.com/jobshout/server/internal/reviewbot"
 	"github.com/jobshout/server/internal/selector"
 	"github.com/jobshout/server/internal/service"
 	"github.com/jobshout/server/internal/strix"
@@ -197,6 +198,8 @@ func main() {
 	blogRepo := repository.NewBlogRepository(pool)
 	pentestRunRepo := repository.NewPentestRunRepository(pool)
 	pentestFindingRepo := repository.NewPentestFindingRepository(pool)
+	reviewRunRepo := repository.NewReviewRunRepository(pool)
+	taskRunRepo := repository.NewTaskRunRepository(pool)
 
 	// Autonomous agents + chat + Telegram repositories
 	memoryRepo := repository.NewMemoryRepository(pool)
@@ -412,6 +415,7 @@ func main() {
 	ssoSvc := service.NewSSOService(ssoRepo, userRepo, rbacRepo, auditRepo, logger)
 	leaderboardSvc := service.NewLeaderboardService(usageRepo, logger)
 	execSvc := service.NewExecutionService(agentRepo, execRepo, toolPermRepo, engineRouter, govSvc, logger)
+	taskRunSvc := service.NewTaskRunService(taskRunRepo, taskRepo, projectRepo, agentRepo, execSvc, logger)
 	workflowSvc := service.NewWorkflowService(workflowRepo, agentRepo, execRepo, toolPermRepo, dagEngine, logger)
 	pluginSvc := service.NewPluginService(pluginRepo, agentRepo, engineRouter, logger)
 
@@ -471,7 +475,11 @@ func main() {
 				"(set OPSAPI_BASE_URL, OPSAPI_API_KEY and OPSAPI_NAMESPACE)")
 		}
 	}
-	blogSvc := service.NewBlogService(blogRunner, blogRepo, researchSvc, agentRepo, logger)
+	blogSvc := service.NewBlogService(
+		blogRunner, blogRepo, researchSvc, agentRepo, logger,
+		cfg.BlogOrphanTimeout, cfg.BlogMaxRuntime,
+	)
+	blogReconciler := service.NewBlogReconciler(blogSvc, 0, logger)
 
 	// ─── Penetration Testing (Strix on the workstation) ──────────────────────
 	// The scanner runs on the Mac Studio behind the same JWT-gated HTTP endpoint
@@ -491,6 +499,21 @@ func main() {
 		)
 	} else {
 		logger.Info("penetration testing disabled (STRIX_BASE_URL empty)")
+	}
+
+	reviewCfg := reviewbot.LoadConfig(logger)
+	reviewClient := reviewbot.NewClient(reviewCfg.BaseURL, reviewCfg.Token, reviewCfg.Timeout, logger)
+	reviewSvc := service.NewReviewService(reviewRunRepo, reviewCfg, logger)
+	reviewReconciler := service.NewReviewReconciler(reviewRunRepo, reviewClient, reviewCfg, logger)
+	if reviewCfg.Configured() {
+		toolRegistry.Register(tools.NewReviewPullRequestTool(reviewSvc))
+		logger.Info("PR review enabled",
+			zap.String("base_url", reviewCfg.BaseURL),
+			zap.Int("allowlist_size", len(reviewCfg.AllowedRepos)),
+			zap.Duration("poll_interval", reviewCfg.PollInterval),
+		)
+	} else {
+		logger.Info("PR review disabled (REVIEW_BOT_BASE_URL empty)")
 	}
 
 	// ─── Autonomous agent engine ────────────────────────────────────────────
@@ -569,6 +592,7 @@ func main() {
 		Blog:            blogSvc,
 		Pentest:         pentestSvc,
 		Images:          imageSvc,
+		Reviews:         reviewSvc,
 		MultiAgent:      multiAgentSvc,
 		Sprints:         sprintSvc,
 		Plugins:         pluginSvc,
@@ -651,6 +675,7 @@ func main() {
 	agentHandler := handler.NewAgentHandler(agentSvc)
 	projectHandler := handler.NewProjectHandler(projectSvc)
 	taskHandler := handler.NewTaskHandler(taskSvc)
+	taskRunHandler := handler.NewTaskRunHandler(taskRunSvc)
 	orgHandler := handler.NewOrganizationHandler(orgRepo)
 	marketplaceHandler := handler.NewMarketplaceHandler(pool, logger)
 	knowledgeHandler := handler.NewKnowledgeHandler(pool, knowledgeIngestSvc, logger)
@@ -679,6 +704,7 @@ func main() {
 	blogHandler := handler.NewBlogHandler(blogSvc)
 	researchHandler := handler.NewResearchHandler(researchSvc)
 	pentestHandler := handler.NewPentestHandler(pentestSvc)
+	reviewHandler := handler.NewReviewHandler(reviewSvc)
 
 	// Chat, goal, multi-agent, and Telegram handlers
 	chatHandler := handler.NewChatHandler(chatSvc)
@@ -812,8 +838,14 @@ func main() {
 					r.Put("/position", taskHandler.Reorder)
 					r.Get("/comments", taskHandler.ListComments)
 					r.Post("/comments", taskHandler.AddComment)
+					// On-demand agent runs of this task.
+					r.Post("/run", taskRunHandler.CreateRun)
+					r.Get("/runs", taskRunHandler.ListRuns)
 				})
 			})
+
+			// A single task run, looked up by its own ID (the poll target).
+			r.Get("/task-runs/{runID}", taskRunHandler.GetRun)
 
 			// Organizations
 			r.Route("/organizations/{orgID}", func(r chi.Router) {
@@ -904,6 +936,13 @@ func main() {
 					r.Get("/findings", pentestHandler.ListFindings)
 					r.Post("/cancel", pentestHandler.CancelRun)
 				})
+			})
+
+			r.Route("/review-runs", func(r chi.Router) {
+				r.Get("/repos", reviewHandler.ListRepos)
+				r.Get("/", reviewHandler.ListRuns)
+				r.Post("/", reviewHandler.CreateRun)
+				r.Get("/{runID}", reviewHandler.GetRun)
 			})
 
 			// Plugins (user-defined LangGraph/LangChain workflows)
@@ -1172,6 +1211,15 @@ func main() {
 	// SKIP LOCKED, and advances each by polling the workstation service. A no-op
 	// when STRIX_BASE_URL is unset. Stops when ctx is cancelled on shutdown.
 	go pentestReconciler.Start(ctx)
+	// Same durable-queue shape as pentest: Postgres is the system of record,
+	// the ClusterIP sidecar holds in-memory OpenCode jobs.
+	go reviewReconciler.Start(ctx)
+
+	// ─── Blog orphan reconciler ─────────────────────────────────────────────
+	// Fails running rows whose writer died (SIGKILL, OOM, node drain). SIGTERM
+	// is handled by InterruptAll below; this loop covers the rest. Does not
+	// restart generation — Retry is the user's action.
+	go blogReconciler.Start(ctx)
 
 	srv := &http.Server{
 		Addr:        cfg.ServerPort,

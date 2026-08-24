@@ -39,6 +39,10 @@ type BlogRepository interface {
 	CreateArticles(ctx context.Context, articles []model.BlogArticle) error
 	ListArticlesByRun(ctx context.Context, runID uuid.UUID) ([]model.BlogArticle, error)
 	GetArticle(ctx context.Context, id uuid.UUID) (*model.BlogArticle, error)
+	// UpdateArticles writes the run's lightweight per-article summaries, so a
+	// brief can be persisted without a full terminal Update racing the step
+	// trace.
+	UpdateArticles(ctx context.Context, runID uuid.UUID, articles []model.BlogRunArticle) error
 	// MarkArticlesPosted records where each article landed in the CMS, after a
 	// publish has already succeeded.
 	MarkArticlesPosted(ctx context.Context, posts []model.BlogArticlePost) error
@@ -55,6 +59,12 @@ type BlogRepository interface {
 	// (migration 022 creates the supporting index) rather than left to the
 	// feature that will consume it.
 	RecentTopics(ctx context.Context, orgID uuid.UUID, since time.Time) ([]string, error)
+	// TouchHeartbeat records that this process is still writing the run, so the
+	// orphan reconciler does not fail a healthy long LLM call.
+	TouchHeartbeat(ctx context.Context, runID uuid.UUID) error
+	// ListStaleRunning returns in-flight runs whose last heartbeat (or start)
+	// is before before. The reconciler fails these; it does not restart them.
+	ListStaleRunning(ctx context.Context, before time.Time) ([]*model.BlogRun, error)
 }
 
 type blogRepository struct {
@@ -70,7 +80,7 @@ func NewBlogRepository(pool *pgxpool.Pool) BlogRepository {
 const blogRunColumns = `
 	id, org_id, agent_id, triggered_by, source, status, topics, briefs, model,
 	cms_namespace, articles, steps, error_message,
-	started_at, completed_at, published_at, created_at`
+	started_at, heartbeat_at, completed_at, published_at, created_at`
 
 // scanBlogRun reads one row in blogRunColumns order.
 func scanBlogRun(row pgx.Row) (*model.BlogRun, error) {
@@ -80,7 +90,7 @@ func scanBlogRun(row pgx.Row) (*model.BlogRun, error) {
 		&run.ID, &run.OrgID, &run.AgentID, &run.TriggeredBy, &run.Source, &run.Status,
 		&topicsRaw, &briefsRaw, &run.Model, &run.CMSNamespace,
 		&articlesRaw, &stepsRaw, &run.ErrorMessage,
-		&run.StartedAt, &run.CompletedAt, &run.PublishedAt, &run.CreatedAt,
+		&run.StartedAt, &run.HeartbeatAt, &run.CompletedAt, &run.PublishedAt, &run.CreatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -164,8 +174,8 @@ func (r *blogRepository) Create(ctx context.Context, run *model.BlogRun) error {
 
 	const sql = `
 		INSERT INTO blog_runs
-		    (id, org_id, agent_id, triggered_by, source, status, topics, briefs, model, articles, steps, started_at, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, NOW())
+		    (id, org_id, agent_id, triggered_by, source, status, topics, briefs, model, articles, steps, started_at, heartbeat_at, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12, NOW())
 		RETURNING created_at`
 
 	return r.pool.QueryRow(ctx, sql,
@@ -195,6 +205,21 @@ func (r *blogRepository) Update(ctx context.Context, run *model.BlogRun) error {
 	)
 	if err != nil {
 		return fmt.Errorf("blog_repo: update: %w", err)
+	}
+	return nil
+}
+
+func (r *blogRepository) UpdateArticles(ctx context.Context, runID uuid.UUID, articles []model.BlogRunArticle) error {
+	if articles == nil {
+		articles = []model.BlogRunArticle{}
+	}
+	articlesJSON, err := json.Marshal(articles)
+	if err != nil {
+		return fmt.Errorf("blog_repo: marshal articles: %w", err)
+	}
+	_, err = r.pool.Exec(ctx, `UPDATE blog_runs SET articles = $2 WHERE id = $1`, runID, articlesJSON)
+	if err != nil {
+		return fmt.Errorf("blog_repo: update articles: %w", err)
 	}
 	return nil
 }
@@ -414,6 +439,41 @@ func (r *blogRepository) RecentTopics(ctx context.Context, orgID uuid.UUID, sinc
 		topics = append(topics, topic)
 	}
 	return topics, rows.Err()
+}
+
+func (r *blogRepository) TouchHeartbeat(ctx context.Context, runID uuid.UUID) error {
+	_, err := r.pool.Exec(ctx,
+		`UPDATE blog_runs SET heartbeat_at = NOW() WHERE id = $1 AND status IN ('running', 'pending')`,
+		runID,
+	)
+	if err != nil {
+		return fmt.Errorf("blog_repo: heartbeat: %w", err)
+	}
+	return nil
+}
+
+func (r *blogRepository) ListStaleRunning(ctx context.Context, before time.Time) ([]*model.BlogRun, error) {
+	sql := `SELECT ` + blogRunColumns + `
+		FROM blog_runs
+		WHERE status IN ('running', 'pending')
+		  AND COALESCE(heartbeat_at, started_at, created_at) < $1
+		ORDER BY created_at
+		LIMIT 50`
+	rows, err := r.pool.Query(ctx, sql, before)
+	if err != nil {
+		return nil, fmt.Errorf("blog_repo: list stale running: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]*model.BlogRun, 0)
+	for rows.Next() {
+		run, err := scanBlogRun(rows)
+		if err != nil {
+			return nil, fmt.Errorf("blog_repo: scan stale running: %w", err)
+		}
+		out = append(out, run)
+	}
+	return out, rows.Err()
 }
 
 func (r *blogRepository) MarkArticlesPosted(ctx context.Context, posts []model.BlogArticlePost) error {

@@ -52,6 +52,19 @@ data:
           proxy_pass $up;
         }
 
+        {{- if .Values.reviewBot.enabled }}
+        # PR-reviewer MCP endpoint for editor CLIs (Claude Code / Cursor). The
+        # review-bot serves MCP on its own port; only /mcp is exposed — the REST
+        # /api on that pod stays cluster-internal. Streamable HTTP uses SSE, so
+        # disable buffering and allow a long-lived connection.
+        location /mcp {
+          set $mcp http://jobshout-review-bot.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.reviewBot.mcpPort | default 8766 }};
+          proxy_pass $mcp;
+          proxy_buffering off;
+          proxy_read_timeout 3600s;
+        }
+        {{- end }}
+
         location / {
           set $web http://jobshout-web.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.web.port }};
           proxy_pass $web;

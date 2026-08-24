@@ -55,6 +55,8 @@ function fallbackHref(entity: EntityRef): string {
       return entity.id ? `/articles/${entity.id}` : "/articles";
     case "pentest_run":
       return "/agents/pentest";
+    case "review_run":
+      return "/agents/review";
     case "image":
       return "/images";
     case "sprint":
