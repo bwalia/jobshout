@@ -44,6 +44,7 @@ const NAV_SECTIONS: NavSection[] = [
     title: "Overview",
     items: [
       { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+      { label: "Chat", href: "/chat", icon: Sparkles },
     ],
   },
   {

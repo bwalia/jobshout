@@ -99,6 +99,7 @@ func (m *mockExecRepo) MarkCompleted(_ context.Context, _ uuid.UUID, _ string, _
 func (m *mockExecRepo) MarkFailed(_ context.Context, _ uuid.UUID, _ string, _ int, _ int) error {
 	return nil
 }
+func (m *mockExecRepo) MarkCancelled(_ context.Context, _ uuid.UUID) error { return nil }
 func (m *mockExecRepo) RecordToolCall(_ context.Context, _ *model.ExecutionToolCall) error {
 	return nil
 }

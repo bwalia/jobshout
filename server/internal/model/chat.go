@@ -18,6 +18,7 @@ const (
 	ChatRoleUser   = "user"
 	ChatRoleAgent  = "agent"
 	ChatRoleSystem = "system"
+	ChatRoleTool   = "tool"
 )
 
 // ChatSession represents a conversation between a user and the system.
@@ -52,6 +53,7 @@ type StartChatSessionRequest struct {
 
 // SendChatMessageRequest is the API payload for sending a message in a session.
 type SendChatMessageRequest struct {
-	Content string `json:"content" validate:"required,min=1"`
-	Source  string `json:"source,omitempty"`
+	Content            string `json:"content" validate:"required,min=1"`
+	Source             string `json:"source,omitempty"`
+	ConfirmationToken  string `json:"confirmation_token,omitempty"`
 }
