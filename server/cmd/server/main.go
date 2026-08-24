@@ -83,6 +83,11 @@ const researchRequestTimeout = 10 * time.Minute
 // downstream; this only stops the ceiling being lower than the floor.
 const imageRequestTimeout = 30 * time.Minute
 
+// chatRequestTimeout bounds a chat turn while the client is still connected.
+// The agent run itself is detached from this context (see chatsvc.SendTurn);
+// this only keeps the SSE response open long enough to stream the reply.
+const chatRequestTimeout = 10 * time.Minute
+
 // defaultRequestTimeout bounds every route that is not doing something
 // legitimately slow. Thirty seconds is generous for a database round trip and
 // short enough that a stuck handler is not held open.
@@ -126,6 +131,11 @@ func requestTimeout(next http.Handler) http.Handler {
 		// HTTP call to that service, so it keeps the default.
 		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/images/generate") {
 			timeout = imageRequestTimeout
+		}
+		if r.Method == http.MethodPost && (strings.HasSuffix(r.URL.Path, "/messages") ||
+			strings.HasSuffix(r.URL.Path, "/messages/stream") ||
+			strings.HasSuffix(r.URL.Path, "/chat/route")) {
+			timeout = chatRequestTimeout
 		}
 
 		ctx, cancel := context.WithTimeout(r.Context(), timeout)
@@ -1169,7 +1179,7 @@ func main() {
 		ReadTimeout: 15 * time.Second,
 		// Must exceed the longest per-route handler deadline (research or sync
 		// image generation), or the response is cut off after the work is done.
-		WriteTimeout: max(researchRequestTimeout, imageRequestTimeout) + time.Minute,
+		WriteTimeout: max(researchRequestTimeout, imageRequestTimeout, chatRequestTimeout) + time.Minute,
 		IdleTimeout:  60 * time.Second,
 	}
 

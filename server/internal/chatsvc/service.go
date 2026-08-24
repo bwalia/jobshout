@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -13,6 +15,10 @@ import (
 	"github.com/jobshout/server/internal/platformtools"
 	"github.com/jobshout/server/internal/repository"
 )
+
+// chatTurnTimeout bounds one agent loop after it is detached from the HTTP
+// request. A reload cancels r.Context(); this deadline is independent of that.
+const chatTurnTimeout = 10 * time.Minute
 
 // ChatService manages chat sessions and dispatches messages through the
 // tool-calling chat agent.
@@ -32,9 +38,11 @@ type ChatService interface {
 }
 
 type chatService struct {
-	chatRepo repository.ChatRepository
-	agent    *chatagent.Agent
-	logger   *zap.Logger
+	chatRepo  repository.ChatRepository
+	agent     *chatagent.Agent
+	logger    *zap.Logger
+	mu        sync.Mutex
+	sessionMu map[uuid.UUID]*sync.Mutex
 }
 
 func NewChatService(
@@ -45,7 +53,24 @@ func NewChatService(
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &chatService{chatRepo: chatRepo, agent: agent, logger: logger}
+	return &chatService{
+		chatRepo:  chatRepo,
+		agent:     agent,
+		logger:    logger,
+		sessionMu: map[uuid.UUID]*sync.Mutex{},
+	}
+}
+
+func (s *chatService) lockSession(id uuid.UUID) func() {
+	s.mu.Lock()
+	m, ok := s.sessionMu[id]
+	if !ok {
+		m = &sync.Mutex{}
+		s.sessionMu[id] = m
+	}
+	s.mu.Unlock()
+	m.Lock()
+	return m.Unlock
 }
 
 func (s *chatService) StartSession(ctx context.Context, orgID, userID uuid.UUID, req model.StartChatSessionRequest) (*model.ChatSession, error) {
@@ -108,7 +133,17 @@ func (s *chatService) SendTurn(ctx context.Context, orgID, userID, sessionID uui
 	if source == "" {
 		source = model.ChatSourceWeb
 	}
-	session, err := s.GetSession(ctx, orgID, userID, sessionID)
+
+	// Reloading (or the 30s request-timeout middleware) cancels r.Context().
+	// The turn has to outlive that: tools already ran, and the reply must
+	// still be persisted so the client can catch up on the next load.
+	runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), chatTurnTimeout)
+	defer cancel()
+
+	unlock := s.lockSession(sessionID)
+	defer unlock()
+
+	session, err := s.GetSession(runCtx, orgID, userID, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -122,11 +157,11 @@ func (s *chatService) SendTurn(ctx context.Context, orgID, userID, sessionID uui
 		Content:   content,
 		Metadata:  map[string]any{},
 	}
-	if err := s.chatRepo.AppendMessage(ctx, userMsg); err != nil {
+	if err := s.chatRepo.AppendMessage(runCtx, userMsg); err != nil {
 		return nil, fmt.Errorf("chat_svc: persist user message: %w", err)
 	}
 
-	history, err := s.chatRepo.ListMessages(ctx, sessionID, chatagent.MaxHistoryLoad)
+	history, err := s.chatRepo.ListMessages(runCtx, sessionID, chatagent.MaxHistoryLoad)
 	if err != nil {
 		s.logger.Warn("chat_svc: list history", zap.Error(err))
 		history = nil
@@ -142,12 +177,27 @@ func (s *chatService) SendTurn(ctx context.Context, orgID, userID, sessionID uui
 	if _, ok := meta["title"]; !ok {
 		meta["title"] = titleFrom(content)
 	}
+	meta[model.ChatMetaTurnStartedAt] = time.Now().UTC().Format(time.RFC3339)
+	if err := s.chatRepo.UpdateSessionMetadata(runCtx, sessionID, meta); err != nil {
+		s.logger.Warn("chat_svc: mark turn in flight", zap.Error(err))
+	}
+
+	clearInFlight := func(m map[string]any) {
+		if m == nil {
+			return
+		}
+		delete(m, model.ChatMetaTurnStartedAt)
+		if err := s.chatRepo.UpdateSessionMetadata(runCtx, sessionID, m); err != nil {
+			s.logger.Warn("chat_svc: persist session metadata", zap.Error(err))
+		}
+	}
 
 	if s.agent == nil {
+		clearInFlight(meta)
 		return s.fallbackTurn(userMsg, source, "Chat is not configured.")
 	}
 
-	tr, err := s.agent.Run(ctx, chatagent.TurnRequest{
+	tr, err := s.agent.Run(runCtx, chatagent.TurnRequest{
 		Ident: platformtools.Identity{
 			OrgID: orgID, UserID: userID, SessionID: sessionID,
 		},
@@ -159,12 +209,17 @@ func (s *chatService) SendTurn(ctx context.Context, orgID, userID, sessionID uui
 	})
 	if err != nil {
 		s.logger.Warn("chat agent failed", zap.Error(err))
+		clearInFlight(meta)
 		return s.fallbackTurn(userMsg, source, chatagent.HumaniseError(err))
 	}
 
 	resp := tr.Response
 	resp.Message = chatagent.SanitiseMessage(resp.Message)
-	if err := s.chatRepo.UpdateSessionMetadata(ctx, sessionID, tr.Metadata); err != nil {
+	if tr.Metadata == nil {
+		tr.Metadata = meta
+	}
+	delete(tr.Metadata, model.ChatMetaTurnStartedAt)
+	if err := s.chatRepo.UpdateSessionMetadata(runCtx, sessionID, tr.Metadata); err != nil {
 		s.logger.Warn("chat_svc: persist session metadata", zap.Error(err))
 	}
 
@@ -181,7 +236,7 @@ func (s *chatService) SendTurn(ctx context.Context, orgID, userID, sessionID uui
 		Content:   resp.Message,
 		Metadata:  agentMeta,
 	}
-	if err := s.chatRepo.AppendMessage(ctx, agentMsg); err != nil {
+	if err := s.chatRepo.AppendMessage(runCtx, agentMsg); err != nil {
 		s.logger.Warn("failed to persist agent response", zap.Error(err))
 	}
 

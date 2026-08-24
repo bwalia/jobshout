@@ -249,7 +249,7 @@ func registerSpecialists(reg *Registry, d Deps) {
 	if d.Images != nil {
 		reg.Register(newTool(
 			"image_generate",
-			"Generate an image from a text prompt.",
+			"Generate an image, picture, drawing or illustration from a text prompt. Call this when the user asks to draw, generate, or create a picture — not an agent.",
 			"insight", model.PermAgentsExecute, false, false,
 			tools.ObjectSchema(map[string]any{
 				"prompt": map[string]any{"type": "string"},
@@ -270,16 +270,23 @@ func registerSpecialists(reg *Registry, d Deps) {
 				if err != nil {
 					return nil, err
 				}
-				b64 := base64.StdEncoding.EncodeToString(res.PNG)
-				if len(b64) > 200 {
-					b64 = b64[:200] + "…"
-				}
 				id := ""
 				if res.RecordID != nil {
 					id = res.RecordID.String()
 				}
-				ref := model.EntityRef{Kind: model.EntityImage, ID: id, Label: "generated image", Href: "/images"}
-				return &Result{Data: map[string]any{"url": res.URL, "model": res.Model, "seed": res.Seed}, Entity: &ref}, nil
+				url := res.URL
+				if url == "" && len(res.PNG) > 0 {
+					// No object storage: keep the picture on the entity so chat
+					// can render it. Do not put the bytes in Data — that would
+					// dump a megabyte into the model's tool-result context.
+					url = "data:image/png;base64," + base64.StdEncoding.EncodeToString(res.PNG)
+				}
+				ref := imageRef(id, url)
+				data := map[string]any{"model": res.Model, "seed": res.Seed}
+				if res.URL != "" {
+					data["url"] = res.URL
+				}
+				return &Result{Data: data, Entity: &ref, Entities: []model.EntityRef{ref}}, nil
 			},
 		))
 	}

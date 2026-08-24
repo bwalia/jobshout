@@ -3,6 +3,8 @@ export interface EntityRef {
   id: string;
   label: string;
   href?: string;
+  /** Fetchable picture for kind=image (stored path or data URL). */
+  url?: string;
 }
 
 export interface ActionRecord {

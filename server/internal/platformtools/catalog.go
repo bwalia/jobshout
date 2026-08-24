@@ -27,6 +27,7 @@ var AlwaysLoad = []string{
 	"usage_summary",
 	"my_permissions",
 	"agent_board",
+	"image_generate",
 }
 
 // HumanLabel is the progress chip text shown while a tool runs.
@@ -118,24 +119,41 @@ func registerCatalog(reg *Registry) {
 			ident := MustIdentity(ctx)
 			perms, _ := ctxPerms(ctx)
 			_ = ident
-			var matches []catalogEntry
-			var names []string
+			type scored struct {
+				entry catalogEntry
+				score int
+			}
+			var ranked []scored
 			for _, t := range reg.FilterByPermissions(perms) {
 				if inAlwaysLoad(t.Name()) {
 					continue
 				}
 				blob := strings.ToLower(t.Name() + " " + t.Description() + " " + t.Domain())
-				if query == "" || strings.Contains(blob, query) {
-					matches = append(matches, catalogEntry{
-						Name: t.Name(), Description: t.Description(), Domain: t.Domain(), Schema: t.Schema(),
-					})
-					names = append(names, t.Name())
+				score := catalogScore(query, blob)
+				if score <= 0 {
+					continue
 				}
+				ranked = append(ranked, scored{
+					entry: catalogEntry{
+						Name: t.Name(), Description: t.Description(), Domain: t.Domain(), Schema: t.Schema(),
+					},
+					score: score,
+				})
 			}
-			sort.Slice(matches, func(i, j int) bool { return matches[i].Name < matches[j].Name })
-			if len(matches) > 12 {
-				matches = matches[:12]
-				names = names[:12]
+			sort.Slice(ranked, func(i, j int) bool {
+				if ranked[i].score != ranked[j].score {
+					return ranked[i].score > ranked[j].score
+				}
+				return ranked[i].entry.Name < ranked[j].entry.Name
+			})
+			if len(ranked) > 12 {
+				ranked = ranked[:12]
+			}
+			matches := make([]catalogEntry, 0, len(ranked))
+			names := make([]string, 0, len(ranked))
+			for _, s := range ranked {
+				matches = append(matches, s.entry)
+				names = append(names, s.entry.Name)
 			}
 			AddDisclosedTools(ctx, names) // value not persisted; loop reads from returned names
 			return &Result{Data: map[string]any{"tools": matches, "names": names}}, nil
@@ -150,6 +168,42 @@ func inAlwaysLoad(name string) bool {
 		}
 	}
 	return false
+}
+
+var catalogStop = map[string]bool{
+	"a": true, "an": true, "the": true, "of": true, "to": true, "for": true,
+	"and": true, "or": true, "in": true, "on": true, "my": true, "me": true,
+	"i": true, "you": true, "we": true, "from": true, "with": true, "that": true,
+	"this": true, "it": true, "is": true, "be": true, "do": true, "can": true,
+	"please": true, "want": true, "need": true,
+}
+
+// catalogScore ranks how well a tool blob matches a natural-language query.
+// The old substring check required the entire query to appear in the description,
+// so "generate an image of a tiger" missed image_generate.
+func catalogScore(query, blob string) int {
+	query = strings.TrimSpace(strings.ToLower(query))
+	if query == "" {
+		return 1
+	}
+	if strings.Contains(blob, query) {
+		return 100
+	}
+	score := 0
+	for _, tok := range strings.Fields(strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+			return r
+		}
+		return ' '
+	}, query)) {
+		if len(tok) < 3 || catalogStop[tok] {
+			continue
+		}
+		if strings.Contains(blob, tok) {
+			score++
+		}
+	}
+	return score
 }
 
 func ctxPerms(ctx context.Context) (map[string]bool, bool) {

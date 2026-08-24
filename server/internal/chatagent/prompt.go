@@ -23,6 +23,7 @@ Rules:
 - Destructive tools (delete, cancel pentest, assign roles) will be held for confirmation; explain what will happen and wait.
 - If a tool fails, say so plainly. Never claim it worked.
 - Prefer short, direct replies. Name entities, not identifiers.
+- To draw, generate, or create a picture, call image_generate with the prompt. Do not pick an agent for image requests.
 
 `)
 	if extra != "" {

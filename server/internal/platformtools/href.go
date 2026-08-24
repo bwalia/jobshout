@@ -9,10 +9,10 @@ import (
 	"github.com/jobshout/server/internal/model"
 )
 
-func agentHref(id uuid.UUID) string       { return "/agents/" + id.String() }
-func taskHref(id uuid.UUID) string        { return "/task-manager" }
-func projectHref(id uuid.UUID) string     { return "/projects/" + id.String() }
-func workflowHref(id uuid.UUID) string    { return "/workflows/" + id.String() }
+func agentHref(id uuid.UUID) string    { return "/agents/" + id.String() }
+func taskHref(id uuid.UUID) string     { return "/task-manager" }
+func projectHref(id uuid.UUID) string  { return "/projects/" + id.String() }
+func workflowHref(id uuid.UUID) string { return "/workflows/" + id.String() }
 func executionHref(agentID uuid.UUID) string {
 	return "/agents/" + agentID.String()
 }
@@ -42,6 +42,16 @@ func executionRef(e model.AgentExecution, agentName string) model.EntityRef {
 		label = "execution"
 	}
 	return model.EntityRef{Kind: model.EntityExecution, ID: e.ID.String(), Label: label, Href: executionHref(e.AgentID)}
+}
+
+func imageRef(id, url string) model.EntityRef {
+	return model.EntityRef{
+		Kind:  model.EntityImage,
+		ID:    id,
+		Label: "generated image",
+		Href:  "/images",
+		URL:   url,
+	}
 }
 
 func clarifyFromMatch[T any](kind, query string, candidates []T, nameOf func(T) string) *Result {

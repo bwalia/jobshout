@@ -30,13 +30,29 @@ export function useChatSessions(): UseQueryResult<PaginatedResponse<ChatSession>
 }
 
 export function useChatMessages(
-  sessionId: string | null
+  sessionId: string | null,
+  opts?: { pollForReply?: boolean }
 ): UseQueryResult<ChatMessage[]> {
   return useQuery({
     queryKey: chatKeys.messages(sessionId ?? ""),
     queryFn: () => getChatMessages(sessionId!),
     enabled: Boolean(sessionId),
+    refetchInterval: (query) => {
+      if (!opts?.pollForReply) return false;
+      const msgs = query.state.data;
+      return awaitingAssistant(msgs ?? []) ? 1500 : false;
+    },
   });
+}
+
+/** True when the last visible message is the user and the reply may still be in flight. */
+export function awaitingAssistant(messages: ChatMessage[]): boolean {
+  const vis = messages.filter((m) => m.role === "user" || m.role === "agent");
+  const last = vis[vis.length - 1];
+  if (!last || last.role !== "user") return false;
+  const t = Date.parse(last.created_at);
+  if (Number.isNaN(t)) return true;
+  return Date.now() - t < 3 * 60 * 1000;
 }
 
 export function useCreateChatSession(): UseMutationResult<ChatSession, Error, void> {

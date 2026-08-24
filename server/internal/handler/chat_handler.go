@@ -183,7 +183,9 @@ func (h *ChatHandler) StreamMessage(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return
 		}
-		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Type, data)
+		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Type, data); err != nil {
+			return
+		}
 		flusher.Flush()
 	}
 

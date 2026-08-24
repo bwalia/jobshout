@@ -5,12 +5,12 @@ import "time"
 // ChatResponse is the structured envelope every chat surface renders.
 // Message is human prose: no UUIDs, HTTP verbs, URL paths, or Go errors.
 type ChatResponse struct {
-	Message      string           `json:"message"`
-	Actions      []ActionRecord   `json:"actions"`
-	Entities     []EntityRef      `json:"entities"`
-	Confirmation *ConfirmRequest  `json:"confirmation,omitempty"`
-	Clarify      *ClarifyRequest  `json:"clarify,omitempty"`
-	Usage        *UsageInfo       `json:"usage,omitempty"`
+	Message      string          `json:"message"`
+	Actions      []ActionRecord  `json:"actions"`
+	Entities     []EntityRef     `json:"entities"`
+	Confirmation *ConfirmRequest `json:"confirmation,omitempty"`
+	Clarify      *ClarifyRequest `json:"clarify,omitempty"`
+	Usage        *UsageInfo      `json:"usage,omitempty"`
 }
 
 // ActionRecord is one tool invocation that actually ran (or was denied /
@@ -34,11 +34,14 @@ const (
 
 // EntityRef is a named, linkable thing the UI can render as a card.
 // Label is what the user reads; ID and Href are for navigation.
+// URL, when set (typically kind=image), is a fetchable picture the chat
+// bubble can render inline — a stored /api/v1/images/file/… path or a data URL.
 type EntityRef struct {
 	Kind  string `json:"kind"`
 	ID    string `json:"id"`
 	Label string `json:"label"`
 	Href  string `json:"href,omitempty"`
+	URL   string `json:"url,omitempty"`
 }
 
 // Entity kinds used by platform tools. Unknown kinds fall back to a plain link.
@@ -61,11 +64,11 @@ const (
 
 // ConfirmRequest is a destructive action waiting for an explicit Approve.
 type ConfirmRequest struct {
-	Token      string `json:"token"`
-	Tool       string `json:"tool"`
-	Summary    string `json:"summary"`
-	Effect     string `json:"effect"`
-	ExpiresAt  string `json:"expires_at,omitempty"`
+	Token     string `json:"token"`
+	Tool      string `json:"tool"`
+	Summary   string `json:"summary"`
+	Effect    string `json:"effect"`
+	ExpiresAt string `json:"expires_at,omitempty"`
 }
 
 // ClarifyRequest asks the user to fill a missing slot.
@@ -121,11 +124,12 @@ type PendingConfirmation struct {
 // Chat session metadata keys. All chat continuity state lives here so a
 // restarted process can reconstruct a turn from Postgres alone.
 const (
-	ChatMetaSummary      = "summary"
-	ChatMetaEntities     = "entities"
-	ChatMetaPending      = "pending_action"
-	ChatMetaConfirmation = "pending_confirmation"
-	ChatMetaLastKind     = "last_entity_kind"
+	ChatMetaSummary       = "summary"
+	ChatMetaEntities      = "entities"
+	ChatMetaPending       = "pending_action"
+	ChatMetaConfirmation  = "pending_confirmation"
+	ChatMetaLastKind      = "last_entity_kind"
+	ChatMetaTurnStartedAt = "turn_started_at"
 )
 
 // ChatTurnResult is what ChatService returns after a send: persisted

@@ -474,7 +474,12 @@ func (a *Agent) executeTool(ctx context.Context, stream StreamFunc, name string,
 		}
 	}
 
-	toolCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	timeout := 60 * time.Second
+	switch name {
+	case "image_generate", "research_run", "article_generate":
+		timeout = 3 * time.Minute
+	}
+	toolCtx, cancel := context.WithTimeout(ctx, timeout)
 	res, err := t.Run(toolCtx, platformtools.StripOrgArgs(args))
 	cancel()
 	action.DurationMs = time.Since(start).Milliseconds()
@@ -503,6 +508,9 @@ func (a *Agent) executeTool(ctx context.Context, stream StreamFunc, name string,
 	}
 
 	action.Status = model.ActionOK
+	if res != nil {
+		fillImageURL(res)
+	}
 	var ents []model.EntityRef
 	if res != nil {
 		if res.Entity != nil {
@@ -626,6 +634,28 @@ func slotNames(c *model.ClarifyRequest) []string {
 		return []string{c.Slot}
 	}
 	return []string{"input"}
+}
+
+// fillImageURL copies a generated-image URL from tool Data onto the entity
+// when the tool forgot to set Entity.URL. Chat renders kind=image from that field.
+func fillImageURL(res *platformtools.Result) {
+	if res == nil {
+		return
+	}
+	data, _ := res.Data.(map[string]any)
+	url, _ := data["url"].(string)
+	if url == "" {
+		return
+	}
+	apply := func(e *model.EntityRef) {
+		if e != nil && e.Kind == model.EntityImage && e.URL == "" {
+			e.URL = url
+		}
+	}
+	apply(res.Entity)
+	for i := range res.Entities {
+		apply(&res.Entities[i])
+	}
 }
 
 func uniqueEntities(in []model.EntityRef) []model.EntityRef {

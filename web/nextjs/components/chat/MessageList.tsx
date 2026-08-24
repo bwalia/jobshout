@@ -28,7 +28,7 @@ export function MessageList({
 
   useEffect(() => {
     if (!locked) {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+      bottomRef.current?.scrollIntoView({ behavior: "auto" });
     }
   }, [messages, streamingText, runningLabel, locked]);
 

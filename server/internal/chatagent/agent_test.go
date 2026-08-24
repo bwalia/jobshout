@@ -379,3 +379,41 @@ func TestAgent_FabricationGuard_ZeroToolsNeverClaimsToolResult(t *testing.T) {
 		t.Fatalf("expected honest failure, got %q", tr.Response.Message)
 	}
 }
+
+func TestAgent_ImageEntityIncludesURL(t *testing.T) {
+	reg := platformtools.NewRegistry()
+	reg.Register(platformtools.TestingTool("image_generate", "", false, func(context.Context, map[string]any) (*platformtools.Result, error) {
+		ref := model.EntityRef{Kind: model.EntityImage, ID: "img1", Label: "generated image", Href: "/images"}
+		return &platformtools.Result{
+			Data:   map[string]any{"url": "/api/v1/images/file/abc"},
+			Entity: &ref,
+		}, nil
+	}))
+	client := &scriptedLLM{steps: []llm.GenerateResponse{
+		{ToolCalls: []llm.ToolCall{{ID: "1", Name: "image_generate", Arguments: map[string]any{"prompt": "a cat"}}}},
+		{Content: "Here is the image."},
+	}}
+	a := New(client, reg, platformtools.NewGuard(nil, nil), nil, zap.NewNop())
+	tr, err := a.Run(context.Background(), TurnRequest{Ident: ident(), Message: "draw a cat"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tr.Response.Entities) != 1 {
+		t.Fatalf("entities = %+v", tr.Response.Entities)
+	}
+	if tr.Response.Entities[0].URL != "/api/v1/images/file/abc" {
+		t.Fatalf("image url = %q", tr.Response.Entities[0].URL)
+	}
+}
+
+func TestFillImageURL_NoOpWhenSet(t *testing.T) {
+	ref := model.EntityRef{Kind: model.EntityImage, URL: "data:image/png;base64,xx"}
+	res := &platformtools.Result{
+		Data:   map[string]any{"url": "/other"},
+		Entity: &ref,
+	}
+	fillImageURL(res)
+	if res.Entity.URL != "data:image/png;base64,xx" {
+		t.Fatalf("should keep existing url, got %q", res.Entity.URL)
+	}
+}

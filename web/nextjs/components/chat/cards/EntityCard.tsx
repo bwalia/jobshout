@@ -3,9 +3,30 @@
 import Link from "next/link";
 import { cn } from "@/lib/utils/cn";
 import type { EntityRef } from "@/lib/types/chat";
+import { StoredImage } from "@/components/image/StoredImage";
 
 export function EntityCard({ entity }: { entity: EntityRef }) {
   const href = entity.href || fallbackHref(entity);
+  if (entity.kind === "image" && entity.url) {
+    return (
+      <Link
+        href={href}
+        className="block overflow-hidden rounded-lg border border-border bg-card transition-colors hover:border-primary/40"
+      >
+        <StoredImage
+          src={entity.url}
+          alt={entity.label || "generated image"}
+          className="max-h-80 w-full bg-muted object-contain"
+        />
+        <div className="px-3 py-2 text-sm">
+          <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+            image
+          </p>
+          <p className="font-medium text-foreground">{entity.label}</p>
+        </div>
+      </Link>
+    );
+  }
   return (
     <Link
       href={href}
