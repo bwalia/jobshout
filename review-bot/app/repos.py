@@ -8,11 +8,15 @@ When the file is absent the registry contains only the `.env` repo, so the
 watcher keeps working with zero extra configuration. The `.env` repo is always
 allowed and always resolves to the existing local clone; other repos are cloned
 on demand under `clones_dir` and refreshed with a fetch on each use.
+
+Clones use GITHUB_TOKEN in the HTTPS URL so a pod without the gh credential
+helper can still fetch private repos.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import replace
 from pathlib import Path
@@ -33,14 +37,23 @@ class RepoNotAllowed(RuntimeError):
     """Raised when a repo is malformed or not on the allowlist."""
 
 
+def github_clone_url(slug: str, token: str = "") -> str:
+    """HTTPS clone URL. Embeds the token when one is provided (k8s / CI)."""
+    if token:
+        return f"https://x-access-token:{token}@github.com/{slug}.git"
+    return f"https://github.com/{slug}.git"
+
+
 class RepoRegistry:
     def __init__(self, base: Settings, allowed: set[str] | None = None, clones_dir: Path | None = None) -> None:
         self._base = base
         self.clones_dir = clones_dir or DEFAULT_CLONES_DIR
-        try:
-            self._base_slug: str | None = repo_slug(base.local_repo_path)
-        except GitHubError:
-            self._base_slug = None  # no origin remote; registry is config-only
+        self._base_slug: str | None = None
+        if base.local_repo_path is not None:
+            try:
+                self._base_slug = repo_slug(base.local_repo_path)
+            except GitHubError:
+                self._base_slug = None  # no origin remote; registry is config-only
         self.allowed: set[str] = set(allowed or ())
         if self._base_slug:
             self.allowed.add(self._base_slug)
@@ -50,7 +63,8 @@ class RepoRegistry:
         """Build the registry from repos.json; absent file → only the .env repo."""
         path = Path(config_path)
         allowed: set[str] = set()
-        clones_dir = DEFAULT_CLONES_DIR
+        env_clones = os.getenv("REVIEW_BOT_CLONES_DIR", "").strip()
+        clones_dir = Path(env_clones).expanduser() if env_clones else DEFAULT_CLONES_DIR
         if path.is_file():
             try:
                 data = json.loads(path.read_text())
@@ -58,7 +72,7 @@ class RepoRegistry:
                 # A typo here must not crash-loop the launchd service with a raw traceback.
                 raise ConfigError(f"{path} is not valid JSON: {exc}") from exc
             allowed.update(data.get("allowed") or [])
-            if data.get("clones_dir"):
+            if data.get("clones_dir") and not env_clones:
                 clones_dir = Path(data["clones_dir"]).expanduser()
         return cls(base=base, allowed=allowed, clones_dir=clones_dir)
 
@@ -78,17 +92,26 @@ class RepoRegistry:
     def ensure_clone(self, slug: str) -> Path:
         """A ready-to-use local clone of the repo: fetched if cached, cloned if not."""
         self.require(slug)
-        if slug == self._base_slug:
+        if slug == self._base_slug and self._base.local_repo_path is not None:
             return self._base.local_repo_path  # reuse the watcher's existing clone
 
         clone_path = self.clones_dir / slug.replace("/", "__")
+        origin = github_clone_url(slug, self._base.github_token)
         try:
             if clone_path.is_dir():
-                Repo(clone_path).git.fetch("origin", "--prune")
+                repo = Repo(clone_path)
+                # Rewrite GitHub remotes so a pod can fetch with GITHUB_TOKEN.
+                # Leave file:// and local-path origins alone (tests, odd clones).
+                try:
+                    current = repo.remotes.origin.url
+                except (AttributeError, ValueError):
+                    current = ""
+                if "github.com" in current:
+                    repo.remotes.origin.set_url(origin)
+                repo.git.fetch("origin", "--prune")
             else:
                 self.clones_dir.mkdir(parents=True, exist_ok=True)
-                # HTTPS + the gh credential helper already authenticated on this machine.
-                Repo.clone_from(f"https://github.com/{slug}.git", clone_path)
+                Repo.clone_from(origin, clone_path)
         except (InvalidGitRepositoryError, NoSuchPathError) as exc:
             # e.g. an interrupted first clone left a half-written directory behind.
             raise WorkspaceError(

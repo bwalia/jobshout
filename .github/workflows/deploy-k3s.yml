@@ -1,6 +1,6 @@
 name: Build & deploy JobShout to k3s
 
-# Build the three JobShout images (server, web, python-sidecar) to the SpectonCR
+# Build the four JobShout images (server, web, python-sidecar, review-bot) to the SpectonCR
 # registry, then hand deployment to Ring Promoter (https://rp.workstation.co.uk).
 # Seeding a ring makes RP run the actual deploy as a short-lived k8s Job in the
 # ring-exec namespace (git-clone this repo at the seeded tag + helm upgrade into
@@ -67,7 +67,7 @@ jobs:
         if: ${{ env.DEPLOYMENT_TYPE == 'build' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
         run: docker login "$IMAGE_REGISTRY" -u "${{ secrets.REGISTRY_USERNAME }}" -p "${{ secrets.REGISTRY_PASSWORD }}"
 
-      - name: Build & push server, web, python-sidecar (linux/amd64)
+      - name: Build & push server, web, python-sidecar, review-bot (linux/amd64)
         if: ${{ env.DEPLOYMENT_TYPE == 'build' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
         run: |
           set -euo pipefail
@@ -102,6 +102,9 @@ jobs:
 
           bx -f python-sidecar/Dockerfile \
             -t "$NS/python-sidecar:$SHA" -t "$NS/python-sidecar:latest" python-sidecar
+
+          bx -f review-bot/Dockerfile \
+            -t "$NS/review-bot:$SHA" -t "$NS/review-bot:latest" review-bot
 
       - name: Assert pushed images are linux/amd64
         if: ${{ env.DEPLOYMENT_TYPE == 'build' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
@@ -149,6 +152,7 @@ jobs:
           assert_not_multiarch_junk "$NS/server:$SHA"
           assert_not_multiarch_junk "$NS/web:$SHA"
           assert_not_multiarch_junk "$NS/python-sidecar:$SHA"
+          assert_not_multiarch_junk "$NS/review-bot:$SHA"
 
           echo "Runtime arch smoke (uname -m must be x86_64 under --platform=linux/amd64)"
           docker run --rm --platform=linux/amd64 --entrypoint /bin/sh "$NS/server:$SHA" \
@@ -157,6 +161,8 @@ jobs:
             -c 'uname -m | grep -qx x86_64'
           docker run --rm --platform=linux/amd64 --entrypoint /bin/sh "$NS/python-sidecar:$SHA" \
             -c 'uname -m | grep -qx x86_64'
+          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh "$NS/review-bot:$SHA" \
+            -c 'uname -m | grep -qx x86_64 && command -v opencode >/dev/null && command -v git >/dev/null'
 
   deploy:
     name: Seed Ring Promoter (${{ github.event.inputs.TARGET_ENV || 'int' }})

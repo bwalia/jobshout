@@ -53,6 +53,8 @@ const (
 	// BuiltinPentester is the Penetration Testing Agent: autonomous security testing
 	// powered by Strix. Tests live APIs, applications, and codebases for vulnerabilities.
 	BuiltinPentester = "pentester"
+	// BuiltinPRReviewer reviews GitHub pull requests via the in-cluster review-bot sidecar.
+	BuiltinPRReviewer = "pr_reviewer"
 )
 
 // EngineConfigStructuredModel is the EngineConfig key holding the Article
