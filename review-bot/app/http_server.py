@@ -221,23 +221,29 @@ def _mcp_allowed_hosts() -> list[str]:
 def _start_mcp(runner: JobRunner, registry: RepoRegistry) -> None:
     """Serve the MCP tools in a daemon thread on REVIEW_BOT_MCP_PORT, sharing runner.
 
-    The public URL (for the MCP auth metadata) is REVIEW_BOT_PUBLIC_URL when set,
-    else the internal REVIEW_BOT_URL. mcp.run() runs its own uvicorn; off the main
-    thread uvicorn skips signal handlers, so this does not fight the REST server.
+    Stateless (stateless_http=True): each request is self-contained, so recreating
+    this pod on a redeploy does NOT invalidate an editor's session — the whole point,
+    since the pod redeploys on every push. mcp.run() cannot do this (it has no
+    stateless_http kwarg and always builds a stateful, in-memory-session app), so we
+    build the ASGI app directly and drive it with our own uvicorn.
+
+    The public URL (for MCP auth metadata) is REVIEW_BOT_PUBLIC_URL when set, else
+    the internal REVIEW_BOT_URL. Off the main thread uvicorn skips signal handlers,
+    so this coexists with the REST server; Server.run() drives the app lifespan.
     """
     mcp_port = int(os.getenv("REVIEW_BOT_MCP_PORT", str(DEFAULT_MCP_PORT)))
     public_url = (os.getenv("REVIEW_BOT_PUBLIC_URL", "").strip() or os.getenv("REVIEW_BOT_URL", "").strip()).rstrip("/")
     mcp = build_mcp(runner, registry, public_url or f"http://localhost:{mcp_port}")
-    allowed = _mcp_allowed_hosts()
+    app = mcp.streamable_http_app(
+        streamable_http_path="/mcp",
+        stateless_http=True,
+        transport_security=TransportSecuritySettings(allowed_hosts=_mcp_allowed_hosts()),
+    )
 
     def run() -> None:
-        mcp.run(
-            transport="streamable-http",
-            host="0.0.0.0",
-            port=mcp_port,
-            streamable_http_path="/mcp",
-            transport_security=TransportSecuritySettings(allowed_hosts=allowed),
-        )
+        import uvicorn
+
+        uvicorn.Server(uvicorn.Config(app, host="0.0.0.0", port=mcp_port, log_level="info")).run()
 
     threading.Thread(target=run, name="review-mcp", daemon=True).start()
 
