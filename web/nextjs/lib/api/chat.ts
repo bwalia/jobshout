@@ -1,30 +1,15 @@
 import { apiClient } from "@/lib/api/client";
-import { getAccessToken } from "@/lib/auth/auth";
 import type { PaginatedResponse, PaginationParams } from "@/lib/types/common";
 import type {
   ChatMessage,
   ChatSession,
-  SendChatMessageResponse,
-  StartChatSessionRequest,
-  SendChatMessageRequest,
+  ChatTurnResult,
+  ChatStreamEvent,
 } from "@/lib/types/chat";
 
-// Wraps the EXISTING /chat backend (ChatService + the 12-stage ChatRouterService).
-// All paths are relative to the apiClient baseURL (/api/v1).
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
-/** Start a new chat session (thread). */
-export async function startChatSession(
-  payload: StartChatSessionRequest = {}
-): Promise<ChatSession> {
-  const { data } = await apiClient.post<ChatSession>("/chat/sessions", {
-    source: "web",
-    ...payload,
-  });
-  return data;
-}
-
-/** List the current user's chat sessions, newest first. */
-export async function getChatSessions(
+export async function listChatSessions(
   params: PaginationParams = {}
 ): Promise<PaginatedResponse<ChatSession>> {
   const { data } = await apiClient.get<PaginatedResponse<ChatSession>>(
@@ -34,7 +19,17 @@ export async function getChatSessions(
   return data;
 }
 
-/** Fetch a session's message history. */
+export async function createChatSession(): Promise<ChatSession> {
+  const { data } = await apiClient.post<ChatSession>("/chat/sessions", {
+    source: "web",
+  });
+  return data;
+}
+
+export async function deleteChatSession(id: string): Promise<void> {
+  await apiClient.delete(`/chat/sessions/${id}`);
+}
+
 export async function getChatMessages(
   sessionId: string,
   limit = 100
@@ -46,99 +41,76 @@ export async function getChatMessages(
   return data ?? [];
 }
 
-/**
- * Send a user turn. The backend persists it, routes it through the intent
- * router (which may run an agent or workflow), and returns both the stored user
- * message and the assistant reply — the reply's metadata references any
- * execution/workflow it launched.
- */
 export async function sendChatMessage(
   sessionId: string,
-  payload: SendChatMessageRequest
-): Promise<SendChatMessageResponse> {
-  const { data } = await apiClient.post<SendChatMessageResponse>(
+  content: string,
+  confirmationToken?: string
+): Promise<ChatTurnResult> {
+  const { data } = await apiClient.post<ChatTurnResult>(
     `/chat/sessions/${sessionId}/messages`,
-    { source: "web", ...payload }
+    { content, source: "web", confirmation_token: confirmationToken || undefined },
+    { timeout: 120000 }
   );
   return data;
 }
 
-const API_BASE =
-  (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080") + "/api/v1";
-
-export interface ChatStreamHandlers {
-  onStatus?: (state: string, data: Record<string, unknown>) => void;
-  onTool?: (data: Record<string, unknown>) => void;
-  onMessage?: (data: Record<string, unknown>) => void;
-  onError?: (message: string) => void;
-}
-
-/**
- * Send a message and consume the server's SSE progress stream. The endpoint is
- * a POST with a body, so this uses fetch + ReadableStream (EventSource is
- * GET-only). Handlers fire as frames arrive; the promise resolves when the
- * stream ends. Pass an AbortSignal to stop generation.
- */
 export async function streamChatMessage(
   sessionId: string,
   content: string,
-  handlers: ChatStreamHandlers,
+  onEvent: (ev: ChatStreamEvent) => void,
+  confirmationToken?: string,
   signal?: AbortSignal
 ): Promise<void> {
-  const token = getAccessToken();
+  const token =
+    typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
   const res = await fetch(
-    `${API_BASE}/chat/sessions/${sessionId}/messages/stream`,
+    `${API_BASE_URL}/api/v1/chat/sessions/${sessionId}/messages/stream`,
     {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ content, source: "web" }),
+      body: JSON.stringify({
+        content,
+        source: "web",
+        confirmation_token: confirmationToken || undefined,
+      }),
       signal,
     }
   );
   if (!res.ok || !res.body) {
-    handlers.onError?.(`stream failed (HTTP ${res.status})`);
-    return;
+    throw new Error(`Chat stream failed (${res.status})`);
   }
-
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
-
-  const dispatch = (frame: string) => {
-    let event = "message";
-    let dataStr = "";
-    for (const line of frame.split("\n")) {
-      if (line.startsWith("event:")) event = line.slice(6).trim();
-      else if (line.startsWith("data:")) dataStr += line.slice(5).trim();
-    }
-    if (event === "done") return;
-    let parsed: { type?: string; data?: Record<string, unknown> } = {};
-    try {
-      parsed = dataStr ? JSON.parse(dataStr) : {};
-    } catch {
-      return;
-    }
-    const type = parsed.type ?? event;
-    const inner = parsed.data ?? {};
-    if (type === "status") handlers.onStatus?.(String(inner.state ?? ""), inner);
-    else if (type === "tool") handlers.onTool?.(inner);
-    else if (type === "message") handlers.onMessage?.(inner);
-    else if (type === "error")
-      handlers.onError?.(String(inner.message ?? "error"));
-  };
-
-  for (;;) {
-    const { value, done } = await reader.read();
+  while (true) {
+    const { done, value } = await reader.read();
     if (done) break;
     buf += decoder.decode(value, { stream: true });
-    let idx;
-    while ((idx = buf.indexOf("\n\n")) !== -1) {
-      const frame = buf.slice(0, idx);
-      buf = buf.slice(idx + 2);
-      if (frame.trim()) dispatch(frame);
+    const chunks = buf.split("\n\n");
+    buf = chunks.pop() ?? "";
+    for (const chunk of chunks) {
+      const ev = parseSse(chunk);
+      if (ev) onEvent(ev);
     }
+  }
+}
+
+function parseSse(chunk: string): ChatStreamEvent | null {
+  let type = "";
+  let data = "";
+  for (const line of chunk.split("\n")) {
+    if (line.startsWith("event:")) type = line.slice(6).trim();
+    if (line.startsWith("data:")) data += line.slice(5).trim();
+  }
+  if (!data) return null;
+  try {
+    const parsed = JSON.parse(data) as ChatStreamEvent;
+    if (type && !parsed.type) parsed.type = type as ChatStreamEvent["type"];
+    return parsed;
+  } catch {
+    return null;
   }
 }

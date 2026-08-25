@@ -1,95 +1,102 @@
 import {
-  useMutation,
   useQuery,
+  useMutation,
   useQueryClient,
-  type UseMutationResult,
   type UseQueryResult,
+  type UseMutationResult,
 } from "@tanstack/react-query";
 import { toast } from "sonner";
-
-import { apiErrorMessage } from "@/lib/api/client";
 import {
+  listChatSessions,
+  createChatSession,
+  deleteChatSession,
   getChatMessages,
-  getChatSessions,
   sendChatMessage,
-  startChatSession,
 } from "@/lib/api/chat";
+import type { ChatMessage, ChatSession, ChatTurnResult } from "@/lib/types/chat";
 import type { PaginatedResponse } from "@/lib/types/common";
-import type {
-  ChatMessage,
-  ChatSession,
-  SendChatMessageResponse,
-  StartChatSessionRequest,
-} from "@/lib/types/chat";
 
 export const chatKeys = {
   all: ["chat"] as const,
   sessions: () => [...chatKeys.all, "sessions"] as const,
-  messages: (sessionId: string) =>
-    [...chatKeys.all, "messages", sessionId] as const,
+  messages: (id: string) => [...chatKeys.all, "messages", id] as const,
 };
 
-/** The current user's chat sessions, newest first. */
-export function useChatSessions(): UseQueryResult<
-  PaginatedResponse<ChatSession>
-> {
+export function useChatSessions(): UseQueryResult<PaginatedResponse<ChatSession>> {
   return useQuery({
     queryKey: chatKeys.sessions(),
-    queryFn: () => getChatSessions({ per_page: 50 }),
+    queryFn: () => listChatSessions({ page: 1, per_page: 50 }),
   });
 }
 
-/** A session's message history. */
 export function useChatMessages(
-  sessionId: string | null
+  sessionId: string | null,
+  opts?: { pollForReply?: boolean }
 ): UseQueryResult<ChatMessage[]> {
   return useQuery({
     queryKey: chatKeys.messages(sessionId ?? ""),
-    queryFn: () => getChatMessages(sessionId as string),
+    queryFn: () => getChatMessages(sessionId!),
     enabled: Boolean(sessionId),
+    refetchInterval: (query) => {
+      if (!opts?.pollForReply) return false;
+      const msgs = query.state.data;
+      return awaitingAssistant(msgs ?? []) ? 1500 : false;
+    },
   });
 }
 
-/** Start a new session, then refresh the sidebar list. */
-export function useStartChatSession(): UseMutationResult<
-  ChatSession,
-  Error,
-  StartChatSessionRequest | void
-> {
-  const queryClient = useQueryClient();
+/** True when the last visible message is the user and the reply may still be in flight. */
+export function awaitingAssistant(messages: ChatMessage[]): boolean {
+  const vis = messages.filter((m) => m.role === "user" || m.role === "agent");
+  const last = vis[vis.length - 1];
+  if (!last || last.role !== "user") return false;
+  const t = Date.parse(last.created_at);
+  if (Number.isNaN(t)) return true;
+  return Date.now() - t < 3 * 60 * 1000;
+}
+
+export function useCreateChatSession(): UseMutationResult<ChatSession, Error, void> {
+  const qc = useQueryClient();
   return useMutation({
-    mutationFn: (payload) => startChatSession(payload ?? {}),
+    mutationFn: createChatSession,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: chatKeys.sessions() });
-    },
-    onError: (error: Error) => {
-      toast.error(apiErrorMessage(error, "Failed to start chat"));
+      qc.invalidateQueries({ queryKey: chatKeys.sessions() });
     },
   });
 }
 
-/**
- * Send a message in a session. On success it refreshes that session's messages
- * and the session list (recency). The caller can also read the returned
- * assistant reply directly to append optimistically.
- */
-export function useSendChatMessage(): UseMutationResult<
-  SendChatMessageResponse,
-  Error,
-  { sessionId: string; content: string }
-> {
-  const queryClient = useQueryClient();
+export function useDeleteChatSession(): UseMutationResult<void, Error, string> {
+  const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ sessionId, content }) =>
-      sendChatMessage(sessionId, { content }),
-    onSuccess: (_data, { sessionId }) => {
-      queryClient.invalidateQueries({
-        queryKey: chatKeys.messages(sessionId),
-      });
-      queryClient.invalidateQueries({ queryKey: chatKeys.sessions() });
+    mutationFn: deleteChatSession,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: chatKeys.sessions() });
+      toast.success("Chat deleted");
     },
-    onError: (error: Error) => {
-      toast.error(apiErrorMessage(error, "Failed to send message"));
+  });
+}
+
+export function useSendChatMessage(
+  sessionId: string | null
+): UseMutationResult<
+  ChatTurnResult,
+  Error,
+  { content: string; confirmationToken?: string }
+> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ content, confirmationToken }) => {
+      if (!sessionId) throw new Error("No chat session");
+      return sendChatMessage(sessionId, content, confirmationToken);
+    },
+    onSuccess: () => {
+      if (sessionId) {
+        qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
+      }
+      qc.invalidateQueries({ queryKey: chatKeys.sessions() });
+    },
+    onError: (err) => {
+      toast.error(err.message || "Couldn't send that message");
     },
   });
 }

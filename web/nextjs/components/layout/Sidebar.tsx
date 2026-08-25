@@ -14,7 +14,6 @@ import {
   Clock,
   ListTree,
   MessageSquare,
-  MessagesSquare,
   Workflow,
   Puzzle,
   ChevronLeft,
@@ -46,12 +45,12 @@ const NAV_SECTIONS: NavSection[] = [
     title: "Overview",
     items: [
       { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+      { label: "Chat", href: "/chat", icon: Sparkles },
     ],
   },
   {
     title: "AI Team",
     items: [
-      { label: "Chat", href: "/chat", icon: MessagesSquare },
       { label: "Agents", href: "/agents", icon: Bot },
       { label: "Security Tester", href: "/agents/pentest", icon: ShieldAlert },
       { label: "PR Reviewer", href: "/agents/review", icon: GitPullRequest },

@@ -57,3 +57,4 @@ __pycache__/
 # it is deliberately never committed — see strix-service/README.md on retention.
 strix-service/strix_runs/
 strix_runs/
+.serena/

@@ -52,6 +52,7 @@ const (
 	ExecutionStatusRunning   = "running"
 	ExecutionStatusCompleted = "completed"
 	ExecutionStatusFailed    = "failed"
+	ExecutionStatusCancelled = "cancelled"
 )
 
 // Workflow run status values.

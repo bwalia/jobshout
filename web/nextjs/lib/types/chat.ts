@@ -1,54 +1,102 @@
-// Types for the chat control-plane UI. These mirror the EXISTING JobShout chat
-// backend (server/internal/model/chat.go + ChatRouterService) — the UI is a
-// shell over that engine, not a new data model.
-
-export type ChatRole = "user" | "agent" | "system";
-
-/** Metadata the router attaches to an assistant turn, referencing the real work. */
-export interface ChatMessageMetadata {
-  intent?: string;
-  confidence?: number;
-  agent_id?: string;
-  execution_id?: string;
-  workflow_run_id?: string;
-  error?: boolean;
-  [key: string]: unknown;
+export interface EntityRef {
+  kind: string;
+  id: string;
+  label: string;
+  href?: string;
+  /** Fetchable picture for kind=image (stored path or data URL). */
+  url?: string;
 }
 
-export interface ChatMessage {
-  id: string;
-  session_id: string;
-  org_id: string;
-  role: ChatRole;
-  source: string;
-  content: string;
-  metadata: ChatMessageMetadata;
-  created_at: string;
+export interface ActionRecord {
+  tool: string;
+  args?: Record<string, unknown>;
+  status: "ok" | "failed" | "denied" | "pending_confirmation" | string;
+  result_ref?: EntityRef;
+  error?: string;
+  duration_ms: number;
+}
+
+export interface ConfirmRequest {
+  token: string;
+  tool: string;
+  summary: string;
+  effect: string;
+  expires_at?: string;
+}
+
+export interface ClarifyOption {
+  label: string;
+  value: string;
+}
+
+export interface ClarifyRequest {
+  question: string;
+  slot?: string;
+  options?: ClarifyOption[];
+}
+
+export interface UsageInfo {
+  model?: string;
+  input_tokens: number;
+  output_tokens: number;
+  latency_ms: number;
+  cost_usd?: number;
+}
+
+export interface ChatResponse {
+  message: string;
+  actions: ActionRecord[];
+  entities: EntityRef[];
+  confirmation?: ConfirmRequest;
+  clarify?: ClarifyRequest;
+  usage?: UsageInfo;
 }
 
 export interface ChatSession {
   id: string;
   org_id: string;
   user_id: string;
-  agent_id: string | null;
+  agent_id?: string;
   source: string;
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 }
 
-export interface StartChatSessionRequest {
-  agent_id?: string;
-  source?: string;
-}
-
-export interface SendChatMessageRequest {
+export interface ChatMessage {
+  id: string;
+  session_id: string;
+  org_id: string;
+  role: "user" | "agent" | "system" | "tool";
+  source: string;
   content: string;
-  source?: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
 }
 
-/** Response of POST /chat/sessions/{id}/messages — the turn's two messages. */
-export interface SendChatMessageResponse {
+export interface ChatTurnResult {
   user_message: ChatMessage;
   agent_message: ChatMessage;
+  response: ChatResponse;
+}
+
+export interface ChatStreamEvent {
+  type: "token" | "tool_call" | "tool_result" | "confirmation" | "clarify" | "done" | "error";
+  token?: string;
+  tool?: string;
+  label?: string;
+  args?: Record<string, unknown>;
+  status?: string;
+  duration_ms?: number;
+  entity?: EntityRef;
+  confirmation?: ConfirmRequest;
+  clarify?: ClarifyRequest;
+  response?: ChatResponse;
+  error?: string;
+}
+
+export function sessionTitle(session: ChatSession): string {
+  const t = session.metadata?.title;
+  if (typeof t === "string" && t.trim()) return t;
+  return "New chat";
 }

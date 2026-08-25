@@ -63,6 +63,11 @@ type GenerateRequest struct {
 	// (the default) preserves the previous behavior; clients that don't support
 	// tool-calling ignore this field.
 	ToolDefs []ToolDef
+	// OnToken, when set, receives each content chunk as it arrives from a
+	// streaming provider, before the full Content is returned on the response.
+	// It is a process-local callback, never serialised; clients that do not
+	// stream simply ignore it.
+	OnToken func(string) `json:"-"`
 }
 
 // GenerateResponse holds the model's reply and usage metadata.

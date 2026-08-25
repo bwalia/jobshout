@@ -21,6 +21,9 @@ type ExecutionService interface {
 	// Execute runs an agent against a prompt and returns the completed execution.
 	Execute(ctx context.Context, orgID uuid.UUID, agentID uuid.UUID, req model.ExecuteAgentRequest) (*model.AgentExecution, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*model.AgentExecution, error)
+	// Cancel stops a pending or running execution. Completed/failed runs are
+	// left unchanged and returned as-is so the call is idempotent.
+	Cancel(ctx context.Context, orgID, id uuid.UUID) (*model.AgentExecution, error)
 	ListByAgent(ctx context.Context, agentID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.AgentExecution], error)
 	ListLangChainTraces(ctx context.Context, executionID uuid.UUID) ([]model.LangChainRunTrace, error)
 	ListLangGraphSnapshots(ctx context.Context, executionID uuid.UUID) ([]model.LangGraphStateSnapshot, error)
@@ -207,6 +210,24 @@ func (s *executionService) GetByID(ctx context.Context, id uuid.UUID) (*model.Ag
 	return exec, nil
 }
 
+func (s *executionService) Cancel(ctx context.Context, orgID, id uuid.UUID) (*model.AgentExecution, error) {
+	exec, err := s.execRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("execution_svc: cancel: %w", err)
+	}
+	if exec == nil || exec.OrgID != orgID {
+		return nil, ErrExecutionNotFound
+	}
+	switch exec.Status {
+	case model.ExecutionStatusCompleted, model.ExecutionStatusFailed, model.ExecutionStatusCancelled:
+		return exec, nil
+	}
+	if err := s.execRepo.MarkCancelled(ctx, id); err != nil {
+		return nil, err
+	}
+	return s.execRepo.GetByID(ctx, id)
+}
+
 func (s *executionService) ListByAgent(ctx context.Context, agentID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.AgentExecution], error) {
 	return s.execRepo.ListByAgent(ctx, agentID, params)
 }
@@ -218,3 +239,9 @@ func (s *executionService) ListLangChainTraces(ctx context.Context, executionID 
 func (s *executionService) ListLangGraphSnapshots(ctx context.Context, executionID uuid.UUID) ([]model.LangGraphStateSnapshot, error) {
 	return s.execRepo.ListLangGraphSnapshots(ctx, executionID)
 }
+
+var ErrExecutionNotFound = executionError("execution not found")
+
+type executionError string
+
+func (e executionError) Error() string { return string(e) }

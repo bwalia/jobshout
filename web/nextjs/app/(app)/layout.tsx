@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Topbar } from "@/components/layout/Topbar";
+import { ChatDock } from "@/components/chat/ChatDock";
 import { useAuthStore } from "@/lib/store/auth-store";
 import { fetchCurrentUser } from "@/lib/auth/auth";
 
@@ -68,6 +69,7 @@ export default function AppLayout({
           {children}
         </main>
       </div>
+      <ChatDock />
     </div>
   );
 }

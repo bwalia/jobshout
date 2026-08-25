@@ -18,6 +18,8 @@ type ChatRepository interface {
 
 	AppendMessage(ctx context.Context, msg *model.ChatMessage) error
 	ListMessages(ctx context.Context, sessionID uuid.UUID, limit int) ([]model.ChatMessage, error)
+	UpdateSessionMetadata(ctx context.Context, id uuid.UUID, metadata map[string]any) error
+	DeleteSession(ctx context.Context, id uuid.UUID) error
 }
 
 type chatRepository struct {
@@ -145,10 +147,14 @@ func (r *chatRepository) ListMessages(ctx context.Context, sessionID uuid.UUID, 
 	}
 	const sql = `
 		SELECT id, session_id, org_id, role, source, content, metadata, created_at
-		FROM chat_messages
-		WHERE session_id = $1
-		ORDER BY created_at ASC
-		LIMIT $2`
+		FROM (
+			SELECT id, session_id, org_id, role, source, content, metadata, created_at
+			FROM chat_messages
+			WHERE session_id = $1
+			ORDER BY created_at DESC
+			LIMIT $2
+		) recent
+		ORDER BY created_at ASC`
 
 	rows, err := r.pool.Query(ctx, sql, sessionID, limit)
 	if err != nil {
@@ -167,4 +173,24 @@ func (r *chatRepository) ListMessages(ctx context.Context, sessionID uuid.UUID, 
 		messages = append(messages, m)
 	}
 	return messages, nil
+}
+
+func (r *chatRepository) UpdateSessionMetadata(ctx context.Context, id uuid.UUID, metadata map[string]any) error {
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	const sql = `UPDATE chat_sessions SET metadata = $2, updated_at = NOW() WHERE id = $1`
+	_, err := r.pool.Exec(ctx, sql, id, metadata)
+	if err != nil {
+		return fmt.Errorf("chat_repo: update_session_metadata: %w", err)
+	}
+	return nil
+}
+
+func (r *chatRepository) DeleteSession(ctx context.Context, id uuid.UUID) error {
+	_, err := r.pool.Exec(ctx, `DELETE FROM chat_sessions WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("chat_repo: delete_session: %w", err)
+	}
+	return nil
 }

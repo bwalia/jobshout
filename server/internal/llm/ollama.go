@@ -109,9 +109,31 @@ func (c *OllamaClient) UsesGateway() bool { return c.auth.enabled() }
 
 func (c *OllamaClient) ProviderName() string { return "ollama" }
 
-// SupportsTools reports that this client does NOT use native tool-calling; the
-// executor falls back to the ReAct JSON-in-prompt loop for Ollama.
-func (c *OllamaClient) SupportsTools() bool { return false }
+// SupportsTools reports whether the DEFAULT model does native tool-calling.
+// Tool support on Ollama is per-model, not per-server (see ollama_models.go),
+// so the answer comes from the discovery cache. False is the safe answer: a
+// false negative costs only the ReAct fallback, which works.
+func (c *OllamaClient) SupportsTools() bool {
+	return c.modelSupportsTools(context.Background(), c.DefaultModel)
+}
+
+// modelSupportsTools resolves a model's "tools" capability, self-priming the
+// discovery cache on a miss so the answer does not depend on whether anything
+// happened to call ListModels first. A failed probe answers false.
+func (c *OllamaClient) modelSupportsTools(ctx context.Context, model string) bool {
+	info, ok := c.lookupModel(model)
+	if !ok {
+		primeCtx, cancel := context.WithTimeout(ctx, modelDiscoveryTimeout)
+		defer cancel()
+		if _, err := c.ListModels(primeCtx); err != nil {
+			return false
+		}
+		if info, ok = c.lookupModel(model); !ok {
+			return false
+		}
+	}
+	return info.SupportsTools()
+}
 
 // ollamaChatRequest mirrors the Ollama /api/chat request body.
 type ollamaChatRequest struct {
@@ -134,6 +156,10 @@ type ollamaChatRequest struct {
 	// Models with no thinking phase ignore the field.
 	Think   bool          `json:"think"`
 	Options ollamaOptions `json:"options,omitempty"`
+	// Tools carries native function definitions. Only attached when the
+	// resolved model advertises the "tools" capability — sending them to a
+	// model that lacks it is an error on some Ollama builds.
+	Tools []ollamaTool `json:"tools,omitempty"`
 }
 
 type ollamaMessage struct {
@@ -143,6 +169,33 @@ type ollamaMessage struct {
 	// response that contains only thinking can be reported as such rather than
 	// as a mysteriously empty reply — see Generate.
 	Thinking string `json:"thinking,omitempty"`
+	// ToolCalls echoes an assistant turn's tool requests back on follow-up
+	// requests, and carries the model's requests on responses.
+	ToolCalls []ollamaToolCall `json:"tool_calls,omitempty"`
+	// ToolName names the tool a role:"tool" result message answers. Ollama has
+	// no call IDs, so the name is the whole correlation.
+	ToolName string `json:"tool_name,omitempty"`
+}
+
+// ollamaTool mirrors one entry of the /api/chat "tools" array.
+type ollamaTool struct {
+	Type     string             `json:"type"` // always "function"
+	Function ollamaToolFunction `json:"function"`
+}
+
+type ollamaToolFunction struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Parameters  map[string]any `json:"parameters"`
+}
+
+// ollamaToolCall mirrors one tool request in a chat message. Unlike OpenAI,
+// Ollama returns arguments as a JSON object, not an encoded string.
+type ollamaToolCall struct {
+	Function struct {
+		Name      string         `json:"name"`
+		Arguments map[string]any `json:"arguments"`
+	} `json:"function"`
 }
 
 type ollamaOptions struct {
@@ -169,8 +222,26 @@ func (c *OllamaClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 	}
 
 	msgs := make([]ollamaMessage, len(req.Messages))
+	// Ollama correlates tool results by name, not ID, so remember what each
+	// synthesized ToolCallID referred to as the history is walked in order.
+	callNames := map[string]string{}
 	for i, m := range req.Messages {
-		msgs[i] = ollamaMessage{Role: m.Role, Content: m.Content}
+		om := ollamaMessage{Role: m.Role, Content: m.Content}
+		if len(m.ToolCalls) > 0 {
+			om.ToolCalls = make([]ollamaToolCall, len(m.ToolCalls))
+			for j, tc := range m.ToolCalls {
+				om.ToolCalls[j].Function.Name = tc.Name
+				om.ToolCalls[j].Function.Arguments = tc.Arguments
+				if om.ToolCalls[j].Function.Arguments == nil {
+					om.ToolCalls[j].Function.Arguments = map[string]any{}
+				}
+				callNames[tc.ID] = tc.Name
+			}
+		}
+		if m.Role == RoleTool {
+			om.ToolName = callNames[m.ToolCallID]
+		}
+		msgs[i] = om
 	}
 
 	opts := ollamaOptions{Temperature: req.Temperature}
@@ -190,6 +261,19 @@ func (c *OllamaClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 		Stream:   true,
 		Think:    false,
 		Options:  opts,
+	}
+	if len(req.ToolDefs) > 0 && c.modelSupportsTools(ctx, model) {
+		body.Tools = make([]ollamaTool, len(req.ToolDefs))
+		for i, d := range req.ToolDefs {
+			body.Tools[i] = ollamaTool{
+				Type: "function",
+				Function: ollamaToolFunction{
+					Name:        d.Name,
+					Description: d.Description,
+					Parameters:  d.Parameters,
+				},
+			}
+		}
 	}
 
 	payload, err := json.Marshal(body)
@@ -221,17 +305,18 @@ func (c *OllamaClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 		return nil, fmt.Errorf("ollama: unexpected status %d: %s", resp.StatusCode, upstreamSnippet(rawBody))
 	}
 
-	return c.readStream(resp.Body, model, opts.NumPredict)
+	return c.readStream(resp.Body, model, opts.NumPredict, req.OnToken)
 }
 
 // readStream accumulates an Ollama NDJSON chat stream into one GenerateResponse.
-func (c *OllamaClient) readStream(body io.Reader, model string, numPredict int) (*GenerateResponse, error) {
+func (c *OllamaClient) readStream(body io.Reader, model string, numPredict int, onToken func(string)) (*GenerateResponse, error) {
 	var (
-		content  strings.Builder
-		thinking strings.Builder
-		done     bool
-		inTok    int
-		outTok   int
+		content   strings.Builder
+		thinking  strings.Builder
+		toolCalls []ollamaToolCall
+		done      bool
+		inTok     int
+		outTok    int
 	)
 
 	scanner := bufio.NewScanner(body)
@@ -249,7 +334,13 @@ func (c *OllamaClient) readStream(body io.Reader, model string, numPredict int) 
 			return nil, fmt.Errorf("ollama: decode stream chunk: %w", err)
 		}
 		content.WriteString(chunk.Message.Content)
+		if onToken != nil && chunk.Message.Content != "" {
+			onToken(chunk.Message.Content)
+		}
 		thinking.WriteString(chunk.Message.Thinking)
+		// Usually one chunk carries every tool call, but append rather than
+		// overwrite in case they arrive split across chunks.
+		toolCalls = append(toolCalls, chunk.Message.ToolCalls...)
 		if chunk.Done {
 			done = true
 			inTok = chunk.PromptEvalCount
@@ -269,11 +360,26 @@ func (c *OllamaClient) readStream(body io.Reader, model string, numPredict int) 
 	// A reply that is only thinking means the model spent its whole budget
 	// reasoning. Callers see an empty Content and report "empty response",
 	// which is true but says nothing about the cause — so name it here, where
-	// the evidence is.
-	if strings.TrimSpace(text) == "" && thinking.Len() > 0 {
+	// the evidence is. A reply carrying tool calls is not empty.
+	if strings.TrimSpace(text) == "" && len(toolCalls) == 0 && thinking.Len() > 0 {
 		return nil, fmt.Errorf(
 			"ollama: model %q returned only reasoning and no content — it exhausted num_predict (%d) before answering",
 			model, numPredict)
+	}
+
+	// Ollama supplies no call IDs; synthesize stable ones so callers can echo
+	// ToolCallID on their RoleTool replies (Generate maps it back to tool_name).
+	var calls []ToolCall
+	for i, tc := range toolCalls {
+		args := tc.Function.Arguments
+		if args == nil {
+			args = map[string]any{}
+		}
+		calls = append(calls, ToolCall{
+			ID:        fmt.Sprintf("call_%d", i),
+			Name:      tc.Function.Name,
+			Arguments: args,
+		})
 	}
 
 	return &GenerateResponse{
@@ -282,5 +388,6 @@ func (c *OllamaClient) readStream(body io.Reader, model string, numPredict int) 
 		Model:        model,
 		InputTokens:  inTok,
 		OutputTokens: outTok,
+		ToolCalls:    calls,
 	}, nil
 }
