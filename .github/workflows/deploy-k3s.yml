@@ -1,18 +1,39 @@
-name: Build & deploy JobShout to k3s
+name: Build, tag & deploy JobShout to k3s
 
-# Build the four JobShout images (server, web, python-sidecar, review-bot) to the SpectonCR
-# registry, then hand deployment to Ring Promoter (https://rp.workstation.co.uk).
-# Seeding a ring makes RP run the actual deploy as a short-lived k8s Job in the
-# ring-exec namespace (git-clone this repo at the seeded tag + helm upgrade into
-# the ring's namespace) — the DTAP control plane owns the deploy, not this CI.
+# Release pipeline, ported from diy-tax-return-uk's auto-tag-main.yml:
+# every push to master computes the next semantic version, builds the four
+# JobShout images (server, web, python-sidecar, review-bot) tagged with it,
+# pushes the git tag + GitHub Release, and only THEN seeds Ring Promoter
+# (https://rp.workstation.co.uk) with that version. Seeding a ring makes RP
+# run the actual deploy as a short-lived k8s Job in the ring-exec namespace
+# (git-clone this repo at the seeded tag + helm upgrade into the ring's
+# namespace) — the DTAP control plane owns the deploy, not this CI.
 #
-# This workflow is green only after Ring Promoter reports the seeded version
-# healthy on the target ring — not when the seed HTTP call is merely accepted.
+# Version scheme: v<MAJOR>.<MINOR>.<PATCH> (v1.0.1, v1.0.2, ...).
+# The repo's one pre-existing tag is bare `1.0.0`; the lookup accepts both
+# bare and v-prefixed semver so the line continues as v1.0.1 instead of
+# forking a second tag line next to it.
+#   - PATCH increments automatically on every push to master
+#   - MINOR/MAJOR (or an exact CUSTOM_VERSION) via workflow_dispatch
 #
-# Continuous deployment: every push to master builds the images and seeds the
-# int ring. Promotion int -> test -> acc -> prod is done from the Ring Promoter
-# UI (rp.workstation.co.uk/?app=jobshout). workflow_dispatch can build-only, or
-# seed a chosen ring / pinned tag.
+# ─── Job order: compute-version → build → auto-tag → deploy ────────────
+# The tag is pushed only AFTER every image is in the registry: a failed
+# build leaves no tag and no release, and the next push retries the SAME
+# version number. Never push the tag first — Ring Promoter's k8sjob
+# git-clones this repo at the seeded version, so a tag naming images that
+# were never published leaves the promoter deploying from a commit whose
+# images don't exist.
+#
+# Why versions, not SHAs: the seed used to carry the commit's short SHA.
+# RP's deploy Job resolves the seeded value with `git clone --branch`,
+# which cannot resolve a raw SHA — and a tag is simultaneously the clonable
+# ref AND the image tag, so the version RP promotes IS the code that built
+# the images.
+#
+# Continuous deployment: every push to master builds, tags and seeds the
+# int ring. Promotion int -> test -> acc -> prod is done from the Ring
+# Promoter UI (rp.workstation.co.uk/?app=jobshout). workflow_dispatch can
+# build-only, deploy-only a pinned IMAGE_TAG, or cut a manual version bump.
 
 on:
   push:
@@ -33,12 +54,31 @@ on:
         options: [build, deploy, build-and-deploy]
       IMAGE_TAG:
         type: string
-        description: "Image tag to DEPLOY (deploy-only). Blank = this commit's short SHA."
+        description: "Image tag to DEPLOY (deploy-only; e.g. v1.0.1). Blank = this run's computed version."
+        default: ""
+        required: false
+      VERSION_TYPE:
+        type: choice
+        description: "Version bump type (for manual major/minor bumps)"
+        default: "patch"
+        required: false
+        options: [patch, minor, major]
+      CUSTOM_VERSION:
+        type: string
+        description: "Custom version (e.g. v1.2.0) - overrides VERSION_TYPE"
         default: ""
         required: false
 
+permissions:
+  contents: write  # auto-tag pushes tags; read-only jobs override below
+
 concurrency:
-  group: jobshout-k3s-${{ github.event.inputs.TARGET_ENV || 'int' }}
+  # Serialize the whole release: two quick pushes must not race to the same
+  # version number. This is workflow-level, so run #2 waits for run #1's
+  # builds to finish before it computes anything — which is what makes it
+  # safe to compute the version in the first job and not claim it until
+  # the tag job.
+  group: jobshout-release
   cancel-in-progress: false
 
 env:
@@ -50,28 +90,128 @@ env:
   DEPLOYMENT_TYPE: ${{ github.event.inputs.DEPLOYMENT_TYPE || 'build-and-deploy' }}
 
 jobs:
+  # ─── work out the next version (does NOT push the tag) ─────────────
+  compute-version:
+    name: Compute Next Version
+    runs-on: self-hosted
+    # Deploy-only dispatches seed a pinned IMAGE_TAG and have nothing to
+    # compute; everything else (pushes, build/bump dispatches) computes.
+    if: >-
+      github.event_name == 'push'
+      || (github.event_name == 'workflow_dispatch' && inputs.DEPLOYMENT_TYPE != 'deploy')
+    permissions:
+      contents: read  # resolves a number; tagging happens after the build
+    outputs:
+      next_version: ${{ steps.calc_version.outputs.next_version }}
+      should_build: ${{ steps.calc_version.outputs.should_build }}
+    steps:
+      - name: Checkout repository with full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # need the tags
+
+      - name: Get latest tag
+        id: get_latest_tag
+        run: |
+          # Accept BOTH v-prefixed and bare semver: the repo's first tag is
+          # bare 1.0.0, and the line continues v-prefixed from v1.0.1.
+          LATEST_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' -l '[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)
+
+          if [ -z "$LATEST_TAG" ]; then
+            LATEST_TAG="v1.0.0"
+            echo "No existing tags found, starting from $LATEST_TAG"
+          else
+            echo "Latest tag: $LATEST_TAG"
+          fi
+
+          echo "latest_tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Calculate next version
+        id: calc_version
+        run: |
+          LATEST_TAG="${{ steps.get_latest_tag.outputs.latest_tag }}"
+
+          # Handle manual overrides from workflow_dispatch
+          if [ -n "${{ github.event.inputs.CUSTOM_VERSION }}" ]; then
+            NEXT_VERSION="${{ github.event.inputs.CUSTOM_VERSION }}"
+            echo "Using custom version: $NEXT_VERSION"
+          elif [ "${{ github.event.inputs.VERSION_TYPE }}" != "patch" ] && [ -n "${{ github.event.inputs.VERSION_TYPE }}" ]; then
+            # Manual minor/major bump via workflow_dispatch
+            VERSION_TYPE="${{ github.event.inputs.VERSION_TYPE }}"
+            # Strip 'v' prefix if present
+            BASE_VERSION="${LATEST_TAG#v}"
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE_VERSION"
+
+            if [ "$VERSION_TYPE" = "major" ]; then
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+            elif [ "$VERSION_TYPE" = "minor" ]; then
+              MINOR=$((MINOR + 1))
+              PATCH=0
+            fi
+
+            NEXT_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+            echo "Manual $VERSION_TYPE bump: $LATEST_TAG -> $NEXT_VERSION"
+          else
+            # Auto patch bump on push to master
+            BASE_VERSION="${LATEST_TAG#v}"
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE_VERSION"
+            PATCH=$((PATCH + 1))
+            NEXT_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+            echo "Auto patch bump: $LATEST_TAG -> $NEXT_VERSION"
+          fi
+
+          # Normalize: a custom version typed without the prefix still tags v-style.
+          case "$NEXT_VERSION" in v*) ;; *) NEXT_VERSION="v$NEXT_VERSION" ;; esac
+
+          # Collision check runs HERE rather than at tag-push time: if the
+          # version is already taken (a workflow_dispatch replaying an
+          # existing CUSTOM_VERSION, mostly) there is nothing to build
+          # either, so bail before spending build time on images that would
+          # overwrite a released tag. The tag job re-checks defensively.
+          if git tag -l "$NEXT_VERSION" | grep -q "^$NEXT_VERSION$"; then
+            echo "::warning::Tag $NEXT_VERSION already exists — skipping build and tag."
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "next_version=$NEXT_VERSION" >> "$GITHUB_OUTPUT"
+
+  # ─── build + push all four release images ──────────────────────────
+  # One build per image, pushed as two tags:
+  #   :v<X.Y.Z>  — immutable, what Ring Promoter seeds and the k8sjob clones
+  #   :latest    — moving alias, kept for anything that still resolves
+  #               images by "latest"
   build:
     name: Build & push images
+    needs: [compute-version]
+    # Only fires when the computed version is actually new. Manual dispatches
+    # replaying an existing version don't trigger a rebuild — that image is
+    # already published under that tag.
+    if: needs.compute-version.outputs.should_build == 'true'
     runs-on: self-hosted
     timeout-minutes: 60
-    outputs:
-      sha: ${{ steps.tag.outputs.sha }}
+    permissions:
+      contents: read  # this job only reads source; tagging happens after it
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Compute image tag (short SHA)
-        id: tag
-        run: echo "sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      - name: Checkout at the triggering commit
+        uses: actions/checkout@v4
+        with:
+          # The exact commit that triggered this run, not HEAD of master
+          # (which may have advanced by the time this job schedules). This is
+          # precisely the commit the auto-tag job will tag once every image
+          # here has been pushed.
+          ref: ${{ github.sha }}
 
       - name: Registry login (SpectonCR)
-        if: ${{ env.DEPLOYMENT_TYPE == 'build' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
         run: docker login "$IMAGE_REGISTRY" -u "${{ secrets.REGISTRY_USERNAME }}" -p "${{ secrets.REGISTRY_PASSWORD }}"
 
       - name: Build & push server, web, python-sidecar, review-bot (linux/amd64)
-        if: ${{ env.DEPLOYMENT_TYPE == 'build' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
         run: |
           set -euo pipefail
-          SHA="${{ steps.tag.outputs.sha }}"
+          VERSION="${{ needs.compute-version.outputs.next_version }}"
           NS="$IMAGE_REGISTRY/$IMAGE_NAMESPACE"
 
           # k3s1 nodes are amd64 but this runner is an arm64 Mac, so cross-build
@@ -92,25 +232,24 @@ jobs:
               --provenance=false --sbom=false --push "$@"
           }
 
-          bx -f server/Dockerfile -t "$NS/server:$SHA" -t "$NS/server:latest" server
+          bx -f server/Dockerfile -t "$NS/server:$VERSION" -t "$NS/server:latest" server
 
           # NEXT_PUBLIC_* are baked at BUILD time, so build same-origin (empty
           # base): the browser calls /api and /ws on whichever host serves it, so
           # ONE image is valid for every ring.
           bx --build-arg NEXT_PUBLIC_API_URL="" --build-arg NEXT_PUBLIC_WS_URL="" \
-            -f web/nextjs/Dockerfile -t "$NS/web:$SHA" -t "$NS/web:latest" web/nextjs
+            -f web/nextjs/Dockerfile -t "$NS/web:$VERSION" -t "$NS/web:latest" web/nextjs
 
           bx -f python-sidecar/Dockerfile \
-            -t "$NS/python-sidecar:$SHA" -t "$NS/python-sidecar:latest" python-sidecar
+            -t "$NS/python-sidecar:$VERSION" -t "$NS/python-sidecar:latest" python-sidecar
 
           bx -f review-bot/Dockerfile \
-            -t "$NS/review-bot:$SHA" -t "$NS/review-bot:latest" review-bot
+            -t "$NS/review-bot:$VERSION" -t "$NS/review-bot:latest" review-bot
 
       - name: Assert pushed images are linux/amd64
-        if: ${{ env.DEPLOYMENT_TYPE == 'build' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
         run: |
           set -euo pipefail
-          SHA="${{ steps.tag.outputs.sha }}"
+          VERSION="${{ needs.compute-version.outputs.next_version }}"
           NS="$IMAGE_REGISTRY/$IMAGE_NAMESPACE"
 
           # A single-platform OCI manifest does not print "linux/amd64" in
@@ -149,36 +288,112 @@ jobs:
           PY
           }
 
-          assert_not_multiarch_junk "$NS/server:$SHA"
-          assert_not_multiarch_junk "$NS/web:$SHA"
-          assert_not_multiarch_junk "$NS/python-sidecar:$SHA"
-          assert_not_multiarch_junk "$NS/review-bot:$SHA"
+          assert_not_multiarch_junk "$NS/server:$VERSION"
+          assert_not_multiarch_junk "$NS/web:$VERSION"
+          assert_not_multiarch_junk "$NS/python-sidecar:$VERSION"
+          assert_not_multiarch_junk "$NS/review-bot:$VERSION"
 
           echo "Runtime arch smoke (uname -m must be x86_64 under --platform=linux/amd64)"
-          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh "$NS/server:$SHA" \
+          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh "$NS/server:$VERSION" \
             -c 'test -x /app/jobshout-server && uname -m | grep -qx x86_64'
-          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh "$NS/web:$SHA" \
+          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh "$NS/web:$VERSION" \
             -c 'uname -m | grep -qx x86_64'
-          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh "$NS/python-sidecar:$SHA" \
+          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh "$NS/python-sidecar:$VERSION" \
             -c 'uname -m | grep -qx x86_64'
-          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh "$NS/review-bot:$SHA" \
+          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh "$NS/review-bot:$VERSION" \
             -c 'uname -m | grep -qx x86_64 && command -v opencode >/dev/null && command -v git >/dev/null'
 
+  # ─── claim the version: push the tag + cut the release ─────────────
+  # Runs only when build succeeded (the default `needs` semantics, no
+  # always() here — that is the whole point of the ordering). A red build
+  # therefore leaves no tag and no release, and the same version number is
+  # retried on the next push.
+  auto-tag:
+    name: Create Incremental Tag
+    needs: [compute-version, build]
+    runs-on: self-hosted
+    permissions:
+      contents: write  # the only job that writes to the repo
+    outputs:
+      tag_created: ${{ steps.create_tag.outputs.tag_created }}
+    steps:
+      - name: Checkout the built commit with full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Tag exactly what was built, not HEAD of master.
+          ref: ${{ github.sha }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create and push tag
+        id: create_tag
+        run: |
+          NEXT_VERSION="${{ needs.compute-version.outputs.next_version }}"
+
+          # compute-version already checked this and would have skipped the
+          # build; re-check because the build takes a while and a manual tag
+          # push in that window must not be clobbered.
+          #
+          # ls-remote, not `git tag -l`: the race being guarded against is a
+          # tag appearing ON THE REMOTE during the build, which the local
+          # clone (taken before that push) cannot see.
+          if git ls-remote --exit-code --tags origin "refs/tags/$NEXT_VERSION" >/dev/null 2>&1; then
+            echo "::warning::Tag $NEXT_VERSION appeared during the build, skipping creation"
+            echo "tag_created=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Creating tag: $NEXT_VERSION"
+            git tag -a "$NEXT_VERSION" -m "Release $NEXT_VERSION"
+            git push origin "$NEXT_VERSION"
+            echo "tag_created=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        if: steps.create_tag.outputs.tag_created == 'true'
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ needs.compute-version.outputs.next_version }}
+          name: Release ${{ needs.compute-version.outputs.next_version }}
+          generate_release_notes: true
+
+  # ─── seed Ring Promoter with the tagged version ────────────────────
+  # The seed carries the v<X.Y.Z> tag, never a commit SHA: RP's k8sjob
+  # git-clones this repo at the seeded value with `git clone --branch`,
+  # which resolves tags but not raw SHAs.
   deploy:
     name: Seed Ring Promoter (${{ github.event.inputs.TARGET_ENV || 'int' }})
-    needs: [build]
+    needs: [compute-version, build, auto-tag]
     runs-on: self-hosted
     timeout-minutes: 25
+    permissions:
+      contents: read
+    # Two entry points:
+    #   - deploy-only dispatch (pinned IMAGE_TAG): its needs are all skipped,
+    #     so always() + the first arm below lets it run standalone.
+    #   - pushes and build-and-deploy dispatches: seed only once the tag is
+    #     live, so RP never records a version it cannot git-clone. A failed
+    #     build/tag therefore seeds nothing.
+    if: >-
+      always()
+      && (github.event_name != 'workflow_dispatch' || inputs.DEPLOYMENT_TYPE != 'build')
+      && (
+        (github.event_name == 'workflow_dispatch' && inputs.DEPLOYMENT_TYPE == 'deploy')
+        || needs.auto-tag.outputs.tag_created == 'true'
+      )
     steps:
       - name: Seed Ring Promoter and wait until the ring is healthy
-        if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
         env:
           RP_API_TOKEN: ${{ secrets.RP_API_TOKEN }}
           RP_URL: ${{ secrets.RP_URL }}
         run: |
           set -euo pipefail
           TAG="${{ github.event.inputs.IMAGE_TAG }}"
-          [ -z "$TAG" ] && TAG="${{ needs.build.outputs.sha }}"
+          [ -z "$TAG" ] && TAG="${{ needs.compute-version.outputs.next_version }}"
           RP="${RP_URL:-https://rp.workstation.co.uk}"
           if [ -z "${RP_API_TOKEN:-}" ]; then
             echo "::error::RP_API_TOKEN is not set — cannot seed Ring Promoter."
