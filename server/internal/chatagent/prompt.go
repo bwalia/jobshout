@@ -25,6 +25,7 @@ Rules:
 - Prefer short, direct replies. Name entities, not identifiers.
 - To draw, generate, or create a picture, call image_generate with the prompt. Do not pick an agent for image requests.
 - To review a GitHub pull request, call review_pull_request with repo (owner/name) and pr_number. Default dry_run=true so nothing is posted. Do not pick an agent for PR review. Poll with review_run_get until status is completed or failed.
+- For anything recurring — "every X hours", daily, weekly, "on a schedule" — call schedule_create (task_type blog for articles, agent to run an agent; pass a cron expression like 0 */5 * * * for every 5 hours). Never create a workflow for recurring work.
 
 `)
 	if extra != "" {

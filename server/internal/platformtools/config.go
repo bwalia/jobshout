@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/robfig/cron/v3"
 
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/repository"
@@ -44,48 +46,110 @@ func registerConfig(reg *Registry, d Deps) {
 	if d.Scheduler != nil {
 		reg.Register(newTool(
 			"schedule_create",
-			"Schedule recurring work. task_type is agent, workflow, multi_agent or blog. Use cron or a preset such as weekdays_9am.",
+			"Schedule recurring work. task_type is agent, workflow, multi_agent or blog (blog = automatic article writing). For agent/workflow pass the agent/workflow name. Use cron (e.g. 0 */5 * * * for every 5 hours) or a preset such as weekdays_9am.",
 			"config", model.PermAgentsExecute, false, false,
 			tools.ObjectSchema(map[string]any{
 				"name":      map[string]any{"type": "string"},
 				"task_type": map[string]any{"type": "string", "enum": []any{"agent", "workflow", "multi_agent", "blog"}},
 				"prompt":    map[string]any{"type": "string"},
 				"preset":    map[string]any{"type": "string", "description": "e.g. weekdays_9am, every_morning_9am, hourly"},
-				"cron":      map[string]any{"type": "string"},
-				"agent":     map[string]any{"type": "string"},
-				"workflow":  map[string]any{"type": "string"},
+				"cron":      map[string]any{"type": "string", "description": "standard 5-field cron, e.g. 0 */5 * * *"},
+				"agent":     map[string]any{"type": "string", "description": "agent name, required when task_type=agent"},
+				"workflow":  map[string]any{"type": "string", "description": "workflow name, required when task_type=workflow"},
 			}, "name", "task_type"),
 			func(ctx context.Context, input map[string]any) (*Result, error) {
 				ident := MustIdentity(ctx)
 				uid := ident.UserID
+				taskType := strArg(input, "task_type")
+
 				preset := strArg(input, "preset")
-				cron := strArg(input, "cron")
-				if preset == "" && cron == "" {
-					preset = "weekdays_9am"
+				cronExpr := strArg(input, "cron")
+				if preset != "" {
+					cronExpr = mapPreset(preset)
 				}
+				if cronExpr == "" {
+					preset = "weekdays_9am"
+					cronExpr = mapPreset(preset)
+				}
+				sched, err := scheduleCronParser.Parse(cronExpr)
+				if err != nil {
+					return &Result{Missing: []string{"cron"}, Question: fmt.Sprintf("%q is not a valid cron expression. When should this run?", cronExpr)}, nil
+				}
+
 				t := &model.ScheduledTask{
-					ID:           uuid.New(),
-					OrgID:        ident.OrgID,
-					Name:         strArg(input, "name"),
-					TaskType:     strArg(input, "task_type"),
-					InputPrompt:  strArg(input, "prompt"),
-					ScheduleType: "cron",
-					Status:       "active",
-					CreatedBy:    &uid,
-					Priority:     "medium",
+					ID:             uuid.New(),
+					OrgID:          ident.OrgID,
+					Name:           strArg(input, "name"),
+					TaskType:       taskType,
+					InputPrompt:    strArg(input, "prompt"),
+					ScheduleType:   "cron",
+					CronExpression: &cronExpr,
+					Status:         "active",
+					CreatedBy:      &uid,
+					Priority:       "medium",
+					Tags:           []string{},
 				}
 				if preset != "" {
 					t.SchedulePreset = &preset
-					mapped := mapPreset(preset)
-					t.CronExpression = &mapped
-				} else {
-					t.CronExpression = &cron
 				}
+				// The runner only advances next_run_at after a run, so the
+				// initial value must be set here or the schedule never fires.
+				next := sched.Next(time.Now())
+				t.NextRunAt = &next
+
+				// Link the dispatch target: an agent/workflow schedule with no
+				// target row is created fine but can never run.
+				switch taskType {
+				case "agent":
+					if d.Agents == nil {
+						return nil, fmt.Errorf("agent schedules are not available")
+					}
+					agents, err := listAllAgents(ctx, d, ident.OrgID)
+					if err != nil {
+						return nil, err
+					}
+					m := ByName(agents, strArg(input, "agent"), func(a model.Agent) string { return a.Name })
+					if !m.Found {
+						if len(m.Candidates) > 0 {
+							return clarifyFromMatch("agent", strArg(input, "agent"), m.Candidates, func(a model.Agent) string { return a.Name }), nil
+						}
+						opts := make([]model.ClarifyOption, 0, len(agents))
+						for _, a := range agents {
+							opts = append(opts, model.ClarifyOption{Label: a.Name + " — " + a.Role, Value: a.Name})
+						}
+						return notFoundClarify("agent", strArg(input, "agent"), opts), nil
+					}
+					t.AgentID = &m.Exact.ID
+				case "workflow":
+					if d.Workflows == nil {
+						return nil, fmt.Errorf("workflow schedules are not available")
+					}
+					res, err := d.Workflows.ListByOrg(ctx, ident.OrgID, model.PaginationParams{Page: 1, PerPage: 100})
+					if err != nil {
+						return nil, err
+					}
+					m := ByName(res.Data, strArg(input, "workflow"), func(w model.Workflow) string { return w.Name })
+					if !m.Found {
+						if len(m.Candidates) > 0 {
+							return clarifyFromMatch("workflow", strArg(input, "workflow"), m.Candidates, func(w model.Workflow) string { return w.Name }), nil
+						}
+						opts := make([]model.ClarifyOption, 0, len(res.Data))
+						for _, w := range res.Data {
+							opts = append(opts, model.ClarifyOption{Label: w.Name, Value: w.Name})
+						}
+						return notFoundClarify("workflow", strArg(input, "workflow"), opts), nil
+					}
+					t.WorkflowID = &m.Exact.ID
+				}
+
 				if err := d.Scheduler.CreateTask(ctx, t); err != nil {
 					return nil, err
 				}
 				ref := model.EntityRef{Kind: model.EntitySchedule, ID: t.ID.String(), Label: t.Name, Href: "/scheduler"}
-				return &Result{Data: map[string]any{"name": t.Name, "schedule": preset, "type": t.TaskType}, Entity: &ref}, nil
+				return &Result{Data: map[string]any{
+					"name": t.Name, "cron": cronExpr, "type": t.TaskType,
+					"next_run_at": next.UTC().Format(time.RFC3339),
+				}, Entity: &ref}, nil
 			},
 		))
 		reg.Register(newTool(
@@ -576,6 +640,17 @@ func registerConfig(reg *Registry, d Deps) {
 			},
 		))
 	}
+}
+
+// scheduleCronParser accepts the same cron flavour the scheduler runner uses.
+var scheduleCronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
+
+func listAllAgents(ctx context.Context, d Deps, orgID uuid.UUID) ([]model.Agent, error) {
+	res, err := d.Agents.List(ctx, orgID, model.PaginationParams{Page: 1, PerPage: 100}, repository.AgentListFilter{})
+	if err != nil {
+		return nil, err
+	}
+	return res.Data, nil
 }
 
 func mapPreset(p string) string {

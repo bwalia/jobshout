@@ -23,6 +23,8 @@ var AlwaysLoad = []string{
 	"task_get",
 	"workflow_list",
 	"workflow_run",
+	"schedule_create",
+	"schedule_list",
 	"execution_get",
 	"usage_summary",
 	"my_permissions",
