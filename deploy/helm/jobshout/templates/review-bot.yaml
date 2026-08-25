@@ -94,6 +94,16 @@ spec:
               readOnly: true
           resources:
             {{- toYaml .Values.reviewBot.resources | nindent 12 }}
+          # Gate liveness/readiness until the process is actually serving, so a
+          # slow start (image pull, settings load) can't trip liveness into a
+          # CrashLoopBackOff and wedge the rollout. ~150s budget before liveness.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.reviewBot.port }}
+            periodSeconds: 5
+            failureThreshold: 30
+            timeoutSeconds: 3
           livenessProbe:
             httpGet:
               path: /health
@@ -101,6 +111,7 @@ spec:
             initialDelaySeconds: 15
             periodSeconds: 20
             timeoutSeconds: 5
+            failureThreshold: 6
           readinessProbe:
             httpGet:
               path: /health
