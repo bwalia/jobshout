@@ -61,7 +61,7 @@ func (s *reviewService) CreateRun(ctx context.Context, req model.CreateReviewRun
 	if !reviewbot.RepoAllowed(repo, s.allowlist) {
 		return nil, fmt.Errorf("%w: %s", ErrReviewRepoNotAllowed, repo)
 	}
-	dryRun := true
+	dryRun := false
 	if req.DryRun != nil {
 		dryRun = *req.DryRun
 	}

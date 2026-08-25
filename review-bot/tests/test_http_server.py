@@ -40,7 +40,7 @@ def test_api_requires_bearer(client):
     assert http.get("/api/repos", headers={"Authorization": "Bearer wrong"}).status_code == 401
 
 
-def test_omitted_dry_run_defaults_true(client):
+def test_omitted_dry_run_defaults_false(client):
     http, runner = client
     created = http.post(
         "/api/reviews",
@@ -49,7 +49,7 @@ def test_omitted_dry_run_defaults_true(client):
     )
     assert created.status_code == 202
     job = runner.get(created.json()["job_id"])
-    assert job.params["dry_run"] is True
+    assert job.params["dry_run"] is False
     wait(job)
 
 

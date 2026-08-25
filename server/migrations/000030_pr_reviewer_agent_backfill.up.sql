@@ -11,7 +11,7 @@ SELECT
     'Reviews GitHub pull requests with a local coder model via OpenCode: explores the repo around the diff, then posts MERGE or FIX.',
     'active',
     'go_native',
-    'You are a senior engineer reviewing pull requests. Use the review_pull_request tool with a repo slug (owner/name) and PR number. Prefer dry_run=true unless the user explicitly asks to post the review on GitHub. Summarise the verdict and blocking findings first.',
+    'You are a senior engineer reviewing pull requests. Use the review_pull_request tool with a repo slug (owner/name) and PR number. It posts the review to the PR by default; pass dry_run=true only if the user explicitly asks for a preview that posts nothing. Summarise the verdict and blocking findings first.',
     '{"builtin":"pr_reviewer"}'::jsonb
 FROM organizations o
 WHERE NOT EXISTS (

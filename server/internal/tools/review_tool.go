@@ -27,12 +27,12 @@ func NewReviewPullRequestTool(starter ReviewStarter) Tool {
 func (t *reviewPullRequestTool) Name() string { return "review_pull_request" }
 
 func (t *reviewPullRequestTool) Description() string {
-	return `Queue an AI review of a GitHub pull request. Returns immediately with a run id; poll by reading the run in JobShout. Prefer dry_run=true unless the user asks to post comments on GitHub.
+	return `Queue an AI review of a GitHub pull request. Returns immediately with a run id; poll by reading the run in JobShout. Posts the review to the PR by default; pass dry_run=true for a preview that posts nothing.
 
 Input parameters:
   repo (string, required) — owner/name, e.g. bwalia/jobshout
   pr_number (integer, required) — pull request number
-  dry_run (boolean, optional) — true (default) prints findings without posting
+  dry_run (boolean, optional) — false (default) posts to GitHub; true prints findings only
   force (boolean, optional) — re-review even if this commit was already started`
 }
 
@@ -61,7 +61,7 @@ func (t *reviewPullRequestTool) Execute(ctx context.Context, input map[string]an
 	if pr < 1 {
 		return "", fmt.Errorf("pr_number must be a positive integer")
 	}
-	dry := true
+	dry := false
 	if v, ok := input["dry_run"]; ok && v != nil {
 		if b, ok := v.(bool); ok {
 			dry = b

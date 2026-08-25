@@ -127,9 +127,8 @@ async def start_review(request: Request) -> JSONResponse:
     except (TypeError, ValueError):
         return JSONResponse({"error": "pr_number must be an integer"}, status_code=400)
 
-    # Preview-only unless the caller opts in. Matches the JobShout form default
-    # so a missing field cannot spam GitHub.
-    dry_run = True if "dry_run" not in payload else bool(payload.get("dry_run"))
+    # Posts to GitHub by default; callers opt into a preview with dry_run=true.
+    dry_run = bool(payload.get("dry_run", False))
     force = bool(payload.get("force", False))
     run_ref = payload.get("run_ref") or ""
     if run_ref and not isinstance(run_ref, str):

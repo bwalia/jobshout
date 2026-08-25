@@ -17,7 +17,7 @@ export function ReviewRunForm({
   const [repos, setRepos] = useState<ReviewRepos | null>(null);
   const [repo, setRepo] = useState('');
   const [prNumber, setPrNumber] = useState('');
-  const [dryRun, setDryRun] = useState(true);
+  const [dryRun, setDryRun] = useState(false);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 

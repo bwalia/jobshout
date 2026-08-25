@@ -23,11 +23,11 @@ func (f *fakeReviewStarter) CreateRun(_ context.Context, req model.CreateReviewR
 	return f.run, f.err
 }
 
-func TestReviewPullRequestToolQueuesDryRun(t *testing.T) {
+func TestReviewPullRequestToolQueuesRealRun(t *testing.T) {
 	orgID := uuid.New()
 	starter := &fakeReviewStarter{
 		run: &model.ReviewRun{
-			ID: uuid.New(), Status: "queued", Repo: "bwalia/jobshout", PRNumber: 8, DryRun: true,
+			ID: uuid.New(), Status: "queued", Repo: "bwalia/jobshout", PRNumber: 8, DryRun: false,
 		},
 	}
 	tool := NewReviewPullRequestTool(starter)
@@ -44,8 +44,8 @@ func TestReviewPullRequestToolQueuesDryRun(t *testing.T) {
 	if starter.orgID != orgID {
 		t.Fatalf("org = %s", starter.orgID)
 	}
-	if starter.got.DryRun == nil || !*starter.got.DryRun {
-		t.Fatal("dry_run should default true")
+	if starter.got.DryRun == nil || *starter.got.DryRun {
+		t.Fatal("dry_run should default false")
 	}
 	var parsed map[string]any
 	if err := json.Unmarshal([]byte(out), &parsed); err != nil {

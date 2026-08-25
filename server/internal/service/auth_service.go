@@ -113,10 +113,10 @@ func (s *authService) seedBuiltinAgents(ctx context.Context, orgID, createdBy uu
 	// Each built-in is seeded independently so one failing does not deprive the
 	// organization of the others.
 	seeds := map[string]*model.Agent{
-		"Article Writer":     articleWriterSeed(orgID),
-		"Research Agent":     researcherSeed(orgID),
-		"Security Tester":    pentestSeed(orgID),
-		"PR Reviewer":        prReviewerSeed(orgID),
+		"Article Writer":  articleWriterSeed(orgID),
+		"Research Agent":  researcherSeed(orgID),
+		"Security Tester": pentestSeed(orgID),
+		"PR Reviewer":     prReviewerSeed(orgID),
 	}
 	seeded := 0
 	for name, agent := range seeds {
@@ -269,7 +269,7 @@ func pentestSeed(orgID uuid.UUID) *model.Agent {
 
 func prReviewerSeed(orgID uuid.UUID) *model.Agent {
 	desc := "Reviews GitHub pull requests with a local coder model via OpenCode: explores the repo around the diff, then posts MERGE or FIX."
-	prompt := "You are a senior engineer reviewing pull requests. Use the review_pull_request tool with a repo slug (owner/name) and PR number. Prefer dry_run=true unless the user explicitly asks to post the review on GitHub. Summarise the verdict and blocking findings first."
+	prompt := "You are a senior engineer reviewing pull requests. Use the review_pull_request tool with a repo slug (owner/name) and PR number. It posts the review to the PR by default; pass dry_run=true only if the user explicitly asks for a preview that posts nothing. Summarise the verdict and blocking findings first."
 	return &model.Agent{
 		ID:           uuid.New(),
 		OrgID:        orgID,

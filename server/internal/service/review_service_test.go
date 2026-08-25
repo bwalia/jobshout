@@ -103,7 +103,7 @@ func testReviewCfg() reviewbot.Config {
 	}
 }
 
-func TestReviewServiceCreateRunDefaultsDryRunAndQueues(t *testing.T) {
+func TestReviewServiceCreateRunDefaultsRealRunAndQueues(t *testing.T) {
 	repo := newMockReviewRunRepository()
 	svc := NewReviewService(repo, testReviewCfg(), zap.NewNop())
 	orgID := uuid.New()
@@ -114,8 +114,8 @@ func TestReviewServiceCreateRunDefaultsDryRunAndQueues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !run.DryRun {
-		t.Fatal("dry_run should default true")
+	if run.DryRun {
+		t.Fatal("dry_run should default false")
 	}
 	if run.Status != "queued" {
 		t.Fatalf("status = %s", run.Status)
