@@ -8,6 +8,7 @@ import {
   defaultValuesForSchema,
   getAgentInputSchema,
   schemaValuesValid,
+  validateSchemaValues,
 } from "@/lib/agents/input-schemas";
 import { launchAgentForTask, type LaunchResult } from "@/lib/agents/launch";
 import { apiErrorMessage } from "@/lib/api/client";
@@ -77,9 +78,11 @@ export function RunTaskDialog({
   const [extraSlug, setExtraSlug] = useState("");
   const [debug, setDebug] = useState(false);
   const [launching, setLaunching] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     setValues(defaultValuesForSchema(schema));
+    setFieldErrors({});
   }, [schema]);
 
   const availableSlugs = useMemo(
@@ -111,6 +114,12 @@ export function RunTaskDialog({
     if (!agentId || !selectedAgent) return;
 
     if (isSpecialist) {
+      const errs = validateSchemaValues(schema, values);
+      setFieldErrors(errs);
+      if (Object.keys(errs).length > 0) {
+        toast.error("Fix the highlighted fields before running");
+        return;
+      }
       setLaunching(true);
       try {
         const result = await launchAgentForTask({
@@ -210,9 +219,16 @@ export function RunTaskDialog({
             <AgentInputFields
               fields={schema.fields}
               values={values}
-              onChange={(k, v) =>
-                setValues((prev) => ({ ...prev, [k]: v }))
-              }
+              onChange={(k, v) => {
+                setValues((prev) => {
+                  const next = { ...prev, [k]: v };
+                  if (fieldErrors[k]) {
+                    setFieldErrors(validateSchemaValues(schema, next));
+                  }
+                  return next;
+                });
+              }}
+              errors={fieldErrors}
               disabled={launching}
               autoFocusFirst
             />

@@ -5,14 +5,17 @@ import { useEffect, useState } from "react";
 import { apiClient } from "@/lib/api/client";
 import type { AgentField } from "@/lib/agents/input-schemas";
 import type { ReviewRepos } from "@/types/review";
+import { cn } from "@/lib/utils/cn";
 
 const inputCls =
-  "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50";
+  "flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50";
 
 interface AgentInputFieldsProps {
   fields: AgentField[];
   values: Record<string, string>;
   onChange: (key: string, value: string) => void;
+  /** Per-field validation messages from validateSchemaValues. */
+  errors?: Record<string, string>;
   disabled?: boolean;
   /** Focus the first required field when true (create flow after agent pick). */
   autoFocusFirst?: boolean;
@@ -25,6 +28,7 @@ export function AgentInputFields({
   fields,
   values,
   onChange,
+  errors,
   disabled,
   autoFocusFirst,
 }: AgentInputFieldsProps) {
@@ -38,6 +42,7 @@ export function AgentInputFields({
           field={field}
           value={values[field.key] ?? ""}
           onChange={(v) => onChange(field.key, v)}
+          error={errors?.[field.key]}
           disabled={disabled}
           autoFocus={Boolean(autoFocusFirst && field.key === firstRequired)}
         />
@@ -50,15 +55,19 @@ function Field({
   field,
   value,
   onChange,
+  error,
   disabled,
   autoFocus,
 }: {
   field: AgentField;
   value: string;
   onChange: (v: string) => void;
+  error?: string;
   disabled?: boolean;
   autoFocus?: boolean;
 }) {
+  const borderCls = error ? "border-destructive" : "border-input";
+
   if (field.type === "checkbox") {
     return (
       <label className="flex cursor-pointer items-start gap-2 text-sm">
@@ -81,29 +90,42 @@ function Field({
     );
   }
 
+  const minLen = field.minLength ?? (field.required ? 1 : undefined);
+  const minNum = field.min ?? (field.type === "number" && field.required ? 1 : undefined);
+
   return (
     <div className="space-y-1.5">
-      <label className="text-sm font-medium">
+      <label className="text-sm font-medium" htmlFor={`agent-field-${field.key}`}>
         {field.label}
         {field.required && <span className="text-destructive"> *</span>}
       </label>
       {field.type === "textarea" ? (
         <textarea
+          id={`agent-field-${field.key}`}
           rows={3}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={field.placeholder}
           disabled={disabled}
           autoFocus={autoFocus}
-          className="w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+          required={field.required}
+          minLength={minLen}
+          aria-invalid={Boolean(error)}
+          className={cn(
+            "w-full resize-none rounded-md border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
+            borderCls
+          )}
         />
       ) : field.type === "select" && field.options ? (
         <select
+          id={`agent-field-${field.key}`}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
           autoFocus={autoFocus}
-          className={inputCls}
+          required={field.required}
+          aria-invalid={Boolean(error)}
+          className={cn(inputCls, borderCls)}
         >
           {field.options.map((o) => (
             <option key={o.value} value={o.value}>
@@ -113,45 +135,66 @@ function Field({
         </select>
       ) : field.type === "repo" ? (
         <RepoField
+          id={`agent-field-${field.key}`}
           value={value}
           onChange={onChange}
           disabled={disabled}
           autoFocus={autoFocus}
           placeholder={field.placeholder}
+          required={field.required}
+          minLength={minLen}
+          error={Boolean(error)}
         />
       ) : (
         <input
+          id={`agent-field-${field.key}`}
           type={field.type === "number" ? "number" : "text"}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={field.placeholder}
           disabled={disabled}
           autoFocus={autoFocus}
-          min={field.type === "number" ? 1 : undefined}
-          className={inputCls}
+          required={field.required}
+          minLength={field.type === "number" ? undefined : minLen}
+          min={minNum}
+          aria-invalid={Boolean(error)}
+          className={cn(inputCls, borderCls)}
         />
       )}
-      {field.help && (
+      {error ? (
+        <p className="text-xs text-destructive" role="alert">
+          {error}
+        </p>
+      ) : field.help ? (
         <p className="text-xs text-muted-foreground">{field.help}</p>
-      )}
+      ) : null}
     </div>
   );
 }
 
 function RepoField({
+  id,
   value,
   onChange,
   disabled,
   autoFocus,
   placeholder,
+  required,
+  minLength,
+  error,
 }: {
+  id: string;
   value: string;
   onChange: (v: string) => void;
   disabled?: boolean;
   autoFocus?: boolean;
   placeholder?: string;
+  required?: boolean;
+  minLength?: number;
+  error?: boolean;
 }) {
   const [allowed, setAllowed] = useState<string[] | null>(null);
+  const borderCls = error ? "border-destructive" : "border-input";
 
   useEffect(() => {
     let cancelled = false;
@@ -175,11 +218,14 @@ function RepoField({
   if (allowed && allowed.length > 0) {
     return (
       <select
+        id={id}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
         autoFocus={autoFocus}
-        className={inputCls}
+        required={required}
+        aria-invalid={error}
+        className={cn(inputCls, borderCls)}
       >
         {allowed.map((slug) => (
           <option key={slug} value={slug}>
@@ -192,13 +238,17 @@ function RepoField({
 
   return (
     <input
+      id={id}
       type="text"
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder ?? "owner/name"}
       disabled={disabled}
       autoFocus={autoFocus}
-      className={inputCls}
+      required={required}
+      minLength={minLength}
+      aria-invalid={error}
+      className={cn(inputCls, borderCls)}
     />
   );
 }

@@ -19,11 +19,18 @@ export interface AgentField {
   label: string;
   type: AgentFieldType;
   required?: boolean;
+  /** Minimum trimmed length for text/textarea/repo (default 1 when required). */
+  minLength?: number;
+  /** Minimum numeric value for number fields (default 1 when required). */
+  min?: number;
   placeholder?: string;
   help?: string;
   options?: AgentFieldOption[];
   defaultValue?: string | boolean;
 }
+
+/** Minimum length for board task titles (create + edit). */
+export const TASK_TITLE_MIN_LENGTH = 3;
 
 export type AgentBuiltin =
   | "article_writer"
@@ -60,6 +67,7 @@ const GENERIC: AgentInputSchema = {
       label: "Title",
       type: "text",
       required: true,
+      minLength: TASK_TITLE_MIN_LENGTH,
       placeholder: "e.g. Draft the launch announcement",
     },
     {
@@ -83,6 +91,7 @@ const SCHEMAS: Record<AgentBuiltin, AgentInputSchema> = {
         label: "Topic",
         type: "text",
         required: true,
+        minLength: 3,
         placeholder: "e.g. Edge AI inference in 2026",
       },
       {
@@ -114,6 +123,7 @@ const SCHEMAS: Record<AgentBuiltin, AgentInputSchema> = {
         label: "Topic",
         type: "text",
         required: true,
+        minLength: 3,
         placeholder: "e.g. Kubernetes cost optimisation patterns",
       },
       {
@@ -139,6 +149,7 @@ const SCHEMAS: Record<AgentBuiltin, AgentInputSchema> = {
         label: "Target URL or path",
         type: "text",
         required: true,
+        minLength: 3,
         placeholder: "https://int.example.com",
         help: "Live API or app URL you are authorised to test",
       },
@@ -146,6 +157,7 @@ const SCHEMAS: Record<AgentBuiltin, AgentInputSchema> = {
         key: "scan_mode",
         label: "Scan mode",
         type: "select",
+        required: true,
         defaultValue: "quick",
         options: [
           { value: "quick", label: "Quick (5–15 min)" },
@@ -157,6 +169,7 @@ const SCHEMAS: Record<AgentBuiltin, AgentInputSchema> = {
         key: "max_budget",
         label: "Max budget (USD cents, optional)",
         type: "number",
+        min: 1,
         placeholder: "1000",
         help: "e.g. 1000 = $10",
       },
@@ -183,6 +196,7 @@ const SCHEMAS: Record<AgentBuiltin, AgentInputSchema> = {
         label: "Repository",
         type: "repo",
         required: true,
+        minLength: 3,
         placeholder: "owner/name",
       },
       {
@@ -190,6 +204,7 @@ const SCHEMAS: Record<AgentBuiltin, AgentInputSchema> = {
         label: "Pull request number",
         type: "number",
         required: true,
+        min: 1,
         placeholder: "42",
       },
       {
@@ -235,16 +250,80 @@ export function defaultValuesForSchema(
   return out;
 }
 
-/** Whether required fields are filled. */
+/**
+ * Validate every field against the schema. Returns per-field error messages
+ * (empty object means the form is ready to submit / launch).
+ */
+export function validateSchemaValues(
+  schema: AgentInputSchema,
+  values: Record<string, string>
+): Record<string, string> {
+  const errors: Record<string, string> = {};
+  for (const f of schema.fields) {
+    const raw = (values[f.key] ?? "").trim();
+    const err = validateField(f, raw);
+    if (err) errors[f.key] = err;
+  }
+  return errors;
+}
+
+function validateField(f: AgentField, raw: string): string | null {
+  if (f.type === "checkbox") return null;
+
+  if (!raw) {
+    if (f.required) return `${f.label} is required`;
+    return null;
+  }
+
+  if (f.type === "number") {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || !Number.isInteger(n)) {
+      return `${f.label} must be a whole number`;
+    }
+    const min = f.min ?? (f.required ? 1 : undefined);
+    if (min != null && n < min) {
+      return `${f.label} must be at least ${min}`;
+    }
+    return null;
+  }
+
+  if (f.type === "select" && f.options) {
+    if (!f.options.some((o) => o.value === raw)) {
+      return `Choose a valid ${f.label.toLowerCase()}`;
+    }
+    return null;
+  }
+
+  if (f.type === "repo") {
+    // owner/name — allow github.com URLs too; launch/API normalises.
+    if (!raw.includes("/") || raw.startsWith("/") || raw.endsWith("/")) {
+      return "Use owner/name (e.g. acme/api)";
+    }
+  }
+
+  const minLen = f.minLength ?? (f.required ? 1 : undefined);
+  if (minLen != null && raw.length < minLen) {
+    return `${f.label} must be at least ${minLen} characters`;
+  }
+  return null;
+}
+
+/** Whether required fields are filled and type-valid. */
 export function schemaValuesValid(
   schema: AgentInputSchema,
   values: Record<string, string>
 ): boolean {
-  return schema.fields.every((f) => {
-    if (!f.required) return true;
-    if (f.type === "checkbox") return true;
-    return Boolean(values[f.key]?.trim());
-  });
+  return Object.keys(validateSchemaValues(schema, values)).length === 0;
+}
+
+/** Board title used in edit mode. */
+export function validateTaskTitle(title: string): string | null {
+  const t = title.trim();
+  if (!t) return "Title is required";
+  if (t.length < TASK_TITLE_MIN_LENGTH) {
+    return `Title must be at least ${TASK_TITLE_MIN_LENGTH} characters`;
+  }
+  return null;
 }
 
 /** Derive board title/description from schema + values. */
