@@ -32,8 +32,9 @@ import { PentestAgentClient } from "@/components/PentestAgentClient";
 import { ReviewAgentClient } from "@/components/ReviewAgentClient";
 import ArticlesPage from "@/app/(app)/articles/page";
 import ImagesPage from "@/app/(app)/images/page";
+import type { LaunchResult } from "@/lib/agents/launch";
 import type { Agent } from "@/lib/types/agent";
-import type { Task } from "@/lib/types/project";
+import type { Project, Task } from "@/lib/types/project";
 import type { TaskRun } from "@/lib/types/task-run";
 import type { TaskStatus } from "@/lib/types/common";
 import { cn } from "@/lib/utils/cn";
@@ -126,6 +127,36 @@ export function TaskManagerPanel() {
     selection?.kind === "agent"
       ? agents.find((a) => a.id === selection.id)
       : null;
+
+  function handleLaunchResult(result: LaunchResult) {
+    switch (result.kind) {
+      case "pentester":
+        select({ kind: "builtin", id: "pentest" });
+        router.replace(
+          `/panel/task-manager?agent=pentest&run=${result.run.id}`,
+          { scroll: false }
+        );
+        break;
+      case "pr_reviewer":
+        select({ kind: "builtin", id: "review" });
+        router.replace(
+          `/panel/task-manager?agent=review&run=${result.run.id}`,
+          { scroll: false }
+        );
+        break;
+      case "article_writer":
+        select({ kind: "builtin", id: "articles" });
+        router.push(`/articles/${result.run.id}`);
+        break;
+      case "researcher":
+        // Sync result — stay on the created task's project.
+        select({ kind: "project", id: result.task.project_id });
+        break;
+      case "task_run":
+        select({ kind: "project", id: result.task.project_id });
+        break;
+    }
+  }
 
   return (
     <div className="flex h-[calc(100dvh-3rem)] flex-col lg:h-screen">
@@ -259,6 +290,7 @@ export function TaskManagerPanel() {
               projectName={
                 projects.find((p) => p.id === selection.id)?.name ?? "Project"
               }
+              onLaunched={handleLaunchResult}
             />
           )}
           {selection?.kind === "builtin" && selection.id === "pentest" && (
@@ -278,7 +310,12 @@ export function TaskManagerPanel() {
             <ImagesPage />
           )}
           {selection?.kind === "agent" && selectedAgent && (
-            <AgentDetailView agent={selectedAgent} agents={agents} />
+            <AgentDetailView
+              agent={selectedAgent}
+              agents={agents}
+              projects={projects}
+              onLaunched={handleLaunchResult}
+            />
           )}
           {!selection && (
             <p className="text-sm text-muted-foreground">
@@ -324,10 +361,12 @@ function ProjectTasksView({
   projectId,
   agents,
   projectName,
+  onLaunched,
 }: {
   projectId: string;
   agents: Agent[];
   projectName: string;
+  onLaunched: (result: LaunchResult) => void;
 }) {
   const { data: tasksResp, isLoading } = useProjectTasks(projectId);
   const tasks = useMemo(() => tasksResp?.data ?? [], [tasksResp]);
@@ -514,6 +553,13 @@ function ProjectTasksView({
           agents={agents}
           onClose={() => setEditorOpen(false)}
           onSaved={(t) => setSelectedId(t.id)}
+          onLaunched={(result) => {
+            if (result.kind === "task_run") {
+              setSelectedId(result.task.id);
+              setFocusRunId(result.run.id);
+            }
+            onLaunched(result);
+          }}
         />
       )}
       {runOpen && selected && (
@@ -522,6 +568,7 @@ function ProjectTasksView({
           agents={agents}
           onClose={() => setRunOpen(false)}
           onLaunched={(run: TaskRun) => setFocusRunId(run.id)}
+          onSpecialistLaunched={onLaunched}
         />
       )}
     </div>
@@ -531,9 +578,13 @@ function ProjectTasksView({
 function AgentDetailView({
   agent,
   agents,
+  projects,
+  onLaunched,
 }: {
   agent: Agent;
   agents: Agent[];
+  projects: Project[];
+  onLaunched: (result: LaunchResult) => void;
 }) {
   const { data: tasksResp } = useTasks({
     assigned_agent_id: agent.id,
@@ -541,6 +592,7 @@ function AgentDetailView({
   });
   const tasks = tasksResp?.data ?? [];
   const [runTask, setRunTask] = useState<Task | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
 
   return (
     <div className="space-y-6">
@@ -569,14 +621,8 @@ function AgentDetailView({
           </Link>
           <button
             type="button"
-            disabled={tasks.length === 0}
-            onClick={() => setRunTask(tasks[0] ?? null)}
-            className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
-            title={
-              tasks.length === 0
-                ? "Assign this agent to a task first"
-                : "Run latest assigned task"
-            }
+            onClick={() => setCreateOpen(true)}
+            className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90"
           >
             <Rocket className="h-4 w-4" /> Run agent
           </button>
@@ -587,7 +633,8 @@ function AgentDetailView({
         <h3 className="mb-2 text-sm font-medium">Assigned tasks</h3>
         {tasks.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No tasks assigned. Create a task in a project and assign this agent.
+            No tasks yet. Use Run agent to create one with this agent&apos;s
+            inputs and execute it.
           </p>
         ) : (
           <ul className="divide-y divide-border rounded-lg border border-border">
@@ -623,12 +670,26 @@ function AgentDetailView({
         </section>
       )}
 
+      {createOpen && (
+        <TaskEditorDialog
+          agents={agents}
+          projects={projects}
+          initialAgentId={agent.id}
+          onClose={() => setCreateOpen(false)}
+          onLaunched={onLaunched}
+        />
+      )}
+
       {runTask && (
         <RunTaskDialog
           task={runTask}
           agents={agents}
           onClose={() => setRunTask(null)}
           onLaunched={() => setRunTask(null)}
+          onSpecialistLaunched={(result) => {
+            setRunTask(null);
+            onLaunched(result);
+          }}
         />
       )}
     </div>
