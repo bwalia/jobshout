@@ -60,7 +60,10 @@ reviewBot:
   allowedRepos:
     - bwalia/jobshout
     - bwalia/diy-tax-return-uk
+    - bwalia/diy-tax-return-infra
     - bwalia/opsapi
+    - bwalia/ring-promoter
+    - bwalia/wslproxy
 
 api:
   replicas: 1
