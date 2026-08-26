@@ -131,30 +131,41 @@ export function TaskManagerPanel() {
   function handleLaunchResult(result: LaunchResult) {
     switch (result.kind) {
       case "pentester":
-        select({ kind: "builtin", id: "pentest" });
+        setSelection({ kind: "builtin", id: "pentest" });
         router.replace(
           `/panel/task-manager?agent=pentest&run=${result.run.id}`,
           { scroll: false }
         );
         break;
       case "pr_reviewer":
-        select({ kind: "builtin", id: "review" });
+        setSelection({ kind: "builtin", id: "review" });
         router.replace(
           `/panel/task-manager?agent=review&run=${result.run.id}`,
           { scroll: false }
         );
         break;
       case "article_writer":
-        select({ kind: "builtin", id: "articles" });
         router.push(`/articles/${result.run.id}`);
         break;
-      case "researcher":
-        // Sync result — stay on the created task's project.
-        select({ kind: "project", id: result.task.project_id });
+      case "researcher": {
+        const params = new URLSearchParams({
+          project: result.task.project_id,
+          task: result.task.id,
+        });
+        setSelection({ kind: "project", id: result.task.project_id });
+        router.replace(`/panel/task-manager?${params}`, { scroll: false });
         break;
-      case "task_run":
-        select({ kind: "project", id: result.task.project_id });
+      }
+      case "task_run": {
+        const params = new URLSearchParams({
+          project: result.task.project_id,
+          task: result.task.id,
+          run: result.run.id,
+        });
+        setSelection({ kind: "project", id: result.task.project_id });
+        router.replace(`/panel/task-manager?${params}`, { scroll: false });
         break;
+      }
     }
   }
 
@@ -368,20 +379,25 @@ function ProjectTasksView({
   projectName: string;
   onLaunched: (result: LaunchResult) => void;
 }) {
+  const searchParams = useSearchParams();
+  const taskParam = searchParams.get("task");
+  const runParam = searchParams.get("run");
+
   const { data: tasksResp, isLoading } = useProjectTasks(projectId);
   const tasks = useMemo(() => tasksResp?.data ?? [], [tasksResp]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(taskParam);
   const selected = tasks.find((t) => t.id === selectedId) ?? null;
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorTask, setEditorTask] = useState<Task | undefined>();
   const [runOpen, setRunOpen] = useState(false);
-  const [focusRunId, setFocusRunId] = useState<string | null>(null);
+  const [focusRunId, setFocusRunId] = useState<string | null>(runParam);
   const transition = useTransitionTask();
   const deleteTask = useDeleteTask();
 
   useEffect(() => {
-    setSelectedId(null);
-  }, [projectId]);
+    setSelectedId(taskParam);
+    setFocusRunId(runParam);
+  }, [projectId, taskParam, runParam]);
 
   return (
     <div className="space-y-4">

@@ -1,5 +1,6 @@
 import { apiClient } from "@/lib/api/client";
 import { createTaskRun } from "@/lib/api/task-runs";
+import { updateTask } from "@/lib/api/tasks";
 import { generateBlog } from "@/lib/api/blog";
 import type { AgentInputSchema } from "@/lib/agents/input-schemas";
 import { runInputsFromValues } from "@/lib/agents/input-schemas";
@@ -16,7 +17,14 @@ export type LaunchResult =
   | { kind: "pentester"; run: PentestRun; task: Task }
   | { kind: "pr_reviewer"; run: ReviewRun; task: Task }
   | { kind: "article_writer"; run: BlogRun; task: Task }
-  | { kind: "researcher"; brief: unknown; task: Task };
+  | { kind: "researcher"; brief: ResearchBrief; task: Task };
+
+interface ResearchBrief {
+  topic?: string;
+  summary?: string;
+  findings?: { claim?: string; source_url?: string }[];
+  sources?: { url?: string; title?: string }[];
+}
 
 /**
  * After the board task exists, kick off the right executor for the chosen agent.
@@ -37,10 +45,10 @@ export async function launchAgentForTask(opts: {
         target: values.target.trim(),
         scan_mode: (values.scan_mode || "quick") as ScanMode,
       };
-      if (values.max_budget.trim()) {
+      if (values.max_budget?.trim()) {
         payload.max_budget = parseInt(values.max_budget, 10);
       }
-      if (values.instruction.trim()) {
+      if (values.instruction?.trim()) {
         payload.instruction = values.instruction.trim();
       }
       const { data: run } = await apiClient.post<PentestRun>(
@@ -63,7 +71,7 @@ export async function launchAgentForTask(opts: {
         briefs: [
           {
             topic: values.topic.trim(),
-            context: values.context.trim() || undefined,
+            context: values.context?.trim() || undefined,
           },
         ],
         model: values.model?.trim() || undefined,
@@ -72,15 +80,20 @@ export async function launchAgentForTask(opts: {
     }
     case "researcher": {
       // Research runs synchronously and can take longer than the default 30s.
-      const { data: brief } = await apiClient.post(
+      const { data: brief } = await apiClient.post<ResearchBrief>(
         "/research",
         {
           topic: values.topic.trim(),
-          context: values.context.trim() || undefined,
+          context: values.context?.trim() || undefined,
         },
         { timeout: 180_000 }
       );
-      return { kind: "researcher", brief, task };
+      // Persist findings on the board task so Create & run leaves a readable artefact.
+      const updated = await updateTask(task.id, {
+        description: formatResearchBrief(brief, task.description),
+        status: "done",
+      }).catch(() => task);
+      return { kind: "researcher", brief, task: updated };
     }
     default: {
       const inputs = runInputsFromValues(schema, values);
@@ -88,12 +101,27 @@ export async function launchAgentForTask(opts: {
         agent_id: agent.id,
       };
       if (Object.keys(inputs).length) payload.inputs = inputs;
-      // Specialists store their prompt in title/description already.
-      if (schema.kind === "task_run" && values.description?.trim()) {
-        // title+description used by default; no override needed
-      }
       const run = await createTaskRun(task.id, payload);
       return { kind: "task_run", run, task };
     }
   }
+}
+
+function formatResearchBrief(
+  brief: ResearchBrief,
+  prior?: string | null
+): string {
+  const parts: string[] = [];
+  if (prior?.trim()) parts.push(prior.trim());
+  if (brief.summary?.trim()) {
+    parts.push(`## Summary\n\n${brief.summary.trim()}`);
+  }
+  if (brief.findings?.length) {
+    const lines = brief.findings.map((f) => {
+      const claim = f.claim?.trim() || "(finding)";
+      return f.source_url ? `- ${claim} ([source](${f.source_url}))` : `- ${claim}`;
+    });
+    parts.push(`## Findings\n\n${lines.join("\n")}`);
+  }
+  return parts.join("\n\n") || prior || "";
 }

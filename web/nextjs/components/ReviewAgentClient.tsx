@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { apiClient } from '@/lib/api/client';
 import { ReviewRun } from '@/types/review';
 import { ReviewRunForm } from './ReviewRunForm';
@@ -15,6 +16,9 @@ interface AgentSummary {
 }
 
 export function ReviewAgentClient() {
+  const searchParams = useSearchParams();
+  const runParam = searchParams.get('run');
+
   const [agentId, setAgentId] = useState('');
   const [loadError, setLoadError] = useState('');
   const [createdRun, setCreatedRun] = useState<ReviewRun | null>(null);
@@ -39,6 +43,25 @@ export function ReviewAgentClient() {
       }
     })();
   }, []);
+
+  // Deep-link from Task Manager Create & run: ?agent=review&run=<id>
+  useEffect(() => {
+    if (!runParam) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { data } = await apiClient.get<ReviewRun>(`/review-runs/${runParam}`);
+        if (cancelled) return;
+        setCreatedRun(data);
+        setTab('run');
+      } catch {
+        // Leave the form; run may still appear under History.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [runParam]);
 
   if (loadError) {
     return (
