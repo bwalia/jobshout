@@ -9,17 +9,11 @@ module.exports = {
   theme: {
     extend: {
       fontFamily: {
-        // JIRA / Confluence-style: Inter for body, Inter Tight for display
-        // (headings, big numerics). Falls back to system stack if Google
-        // Fonts is unreachable.
         sans: [
           "var(--font-sans)",
           "-apple-system",
           "BlinkMacSystemFont",
           "Segoe UI",
-          "Roboto",
-          "Helvetica",
-          "Arial",
           "sans-serif",
         ],
         display: [
@@ -27,11 +21,8 @@ module.exports = {
           "var(--font-sans)",
           "-apple-system",
           "BlinkMacSystemFont",
-          "Segoe UI",
-          "Roboto",
           "sans-serif",
         ],
-        // Telemetry voice — agent ids, timestamps, metrics.
         mono: [
           "var(--font-mono)",
           "ui-monospace",
@@ -42,10 +33,9 @@ module.exports = {
           "monospace",
         ],
       },
-      // JIRA's tighter type scale: smaller, denser, more lines per screen.
       fontSize: {
         "2xs": ["10px", { lineHeight: "14px", letterSpacing: "0.02em" }],
-        xs: ["11px", { lineHeight: "16px", letterSpacing: "0.005em" }],
+        xs: ["12px", { lineHeight: "16px" }],
         sm: ["13px", { lineHeight: "20px" }],
         base: ["14px", { lineHeight: "22px" }],
         lg: ["16px", { lineHeight: "24px" }],
@@ -120,12 +110,11 @@ module.exports = {
         sm: "calc(var(--radius) - 6px)",
       },
       boxShadow: {
-        "card": "0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px -1px rgba(0, 0, 0, 0.04)",
-        "card-hover": "0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.05)",
-        // Amber signal glow for the primary CTA / focused control.
-        "signal": "0 0 0 1px hsl(var(--signal) / 0.35), 0 4px 20px -4px hsl(var(--signal) / 0.4)",
-        // Soft green glow for a live/broadcasting element.
-        "glow-live": "0 0 16px -2px hsl(var(--signal-live) / 0.55)",
+        card: "0 1px 2px 0 rgba(0, 0, 0, 0.04)",
+        "card-hover": "0 2px 8px -2px rgba(0, 0, 0, 0.08)",
+        // Kept as no-ops so existing class names don't break; glows removed.
+        signal: "none",
+        "glow-live": "none",
       },
     },
   },

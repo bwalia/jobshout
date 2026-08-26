@@ -1,10 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Sidebar } from "@/components/layout/Sidebar";
-import { Topbar } from "@/components/layout/Topbar";
-import { ChatDock } from "@/components/chat/ChatDock";
+import { AppShell } from "@/components/layout/AppShell";
 import { useAuthStore } from "@/lib/store/auth-store";
 import { fetchCurrentUser } from "@/lib/auth/auth";
 
@@ -15,7 +13,6 @@ export default function AppLayout({
 }) {
   const router = useRouter();
   const { isAuthenticated, isLoading, setUser, setLoading } = useAuthStore();
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   useEffect(() => {
     async function hydrateUser() {
@@ -30,9 +27,9 @@ export default function AppLayout({
     }
 
     if (!isAuthenticated && !isLoading) {
-      hydrateUser();
+      void hydrateUser();
     } else if (isLoading) {
-      hydrateUser();
+      void hydrateUser();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -52,24 +49,5 @@ export default function AppLayout({
     return null;
   }
 
-  return (
-    <div className="min-h-screen bg-background">
-      <Sidebar
-        collapsed={sidebarCollapsed}
-        onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
-      />
-
-      <div
-        className={`flex flex-1 flex-col transition-all duration-300 ${
-          sidebarCollapsed ? "ml-[72px]" : "ml-64"
-        }`}
-      >
-        <Topbar onMenuToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
-        <main className="flex-1 overflow-y-auto p-6 scrollbar-thin">
-          {children}
-        </main>
-      </div>
-      <ChatDock />
-    </div>
-  );
+  return <AppShell>{children}</AppShell>;
 }

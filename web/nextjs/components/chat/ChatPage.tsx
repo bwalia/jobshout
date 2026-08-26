@@ -1,21 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Sparkles } from "lucide-react";
 import {
   useChatMessages,
   useChatSessions,
   useCreateChatSession,
-  useDeleteChatSession,
   awaitingAssistant,
+  chatKeys,
 } from "@/lib/hooks/useChat";
 import { streamChatMessage } from "@/lib/api/chat";
-import { chatKeys } from "@/lib/hooks/useChat";
 import { useQueryClient } from "@tanstack/react-query";
 import type { ChatMessage } from "@/lib/types/chat";
 import { MessageList } from "./MessageList";
 import { Composer } from "./Composer";
-import { SessionSidebar } from "./SessionSidebar";
 import { cn } from "@/lib/utils/cn";
 
 const EXAMPLES = [
@@ -29,10 +28,12 @@ const EXAMPLES = [
 
 export function ChatPage({ className }: { className?: string }) {
   const qc = useQueryClient();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const sessionsQuery = useChatSessions();
   const createSession = useCreateChatSession();
-  const deleteSession = useDeleteChatSession();
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const sessionFromUrl = searchParams.get("session");
+  const [sessionId, setSessionId] = useState<string | null>(sessionFromUrl);
   const [draft, setDraft] = useState("");
   const [failedDraft, setFailedDraft] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -41,18 +42,29 @@ export function ChatPage({ className }: { className?: string }) {
   const [pending, setPending] = useState<ChatMessage | null>(null);
   const messagesQuery = useChatMessages(sessionId, { pollForReply: !busy });
 
-  const sessions = sessionsQuery.data?.data ?? [];
+  const sessions = useMemo(
+    () => sessionsQuery.data?.data ?? [],
+    [sessionsQuery.data]
+  );
 
   useEffect(() => {
-    if (!sessionId && sessions[0]) setSessionId(sessions[0].id);
-  }, [sessionId, sessions]);
+    if (sessionFromUrl) {
+      setSessionId(sessionFromUrl);
+      return;
+    }
+    if (!sessionId && sessions[0]) {
+      setSessionId(sessions[0].id);
+      router.replace(`/chat?session=${sessions[0].id}`);
+    }
+  }, [sessionFromUrl, sessionId, sessions, router]);
 
   const ensureSession = useCallback(async () => {
     if (sessionId) return sessionId;
     const s = await createSession.mutateAsync();
     setSessionId(s.id);
+    router.replace(`/chat?session=${s.id}`);
     return s.id;
-  }, [sessionId, createSession]);
+  }, [sessionId, createSession, router]);
 
   const send = useCallback(
     async (text: string, token?: string) => {
@@ -93,8 +105,6 @@ export function ChatPage({ className }: { className?: string }) {
           void qc.invalidateQueries({ queryKey: chatKeys.messages(id) });
         }
         if (isDisconnectError(err)) {
-          // Reload aborted the POST; the server finishes the turn and we catch
-          // up by polling messages.
           return;
         }
         setPending(null);
@@ -126,29 +136,13 @@ export function ChatPage({ className }: { className?: string }) {
   }, [messagesQuery.data, pending]);
 
   return (
-    <div className={cn("flex h-[calc(100vh-8rem)] overflow-hidden rounded-xl border border-border bg-card", className)}>
-      <SessionSidebar
-        sessions={sessions}
-        activeId={sessionId}
-        onSelect={(id) => {
-          setPending(null);
-          setSessionId(id);
-        }}
-        onNew={() => {
-          setPending(null);
-          createSession.mutate(undefined, {
-            onSuccess: (s) => setSessionId(s.id),
-          });
-        }}
-        onDelete={(id) => {
-          deleteSession.mutate(id, {
-            onSuccess: () => {
-              if (sessionId === id) setSessionId(null);
-            },
-          });
-        }}
-      />
-      <div className="flex min-w-0 flex-1 flex-col p-4">
+    <div
+      className={cn(
+        "flex h-[calc(100dvh-3rem)] flex-col bg-background lg:h-screen",
+        className
+      )}
+    >
+      <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-4 py-4">
         {messages.length === 0 && !busy && !pending ? (
           <EmptyState onPick={(p) => { setDraft(""); void send(p); }} />
         ) : (
@@ -190,10 +184,10 @@ function EmptyState({ onPick }: { onPick: (prompt: string) => void }) {
     <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
       <Sparkles className="h-8 w-8 text-primary" />
       <div>
-        <h2 className="font-display text-lg font-semibold">JobShout AI</h2>
+        <h2 className="text-lg font-semibold tracking-tight">JobShout</h2>
         <p className="mt-1 max-w-md text-sm text-muted-foreground">
-          Drive agents, tasks, workflows and the rest of the platform in plain language.
-          This chat is separate from Telegram — each keeps its own history.
+          Drive agents, tasks, and workflows in plain language. Run results show
+          up as compact cards you can open in Task Manager.
         </p>
       </div>
       <div className="flex max-w-lg flex-wrap justify-center gap-2">
@@ -202,7 +196,7 @@ function EmptyState({ onPick }: { onPick: (prompt: string) => void }) {
             key={p}
             type="button"
             onClick={() => onPick(p)}
-            className="rounded-full border border-border px-3 py-1.5 text-xs hover:border-primary/40 hover:bg-primary/10"
+            className="rounded-lg border border-border px-3 py-1.5 text-xs hover:border-primary/40 hover:bg-primary/10"
           >
             {p}
           </button>

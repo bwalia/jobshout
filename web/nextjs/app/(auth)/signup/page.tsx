@@ -32,7 +32,7 @@ export default function SignupPage() {
         org_name: orgName,
       });
       setUser(data.user);
-      router.push("/dashboard");
+      router.push("/chat");
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : "Registration failed. Try again.";
