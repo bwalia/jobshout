@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Bug, Plus, Rocket, X } from "lucide-react";
+import { Bug, Loader2, Plus, Rocket, X } from "lucide-react";
 
 import { AgentInputFields } from "@/components/task-manager/AgentInputFields";
 import {
   defaultValuesForSchema,
   getAgentInputSchema,
+  isSpecialistSchema,
   schemaValuesValid,
   validateSchemaValues,
 } from "@/lib/agents/input-schemas";
@@ -65,7 +66,7 @@ export function RunTaskDialog({
     () => getAgentInputSchema(selectedAgent),
     [selectedAgent]
   );
-  const isSpecialist = schema.kind !== "task_run";
+  const isSpecialist = isSpecialistSchema(schema);
 
   const [values, setValues] = useState<Record<string, string>>(() =>
     defaultValuesForSchema(getAgentInputSchema(null))
@@ -78,11 +79,16 @@ export function RunTaskDialog({
   const [extraSlug, setExtraSlug] = useState("");
   const [debug, setDebug] = useState(false);
   const [launching, setLaunching] = useState(false);
+  const [launchError, setLaunchError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  /** After a failed submit, keep live-validating so errors clear as the user fixes fields. */
+  const [touchedSubmit, setTouchedSubmit] = useState(false);
 
   useEffect(() => {
     setValues(defaultValuesForSchema(schema));
     setFieldErrors({});
+    setTouchedSubmit(false);
+    setLaunchError(null);
   }, [schema]);
 
   const availableSlugs = useMemo(
@@ -104,22 +110,42 @@ export function RunTaskDialog({
     setExtraSlug("");
   }
 
+  function onSpecialistFieldChange(key: string, value: string) {
+    const next = { ...values, [key]: value };
+    setValues(next);
+    // Always refresh this field's error once the user has attempted to run,
+    // or whenever that field already showed an error — so fixing a blank
+    // required field clears the message immediately.
+    if (touchedSubmit || fieldErrors[key]) {
+      setFieldErrors(validateSchemaValues(schema, next));
+    }
+  }
+
+  const busy = launching || createRun.isPending;
   const canRun =
-    Boolean(agentId) &&
-    !createRun.isPending &&
-    !launching &&
+    Boolean(selectedAgent) &&
+    !busy &&
     (!isSpecialist || schemaValuesValid(schema, values));
 
   async function handleRun() {
-    if (!agentId || !selectedAgent) return;
+    if (busy) return;
+    if (!agentId || !selectedAgent) {
+      setLaunchError("Choose an agent first");
+      return;
+    }
 
+    setLaunchError(null);
+
+    // Specialist path: schema fields only — never mix with generic overrides.
     if (isSpecialist) {
+      setTouchedSubmit(true);
       const errs = validateSchemaValues(schema, values);
       setFieldErrors(errs);
       if (Object.keys(errs).length > 0) {
-        toast.error("Fix the highlighted fields before running");
+        setLaunchError("Fix the highlighted fields before running");
         return;
       }
+
       setLaunching(true);
       try {
         const result = await launchAgentForTask({
@@ -136,13 +162,17 @@ export function RunTaskDialog({
         onSpecialistLaunched?.(result);
         onClose();
       } catch (err) {
-        toast.error(apiErrorMessage(err, "Failed to launch agent"));
+        const msg = apiErrorMessage(err, "Failed to launch agent");
+        setLaunchError(msg);
+        toast.error(msg);
       } finally {
         setLaunching(false);
       }
       return;
     }
 
+    // Generic path: task-run only — no schema field validation.
+    setFieldErrors({});
     const payload: CreateTaskRunRequest = {
       agent_id: agentId,
       debug,
@@ -153,19 +183,27 @@ export function RunTaskDialog({
     if (modelName.trim()) payload.model_name = modelName.trim();
     if (selectedSlugs.length) payload.skill_slugs = selectedSlugs;
 
+    setLaunching(true);
     try {
       const run = await createRun.mutateAsync({ taskId: task.id, payload });
+      toast.success("Agent run started");
       onLaunched(run);
       onClose();
-    } catch {
-      // toast surfaced by the hook
+    } catch (err) {
+      const msg = apiErrorMessage(err, "Failed to start run");
+      setLaunchError(msg);
+      // Hook may also toast; keep inline error for the dialog.
+    } finally {
+      setLaunching(false);
     }
   }
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onClick={onClose}
+      onClick={() => {
+        if (!busy) onClose();
+      }}
     >
       <div
         className="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-xl border border-border bg-card shadow-xl"
@@ -183,7 +221,8 @@ export function RunTaskDialog({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            disabled={busy}
+            className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
             aria-label="Close"
           >
             <X className="h-5 w-5" />
@@ -197,7 +236,11 @@ export function RunTaskDialog({
             </label>
             <select
               value={agentId}
-              onChange={(e) => setAgentId(e.target.value)}
+              onChange={(e) => {
+                setAgentId(e.target.value);
+                setLaunchError(null);
+              }}
+              disabled={busy}
               className={inputCls}
             >
               <option value="">— Choose an agent —</option>
@@ -215,26 +258,18 @@ export function RunTaskDialog({
             )}
           </div>
 
-          {selectedAgent && isSpecialist && (
+          {selectedAgent && isSpecialist ? (
             <AgentInputFields
               fields={schema.fields}
               values={values}
-              onChange={(k, v) => {
-                setValues((prev) => {
-                  const next = { ...prev, [k]: v };
-                  if (fieldErrors[k]) {
-                    setFieldErrors(validateSchemaValues(schema, next));
-                  }
-                  return next;
-                });
-              }}
+              onChange={onSpecialistFieldChange}
               errors={fieldErrors}
-              disabled={launching}
+              disabled={busy}
               autoFocusFirst
             />
-          )}
+          ) : null}
 
-          {selectedAgent && !isSpecialist && (
+          {selectedAgent && !isSpecialist ? (
             <>
               <div className="space-y-2">
                 <label className="text-sm font-medium">
@@ -249,6 +284,7 @@ export function RunTaskDialog({
                           key={slug}
                           type="button"
                           onClick={() => toggleSlug(slug)}
+                          disabled={busy}
                           className={
                             "rounded-full border px-3 py-1 font-mono text-xs transition-colors " +
                             (on
@@ -278,13 +314,15 @@ export function RunTaskDialog({
                         addExtraSlug();
                       }
                     }}
+                    disabled={busy}
                     placeholder="add a skill by slug, e.g. web-search"
                     className={inputCls + " font-mono"}
                   />
                   <button
                     type="button"
                     onClick={addExtraSlug}
-                    className="inline-flex h-9 shrink-0 items-center gap-1 rounded-md border border-border bg-background px-3 text-sm hover:bg-accent"
+                    disabled={busy}
+                    className="inline-flex h-9 shrink-0 items-center gap-1 rounded-md border border-border bg-background px-3 text-sm hover:bg-accent disabled:opacity-50"
                   >
                     <Plus className="h-4 w-4" /> Add
                   </button>
@@ -301,6 +339,7 @@ export function RunTaskDialog({
                         e.target.value as CreateTaskRunRequest["engine"] | ""
                       )
                     }
+                    disabled={busy}
                     className={inputCls}
                   >
                     <option value="">Agent default</option>
@@ -316,6 +355,7 @@ export function RunTaskDialog({
                     value={modelProvider}
                     onChange={(e) => setModelProvider(e.target.value)}
                     placeholder="agent default"
+                    disabled={busy}
                     className={inputCls + " font-mono"}
                   />
                 </div>
@@ -326,6 +366,7 @@ export function RunTaskDialog({
                     value={modelName}
                     onChange={(e) => setModelName(e.target.value)}
                     placeholder="agent default"
+                    disabled={busy}
                     className={inputCls + " font-mono"}
                   />
                 </div>
@@ -343,7 +384,8 @@ export function RunTaskDialog({
                   value={promptOverride}
                   onChange={(e) => setPromptOverride(e.target.value)}
                   placeholder={derivedPrompt}
-                  className="w-full resize-none rounded-md border border-input bg-background px-3 py-2 font-mono text-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  disabled={busy}
+                  className="w-full resize-none rounded-md border border-input bg-background px-3 py-2 font-mono text-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
                 />
               </div>
 
@@ -352,6 +394,7 @@ export function RunTaskDialog({
                   type="checkbox"
                   checked={debug}
                   onChange={(e) => setDebug(e.target.checked)}
+                  disabled={busy}
                   className="h-4 w-4 rounded border-input"
                 />
                 <Bug className="h-4 w-4 text-muted-foreground" />
@@ -361,6 +404,15 @@ export function RunTaskDialog({
                 </span>
               </label>
             </>
+          ) : null}
+
+          {launchError && (
+            <div
+              className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              role="alert"
+            >
+              {launchError}
+            </div>
           )}
         </div>
 
@@ -368,7 +420,8 @@ export function RunTaskDialog({
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-9 items-center rounded-md border border-border bg-background px-4 text-sm font-medium hover:bg-accent"
+            disabled={busy}
+            className="inline-flex h-9 items-center rounded-md border border-border bg-background px-4 text-sm font-medium hover:bg-accent disabled:opacity-50"
           >
             Cancel
           </button>
@@ -378,8 +431,12 @@ export function RunTaskDialog({
             disabled={!canRun}
             className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
           >
-            <Rocket className="h-4 w-4" />
-            {createRun.isPending || launching ? "Starting…" : "Run now"}
+            {busy ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Rocket className="h-4 w-4" />
+            )}
+            {busy ? "Starting…" : "Run now"}
           </button>
         </div>
       </div>

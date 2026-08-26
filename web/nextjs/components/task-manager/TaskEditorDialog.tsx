@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Rocket, X } from "lucide-react";
+import { Loader2, Rocket, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { AgentInputFields } from "@/components/task-manager/AgentInputFields";
@@ -343,6 +343,7 @@ function CreateTaskForm({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [launching, setLaunching] = useState(false);
+  const [touchedSubmit, setTouchedSubmit] = useState(false);
 
   const selectedAgent = useMemo(
     () => agents.find((a) => a.id === agentId) ?? null,
@@ -360,6 +361,7 @@ function CreateTaskForm({
     setValues(defaultValuesForSchema(schema));
     setFieldErrors({});
     setFormError(null);
+    setTouchedSubmit(false);
   }, [schema]);
 
   const pending = createTask.isPending || launching;
@@ -369,14 +371,15 @@ function CreateTaskForm({
   const createReady = schemaOk && Boolean(resolvedProjectId);
 
   function setValue(key: string, value: string) {
-    setValues((prev) => {
-      const next = { ...prev, [key]: value };
-      if (fieldErrors[key]) {
-        const errs = validateSchemaValues(schema, next);
-        setFieldErrors(errs);
-      }
-      return next;
-    });
+    const next = { ...values, [key]: value };
+    setValues(next);
+    // Re-validate after a failed submit (or when this field already has an
+    // error) so filling a blank required field clears the message immediately.
+    if (touchedSubmit || fieldErrors[key]) {
+      const errs = validateSchemaValues(schema, next);
+      setFieldErrors(errs);
+      if (Object.keys(errs).length === 0) setFormError(null);
+    }
   }
 
   /** Re-validate schema + project; returns false and surfaces errors if invalid. */
@@ -389,6 +392,7 @@ function CreateTaskForm({
       setFormError("Choose a project");
       return false;
     }
+    setTouchedSubmit(true);
     const errs = validateSchemaValues(schema, values);
     setFieldErrors(errs);
     if (Object.keys(errs).length > 0) {
@@ -419,19 +423,23 @@ function CreateTaskForm({
 
   async function handleCreateOnly(e: React.FormEvent) {
     e.preventDefault();
+    if (pending) return;
     if (!assertCreateReady()) return;
     try {
       const created = await createBoardTask();
       onSaved?.(created);
       onClose();
     } catch (err) {
+      setFormError(apiErrorMessage(err, "Failed to create task"));
       toast.error(apiErrorMessage(err, "Failed to create task"));
     }
   }
 
   async function handleCreateAndRun() {
+    if (pending) return;
     if (!assertCreateReady() || !selectedAgent) return;
     setLaunching(true);
+    setFormError(null);
     try {
       const created = await createBoardTask();
       onSaved?.(created);
@@ -455,7 +463,9 @@ function CreateTaskForm({
       onLaunched?.(result);
       onClose();
     } catch (err) {
-      toast.error(apiErrorMessage(err, "Failed to launch agent"));
+      const msg = apiErrorMessage(err, "Failed to launch agent");
+      setFormError(msg);
+      toast.error(msg);
     } finally {
       setLaunching(false);
     }
@@ -566,7 +576,8 @@ function CreateTaskForm({
         <button
           type="button"
           onClick={onClose}
-          className="inline-flex h-9 items-center rounded-md border border-border bg-background px-4 text-sm font-medium hover:bg-accent"
+          disabled={pending}
+          className="inline-flex h-9 items-center rounded-md border border-border bg-background px-4 text-sm font-medium hover:bg-accent disabled:opacity-50"
         >
           Cancel
         </button>
@@ -583,7 +594,11 @@ function CreateTaskForm({
           disabled={pending || !createReady}
           className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
         >
-          <Rocket className="h-4 w-4" />
+          {launching ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Rocket className="h-4 w-4" />
+          )}
           {launching ? "Starting…" : "Create & run"}
         </button>
       </div>

@@ -223,11 +223,16 @@ const SCHEMAS: Record<AgentBuiltin, AgentInputSchema> = {
   },
 };
 
+/** True when this schema launches via a specialist API (not generic task run). */
+export function isSpecialistSchema(schema: AgentInputSchema): boolean {
+  return schema.kind !== "task_run" && schema.kind !== "images";
+}
+
 /** Resolve the input schema for an agent (builtin specialist or generic). */
 export function getAgentInputSchema(agent: Agent | null | undefined): AgentInputSchema {
   if (!agent) return GENERIC;
   const builtin = agent.metadata?.builtin;
-  if (builtin && builtin in SCHEMAS) {
+  if (typeof builtin === "string" && builtin in SCHEMAS) {
     return SCHEMAS[builtin as AgentBuiltin];
   }
   return GENERIC;
