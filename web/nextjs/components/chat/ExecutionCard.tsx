@@ -1,10 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import {
   AlertTriangle,
   CheckCircle2,
   ChevronDown,
+  ExternalLink,
   Loader2,
   Wrench,
   Zap,
@@ -14,10 +16,22 @@ import { useExecution } from "@/lib/hooks/useChatDetails";
 
 function StatusPill({ status }: { status: string }) {
   const map: Record<string, { cls: string; icon: React.ReactNode }> = {
-    completed: { cls: "text-signal-live", icon: <CheckCircle2 className="h-3.5 w-3.5" /> },
-    running: { cls: "text-signal-live", icon: <Loader2 className="h-3.5 w-3.5 animate-spin" /> },
-    pending: { cls: "text-muted-foreground", icon: <Loader2 className="h-3.5 w-3.5 animate-spin" /> },
-    failed: { cls: "text-signal-error", icon: <AlertTriangle className="h-3.5 w-3.5" /> },
+    completed: {
+      cls: "text-signal-live",
+      icon: <CheckCircle2 className="h-3.5 w-3.5" />,
+    },
+    running: {
+      cls: "text-signal-live",
+      icon: <Loader2 className="h-3.5 w-3.5 animate-spin" />,
+    },
+    pending: {
+      cls: "text-muted-foreground",
+      icon: <Loader2 className="h-3.5 w-3.5 animate-spin" />,
+    },
+    failed: {
+      cls: "text-signal-error",
+      icon: <AlertTriangle className="h-3.5 w-3.5" />,
+    },
   };
   const m = map[status] ?? map.completed;
   return (
@@ -28,22 +42,21 @@ function StatusPill({ status }: { status: string }) {
   );
 }
 
-/**
- * The Agent Activity card for a chat turn that ran an agent. Fetches the real
- * execution by id (from the message metadata) and shows a safe execution
- * summary — agent activity, model, tokens, cost, duration — plus an expandable
- * tool timeline. Tool inputs/outputs are NOT shown (they can carry secrets);
- * only the tool name, outcome and duration.
- */
+/** Compact agent-run card for chat. Links into Task Manager for full detail. */
 export function ExecutionCard({
   executionId,
   agentName,
+  agentId,
 }: {
   executionId: string;
   agentName?: string;
+  agentId?: string;
 }) {
   const [open, setOpen] = useState(false);
   const { data: exec, isLoading } = useExecution(executionId);
+  const detailHref = agentId
+    ? `/panel/task-manager?agent=${agentId}&run=${executionId}`
+    : `/panel/task-manager`;
 
   if (isLoading || !exec) {
     return (
@@ -70,10 +83,18 @@ export function ExecutionCard({
           <span>${exec.cost_usd.toFixed(4)}</span>
           <span>{duration}</span>
         </span>
+        <Link
+          href={detailHref}
+          className="rounded p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
+          title="Open in Task Manager"
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+        </Link>
       </div>
 
       {(tools.length > 0 || exec.model_name) && (
         <button
+          type="button"
           onClick={() => setOpen((v) => !v)}
           className="flex w-full items-center gap-2 border-t border-border px-3 py-1.5 text-left text-xs text-muted-foreground hover:bg-accent"
         >
@@ -82,7 +103,9 @@ export function ExecutionCard({
           {exec.iterations ? ` · ${exec.iterations} steps` : ""}
           {exec.model_name ? ` · ${exec.model_name}` : ""}
           <ChevronDown
-            className={"ml-auto h-4 w-4 transition-transform " + (open ? "rotate-180" : "")}
+            className={
+              "ml-auto h-4 w-4 transition-transform " + (open ? "rotate-180" : "")
+            }
           />
         </button>
       )}

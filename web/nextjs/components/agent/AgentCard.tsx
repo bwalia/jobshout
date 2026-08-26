@@ -50,7 +50,7 @@ export function AgentCard({ agent, currentTask }: AgentCardProps) {
 
   return (
     <Link
-      href={`/agents/${agent.id}`}
+      href={`/panel/task-manager?agent=${agent.id}`}
       className="group flex flex-col gap-4 rounded-xl border border-border bg-card p-5 shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:shadow-card-hover"
     >
       {/* Top row: avatar + status */}

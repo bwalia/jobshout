@@ -22,7 +22,7 @@ export default function LoginPage() {
     try {
       const data = await loginUser({ email, password });
       setUser(data.user);
-      router.push("/dashboard");
+      router.push("/chat");
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : "Login failed. Check your credentials.";

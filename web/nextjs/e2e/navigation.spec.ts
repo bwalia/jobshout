@@ -12,28 +12,25 @@ test.describe("Navigation & Layout", () => {
     await loginViaUI(page, creds.email, creds.password);
   });
 
-  const sidebarLinks = [
-    { href: "/dashboard", heading: "Dashboard" },
-    { href: "/agents", heading: "Agents" },
-    { href: "/projects", heading: "Projects" },
-    { href: "/task-manager", heading: "Multi-Level Task Manager" },
-    { href: "/articles", heading: "Articles" },
-    { href: "/workflows", heading: "Workflows" },
+  const panels = [
+    { href: "/panel/dashboard", heading: /Good (morning|afternoon|evening)/ },
+    { href: "/panel/task-board", heading: /Task Board/ },
+    { href: "/panel/task-manager", heading: /Task Manager/ },
+    { href: "/panel/workflows", heading: /Workflows/ },
   ];
 
-  for (const { href, heading } of sidebarLinks) {
-    test(`sidebar navigates to ${href}`, async ({ page }) => {
-      const link = page.locator(`nav a[href="${href}"]`);
-      await expect(link).toBeVisible({ timeout: 5_000 });
-      await link.click();
-      await page.waitForURL(`**${href}`, { timeout: 10_000 });
+  for (const { href, heading } of panels) {
+    test(`opens panel ${href}`, async ({ page }) => {
+      await page.goto(href);
+      await page.waitForURL(`**${href}**`, { timeout: 10_000 });
       await expect(page.locator("h1").first()).toContainText(heading, {
         timeout: 5_000,
       });
     });
   }
 
-  test("dashboard shows stats cards", async ({ page }) => {
-    await expect(page.locator("h1")).toContainText("Dashboard");
+  test("chat is home after login", async ({ page }) => {
+    await expect(page).toHaveURL(/\/chat/);
+    await expect(page.getByRole("button", { name: /new chat/i })).toBeVisible();
   });
 });

@@ -1,14 +1,18 @@
 "use client";
 
+import { Suspense } from "react";
 import { ChatPage } from "@/components/chat/ChatPage";
 
 export default function ChatRoutePage() {
   return (
-    <div>
-      <h1 className="mb-4 font-display text-2xl font-semibold tracking-tight">
-        Chat
-      </h1>
+    <Suspense
+      fallback={
+        <div className="flex h-screen items-center justify-center text-sm text-muted-foreground">
+          Loading chat…
+        </div>
+      }
+    >
       <ChatPage />
-    </div>
+    </Suspense>
   );
 }

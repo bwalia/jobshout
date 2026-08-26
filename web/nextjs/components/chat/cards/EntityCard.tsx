@@ -43,26 +43,36 @@ export function EntityCard({ entity }: { entity: EntityRef }) {
 function fallbackHref(entity: EntityRef): string {
   switch (entity.kind) {
     case "agent":
-      return entity.id ? `/agents/${entity.id}` : "/agents";
+      return entity.id
+        ? `/panel/task-manager?agent=${entity.id}`
+        : "/panel/task-manager";
     case "task":
-      return "/task-manager";
+      return entity.id
+        ? `/panel/task-board?task=${entity.id}`
+        : "/panel/task-board";
     case "project":
-      return entity.id ? `/projects/${entity.id}` : "/projects";
+      return entity.id
+        ? `/panel/task-manager?project=${entity.id}`
+        : "/panel/task-manager";
     case "workflow":
     case "workflow_run":
-      return entity.id ? `/workflows/${entity.id}` : "/workflows";
+      return entity.id ? `/workflows/${entity.id}` : "/panel/workflows";
     case "article_run":
-      return entity.id ? `/articles/${entity.id}` : "/articles";
+      return entity.id ? `/articles/${entity.id}` : "/panel/task-manager?agent=articles";
     case "pentest_run":
-      return "/agents/pentest";
+      return entity.id
+        ? `/panel/task-manager?agent=pentest&run=${entity.id}`
+        : "/panel/task-manager?agent=pentest";
     case "review_run":
-      return "/agents/review";
+      return entity.id
+        ? `/panel/task-manager?agent=review&run=${entity.id}`
+        : "/panel/task-manager?agent=review";
     case "image":
-      return "/images";
+      return "/panel/task-manager?agent=images";
     case "sprint":
-      return "/sprints";
+      return "/panel/sprints";
     default:
-      return "/dashboard";
+      return "/panel/dashboard";
   }
 }
 
