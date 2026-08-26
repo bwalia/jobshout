@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>JobShout · Quick jobs, done by AI agents</title>
+<meta name="description" content="Brief a job in chat. Specialist AI agents run it with real tools, stream every step live, and wait for your approval on anything irreversible.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230d0c0a'/><circle cx='16' cy='16' r='5' fill='%232ee6a0'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/landing/scrollcraft.css">
+<link rel="stylesheet" href="/landing/app.css">
+<noscript><style>
+  /* Without JS the page reads as a finished story: every state shown settled. */
+  [data-sc-cue], [data-sc-in], [data-sc-stagger] > * { opacity: 1 !important; transform: none !important; }
+  [data-sc-reveal] { clip-path: none !important; }
+  .msg, .plan, .row, .artifact { opacity: 1 !important; transform: none !important; }
+  .hello { position: static !important; padding: 0 0 24px !important; }
+  .composer, .ticket__time, .pane__empty { display: none; }
+  .console__meter-fill { transform: none !important; }
+</style></noscript>
+</head>
+<body>
+
+<span data-sc-progress></span>
+<div class="sc-grain" aria-hidden="true"></div>
+
+<header class="bar">
+  <a class="bar__mark" href="#witness" aria-label="JobShout, back to top">
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><rect width="18" height="18" rx="4.5" fill="var(--sc-ink)"/><circle cx="9" cy="9" r="3.2" fill="var(--sc-canvas)"/><circle cx="9" cy="9" r="3.2" fill="var(--sc-accent)" opacity="0.9"/></svg>
+    <span>JobShout</span>
+  </a>
+  <span class="bar__env sc-label" title="Everything on this page computes from sample data in the page itself."><span class="env-full">sample run · illustrative data</span><span class="env-short">sample data</span></span>
+  <nav class="bar__nav" aria-label="Account">
+    <a class="bar__signin" href="/login">Sign in</a>
+    <a class="btn btn--pill" href="/signup">Shout a job</a>
+  </nav>
+</header>
+
+<main id="top">
+
+  <!-- ═══ ACT 1 · WITNESS · pin ═══════════════════════════════════════════
+       The console is already on when you land. Scrolling types the brief,
+       sends it, and watches an agent pick it up and plan. -->
+  <section id="witness" data-sc-act="pin" data-sc-span="2.6" data-sc-drift="#0d0c0a" aria-label="Demo: briefing a job">
+    <div data-sc-stage>
+      <div class="stage-center">
+        <div class="console" id="console1" data-sc-verify-state="phase:0">
+          <div class="console__head">
+            <span class="console__app mono">jobshout / new job</span>
+            <span class="chip" id="run-status" data-state="wait">queued to run</span>
+          </div>
+          <div class="console__body console__body--hero">
+
+            <section class="pane pane--chat" aria-label="Job chat">
+              <div class="thread">
+                <div class="hello" id="hello">
+                  <h1 class="hello__title">Shout a job.<br>Watch it get done.</h1>
+                  <p class="hello__sub">Automations, one-off tasks, small workflows. Specialist AI agents run them live, and anything irreversible waits for you.</p>
+                  <p class="hello__cta"><a class="btn btn--pill btn--lg" href="/signup">Shout a job</a></p>
+                </div>
+                <div class="msg msg--user" id="msg-brief">
+                  <p>Pull last month's invoices, chase the two that are overdue, and send me a one-page summary.</p>
+                </div>
+                <div class="msg msg--agent" id="msg-pickup">
+                  <span class="msg__who mono">Ledger</span>
+                  <p>Picked up. Courier will handle the emails. Drafting a plan now.</p>
+                </div>
+              </div>
+              <div class="composer" aria-hidden="true">
+                <p class="composer__field mono" id="typer" data-text="Pull last month's invoices, chase the two that are overdue, and send me a one-page summary."><span class="composer__ph">Describe the job</span><span class="composer__typed"></span><span class="caret"></span></p>
+                <span class="composer__send btn btn--pill btn--sm">Send</span>
+              </div>
+            </section>
+
+            <section class="pane pane--side" aria-label="Run activity">
+              <div class="pane__empty pane__empty--run" id="side-empty">
+                <p class="mono">no run yet</p>
+                <p>Activity streams here the moment a job starts.</p>
+              </div>
+              <div class="plan" id="plan">
+                <p class="plan__head mono">plan · drafted by Ledger</p>
+                <ol class="plan__list">
+                  <li class="plan__item"><span class="tick" aria-hidden="true"></span>Fetch July invoices</li>
+                  <li class="plan__item"><span class="tick" aria-hidden="true"></span>Flag overdue, draft chasers</li>
+                  <li class="plan__item"><span class="tick" aria-hidden="true"></span>Send chasers <span class="plan__gate mono">needs your approval</span></li>
+                  <li class="plan__item"><span class="tick" aria-hidden="true"></span>Write the one-page summary</li>
+                </ol>
+              </div>
+            </section>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ ACT 2 · RECOGNITION · flow ═══════════════════════════════════════
+       The one document-like moment: a compact help pane, three lines. -->
+  <section id="how" class="sc-section sc-section--after-pin" data-sc-act="flow" aria-label="What JobShout is">
+    <div class="sc-wrap how" data-sc-in data-sc-stagger="70">
+      <p class="how__tab mono" aria-hidden="true">jobshout / help</p>
+      <h2 class="h-med">What you just watched</h2>
+      <ol class="how__list">
+        <li>
+          <span class="how__n mono" aria-hidden="true">01</span>
+          <div><h3>Brief it in chat</h3><p class="p-soft">A sentence is enough. Add files, links or a schedule if you have one.</p></div>
+        </li>
+        <li>
+          <span class="how__n mono" aria-hidden="true">02</span>
+          <div><h3>Agents run it</h3><p class="p-soft">Each agent brings its own tools and skills. Every step streams as it happens.</p></div>
+        </li>
+        <li>
+          <span class="how__n mono" aria-hidden="true">03</span>
+          <div><h3>You hold the gate</h3><p class="p-soft">Risky steps pause and wait for your sign-off. Nothing ships behind your back.</p></div>
+        </li>
+      </ol>
+      <p class="how__note">Not a chatbot. Agents execute: real tool calls, real workflows, results you can open.</p>
+    </div>
+  </section>
+
+  <!-- ═══ ACT 3 · RANGE · pan ═════════════════════════════════════════════
+       The roster travels sideways: options, not an argument. -->
+  <section id="roster" data-sc-act="pan" data-sc-span="2.6" aria-label="Agent roster">
+    <div data-sc-stage>
+      <div class="rail" data-sc-pan="0.06">
+
+        <div class="rail__lead">
+          <h2 class="h-med">Pick the agent.<br>Or several.</h2>
+          <p class="p-soft">A sample of today's board. Every agent lists its skills, its tools, and the limits you set.</p>
+        </div>
+
+        <article class="agent" style="--i:1">
+          <div class="agent__in" data-sc-tilt="6">
+            <header class="agent__head"><h3>Ledger</h3><span class="dot dot--ok" title="available"></span></header>
+            <p class="agent__role p-soft">Billing and reconciliation</p>
+            <ul class="agent__skills" aria-label="Skills"><li>invoices</li><li>dunning</li><li>reports</li></ul>
+            <p class="agent__tools mono">stripe · sheets · email</p>
+          </div>
+        </article>
+
+        <article class="agent" style="--i:2">
+          <div class="agent__in" data-sc-tilt="6">
+            <header class="agent__head"><h3>Scout</h3><span class="dot dot--ok" title="available"></span></header>
+            <p class="agent__role p-soft">Research and monitoring</p>
+            <ul class="agent__skills" aria-label="Skills"><li>web research</li><li>watchlists</li><li>digests</li></ul>
+            <p class="agent__tools mono">browser · search · slack</p>
+          </div>
+        </article>
+
+        <article class="agent" style="--i:3">
+          <div class="agent__in" data-sc-tilt="6">
+            <header class="agent__head"><h3>Courier</h3><span class="dot dot--ok" title="available"></span></header>
+            <p class="agent__role p-soft">Email and messaging</p>
+            <ul class="agent__skills" aria-label="Skills"><li>outreach</li><li>replies</li><li>scheduling</li></ul>
+            <p class="agent__tools mono">gmail · slack · calendar</p>
+          </div>
+        </article>
+
+        <article class="agent" style="--i:4">
+          <div class="agent__in" data-sc-tilt="6">
+            <header class="agent__head"><h3>Draftsman</h3><span class="dot dot--ok" title="available"></span></header>
+            <p class="agent__role p-soft">Documents and decks</p>
+            <ul class="agent__skills" aria-label="Skills"><li>reports</li><li>proposals</li><li>briefs</li></ul>
+            <p class="agent__tools mono">docs · pdf · templates</p>
+          </div>
+        </article>
+
+        <article class="agent" style="--i:5">
+          <div class="agent__in" data-sc-tilt="6">
+            <header class="agent__head"><h3>Stagehand</h3><span class="dot dot--busy" title="on a job"></span></header>
+            <p class="agent__role p-soft">Browser automation</p>
+            <ul class="agent__skills" aria-label="Skills"><li>form filling</li><li>scraping</li><li>checks</li></ul>
+            <p class="agent__tools mono">browser · vision</p>
+          </div>
+        </article>
+
+        <article class="agent" style="--i:6">
+          <div class="agent__in" data-sc-tilt="6">
+            <header class="agent__head"><h3>Keeper</h3><span class="dot dot--ok" title="available"></span></header>
+            <p class="agent__role p-soft">Data and spreadsheets</p>
+            <ul class="agent__skills" aria-label="Skills"><li>cleanups</li><li>imports</li><li>syncs</li></ul>
+            <p class="agent__tools mono">sheets · csv · apis</p>
+          </div>
+        </article>
+
+        <div class="rail__tail">
+          <p>Need something narrower?</p>
+          <p class="p-soft">Build your own agent in the studio: pick a model, grant tools, set spending and approval limits.</p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ ACT 4 · CONTROL · flow ══════════════════════════════════════════
+       The quiet act, authored. One card. The run is paused on purpose. -->
+  <section id="gate" class="sc-section sc-section--after-pin" data-sc-act="flow" aria-label="Approval gate">
+    <div class="sc-wrap gate">
+      <div class="gate__head" data-sc-in>
+        <span class="chip chip--wait" id="gate-chip">paused · waiting on you</span>
+        <h2 class="h-med">Nothing irreversible runs without you</h2>
+      </div>
+
+      <figure class="approval" data-sc-reveal="up" data-sc-reveal-at="0.2 0.48" id="approval">
+        <figcaption class="approval__head">
+          <span>Approval requested</span>
+          <span class="mono">email.send</span>
+        </figcaption>
+        <div class="approval__body">
+          <p><span class="mono approval__agent">Courier</span> wants to send 2 emails outside your org.</p>
+          <p class="approval__detail mono">to: billing@acmefreight.example, accounts@nordwind.example<br>subject: Overdue invoice reminder</p>
+          <div class="approval__actions">
+            <button class="btn btn--pill btn--sm" id="btn-approve" type="button">Approve</button>
+            <button class="btn btn--ghost btn--sm" id="btn-decline" type="button">Decline</button>
+          </div>
+          <p class="approval__stamp mono" id="stamp" aria-live="polite"></p>
+        </div>
+      </figure>
+
+      <p class="gate__note p-soft" data-sc-in>Sending, spending and deleting always pause for sign-off. Read only work just runs. Every run keeps a full step history you can audit later.</p>
+    </div>
+  </section>
+
+  <!-- ═══ ACT 5 · PAYOFF · pin · THE PEAK ═════════════════════════════════
+       The run cascades under the reader's hand, then settles into the
+       deliverable. Largest span on the page. -->
+  <section id="run" data-sc-act="pin" data-sc-span="3.6" data-sc-drift="#12100c" aria-label="Demo: the run, streamed live">
+    <div data-sc-stage>
+      <div class="stage-center">
+        <div class="console console--run" id="console2" data-sc-verify-state="phase:0">
+          <div class="console__head">
+            <span class="console__app mono">jobshout / run 88f3 · Ledger + Courier</span>
+            <span class="console__meter" aria-hidden="true"><span class="console__meter-fill" id="meter"></span></span>
+            <span class="chip" id="run2-status" data-state="done">delivered</span>
+          </div>
+          <div class="console__body console__body--run">
+
+            <section class="pane pane--log" aria-label="Live step log">
+              <ol class="log" id="log">
+                <li class="row" data-at="0.06"><span class="row__t mono">00:04</span><span class="row__tool mono">stripe.invoices.list</span><span class="row__d">July: 38 invoices</span><span class="row__dur mono">3.8s</span><span class="dot"></span></li>
+                <li class="row" data-at="0.125"><span class="row__t mono">00:12</span><span class="row__tool mono">sheets.append</span><span class="row__d">ledger tab updated</span><span class="row__dur mono">1.2s</span><span class="dot"></span></li>
+                <li class="row" data-at="0.19"><span class="row__t mono">00:19</span><span class="row__tool mono">ledger.flag_overdue</span><span class="row__d">INV-2041, INV-2033</span><span class="row__dur mono">0.6s</span><span class="dot"></span></li>
+                <li class="row" data-at="0.255"><span class="row__t mono">00:26</span><span class="row__tool mono">email.draft</span><span class="row__d">chaser for INV-2041</span><span class="row__dur mono">4.1s</span><span class="dot"></span></li>
+                <li class="row" data-at="0.32"><span class="row__t mono">00:31</span><span class="row__tool mono">email.draft</span><span class="row__d">chaser for INV-2033</span><span class="row__dur mono">3.6s</span><span class="dot"></span></li>
+                <li class="row" data-at="0.385" id="row-send">
+                  <span class="row__t mono">00:38</span><span class="row__tool mono">email.send</span>
+                  <span class="row__d" data-approved="2 sent · approved by you" data-declined="skipped · declined by you">2 sent · approved by you</span>
+                  <span class="row__dur mono">2.2s</span><span class="dot"></span>
+                </li>
+                <li class="row" data-at="0.45"><span class="row__t mono">01:04</span><span class="row__tool mono">doc.compose</span><span class="row__d">summary, one page</span><span class="row__dur mono">21.4s</span><span class="dot"></span></li>
+                <li class="row" data-at="0.515"><span class="row__t mono">01:27</span><span class="row__tool mono">run.self_check</span><span class="row__d">all steps verified</span><span class="row__dur mono">1.9s</span><span class="dot"></span></li>
+              </ol>
+              <p class="log__cap" data-sc-cue="0.1 0.5 0.2 0.2">Every step streams as it runs. Stop it or steer it at any point.</p>
+            </section>
+
+            <section class="pane pane--artifact" aria-label="Deliverable">
+              <div class="pane__empty" id="artifact-empty">
+                <p class="mono">deliverable</p>
+                <p>Lands here when the run settles.</p>
+              </div>
+              <figure class="artifact" id="artifact" data-sc-reveal="up" data-sc-reveal-at="0.62 0.84">
+                <figcaption class="artifact__head">
+                  <span>July invoice summary</span>
+                  <span class="mono">doc · one page</span>
+                </figcaption>
+                <div class="artifact__body">
+                  <p><strong>38</strong> invoices reviewed. 36 paid on time.</p>
+                  <p>Two overdue: <span class="mono">INV-2041</span> (£1,850, 12 days late) and <span class="mono">INV-2033</span> (£420, 6 days).</p>
+                  <p id="artifact-outcome" data-approved="Chasers sent to both. Replies will land in your inbox." data-declined="Chasers drafted, not sent. You declined the send, so they wait in your outbox.">Chasers sent to both. Replies will land in your inbox.</p>
+                </div>
+                <footer class="artifact__foot mono">delivered by Ledger with Courier · 8 steps · 90 seconds</footer>
+              </figure>
+            </section>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ ACT 6 · COMMITMENT · flow ═══════════════════════════════════════
+       The close is an actual input. The ticket above it is stamped done. -->
+  <section id="shout" class="sc-section sc-section--after-pin shout" data-sc-act="flow" aria-label="Start your first job">
+    <div class="sc-wrap">
+      <p class="shout__done mono" data-sc-in id="shout-done">
+        <span class="tick tick--done" aria-hidden="true"></span>
+        JOB-4721 · done · deliverable: this page · runtime <span id="done-time">your visit</span>
+      </p>
+      <div class="shout__head" data-sc-in>
+        <h2 class="h-big">Your turn</h2>
+        <p class="p-soft">Describe the job. A sentence is enough.</p>
+      </div>
+      <form class="shout__composer" data-sc-in action="/signup" method="get" id="shout-form">
+        <label class="visually-hidden" for="brief">Describe your job</label>
+        <input class="shout__field mono" id="brief" name="brief" type="text"
+               placeholder="e.g. Watch these pricing pages, ping me on changes"
+               autocomplete="off" maxlength="280">
+        <button class="btn btn--pill btn--lg" type="submit">Shout a job</button>
+      </form>
+      <footer class="foot" data-sc-in>
+        <span>© 2026 JobShout</span>
+        <span class="foot__dot" aria-hidden="true">·</span>
+        <a href="/login">Sign in</a>
+        <span class="foot__dot" aria-hidden="true">·</span>
+        <span class="p-faint">The run above is a sample. Yours will be real.</span>
+      </footer>
+    </div>
+  </section>
+
+</main>
+
+<!-- ═══ THE SIGNATURE · the page itself is a job ══════════════════════════
+     Fixed ticket rail. Cut on landing, stamped step by step as the visitor
+     scrolls, done at the close. Steps link back to their acts. -->
+<nav class="ticket" id="ticket" aria-label="This page, tracked as a job" data-sc-verify-state="steps:0">
+  <span class="ticket__id">
+    <span class="mono ticket__no">JOB-4721</span>
+    <span class="ticket__brief">this page is a job: explain JobShout to a first-time visitor</span>
+  </span>
+  <ol class="ticket__steps">
+    <li><a href="#witness" data-step="briefed"><span class="tick" aria-hidden="true"></span>Briefed</a></li>
+    <li><a href="#witness" data-step="planned"><span class="tick" aria-hidden="true"></span>Planned</a></li>
+    <li><a href="#roster" data-step="crew"><span class="tick" aria-hidden="true"></span>Crew picked</a></li>
+    <li><a href="#gate" data-step="gate"><span class="tick" aria-hidden="true"></span>Gate held</a></li>
+    <li><a href="#run" data-step="run"><span class="tick" aria-hidden="true"></span>Run streamed</a></li>
+    <li><a href="#shout" data-step="done"><span class="tick" aria-hidden="true"></span>Delivered</a></li>
+  </ol>
+  <span class="ticket__time mono" id="ticket-time" title="Elapsed time of your visit">0:00</span>
+</nav>
+
+<script src="/landing/scrollcraft.js"></script>
+<script src="/landing/app.js"></script>
+<script>ScrollCraft.mount(document.body); JobShout.init();</script>
+</body>
+</html>
