@@ -233,7 +233,10 @@ func (m *mailMemRepo) ClaimDueConnections(ctx context.Context, limit int, lease 
 	now := time.Now()
 	var out []model.MailConnection
 	for _, c := range m.conns {
-		if c.Status != model.MailConnConnected {
+		if c.Status != model.MailConnConnected && c.Status != model.MailConnError {
+			continue
+		}
+		if len(c.RefreshTokenEnc) == 0 {
 			continue
 		}
 		if c.NextSyncAt != nil && c.NextSyncAt.After(now) {
@@ -311,6 +314,8 @@ type fakeGmail struct {
 	messages  []mail.InboxMessage
 	sent      []mail.OutboundMessage
 	sendCalls int
+	listCalls int
+	listErr   error
 	tokens    mail.TokenSet
 }
 
@@ -324,6 +329,10 @@ func (f *fakeGmail) Profile(ctx context.Context, accessToken string) (string, er
 	return f.email, nil
 }
 func (f *fakeGmail) ListMessages(ctx context.Context, accessToken, query string, limit int) ([]mail.InboxMessage, error) {
+	f.listCalls++
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
 	return f.messages, nil
 }
 func (f *fakeGmail) Send(ctx context.Context, accessToken string, msg mail.OutboundMessage) (string, error) {
@@ -610,5 +619,128 @@ func TestUpdateConnectionSavesRulesWhileDisconnected(t *testing.T) {
 	}
 	if c.Scopes == nil {
 		t.Fatal("scopes must be an empty slice, not nil (postgres text[] NOT NULL)")
+	}
+}
+
+func TestAvailableAndConnectionStatusWhenStatusError(t *testing.T) {
+	svc, repo, orgID := setupMail(t, &fakeGmail{
+		email:  "org@example.com",
+		tokens: mail.TokenSet{AccessToken: "a", RefreshToken: "r", Expiry: time.Now().Add(time.Hour)},
+	}, nil, nil)
+	connectOrg(t, svc, repo, orgID)
+	c, err := repo.GetConnectionByOrg(context.Background(), orgID)
+	if err != nil || c == nil {
+		t.Fatalf("connection: %v", err)
+	}
+	c.Status = model.MailConnError
+	msg := "mail: gmail api: decode (json: cannot unmarshal string)"
+	c.StatusError = &msg
+	if err := repo.UpsertConnection(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+	if !svc.Available(context.Background(), orgID) {
+		t.Fatal("error status with a refresh token must still be available")
+	}
+	st, err := svc.ConnectionStatus(context.Background(), orgID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Connected {
+		t.Fatal("ConnectionStatus.Connected must stay true so the UI does not flip to Connect Gmail")
+	}
+	if st.Status != model.MailConnError {
+		t.Errorf("status %q", st.Status)
+	}
+	if st.StatusError != msg {
+		t.Errorf("status_error %q", st.StatusError)
+	}
+	if st.Email != "org@example.com" {
+		t.Errorf("email %q", st.Email)
+	}
+}
+
+func TestClaimDueConnectionsClaimsErrorRows(t *testing.T) {
+	gmail := &fakeGmail{
+		email:  "org@example.com",
+		tokens: mail.TokenSet{AccessToken: "a", RefreshToken: "r", Expiry: time.Now().Add(time.Hour)},
+		messages: []mail.InboxMessage{{
+			GmailThreadID: "th-error-claim", FromEmail: "alex@c.com", Subject: "Hello", Body: "Hi",
+		}},
+	}
+	svc, repo, orgID := setupMail(t, gmail, nil, nil)
+	connectOrg(t, svc, repo, orgID)
+	c, err := repo.GetConnectionByOrg(context.Background(), orgID)
+	if err != nil || c == nil {
+		t.Fatalf("connection: %v", err)
+	}
+	c.Status = model.MailConnError
+	now := time.Now().Add(-time.Second)
+	c.NextSyncAt = &now
+	if err := repo.UpsertConnection(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ProcessDueSyncs(context.Background(), 5); err != nil {
+		t.Fatal(err)
+	}
+	if gmail.listCalls < 1 {
+		t.Fatal("ClaimDueConnections must pick up status=error rows")
+	}
+	listed, err := repo.ListThreads(context.Background(), orgID, model.PaginationParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Data) != 1 {
+		t.Fatalf("threads %d, want 1 after claiming an error mailbox", len(listed.Data))
+	}
+}
+
+func TestEnqueueSyncClearsLease(t *testing.T) {
+	svc, repo, orgID := setupMail(t, &fakeGmail{
+		email:  "org@example.com",
+		tokens: mail.TokenSet{AccessToken: "a", RefreshToken: "r", Expiry: time.Now().Add(time.Hour)},
+	}, nil, nil)
+	connectOrg(t, svc, repo, orgID)
+	c, err := repo.GetConnectionByOrg(context.Background(), orgID)
+	if err != nil || c == nil {
+		t.Fatalf("connection: %v", err)
+	}
+	until := time.Now().Add(2 * time.Minute)
+	c.SyncLeaseUntil = &until
+	c.Status = model.MailConnError
+	if err := repo.UpsertConnection(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.EnqueueSync(context.Background(), orgID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.GetConnectionByOrg(context.Background(), orgID)
+	if err != nil || got == nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got.SyncLeaseUntil != nil {
+		t.Fatal("EnqueueSync must persist sync_lease_until = NULL")
+	}
+}
+
+func TestProcessDueSyncsClearsLeaseOnFailure(t *testing.T) {
+	gmail := &fakeGmail{
+		email:   "org@example.com",
+		tokens:  mail.TokenSet{AccessToken: "a", RefreshToken: "r", Expiry: time.Now().Add(time.Hour)},
+		listErr: errors.New("mail: gmail api: decode (json: cannot unmarshal string)"),
+	}
+	svc, repo, orgID := setupMail(t, gmail, nil, nil)
+	connectOrg(t, svc, repo, orgID)
+	if err := svc.ProcessDueSyncs(context.Background(), 5); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.GetConnectionByOrg(context.Background(), orgID)
+	if err != nil || got == nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got.Status != model.MailConnError {
+		t.Errorf("status %q", got.Status)
+	}
+	if got.SyncLeaseUntil != nil {
+		t.Fatal("failed sync must persist sync_lease_until = NULL")
 	}
 }

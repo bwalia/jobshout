@@ -137,7 +137,11 @@ func (s *mailService) Available(ctx context.Context, orgID uuid.UUID) bool {
 		return false
 	}
 	c, err := s.repo.GetConnectionByOrg(ctx, orgID)
-	return err == nil && c != nil && c.Status == model.MailConnConnected && len(c.RefreshTokenEnc) > 0
+	return err == nil && mailboxLinked(c)
+}
+
+func mailboxLinked(c *model.MailConnection) bool {
+	return c != nil && len(c.RefreshTokenEnc) > 0 && c.Status != model.MailConnDisconnected
 }
 
 func (s *mailService) ConnectionStatus(ctx context.Context, orgID uuid.UUID) (*model.MailConnectionStatus, error) {
@@ -157,7 +161,7 @@ func (s *mailService) ConnectionStatus(ctx context.Context, orgID uuid.UUID) (*m
 	if c == nil {
 		return st, nil
 	}
-	st.Connected = c.Status == model.MailConnConnected && len(c.RefreshTokenEnc) > 0
+	st.Connected = mailboxLinked(c)
 	st.Email = c.GoogleEmail
 	st.Status = c.Status
 	if c.StatusError != nil {
@@ -275,7 +279,7 @@ func (s *mailService) UpdateConnection(ctx context.Context, orgID uuid.UUID, req
 		}
 		c = &model.MailConnection{
 			OrgID: orgID, Status: model.MailConnDisconnected,
-			Scopes: []string{},
+			Scopes:      []string{},
 			WatchLabels: []string{}, WatchSenders: []string{}, WatchSubjectPrefixes: []string{},
 		}
 		if agent != nil {
@@ -567,7 +571,7 @@ func (s *mailService) ApproveSend(ctx context.Context, orgID, draftID, userID uu
 	if err != nil {
 		return nil, err
 	}
-	if c == nil || c.Status != model.MailConnConnected {
+	if c == nil || !mailboxLinked(c) {
 		return nil, ErrMailNotConnected
 	}
 

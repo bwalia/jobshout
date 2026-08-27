@@ -80,17 +80,17 @@ func nzStrings(s []string) []string {
 	return s
 }
 
-func (r *mailRepository) UpsertConnection(ctx context.Context, c *model.MailConnection) error {
-	if c.ID == uuid.Nil {
-		c.ID = uuid.New()
-	}
-	const sql = `
+// upsertConnectionSQL writes sync_lease_until so a failed sync or EnqueueSync
+// that nils the lease in memory actually clears it in postgres. Omitting the
+// column left the 2-minute claim lease stuck after "mail: gmail api: decode".
+const upsertConnectionSQL = `
 		INSERT INTO mail_connections (
 			id, org_id, agent_id, google_email, refresh_token_enc, token_expiry, scopes,
 			allow_mailbox_mutations, watch_labels, watch_senders, watch_subject_prefixes,
-			status, status_error, last_sync_at, next_sync_at, connected_at, disconnected_at
+			status, status_error, last_sync_at, next_sync_at, sync_lease_until,
+			connected_at, disconnected_at
 		) VALUES (
-			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17
+			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18
 		)
 		ON CONFLICT (org_id) DO UPDATE SET
 			agent_id = EXCLUDED.agent_id,
@@ -106,14 +106,20 @@ func (r *mailRepository) UpsertConnection(ctx context.Context, c *model.MailConn
 			status_error = EXCLUDED.status_error,
 			last_sync_at = EXCLUDED.last_sync_at,
 			next_sync_at = EXCLUDED.next_sync_at,
+			sync_lease_until = EXCLUDED.sync_lease_until,
 			connected_at = EXCLUDED.connected_at,
 			disconnected_at = EXCLUDED.disconnected_at,
 			updated_at = NOW()
 		RETURNING id, created_at, updated_at`
-	return r.pool.QueryRow(ctx, sql,
+
+func (r *mailRepository) UpsertConnection(ctx context.Context, c *model.MailConnection) error {
+	if c.ID == uuid.Nil {
+		c.ID = uuid.New()
+	}
+	return r.pool.QueryRow(ctx, upsertConnectionSQL,
 		c.ID, c.OrgID, c.AgentID, c.GoogleEmail, c.RefreshTokenEnc, c.TokenExpiry, nzStrings(c.Scopes),
 		c.AllowMailboxMutations, nzStrings(c.WatchLabels), nzStrings(c.WatchSenders), nzStrings(c.WatchSubjectPrefixes),
-		c.Status, c.StatusError, c.LastSyncAt, c.NextSyncAt, c.ConnectedAt, c.DisconnectedAt,
+		c.Status, c.StatusError, c.LastSyncAt, c.NextSyncAt, c.SyncLeaseUntil, c.ConnectedAt, c.DisconnectedAt,
 	).Scan(&c.ID, &c.CreatedAt, &c.UpdatedAt)
 }
 
@@ -444,6 +450,15 @@ func (r *mailRepository) UpdateDraft(ctx context.Context, d *model.MailDraft) er
 	).Scan(&d.UpdatedAt)
 }
 
+// claimDuePredicate is the eligibility filter for a mailbox sync. Status
+// 'error' still has a refresh token; claiming only 'connected' left the inbox
+// stuck after a single Gmail decode failure.
+const claimDuePredicate = `
+			status IN ('connected', 'error')
+			  AND refresh_token_enc IS NOT NULL
+			  AND (next_sync_at IS NULL OR next_sync_at <= NOW())
+			  AND (sync_lease_until IS NULL OR sync_lease_until < NOW())`
+
 func (r *mailRepository) ClaimDueConnections(ctx context.Context, limit int, lease time.Duration) ([]model.MailConnection, error) {
 	if limit < 1 {
 		limit = 5
@@ -454,9 +469,7 @@ func (r *mailRepository) ClaimDueConnections(ctx context.Context, limit int, lea
 		SET sync_lease_until = NOW() + $2::interval, updated_at = NOW()
 		WHERE id IN (
 			SELECT id FROM mail_connections
-			WHERE status = 'connected'
-			  AND (next_sync_at IS NULL OR next_sync_at <= NOW())
-			  AND (sync_lease_until IS NULL OR sync_lease_until < NOW())
+			WHERE `+claimDuePredicate+`
 			ORDER BY next_sync_at NULLS FIRST
 			FOR UPDATE SKIP LOCKED
 			LIMIT $1

@@ -5,13 +5,17 @@ logLevel: debug
 # image.tag is injected by Ring Promoter (--set image.tag=<sha>). Do not pin a
 # stale SHA here; a forgotten --set would roll int back to that commit.
 
-# Cluster-side secret holding OPSAPI_API_KEY (and any other real credential)
-# for this ring. Only the name lives here; create it with:
-#   kubectl -n int create secret generic jobshout-cms \
-#     --from-literal=OPSAPI_API_KEY=<key> --dry-run=client -o yaml | kubectl apply -f -
+# Cluster-side secrets this chart does not manage. Only the names live here.
+# Create them on k3s1; helm leaves the Secret objects alone across redeploys.
+#   kubectl -n int create secret generic jobshout-cms ...
+#   kubectl -n int create secret generic jobshout-mail \
+#     --from-literal=GMAIL_CLIENT_ID=... \
+#     --from-literal=GMAIL_CLIENT_SECRET=... \
+#     --from-literal=GMAIL_TOKEN_KEY=$(openssl rand -hex 32)
 extraSecretRefs:
   - jobshout-cms
   - jobshout-review
+  - jobshout-mail
 
 # opsapi CMS — the Article Writer files generated articles there as drafts.
 # The host and namespace slug are not secret; the API key is, and comes from

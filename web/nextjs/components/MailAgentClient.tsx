@@ -145,13 +145,17 @@ export function MailAgentClient() {
       setPolling(true);
       window.setTimeout(() => setPolling(false), 20000);
       await loadThreads();
-      await loadConnection();
     } catch (e: unknown) {
       const msg =
         (e as { response?: { data?: { error?: string } } })?.response?.data?.error ??
         "Sync failed.";
       setError(msg);
     } finally {
+      try {
+        await loadConnection();
+      } catch {
+        /* keep the sync error visible */
+      }
       setBusy(false);
     }
   }
@@ -239,6 +243,10 @@ export function MailAgentClient() {
     );
   }
 
+  const mailboxLinked =
+    connection.connected ||
+    (connection.status !== "disconnected" && Boolean(connection.email));
+
   return (
     <div className="space-y-4">
       {error && (
@@ -259,7 +267,7 @@ export function MailAgentClient() {
             GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET and GMAIL_TOKEN_KEY.
           </p>
         )}
-        {connection.configured && !connection.connected && (
+        {connection.configured && !mailboxLinked && (
           <div className="mt-3 space-y-3">
             <p className="text-sm text-muted-foreground">
               Connect one shared organisation mailbox. The Mail Agent will draft
@@ -284,11 +292,14 @@ export function MailAgentClient() {
             </button>
           </div>
         )}
-        {connection.connected && (
+        {mailboxLinked && (
           <div className="mt-3 space-y-3">
             <p className="text-sm">
               Connected as <span className="font-medium">{connection.email}</span>
             </p>
+            {connection.status === "error" && connection.status_error ? (
+              <p className="text-sm text-destructive">{connection.status_error}</p>
+            ) : null}
             {connection.last_sync_at && (
               <p className="text-xs text-muted-foreground">
                 Last sync {new Date(connection.last_sync_at).toLocaleString()}
@@ -350,7 +361,7 @@ export function MailAgentClient() {
         )}
       </div>
 
-      {connection.connected && !selected && (
+      {mailboxLinked && !selected && (
         <div className="rounded-lg border border-border bg-card p-4 text-card-foreground">
           <h2 className="font-semibold">Inbox</h2>
           <p className="mb-3 text-sm text-muted-foreground">
