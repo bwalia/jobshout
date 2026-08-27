@@ -318,6 +318,9 @@ func (c *OllamaClient) readStream(body io.Reader, model string, numPredict int, 
 		inTok     int
 		outTok    int
 	)
+	// Stream tokens through the leak guard so leaked tool-call markup is never
+	// forwarded to a live client.
+	guard := &leakStreamGuard{onToken: onToken}
 
 	scanner := bufio.NewScanner(body)
 	// Article drafts can emit large single-line JSON chunks; the default
@@ -334,9 +337,7 @@ func (c *OllamaClient) readStream(body io.Reader, model string, numPredict int, 
 			return nil, fmt.Errorf("ollama: decode stream chunk: %w", err)
 		}
 		content.WriteString(chunk.Message.Content)
-		if onToken != nil && chunk.Message.Content != "" {
-			onToken(chunk.Message.Content)
-		}
+		guard.feed(chunk.Message.Content)
 		thinking.WriteString(chunk.Message.Thinking)
 		// Usually one chunk carries every tool call, but append rather than
 		// overwrite in case they arrive split across chunks.
@@ -380,6 +381,16 @@ func (c *OllamaClient) readStream(body io.Reader, model string, numPredict int, 
 			Name:      tc.Function.Name,
 			Arguments: args,
 		})
+	}
+
+	// The model sometimes writes its tool-call markup into content instead of
+	// issuing structured tool calls. Recover those so the call still executes
+	// and the markup never reaches the user.
+	if len(calls) == 0 {
+		if recovered, cleaned, ok := recoverLeakedToolCalls(text); ok {
+			calls = recovered
+			text = cleaned
+		}
 	}
 
 	return &GenerateResponse{

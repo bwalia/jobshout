@@ -23,6 +23,12 @@ var (
 	// tool-result field. Line-anchored on purpose: prose that merely mentions
 	// these words must survive.
 	fakeToolJSONRe = regexp.MustCompile(`(?m)^\s*\{\s*"(?:name|tool|result|status|tool_call|function)"\s*:`)
+	// Coder-model tool-call markup leaked as text (<function=...> /
+	// <tool_call>). The Ollama client recovers well-formed blocks into real
+	// tool calls; anything that still reaches a reply — malformed, truncated,
+	// or from another provider — is scaffolding and must not be shown. An
+	// unclosed block is stripped to end of text.
+	leakedMarkupRe = regexp.MustCompile(`(?s)<(?:function=[a-zA-Z0-9_.:-]+|tool_call)>.*?(?:</function>|</tool_call>|$)`)
 )
 
 // SanitiseMessage makes a model reply safe to show a non-engineer.
@@ -40,7 +46,8 @@ func SanitiseMessage(s string) string {
 // tool scaffolding: the untrusted-result delimiters, or a bare tool-call/
 // tool-result JSON object. The fabrication guard in the loop keys off this.
 func ContainsToolScaffolding(s string) bool {
-	return scaffoldMarkerRe.MatchString(s) || fakeToolJSONRe.MatchString(s)
+	return scaffoldMarkerRe.MatchString(s) || fakeToolJSONRe.MatchString(s) ||
+		strings.Contains(s, "<function=") || strings.Contains(s, "<tool_call>")
 }
 
 func stripToolScaffolding(s string) string {
@@ -49,6 +56,7 @@ func stripToolScaffolding(s string) string {
 	}
 	s = scaffoldBlockRe.ReplaceAllString(s, "")
 	s = scaffoldMarkerRe.ReplaceAllString(s, "")
+	s = leakedMarkupRe.ReplaceAllString(s, "")
 	s = strings.ReplaceAll(s, scaffoldTrailer, "")
 	s = stripFakeToolJSON(s)
 	return s

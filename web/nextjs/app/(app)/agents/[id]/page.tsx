@@ -867,6 +867,15 @@ export default function AgentProfilePage() {
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <AgentStatusBadge status={agent.status} />
 
+                {agent.metadata?.builtin === "mail" && (
+                  <Link
+                    href="/panel/task-manager?agent=mail"
+                    className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary hover:underline"
+                  >
+                    Open inbox
+                  </Link>
+                )}
+
                 {agent.model_provider && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
                     <Cpu className="h-3 w-3" />

@@ -10,6 +10,7 @@ import {
   Plus,
   ShieldAlert,
   GitPullRequest,
+  Mail,
   Rocket,
   BookOpen,
 } from "lucide-react";
@@ -30,6 +31,7 @@ import { CreateAgentDialog } from "@/components/agent/CreateAgentDialog";
 import { AgentStatusBadge } from "@/components/agent/AgentStatusBadge";
 import { PentestAgentClient } from "@/components/PentestAgentClient";
 import { ReviewAgentClient } from "@/components/ReviewAgentClient";
+import { MailAgentClient } from "@/components/MailAgentClient";
 import ArticlesPage from "@/app/(app)/articles/page";
 import ImagesPage from "@/app/(app)/images/page";
 import type { LaunchResult } from "@/lib/agents/launch";
@@ -42,16 +44,17 @@ import { cn } from "@/lib/utils/cn";
 type Selection =
   | { kind: "project"; id: string }
   | { kind: "agent"; id: string }
-  | { kind: "builtin"; id: "pentest" | "review" | "articles" | "images" };
+  | { kind: "builtin"; id: "pentest" | "review" | "mail" | "articles" | "images" };
 
 const BUILTINS: {
-  id: "pentest" | "review" | "articles" | "images";
+  id: "pentest" | "review" | "mail" | "articles" | "images";
   label: string;
   icon: React.ElementType;
   match?: string;
 }[] = [
   { id: "pentest", label: "Security Tester", icon: ShieldAlert, match: "pentester" },
   { id: "review", label: "PR Reviewer", icon: GitPullRequest, match: "pr_reviewer" },
+  { id: "mail", label: "Mail Agent", icon: Mail, match: "mail" },
   { id: "articles", label: "Articles", icon: Newspaper, match: "article_writer" },
   { id: "images", label: "Images", icon: ImageIcon },
 ];
@@ -68,7 +71,7 @@ function parseSelection(
   project: string | null,
   agent: string | null
 ): Selection | null {
-  if (agent === "pentest" || agent === "review" || agent === "articles" || agent === "images") {
+  if (agent === "pentest" || agent === "review" || agent === "mail" || agent === "articles" || agent === "images") {
     return { kind: "builtin", id: agent };
   }
   if (agent) return { kind: "agent", id: agent };
@@ -312,6 +315,11 @@ export function TaskManagerPanel() {
           {selection?.kind === "builtin" && selection.id === "review" && (
             <BuiltinFrame title="PR Reviewer">
               <ReviewAgentClient />
+            </BuiltinFrame>
+          )}
+          {selection?.kind === "builtin" && selection.id === "mail" && (
+            <BuiltinFrame title="Mail Agent">
+              <MailAgentClient />
             </BuiltinFrame>
           )}
           {selection?.kind === "builtin" && selection.id === "articles" && (

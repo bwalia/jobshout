@@ -1,8 +1,8 @@
 package model
 
 import (
-	"time"
 	"github.com/google/uuid"
+	"time"
 )
 
 // EngineType constants identify which runtime executes a given agent or step.
@@ -55,6 +55,9 @@ const (
 	BuiltinPentester = "pentester"
 	// BuiltinPRReviewer reviews GitHub pull requests via the in-cluster review-bot sidecar.
 	BuiltinPRReviewer = "pr_reviewer"
+	// BuiltinMail is the Mail Agent: one shared org Gmail, draft-only replies,
+	// Research Agent handoff, human approve-before-send.
+	BuiltinMail = "mail"
 )
 
 // EngineConfigStructuredModel is the EngineConfig key holding the Article

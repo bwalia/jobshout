@@ -92,6 +92,8 @@ var humanLabels = map[string]string{
 	"review_run_get":       "Checking the PR review…",
 	"review_run_list":      "Listing PR reviews…",
 	"review_allowed_repos": "Checking which repos I can review…",
+	"mail_sync":            "Syncing the mailbox…",
+	"mail_list_drafts":     "Looking up mail drafts…",
 	"usage_summary":        "Checking usage…",
 	"agent_analytics":      "Checking agent analytics…",
 	"leaderboard":          "Checking the leaderboard…",

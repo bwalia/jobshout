@@ -40,6 +40,14 @@ func TestBoardActivity(t *testing.T) {
 		{"blog completed frees the agent", ptr("blog"), ptr(model.BlogRunStatusCompleted), nil, model.ActivityIdle},
 		{"blog pending", ptr("blog"), ptr(model.BlogRunStatusPending), nil, model.ActivityIdle},
 
+		// Mail Agent — monitoring/classifying/researching is work; a draft waiting
+		// on a human sits in reviewing; terminal states free the agent.
+		{"mail classifying", ptr("mail"), ptr(model.MailThreadClassifying), nil, model.ActivityExecuting},
+		{"mail researching", ptr("mail"), ptr(model.MailThreadResearching), ptr("research"), model.ActivityExecuting},
+		{"mail draft ready", ptr("mail"), ptr(model.MailThreadDraftReady), nil, model.ActivityReviewing},
+		{"mail sent frees the agent", ptr("mail"), ptr(model.MailThreadSent), nil, model.ActivityIdle},
+		{"mail failed", ptr("mail"), ptr(model.MailThreadFailed), nil, model.ActivityFailed},
+
 		// A source we do not know about must not invent a column.
 		{"unknown kind", ptr("mystery"), ptr("running"), nil, model.ActivityIdle},
 	}
@@ -66,13 +74,16 @@ func TestBoardActivityValuesAreKnownColumns(t *testing.T) {
 		model.ActivityFailed:     true,
 	}
 
-	kinds := []string{"job", "blog"}
+	kinds := []string{"job", "blog", "mail"}
 	statuses := []string{
 		model.MultiAgentStatusPending, model.MultiAgentStatusPlanning,
 		model.MultiAgentStatusExecuting, model.MultiAgentStatusReviewing,
 		model.MultiAgentStatusCompleted, model.MultiAgentStatusFailed,
 		model.BlogRunStatusPending, model.BlogRunStatusRunning,
 		model.BlogRunStatusCompleted, model.BlogRunStatusFailed,
+		model.MailThreadNew, model.MailThreadClassifying, model.MailThreadResearching,
+		model.MailThreadDraftReady, model.MailThreadSent, model.MailThreadRejected,
+		model.MailThreadIgnored, model.MailThreadFailed,
 	}
 	steps := []*string{
 		nil,

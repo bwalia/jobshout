@@ -68,3 +68,10 @@ data:
   REVIEW_BOT_POLL_INTERVAL: {{ .Values.reviewBot.pollInterval | default "15s" | quote }}
   REVIEW_BOT_MAX_RUNTIME: {{ .Values.reviewBot.maxRuntime | default "40m" | quote }}
   REVIEW_BOT_ALLOWED_REPOS: {{ join "," (.Values.reviewBot.allowedRepos | default list) | quote }}
+  # Public origin of this ring — OAuth return and Telegram links. Secrets for
+  # Gmail (GMAIL_CLIENT_ID / GMAIL_CLIENT_SECRET / GMAIL_TOKEN_KEY) live in an
+  # extraSecretRefs secret, never here.
+  FRONTEND_BASE_URL: {{ printf "https://%s" .Values.host | quote }}
+  GMAIL_OAUTH_REDIRECT_URL: {{ printf "https://%s/api/v1/mail/connection/oauth/callback" .Values.host | quote }}
+  MAIL_POLL_INTERVAL: {{ .Values.mail.pollInterval | default "5m" | quote }}
+  MAIL_RECONCILE_INTERVAL: {{ .Values.mail.reconcileInterval | default "15s" | quote }}

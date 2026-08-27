@@ -19,6 +19,7 @@ func executionHref(agentID uuid.UUID) string {
 func articleHref(id uuid.UUID) string { return "/articles/" + id.String() }
 func pentestHref() string             { return "/agents/pentest" }
 func reviewHref() string              { return "/agents/review" }
+func mailHref() string                { return "/panel/task-manager?agent=mail" }
 func sprintHref() string              { return "/sprints" }
 
 func agentRef(a model.Agent) model.EntityRef {

@@ -144,8 +144,10 @@ func (r *multiAgentRepository) BoardEntries(ctx context.Context, orgID uuid.UUID
 	//
 	//   1. multi_agent_jobs — the agent participated as planner/executor/reviewer.
 	//   2. blog_runs        — the agent is the article generator for that run.
+	//   3. mail_threads     — Mail Agent work, plus Research Agent while a
+	//                       thread is in researching so the board does not lie.
 	//
-	// Both are normalised into the same shape, unioned, and the newest row per
+	// All are normalised into the same shape, unioned, and the newest row per
 	// agent wins. Agents with no activity at all fall through to idle.
 	//
 	// For blog runs the running step is pulled out of the steps JSONB so the
@@ -188,9 +190,41 @@ func (r *multiAgentRepository) BoardEntries(ctx context.Context, orgID uuid.UUID
 			) s ON TRUE
 			WHERE b.org_id = $1 AND b.agent_id IS NOT NULL
 		),
+		mail_activity AS (
+			SELECT t.agent_id,
+			       'mail'::text    AS kind,
+			       t.id            AS source_id,
+			       t.status::text  AS status,
+			       NULL::text      AS step_key,
+			       COALESCE(NULLIF(t.subject, ''), t.status)::text AS detail,
+			       'mail'::text    AS job_role,
+			       t.updated_at    AS created_at
+			FROM mail_threads t
+			WHERE t.org_id = $1 AND t.agent_id IS NOT NULL
+		),
+		mail_research_activity AS (
+			SELECT a.id            AS agent_id,
+			       'mail'::text    AS kind,
+			       t.id            AS source_id,
+			       t.status::text  AS status,
+			       'research'::text AS step_key,
+			       COALESCE(NULLIF(t.subject, ''), 'researching email')::text AS detail,
+			       'researcher'::text AS job_role,
+			       t.updated_at    AS created_at
+			FROM mail_threads t
+			JOIN agents a
+			       ON a.org_id = t.org_id
+			      AND a.metadata->>'builtin' = 'researcher'
+			WHERE t.org_id = $1 AND t.status = 'researching'
+		),
 		combined AS (
 			SELECT u.*, ROW_NUMBER() OVER (PARTITION BY u.agent_id ORDER BY u.created_at DESC) AS rn
-			FROM (SELECT * FROM job_activity UNION ALL SELECT * FROM blog_activity) u
+			FROM (
+				SELECT * FROM job_activity
+				UNION ALL SELECT * FROM blog_activity
+				UNION ALL SELECT * FROM mail_activity
+				UNION ALL SELECT * FROM mail_research_activity
+			) u
 		)
 		SELECT a.id, a.name, a.role, a.avatar_url,
 		       c.kind, c.source_id, c.status, c.step_key, c.detail, c.job_role, c.created_at
@@ -270,6 +304,17 @@ func boardActivity(kind, status, stepKey *string) string {
 					return model.ActivityPublishing
 				}
 			}
+			return model.ActivityExecuting
+		}
+		return model.ActivityIdle
+
+	case "mail":
+		switch *status {
+		case model.MailThreadFailed:
+			return model.ActivityFailed
+		case model.MailThreadDraftReady:
+			return model.ActivityReviewing
+		case model.MailThreadNew, model.MailThreadClassifying, model.MailThreadResearching:
 			return model.ActivityExecuting
 		}
 		return model.ActivityIdle

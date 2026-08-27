@@ -290,6 +290,50 @@ func registerSpecialists(reg *Registry, d Deps) {
 			},
 		))
 	}
+
+	if d.Mail != nil {
+		reg.Register(newTool(
+			"mail_sync",
+			"Sync the organisation Gmail inbox now. The Mail Agent classifies new mail and drafts replies; nothing is sent.",
+			"insight", model.PermAgentsExecute, false, false,
+			tools.ObjectSchema(map[string]any{}),
+			func(ctx context.Context, input map[string]any) (*Result, error) {
+				ident := MustIdentity(ctx)
+				if !d.Mail.Available(ctx, ident.OrgID) {
+					return &Result{Data: map[string]any{
+						"available": false,
+						"message":   "Gmail is not connected. Open Mail Agent to connect the shared mailbox.",
+					}}, nil
+				}
+				if err := d.Mail.EnqueueSync(ctx, ident.OrgID); err != nil {
+					return nil, err
+				}
+				ref := model.EntityRef{Kind: model.EntityMailThread, ID: "", Label: "Mail inbox", Href: mailHref()}
+				return &Result{Data: map[string]any{"status": "queued"}, Entity: &ref, Effect: "queue a mailbox sync"}, nil
+			},
+		))
+		reg.Register(newTool(
+			"mail_list_drafts",
+			"List Mail Agent drafts waiting for a human to approve (nothing is sent from here).",
+			"insight", model.PermAgentsRead, false, true,
+			tools.ObjectSchema(map[string]any{}),
+			func(ctx context.Context, input map[string]any) (*Result, error) {
+				ident := MustIdentity(ctx)
+				out, err := d.Mail.ListPendingDrafts(ctx, ident.OrgID, model.PaginationParams{Page: 1, PerPage: 20})
+				if err != nil {
+					return nil, err
+				}
+				items := make([]map[string]any, 0, len(out.Data))
+				for _, dft := range out.Data {
+					items = append(items, map[string]any{
+						"id": dft.ID.String(), "subject": dft.Subject, "to": dft.ToEmail, "status": dft.Status,
+					})
+				}
+				ref := model.EntityRef{Kind: model.EntityMailThread, ID: "", Label: "Mail drafts", Href: mailHref()}
+				return &Result{Data: map[string]any{"drafts": items, "total": out.Total}, Entity: &ref}, nil
+			},
+		))
+	}
 }
 
 func pentestTargetAllowed(target string) bool {

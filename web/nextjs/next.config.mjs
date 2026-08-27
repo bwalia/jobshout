@@ -48,6 +48,11 @@ const nextConfig = {
         destination: "/panel/task-manager?agent=review",
         permanent: false,
       },
+      {
+        source: "/agents/mail",
+        destination: "/panel/task-manager?agent=mail",
+        permanent: false,
+      },
       // /agents/:id and /agents/:id/knowledge stay routable — the rich agent
       // profile (edit, knowledge, skills, metrics) is linked from Task Manager.
       {
