@@ -149,23 +149,30 @@ func TestArticleExcerpt(t *testing.T) {
 }
 
 // goldmark has no idea what mermaid is and renders the fence as a code block,
-// which would publish the diagram's source as literal text. The div is what
-// mermaid.js scans for.
-func TestRenderHTML_MermaidBecomesADiv(t *testing.T) {
+// which would publish the diagram's source as literal text. The CMS path does
+// not run mermaid.js, so we emit a mermaid.ink <img> that paints without it.
+func TestRenderHTML_MermaidBecomesAnImage(t *testing.T) {
 	md := "# Title\n\nBefore.\n\n```mermaid\nsequenceDiagram\n    A->>B: hi\n```\n\nAfter."
 
 	got, err := renderHTML(md)
 	if err != nil {
 		t.Fatalf("renderHTML: %v", err)
 	}
-	if !strings.Contains(got, `<div class="mermaid">`) {
-		t.Errorf("mermaid fence was not converted:\n%s", got)
+	if !strings.Contains(got, `<img class="mermaid-diagram"`) {
+		t.Errorf("mermaid fence was not converted to an image:\n%s", got)
+	}
+	if !strings.Contains(got, mermaidInkSVG) {
+		t.Errorf("expected a mermaid.ink SVG URL:\n%s", got)
 	}
 	if strings.Contains(got, `class="language-mermaid"`) {
 		t.Errorf("the code block survived:\n%s", got)
 	}
-	if !strings.Contains(got, "sequenceDiagram") {
-		t.Errorf("diagram source was lost:\n%s", got)
+	if strings.Contains(got, `<div class="mermaid">`) {
+		t.Errorf("legacy mermaid div should not be emitted:\n%s", got)
+	}
+	// The diagram source is carried in the URL, not as visible page text.
+	if strings.Contains(got, "sequenceDiagram") {
+		t.Errorf("raw diagram source leaked into the HTML body:\n%s", got)
 	}
 }
 
@@ -183,24 +190,24 @@ func TestRenderHTML_OtherCodeBlocksAreUntouched(t *testing.T) {
 			t.Errorf("expected %s to survive:\n%s", want, got)
 		}
 	}
-	if strings.Contains(got, `class="mermaid"`) {
+	if strings.Contains(got, `mermaid-diagram`) {
 		t.Error("a non-mermaid block was converted")
 	}
 }
 
-// A label containing a < must not become markup. goldmark escapes on the way
-// in and mermaid reads text content, which the browser unescapes.
-func TestRenderHTML_MermaidStaysEscaped(t *testing.T) {
+// A label containing a < must not become markup. The source lives in a
+// base64 URL segment, so the raw character never appears in the HTML body.
+func TestRenderHTML_MermaidAngleBracketSafe(t *testing.T) {
 	md := "# T\n\n```mermaid\nflowchart LR\n    A[\"a < b\"] --> B\n```"
 
 	got, err := renderHTML(md)
 	if err != nil {
 		t.Fatalf("renderHTML: %v", err)
 	}
-	if strings.Contains(got, `A["a < b"]`) {
+	if strings.Contains(got, `A["a < b"]`) || strings.Contains(got, "a < b") {
 		t.Errorf("raw < survived into the markup:\n%s", got)
 	}
-	if !strings.Contains(got, "&lt;") {
-		t.Errorf("expected the < to stay escaped:\n%s", got)
+	if !strings.Contains(got, mermaidInkSVG) {
+		t.Errorf("expected a mermaid.ink image:\n%s", got)
 	}
 }

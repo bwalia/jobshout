@@ -2,6 +2,7 @@ package blog
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"regexp"
 	"strings"
@@ -40,29 +41,42 @@ func renderHTML(markdown string) (string, error) {
 	if err := markdownConverter.Convert([]byte(stripLeadingH1(markdown)), &buf); err != nil {
 		return "", fmt.Errorf("blog: render markdown to html: %w", err)
 	}
-	return strings.TrimSpace(mermaidToDiv(buf.String())), nil
+	return strings.TrimSpace(mermaidToImg(buf.String())), nil
 }
 
 // mermaidCodeBlock matches the HTML goldmark emits for a ```mermaid fence.
 var mermaidCodeBlock = regexp.MustCompile(
 	`(?s)<pre><code class="language-mermaid">(.*?)</code></pre>`)
 
-// mermaidToDiv rewrites a fenced mermaid block into the markup mermaid.js
-// looks for.
+// mermaidInkSVG is the public Mermaid renderer used for CMS HTML. The opsapi
+// TipTap editor and consumer sites that inject content_html do not run
+// mermaid.js, so a bare <div class="mermaid"> never becomes a diagram there.
+// An <img> pointing at mermaid.ink does: TipTap keeps images, and a plain
+// HTML page paints them without any client-side Mermaid runtime.
+const mermaidInkSVG = "https://mermaid.ink/svg/"
+
+// mermaidToImg rewrites a fenced mermaid block into a self-rendering <img>.
 //
 // goldmark has no idea what mermaid is, so it renders the fence as a code
-// block — which publishes the diagram's source as literal text on the page.
-// `<div class="mermaid">` is the convention mermaid.js scans for, so a CMS
-// theme that loads the library renders a diagram, and one that does not shows
-// the same text it would have shown anyway. Nothing gets worse; it can only
-// get better.
+// block — which would publish the diagram's source as literal text. The
+// previous <div class="mermaid"> convention only helps a theme that loads
+// mermaid.js; the CMS path JobShout publishes to does not.
 //
-// The source is left HTML-escaped. goldmark escaped it on the way in, and
-// mermaid reads the element's text content, which the browser unescapes.
-// Unescaping here would instead let a label containing a < become markup.
-func mermaidToDiv(html string) string {
-	return mermaidCodeBlock.ReplaceAllString(html,
-		`<div class="mermaid">$1</div>`)
+// The diagram source is URL-safe base64 in the image path (not HTML body
+// text), so characters like < and > cannot become markup.
+func mermaidToImg(html string) string {
+	return mermaidCodeBlock.ReplaceAllStringFunc(html, func(block string) string {
+		m := mermaidCodeBlock.FindStringSubmatch(block)
+		if m == nil {
+			return block
+		}
+		source := strings.TrimSpace(unescapeEntities(m[1]))
+		if source == "" {
+			return block
+		}
+		enc := base64.RawURLEncoding.EncodeToString([]byte(source))
+		return `<img class="mermaid-diagram" alt="Diagram" src="` + mermaidInkSVG + enc + `" />`
+	})
 }
 
 var (
