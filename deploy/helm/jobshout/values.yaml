@@ -17,8 +17,8 @@ image:
   # the NodePort's auth realm is int-spectoncr.diytaxreturn.co.uk.
   registry: int-spectoncr.diytaxreturn.co.uk
   namespace: jobshout
-  # server / web / python-sidecar / review-bot images share this tag (git SHA),
-  # injected at deploy time via --set image.tag=<sha>.
+  # server / web / python-sidecar / review-bot images share this tag (git
+  # release like v1.0.8), injected at deploy time via --set image.tag=<version>.
   tag: latest
   pullPolicy: IfNotPresent
   pullSecret: jobshout-registry

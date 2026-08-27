@@ -16,6 +16,9 @@ RUN go mod download
 
 COPY . .
 
+# Release tag (v1.0.8). CI passes --build-arg VERSION=$NEXT_VERSION so /health
+# and the sidebar show the git tag that built this image, not a hardcoded string.
+ARG VERSION=dev
 # TARGETOS/TARGETARCH are injected by buildx from --platform (e.g. linux/amd64).
 # When building without buildx (local docker compose), they are unset and Go
 # builds for the native arch — so local builds stay correct.
@@ -29,7 +32,7 @@ RUN echo "building GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-$(go env GOARCH)
 # assignments before expansion, so ${VAR:+GOARCH=...} would be parsed as a
 # command). Default to the native arch when TARGETARCH is unset (local builds).
 RUN CGO_ENABLED=0 GOOS="${TARGETOS:-linux}" GOARCH="${TARGETARCH:-$(go env GOARCH)}" \
-    go build -ldflags="-s -w" -o /jobshout-server ./cmd/server
+    go build -ldflags="-s -w -X main.version=${VERSION}" -o /jobshout-server ./cmd/server
 
 # Pin the runtime base to TARGETPLATFORM. Without it, buildx on an arm64 Mac
 # has shipped an arm64 alpine tagged as linux/amd64; k3s then CrashLoops with

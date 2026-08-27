@@ -71,6 +71,12 @@ data:
   # Public origin of this ring — OAuth return and Telegram links. Secrets for
   # Gmail (GMAIL_CLIENT_ID / GMAIL_CLIENT_SECRET / GMAIL_TOKEN_KEY) live in an
   # extraSecretRefs secret, never here.
+  # Sidebar build stamp. image.tag is the git release RP deploys (v1.0.8), not
+  # a SHA — that is the version the UI must show. APP_DEPLOYED_AT is when this
+  # helm render ran, so a rollout reports the last deploy rather than boot time.
+  APP_VERSION: {{ .Values.image.tag | quote }}
+  APP_ENV: {{ .Values.env | quote }}
+  APP_DEPLOYED_AT: {{ now | date "2006-01-02T15:04:05Z07:00" | quote }}
   FRONTEND_BASE_URL: {{ printf "https://%s" .Values.host | quote }}
   GMAIL_OAUTH_REDIRECT_URL: {{ printf "https://%s/api/v1/mail/connection/oauth/callback" .Values.host | quote }}
   MAIL_POLL_INTERVAL: {{ .Values.mail.pollInterval | default "5m" | quote }}
