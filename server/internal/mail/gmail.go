@@ -9,8 +9,11 @@ import (
 	"net/http"
 	netmail "net/mail"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 const gmailAPI = "https://gmail.googleapis.com/gmail/v1/users/me"
@@ -26,15 +29,19 @@ type GmailAPI interface {
 
 type httpGmail struct {
 	client *http.Client
+	logger *zap.Logger
 }
 
 // NewGmailAPI talks to Google over HTTP. No official client library: the
 // surface is small and tests inject a fake instead.
-func NewGmailAPI(client *http.Client) GmailAPI {
+func NewGmailAPI(client *http.Client, logger *zap.Logger) GmailAPI {
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
-	return &httpGmail{client: client}
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	return &httpGmail{client: client, logger: logger}
 }
 
 func (g *httpGmail) ExchangeCode(ctx context.Context, code, redirectURL, clientID, clientSecret string) (TokenSet, error) {
@@ -113,7 +120,12 @@ func (g *httpGmail) ListMessages(ctx context.Context, accessToken, query string,
 		seen[m.ThreadID] = true
 		msg, err := g.getMessage(ctx, accessToken, m.ID)
 		if err != nil {
-			return nil, err
+			// One unreadable message must not fail the whole inbox sync.
+			g.logger.Warn("mail: skipping gmail message",
+				zap.String("gmail_message_id", m.ID),
+				zap.String("gmail_thread_id", m.ThreadID),
+				zap.Error(RedactErr(err)))
+			continue
 		}
 		out = append(out, msg)
 	}
@@ -174,17 +186,35 @@ func (g *httpGmail) getJSON(ctx context.Context, accessToken, rawURL string, v a
 		return fmt.Errorf("mail: gmail api: status %d", resp.StatusCode)
 	}
 	if err := json.Unmarshal(body, v); err != nil {
-		return fmt.Errorf("mail: gmail api: decode")
+		return fmt.Errorf("mail: gmail api: decode (%v)", err)
 	}
 	return nil
 }
 
 type gmailMessage struct {
-	ID       string    `json:"id"`
-	ThreadID string    `json:"threadId"`
-	Snippet  string    `json:"snippet"`
-	Internal int64     `json:"internalDate"`
-	Payload  gmailPart `json:"payload"`
+	ID       string       `json:"id"`
+	ThreadID string       `json:"threadId"`
+	Snippet  string       `json:"snippet"`
+	Internal gmailEpochMS `json:"internalDate"`
+	Payload  gmailPart    `json:"payload"`
+}
+
+// gmailEpochMS accepts Gmail's internalDate as either a JSON number or a
+// string. Google documents it as milliseconds since epoch and often encodes
+// it as a string so JavaScript does not lose precision.
+type gmailEpochMS struct{ ms int64 }
+
+func (e *gmailEpochMS) UnmarshalJSON(b []byte) error {
+	s := strings.TrimSpace(strings.Trim(string(b), `"`))
+	if s == "" || s == "null" {
+		return nil
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return err
+	}
+	e.ms = n
+	return nil
 }
 
 type gmailPart struct {
@@ -222,8 +252,8 @@ func parseGmailMessage(raw gmailMessage) InboxMessage {
 		MessageIDHeader:  h("Message-Id"),
 		ReferencesHeader: h("References"),
 	}
-	if raw.Internal > 0 {
-		msg.ReceivedAt = time.UnixMilli(raw.Internal)
+	if raw.Internal.ms > 0 {
+		msg.ReceivedAt = time.UnixMilli(raw.Internal.ms)
 	}
 	return msg
 }

@@ -530,7 +530,7 @@ func main() {
 		mailLLM = c
 	}
 	mailSvc := service.NewMailService(
-		mailRepo, agentRepo, mail.NewGmailAPI(nil),
+		mailRepo, agentRepo, mail.NewGmailAPI(nil, logger),
 		mail.NewClassifier(mailLLM, logger), mail.NewDrafter(mailLLM, logger),
 		researchSvc, mailCfg, logger,
 	)
