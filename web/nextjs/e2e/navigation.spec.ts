@@ -33,4 +33,22 @@ test.describe("Navigation & Layout", () => {
     await expect(page).toHaveURL(/\/chat/);
     await expect(page.getByRole("button", { name: /new chat/i })).toBeVisible();
   });
+
+  test("dashboard reveals workspace menus", async ({ page }) => {
+    const aside = page.locator("aside");
+    await expect(aside.getByRole("link", { name: "Task Board" })).toHaveCount(0);
+    await page.getByRole("link", { name: "Dashboard" }).click();
+    await page.waitForURL("**/panel/dashboard**", { timeout: 10_000 });
+    await expect(page.locator("h1").first()).toContainText(
+      /Good (morning|afternoon|evening)/
+    );
+    await expect(aside.getByRole("link", { name: "Dashboard" })).toBeVisible();
+    await expect(aside.getByRole("link", { name: "Task Board" })).toBeVisible();
+    await expect(aside.getByRole("link", { name: "Task Manager" })).toBeVisible();
+    await expect(aside.getByRole("link", { name: "Automations" })).toBeVisible();
+
+    await aside.getByRole("button", { name: /new chat/i }).click();
+    await expect(page).toHaveURL(/\/chat/);
+    await expect(aside.getByRole("link", { name: "Task Board" })).toHaveCount(0);
+  });
 });

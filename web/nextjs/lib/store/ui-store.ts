@@ -4,7 +4,7 @@ import { persist } from "zustand/middleware";
 interface UiState {
   sidebarCollapsed: boolean;
   mobileSidebarOpen: boolean;
-  panelMenuOpen: boolean;
+  commandPaletteOpen: boolean;
   /** Task Board detail drawer. */
   openTaskId: string | null;
   /** Local chat title overrides (no rename API yet). */
@@ -13,7 +13,8 @@ interface UiState {
   setSidebarCollapsed: (v: boolean) => void;
   toggleSidebar: () => void;
   setMobileSidebarOpen: (v: boolean) => void;
-  setPanelMenuOpen: (v: boolean) => void;
+  setCommandPaletteOpen: (v: boolean) => void;
+  toggleCommandPalette: () => void;
   setOpenTaskId: (id: string | null) => void;
   setChatTitle: (sessionId: string, title: string) => void;
   clearChatTitle: (sessionId: string) => void;
@@ -24,7 +25,7 @@ export const useUiStore = create<UiState>()(
     (set) => ({
       sidebarCollapsed: false,
       mobileSidebarOpen: false,
-      panelMenuOpen: false,
+      commandPaletteOpen: false,
       openTaskId: null,
       chatTitleOverrides: {},
 
@@ -32,7 +33,9 @@ export const useUiStore = create<UiState>()(
       toggleSidebar: () =>
         set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
       setMobileSidebarOpen: (mobileSidebarOpen) => set({ mobileSidebarOpen }),
-      setPanelMenuOpen: (panelMenuOpen) => set({ panelMenuOpen }),
+      setCommandPaletteOpen: (commandPaletteOpen) => set({ commandPaletteOpen }),
+      toggleCommandPalette: () =>
+        set((s) => ({ commandPaletteOpen: !s.commandPaletteOpen })),
       setOpenTaskId: (openTaskId) => set({ openTaskId }),
       setChatTitle: (sessionId, title) =>
         set((s) => ({

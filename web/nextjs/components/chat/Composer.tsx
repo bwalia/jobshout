@@ -17,25 +17,28 @@ export function Composer({
   onSend,
   disabled,
   placeholder,
+  variant = "docked",
 }: {
   value: string;
   onChange: (v: string) => void;
   onSend: () => void;
   disabled?: boolean;
   placeholder?: string;
+  variant?: "hero" | "docked";
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const showSlash = value.startsWith("/") && !value.includes(" ");
+  const hero = variant === "hero";
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
-  }, [value]);
+    el.style.height = `${Math.min(el.scrollHeight, hero ? 220 : 160)}px`;
+  }, [value, hero]);
 
   return (
-    <div className="relative">
+    <div className="relative w-full">
       {showSlash ? (
         <ul className="absolute bottom-full mb-1 w-full rounded-lg border border-border bg-card p-1 shadow-lg">
           {SLASH.filter((s) => s.cmd.startsWith(value)).map((s) => (
@@ -52,36 +55,51 @@ export function Composer({
           ))}
         </ul>
       ) : null}
-      <div className="flex items-end gap-2 rounded-xl border border-border bg-card px-3 py-2 focus-within:border-primary/50">
+      <div
+        className={cn(
+          "border border-border bg-card focus-within:border-primary/40",
+          hero ? "rounded-2xl px-3 pt-3 pb-2 shadow-sm" : "rounded-xl px-3 pt-2 pb-2"
+        )}
+      >
         <textarea
           ref={ref}
-          rows={1}
+          rows={hero ? 3 : 1}
           value={value}
           disabled={disabled}
-          placeholder={placeholder ?? "Ask JobShout to run an agent, create a task, check status…"}
-          className="max-h-40 min-h-[24px] flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+          placeholder={
+            placeholder ??
+            (hero
+              ? "Ask JobShout to build, fix bugs, explore"
+              : "Ask JobShout to run an agent, create a task, check status…")
+          }
+          className={cn(
+            "w-full resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground",
+            hero ? "min-h-[72px]" : "min-h-[24px] max-h-40"
+          )}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+            if (e.nativeEvent.isComposing) return;
+            if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               if (!disabled && value.trim()) onSend();
             }
           }}
         />
-        <button
-          type="button"
-          disabled={disabled || !value.trim()}
-          onClick={onSend}
-          aria-label="Send message"
-          className={cn(
-            "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground",
-            (disabled || !value.trim()) && "opacity-40"
-          )}
-        >
-          <ArrowUp className="h-4 w-4" />
-        </button>
+        <div className="mt-1 flex items-center justify-end">
+          <button
+            type="button"
+            disabled={disabled || !value.trim()}
+            onClick={onSend}
+            aria-label="Send message"
+            className={cn(
+              "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground",
+              (disabled || !value.trim()) && "opacity-40"
+            )}
+          >
+            <ArrowUp className="h-4 w-4" />
+          </button>
+        </div>
       </div>
-      <p className="mt-1 text-[10px] text-muted-foreground">⌘↵ to send</p>
     </div>
   );
 }

@@ -1,18 +1,31 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Plus, Search, Pencil, Trash2, ChevronLeft } from "lucide-react";
+import {
+  Plus,
+  Search,
+  Pencil,
+  Trash2,
+  ChevronLeft,
+  Box,
+} from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { sessionTitle, type ChatSession } from "@/lib/types/chat";
 import {
   useChatSessions,
-  useCreateChatSession,
   useDeleteChatSession,
 } from "@/lib/hooks/useChat";
 import { useUiStore } from "@/lib/store/ui-store";
-import { PanelMenu } from "./PanelMenu";
 import { SidebarFooter } from "./SidebarFooter";
+import {
+  APP_NAV_PANELS,
+  SIDEBAR_PRIMARY,
+  isAppNavPath,
+  panelFromPath,
+  rememberPanelTransition,
+} from "@/lib/panels";
 
 function groupByRecency(sessions: ChatSession[]) {
   const now = Date.now();
@@ -20,7 +33,7 @@ function groupByRecency(sessions: ChatSession[]) {
   const groups: { label: string; items: ChatSession[] }[] = [
     { label: "Today", items: [] },
     { label: "Yesterday", items: [] },
-    { label: "Previous 7 days", items: [] },
+    { label: "Last 7 days", items: [] },
     { label: "Older", items: [] },
   ];
   for (const s of sessions) {
@@ -34,6 +47,16 @@ function groupByRecency(sessions: ChatSession[]) {
   return groups.filter((g) => g.items.length > 0);
 }
 
+function navItemClass(active: boolean, collapsed: boolean) {
+  return cn(
+    "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors",
+    collapsed && "h-10 w-10 justify-center px-0",
+    active
+      ? "bg-sidebar-muted text-foreground"
+      : "text-sidebar-foreground hover:bg-sidebar-muted/70 hover:text-foreground"
+  );
+}
+
 function SidebarBody({
   collapsed,
   onToggleCollapse,
@@ -45,37 +68,33 @@ function SidebarBody({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const activeSession = searchParams.get("session");
-  const { chatTitleOverrides, setChatTitle } = useUiStore();
+  const { chatTitleOverrides, setChatTitle, setCommandPaletteOpen } =
+    useUiStore();
 
   const sessionsQuery = useChatSessions();
-  const createSession = useCreateChatSession();
   const deleteSession = useDeleteChatSession();
   const sessions = useMemo(
     () => sessionsQuery.data?.data ?? [],
     [sessionsQuery.data]
   );
-  const [query, setQuery] = useState("");
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return sessions;
-    return sessions.filter((s) => {
-      const title = (chatTitleOverrides[s.id] ?? sessionTitle(s)).toLowerCase();
-      return title.includes(q);
-    });
-  }, [sessions, query, chatTitleOverrides]);
-
-  const groups = useMemo(() => groupByRecency(filtered), [filtered]);
+  const groups = useMemo(() => groupByRecency(sessions), [sessions]);
+  const activePanel = panelFromPath(pathname);
+  const showAppNav = isAppNavPath(pathname);
+  const onEmptyChat = pathname.startsWith("/chat") && !activeSession;
 
   function goSession(id: string) {
     router.push(`/chat?session=${id}`);
   }
 
-  async function onNewChat() {
-    const s = await createSession.mutateAsync();
-    router.push(`/chat?session=${s.id}`);
+  function onNewChat() {
+    router.push("/chat");
+  }
+
+  function markPanelNav(href: string) {
+    rememberPanelTransition(activePanel, panelFromPath(href));
   }
 
   function startRename(s: ChatSession) {
@@ -99,16 +118,20 @@ function SidebarBody({
     >
       <div
         className={cn(
-          "flex h-14 shrink-0 items-center gap-2 border-b border-sidebar-border px-3",
-          collapsed && "justify-center px-2"
+          "flex shrink-0 items-center gap-1 border-b border-sidebar-border px-3",
+          collapsed ? "h-auto flex-col py-3" : "h-14"
         )}
       >
-        <PanelMenu collapsed={collapsed} />
-        {!collapsed && (
-          <span className="flex-1 truncate text-sm font-semibold tracking-tight text-foreground">
-            JobShout
-          </span>
-        )}
+        <button
+          type="button"
+          onClick={onNewChat}
+          title="JobShout"
+          aria-label="JobShout home"
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-foreground hover:bg-sidebar-muted"
+        >
+          <Box className="h-5 w-5" />
+        </button>
+        {!collapsed && <div className="flex-1" />}
         {onToggleCollapse && (
           <button
             type="button"
@@ -122,130 +145,172 @@ function SidebarBody({
             <ChevronLeft className="h-4 w-4" />
           </button>
         )}
-      </div>
-
-      <div className={cn("px-3 pt-3", collapsed && "px-2")}>
         <button
           type="button"
-          onClick={() => void onNewChat()}
-          disabled={createSession.isPending}
-          title="New chat"
-          className={cn(
-            "flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50",
-            collapsed && "h-10 w-10 px-0"
-          )}
+          onClick={() => setCommandPaletteOpen(true)}
+          title="Search"
+          aria-label="Search"
+          className="flex h-8 w-8 items-center justify-center rounded-md text-sidebar-foreground hover:bg-sidebar-muted hover:text-foreground"
         >
-          <Plus className="h-4 w-4" />
-          {!collapsed && "New chat"}
+          <Search className="h-4 w-4" />
         </button>
       </div>
 
-      {!collapsed && (
-        <>
-          <div className="px-3 pt-3">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search chats"
-                className="h-8 w-full rounded-md border border-sidebar-border bg-background pl-8 pr-2 text-sm outline-none placeholder:text-muted-foreground focus:border-ring"
-              />
-            </div>
-          </div>
-          <nav className="mt-2 flex-1 overflow-y-auto scrollbar-thin px-2 pb-2">
-            {groups.length === 0 ? (
-              <p className="px-2 py-6 text-center text-xs text-muted-foreground">
-                No chats yet
-              </p>
-            ) : (
-              groups.map((g) => (
-                <div key={g.label} className="mb-3">
-                  <p className="mb-1 px-2 text-[11px] font-medium text-muted-foreground">
-                    {g.label}
-                  </p>
-                  <ul className="space-y-0.5">
-                    {g.items.map((s) => {
-                      const active =
-                        pathname.startsWith("/chat") && activeSession === s.id;
-                      const title =
-                        chatTitleOverrides[s.id] ?? sessionTitle(s);
-                      return (
-                        <li key={s.id} className="group relative">
-                          {renamingId === s.id ? (
-                            <input
-                              autoFocus
-                              value={renameDraft}
-                              onChange={(e) => setRenameDraft(e.target.value)}
-                              onBlur={commitRename}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") commitRename();
-                                if (e.key === "Escape") setRenamingId(null);
-                              }}
-                              className="w-full rounded-md border border-ring bg-background px-2 py-1.5 text-sm outline-none"
-                            />
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => goSession(s.id)}
-                              className={cn(
-                                "w-full truncate rounded-md px-2 py-1.5 pr-14 text-left text-sm transition-colors",
-                                active
-                                  ? "bg-sidebar-muted text-foreground"
-                                  : "text-sidebar-foreground hover:bg-sidebar-muted/70 hover:text-foreground"
-                              )}
-                            >
-                              {title}
-                            </button>
-                          )}
-                          {renamingId !== s.id && (
-                            <div className="absolute right-1 top-1/2 hidden -translate-y-1/2 items-center gap-0.5 group-hover:flex">
-                              <button
-                                type="button"
-                                aria-label="Rename"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  startRename(s);
-                                }}
-                                className="rounded p-1 text-muted-foreground hover:bg-background hover:text-foreground"
-                              >
-                                <Pencil className="h-3 w-3" />
-                              </button>
-                              <button
-                                type="button"
-                                aria-label="Delete"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (
-                                    confirm("Delete this chat permanently?")
-                                  ) {
-                                    deleteSession.mutate(s.id, {
-                                      onSuccess: () => {
-                                        if (activeSession === s.id) {
-                                          router.push("/chat");
-                                        }
-                                      },
-                                    });
-                                  }
-                                }}
-                                className="rounded p-1 text-muted-foreground hover:bg-background hover:text-destructive"
-                              >
-                                <Trash2 className="h-3 w-3" />
-                              </button>
-                            </div>
-                          )}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              ))
-            )}
-          </nav>
-        </>
+      <div className={cn("flex flex-col gap-0.5 px-2 pt-3", collapsed && "items-center px-2")}>
+        <button
+          type="button"
+          onClick={onNewChat}
+          title="New chat"
+          aria-label="New chat"
+          className={navItemClass(onEmptyChat, collapsed)}
+        >
+          <Plus className="h-4 w-4 shrink-0" />
+          {!collapsed && "New Chat"}
+        </button>
+
+        {SIDEBAR_PRIMARY.map((item) => {
+          const Icon = item.icon;
+          const active = pathname.startsWith(item.href);
+          return (
+            <Link
+              key={item.id}
+              href={item.href}
+              title={item.label}
+              aria-current={active ? "page" : undefined}
+              onClick={() => markPanelNav(item.href)}
+              className={navItemClass(active, collapsed)}
+            >
+              <Icon className="h-4 w-4 shrink-0" />
+              {!collapsed && <span className="truncate">{item.label}</span>}
+            </Link>
+          );
+        })}
+      </div>
+
+      <div
+        className={cn(
+          "mt-1 flex min-h-0 flex-1 flex-col overflow-y-auto scrollbar-thin",
+          collapsed && "items-center"
+        )}
+      >
+        {showAppNav && (
+        <nav
+          className={cn(
+            "flex flex-col gap-0.5 border-t border-sidebar-border px-2 pt-2",
+            collapsed && "items-center"
+          )}
+          aria-label="Workspace"
+        >
+          {APP_NAV_PANELS.map((panel) => {
+            const Icon = panel.icon;
+            const active = panel.id === activePanel;
+            return (
+              <Link
+                key={panel.id}
+                href={panel.href}
+                title={panel.label}
+                aria-current={active ? "page" : undefined}
+                onClick={() => markPanelNav(panel.href)}
+                className={navItemClass(active, collapsed)}
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                {!collapsed && <span className="truncate">{panel.label}</span>}
+              </Link>
+            );
+          })}
+        </nav>
       )}
 
-      {collapsed && <div className="flex-1" />}
+      {!collapsed && (
+        <nav className="mt-2 px-2 pb-2">
+          {groups.length === 0 ? (
+            <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+              No chats yet
+            </p>
+          ) : (
+            groups.map((g) => (
+              <div key={g.label} className="mb-3">
+                <p className="mb-1 px-2 text-[11px] font-medium text-muted-foreground">
+                  {g.label}
+                </p>
+                <ul className="space-y-0.5">
+                  {g.items.map((s) => {
+                    const active =
+                      pathname.startsWith("/chat") && activeSession === s.id;
+                    const title =
+                      chatTitleOverrides[s.id] ?? sessionTitle(s);
+                    return (
+                      <li key={s.id} className="group relative">
+                        {renamingId === s.id ? (
+                          <input
+                            autoFocus
+                            value={renameDraft}
+                            onChange={(e) => setRenameDraft(e.target.value)}
+                            onBlur={commitRename}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") commitRename();
+                              if (e.key === "Escape") setRenamingId(null);
+                            }}
+                            className="w-full rounded-md border border-ring bg-background px-2 py-1.5 text-sm outline-none"
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => goSession(s.id)}
+                            className={cn(
+                              "w-full truncate rounded-md px-2 py-1.5 pr-14 text-left text-sm transition-colors",
+                              active
+                                ? "bg-sidebar-muted text-foreground"
+                                : "text-sidebar-foreground hover:bg-sidebar-muted/70 hover:text-foreground"
+                            )}
+                          >
+                            {title}
+                          </button>
+                        )}
+                        {renamingId !== s.id && (
+                          <div className="absolute right-1 top-1/2 hidden -translate-y-1/2 items-center gap-0.5 group-hover:flex">
+                            <button
+                              type="button"
+                              aria-label="Rename"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                startRename(s);
+                              }}
+                              className="rounded p-1 text-muted-foreground hover:bg-background hover:text-foreground"
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </button>
+                            <button
+                              type="button"
+                              aria-label="Delete"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (confirm("Delete this chat permanently?")) {
+                                  deleteSession.mutate(s.id, {
+                                    onSuccess: () => {
+                                      if (activeSession === s.id) {
+                                        router.push("/chat");
+                                      }
+                                    },
+                                  });
+                                }
+                              }}
+                              className="rounded p-1 text-muted-foreground hover:bg-background hover:text-destructive"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))
+          )}
+        </nav>
+      )}
+      </div>
 
       <SidebarFooter collapsed={collapsed} />
     </aside>
