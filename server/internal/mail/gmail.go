@@ -1,0 +1,360 @@
+package mail
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	netmail "net/mail"
+	"net/url"
+	"strings"
+	"time"
+)
+
+const gmailAPI = "https://gmail.googleapis.com/gmail/v1/users/me"
+
+// GmailAPI is the Gmail surface the Mail Agent needs. Tests substitute a fake.
+type GmailAPI interface {
+	ExchangeCode(ctx context.Context, code, redirectURL, clientID, clientSecret string) (TokenSet, error)
+	Refresh(ctx context.Context, refreshToken, clientID, clientSecret string) (TokenSet, error)
+	Profile(ctx context.Context, accessToken string) (string, error)
+	ListMessages(ctx context.Context, accessToken, query string, limit int) ([]InboxMessage, error)
+	Send(ctx context.Context, accessToken string, msg OutboundMessage) (string, error)
+}
+
+type httpGmail struct {
+	client *http.Client
+}
+
+// NewGmailAPI talks to Google over HTTP. No official client library: the
+// surface is small and tests inject a fake instead.
+func NewGmailAPI(client *http.Client) GmailAPI {
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	return &httpGmail{client: client}
+}
+
+func (g *httpGmail) ExchangeCode(ctx context.Context, code, redirectURL, clientID, clientSecret string) (TokenSet, error) {
+	body, status, err := postForm(ctx, g.client, googleTokenURL, url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"redirect_uri":  {redirectURL},
+		"client_id":     {clientID},
+		"client_secret": {clientSecret},
+	})
+	if err != nil {
+		return TokenSet{}, err
+	}
+	return parseTokenResponse(body, status)
+}
+
+func (g *httpGmail) Refresh(ctx context.Context, refreshToken, clientID, clientSecret string) (TokenSet, error) {
+	body, status, err := postForm(ctx, g.client, googleTokenURL, url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {refreshToken},
+		"client_id":     {clientID},
+		"client_secret": {clientSecret},
+	})
+	if err != nil {
+		return TokenSet{}, err
+	}
+	ts, err := parseTokenResponse(body, status)
+	if err != nil {
+		return TokenSet{}, err
+	}
+	if ts.RefreshToken == "" {
+		ts.RefreshToken = refreshToken
+	}
+	return ts, nil
+}
+
+func (g *httpGmail) Profile(ctx context.Context, accessToken string) (string, error) {
+	var p struct {
+		EmailAddress string `json:"emailAddress"`
+	}
+	if err := g.getJSON(ctx, accessToken, gmailAPI+"/profile", &p); err != nil {
+		return "", err
+	}
+	if p.EmailAddress == "" {
+		return "", fmt.Errorf("mail: gmail profile had no email")
+	}
+	return p.EmailAddress, nil
+}
+
+func (g *httpGmail) ListMessages(ctx context.Context, accessToken, query string, limit int) ([]InboxMessage, error) {
+	if limit <= 0 {
+		limit = 25
+	}
+	if limit > 50 {
+		limit = 50
+	}
+	var list struct {
+		Messages []struct {
+			ID       string `json:"id"`
+			ThreadID string `json:"threadId"`
+		} `json:"messages"`
+	}
+	q := url.Values{"maxResults": {fmt.Sprintf("%d", limit)}}
+	if query != "" {
+		q.Set("q", query)
+	}
+	if err := g.getJSON(ctx, accessToken, gmailAPI+"/messages?"+q.Encode(), &list); err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	out := make([]InboxMessage, 0, len(list.Messages))
+	for _, m := range list.Messages {
+		if m.ThreadID == "" || seen[m.ThreadID] {
+			continue
+		}
+		seen[m.ThreadID] = true
+		msg, err := g.getMessage(ctx, accessToken, m.ID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, msg)
+	}
+	return out, nil
+}
+
+func (g *httpGmail) Send(ctx context.Context, accessToken string, msg OutboundMessage) (string, error) {
+	raw := encodeRFC822(msg)
+	payload, _ := json.Marshal(map[string]string{
+		"raw":      raw,
+		"threadId": msg.ThreadID,
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, gmailAPI+"/messages/send", strings.NewReader(string(payload)))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := g.client.Do(req)
+	if err != nil {
+		return "", RedactErr(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("mail: gmail send: status %d", resp.StatusCode)
+	}
+	var out struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil || out.ID == "" {
+		return "", fmt.Errorf("mail: gmail send: missing message id")
+	}
+	return out.ID, nil
+}
+
+func (g *httpGmail) getMessage(ctx context.Context, accessToken, id string) (InboxMessage, error) {
+	var raw gmailMessage
+	if err := g.getJSON(ctx, accessToken, gmailAPI+"/messages/"+url.PathEscape(id)+"?format=full", &raw); err != nil {
+		return InboxMessage{}, err
+	}
+	return parseGmailMessage(raw), nil
+}
+
+func (g *httpGmail) getJSON(ctx context.Context, accessToken, rawURL string, v any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	resp, err := g.client.Do(req)
+	if err != nil {
+		return RedactErr(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("mail: gmail api: status %d", resp.StatusCode)
+	}
+	if err := json.Unmarshal(body, v); err != nil {
+		return fmt.Errorf("mail: gmail api: decode")
+	}
+	return nil
+}
+
+type gmailMessage struct {
+	ID       string    `json:"id"`
+	ThreadID string    `json:"threadId"`
+	Snippet  string    `json:"snippet"`
+	Internal int64     `json:"internalDate"`
+	Payload  gmailPart `json:"payload"`
+}
+
+type gmailPart struct {
+	MimeType string `json:"mimeType"`
+	Headers  []struct {
+		Name  string `json:"name"`
+		Value string `json:"value"`
+	} `json:"headers"`
+	Body struct {
+		Data string `json:"data"`
+	} `json:"body"`
+	Parts []gmailPart `json:"parts"`
+}
+
+func parseGmailMessage(raw gmailMessage) InboxMessage {
+	h := func(name string) string {
+		for _, hdr := range raw.Payload.Headers {
+			if strings.EqualFold(hdr.Name, name) {
+				return hdr.Value
+			}
+		}
+		return ""
+	}
+	fromEmail, fromName := splitAddress(h("From"))
+	toEmail, _ := splitAddress(h("To"))
+	msg := InboxMessage{
+		GmailThreadID:    raw.ThreadID,
+		GmailMessageID:   raw.ID,
+		FromEmail:        fromEmail,
+		FromName:         fromName,
+		ToEmail:          toEmail,
+		Subject:          h("Subject"),
+		Snippet:          raw.Snippet,
+		Body:             extractText(raw.Payload),
+		MessageIDHeader:  h("Message-Id"),
+		ReferencesHeader: h("References"),
+	}
+	if raw.Internal > 0 {
+		msg.ReceivedAt = time.UnixMilli(raw.Internal)
+	}
+	return msg
+}
+
+func extractText(p gmailPart) string {
+	if strings.HasPrefix(strings.ToLower(p.MimeType), "text/plain") && p.Body.Data != "" {
+		return decodeBody(p.Body.Data)
+	}
+	var html string
+	for _, part := range p.Parts {
+		if t := extractText(part); t != "" {
+			if strings.HasPrefix(strings.ToLower(part.MimeType), "text/plain") || strings.HasPrefix(strings.ToLower(p.MimeType), "multipart/") {
+				if !strings.HasPrefix(strings.ToLower(part.MimeType), "text/html") {
+					return t
+				}
+			}
+			html = t
+		}
+	}
+	if p.Body.Data != "" && html == "" {
+		html = decodeBody(p.Body.Data)
+	}
+	if strings.Contains(strings.ToLower(p.MimeType), "html") || html != "" {
+		return stripTags(html)
+	}
+	return html
+}
+
+func decodeBody(data string) string {
+	data = strings.ReplaceAll(data, "-", "+")
+	data = strings.ReplaceAll(data, "_", "/")
+	b, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		if b2, err2 := base64.RawStdEncoding.DecodeString(data); err2 == nil {
+			return string(b2)
+		}
+		return ""
+	}
+	return string(b)
+}
+
+func stripTags(s string) string {
+	var b strings.Builder
+	inTag := false
+	for _, r := range s {
+		switch {
+		case r == '<':
+			inTag = true
+		case r == '>':
+			inTag = false
+			b.WriteByte(' ')
+		case !inTag:
+			b.WriteRune(r)
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func splitAddress(raw string) (email, name string) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", ""
+	}
+	a, err := netmail.ParseAddress(raw)
+	if err != nil {
+		return raw, ""
+	}
+	return a.Address, a.Name
+}
+
+func encodeRFC822(msg OutboundMessage) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "From: %s\r\n", msg.From)
+	fmt.Fprintf(&b, "To: %s\r\n", msg.To)
+	if strings.TrimSpace(msg.CC) != "" {
+		fmt.Fprintf(&b, "Cc: %s\r\n", msg.CC)
+	}
+	fmt.Fprintf(&b, "Subject: %s\r\n", msg.Subject)
+	if msg.InReplyTo != "" {
+		fmt.Fprintf(&b, "In-Reply-To: %s\r\n", msg.InReplyTo)
+	}
+	if msg.References != "" {
+		fmt.Fprintf(&b, "References: %s\r\n", msg.References)
+	}
+	b.WriteString("MIME-Version: 1.0\r\n")
+	b.WriteString("Content-Type: text/plain; charset=UTF-8\r\n\r\n")
+	b.WriteString(msg.Body)
+	return base64.RawURLEncoding.EncodeToString([]byte(b.String()))
+}
+
+// SearchQuery builds a Gmail search string from watch rules.
+func SearchQuery(rules ...string) string {
+	// Default: unread inbox from the last week, so a first connect does not
+	// ingest years of mail.
+	q := "is:unread in:inbox newer_than:7d"
+	var extra []string
+	for _, r := range rules {
+		r = strings.TrimSpace(r)
+		if r != "" {
+			extra = append(extra, r)
+		}
+	}
+	if len(extra) == 0 {
+		return q
+	}
+	return q + " " + strings.Join(extra, " ")
+}
+
+// RulesQuery maps stored watch rules onto Gmail search operators.
+func RulesQuery(labels, senders, prefixes []string) string {
+	var parts []string
+	for _, s := range senders {
+		s = strings.TrimSpace(s)
+		if s != "" {
+			parts = append(parts, "from:"+s)
+		}
+	}
+	for _, l := range labels {
+		l = strings.TrimSpace(l)
+		if l != "" {
+			parts = append(parts, "label:"+l)
+		}
+	}
+	for _, p := range prefixes {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			parts = append(parts, `subject:"`+p+`"`)
+		}
+	}
+	if len(parts) == 0 {
+		return SearchQuery()
+	}
+	return SearchQuery("(" + strings.Join(parts, " OR ") + ")")
+}

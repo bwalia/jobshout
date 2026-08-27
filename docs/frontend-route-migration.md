@@ -20,6 +20,7 @@ Functionality is preserved; only navigation structure changed.
 | `/agents/[id]/knowledge` | `/agents/[id]/knowledge` | kept |
 | `/agents/pentest` | `/panel/task-manager?agent=pentest` | done |
 | `/agents/review` | `/panel/task-manager?agent=review` | done |
+| `/agents/mail` | `/panel/task-manager?agent=mail` | done |
 | `/articles` | `/panel/task-manager?agent=articles` | done |
 | `/articles/[runId]` | `/articles/[runId]` (linked from Articles list) | kept |
 | `/images` | `/panel/task-manager?agent=images` | done |

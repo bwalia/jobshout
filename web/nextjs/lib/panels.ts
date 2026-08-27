@@ -82,6 +82,7 @@ export const ROUTE_MIGRATION: { from: string; to: string; note: string }[] = [
   { from: "/agents/[id]", to: "/agents/[id]", note: "Rich agent profile kept, linked from Task Manager" },
   { from: "/agents/pentest", to: "/panel/task-manager?agent=pentest", note: "Security Tester in Task Manager" },
   { from: "/agents/review", to: "/panel/task-manager?agent=review", note: "PR Reviewer in Task Manager" },
+  { from: "/agents/mail", to: "/panel/task-manager?agent=mail", note: "Mail Agent in Task Manager" },
   { from: "/articles", to: "/panel/task-manager?agent=articles", note: "Articles bot in Task Manager" },
   { from: "/articles/[runId]", to: "/articles/[runId]", note: "Article run detail kept" },
   { from: "/images", to: "/panel/task-manager?agent=images", note: "Images bot in Task Manager" },

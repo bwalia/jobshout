@@ -44,6 +44,7 @@ import (
 	"github.com/jobshout/server/internal/langgraph"
 	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/llmtrace"
+	"github.com/jobshout/server/internal/mail"
 	"github.com/jobshout/server/internal/middleware"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/modelselect"
@@ -200,6 +201,7 @@ func main() {
 	pentestFindingRepo := repository.NewPentestFindingRepository(pool)
 	reviewRunRepo := repository.NewReviewRunRepository(pool)
 	taskRunRepo := repository.NewTaskRunRepository(pool)
+	mailRepo := repository.NewMailRepository(pool)
 
 	// Autonomous agents + chat + Telegram repositories
 	memoryRepo := repository.NewMemoryRepository(pool)
@@ -516,6 +518,28 @@ func main() {
 		logger.Info("PR review disabled (REVIEW_BOT_BASE_URL empty)")
 	}
 
+	mailCfg := mail.LoadConfig()
+	var mailLLM llm.Client
+	if c, err := llmRouter.For(cfg.LLMProvider); err != nil {
+		logger.Warn("mail: llm router returned error — classify/draft will use heuristics", zap.Error(err))
+	} else {
+		mailLLM = c
+	}
+	mailSvc := service.NewMailService(
+		mailRepo, agentRepo, mail.NewGmailAPI(nil),
+		mail.NewClassifier(mailLLM, logger), mail.NewDrafter(mailLLM, logger),
+		researchSvc, mailCfg, logger,
+	)
+	mailReconciler := service.NewMailReconciler(mailSvc, mailCfg.ReconcileInterval, logger)
+	if mailCfg.Configured() {
+		logger.Info("mail agent oauth configured",
+			zap.String("redirect_url", mailCfg.RedirectURL),
+			zap.Duration("poll_interval", mailCfg.PollInterval),
+		)
+	} else {
+		logger.Info("mail agent oauth not configured (set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_TOKEN_KEY)")
+	}
+
 	// ─── Autonomous agent engine ────────────────────────────────────────────
 	autonomousExec := executor.NewAutonomousExecutor(goNativeExec, llmRouter, memoryRepo, goalRepo, logger).WithAutoSelect(autoSelector)
 	memorySvc := service.NewMemoryService(memoryRepo, logger)
@@ -593,6 +617,7 @@ func main() {
 		Pentest:         pentestSvc,
 		Images:          imageSvc,
 		Reviews:         reviewSvc,
+		Mail:            mailSvc,
 		MultiAgent:      multiAgentSvc,
 		Sprints:         sprintSvc,
 		Plugins:         pluginSvc,
@@ -705,6 +730,7 @@ func main() {
 	researchHandler := handler.NewResearchHandler(researchSvc)
 	pentestHandler := handler.NewPentestHandler(pentestSvc)
 	reviewHandler := handler.NewReviewHandler(reviewSvc)
+	mailHandler := handler.NewMailHandler(mailSvc, mailCfg.FrontendBaseURL)
 
 	// Chat, goal, multi-agent, and Telegram handlers
 	chatHandler := handler.NewChatHandler(chatSvc)
@@ -765,6 +791,8 @@ func main() {
 		r.Post("/auth/register", authHandler.Register)
 		r.Post("/auth/login", authHandler.Login)
 		r.Post("/auth/refresh", authHandler.Refresh)
+		// Google redirects the browser here with ?code=&state= — no JWT.
+		r.Get("/mail/connection/oauth/callback", mailHandler.OAuthCallback)
 
 		// Protected routes
 		r.Group(func(r chi.Router) {
@@ -943,6 +971,20 @@ func main() {
 				r.Get("/", reviewHandler.ListRuns)
 				r.Post("/", reviewHandler.CreateRun)
 				r.Get("/{runID}", reviewHandler.GetRun)
+			})
+
+			r.Route("/mail", func(r chi.Router) {
+				r.Get("/connection", mailHandler.GetConnection)
+				r.Patch("/connection", mailHandler.PatchConnection)
+				r.Delete("/connection", mailHandler.Disconnect)
+				r.Post("/connection/oauth/start", mailHandler.StartOAuth)
+				r.Post("/sync", mailHandler.Sync)
+				r.Get("/threads", mailHandler.ListThreads)
+				r.Get("/threads/{id}", mailHandler.GetThread)
+				r.Get("/drafts", mailHandler.ListDrafts)
+				r.Patch("/drafts/{id}", mailHandler.PatchDraft)
+				r.Post("/drafts/{id}/approve", mailHandler.ApproveDraft)
+				r.Post("/drafts/{id}/reject", mailHandler.RejectDraft)
 			})
 
 			// Plugins (user-defined LangGraph/LangChain workflows)
@@ -1214,6 +1256,7 @@ func main() {
 	// Same durable-queue shape as pentest: Postgres is the system of record,
 	// the ClusterIP sidecar holds in-memory OpenCode jobs.
 	go reviewReconciler.Start(ctx)
+	go mailReconciler.Start(ctx)
 
 	// ─── Blog orphan reconciler ─────────────────────────────────────────────
 	// Fails running rows whose writer died (SIGKILL, OOM, node drain). SIGTERM

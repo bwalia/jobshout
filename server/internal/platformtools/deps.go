@@ -22,6 +22,7 @@ type Deps struct {
 	Pentest         service.PentestService
 	Images          *service.ImageService
 	Reviews         service.ReviewService
+	Mail            service.MailService
 	MultiAgent      service.MultiAgentService
 	Sprints         service.SprintService
 	Plugins         service.PluginService

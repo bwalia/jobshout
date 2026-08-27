@@ -164,6 +164,20 @@ pentest:
   # Comma-separated hosts, wildcards, CIDRs or URL prefixes.
   targetAllowlist: ""
 
+# Mail Agent — one shared org Gmail. OAuth client id/secret and GMAIL_TOKEN_KEY
+# are secrets (extraSecretRefs), not chart values. Empty client id leaves Connect
+# disabled; the builtin agent still seeds.
+#
+#   kubectl -n <ring> create secret generic jobshout-mail \
+#     --from-literal=GMAIL_CLIENT_ID=<google-oauth-client-id> \
+#     --from-literal=GMAIL_CLIENT_SECRET=<google-oauth-client-secret> \
+#     --from-literal=GMAIL_TOKEN_KEY=$(openssl rand -hex 32) \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#
+mail:
+  pollInterval: "5m"
+  reconcileInterval: "15s"
+
 # In-cluster PR reviewer (OpenCode + git clones in the pod; Ollama on the Mac
 # via ollama.workstation.co.uk). Off by default — int opts in. No public URL:
 # the API reaches it at http://jobshout-review-bot:8765. Create the operator
