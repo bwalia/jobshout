@@ -30,7 +30,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             type="button"
             onClick={() => setMobileSidebarOpen(true)}
             className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-secondary hover:text-foreground"
-            aria-label="Open menu"
+            aria-label="Open sidebar"
           >
             <Menu className="h-5 w-5" />
           </button>

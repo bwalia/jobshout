@@ -1,11 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Sparkles } from "lucide-react";
 import {
   useChatMessages,
-  useChatSessions,
   useCreateChatSession,
   awaitingAssistant,
   chatKeys,
@@ -30,7 +28,6 @@ export function ChatPage({ className }: { className?: string }) {
   const qc = useQueryClient();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const sessionsQuery = useChatSessions();
   const createSession = useCreateChatSession();
   const sessionFromUrl = searchParams.get("session");
   const [sessionId, setSessionId] = useState<string | null>(sessionFromUrl);
@@ -42,21 +39,18 @@ export function ChatPage({ className }: { className?: string }) {
   const [pending, setPending] = useState<ChatMessage | null>(null);
   const messagesQuery = useChatMessages(sessionId, { pollForReply: !busy });
 
-  const sessions = useMemo(
-    () => sessionsQuery.data?.data ?? [],
-    [sessionsQuery.data]
-  );
-
   useEffect(() => {
     if (sessionFromUrl) {
       setSessionId(sessionFromUrl);
       return;
     }
-    if (!sessionId && sessions[0]) {
-      setSessionId(sessions[0].id);
-      router.replace(`/chat?session=${sessions[0].id}`);
-    }
-  }, [sessionFromUrl, sessionId, sessions, router]);
+    setSessionId(null);
+    setPending(null);
+    setStreaming("");
+    setFailedDraft(null);
+    setBusy(false);
+    setRunningLabel(null);
+  }, [sessionFromUrl]);
 
   const ensureSession = useCallback(async () => {
     if (sessionId) return sessionId;
@@ -126,6 +120,8 @@ export function ChatPage({ className }: { className?: string }) {
 
   const messages: ChatMessage[] = withPending(messagesQuery.data ?? [], pending);
   const waitingOnTurn = !busy && awaitingAssistant(messages);
+  const isEmpty =
+    !sessionId && messages.length === 0 && !busy && !pending;
 
   useEffect(() => {
     if (!pending) return;
@@ -135,17 +131,61 @@ export function ChatPage({ className }: { className?: string }) {
     if (synced) setPending(null);
   }, [messagesQuery.data, pending]);
 
+  const failedRestore = failedDraft ? (
+    <button
+      type="button"
+      className="mb-2 self-start text-xs text-destructive underline"
+      onClick={() => {
+        setDraft(failedDraft);
+        setFailedDraft(null);
+      }}
+    >
+      Send failed — restore draft
+    </button>
+  ) : null;
+
+  const composer = (
+    <Composer
+      value={draft}
+      onChange={setDraft}
+      onSend={onSend}
+      disabled={busy || waitingOnTurn}
+      variant={isEmpty ? "hero" : "docked"}
+    />
+  );
+
   return (
     <div
       className={cn(
         "flex h-[calc(100dvh-3rem)] flex-col bg-background lg:h-screen",
         className
       )}
+      data-chat-layout={isEmpty ? "hero" : "docked"}
     >
-      <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-4 py-4">
-        {messages.length === 0 && !busy && !pending ? (
-          <EmptyState onPick={(p) => { setDraft(""); void send(p); }} />
-        ) : (
+      {isEmpty ? (
+        <div className="flex flex-1 flex-col items-center justify-center px-4">
+          <div className="flex w-full max-w-2xl flex-col items-center">
+            {failedRestore}
+            {composer}
+            <div className="mt-4 flex max-w-lg flex-wrap justify-center gap-2">
+              {EXAMPLES.map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => {
+                    setDraft("");
+                    void send(p);
+                  }}
+                  className="rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground hover:border-primary/40 hover:bg-primary/10 hover:text-foreground"
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-4 py-4">
           <MessageList
             messages={messages}
             streamingText={streaming}
@@ -155,53 +195,10 @@ export function ChatPage({ className }: { className?: string }) {
             onCancel={() => void send("cancel")}
             onClarify={(v) => void send(v)}
           />
-        )}
-        {failedDraft ? (
-          <button
-            type="button"
-            className="mb-2 self-start text-xs text-destructive underline"
-            onClick={() => {
-              setDraft(failedDraft);
-              setFailedDraft(null);
-            }}
-          >
-            Send failed — restore draft
-          </button>
-        ) : null}
-        <Composer
-          value={draft}
-          onChange={setDraft}
-          onSend={onSend}
-          disabled={busy || waitingOnTurn}
-        />
-      </div>
-    </div>
-  );
-}
-
-function EmptyState({ onPick }: { onPick: (prompt: string) => void }) {
-  return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
-      <Sparkles className="h-8 w-8 text-primary" />
-      <div>
-        <h2 className="text-lg font-semibold tracking-tight">JobShout</h2>
-        <p className="mt-1 max-w-md text-sm text-muted-foreground">
-          Drive agents, tasks, and workflows in plain language. Run results show
-          up as compact cards you can open in Task Manager.
-        </p>
-      </div>
-      <div className="flex max-w-lg flex-wrap justify-center gap-2">
-        {EXAMPLES.map((p) => (
-          <button
-            key={p}
-            type="button"
-            onClick={() => onPick(p)}
-            className="rounded-lg border border-border px-3 py-1.5 text-xs hover:border-primary/40 hover:bg-primary/10"
-          >
-            {p}
-          </button>
-        ))}
-      </div>
+          {failedRestore}
+          {composer}
+        </div>
+      )}
     </div>
   );
 }

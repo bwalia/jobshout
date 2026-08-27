@@ -5,10 +5,7 @@ import { useRouter } from "next/navigation";
 import { Search } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { PANELS } from "@/lib/panels";
-import {
-  useChatSessions,
-  useCreateChatSession,
-} from "@/lib/hooks/useChat";
+import { useChatSessions } from "@/lib/hooks/useChat";
 import { sessionTitle } from "@/lib/types/chat";
 import { useUiStore } from "@/lib/store/ui-store";
 
@@ -19,12 +16,13 @@ type Item =
 
 export function CommandPalette() {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const open = useUiStore((s) => s.commandPaletteOpen);
+  const setOpen = useUiStore((s) => s.setCommandPaletteOpen);
+  const toggle = useUiStore((s) => s.toggleCommandPalette);
   const [query, setQuery] = useState("");
   const [focusIdx, setFocusIdx] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const sessionsQuery = useChatSessions();
-  const createSession = useCreateChatSession();
   const overrides = useUiStore((s) => s.chatTitleOverrides);
 
   const items = useMemo<Item[]>(() => {
@@ -35,15 +33,13 @@ export function CommandPalette() {
         id: "new-chat",
         label: "New chat",
         run: () => {
-          void createSession.mutateAsync().then((s) => {
-            router.push(`/chat?session=${s.id}`);
-          });
+          router.push("/chat");
         },
       },
-      ...PANELS.map((p) => ({
+      ...PANELS.filter((p) => p.id !== "chat").map((p) => ({
         kind: "panel" as const,
         id: p.id,
-        label: p.label,
+        label: p.id === "workflows" ? "Automations" : p.label,
         href: p.href,
       })),
       ...(sessionsQuery.data?.data ?? []).slice(0, 20).map((s) => ({
@@ -55,35 +51,36 @@ export function CommandPalette() {
     ];
     if (!q) return list;
     return list.filter((i) => i.label.toLowerCase().includes(q));
-  }, [query, sessionsQuery.data, overrides, createSession, router]);
+  }, [query, sessionsQuery.data, overrides, router]);
 
   const close = useCallback(() => {
     setOpen(false);
     setQuery("");
     setFocusIdx(0);
-  }, []);
+  }, [setOpen]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        setOpen((v) => !v);
+        toggle();
       }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") {
         e.preventDefault();
-        void createSession.mutateAsync().then((s) => {
-          router.push(`/chat?session=${s.id}`);
-        });
+        router.push("/chat");
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [createSession, router]);
+  }, [router, toggle]);
 
   useEffect(() => {
     if (open) {
       setFocusIdx(0);
       requestAnimationFrame(() => inputRef.current?.focus());
+    } else {
+      setQuery("");
+      setFocusIdx(0);
     }
   }, [open]);
 

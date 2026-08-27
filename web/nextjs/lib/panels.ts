@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import {
+  Bot,
   LayoutDashboard,
   MessageSquare,
   Kanban,
@@ -66,6 +67,37 @@ export function panelFromPath(pathname: string): PanelId {
     if (slug && PANELS.some((p) => p.id === slug)) return slug;
   }
   return "chat";
+}
+
+/** Workflows — top-level Automations item (Cursor "Codebase" analogue). */
+export const AUTOMATIONS_HREF = "/panel/workflows";
+
+/**
+ * Always-visible sidebar items. Dashboard is first among app destinations;
+ * clicking it (or any /panel route) reveals APP_NAV_PANELS underneath.
+ */
+export const SIDEBAR_PRIMARY: { id: string; label: string; href: string; icon: LucideIcon }[] = [
+  { id: "automations", label: "Automations", href: AUTOMATIONS_HREF, icon: Bot },
+  { id: "dashboard", label: "Dashboard", href: "/panel/dashboard", icon: LayoutDashboard },
+];
+
+/** Extra menus shown once Dashboard (or any panel) is open. Dashboard stays in primary. */
+export const APP_NAV_PANELS: PanelDef[] = PANELS.filter(
+  (p) => p.id !== "chat" && p.id !== "dashboard" && p.id !== "workflows"
+);
+
+export function isAppNavPath(pathname: string): boolean {
+  return pathname.startsWith("/panel/");
+}
+
+export function rememberPanelTransition(from: PanelId, to: PanelId) {
+  if (from === to) return;
+  try {
+    sessionStorage.setItem("jobshout-panel-from", from);
+    sessionStorage.setItem("jobshout-panel-to", to);
+  } catch {
+    /* ignore */
+  }
 }
 
 /** Old route → new location (for redirects + migration checklist). */
