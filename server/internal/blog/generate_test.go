@@ -44,8 +44,9 @@ func newTestRunner(cms CMSPublisher, responses ...scriptedResponse) *Runner {
 // happens when research fails or comes back thin.
 func newTestRunnerWith(cms CMSPublisher, researcher Researcher, responses ...scriptedResponse) *Runner {
 	return NewRunner(Config{
-		ContentDir: "content/blogs",
-		AuthorName: "Test Writer",
+		ContentDir:    "content/blogs",
+		AuthorName:    "Test Writer",
+		PublicBaseURL: "https://jobshout.test",
 	}, &stubLLM{responses: responses}, cms, researcher, zap.NewNop())
 }
 
@@ -179,6 +180,30 @@ func TestPublish_AlwaysCreatesDrafts(t *testing.T) {
 	}
 	if result.Posts[0].PostUUID == "" {
 		t.Error("result should carry the CMS post UUID")
+	}
+}
+
+// A cover on the article must land in opsapi's featured_image_url as an
+// absolute URL, so the console Featured image preview can load it.
+func TestPublish_SendsFeaturedImageURL(t *testing.T) {
+	cms := &fakeCMS{}
+	r := newTestRunner(cms)
+
+	_, err := r.Publish(context.Background(), []GeneratedArticle{{
+		Topic: "covered", Slug: "covered",
+		Title: "Covered", Excerpt: "Has a cover.",
+		HTML:          "<p>Body</p>",
+		CoverImageURL: "/api/v1/images/file/org/2026/08/cover.png",
+	}}, nil)
+	if err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if len(cms.posts) != 1 {
+		t.Fatalf("sent %d posts, want 1", len(cms.posts))
+	}
+	want := "https://jobshout.test/api/v1/images/file/org/2026/08/cover.png"
+	if cms.posts[0].FeaturedImageURL != want {
+		t.Errorf("featured_image_url = %q, want %q", cms.posts[0].FeaturedImageURL, want)
 	}
 }
 

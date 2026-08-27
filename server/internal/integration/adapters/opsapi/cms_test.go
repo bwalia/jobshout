@@ -71,10 +71,11 @@ func TestCreatePost_SendsNamespaceAndAuth(t *testing.T) {
 
 	c := newTestClient(t, srv.URL)
 	post, err := c.CreatePost(context.Background(), CreatePostRequest{
-		Title:       "Hello",
-		Slug:        "hello",
-		ContentHTML: "<p>Hi</p>",
-		Status:      StatusDraft,
+		Title:            "Hello",
+		Slug:             "hello",
+		ContentHTML:      "<p>Hi</p>",
+		Status:           StatusDraft,
+		FeaturedImageURL: "https://int.jobshout.co.uk/api/v1/images/file/cover.png",
 	})
 	if err != nil {
 		t.Fatalf("CreatePost: %v", err)
@@ -91,6 +92,9 @@ func TestCreatePost_SendsNamespaceAndAuth(t *testing.T) {
 	}
 	if post.UUID != "post-abc" {
 		t.Errorf("post UUID = %q, want %q", post.UUID, "post-abc")
+	}
+	if gotBody.FeaturedImageURL != "https://int.jobshout.co.uk/api/v1/images/file/cover.png" {
+		t.Errorf("featured_image_url = %q, want the cover URL sent through", gotBody.FeaturedImageURL)
 	}
 }
 

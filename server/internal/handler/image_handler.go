@@ -168,6 +168,10 @@ func (h *ImageHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 // Serve handles GET /api/v1/images/file/* — the stored bytes.
+//
+// The route is registered without auth: object keys contain UUIDs (not
+// sequential IDs), and CMS featured-image previews load this URL with a plain
+// <img> that cannot attach a JWT.
 func (h *ImageHandler) Serve(w http.ResponseWriter, r *http.Request) {
 	key := strings.TrimPrefix(r.URL.Path, imagestore.URLPrefix)
 	if key == "" {

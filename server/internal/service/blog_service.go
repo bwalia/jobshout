@@ -824,6 +824,9 @@ func (s *blogService) Publish(ctx context.Context, orgID uuid.UUID, runID uuid.U
 		articles = append(articles, blog.GeneratedArticle{
 			Topic: a.Topic, Slug: a.Slug, Path: a.Path,
 			Markdown: a.Markdown, HTML: a.HTML, WordCount: a.WordCount,
+			// Cover must travel with the article or Publish cannot fill
+			// opsapi's featured_image_url and the CMS draft has no cover.
+			CoverImageURL: a.CoverImageURL,
 		})
 	}
 

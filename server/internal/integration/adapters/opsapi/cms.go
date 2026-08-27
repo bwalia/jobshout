@@ -84,18 +84,21 @@ func (c *Client) BaseURL() string { return c.cfg.BaseURL }
 
 // CreatePostRequest is the body of POST /api/v2/cms/posts.
 //
-// Fields opsapi accepts but JobShout has no opinion on — category, featured
-// image, scheduling, visibility — are left out so opsapi's defaults apply.
+// Fields opsapi accepts but JobShout has no opinion on — category, scheduling,
+// visibility — are left out so opsapi's defaults apply. FeaturedImageURL is
+// set when the article has a cover, so the opsapi console Featured image field
+// (and public CMS consumers) show the same picture JobShout generated.
 type CreatePostRequest struct {
-	Title          string   `json:"title"`
-	Slug           string   `json:"slug,omitempty"`
-	Excerpt        string   `json:"excerpt,omitempty"`
-	ContentHTML    string   `json:"content_html"`
-	Status         string   `json:"status"`
-	AuthorName     string   `json:"author_name,omitempty"`
-	Tags           []string `json:"tags,omitempty"`
-	SEOTitle       string   `json:"seo_title,omitempty"`
-	SEODescription string   `json:"seo_description,omitempty"`
+	Title            string   `json:"title"`
+	Slug             string   `json:"slug,omitempty"`
+	Excerpt          string   `json:"excerpt,omitempty"`
+	ContentHTML      string   `json:"content_html"`
+	Status           string   `json:"status"`
+	AuthorName       string   `json:"author_name,omitempty"`
+	FeaturedImageURL string   `json:"featured_image_url,omitempty"`
+	Tags             []string `json:"tags,omitempty"`
+	SEOTitle         string   `json:"seo_title,omitempty"`
+	SEODescription   string   `json:"seo_description,omitempty"`
 }
 
 // Post is the subset of opsapi's created-post row that JobShout stores. The
