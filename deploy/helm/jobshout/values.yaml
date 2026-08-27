@@ -6,7 +6,7 @@
 
 env: int
 # Public host per environment. jobshout.co.uk has no wildcard, so each host needs
-# a Cloudflare CNAME -> pop0.wslproxy.com plus a wslproxy vhost -> the k3s Traefik
+# a Cloudflare CNAME -> lon1.pop0.uk plus a wslproxy vhost -> the k3s Traefik
 # edge (see .github/workflows/register-edge-vhost.yml).
 host: int.jobshout.co.uk
 
