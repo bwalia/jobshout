@@ -232,7 +232,7 @@ jobs:
               --provenance=false --sbom=false --push "$@"
           }
 
-          bx -f server/Dockerfile -t "$NS/server:$VERSION" -t "$NS/server:latest" server
+          bx --build-arg VERSION="$VERSION" -f server/Dockerfile -t "$NS/server:$VERSION" -t "$NS/server:latest" server
 
           # NEXT_PUBLIC_* are baked at BUILD time, so build same-origin (empty
           # base): the browser calls /api and /ws on whichever host serves it, so

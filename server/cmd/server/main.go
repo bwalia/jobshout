@@ -62,7 +62,11 @@ import (
 	"github.com/google/uuid"
 )
 
-const version = "0.3.0"
+// version is the release this binary was built as (CI: -ldflags -X main.version=v1.0.8).
+// Runtime APP_VERSION (Helm image.tag) wins so the sidebar shows what is actually deployed.
+var version = "dev"
+
+var startedAt = time.Now()
 
 // researchRequestTimeout bounds the synchronous research endpoint.
 //
@@ -770,8 +774,12 @@ func main() {
 	})
 	r.Use(corsHandler.Handler)
 
-	// Health check
-	r.Get("/health", handler.Health(pool, version))
+	// Health check — version/env/deployed_at feed the sidebar build stamp.
+	r.Get("/health", handler.Health(pool, handler.RuntimeInfo{
+		Version:    resolveVersion(),
+		Env:        strings.TrimSpace(os.Getenv("APP_ENV")),
+		DeployedAt: resolveDeployedAt(),
+	}))
 
 	// Prometheus metrics endpoint
 	r.Handle("/metrics", promhttp.Handler())
@@ -1278,7 +1286,7 @@ func main() {
 	go func() {
 		logger.Info("starting server",
 			zap.String("port", cfg.ServerPort),
-			zap.String("version", version),
+			zap.String("version", resolveVersion()),
 		)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Fatal("server failed", zap.Error(err))
@@ -1353,4 +1361,29 @@ func startModelDiscovery(router *llm.Router, logger *zap.Logger) {
 			cancel()
 		}
 	}()
+}
+
+func resolveVersion() string {
+	if v := strings.TrimSpace(os.Getenv("APP_VERSION")); v != "" && v != "latest" {
+		return v
+	}
+	if v := strings.TrimSpace(version); v != "" && v != "dev" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("APP_VERSION")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(version); v != "" {
+		return v
+	}
+	return "dev"
+}
+
+func resolveDeployedAt() time.Time {
+	if s := strings.TrimSpace(os.Getenv("APP_DEPLOYED_AT")); s != "" {
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			return t
+		}
+	}
+	return startedAt
 }

@@ -7,6 +7,7 @@ import { useTheme } from "next-themes";
 import { useAuthStore } from "@/lib/store/auth-store";
 import { clearTokens } from "@/lib/auth/auth";
 import { cn } from "@/lib/utils/cn";
+import { useHealth } from "@/lib/hooks/useHealth";
 
 function initials(name: string): string {
   return name
@@ -43,6 +44,7 @@ export function SidebarFooter({ collapsed }: { collapsed: boolean }) {
     [user?.full_name]
   );
   const isDark = mounted && resolvedTheme === "dark";
+  const health = useHealth();
 
   function handleLogout() {
     clearTokens();
@@ -82,6 +84,7 @@ export function SidebarFooter({ collapsed }: { collapsed: boolean }) {
             />
           )}
         </div>
+        <BuildStamp info={health.data} collapsed />
       </div>
     );
   }
@@ -139,6 +142,7 @@ export function SidebarFooter({ collapsed }: { collapsed: boolean }) {
           {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </button>
       </div>
+      <BuildStamp info={health.data} />
     </div>
   );
 }
@@ -180,4 +184,63 @@ function AccountMenu({
       </button>
     </div>
   );
+}
+
+function BuildStamp({
+  info,
+  collapsed,
+}: {
+  info?: { version: string; env?: string; deployed_at?: string };
+  collapsed?: boolean;
+}) {
+  if (!info?.version) return null;
+  const deployed = formatDeployed(info.deployed_at);
+  const absolute = info.deployed_at
+    ? new Date(info.deployed_at).toLocaleString()
+    : undefined;
+  const detail = [info.env, deployed ? `Deployed ${deployed}` : null]
+    .filter(Boolean)
+    .join(" · ");
+  const title = [info.version, info.env, absolute && `Deployed ${absolute}`]
+    .filter(Boolean)
+    .join(" · ");
+
+  if (collapsed) {
+    return (
+      <span
+        className="max-w-full truncate px-0.5 text-center font-mono text-[9px] leading-tight text-muted-foreground"
+        title={title}
+      >
+        {info.version}
+      </span>
+    );
+  }
+
+  return (
+    <div
+      className="mt-2 flex items-start justify-between gap-2 px-2"
+      title={title}
+    >
+      <span className="min-w-0 truncate text-[10px] leading-tight text-muted-foreground">
+        {detail || "\u00a0"}
+      </span>
+      <span className="shrink-0 font-mono text-[10px] leading-tight text-muted-foreground">
+        {info.version}
+      </span>
+    </div>
+  );
+}
+
+function formatDeployed(iso?: string): string | null {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return null;
+  const mins = Math.floor((Date.now() - t) / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return new Date(t).toLocaleDateString();
 }
