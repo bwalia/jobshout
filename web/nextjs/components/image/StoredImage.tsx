@@ -5,13 +5,13 @@ import { useEffect, useState } from "react";
 import { fetchImageObjectURL } from "@/lib/api/images";
 
 /**
- * Renders an image the API serves behind authentication.
+ * Renders a stored image URL in the JobShout UI.
  *
- * Every stored image lives at `/api/v1/images/file/…`, inside the authenticated
- * API. A browser sends no Authorization header with an `<img>` request, so the
- * obvious markup renders a broken image however healthy the platform is. This
- * fetches the bytes with the token attached and renders the result, which is
- * the only way to show them without making the route public.
+ * Generated images live at `/api/v1/images/file/…` and are publicly readable
+ * (UUID keys, immutable cache) so opsapi and other consumers can use a plain
+ * `<img>`. Inside this app the browser still cannot point `<img>` at the API
+ * host with credentials, and relative paths would hit Next.js rather than the
+ * Go API — so we fetch the bytes with the session token and render a blob URL.
  *
  * A `data:` source is passed straight through: a freshly generated image comes
  * back inline when there is no object storage, needs no fetching, and would be

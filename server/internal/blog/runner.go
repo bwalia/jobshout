@@ -43,6 +43,12 @@ type Config struct {
 	ContentDir string
 	// AuthorName is the byline attached to posts created in the CMS.
 	AuthorName string
+	// PublicBaseURL is this ring's public origin (e.g. https://int.jobshout.co.uk).
+	// Cover images are stored as relative /api/v1/images/file/… paths; opsapi's
+	// Featured image field needs an absolute URL a browser can load, so Publish
+	// prefixes relative covers with this base. Empty means covers are omitted
+	// from the CMS payload rather than sending a path another host cannot resolve.
+	PublicBaseURL string
 	// Model is the LLM used for writing — planning, drafting, reviewing,
 	// revising and expanding. Empty means the provider's default.
 	//
@@ -362,7 +368,10 @@ func (r *Runner) Publish(ctx context.Context, articles []GeneratedArticle, progr
 			ContentHTML: a.HTML,
 			Status:      opsapi.StatusDraft,
 			AuthorName:  r.cfg.AuthorName,
-			SEOTitle:    a.Title,
+			// Cover → opsapi Featured image. Absolute so the console <img>
+			// preview (and public sites) can load bytes without a JobShout JWT.
+			FeaturedImageURL: publicImageURL(r.cfg.PublicBaseURL, a.CoverImageURL),
+			SEOTitle:         a.Title,
 			// opsapi caps meta descriptions at the same length we trim excerpts
 			// to, so the excerpt serves both without a second derivation.
 			SEODescription: a.Excerpt,

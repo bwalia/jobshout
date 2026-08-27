@@ -459,6 +459,7 @@ func main() {
 		blogRunner = blog.NewRunner(blog.Config{
 			ContentDir:      cfg.BlogContentDir,
 			AuthorName:      cfg.BlogAuthorName,
+			PublicBaseURL:   cfg.FrontendBaseURL,
 			Model:           cfg.BlogModel,
 			ProseModel:      cfg.BlogProseModel,
 			StructuredModel: cfg.BlogStructuredModel,
@@ -801,6 +802,12 @@ func main() {
 		r.Post("/auth/refresh", authHandler.Refresh)
 		// Google redirects the browser here with ?code=&state= — no JWT.
 		r.Get("/mail/connection/oauth/callback", mailHandler.OAuthCallback)
+
+		// Generated images are public. Keys embed UUIDs so they are not
+		// enumerable, and Cache-Control already marks them immutable. Auth
+		// would break opsapi's featured-image preview and any public site
+		// that loads the cover with a plain <img> (no Authorization header).
+		r.Get("/images/file/*", imageHandler.Serve)
 
 		// Protected routes
 		r.Group(func(r chi.Router) {
@@ -1237,11 +1244,11 @@ func main() {
 			// Image generation. Registered unconditionally: /models answers
 			// "enabled: false" when nothing is configured, which the UI renders
 			// as a disabled control — a 404 there would look like a broken
-			// deployment rather than a switched-off feature.
+			// deployment rather than a switched-off feature. File serving is
+			// registered above, outside auth, so CMS covers stay loadable.
 			r.Route("/images", func(r chi.Router) {
 				r.Get("/models", imageHandler.ListModels)
 				r.Post("/generate", imageHandler.Generate)
-				r.Get("/file/*", imageHandler.Serve)
 				r.Get("/", imageHandler.List)
 			})
 
