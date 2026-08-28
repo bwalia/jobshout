@@ -3,6 +3,7 @@ package chatsvc
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -260,3 +261,121 @@ func (s *scriptedOK) Generate(_ context.Context, _ llm.GenerateRequest) (*llm.Ge
 }
 func (s *scriptedOK) ProviderName() string { return "ok" }
 func (s *scriptedOK) SupportsTools() bool  { return true }
+
+type recordingLLM struct {
+	steps []llm.GenerateResponse
+	reqs  []llm.GenerateRequest
+	i     int
+}
+
+func (s *recordingLLM) Generate(_ context.Context, req llm.GenerateRequest) (*llm.GenerateResponse, error) {
+	s.reqs = append(s.reqs, req)
+	if s.i >= len(s.steps) {
+		return &llm.GenerateResponse{Content: "Okay.", FinishReason: "stop"}, nil
+	}
+	r := s.steps[s.i]
+	s.i++
+	return &r, nil
+}
+func (s *recordingLLM) ProviderName() string { return "recording" }
+func (s *recordingLLM) SupportsTools() bool  { return true }
+
+func TestSendTurn_PersistsToolTranscript(t *testing.T) {
+	repo := newMemChatRepo()
+	org, user, sid := uuid.New(), uuid.New(), uuid.New()
+	if err := repo.CreateSession(context.Background(), &model.ChatSession{
+		ID: sid, OrgID: org, UserID: user, Source: model.ChatSourceWeb, Metadata: map[string]any{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	reg := platformtools.NewRegistry()
+	reg.Register(platformtools.TestingTool("task_create", "", false, func(_ context.Context, in map[string]any) (*platformtools.Result, error) {
+		title, _ := in["title"].(string)
+		ref := model.EntityRef{Kind: model.EntityTask, ID: uuid.New().String(), Label: title}
+		return &platformtools.Result{Data: map[string]any{"title": title, "project": "Website"}, Entity: &ref}, nil
+	}))
+	client := &recordingLLM{steps: []llm.GenerateResponse{
+		{ToolCalls: []llm.ToolCall{{ID: "1", Name: "task_create", Arguments: map[string]any{"title": "Fix login"}}}},
+		{Content: "Created the login task."},
+		{Content: "Still looking at that task."},
+	}}
+	agent := chatagent.New(client, reg, platformtools.NewGuard(nil, nil), nil, zap.NewNop())
+	svc := NewChatService(repo, agent, zap.NewNop())
+
+	_, err := svc.SendTurn(context.Background(), org, user, sid, "create a task", "web", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgs, err := repo.ListMessages(context.Background(), sid, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawTool bool
+	for _, m := range msgs {
+		if m.Role == model.ChatRoleTool {
+			sawTool = true
+			if len(m.Content) > 10_000 {
+				t.Fatal("tool payload too large")
+			}
+		}
+	}
+	if !sawTool {
+		t.Fatalf("expected a tool-result row, got roles: %v", rolesOf(msgs))
+	}
+
+	_, err = svc.SendTurn(context.Background(), org, user, sid, "what was that again", "web", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(client.reqs) < 3 {
+		t.Fatalf("reqs = %d", len(client.reqs))
+	}
+	last := client.reqs[len(client.reqs)-1]
+	foundToolRole := false
+	for _, m := range last.Messages {
+		if m.Role == llm.RoleTool {
+			foundToolRole = true
+		}
+	}
+	if !foundToolRole {
+		t.Fatal("second Run must send a tool-role message to the LLM")
+	}
+}
+
+func TestSendTurn_TruncatesHugeToolPayload(t *testing.T) {
+	repo := newMemChatRepo()
+	org, user, sid := uuid.New(), uuid.New(), uuid.New()
+	if err := repo.CreateSession(context.Background(), &model.ChatSession{
+		ID: sid, OrgID: org, UserID: user, Source: model.ChatSourceWeb, Metadata: map[string]any{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	huge := strings.Repeat("x", 50_000)
+	reg := platformtools.NewRegistry()
+	reg.Register(platformtools.TestingTool("boom", "", false, func(context.Context, map[string]any) (*platformtools.Result, error) {
+		return &platformtools.Result{Data: map[string]any{"blob": huge}}, nil
+	}))
+	client := &recordingLLM{steps: []llm.GenerateResponse{
+		{ToolCalls: []llm.ToolCall{{ID: "1", Name: "boom"}}},
+		{Content: "Done."},
+	}}
+	agent := chatagent.New(client, reg, nil, nil, zap.NewNop())
+	svc := NewChatService(repo, agent, zap.NewNop())
+	if _, err := svc.SendTurn(context.Background(), org, user, sid, "go", "web", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	msgs, _ := repo.ListMessages(context.Background(), sid, 50)
+	for _, m := range msgs {
+		if m.Role == model.ChatRoleTool && len(m.Content) >= 50_000 {
+			t.Fatalf("stored %d chars", len(m.Content))
+		}
+	}
+}
+
+func rolesOf(msgs []model.ChatMessage) []string {
+	out := make([]string, len(msgs))
+	for i, m := range msgs {
+		out[i] = m.Role
+	}
+	return out
+}

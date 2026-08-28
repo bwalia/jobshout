@@ -82,8 +82,8 @@ func (f *fakeTasks) AddComment(context.Context, uuid.UUID, uuid.UUID, string) (*
 func (f *fakeTasks) Update(context.Context, uuid.UUID, model.UpdateTaskRequest) (*model.Task, error) {
 	return nil, nil
 }
-func (f *fakeTasks) Delete(context.Context, uuid.UUID) error { return nil }
-func (f *fakeTasks) Transition(context.Context, uuid.UUID, string) error { return nil }
+func (f *fakeTasks) Delete(context.Context, uuid.UUID) error               { return nil }
+func (f *fakeTasks) Transition(context.Context, uuid.UUID, string) error   { return nil }
 func (f *fakeTasks) Reorder(context.Context, uuid.UUID, string, int) error { return nil }
 
 var _ service.ProjectService = (*fakeProjects)(nil)
@@ -128,8 +128,8 @@ func TestTaskCreate_AsksForProject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res == nil || len(res.Missing) == 0 {
-		t.Fatal("expected clarify for project")
+	if res == nil || len(res.Missing) == 0 || res.Missing[0] != "project" {
+		t.Fatalf("expected clarify for project, missing=%v", res.Missing)
 	}
 }
 

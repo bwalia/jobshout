@@ -37,7 +37,7 @@ func registerWork(reg *Registry, d Deps) {
 				p := projects[0]
 				return &p, nil, nil
 			}
-			return nil, notFoundClarify("project", "", opts), nil
+			return nil, notFoundClarify("project", "", "project", opts), nil
 		}
 		m := ByName(projects, name, func(p model.Project) string { return p.Name })
 		if m.Found {
@@ -45,9 +45,9 @@ func registerWork(reg *Registry, d Deps) {
 			return &p, nil, nil
 		}
 		if len(m.Candidates) > 0 {
-			return nil, clarifyFromMatch("project", name, m.Candidates, func(p model.Project) string { return p.Name }), nil
+			return nil, clarifyFromMatch("project", name, "project", m.Candidates, func(p model.Project) string { return p.Name }), nil
 		}
-		return nil, notFoundClarify("project", name, opts), nil
+		return nil, notFoundClarify("project", name, "project", opts), nil
 	}
 
 	scopedTask := func(ctx context.Context, id uuid.UUID) (*model.Task, error) {
@@ -77,7 +77,7 @@ func registerWork(reg *Registry, d Deps) {
 				}
 				opts = append(opts, model.ClarifyOption{Label: t.Title, Value: t.Title})
 			}
-			return nil, notFoundClarify("task", "", opts), nil
+			return nil, notFoundClarify("task", "", "title", opts), nil
 		}
 		m := ByName(res.Data, title, func(t model.Task) string { return t.Title })
 		if m.Found {
@@ -85,7 +85,7 @@ func registerWork(reg *Registry, d Deps) {
 			return &t, nil, nil
 		}
 		if len(m.Candidates) > 0 {
-			return nil, clarifyFromMatch("task", title, m.Candidates, func(t model.Task) string { return t.Title }), nil
+			return nil, clarifyFromMatch("task", title, "title", m.Candidates, func(t model.Task) string { return t.Title }), nil
 		}
 		opts := make([]model.ClarifyOption, 0, min(8, len(res.Data)))
 		for i, t := range res.Data {
@@ -94,7 +94,7 @@ func registerWork(reg *Registry, d Deps) {
 			}
 			opts = append(opts, model.ClarifyOption{Label: t.Title, Value: t.Title})
 		}
-		return nil, notFoundClarify("task", title, opts), nil
+		return nil, notFoundClarify("task", title, "title", opts), nil
 	}
 
 	reg.Register(newTool(
@@ -431,11 +431,11 @@ func registerWork(reg *Registry, d Deps) {
 				}
 				m := ByName(list, strArg(input, "sprint"), func(s model.Sprint) string { return s.Name })
 				if !m.Found {
-					return clarifyFromMatch("sprint", strArg(input, "sprint"), m.Candidates, func(s model.Sprint) string { return s.Name }), nil
+					return clarifyFromMatch("sprint", strArg(input, "sprint"), "sprint", m.Candidates, func(s model.Sprint) string { return s.Name }), nil
 				}
 				jobID := strArg(input, "job_id")
 				if jobID == "" {
-					return &Result{Missing: []string{"job"}, Question: "Which collaboration job should I add to " + m.Exact.Name + "?"}, nil
+					return &Result{Missing: []string{"job_id"}, Question: "Which collaboration job should I add to " + m.Exact.Name + "?"}, nil
 				}
 				jid, err := uuid.Parse(jobID)
 				if err != nil {

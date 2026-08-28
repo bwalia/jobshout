@@ -6,6 +6,8 @@ ai:
   enabled: true
   ollamaBaseURL: "https://ollama.workstation.co.uk"
   ollamaModel: "llama3:latest"
+  chatModel: "qwen3-coder:30b"
+  chatModelFallback: "llama3.1:8b"
   imageBaseURL: "https://images.workstation.co.uk"
   imageModel: "z-image-turbo"
   blogCoverImages: false

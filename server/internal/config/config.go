@@ -58,6 +58,13 @@ type Config struct {
 	// long prompts rather than refusing them, so it is always sent explicitly.
 	OllamaNumCtx int `mapstructure:"OLLAMA_NUM_CTX"`
 
+	// Chat model is pinned separately from worker OLLAMA_DEFAULT_MODEL so
+	// the conversational control surface can use a tool-capable model
+	// without changing article/research/pentest workers.
+	ChatModel         string `mapstructure:"CHAT_MODEL"`
+	ChatModelFallback string `mapstructure:"CHAT_MODEL_FALLBACK"`
+	ChatNumCtx        int    `mapstructure:"CHAT_NUM_CTX"`
+
 	// OpenAI (or OpenAI-compatible) configuration.
 	// When LLM_PROVIDER=openai, OPENAI_API_KEY must be set.
 	OpenAIAPIKey       string `mapstructure:"OPENAI_API_KEY"`
@@ -217,6 +224,9 @@ func Load() (*Config, error) {
 	// No OLLAMA_JWT_SECRET default on purpose — see the field comment.
 	viper.SetDefault("OLLAMA_TIMEOUT", "30m")
 	viper.SetDefault("OLLAMA_NUM_CTX", 8192)
+	viper.SetDefault("CHAT_MODEL", DefaultChatModel)
+	viper.SetDefault("CHAT_MODEL_FALLBACK", DefaultChatModelFallback)
+	viper.SetDefault("CHAT_NUM_CTX", DefaultChatNumCtx)
 	viper.SetDefault("OPENAI_BASE_URL", "https://api.openai.com")
 	viper.SetDefault("OPENAI_DEFAULT_MODEL", "gpt-4o-mini")
 	viper.SetDefault("CLAUDE_BASE_URL", "https://api.anthropic.com")
@@ -285,6 +295,9 @@ func Load() (*Config, error) {
 		OllamaJWTSecret:      viper.GetString("OLLAMA_JWT_SECRET"),
 		OllamaTimeout:        viper.GetDuration("OLLAMA_TIMEOUT"),
 		OllamaNumCtx:         viper.GetInt("OLLAMA_NUM_CTX"),
+		ChatModel:            viper.GetString("CHAT_MODEL"),
+		ChatModelFallback:    viper.GetString("CHAT_MODEL_FALLBACK"),
+		ChatNumCtx:           viper.GetInt("CHAT_NUM_CTX"),
 		OpenAIAPIKey:         viper.GetString("OPENAI_API_KEY"),
 		OpenAIBaseURL:        viper.GetString("OPENAI_BASE_URL"),
 		OpenAIDefaultModel:   viper.GetString("OPENAI_DEFAULT_MODEL"),
@@ -356,3 +369,9 @@ type configError string
 func (e configError) Error() string {
 	return string(e)
 }
+
+const (
+	DefaultChatModel         = "qwen3-coder:30b"
+	DefaultChatModelFallback = "llama3.1:8b"
+	DefaultChatNumCtx        = 16384
+)

@@ -33,7 +33,7 @@ func registerWorkflows(reg *Registry, d Deps) {
 			opts = append(opts, model.ClarifyOption{Label: w.Name, Value: w.Name})
 		}
 		if name == "" {
-			return nil, notFoundClarify("workflow", "", opts), nil
+			return nil, notFoundClarify("workflow", "", "name", opts), nil
 		}
 		m := ByName(wfs, name, func(w model.Workflow) string { return w.Name })
 		if m.Found {
@@ -41,9 +41,9 @@ func registerWorkflows(reg *Registry, d Deps) {
 			return &w, nil, nil
 		}
 		if len(m.Candidates) > 0 {
-			return nil, clarifyFromMatch("workflow", name, m.Candidates, func(w model.Workflow) string { return w.Name }), nil
+			return nil, clarifyFromMatch("workflow", name, "name", m.Candidates, func(w model.Workflow) string { return w.Name }), nil
 		}
-		return nil, notFoundClarify("workflow", name, opts), nil
+		return nil, notFoundClarify("workflow", name, "name", opts), nil
 	}
 
 	reg.Register(newTool(
@@ -157,7 +157,7 @@ func registerWorkflows(reg *Registry, d Deps) {
 			ident := MustIdentity(ctx)
 			id, err := uuid.Parse(strArg(input, "run_id"))
 			if err != nil {
-				return &Result{Missing: []string{"workflow_run"}, Question: "Which workflow run should I check?"}, nil
+				return &Result{Missing: []string{"run_id"}, Question: "Which workflow run should I check?"}, nil
 			}
 			run, err := d.Workflows.GetRunByID(ctx, id)
 			if err != nil {
@@ -218,7 +218,7 @@ func registerWorkflows(reg *Registry, d Deps) {
 				}
 				match := ByName(agentsPage.Data, agentName, func(a model.Agent) string { return a.Name })
 				if !match.Found {
-					return clarifyFromMatch("agent", agentName, match.Candidates, func(a model.Agent) string { return a.Name }), nil
+					return clarifyFromMatch("agent", agentName, "agent", match.Candidates, func(a model.Agent) string { return a.Name }), nil
 				}
 				steps = append(steps, model.CreateWorkflowStepRequest{
 					Name: stepName, AgentID: match.Exact.ID.String(), InputTemplate: prompt, Position: i,
@@ -264,7 +264,7 @@ func registerWorkflows(reg *Registry, d Deps) {
 						a := m.Exact
 						return &a, nil
 					}
-					return nil, clarifyFromMatch("agent", strArg(input, key), m.Candidates, func(a model.Agent) string { return a.Name })
+					return nil, clarifyFromMatch("agent", strArg(input, key), key, m.Candidates, func(a model.Agent) string { return a.Name })
 				}
 				planner, clar := resolve("planner")
 				if clar != nil {

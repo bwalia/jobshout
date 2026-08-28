@@ -40,12 +40,22 @@ func isAbandon(s string) bool {
 	if isNegative(l) {
 		return true
 	}
-	for _, p := range []string{"never mind", "nevermind", "forget it", "forget that", "actually "} {
+	for _, p := range []string{"never mind", "nevermind", "forget it", "forget that"} {
 		if strings.Contains(l, p) {
 			return true
 		}
 	}
-	return l == "help" || strings.HasPrefix(l, "show me") || strings.HasPrefix(l, "list ")
+	return false
+}
+
+func looksLikeNewRequest(s string) bool {
+	l := strings.ToLower(strings.TrimSpace(s))
+	for _, p := range []string{"list ", "create ", "run ", "show ", "delete ", "start "} {
+		if strings.HasPrefix(l, p) {
+			return true
+		}
+	}
+	return false
 }
 
 func mergePendingArgs(p *model.PendingAction, userText string) map[string]any {
@@ -69,6 +79,18 @@ func mergePendingArgs(p *model.PendingAction, userText string) map[string]any {
 		}
 	}
 	return args
+}
+
+func pendingStillMissing(p *model.PendingAction, args map[string]any) bool {
+	if p == nil {
+		return false
+	}
+	for _, slot := range p.Missing {
+		if asString(args[slot]) == "" {
+			return true
+		}
+	}
+	return false
 }
 
 func copyArgs(in map[string]any) map[string]any {

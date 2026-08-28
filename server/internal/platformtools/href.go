@@ -61,7 +61,10 @@ func imageRef(id, url string) model.EntityRef {
 	}
 }
 
-func clarifyFromMatch[T any](kind, query string, candidates []T, nameOf func(T) string) *Result {
+// clarifyFromMatch asks the user to pick among candidates. kind is the English
+// noun in the question ("agent"); slot is the JSON property the tool reads
+// ("name"). Missing must be the schema field so chip answers merge correctly.
+func clarifyFromMatch[T any](kind, query, slot string, candidates []T, nameOf func(T) string) *Result {
 	opts := make([]model.ClarifyOption, 0, len(candidates))
 	for _, c := range candidates {
 		n := nameOf(c)
@@ -75,15 +78,18 @@ func clarifyFromMatch[T any](kind, query string, candidates []T, nameOf func(T) 
 	if len(candidates) == 0 {
 		question = fmt.Sprintf("I couldn't find a %s named %q. Pick one of these, or tell me another name.", kind, q)
 	}
+	if slot == "" {
+		slot = kind
+	}
 	return &Result{
-		Missing:  []string{kind},
+		Missing:  []string{slot},
 		Options:  opts,
 		Question: question,
 		Data:     map[string]any{"candidates": labelsOf(candidates, nameOf)},
 	}
 }
 
-func notFoundClarify(kind, query string, options []model.ClarifyOption) *Result {
+func notFoundClarify(kind, query, slot string, options []model.ClarifyOption) *Result {
 	q := strings.TrimSpace(query)
 	question := fmt.Sprintf("I couldn't find a %s named %q.", kind, q)
 	if q == "" {
@@ -92,5 +98,8 @@ func notFoundClarify(kind, query string, options []model.ClarifyOption) *Result 
 	if len(options) > 0 {
 		question += " Here are the ones I can see."
 	}
-	return &Result{Missing: []string{kind}, Options: options, Question: question}
+	if slot == "" {
+		slot = kind
+	}
+	return &Result{Missing: []string{slot}, Options: options, Question: question}
 }

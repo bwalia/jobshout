@@ -57,10 +57,12 @@ func DefaultCatalog() []Candidate {
 		{Provider: "claude", Model: "claude-3-haiku-20240307", ContextTokens: 200_000, SupportsTools: true, Quality: 4, Speed: 10},
 
 		// ── Ollama (local) ──────────────────────────────────────────────────
-		// Free to run, so the selector reaches for these first whenever they
-		// clear the quality bar. No native tool-calling (llm.OllamaClient
-		// reports SupportsTools() == false), so tool tasks skip them.
+		// llama3:latest has no native tools. Coder and llama3.1:8b do; chat
+		// routing is explicit env (CHAT_MODEL), not this catalog. Workers may
+		// auto-select these when the Ollama client advertises tools.
 		{Provider: "ollama", Model: "llama3:latest", ContextTokens: 8_192, SupportsTools: false, Quality: 4, Speed: 7},
+		{Provider: "ollama", Model: "llama3.1:8b", ContextTokens: 128_000, SupportsTools: true, Quality: 4, Speed: 6},
+		{Provider: "ollama", Model: "qwen3-coder:30b", ContextTokens: 262_144, SupportsTools: true, Quality: 6, Speed: 6},
 	}
 }
 
