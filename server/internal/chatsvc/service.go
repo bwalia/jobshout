@@ -206,6 +206,7 @@ func (s *chatService) SendTurn(ctx context.Context, orgID, userID, sessionID uui
 		History:           history,
 		Metadata:          meta,
 		Stream:            stream,
+		Source:            source,
 	})
 	if err != nil {
 		s.logger.Warn("chat agent failed", zap.Error(err))
@@ -221,6 +222,21 @@ func (s *chatService) SendTurn(ctx context.Context, orgID, userID, sessionID uui
 	delete(tr.Metadata, model.ChatMetaTurnStartedAt)
 	if err := s.chatRepo.UpdateSessionMetadata(runCtx, sessionID, tr.Metadata); err != nil {
 		s.logger.Warn("chat_svc: persist session metadata", zap.Error(err))
+	}
+
+	for i := range tr.Transcript {
+		row := tr.Transcript[i]
+		if row.ID == uuid.Nil {
+			row.ID = uuid.New()
+		}
+		row.SessionID = sessionID
+		row.OrgID = orgID
+		if row.Source == "" {
+			row.Source = source
+		}
+		if err := s.chatRepo.AppendMessage(runCtx, &row); err != nil {
+			s.logger.Warn("chat_svc: persist tool transcript", zap.Error(err))
+		}
 	}
 
 	agentMeta := map[string]any{

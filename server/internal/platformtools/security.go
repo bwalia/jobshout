@@ -73,7 +73,7 @@ func registerSecurity(reg *Registry, d Deps) {
 			ident := MustIdentity(ctx)
 			uid, err := uuid.Parse(strArg(input, "user_id"))
 			if err != nil {
-				return &Result{Missing: []string{"user"}, Question: "Which user should I assign the role to?"}, nil
+				return &Result{Missing: []string{"user_id"}, Question: "Which user should I assign the role to?"}, nil
 			}
 			roles, err := d.RBAC.ListRoles(ctx, ident.OrgID)
 			if err != nil {
@@ -81,7 +81,7 @@ func registerSecurity(reg *Registry, d Deps) {
 			}
 			m := ByName(roles, strArg(input, "role"), func(r model.Role) string { return r.Name })
 			if !m.Found {
-				return clarifyFromMatch("role", strArg(input, "role"), m.Candidates, func(r model.Role) string { return r.Name }), nil
+				return clarifyFromMatch("role", strArg(input, "role"), "role", m.Candidates, func(r model.Role) string { return r.Name }), nil
 			}
 			if err := d.RBAC.AssignRole(ctx, ident.OrgID, ident.UserID, model.AssignRoleRequest{UserID: uid, RoleID: m.Exact.ID}); err != nil {
 				return nil, err

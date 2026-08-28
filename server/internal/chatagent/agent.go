@@ -56,12 +56,14 @@ type TurnRequest struct {
 	History           []model.ChatMessage
 	Metadata          map[string]any
 	Stream            StreamFunc
+	Source            string
 }
 
 // TurnResult is the envelope plus the session metadata to persist.
 type TurnResult struct {
-	Response model.ChatResponse
-	Metadata map[string]any
+	Response   model.ChatResponse
+	Metadata   map[string]any
+	Transcript []model.ChatMessage
 }
 
 func (a *Agent) Run(ctx context.Context, req TurnRequest) (*TurnResult, error) {
@@ -71,7 +73,9 @@ func (a *Agent) Run(ctx context.Context, req TurnRequest) (*TurnResult, error) {
 		meta = map[string]any{}
 	}
 	msg := strings.TrimSpace(req.Message)
-	if msg == "" && req.ConfirmationToken == "" {
+	// Whitespace still counts as a turn when a slot-fill or confirm is waiting;
+	// handlePending re-asks instead of launching with an empty value.
+	if msg == "" && req.ConfirmationToken == "" && readPending(meta) == nil && readConfirm(meta) == nil {
 		resp := model.ChatResponse{Message: "Please send a non-empty message."}
 		emit(req.Stream, Event{Type: EventDone, Response: &resp})
 		return &TurnResult{Response: resp, Metadata: meta}, nil
@@ -79,6 +83,8 @@ func (a *Agent) Run(ctx context.Context, req TurnRequest) (*TurnResult, error) {
 
 	ident := req.Ident
 	ctx = platformtools.WithIdentity(ctx, ident)
+	ents := readEntities(meta)
+	ctx = platformtools.WithSessionEntities(ctx, ents)
 	ctx = llmtrace.WithTrace(ctx, llmtrace.TraceInfo{
 		TraceName: "go-chat-run",
 		SessionID: ident.SessionID.String(),
@@ -100,7 +106,7 @@ func (a *Agent) Run(ctx context.Context, req TurnRequest) (*TurnResult, error) {
 	}
 
 	if pending := readPending(meta); pending != nil {
-		if isAbandon(msg) {
+		if isAbandon(msg) || looksLikeNewRequest(msg) {
 			writePending(meta, nil)
 		} else {
 			return a.handlePending(ctx, req, meta, pending, start)
@@ -174,6 +180,23 @@ func (a *Agent) handleConfirmation(ctx context.Context, req TurnRequest, meta ma
 
 func (a *Agent) handlePending(ctx context.Context, req TurnRequest, meta map[string]any, pending *model.PendingAction, start time.Time) (*TurnResult, error) {
 	args := mergePendingArgs(pending, req.Message)
+	if pendingStillMissing(pending, args) {
+		q := pending.Question
+		if q == "" {
+			q = "I need a bit more detail to continue."
+		}
+		slot := ""
+		if len(pending.Missing) > 0 {
+			slot = pending.Missing[0]
+		}
+		clarify := &model.ClarifyRequest{Question: q, Slot: slot}
+		writePending(meta, pending)
+		resp := model.ChatResponse{Message: SanitiseMessage(q), Clarify: clarify}
+		finaliseUsage(&resp, start, "")
+		emit(req.Stream, Event{Type: EventClarify, Clarify: clarify})
+		emit(req.Stream, Event{Type: EventDone, Response: &resp})
+		return &TurnResult{Response: resp, Metadata: meta}, nil
+	}
 	action, entities, clarify, result, err := a.executeTool(ctx, req.Stream, pending.Tool, args, false)
 	if err != nil && !errors.Is(err, platformtools.ErrNeedsConfirm) {
 		writePending(meta, nil)
@@ -227,6 +250,7 @@ func (a *Agent) loop(ctx context.Context, req TurnRequest, meta map[string]any, 
 		meta[model.ChatMetaSummary] = summary
 	}
 	entities := readEntities(meta)
+	ctx = platformtools.WithSessionEntities(ctx, entities)
 	pending := readPending(meta)
 
 	var memories []string
@@ -252,6 +276,7 @@ func (a *Agent) loop(ctx context.Context, req TurnRequest, meta map[string]any, 
 		outputTokens int
 		modelName    string
 		anyFailed    bool
+		transcript   []model.ChatMessage
 	)
 
 	maxIter := a.maxIter
@@ -332,14 +357,16 @@ func (a *Agent) loop(ctx context.Context, req TurnRequest, meta map[string]any, 
 			}
 			emit(req.Stream, Event{Type: EventDone, Response: &resp})
 			writeEntities(meta, entities)
-			return &TurnResult{Response: resp, Metadata: meta}, nil
+			return &TurnResult{Response: resp, Metadata: meta, Transcript: transcript}, nil
 		}
 
-		messages = append(messages, llm.Message{
+		assistantMsg := llm.Message{
 			Role:      llm.RoleAssistant,
 			Content:   llmResp.Content,
 			ToolCalls: llmResp.ToolCalls,
-		})
+		}
+		messages = append(messages, assistantMsg)
+		recordTranscript(&transcript, req, assistantMsg)
 
 		for _, tc := range llmResp.ToolCalls {
 			args := tc.Arguments
@@ -360,17 +387,27 @@ func (a *Agent) loop(ctx context.Context, req TurnRequest, meta map[string]any, 
 				addDisclosed(meta, names)
 			}
 
+			content := wrapToolResult(tc.Name, action, result, ents)
+			toolMsg := llm.Message{
+				Role:       llm.RoleTool,
+				ToolCallID: tc.ID,
+				Content:    content,
+			}
+
 			if action.Status == model.ActionPendingConfirmation {
+				recordTranscript(&transcript, req, toolMsg)
 				tr, err := a.holdConfirmation(req, meta, tc.Name, args, action, start)
 				if tr != nil {
 					tr.Response.Actions = actions
 					tr.Response.Entities = allEntities
+					tr.Transcript = transcript
 				}
 				writeEntities(meta, entities)
 				return tr, err
 			}
 
 			if clarify != nil {
+				recordTranscript(&transcript, req, toolMsg)
 				writePending(meta, &model.PendingAction{
 					Tool: tc.Name, Args: copyArgs(args), Missing: slotNames(clarify),
 					AskedAt: time.Now(), Question: clarify.Question,
@@ -385,15 +422,11 @@ func (a *Agent) loop(ctx context.Context, req TurnRequest, meta map[string]any, 
 				}
 				emit(req.Stream, Event{Type: EventClarify, Clarify: clarify})
 				emit(req.Stream, Event{Type: EventDone, Response: &resp})
-				return &TurnResult{Response: resp, Metadata: meta}, nil
+				return &TurnResult{Response: resp, Metadata: meta, Transcript: transcript}, nil
 			}
 
-			content := wrapToolResult(tc.Name, action, result, ents)
-			messages = append(messages, llm.Message{
-				Role:       llm.RoleTool,
-				ToolCallID: tc.ID,
-				Content:    content,
-			})
+			messages = append(messages, toolMsg)
+			recordTranscript(&transcript, req, toolMsg)
 		}
 
 		if anyFailed {
@@ -412,7 +445,37 @@ func (a *Agent) loop(ctx context.Context, req TurnRequest, meta map[string]any, 
 	}
 	writeEntities(meta, entities)
 	emit(req.Stream, Event{Type: EventDone, Response: &resp})
-	return &TurnResult{Response: resp, Metadata: meta}, nil
+	return &TurnResult{Response: resp, Metadata: meta, Transcript: transcript}, nil
+}
+
+func recordTranscript(out *[]model.ChatMessage, req TurnRequest, m llm.Message) {
+	role := model.ChatRoleAgent
+	meta := map[string]any{}
+	content := m.Content
+	switch m.Role {
+	case llm.RoleTool:
+		role = model.ChatRoleTool
+		meta["tool_call_id"] = m.ToolCallID
+		if len(content) > toolResultMaxChars {
+			content = content[:toolResultMaxChars] + "…"
+		}
+	case llm.RoleAssistant:
+		if len(m.ToolCalls) == 0 {
+			return
+		}
+		meta["tool_calls"] = toolCallsMeta(m.ToolCalls)
+	default:
+		return
+	}
+	*out = append(*out, model.ChatMessage{
+		ID:        uuid.New(),
+		SessionID: req.Ident.SessionID,
+		OrgID:     req.Ident.OrgID,
+		Role:      role,
+		Source:    req.Source,
+		Content:   content,
+		Metadata:  meta,
+	})
 }
 
 func (a *Agent) holdConfirmation(req TurnRequest, meta map[string]any, tool string, args map[string]any, action model.ActionRecord, start time.Time) (*TurnResult, error) {
@@ -597,6 +660,12 @@ func composeFromResult(action model.ActionRecord, ents []model.EntityRef, res *p
 		if data, ok := res.Data.(map[string]any); ok {
 			if h, ok := data["help"].(string); ok && h != "" {
 				return h
+			}
+			if st := asString(data["status"]); st == model.ExecutionStatusRunning || st == model.ExecutionStatusPending {
+				if name := asString(data["agent"]); name != "" {
+					return fmt.Sprintf("%s has started. Ask me for status when you want an update.", name)
+				}
+				return "That work has started. Ask me for status when you want an update."
 			}
 			if t := asString(data["title"]); t != "" {
 				if p := asString(data["project"]); p != "" {

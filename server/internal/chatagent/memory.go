@@ -10,12 +10,13 @@ import (
 )
 
 const (
-	windowTokenBudget = 4000
-	minTurns          = 4
-	charsPerToken     = 4
-	entityIdle        = 24 * time.Hour
-	confirmTTL        = 10 * time.Minute
-	maxHistoryLoad    = 80
+	windowTokenBudget  = 6000
+	minTurns           = 4
+	charsPerToken      = 4
+	entityIdle         = 24 * time.Hour
+	confirmTTL         = 10 * time.Minute
+	maxHistoryLoad     = 80
+	toolResultMaxChars = 4000
 )
 
 // MaxHistoryLoad is how many transcript rows ChatService fetches before windowing.
@@ -36,7 +37,7 @@ func Window(history []model.ChatMessage, budget int) (kept []model.ChatMessage, 
 		budget = windowTokenBudget
 	}
 	if len(history) <= minTurns {
-		return history, nil
+		return dropLeadingOrphanTools(history), nil
 	}
 	used := 0
 	cut := 0
@@ -49,7 +50,15 @@ func Window(history []model.ChatMessage, budget int) (kept []model.ChatMessage, 
 		used += t
 		cut = i
 	}
-	return history[cut:], history[:cut]
+	kept = dropLeadingOrphanTools(history[cut:])
+	return kept, history[:cut]
+}
+
+func dropLeadingOrphanTools(kept []model.ChatMessage) []model.ChatMessage {
+	for len(kept) > 0 && kept[0].Role == model.ChatRoleTool {
+		kept = kept[1:]
+	}
+	return kept
 }
 
 func toLLMHistory(msgs []model.ChatMessage) []llm.Message {
@@ -64,7 +73,66 @@ func toLLMHistory(msgs []model.ChatMessage) []llm.Message {
 		case model.ChatRoleTool:
 			role = llm.RoleTool
 		}
-		out = append(out, llm.Message{Role: role, Content: m.Content})
+		msg := llm.Message{Role: role, Content: m.Content}
+		if calls := toolCallsFromMeta(m.Metadata); len(calls) > 0 {
+			msg.ToolCalls = calls
+		}
+		if id := toolCallIDFromMeta(m.Metadata); id != "" {
+			msg.ToolCallID = id
+		}
+		out = append(out, msg)
+	}
+	return out
+}
+
+func toolCallsFromMeta(meta map[string]any) []llm.ToolCall {
+	if meta == nil {
+		return nil
+	}
+	raw, ok := meta["tool_calls"]
+	if !ok {
+		return nil
+	}
+	switch v := raw.(type) {
+	case []llm.ToolCall:
+		return v
+	case []any:
+		out := make([]llm.ToolCall, 0, len(v))
+		for _, item := range v {
+			m, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			tc := llm.ToolCall{
+				ID:        asString(m["id"]),
+				Name:      asString(m["name"]),
+				Arguments: map[string]any{},
+			}
+			if args, ok := m["arguments"].(map[string]any); ok {
+				tc.Arguments = args
+			}
+			out = append(out, tc)
+		}
+		return out
+	}
+	return nil
+}
+
+func toolCallIDFromMeta(meta map[string]any) string {
+	if meta == nil {
+		return ""
+	}
+	return asString(meta["tool_call_id"])
+}
+
+func toolCallsMeta(calls []llm.ToolCall) []any {
+	out := make([]any, 0, len(calls))
+	for _, tc := range calls {
+		out = append(out, map[string]any{
+			"id":        tc.ID,
+			"name":      tc.Name,
+			"arguments": stripSecretArgs(tc.Arguments),
+		})
 	}
 	return out
 }

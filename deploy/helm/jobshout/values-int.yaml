@@ -29,6 +29,8 @@ ai:
   enabled: true
   ollamaBaseURL: "https://ollama.workstation.co.uk"
   ollamaModel: "llama3:latest"
+  chatModel: "qwen3-coder:30b"
+  chatModelFallback: "llama3.1:8b"
   # Shared workstation Ollama is CPU-heavy and often queued; research/draft
   # calls were dying at 10m with "awaiting headers". Match imageTimeout headroom.
   ollamaTimeout: "30m"

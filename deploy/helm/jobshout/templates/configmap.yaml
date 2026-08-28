@@ -22,6 +22,9 @@ data:
   OLLAMA_DEFAULT_MODEL: {{ .Values.ai.ollamaModel | quote }}
   OLLAMA_TIMEOUT: {{ .Values.ai.ollamaTimeout | default "10m" | quote }}
   OLLAMA_NUM_CTX: {{ .Values.ai.ollamaNumCtx | default 8192 | quote }}
+  CHAT_MODEL: {{ .Values.ai.chatModel | default "qwen3-coder:30b" | quote }}
+  CHAT_MODEL_FALLBACK: {{ .Values.ai.chatModelFallback | default "llama3.1:8b" | quote }}
+  CHAT_NUM_CTX: {{ .Values.ai.chatNumCtx | default 16384 | quote }}
   OPENAI_BASE_URL: {{ .Values.ai.openaiBaseURL | quote }}
   OPENAI_DEFAULT_MODEL: {{ .Values.ai.openaiModel | quote }}
   # Image generation. Like Ollama, the local image model runs OUTSIDE the

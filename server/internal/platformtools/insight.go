@@ -48,7 +48,7 @@ func registerInsight(reg *Registry, d Deps) {
 					}
 					m := ByName(agents.Data, strArg(input, "name"), func(a model.Agent) string { return a.Name })
 					if !m.Found {
-						return clarifyFromMatch("agent", strArg(input, "name"), m.Candidates, func(a model.Agent) string { return a.Name }), nil
+						return clarifyFromMatch("agent", strArg(input, "name"), "name", m.Candidates, func(a model.Agent) string { return a.Name }), nil
 					}
 					from, to := month()
 					a, err := d.Analytics.AgentAnalytics(ctx, m.Exact.ID, from, to)

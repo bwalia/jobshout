@@ -28,11 +28,11 @@ func registerConfig(reg *Registry, d Deps) {
 					return nil, err
 				}
 				type row struct {
-					Name     string `json:"name"`
-					Type     string `json:"type"`
-					Model    string `json:"model"`
-					Default  bool   `json:"default"`
-					Active   bool   `json:"active"`
+					Name    string `json:"name"`
+					Type    string `json:"type"`
+					Model   string `json:"model"`
+					Default bool   `json:"default"`
+					Active  bool   `json:"active"`
 				}
 				rows := make([]row, 0, len(list))
 				for _, p := range list {
@@ -111,13 +111,13 @@ func registerConfig(reg *Registry, d Deps) {
 					m := ByName(agents, strArg(input, "agent"), func(a model.Agent) string { return a.Name })
 					if !m.Found {
 						if len(m.Candidates) > 0 {
-							return clarifyFromMatch("agent", strArg(input, "agent"), m.Candidates, func(a model.Agent) string { return a.Name }), nil
+							return clarifyFromMatch("agent", strArg(input, "agent"), "agent", m.Candidates, func(a model.Agent) string { return a.Name }), nil
 						}
 						opts := make([]model.ClarifyOption, 0, len(agents))
 						for _, a := range agents {
 							opts = append(opts, model.ClarifyOption{Label: a.Name + " — " + a.Role, Value: a.Name})
 						}
-						return notFoundClarify("agent", strArg(input, "agent"), opts), nil
+						return notFoundClarify("agent", strArg(input, "agent"), "agent", opts), nil
 					}
 					t.AgentID = &m.Exact.ID
 				case "workflow":
@@ -131,13 +131,13 @@ func registerConfig(reg *Registry, d Deps) {
 					m := ByName(res.Data, strArg(input, "workflow"), func(w model.Workflow) string { return w.Name })
 					if !m.Found {
 						if len(m.Candidates) > 0 {
-							return clarifyFromMatch("workflow", strArg(input, "workflow"), m.Candidates, func(w model.Workflow) string { return w.Name }), nil
+							return clarifyFromMatch("workflow", strArg(input, "workflow"), "workflow", m.Candidates, func(w model.Workflow) string { return w.Name }), nil
 						}
 						opts := make([]model.ClarifyOption, 0, len(res.Data))
 						for _, w := range res.Data {
 							opts = append(opts, model.ClarifyOption{Label: w.Name, Value: w.Name})
 						}
-						return notFoundClarify("workflow", strArg(input, "workflow"), opts), nil
+						return notFoundClarify("workflow", strArg(input, "workflow"), "workflow", opts), nil
 					}
 					t.WorkflowID = &m.Exact.ID
 				}
@@ -225,7 +225,7 @@ func registerConfig(reg *Registry, d Deps) {
 					sm = ByName(skills, strArg(input, "skill"), func(s model.Skill) string { return s.Slug })
 				}
 				if !sm.Found {
-					return clarifyFromMatch("skill", strArg(input, "skill"), sm.Candidates, func(s model.Skill) string { return s.Name }), nil
+					return clarifyFromMatch("skill", strArg(input, "skill"), "skill", sm.Candidates, func(s model.Skill) string { return s.Name }), nil
 				}
 				agents, err := d.Agents.List(ctx, ident.OrgID, model.PaginationParams{Page: 1, PerPage: 100}, repository.AgentListFilter{})
 				if err != nil {
@@ -233,7 +233,7 @@ func registerConfig(reg *Registry, d Deps) {
 				}
 				am := ByName(agents.Data, strArg(input, "agent"), func(a model.Agent) string { return a.Name })
 				if !am.Found {
-					return clarifyFromMatch("agent", strArg(input, "agent"), am.Candidates, func(a model.Agent) string { return a.Name }), nil
+					return clarifyFromMatch("agent", strArg(input, "agent"), "agent", am.Candidates, func(a model.Agent) string { return a.Name }), nil
 				}
 				if err := d.Skills.EnableForAgent(ctx, am.Exact.ID, sm.Exact.ID, nil); err != nil {
 					return nil, err
@@ -271,8 +271,8 @@ func registerConfig(reg *Registry, d Deps) {
 			"Execute a named plugin.",
 			"config", model.PermAgentsExecute, false, false,
 			tools.ObjectSchema(map[string]any{
-				"name":   map[string]any{"type": "string"},
-				"input":  map[string]any{"type": "object"},
+				"name":  map[string]any{"type": "string"},
+				"input": map[string]any{"type": "object"},
 			}, "name"),
 			func(ctx context.Context, input map[string]any) (*Result, error) {
 				ident := MustIdentity(ctx)
@@ -282,7 +282,7 @@ func registerConfig(reg *Registry, d Deps) {
 				}
 				m := ByName(res.Data, strArg(input, "name"), func(p model.Plugin) string { return p.Name })
 				if !m.Found {
-					return clarifyFromMatch("plugin", strArg(input, "name"), m.Candidates, func(p model.Plugin) string { return p.Name }), nil
+					return clarifyFromMatch("plugin", strArg(input, "name"), "name", m.Candidates, func(p model.Plugin) string { return p.Name }), nil
 				}
 				in, _ := input["input"].(map[string]any)
 				exec, err := d.Plugins.Execute(ctx, m.Exact.ID, ident.OrgID, model.ExecutePluginRequest{Input: in})
@@ -353,7 +353,7 @@ func registerConfig(reg *Registry, d Deps) {
 				}
 				m := ByName(agents.Data, strArg(input, "agent"), func(a model.Agent) string { return a.Name })
 				if !m.Found {
-					return clarifyFromMatch("agent", strArg(input, "agent"), m.Candidates, func(a model.Agent) string { return a.Name }), nil
+					return clarifyFromMatch("agent", strArg(input, "agent"), "agent", m.Candidates, func(a model.Agent) string { return a.Name }), nil
 				}
 				filename := strArg(input, "filename")
 				content := strArg(input, "content")
@@ -391,7 +391,7 @@ func registerConfig(reg *Registry, d Deps) {
 				}
 				m := ByName(agents.Data, strArg(input, "agent"), func(a model.Agent) string { return a.Name })
 				if !m.Found {
-					return clarifyFromMatch("agent", strArg(input, "agent"), m.Candidates, func(a model.Agent) string { return a.Name }), nil
+					return clarifyFromMatch("agent", strArg(input, "agent"), "agent", m.Candidates, func(a model.Agent) string { return a.Name }), nil
 				}
 				out, err := kt.Execute(tools.WithAgent(ctx, m.Exact.ID), map[string]any{"query": strArg(input, "query")})
 				if err != nil {
@@ -420,7 +420,7 @@ func registerConfig(reg *Registry, d Deps) {
 				}
 				im := ByName(list, strArg(input, "integration"), func(i model.Integration) string { return i.Name })
 				if !im.Found {
-					return clarifyFromMatch("integration", strArg(input, "integration"), im.Candidates, func(i model.Integration) string { return i.Name }), nil
+					return clarifyFromMatch("integration", strArg(input, "integration"), "integration", im.Candidates, func(i model.Integration) string { return i.Name }), nil
 				}
 				tasks, err := d.Tasks.ListByOrg(ctx, ident.OrgID, model.PaginationParams{Page: 1, PerPage: 100})
 				if err != nil {
@@ -428,7 +428,7 @@ func registerConfig(reg *Registry, d Deps) {
 				}
 				tm := ByName(tasks.Data, strArg(input, "task"), func(t model.Task) string { return t.Title })
 				if !tm.Found {
-					return clarifyFromMatch("task", strArg(input, "task"), tm.Candidates, func(t model.Task) string { return t.Title }), nil
+					return clarifyFromMatch("task", strArg(input, "task"), "task", tm.Candidates, func(t model.Task) string { return t.Title }), nil
 				}
 				dir := strArg(input, "direction")
 				if dir == "" {
@@ -491,7 +491,7 @@ func registerConfig(reg *Registry, d Deps) {
 				}
 				m := ByName(list, strArg(input, "name"), func(c model.NotificationConfig) string { return c.Name })
 				if !m.Found {
-					return clarifyFromMatch("notification", strArg(input, "name"), m.Candidates, func(c model.NotificationConfig) string { return c.Name }), nil
+					return clarifyFromMatch("notification", strArg(input, "name"), "name", m.Candidates, func(c model.NotificationConfig) string { return c.Name }), nil
 				}
 				if err := d.Notifications.TestConfig(ctx, m.Exact.ID); err != nil {
 					return nil, err
@@ -535,7 +535,7 @@ func registerConfig(reg *Registry, d Deps) {
 				ident := MustIdentity(ctx)
 				id, err := uuid.Parse(strArg(input, "approval_id"))
 				if err != nil {
-					return &Result{Missing: []string{"approval"}, Question: "Which approval should I decide?"}, nil
+					return &Result{Missing: []string{"approval_id"}, Question: "Which approval should I decide?"}, nil
 				}
 				a, err := d.Approvals.Decide(ctx, id, ident.UserID, strArg(input, "decision"), strArg(input, "reason"))
 				if err != nil {

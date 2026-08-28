@@ -20,19 +20,23 @@ func registerSpecialists(reg *Registry, d Deps) {
 	if d.Research != nil {
 		reg.Register(newTool(
 			"research_run",
-			"Run a web research task and return sourced findings.",
+			"Run a web research task and return sourced findings. Omit unknown fields; the tool will ask. Do not invent a topic.",
 			"insight", model.PermAgentsExecute, false, false,
 			tools.ObjectSchema(map[string]any{
-				"topic":   map[string]any{"type": "string"},
+				"topic":   map[string]any{"type": "string", "description": "Subject to research. Omit if unknown."},
 				"context": map[string]any{"type": "string"},
-			}, "topic"),
+			}),
 			func(ctx context.Context, input map[string]any) (*Result, error) {
 				ident := MustIdentity(ctx)
 				if !d.Research.Available() {
 					return &Result{Data: map[string]any{"available": false, "message": "Research is not configured on this server."}}, nil
 				}
+				topic := strArg(input, "topic")
+				if topic == "" {
+					return &Result{Missing: []string{"topic"}, Question: "What should I research?"}, nil
+				}
 				brief, err := d.Research.Research(ctx, ident.OrgID, research.Request{
-					Topic:   strArg(input, "topic"),
+					Topic:   topic,
 					Context: strArg(input, "context"),
 				}, nil)
 				if err != nil {
@@ -61,17 +65,21 @@ func registerSpecialists(reg *Registry, d Deps) {
 	if d.Blog != nil {
 		reg.Register(newTool(
 			"article_generate",
-			"Generate an article end to end from a topic.",
+			"Generate an article end to end from a topic. Omit unknown fields; the tool will ask. Do not invent a topic.",
 			"insight", model.PermAgentsExecute, false, false,
 			tools.ObjectSchema(map[string]any{
-				"topic":   map[string]any{"type": "string"},
+				"topic":   map[string]any{"type": "string", "description": "Subject to write about. Omit if unknown."},
 				"context": map[string]any{"type": "string"},
-			}, "topic"),
+			}),
 			func(ctx context.Context, input map[string]any) (*Result, error) {
 				ident := MustIdentity(ctx)
+				topic := strArg(input, "topic")
+				if topic == "" {
+					return &Result{Missing: []string{"topic"}, Question: "What should I write about?"}, nil
+				}
 				uid := ident.UserID
 				run, err := d.Blog.Generate(ctx, ident.OrgID, &uid, "chat", model.GenerateBlogRequest{
-					Topics: []string{strArg(input, "topic")},
+					Topics: []string{topic},
 				})
 				if err != nil {
 					return nil, err
@@ -90,7 +98,7 @@ func registerSpecialists(reg *Registry, d Deps) {
 			func(ctx context.Context, input map[string]any) (*Result, error) {
 				id, err := uuid.Parse(strArg(input, "run_id"))
 				if err != nil {
-					return &Result{Missing: []string{"article_run"}, Question: "Which article run should I check?"}, nil
+					return &Result{Missing: []string{"run_id"}, Question: "Which article run should I check?"}, nil
 				}
 				run, err := d.Blog.GetByID(ctx, id)
 				if err != nil {
@@ -115,7 +123,7 @@ func registerSpecialists(reg *Registry, d Deps) {
 				ident := MustIdentity(ctx)
 				id, err := uuid.Parse(strArg(input, "run_id"))
 				if err != nil {
-					return &Result{Missing: []string{"article_run"}, Question: "Which article run should I publish?"}, nil
+					return &Result{Missing: []string{"run_id"}, Question: "Which article run should I publish?"}, nil
 				}
 				run, err := d.Blog.Publish(ctx, ident.OrgID, id)
 				if err != nil {
@@ -136,7 +144,7 @@ func registerSpecialists(reg *Registry, d Deps) {
 				ident := MustIdentity(ctx)
 				id, err := uuid.Parse(strArg(input, "run_id"))
 				if err != nil {
-					return &Result{Missing: []string{"article_run"}, Question: "Which article run should I cancel?"}, nil
+					return &Result{Missing: []string{"run_id"}, Question: "Which article run should I cancel?"}, nil
 				}
 				run, err := d.Blog.Cancel(ctx, ident.OrgID, id)
 				if err != nil {
@@ -150,16 +158,19 @@ func registerSpecialists(reg *Registry, d Deps) {
 	if d.Pentest != nil {
 		reg.Register(newTool(
 			"pentest_start",
-			"Start a security test against a target. Only targets in the organisation's authorised scope are accepted; others are refused.",
+			"Start a security test against a target. Omit unknown fields; the tool will ask. Do not invent a target. Only targets in the organisation's authorised scope are accepted; others are refused.",
 			"security", model.PermAgentsExecute, true, false,
 			tools.ObjectSchema(map[string]any{
-				"target":      map[string]any{"type": "string"},
+				"target":      map[string]any{"type": "string", "description": "URL or path to test. Omit if unknown."},
 				"scan_mode":   map[string]any{"type": "string", "enum": []any{"quick", "standard", "deep"}},
 				"instruction": map[string]any{"type": "string"},
-			}, "target"),
+			}),
 			func(ctx context.Context, input map[string]any) (*Result, error) {
 				ident := MustIdentity(ctx)
 				target := strArg(input, "target")
+				if target == "" {
+					return &Result{Missing: []string{"target"}, Question: "What URL or path should I test?"}, nil
+				}
 				if !pentestTargetAllowed(target) {
 					return &Result{Data: map[string]any{
 						"refused": true,
@@ -214,7 +225,7 @@ func registerSpecialists(reg *Registry, d Deps) {
 				ident := MustIdentity(ctx)
 				id, err := uuid.Parse(strArg(input, "run_id"))
 				if err != nil {
-					return &Result{Missing: []string{"pentest_run"}, Question: "Which pentest should I report on?"}, nil
+					return &Result{Missing: []string{"run_id"}, Question: "Which pentest should I report on?"}, nil
 				}
 				findings, err := d.Pentest.GetFindings(ctx, id, ident.OrgID)
 				if err != nil {
@@ -235,7 +246,7 @@ func registerSpecialists(reg *Registry, d Deps) {
 				ident := MustIdentity(ctx)
 				id, err := uuid.Parse(strArg(input, "run_id"))
 				if err != nil {
-					return &Result{Missing: []string{"pentest_run"}, Question: "Which pentest should I cancel?"}, nil
+					return &Result{Missing: []string{"run_id"}, Question: "Which pentest should I cancel?"}, nil
 				}
 				run, err := d.Pentest.Cancel(ctx, id, ident.OrgID)
 				if err != nil {
