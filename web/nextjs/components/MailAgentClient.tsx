@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { apiClient } from "@/lib/api/client";
+import { apiClient, apiErrorMessage } from "@/lib/api/client";
 import type {
   MailConnectionStatus,
   MailDraft,
@@ -189,8 +189,8 @@ export function MailAgentClient() {
         reply_instructions: replyInstructions,
       });
       await loadConnection();
-    } catch {
-      setError("Could not save rules.");
+    } catch (e: unknown) {
+      setError(apiErrorMessage(e, "Could not save rules."));
     } finally {
       setBusy(false);
     }

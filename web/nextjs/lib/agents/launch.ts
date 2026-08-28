@@ -4,7 +4,11 @@ import { updateTask } from "@/lib/api/tasks";
 import { generateBlog } from "@/lib/api/blog";
 import type { AgentInputSchema } from "@/lib/agents/input-schemas";
 import { runInputsFromValues } from "@/lib/agents/input-schemas";
-import { mailPatchFromFormValues } from "@/lib/agents/mail-playbook";
+import {
+  mailFormIsBlank,
+  mailPatchFromFormValues,
+  resolveMailLaunchValues,
+} from "@/lib/agents/mail-playbook";
 import type { Agent } from "@/lib/types/agent";
 import type { Task } from "@/lib/types/project";
 import type { TaskRun } from "@/lib/types/task-run";
@@ -99,7 +103,12 @@ export async function launchAgentForTask(opts: {
       return { kind: "researcher", brief, task: updated };
     }
     case "mail": {
-      await apiClient.patch("/mail/connection", mailPatchFromFormValues(values));
+      const toSave = await resolveMailLaunchValues(values);
+      // Empty form + no saved playbook: skip PATCH so we never wipe a mailbox
+      // that GET could not see (or that the dialog had not hydrated yet).
+      if (!mailFormIsBlank(toSave)) {
+        await apiClient.patch("/mail/connection", mailPatchFromFormValues(toSave));
+      }
       try {
         await apiClient.post("/mail/sync");
         return { kind: "mail", task, syncQueued: true };

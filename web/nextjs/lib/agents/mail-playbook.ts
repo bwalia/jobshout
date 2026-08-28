@@ -60,3 +60,23 @@ export async function fetchMailFormValues(): Promise<Record<string, string> | nu
     return null;
   }
 }
+
+/** True when every playbook field is empty (unhydrated form or a race). */
+export function mailFormIsBlank(values: Record<string, string>): boolean {
+  return MAIL_FORM_KEYS.every((k) => !(values[k] ?? "").trim());
+}
+
+/**
+ * Prefer the dialog form once it has any content. If the form is still blank
+ * (Create & run before GET finished, or GET failed), keep the saved mailbox
+ * instead of PATCHing empty rules and wiping the playbook.
+ */
+export async function resolveMailLaunchValues(
+  form: Record<string, string>
+): Promise<Record<string, string>> {
+  const saved = await fetchMailFormValues();
+  if (saved && mailFormIsBlank(form) && !mailFormIsBlank(saved)) {
+    return saved;
+  }
+  return form;
+}
