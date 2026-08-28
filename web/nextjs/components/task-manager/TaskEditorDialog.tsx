@@ -15,6 +15,7 @@ import {
   validateTaskTitle,
 } from "@/lib/agents/input-schemas";
 import { launchAgentForTask, type LaunchResult } from "@/lib/agents/launch";
+import { fetchMailFormValues, mailFormIsBlank } from "@/lib/agents/mail-playbook";
 import { apiErrorMessage } from "@/lib/api/client";
 import { useCreateTask, useUpdateTask } from "@/lib/hooks/useTasks";
 import type { Agent } from "@/lib/types/agent";
@@ -356,19 +357,41 @@ function CreateTaskForm({
   const [values, setValues] = useState<Record<string, string>>(() =>
     defaultValuesForSchema(getAgentInputSchema(null))
   );
+  /** idle until Mail is selected; ready only after GET mailbox (or GET failed). */
+  const [mailboxLoad, setMailboxLoad] = useState<"idle" | "loading" | "ready">(
+    "idle"
+  );
 
   useEffect(() => {
     setValues(defaultValuesForSchema(schema));
     setFieldErrors({});
     setFormError(null);
     setTouchedSubmit(false);
+    if (schema.kind !== "mail") {
+      setMailboxLoad("idle");
+      return;
+    }
+    setMailboxLoad("loading");
+    let cancelled = false;
+    void fetchMailFormValues()
+      .then((saved) => {
+        if (cancelled || !saved) return;
+        setValues((prev) => (mailFormIsBlank(prev) ? { ...prev, ...saved } : prev));
+      })
+      .finally(() => {
+        if (!cancelled) setMailboxLoad("ready");
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [schema]);
 
   const pending = createTask.isPending || launching;
   const resolvedProjectId = fixedProjectId || projectId;
+  const mailReady = schema.kind !== "mail" || mailboxLoad === "ready";
   const schemaOk =
     Boolean(selectedAgent) && schemaValuesValid(schema, values);
-  const createReady = schemaOk && Boolean(resolvedProjectId);
+  const createReady = schemaOk && Boolean(resolvedProjectId) && mailReady;
 
   function setValue(key: string, value: string) {
     const next = { ...values, [key]: value };
@@ -390,6 +413,10 @@ function CreateTaskForm({
     }
     if (!resolvedProjectId) {
       setFormError("Choose a project");
+      return false;
+    }
+    if (!mailReady) {
+      setFormError("Loading saved mailbox settings…");
       return false;
     }
     setTouchedSubmit(true);
@@ -458,7 +485,11 @@ function CreateTaskForm({
               ? "Security scan queued"
               : result.kind === "pr_reviewer"
                 ? "PR review queued"
-                : "Agent run started"
+                : result.kind === "mail"
+                  ? result.syncQueued
+                    ? "Mailbox sync queued"
+                    : "Playbook saved. Connect Gmail on Mail Agent to sync."
+                  : "Agent run started"
       );
       onLaunched?.(result);
       onClose();
@@ -508,13 +539,19 @@ function CreateTaskForm({
           )}
         </div>
 
+        {selectedAgent && schema.kind === "mail" && mailboxLoad === "loading" && (
+          <p className="text-xs text-muted-foreground">
+            Loading saved mailbox settings…
+          </p>
+        )}
+
         {selectedAgent && (
           <AgentInputFields
             fields={schema.fields}
             values={values}
             onChange={setValue}
             errors={fieldErrors}
-            disabled={pending}
+            disabled={pending || !mailReady}
             autoFocusFirst={Boolean(initialAgentId || agentId)}
           />
         )}

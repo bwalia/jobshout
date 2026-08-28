@@ -150,6 +150,10 @@ export function TaskManagerPanel() {
       case "article_writer":
         router.push(`/articles/${result.run.id}`);
         break;
+      case "mail":
+        setSelection({ kind: "builtin", id: "mail" });
+        router.replace("/panel/task-manager?agent=mail", { scroll: false });
+        break;
       case "researcher": {
         const params = new URLSearchParams({
           project: result.task.project_id,

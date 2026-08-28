@@ -4,6 +4,11 @@ import { updateTask } from "@/lib/api/tasks";
 import { generateBlog } from "@/lib/api/blog";
 import type { AgentInputSchema } from "@/lib/agents/input-schemas";
 import { runInputsFromValues } from "@/lib/agents/input-schemas";
+import {
+  mailFormIsBlank,
+  mailPatchFromFormValues,
+  resolveMailLaunchValues,
+} from "@/lib/agents/mail-playbook";
 import type { Agent } from "@/lib/types/agent";
 import type { Task } from "@/lib/types/project";
 import type { TaskRun } from "@/lib/types/task-run";
@@ -11,13 +16,15 @@ import type { ScanMode } from "@/types/pentest";
 import type { PentestRun } from "@/types/pentest";
 import type { ReviewRun } from "@/types/review";
 import type { BlogRun } from "@/lib/types/blog";
+import axios from "axios";
 
 export type LaunchResult =
   | { kind: "task_run"; run: TaskRun; task: Task }
   | { kind: "pentester"; run: PentestRun; task: Task }
   | { kind: "pr_reviewer"; run: ReviewRun; task: Task }
   | { kind: "article_writer"; run: BlogRun; task: Task }
-  | { kind: "researcher"; brief: ResearchBrief; task: Task };
+  | { kind: "researcher"; brief: ResearchBrief; task: Task }
+  | { kind: "mail"; task: Task; syncQueued: boolean };
 
 interface ResearchBrief {
   topic?: string;
@@ -94,6 +101,25 @@ export async function launchAgentForTask(opts: {
         status: "done",
       }).catch(() => task);
       return { kind: "researcher", brief, task: updated };
+    }
+    case "mail": {
+      const toSave = await resolveMailLaunchValues(values);
+      // Empty form + no saved playbook: skip PATCH so we never wipe a mailbox
+      // that GET could not see (or that the dialog had not hydrated yet).
+      if (!mailFormIsBlank(toSave)) {
+        await apiClient.patch("/mail/connection", mailPatchFromFormValues(toSave));
+      }
+      try {
+        await apiClient.post("/mail/sync");
+        return { kind: "mail", task, syncQueued: true };
+      } catch (err) {
+        const status = axios.isAxiosError(err) ? err.response?.status : undefined;
+        // Playbook is saved; 409/503 means Gmail is not connected or not configured.
+        if (status === 409 || status === 503) {
+          return { kind: "mail", task, syncQueued: false };
+        }
+        throw err;
+      }
     }
     default: {
       const inputs = runInputsFromValues(schema, values);

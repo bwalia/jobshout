@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"go.uber.org/zap"
@@ -57,15 +58,24 @@ type fixedBackend struct {
 	sources   []Source
 	docs      map[string]*Document
 	fetchErrs map[string]error
+	mu        sync.Mutex
+	searchN   int
+	fetched   []string
 }
 
 func (f *fixedBackend) Name() string { return "fixed" }
 
 func (f *fixedBackend) Search(context.Context, string, int) ([]Source, error) {
+	f.mu.Lock()
+	f.searchN++
+	f.mu.Unlock()
 	return f.sources, nil
 }
 
 func (f *fixedBackend) Fetch(_ context.Context, rawURL string) (*Document, error) {
+	f.mu.Lock()
+	f.fetched = append(f.fetched, rawURL)
+	f.mu.Unlock()
 	if err, ok := f.fetchErrs[rawURL]; ok {
 		return nil, err
 	}
@@ -73,6 +83,20 @@ func (f *fixedBackend) Fetch(_ context.Context, rawURL string) (*Document, error
 		return doc, nil
 	}
 	return nil, fmt.Errorf("no such document: %s", rawURL)
+}
+
+func (f *fixedBackend) searchCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.searchN
+}
+
+func (f *fixedBackend) fetchURLs() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, len(f.fetched))
+	copy(out, f.fetched)
+	return out
 }
 
 // newTestAgent wires an Agent over the fake backend and scripted model.
@@ -753,5 +777,184 @@ func TestCitedSources_OnlyIncludesSourcesThatSurvived(t *testing.T) {
 	}
 	if got[0].Title != "Cited" {
 		t.Errorf("got %q, want the cited source", got[0].Title)
+	}
+}
+
+func pinnedMailRequest(focus, subject, body string, urls []string) Request {
+	var b strings.Builder
+	b.WriteString("Pinned knowledge pages only. Do not use other sources.")
+	if focus != "" {
+		b.WriteString("\nLook for: ")
+		b.WriteString(focus)
+	}
+	b.WriteString("\nInbound email:\n")
+	b.WriteString(subject)
+	b.WriteString("\n")
+	b.WriteString(body)
+	topic := focus
+	if topic == "" {
+		topic = subject
+	}
+	if topic == "" {
+		topic = "inbound email"
+	}
+	return Request{Topic: topic, Context: b.String(), URLs: urls}
+}
+
+func TestResearch_PinnedURLsSkipPlanAndSearch(t *testing.T) {
+	backend := defaultBackend()
+	model := &scriptedLLM{responses: []scriptedResponse{
+		{trigger: "You extract facts from one knowledge page", content: `{"findings": [{"claim": "Gateway API reached GA in Kubernetes 1.31.", "quote": "Kubernetes 1.31 promoted the Gateway API to general availability after an extended beta period."}]}`},
+		{trigger: "fact-checking citations", content: `{"verdicts": [{"index": 0, "supported": true}]}`},
+		{trigger: "Summarise the current state", content: "Gateway API is GA."},
+	}}
+	agent := newTestAgent(t, backend, model)
+
+	brief, err := agent.Research(context.Background(), pinnedMailRequest(
+		"Gateway API status",
+		"Latest k8s?",
+		"What is the current Gateway API status?",
+		[]string{"https://kubernetes.io/blog/gateway-ga"},
+	), nil)
+	if err != nil {
+		t.Fatalf("Research returned error: %v", err)
+	}
+	if backend.searchCalls() != 0 {
+		t.Fatalf("Search called %d times, want 0", backend.searchCalls())
+	}
+	fetched := backend.fetchURLs()
+	if len(fetched) != 1 || fetched[0] != "https://kubernetes.io/blog/gateway-ga" {
+		t.Fatalf("fetched %v, want the pinned URL only", fetched)
+	}
+	for _, p := range model.prompts {
+		if strings.Contains(p, "planning research for a technical article") {
+			t.Fatal("planner must not run in pinned URL mode")
+		}
+		if strings.Contains(p, "choosing which search results") {
+			t.Fatal("source selector must not run in pinned URL mode")
+		}
+	}
+	if !brief.IsUsable() {
+		t.Fatal("brief reports itself unusable")
+	}
+	if len(brief.Queries) != 0 {
+		t.Errorf("queries %v, want none", brief.Queries)
+	}
+}
+
+func TestResearch_PinnedExtractPromptIncludesFocusAndEmail(t *testing.T) {
+	backend := defaultBackend()
+	model := &scriptedLLM{responses: []scriptedResponse{
+		{trigger: "You extract facts from one knowledge page", content: `{"findings": [{"claim": "c", "quote": "Kubernetes 1.31 promoted the Gateway API to general availability"}]}`},
+		{trigger: "fact-checking citations", content: `{"verdicts": [{"index": 0, "supported": true}]}`},
+		{trigger: "Summarise the current state", content: "summary"},
+	}}
+	agent := newTestAgent(t, backend, model)
+
+	_, err := agent.Research(context.Background(), pinnedMailRequest(
+		"list prices and SLA hours",
+		"Pricing question",
+		"How much does the team plan cost, and what is the SLA?",
+		[]string{"https://kubernetes.io/blog/gateway-ga"},
+	), nil)
+	if err != nil {
+		t.Fatalf("Research returned error: %v", err)
+	}
+	var extract string
+	for _, p := range model.prompts {
+		if strings.Contains(p, "You extract facts from one knowledge page") {
+			extract = p
+			break
+		}
+	}
+	if extract == "" {
+		t.Fatal("no extract prompt recorded")
+	}
+	for _, want := range []string{
+		"LOOK FOR:",
+		"list prices and SLA hours",
+		"Pricing question",
+		"How much does the team plan cost, and what is the SLA?",
+		"DOCUMENT URL:",
+		"https://kubernetes.io/blog/gateway-ga",
+	} {
+		if !strings.Contains(extract, want) {
+			t.Errorf("extract prompt missing %q\n%s", want, extract)
+		}
+	}
+}
+
+func TestResearch_PinnedEmptyFocusUsesEmailAsTheQuestion(t *testing.T) {
+	backend := defaultBackend()
+	model := &scriptedLLM{responses: []scriptedResponse{
+		{trigger: "You extract facts from one knowledge page", content: `{"findings": [{"claim": "c", "quote": "Kubernetes 1.31 promoted the Gateway API to general availability"}]}`},
+		{trigger: "fact-checking citations", content: `{"verdicts": [{"index": 0, "supported": true}]}`},
+		{trigger: "Summarise the current state", content: "summary"},
+	}}
+	agent := newTestAgent(t, backend, model)
+
+	_, err := agent.Research(context.Background(), pinnedMailRequest(
+		"",
+		"Latest k8s?",
+		"What is the current Gateway API status?",
+		[]string{"https://kubernetes.io/blog/gateway-ga"},
+	), nil)
+	if err != nil {
+		t.Fatalf("Research returned error: %v", err)
+	}
+	var extract string
+	for _, p := range model.prompts {
+		if strings.Contains(p, "You extract facts from one knowledge page") {
+			extract = p
+			break
+		}
+	}
+	if extract == "" {
+		t.Fatal("no extract prompt recorded")
+	}
+	if !strings.Contains(extract, "(whatever the email is asking)") {
+		t.Errorf("empty research_focus should fall back in LOOK FOR:\n%s", extract)
+	}
+	if !strings.Contains(extract, "What is the current Gateway API status?") {
+		t.Errorf("email body missing from extract prompt:\n%s", extract)
+	}
+}
+
+func TestResearch_PinnedFetchFailureWarnsWithoutFindings(t *testing.T) {
+	backend := &fixedBackend{
+		docs: map[string]*Document{},
+		fetchErrs: map[string]error{
+			"https://example.com/pricing": fmt.Errorf("timeout"),
+		},
+	}
+	model := &scriptedLLM{}
+	agent := newTestAgent(t, backend, model)
+
+	brief, err := agent.Research(context.Background(), pinnedMailRequest(
+		"prices",
+		"How much?",
+		"What does it cost?",
+		[]string{"https://example.com/pricing"},
+	), nil)
+	if err != nil {
+		t.Fatalf("pinned fetch failure should not fail the run: %v", err)
+	}
+	if len(brief.Findings) != 0 {
+		t.Errorf("invented findings: %+v", brief.Findings)
+	}
+	if backend.searchCalls() != 0 {
+		t.Fatalf("Search must not run after a failed pinned fetch, calls=%d", backend.searchCalls())
+	}
+	var warned bool
+	for _, w := range brief.Warnings {
+		if strings.Contains(w, "could not read") || strings.Contains(w, "none of the pinned") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Errorf("expected a fetch warning, got %v", brief.Warnings)
+	}
+	if len(model.prompts) != 0 {
+		t.Errorf("LLM should not run when no page loaded, prompts=%d", len(model.prompts))
 	}
 }
