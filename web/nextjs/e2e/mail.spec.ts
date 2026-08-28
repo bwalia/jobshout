@@ -105,16 +105,25 @@ test.describe("Mail Agent", () => {
           labels: [],
           subject_prefixes: ["[support]"],
         },
+        knowledge_urls: ["https://example.com/pricing"],
+        research_focus: "prices and SLA",
+        reply_instructions: "Be warm and short.",
       }),
     });
     expect(res.status).toBe(200);
     const st = body as {
       connected: boolean;
       rules: { senders: string[]; subject_prefixes: string[] };
+      knowledge_urls?: string[];
+      research_focus?: string;
+      reply_instructions?: string;
     };
     expect(st.connected).toBe(false);
     expect(st.rules.senders).toContain("ops@example.com");
     expect(st.rules.subject_prefixes).toContain("[support]");
+    expect(st.knowledge_urls).toContain("https://example.com/pricing");
+    expect(st.research_focus).toBe("prices and SLA");
+    expect(st.reply_instructions).toBe("Be warm and short.");
   });
 
   test("mail page shows connect (or unconfigured) and never a send button", async ({

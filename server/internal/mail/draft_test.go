@@ -19,7 +19,7 @@ func TestBuildDraftPromptIncludesResearchAndForbidsSent(t *testing.T) {
 	}
 	p := BuildDraftPrompt(fixtureSupportQuestion(), ClassifyResult{
 		Intent: "question", SuggestedAction: "reply", Reason: "needs facts",
-	}, brief)
+	}, brief, DraftOptions{})
 	for _, want := range []string{
 		"Kubernetes 1.31",
 		"https://kubernetes.io/blog/",
@@ -43,6 +43,26 @@ func TestHeuristicDraftNeverClaimsSent(t *testing.T) {
 	}
 	if !strings.HasPrefix(strings.ToLower(d.Subject), "re:") {
 		t.Errorf("subject %q", d.Subject)
+	}
+}
+
+func TestBuildDraftPromptIncludesReplyInstructionsAndPinnedGuidance(t *testing.T) {
+	p := BuildDraftPrompt(fixtureSupportQuestion(), ClassifyResult{
+		Intent: "question", SuggestedAction: "reply", Reason: "needs facts",
+	}, &research.Brief{Summary: "Price is £40/user from the pricing page."}, DraftOptions{
+		ReplyInstructions: "Be warm, under 80 words, never mention competitors.",
+		PinnedKnowledge:   true,
+	})
+	for _, want := range []string{
+		"REPLY INSTRUCTIONS FROM THE OPERATOR",
+		"Be warm, under 80 words, never mention competitors.",
+		"pinned knowledge pages",
+		"If findings are empty",
+		"Never claim this reply has been sent",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("prompt missing %q", want)
+		}
 	}
 }
 

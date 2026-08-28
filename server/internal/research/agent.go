@@ -72,6 +72,9 @@ type Request struct {
 	// Context is the caller's extra guidance: angle, audience, points to hit,
 	// things to avoid. Free text, passed to the planner verbatim.
 	Context string
+	// URLs, when non-empty, skip plan and search. Each URL is Fetch'd and
+	// extracted; there is no web search, HN/arxiv, or search-pool recovery.
+	URLs []string
 	// Model optionally overrides the LLM used.
 	Model string
 }
@@ -163,6 +166,10 @@ func (a *Agent) Research(ctx context.Context, req Request, progress ProgressFunc
 	}
 
 	brief := &Brief{Topic: topic}
+
+	if len(req.URLs) > 0 {
+		return a.researchPinned(ctx, req, brief, progress)
+	}
 
 	// 1. Plan — turn the topic and the caller's guidance into search queries.
 	progress.report(PhasePlanning, fmt.Sprintf("Planning research for %q", topic))
@@ -271,6 +278,71 @@ func (a *Agent) Research(ctx context.Context, req Request, progress ProgressFunc
 	progress.report(PhaseSynthesised, fmt.Sprintf("%d verified findings from %d sources",
 		len(brief.Findings), len(brief.Sources)))
 
+	return brief, nil
+}
+
+// researchPinned Fetch's the caller's URLs only: no planner, no search, no
+// recovery from HN/arxiv. A failed URL is a warning; if none load, the brief
+// is empty so the caller can draft without invented facts.
+func (a *Agent) researchPinned(ctx context.Context, req Request, brief *Brief, progress ProgressFunc) (*Brief, error) {
+	candidates := make([]Source, 0, len(req.URLs))
+	seen := make(map[string]struct{}, len(req.URLs))
+	for _, raw := range req.URLs {
+		u, err := validateURL(raw)
+		if err != nil {
+			brief.Warnings = append(brief.Warnings, fmt.Sprintf("skipped pinned url %s: %v", strings.TrimSpace(raw), err))
+			continue
+		}
+		key := canonicalURL(u)
+		if key == "" {
+			key = u
+		}
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		candidates = append(candidates, Source{URL: u, Site: siteOf(u)})
+		if len(candidates) >= 20 {
+			break
+		}
+	}
+
+	if len(candidates) == 0 {
+		brief.Warnings = append(brief.Warnings, "none of the pinned knowledge pages could be retrieved")
+		return brief, nil
+	}
+
+	tried := make(map[string]struct{})
+	progress.report(PhaseReading, fmt.Sprintf("Reading %d pinned knowledge page(s)", len(candidates)))
+	docs := a.read(ctx, candidates, brief, len(candidates), tried)
+	if len(docs) == 0 {
+		brief.Warnings = append(brief.Warnings, "none of the pinned knowledge pages could be retrieved")
+		return brief, nil
+	}
+
+	findings := a.extractAll(ctx, req, docs, brief)
+	if len(findings) == 0 {
+		progress.report(PhaseSynthesised, "no claims extracted from pinned pages")
+		return brief, nil
+	}
+
+	progress.report(PhaseVerifying, fmt.Sprintf("Verifying %d claims against their sources", len(findings)))
+	verified := a.verify(ctx, req, findings, docs, brief)
+	brief.Findings = verified
+	brief.Sources = citedSources(verified, docs)
+
+	if len(verified) > 0 {
+		summary, err := a.synthesise(ctx, req, verified)
+		if err != nil {
+			brief.Warnings = append(brief.Warnings, fmt.Sprintf("summary generation failed: %v", err))
+			a.logger.Warn("research: synthesis failed", zap.Error(err))
+		} else {
+			brief.Summary = summary
+		}
+	}
+
+	progress.report(PhaseSynthesised, fmt.Sprintf("%d verified findings from %d pinned page(s)",
+		len(brief.Findings), len(brief.Sources)))
 	return brief, nil
 }
 
@@ -717,7 +789,11 @@ func (a *Agent) extractAll(ctx context.Context, req Request, docs []Document, br
 // looks right; a claim plus a quote can be checked against the actual bytes of
 // the page.
 func (a *Agent) extract(ctx context.Context, req Request, doc Document) ([]Finding, error) {
-	prompt := fmt.Sprintf(`You are extracting citable facts from a source document for an article.
+	var prompt string
+	if len(req.URLs) > 0 {
+		prompt = extractPinnedPrompt(req, doc)
+	} else {
+		prompt = fmt.Sprintf(`You are extracting citable facts from a source document for an article.
 
 ARTICLE TOPIC:
 %s
@@ -741,7 +817,8 @@ Rules:
 
 Respond with JSON only, in exactly this shape:
 {"findings": [{"claim": "...", "quote": "..."}]}`,
-		req.Topic, doc.URL, doc.Title, proseExcerpt(doc.Text, docExcerptChars))
+			req.Topic, doc.URL, doc.Title, proseExcerpt(doc.Text, docExcerptChars))
+	}
 
 	var parsed struct {
 		Findings []struct {
@@ -763,6 +840,65 @@ Respond with JSON only, in exactly this shape:
 		out = append(out, Finding{Claim: claim, SourceURL: doc.URL, Quote: quote})
 	}
 	return out, nil
+}
+
+func extractPinnedPrompt(req Request, doc Document) string {
+	lookFor := pinnedLookFor(req)
+	subject, body := pinnedInbound(req)
+	if len(body) > 4000 {
+		body = body[:4000] + "\n…"
+	}
+	return fmt.Sprintf(`You extract facts from one knowledge page to answer an inbound email.
+Use only DOCUMENT TEXT. If the page does not contain what we are looking for, return {"findings":[]}. Do not guess.
+
+LOOK FOR:
+%s
+
+INBOUND SUBJECT:
+%s
+
+INBOUND EMAIL (trimmed):
+%s
+
+DOCUMENT URL:
+%s
+
+DOCUMENT TEXT:
+%s
+
+Return JSON only:
+{"findings":[{"claim":"...","quote":"..."}]}
+Each claim is one factual sentence. Each quote is verbatim from DOCUMENT TEXT.`,
+		lookFor, subject, body, doc.URL, proseExcerpt(doc.Text, docExcerptChars))
+}
+
+func pinnedLookFor(req Request) string {
+	const prefix = "Look for: "
+	ctx := req.Context
+	if i := strings.Index(ctx, prefix); i >= 0 {
+		rest := ctx[i+len(prefix):]
+		if j := strings.Index(rest, "\n"); j >= 0 {
+			rest = rest[:j]
+		}
+		if s := strings.TrimSpace(rest); s != "" {
+			return s
+		}
+	}
+	return "(whatever the email is asking)"
+}
+
+func pinnedInbound(req Request) (subject, body string) {
+	const prefix = "Inbound email:\n"
+	ctx := req.Context
+	i := strings.Index(ctx, prefix)
+	if i < 0 {
+		return "", strings.TrimSpace(ctx)
+	}
+	inbound := ctx[i+len(prefix):]
+	if j := strings.Index(inbound, "\n"); j >= 0 {
+		return inbound[:j], strings.TrimSpace(inbound[j+1:])
+	}
+	return inbound, ""
 }
 
 // verify drops every finding the source does not actually support.

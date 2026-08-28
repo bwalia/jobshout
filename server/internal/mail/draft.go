@@ -14,7 +14,17 @@ import (
 
 // Drafter writes a reply body. It never sends.
 type Drafter interface {
-	Draft(ctx context.Context, msg InboxMessage, class ClassifyResult, brief *research.Brief) (Draft, error)
+	Draft(ctx context.Context, msg InboxMessage, class ClassifyResult, brief *research.Brief, opts DraftOptions) (Draft, error)
+}
+
+// DraftOptions is operator guidance applied after research (or instead of it).
+type DraftOptions struct {
+	// ReplyInstructions is how the reply should read. Empty keeps the default
+	// concise professional tone.
+	ReplyInstructions string
+	// PinnedKnowledge is true when findings (if any) came from the org's
+	// pinned knowledge pages rather than an open-web search.
+	PinnedKnowledge bool
 }
 
 type llmDrafter struct {
@@ -30,7 +40,7 @@ func NewDrafter(client llm.Client, logger *zap.Logger) Drafter {
 	return &llmDrafter{llm: client, logger: logger}
 }
 
-func (d *llmDrafter) Draft(ctx context.Context, msg InboxMessage, class ClassifyResult, brief *research.Brief) (Draft, error) {
+func (d *llmDrafter) Draft(ctx context.Context, msg InboxMessage, class ClassifyResult, brief *research.Brief, opts DraftOptions) (Draft, error) {
 	if d.llm == nil {
 		return HeuristicDraft(msg, brief), nil
 	}
@@ -40,7 +50,7 @@ func (d *llmDrafter) Draft(ctx context.Context, msg InboxMessage, class Classify
 		To      string `json:"to"`
 		CC      string `json:"cc"`
 	}
-	err := llm.GenerateJSON(ctx, "mail-draft", BuildDraftPrompt(msg, class, brief), &out,
+	err := llm.GenerateJSON(ctx, "mail-draft", BuildDraftPrompt(msg, class, brief, opts), &out,
 		func(ctx context.Context, prompt string) (string, error) {
 			resp, err := d.llm.Generate(ctx, llm.GenerateRequest{
 				MaxTokens: 800,
@@ -89,7 +99,7 @@ If research findings are provided, use only those facts; do not invent citations
 
 // BuildDraftPrompt is exported so tests can assert research is folded in and
 // the prompt forbids claiming the mail was sent.
-func BuildDraftPrompt(msg InboxMessage, class ClassifyResult, brief *research.Brief) string {
+func BuildDraftPrompt(msg InboxMessage, class ClassifyResult, brief *research.Brief, opts DraftOptions) string {
 	body := strings.TrimSpace(msg.Body)
 	if len(body) > 4000 {
 		body = body[:4000] + "\n…"
@@ -116,13 +126,34 @@ func BuildDraftPrompt(msg InboxMessage, class ClassifyResult, brief *research.Br
 
 Triage: intent=%s action=%s reason=%s
 Do not claim the reply has been sent.
-
+%s
 From: %s <%s>
 Subject: %s
 
 %s
 %s`, msg.FromEmail, class.Intent, class.SuggestedAction, class.Reason,
+		draftOperatorGuidance(opts),
 		msg.FromName, msg.FromEmail, msg.Subject, body, researchBlock)
+}
+
+func draftOperatorGuidance(opts DraftOptions) string {
+	reply := strings.TrimSpace(opts.ReplyInstructions)
+	if !opts.PinnedKnowledge && reply == "" {
+		return ""
+	}
+	if reply == "" {
+		reply = "(none — be concise and professional)"
+	}
+	var b strings.Builder
+	b.WriteString("\nREPLY INSTRUCTIONS FROM THE OPERATOR (follow these; they override default tone):\n")
+	b.WriteString(reply)
+	b.WriteByte('\n')
+	if opts.PinnedKnowledge {
+		b.WriteString("Research findings come from the organisation's pinned knowledge pages.\n")
+		b.WriteString("Use only those facts. If findings are empty, do not invent prices, versions, or policy; say we will follow up.\n")
+	}
+	b.WriteString("Never claim this reply has been sent.\n")
+	return b.String()
 }
 
 // HeuristicDraft is a safe fallback that never claims to have sent.

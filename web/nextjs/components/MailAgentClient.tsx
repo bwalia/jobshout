@@ -46,6 +46,9 @@ export function MailAgentClient() {
   const [senders, setSenders] = useState("");
   const [prefixes, setPrefixes] = useState("");
   const [labels, setLabels] = useState("");
+  const [knowledgeUrls, setKnowledgeUrls] = useState("");
+  const [researchFocus, setResearchFocus] = useState("");
+  const [replyInstructions, setReplyInstructions] = useState("");
 
   const loadConnection = useCallback(async () => {
     const { data } = await apiClient.get<MailConnectionStatus>("/mail/connection");
@@ -53,6 +56,9 @@ export function MailAgentClient() {
     setSenders((data.rules?.senders ?? []).join(", "));
     setPrefixes((data.rules?.subject_prefixes ?? []).join(", "));
     setLabels((data.rules?.labels ?? []).join(", "));
+    setKnowledgeUrls((data.knowledge_urls ?? []).join("\n"));
+    setResearchFocus(data.research_focus ?? "");
+    setReplyInstructions(data.reply_instructions ?? "");
   }, []);
 
   const loadThreads = useCallback(async () => {
@@ -175,6 +181,12 @@ export function MailAgentClient() {
           labels: split(labels),
           subject_prefixes: split(prefixes),
         },
+        knowledge_urls: knowledgeUrls
+          .split("\n")
+          .map((x) => x.trim())
+          .filter(Boolean),
+        research_focus: researchFocus,
+        reply_instructions: replyInstructions,
       });
       await loadConnection();
     } catch {
@@ -348,6 +360,40 @@ export function MailAgentClient() {
                   className="mt-1 flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
                 />
               </label>
+              <label className="text-xs text-muted-foreground">
+                Knowledge links (one URL per line)
+                <textarea
+                  value={knowledgeUrls}
+                  onChange={(e) => setKnowledgeUrls(e.target.value)}
+                  rows={3}
+                  placeholder="https://example.com/pricing"
+                  className="mt-1 w-full rounded-md border border-input bg-background p-3 text-sm"
+                />
+              </label>
+              <label className="text-xs text-muted-foreground">
+                What to look for in those pages
+                <textarea
+                  value={researchFocus}
+                  onChange={(e) => setResearchFocus(e.target.value)}
+                  rows={2}
+                  placeholder="Prices, SLA, refund window…"
+                  className="mt-1 w-full rounded-md border border-input bg-background p-3 text-sm"
+                />
+              </label>
+              <label className="text-xs text-muted-foreground">
+                How the reply should read
+                <textarea
+                  value={replyInstructions}
+                  onChange={(e) => setReplyInstructions(e.target.value)}
+                  rows={2}
+                  placeholder="Tone, length, must-include, must-avoid"
+                  className="mt-1 w-full rounded-md border border-input bg-background p-3 text-sm"
+                />
+              </label>
+              <p className="text-xs text-muted-foreground">
+                When links are set, matching mail is researched from those pages
+                only — not the open web. Empty links keep today&apos;s behaviour.
+              </p>
               <button
                 type="button"
                 disabled={busy}

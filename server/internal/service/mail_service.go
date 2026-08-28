@@ -20,11 +20,12 @@ import (
 )
 
 var (
-	ErrMailNotConfigured    = errors.New("mail: Gmail OAuth is not configured on this server")
-	ErrMailNotConnected     = errors.New("mail: Gmail is not connected")
-	ErrMailNotFound         = errors.New("mail: not found")
-	ErrMailCannotSend       = errors.New("mail: send requires an approved draft")
-	ErrMailDraftNotEditable = errors.New("mail: draft cannot be edited in its current state")
+	ErrMailNotConfigured       = errors.New("mail: Gmail OAuth is not configured on this server")
+	ErrMailNotConnected        = errors.New("mail: Gmail is not connected")
+	ErrMailNotFound            = errors.New("mail: not found")
+	ErrMailCannotSend          = errors.New("mail: send requires an approved draft")
+	ErrMailDraftNotEditable    = errors.New("mail: draft cannot be edited in its current state")
+	ErrMailInvalidKnowledgeURL = mail.ErrInvalidKnowledgeURL
 )
 
 // MailService is the org mailbox specialist: connect, sync, draft, approve-to-send.
@@ -146,10 +147,13 @@ func mailboxLinked(c *model.MailConnection) bool {
 
 func (s *mailService) ConnectionStatus(ctx context.Context, orgID uuid.UUID) (*model.MailConnectionStatus, error) {
 	st := &model.MailConnectionStatus{
-		Configured:       s.Configured(),
-		Status:           model.MailConnDisconnected,
-		ScopesDocumented: mail.ScopeDocs(),
-		Rules:            model.MailWatchRules{Labels: []string{}, Senders: []string{}, SubjectPrefixes: []string{}},
+		Configured:        s.Configured(),
+		Status:            model.MailConnDisconnected,
+		ScopesDocumented:  mail.ScopeDocs(),
+		Rules:             model.MailWatchRules{Labels: []string{}, Senders: []string{}, SubjectPrefixes: []string{}},
+		KnowledgeURLs:     []string{},
+		ResearchFocus:     "",
+		ReplyInstructions: "",
 	}
 	if agent, err := s.EnsureMailAgent(ctx, orgID); err == nil && agent != nil {
 		st.AgentID = &agent.ID
@@ -171,6 +175,12 @@ func (s *mailService) ConnectionStatus(ctx context.Context, orgID uuid.UUID) (*m
 	st.Rules = model.MailWatchRules{
 		Labels: c.WatchLabels, Senders: c.WatchSenders, SubjectPrefixes: c.WatchSubjectPrefixes,
 	}
+	st.KnowledgeURLs = c.WatchKnowledgeURLs
+	if st.KnowledgeURLs == nil {
+		st.KnowledgeURLs = []string{}
+	}
+	st.ResearchFocus = c.ResearchFocus
+	st.ReplyInstructions = c.ReplyInstructions
 	st.Scopes = c.Scopes
 	st.LastSyncAt = c.LastSyncAt
 	st.ConnectedAt = c.ConnectedAt
@@ -240,6 +250,7 @@ func (s *mailService) CompleteOAuth(ctx context.Context, state, code string) err
 		WatchLabels:          []string{},
 		WatchSenders:         []string{},
 		WatchSubjectPrefixes: []string{},
+		WatchKnowledgeURLs:   []string{},
 	}
 	if agent != nil {
 		conn.AgentID = &agent.ID
@@ -249,6 +260,9 @@ func (s *mailService) CompleteOAuth(ctx context.Context, state, code string) err
 		conn.WatchLabels = existing.WatchLabels
 		conn.WatchSenders = existing.WatchSenders
 		conn.WatchSubjectPrefixes = existing.WatchSubjectPrefixes
+		conn.WatchKnowledgeURLs = existing.WatchKnowledgeURLs
+		conn.ResearchFocus = existing.ResearchFocus
+		conn.ReplyInstructions = existing.ReplyInstructions
 	}
 	if err := s.repo.UpsertConnection(ctx, conn); err != nil {
 		return err
@@ -279,8 +293,11 @@ func (s *mailService) UpdateConnection(ctx context.Context, orgID uuid.UUID, req
 		}
 		c = &model.MailConnection{
 			OrgID: orgID, Status: model.MailConnDisconnected,
-			Scopes:      []string{},
-			WatchLabels: []string{}, WatchSenders: []string{}, WatchSubjectPrefixes: []string{},
+			Scopes:               []string{},
+			WatchLabels:          []string{},
+			WatchSenders:         []string{},
+			WatchSubjectPrefixes: []string{},
+			WatchKnowledgeURLs:   []string{},
 		}
 		if agent != nil {
 			c.AgentID = &agent.ID
@@ -296,6 +313,19 @@ func (s *mailService) UpdateConnection(ctx context.Context, orgID uuid.UUID, req
 		c.WatchLabels = req.Rules.Labels
 		c.WatchSenders = req.Rules.Senders
 		c.WatchSubjectPrefixes = req.Rules.SubjectPrefixes
+	}
+	if req.KnowledgeURLs != nil {
+		urls, err := mail.SanitizeKnowledgeURLs(*req.KnowledgeURLs)
+		if err != nil {
+			return nil, err
+		}
+		c.WatchKnowledgeURLs = urls
+	}
+	if req.ResearchFocus != nil {
+		c.ResearchFocus = strings.TrimSpace(*req.ResearchFocus)
+	}
+	if req.ReplyInstructions != nil {
+		c.ReplyInstructions = strings.TrimSpace(*req.ReplyInstructions)
 	}
 	if err := s.repo.UpdateConnectionMeta(ctx, c); err != nil {
 		return nil, err
@@ -427,10 +457,10 @@ func (s *mailService) ingestAndProcess(ctx context.Context, c *model.MailConnect
 	if err := s.repo.UpsertThread(ctx, th); err != nil {
 		return err
 	}
-	return s.processThread(ctx, th, msg)
+	return s.processThread(ctx, th, msg, c)
 }
 
-func (s *mailService) processThread(ctx context.Context, th *model.MailThread, msg mail.InboxMessage) error {
+func (s *mailService) processThread(ctx context.Context, th *model.MailThread, msg mail.InboxMessage, c *model.MailConnection) error {
 	th.Status = model.MailThreadClassifying
 	_ = s.repo.UpdateThread(ctx, th)
 
@@ -445,23 +475,33 @@ func (s *mailService) processThread(ctx context.Context, th *model.MailThread, m
 		return s.repo.UpdateThread(ctx, th)
 	}
 
+	pinnedReq, pinned := mailKnowledgeRequest(c, msg)
+	wantResearch := pinned || class.NeedsResearch
+
 	var brief *research.Brief
-	if class.NeedsResearch && s.research != nil && s.research.Available() {
+	if wantResearch && s.research != nil && s.research.Available() {
 		th.Status = model.MailThreadResearching
 		_ = s.repo.UpdateThread(ctx, th)
-		topic := strings.TrimSpace(msg.Subject)
-		if topic == "" {
-			topic = "inbound email"
+		req := pinnedReq
+		if !pinned {
+			topic := strings.TrimSpace(msg.Subject)
+			if topic == "" {
+				topic = "inbound email"
+			}
+			req = research.Request{
+				Topic:   topic,
+				Context: "Write a factual briefing that can be used in a short professional email reply.\n\n" + strings.TrimSpace(msg.Body),
+			}
 		}
-		b, rerr := s.research.Research(ctx, th.OrgID, research.Request{
-			Topic:   topic,
-			Context: "Write a factual briefing that can be used in a short professional email reply.\n\n" + strings.TrimSpace(msg.Body),
-		}, nil)
+		b, rerr := s.research.Research(ctx, th.OrgID, req, nil)
 		if rerr != nil {
 			s.logger.Warn("mail: research handoff failed, drafting without it", zap.Error(rerr))
 		} else {
 			brief = b
 			sum := b.Summary
+			if sum == "" && len(b.Warnings) > 0 {
+				sum = strings.Join(b.Warnings, " ")
+			}
 			th.ResearchSummary = &sum
 			id := uuid.New()
 			th.ResearchBriefID = &id
@@ -469,11 +509,16 @@ func (s *mailService) processThread(ctx context.Context, th *model.MailThread, m
 				th.ResearchFindings = raw
 			}
 		}
-	} else if class.NeedsResearch {
+	} else if wantResearch {
 		s.logger.Info("mail: research requested but Research Agent is unavailable; drafting without it")
 	}
 
-	draft, err := s.drafter.Draft(ctx, msg, class, brief)
+	opts := mail.DraftOptions{}
+	if pinned && c != nil {
+		opts.PinnedKnowledge = true
+		opts.ReplyInstructions = c.ReplyInstructions
+	}
+	draft, err := s.drafter.Draft(ctx, msg, class, brief, opts)
 	if err != nil {
 		return s.failThread(ctx, th, err)
 	}
@@ -676,4 +721,37 @@ func (s *mailService) accessToken(ctx context.Context, c *model.MailConnection) 
 		}
 	}
 	return ts.AccessToken, nil
+}
+
+// mailKnowledgeRequest builds a pinned-URL research.Request when the mailbox
+// has knowledge pages. ok is false when the list is empty (open-web path).
+func mailKnowledgeRequest(c *model.MailConnection, msg mail.InboxMessage) (research.Request, bool) {
+	if c == nil || len(c.WatchKnowledgeURLs) == 0 {
+		return research.Request{}, false
+	}
+	focus := strings.TrimSpace(c.ResearchFocus)
+	subject := strings.TrimSpace(msg.Subject)
+	body := strings.TrimSpace(msg.Body)
+	topic := focus
+	if topic == "" {
+		topic = subject
+	}
+	if topic == "" {
+		topic = "inbound email"
+	}
+	var b strings.Builder
+	b.WriteString("Pinned knowledge pages only. Do not use other sources.")
+	if focus != "" {
+		b.WriteString("\nLook for: ")
+		b.WriteString(focus)
+	}
+	b.WriteString("\nInbound email:\n")
+	b.WriteString(subject)
+	b.WriteString("\n")
+	b.WriteString(body)
+	return research.Request{
+		Topic:   topic,
+		Context: b.String(),
+		URLs:    append([]string(nil), c.WatchKnowledgeURLs...),
+	}, true
 }
