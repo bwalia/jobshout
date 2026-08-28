@@ -36,7 +36,8 @@ export type AgentBuiltin =
   | "article_writer"
   | "researcher"
   | "pentester"
-  | "pr_reviewer";
+  | "pr_reviewer"
+  | "mail";
 
 /**
  * How a selected agent should be launched from Task Manager.
@@ -220,6 +221,67 @@ const SCHEMAS: Record<AgentBuiltin, AgentInputSchema> = {
       `Review ${v.repo?.trim()}#${v.pr_number?.trim()}${
         v.dry_run === "true" ? " (preview only)" : ""
       }`,
+  },
+  mail: {
+    kind: "mail",
+    hint: "Saves watch rules and the knowledge playbook on the shared mailbox, then syncs Gmail. Connect Gmail on Mail Agent first if you have not. Nothing is sent until you Approve a draft.",
+    fields: [
+      {
+        key: "senders",
+        label: "Watch senders",
+        type: "text",
+        placeholder: "ops@example.com, support@client.com",
+        help: "Comma-separated. Empty = all unread in the last 7 days.",
+      },
+      {
+        key: "subject_prefixes",
+        label: "Subject prefixes",
+        type: "text",
+        placeholder: "[support], [billing]",
+      },
+      {
+        key: "labels",
+        label: "Gmail labels",
+        type: "text",
+        placeholder: "INBOX, Support",
+      },
+      {
+        key: "knowledge_urls",
+        label: "Knowledge links",
+        type: "textarea",
+        placeholder: "https://example.com/pricing",
+        help: "One http(s) URL per line. Matching mail is researched from these pages only. Empty = open web when the classifier asks.",
+      },
+      {
+        key: "research_focus",
+        label: "What to look for in those pages",
+        type: "textarea",
+        placeholder: "Prices, SLA, refund window…",
+      },
+      {
+        key: "reply_instructions",
+        label: "How the reply should read",
+        type: "textarea",
+        placeholder: "Tone, length, must-include, must-avoid",
+      },
+    ],
+    titleFrom: (v) => {
+      const focus = v.research_focus?.trim();
+      if (focus) return `Mail: ${focus.slice(0, 80)}`;
+      const urls = v.knowledge_urls?.trim();
+      if (urls) return "Mail: research pinned pages and draft";
+      return "Mail: sync inbox and draft";
+    },
+    descriptionFrom: (v) => {
+      const parts: string[] = [];
+      if (v.senders?.trim()) parts.push(`Senders: ${v.senders.trim()}`);
+      if (v.knowledge_urls?.trim()) parts.push(v.knowledge_urls.trim());
+      if (v.research_focus?.trim()) parts.push(`Look for: ${v.research_focus.trim()}`);
+      if (v.reply_instructions?.trim()) {
+        parts.push(`Reply style: ${v.reply_instructions.trim()}`);
+      }
+      return parts.length ? parts.join("\n\n") : undefined;
+    },
   },
 };
 

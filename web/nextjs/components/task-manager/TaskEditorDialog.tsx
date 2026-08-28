@@ -15,6 +15,7 @@ import {
   validateTaskTitle,
 } from "@/lib/agents/input-schemas";
 import { launchAgentForTask, type LaunchResult } from "@/lib/agents/launch";
+import { fetchMailFormValues } from "@/lib/agents/mail-playbook";
 import { apiErrorMessage } from "@/lib/api/client";
 import { useCreateTask, useUpdateTask } from "@/lib/hooks/useTasks";
 import type { Agent } from "@/lib/types/agent";
@@ -362,6 +363,14 @@ function CreateTaskForm({
     setFieldErrors({});
     setFormError(null);
     setTouchedSubmit(false);
+    if (schema.kind !== "mail") return;
+    let cancelled = false;
+    void fetchMailFormValues().then((saved) => {
+      if (!cancelled && saved) setValues((prev) => ({ ...prev, ...saved }));
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [schema]);
 
   const pending = createTask.isPending || launching;
@@ -458,7 +467,11 @@ function CreateTaskForm({
               ? "Security scan queued"
               : result.kind === "pr_reviewer"
                 ? "PR review queued"
-                : "Agent run started"
+                : result.kind === "mail"
+                  ? result.syncQueued
+                    ? "Mailbox sync queued"
+                    : "Playbook saved. Connect Gmail on Mail Agent to sync."
+                  : "Agent run started"
       );
       onLaunched?.(result);
       onClose();

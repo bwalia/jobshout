@@ -12,6 +12,7 @@ import {
   validateSchemaValues,
 } from "@/lib/agents/input-schemas";
 import { launchAgentForTask, type LaunchResult } from "@/lib/agents/launch";
+import { fetchMailFormValues } from "@/lib/agents/mail-playbook";
 import { apiErrorMessage } from "@/lib/api/client";
 import { useSkills } from "@/lib/hooks/useSkills";
 import { useCreateTaskRun } from "@/lib/hooks/useTaskRuns";
@@ -89,6 +90,14 @@ export function RunTaskDialog({
     setFieldErrors({});
     setTouchedSubmit(false);
     setLaunchError(null);
+    if (schema.kind !== "mail") return;
+    let cancelled = false;
+    void fetchMailFormValues().then((saved) => {
+      if (!cancelled && saved) setValues((prev) => ({ ...prev, ...saved }));
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [schema]);
 
   const availableSlugs = useMemo(
@@ -157,7 +166,11 @@ export function RunTaskDialog({
         toast.success(
           result.kind === "researcher"
             ? "Research complete"
-            : "Agent run started"
+            : result.kind === "mail"
+              ? result.syncQueued
+                ? "Mailbox sync queued"
+                : "Playbook saved. Connect Gmail on Mail Agent to sync."
+              : "Agent run started"
         );
         onSpecialistLaunched?.(result);
         onClose();
