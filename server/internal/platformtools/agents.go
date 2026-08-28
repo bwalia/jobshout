@@ -39,9 +39,9 @@ func registerAgents(reg *Registry, d Deps) {
 			opts = append(opts, model.ClarifyOption{Label: a.Name + " — " + a.Role, Value: a.Name})
 		}
 		if len(m.Candidates) > 0 {
-			return nil, clarifyFromMatch("agent", name, m.Candidates, func(a model.Agent) string { return a.Name }), nil
+			return nil, clarifyFromMatch("agent", name, "name", m.Candidates, func(a model.Agent) string { return a.Name }), nil
 		}
-		return nil, notFoundClarify("agent", name, opts), nil
+		return nil, notFoundClarify("agent", name, "name", opts), nil
 	}
 
 	scopedAgent := func(ctx context.Context, id uuid.UUID) (*model.Agent, error) {
@@ -136,11 +136,11 @@ func registerAgents(reg *Registry, d Deps) {
 		"Create a new agent from a name, role and optional description and model.",
 		"agents", model.PermAgentsCreate, false, false,
 		tools.ObjectSchema(map[string]any{
-			"name":        map[string]any{"type": "string"},
-			"role":        map[string]any{"type": "string"},
-			"description": map[string]any{"type": "string"},
-			"model":       map[string]any{"type": "string"},
-			"provider":    map[string]any{"type": "string"},
+			"name":          map[string]any{"type": "string"},
+			"role":          map[string]any{"type": "string"},
+			"description":   map[string]any{"type": "string"},
+			"model":         map[string]any{"type": "string"},
+			"provider":      map[string]any{"type": "string"},
 			"system_prompt": map[string]any{"type": "string"},
 		}, "name", "role"),
 		func(ctx context.Context, input map[string]any) (*Result, error) {
@@ -263,71 +263,22 @@ func registerAgents(reg *Registry, d Deps) {
 
 	reg.Register(newTool(
 		"agent_execute",
-		"Run a one-off task on a named agent. If no agent is named, pick the best match from the org's agents and say why. The prompt is the work to do.",
+		"Run a named agent. Omit unknown fields; the tool will ask. Do not invent a topic, target, repo, or PR number. Specialists (research, article, pentest, PR review) interview then launch their dedicated path.",
 		"agents", model.PermAgentsExecute, false, false,
 		tools.ObjectSchema(map[string]any{
-			"name":   map[string]any{"type": "string", "description": "Agent name. Omit to auto-select."},
-			"prompt": map[string]any{"type": "string", "description": "The task to run"},
-			"reason": map[string]any{"type": "string", "description": "Why this agent, when auto-selecting"},
-		}, "prompt"),
+			"name":        map[string]any{"type": "string", "description": "Agent name. Omit if unknown; the tool will ask."},
+			"prompt":      map[string]any{"type": "string", "description": "Work to do for a generic agent. Omit if unknown."},
+			"topic":       map[string]any{"type": "string", "description": "Research or article topic. Omit if unknown."},
+			"context":     map[string]any{"type": "string", "description": "Optional extra context for research or writing."},
+			"target":      map[string]any{"type": "string", "description": "Pentest target URL or path. Omit if unknown."},
+			"scan_mode":   map[string]any{"type": "string", "enum": []any{"quick", "standard", "deep"}},
+			"instruction": map[string]any{"type": "string"},
+			"repo":        map[string]any{"type": "string", "description": "GitHub owner/name for PR review."},
+			"pr_number":   map[string]any{"type": "integer", "description": "Pull request number."},
+			"reason":      map[string]any{"type": "string", "description": "Why this agent, when auto-selecting"},
+		}),
 		func(ctx context.Context, input map[string]any) (*Result, error) {
-			ident := MustIdentity(ctx)
-			prompt := strArg(input, "prompt")
-			if prompt == "" {
-				return &Result{Missing: []string{"prompt"}, Question: "What should the agent do?"}, nil
-			}
-			var agent *model.Agent
-			name := strArg(input, "name")
-			if name != "" {
-				a, clar, err := resolveAgent(ctx, name)
-				if err != nil || clar != nil {
-					return clar, err
-				}
-				agent = a
-			} else {
-				agents, err := loadAgents(ctx)
-				if err != nil {
-					return nil, err
-				}
-				if len(agents) == 0 {
-					return &Result{Question: "There are no agents in this organisation yet. Create one first?", Missing: []string{"agent"}}, nil
-				}
-				if len(agents) == 1 {
-					agent = &agents[0]
-				} else {
-					opts := make([]model.ClarifyOption, 0, len(agents))
-					for _, a := range agents {
-						opts = append(opts, model.ClarifyOption{Label: a.Name + " — " + a.Role, Value: a.Name})
-					}
-					return &Result{
-						Missing:  []string{"agent"},
-						Options:  opts,
-						Question: "Which agent should handle that?",
-					}, nil
-				}
-			}
-			exec, err := d.Exec.Execute(ctx, ident.OrgID, agent.ID, model.ExecuteAgentRequest{Prompt: prompt})
-			if err != nil {
-				return nil, err
-			}
-			out := ""
-			if exec.Output != nil {
-				out = *exec.Output
-			}
-			errMsg := ""
-			if exec.ErrorMessage != nil {
-				errMsg = *exec.ErrorMessage
-			}
-			aref := agentRef(*agent)
-			eref := executionRef(*exec, agent.Name)
-			return &Result{
-				Data: map[string]any{
-					"agent": agent.Name, "status": exec.Status,
-					"output": out, "error": errMsg, "reason": strArg(input, "reason"),
-				},
-				Entity:   &eref,
-				Entities: []model.EntityRef{aref, eref},
-			}, nil
+			return runAgentExecute(ctx, d, reg, input)
 		},
 	))
 
@@ -344,7 +295,10 @@ func registerAgents(reg *Registry, d Deps) {
 				ident := MustIdentity(ctx)
 				idStr := strArg(input, "execution_id")
 				if idStr == "" {
-					return &Result{Missing: []string{"execution"}, Question: "Which run should I look up? Name the agent or refer to the last one."}, nil
+					idStr = lastEntityID(ctx, model.EntityExecution)
+				}
+				if idStr == "" {
+					return &Result{Missing: []string{"execution_id"}, Question: "Which run should I look up? Name the agent or refer to the last one."}, nil
 				}
 				id, err := uuid.Parse(idStr)
 				if err != nil {
@@ -385,13 +339,17 @@ func registerAgents(reg *Registry, d Deps) {
 			"Cancel a running execution. Requires confirmation.",
 			"agents", model.PermAgentsExecute, true, false,
 			tools.ObjectSchema(map[string]any{
-				"execution_id": map[string]any{"type": "string"},
-			}, "execution_id"),
+				"execution_id": map[string]any{"type": "string", "description": "Omit to use the current context execution"},
+			}),
 			func(ctx context.Context, input map[string]any) (*Result, error) {
 				ident := MustIdentity(ctx)
-				id, err := uuid.Parse(strArg(input, "execution_id"))
+				idStr := strArg(input, "execution_id")
+				if idStr == "" {
+					idStr = lastEntityID(ctx, model.EntityExecution)
+				}
+				id, err := uuid.Parse(idStr)
 				if err != nil {
-					return &Result{Missing: []string{"execution"}, Question: "Which run should I stop?"}, nil
+					return &Result{Missing: []string{"execution_id"}, Question: "Which run should I stop?"}, nil
 				}
 				exec, err := d.Exec.Cancel(ctx, ident.OrgID, id)
 				if err != nil {
@@ -496,7 +454,7 @@ func registerAgents(reg *Registry, d Deps) {
 				a, clar, err := resolveAgent(ctx, strArg(input, "name"))
 				if err != nil || clar != nil {
 					if strArg(input, "name") == "" {
-						return &Result{Missing: []string{"agent"}, Question: "Which agent's goal should I check?"}, nil
+						return &Result{Missing: []string{"name"}, Question: "Which agent's goal should I check?"}, nil
 					}
 					return clar, err
 				}

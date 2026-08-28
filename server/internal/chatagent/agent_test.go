@@ -417,3 +417,280 @@ func TestFillImageURL_NoOpWhenSet(t *testing.T) {
 		t.Fatalf("should keep existing url, got %q", res.Entity.URL)
 	}
 }
+
+func TestAgent_ExecuteClarifyFillsName(t *testing.T) {
+	var gotName string
+	ran := 0
+	reg := platformtools.NewRegistry()
+	reg.Register(platformtools.TestingTool("agent_execute", "", false, func(_ context.Context, in map[string]any) (*platformtools.Result, error) {
+		name, _ := in["name"].(string)
+		if name == "" {
+			return &platformtools.Result{
+				Missing:  []string{"name"},
+				Question: "Which agent should handle that?",
+				Options:  []model.ClarifyOption{{Label: "Research Agent — research", Value: "Research Agent"}},
+			}, nil
+		}
+		ran++
+		gotName = name
+		ref := model.EntityRef{Kind: model.EntityExecution, ID: uuid.New().String(), Label: name}
+		return &platformtools.Result{Data: map[string]any{"agent": name, "status": "running"}, Entity: &ref}, nil
+	}))
+	client := &scriptedLLM{steps: []llm.GenerateResponse{
+		{ToolCalls: []llm.ToolCall{{ID: "1", Name: "agent_execute", Arguments: map[string]any{"prompt": "run the research agent"}}}},
+	}}
+	a := New(client, reg, nil, nil, zap.NewNop())
+	tr, err := a.Run(context.Background(), TurnRequest{Ident: ident(), Message: "run the research agent", Metadata: map[string]any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr.Response.Clarify == nil {
+		t.Fatal("expected clarify")
+	}
+	found := false
+	for _, o := range tr.Response.Clarify.Options {
+		if o.Value == "Research Agent" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("options = %+v", tr.Response.Clarify.Options)
+	}
+	tr2, err := a.Run(context.Background(), TurnRequest{
+		Ident: ident(), Message: "Research Agent", Metadata: tr.Metadata,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ran != 1 {
+		t.Fatalf("ran = %d", ran)
+	}
+	if gotName != "Research Agent" {
+		t.Fatalf("name = %q", gotName)
+	}
+	if tr2.Response.Clarify != nil {
+		t.Fatalf("still clarifying: %+v", tr2.Response.Clarify)
+	}
+}
+
+func TestAgent_ExecutionGetFillsExecutionID(t *testing.T) {
+	want := uuid.New().String()
+	var gotID string
+	reg := platformtools.NewRegistry()
+	reg.Register(platformtools.TestingTool("execution_get", "", false, func(_ context.Context, in map[string]any) (*platformtools.Result, error) {
+		id, _ := in["execution_id"].(string)
+		if id == "" {
+			return &platformtools.Result{Missing: []string{"execution_id"}, Question: "Which run?"}, nil
+		}
+		gotID = id
+		return &platformtools.Result{Data: map[string]any{"status": "running"}}, nil
+	}))
+	client := &scriptedLLM{steps: []llm.GenerateResponse{
+		{ToolCalls: []llm.ToolCall{{ID: "1", Name: "execution_get", Arguments: map[string]any{}}}},
+	}}
+	a := New(client, reg, nil, nil, zap.NewNop())
+	tr, err := a.Run(context.Background(), TurnRequest{Ident: ident(), Message: "how's that run", Metadata: map[string]any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr.Response.Clarify == nil {
+		t.Fatal("expected clarify")
+	}
+	_, err = a.Run(context.Background(), TurnRequest{Ident: ident(), Message: want, Metadata: tr.Metadata})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotID != want {
+		t.Fatalf("execution_id = %q; want %s", gotID, want)
+	}
+}
+
+func TestAgent_TaskCreateProjectSlotFills(t *testing.T) {
+	var gotProject string
+	created := 0
+	reg := platformtools.NewRegistry()
+	reg.Register(platformtools.TestingTool("task_create", "", false, func(_ context.Context, in map[string]any) (*platformtools.Result, error) {
+		project, _ := in["project"].(string)
+		if project == "" {
+			return &platformtools.Result{
+				Missing:  []string{"project"},
+				Question: "Which project?",
+				Options:  []model.ClarifyOption{{Label: "Website", Value: "Website"}},
+			}, nil
+		}
+		created++
+		gotProject = project
+		title, _ := in["title"].(string)
+		ref := model.EntityRef{Kind: model.EntityTask, ID: uuid.New().String(), Label: title}
+		return &platformtools.Result{Data: map[string]any{"title": title, "project": project}, Entity: &ref}, nil
+	}))
+	client := &scriptedLLM{steps: []llm.GenerateResponse{
+		{ToolCalls: []llm.ToolCall{{ID: "1", Name: "task_create", Arguments: map[string]any{"title": "Fix login"}}}},
+	}}
+	a := New(client, reg, nil, nil, zap.NewNop())
+	tr, err := a.Run(context.Background(), TurnRequest{Ident: ident(), Message: "create a task to fix login", Metadata: map[string]any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = a.Run(context.Background(), TurnRequest{Ident: ident(), Message: "Website", Metadata: tr.Metadata})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created != 1 || gotProject != "Website" {
+		t.Fatalf("created=%d project=%q", created, gotProject)
+	}
+}
+
+func TestAgent_PendingListAgentsDoesNotFillSlot(t *testing.T) {
+	created := 0
+	listed := 0
+	reg := platformtools.NewRegistry()
+	reg.Register(platformtools.TestingTool("task_create", "", false, func(_ context.Context, in map[string]any) (*platformtools.Result, error) {
+		if in["project"] == nil || in["project"] == "" {
+			return &platformtools.Result{Missing: []string{"project"}, Question: "Which project?"}, nil
+		}
+		created++
+		return &platformtools.Result{Data: map[string]any{"ok": true}}, nil
+	}))
+	reg.Register(platformtools.TestingTool("agent_list", "", false, func(context.Context, map[string]any) (*platformtools.Result, error) {
+		listed++
+		return &platformtools.Result{Data: map[string]any{"agents": []any{}}}, nil
+	}))
+	client := &scriptedLLM{steps: []llm.GenerateResponse{
+		{ToolCalls: []llm.ToolCall{{ID: "1", Name: "task_create", Arguments: map[string]any{"title": "Fix login"}}}},
+		{ToolCalls: []llm.ToolCall{{ID: "2", Name: "agent_list"}}},
+		{Content: "Here are your agents."},
+	}}
+	a := New(client, reg, nil, nil, zap.NewNop())
+	tr, err := a.Run(context.Background(), TurnRequest{Ident: ident(), Message: "create a task", Metadata: map[string]any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if readPending(tr.Metadata) == nil {
+		t.Fatal("expected pending")
+	}
+	tr2, err := a.Run(context.Background(), TurnRequest{Ident: ident(), Message: "list my agents", Metadata: tr.Metadata})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created != 0 {
+		t.Fatal("list my agents must not complete task_create")
+	}
+	if listed != 1 {
+		t.Fatalf("listed = %d; want loop → agent_list", listed)
+	}
+	if readPending(tr2.Metadata) != nil {
+		t.Fatal("pending should be cleared")
+	}
+}
+
+func TestAgent_PendingWhitespaceReclarifies(t *testing.T) {
+	reg := platformtools.NewRegistry()
+	reg.Register(platformtools.TestingTool("agent_execute", "", false, func(_ context.Context, in map[string]any) (*platformtools.Result, error) {
+		topic, _ := in["topic"].(string)
+		if strings.TrimSpace(topic) == "" {
+			return &platformtools.Result{Missing: []string{"topic"}, Question: "What should I research?"}, nil
+		}
+		return &platformtools.Result{Data: map[string]any{"topic": topic}}, nil
+	}))
+	client := &scriptedLLM{steps: []llm.GenerateResponse{
+		{ToolCalls: []llm.ToolCall{{ID: "1", Name: "agent_execute", Arguments: map[string]any{"name": "Research Agent"}}}},
+	}}
+	a := New(client, reg, nil, nil, zap.NewNop())
+	tr, err := a.Run(context.Background(), TurnRequest{Ident: ident(), Message: "run research", Metadata: map[string]any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr2, err := a.Run(context.Background(), TurnRequest{Ident: ident(), Message: "   ", Metadata: tr.Metadata})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr2.Response.Clarify == nil {
+		t.Fatal("whitespace must re-clarify, not execute")
+	}
+	if readPending(tr2.Metadata) == nil {
+		t.Fatal("pending should remain")
+	}
+}
+
+func TestAgent_ConfirmCheckedBeforePending(t *testing.T) {
+	ran := 0
+	reg := platformtools.NewRegistry()
+	reg.Register(platformtools.TestingTool("agent_delete", "", true, func(context.Context, map[string]any) (*platformtools.Result, error) {
+		ran++
+		return &platformtools.Result{Data: map[string]any{"deleted": true}}, nil
+	}))
+	client := &scriptedLLM{steps: []llm.GenerateResponse{
+		{ToolCalls: []llm.ToolCall{{ID: "1", Name: "agent_delete", Arguments: map[string]any{"name": "DevOps"}}}},
+	}}
+	a := New(client, reg, platformtools.NewGuard(nil, nil), nil, zap.NewNop())
+	tr, err := a.Run(context.Background(), TurnRequest{Ident: ident(), Message: "delete DevOps", Metadata: map[string]any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writePending(tr.Metadata, &model.PendingAction{Tool: "task_create", Missing: []string{"project"}, Args: map[string]any{"title": "x"}})
+	tr2, err := a.Run(context.Background(), TurnRequest{
+		Ident: ident(), Message: "yes", ConfirmationToken: tr.Response.Confirmation.Token, Metadata: tr.Metadata,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ran != 1 {
+		t.Fatalf("confirm should run delete, ran=%d", ran)
+	}
+	if readPending(tr2.Metadata) == nil || readPending(tr2.Metadata).Tool != "task_create" {
+		t.Fatalf("pending must survive confirm yes: %+v", readPending(tr2.Metadata))
+	}
+}
+
+func TestAgent_TranscriptIncludesToolResult(t *testing.T) {
+	reg := platformtools.NewRegistry()
+	reg.Register(platformtools.TestingTool("task_create", "", false, func(_ context.Context, in map[string]any) (*platformtools.Result, error) {
+		title, _ := in["title"].(string)
+		ref := model.EntityRef{Kind: model.EntityTask, ID: uuid.New().String(), Label: title}
+		return &platformtools.Result{Data: map[string]any{"title": title, "project": "Website"}, Entity: &ref}, nil
+	}))
+	client := &scriptedLLM{steps: []llm.GenerateResponse{
+		{ToolCalls: []llm.ToolCall{{ID: "1", Name: "task_create", Arguments: map[string]any{"title": "Fix login"}}}},
+		{Content: "Created the task."},
+	}}
+	a := New(client, reg, platformtools.NewGuard(nil, nil), nil, zap.NewNop())
+	tr, err := a.Run(context.Background(), TurnRequest{Ident: ident(), Message: "create a task", Metadata: map[string]any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tr.Transcript) < 2 {
+		t.Fatalf("transcript = %d; want assistant tool-call + tool result", len(tr.Transcript))
+	}
+	var sawTool bool
+	for _, m := range tr.Transcript {
+		if m.Role == model.ChatRoleTool {
+			sawTool = true
+		}
+	}
+	if !sawTool {
+		t.Fatal("expected a tool-result row")
+	}
+}
+
+func TestAgent_TranscriptTruncatesHugeToolPayload(t *testing.T) {
+	huge := strings.Repeat("x", 50_000)
+	reg := platformtools.NewRegistry()
+	reg.Register(platformtools.TestingTool("boom", "", false, func(context.Context, map[string]any) (*platformtools.Result, error) {
+		return &platformtools.Result{Data: map[string]any{"blob": huge}}, nil
+	}))
+	client := &scriptedLLM{steps: []llm.GenerateResponse{
+		{ToolCalls: []llm.ToolCall{{ID: "1", Name: "boom"}}},
+		{Content: "Done."},
+	}}
+	a := New(client, reg, nil, nil, zap.NewNop())
+	tr, err := a.Run(context.Background(), TurnRequest{Ident: ident(), Message: "go", Metadata: map[string]any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range tr.Transcript {
+		if m.Role == model.ChatRoleTool && len(m.Content) >= 50_000 {
+			t.Fatalf("tool payload stored in full (%d chars)", len(m.Content))
+		}
+	}
+}

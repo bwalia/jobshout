@@ -42,6 +42,8 @@ export type AgentBuiltin =
 /**
  * How a selected agent should be launched from Task Manager.
  * Specialists hit their dedicated APIs; everything else uses task runs.
+ *
+ * Keep required field keys and order in sync with server/internal/agentschema.
  */
 export type AgentLaunchKind = "task_run" | AgentBuiltin | "images";
 

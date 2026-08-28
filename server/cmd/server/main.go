@@ -230,13 +230,22 @@ func main() {
 	)
 
 	// Langfuse tracing wraps every registered client before anything resolves
-	// one, so a single call here covers the executor, blog, research, chat and
-	// intent paths alike. Disabled tracing wraps with the identity function.
+	// one, so a single call here covers the executor, blog, research and intent
+	// paths. Chat uses a dedicated client (CHAT_MODEL), wrapped separately so
+	// its DefaultModel is not the worker OLLAMA_DEFAULT_MODEL.
+	chatInner := llm.NewChatInner(cfg, llmRouter)
 	tracing := llmtrace.Init(cfg, logger)
 	if tracing.Enabled() {
 		llmRouter.WrapClients(tracing.Wrap)
+		chatInner = tracing.Wrap(chatInner)
 		logger.Info("LLM tracing enabled", zap.String("langfuse_host", cfg.LangfuseHost))
 	}
+	chatClient := llm.NewChatClient(chatInner, cfg.ChatModel, cfg.ChatModelFallback, logger)
+	logger.Info("chat LLM client",
+		zap.String("model", llm.SanitizeChatModel(cfg.ChatModel)),
+		zap.String("fallback", llm.SanitizeChatFallback(cfg.ChatModelFallback)),
+		zap.Int("num_ctx", cfg.ChatNumCtx),
+	)
 
 	// Warm the model-discovery cache so the picker and auto-selection have a
 	// live answer from the first request, then keep it fresh in the background.
@@ -646,17 +655,19 @@ func main() {
 		Memory:          memorySvc,
 	})
 	chatGuard := platformtools.NewGuard(rbacSvc, govSvc)
-	chatAgent := chatagent.New(llmRouter.Default(), platformReg, chatGuard, memorySvc, logger)
+	chatAgent := chatagent.New(chatClient, platformReg, chatGuard, memorySvc, logger)
 	chatSvc := chatsvc.NewChatService(chatRepo, chatAgent, logger)
 	chatRouterSvc := chatsvc.NewChatRouterService(chatAgent, logger)
 	logger.Info("chat agent initialised", zap.Int("platform_tools", len(platformReg.Names())))
-	if chatClient := llmRouter.Default(); chatClient != nil {
-		if tc, ok := chatClient.(llm.ToolCapableClient); !ok || !tc.SupportsTools() {
+	if chatClient != nil {
+		if !chatClient.SupportsTools() {
 			logger.Warn("chat agent: model has no native tool-calling — using ReAct fallback",
-				zap.String("provider", chatClient.ProviderName()))
+				zap.String("provider", chatClient.ProviderName()),
+				zap.String("model", llm.SanitizeChatModel(cfg.ChatModel)))
 		} else {
 			logger.Info("chat agent: native tool-calling active",
-				zap.String("provider", chatClient.ProviderName()))
+				zap.String("provider", chatClient.ProviderName()),
+				zap.String("model", llm.SanitizeChatModel(cfg.ChatModel)))
 		}
 	}
 

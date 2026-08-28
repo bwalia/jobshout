@@ -20,6 +20,10 @@ import (
 type ExecutionService interface {
 	// Execute runs an agent against a prompt and returns the completed execution.
 	Execute(ctx context.Context, orgID uuid.UUID, agentID uuid.UUID, req model.ExecuteAgentRequest) (*model.AgentExecution, error)
+	// Start creates the execution row and runs the agent in the background,
+	// returning immediately with status running. Chat uses this so a 60s tool
+	// timeout cannot cancel a long worker.
+	Start(ctx context.Context, orgID uuid.UUID, agentID uuid.UUID, req model.ExecuteAgentRequest) (*model.AgentExecution, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*model.AgentExecution, error)
 	// Cancel stops a pending or running execution. Completed/failed runs are
 	// left unchanged and returned as-is so the call is idempotent.
@@ -48,6 +52,9 @@ func NewExecutionService(
 	govSvc GovernanceService,
 	logger *zap.Logger,
 ) ExecutionService {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
 	return &executionService{
 		agentRepo:    agentRepo,
 		execRepo:     execRepo,
@@ -59,6 +66,47 @@ func NewExecutionService(
 }
 
 func (s *executionService) Execute(ctx context.Context, orgID uuid.UUID, agentID uuid.UUID, req model.ExecuteAgentRequest) (*model.AgentExecution, error) {
+	st, err := s.begin(ctx, orgID, agentID, req)
+	if err != nil {
+		return nil, err
+	}
+	return s.finish(ctx, st)
+}
+
+func (s *executionService) Start(ctx context.Context, orgID uuid.UUID, agentID uuid.UUID, req model.ExecuteAgentRequest) (*model.AgentExecution, error) {
+	st, err := s.begin(ctx, orgID, agentID, req)
+	if err != nil {
+		return nil, err
+	}
+	bg := context.WithoutCancel(ctx)
+	go func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				s.logger.Error("execution: background panic",
+					zap.Any("panic", rec),
+					zap.String("id", st.exec.ID.String()))
+			}
+		}()
+		if _, err := s.finish(bg, st); err != nil {
+			s.logger.Error("execution: background run failed",
+				zap.Error(err),
+				zap.String("id", st.exec.ID.String()))
+		}
+	}()
+	return st.exec, nil
+}
+
+type startedExec struct {
+	exec       *model.AgentExecution
+	agent      *model.Agent
+	orgID      uuid.UUID
+	agentID    uuid.UUID
+	req        model.ExecuteAgentRequest
+	agentTools []string
+	engineType string
+}
+
+func (s *executionService) begin(ctx context.Context, orgID uuid.UUID, agentID uuid.UUID, req model.ExecuteAgentRequest) (*startedExec, error) {
 	agent, err := s.agentRepo.FindByID(ctx, agentID)
 	if err != nil {
 		return nil, fmt.Errorf("execution_svc: find agent: %w", err)
@@ -67,9 +115,6 @@ func (s *executionService) Execute(ctx context.Context, orgID uuid.UUID, agentID
 		return nil, ErrAgentNotFound
 	}
 
-	// Apply a per-call model override without touching the agent record: work on
-	// a shallow copy so governance, engine resolution and the runner all see the
-	// overridden model, while the persisted agent is unchanged.
 	if req.ModelProvider != nil && *req.ModelProvider != "" {
 		clone := *agent
 		clone.ModelProvider = req.ModelProvider
@@ -79,15 +124,6 @@ func (s *executionService) Execute(ctx context.Context, orgID uuid.UUID, agentID
 		agent = &clone
 	}
 
-	// Carry per-run skill overrides on the context so the go-native executor can
-	// fold in run-scoped skills. Absent overrides leave the run unchanged.
-	if len(req.SkillSlugs) > 0 {
-		ctx = executor.WithRunOptions(ctx, executor.RunOptions{
-			SkillSlugs: req.SkillSlugs,
-		})
-	}
-
-	// Enforce governance policies before execution.
 	if s.govSvc != nil {
 		provider := ""
 		if agent.ModelProvider != nil {
@@ -102,10 +138,8 @@ func (s *executionService) Execute(ctx context.Context, orgID uuid.UUID, agentID
 		}
 	}
 
-	// Determine which engine to use.
 	engineType := engine.ResolveEngine(agent, req.EngineOverride, "")
 
-	// Resolve which tools this agent is allowed to use.
 	agentTools, err := s.toolPermRepo.ListByAgent(ctx, agentID)
 	if err != nil {
 		s.logger.Warn("failed to load agent tool permissions; running without tools",
@@ -115,7 +149,6 @@ func (s *executionService) Execute(ctx context.Context, orgID uuid.UUID, agentID
 		agentTools = []string{}
 	}
 
-	// Create the execution record.
 	execID := uuid.New()
 	execRecord := &model.AgentExecution{
 		ID:          execID,
@@ -129,7 +162,6 @@ func (s *executionService) Execute(ctx context.Context, orgID uuid.UUID, agentID
 		return nil, fmt.Errorf("execution_svc: create execution record: %w", err)
 	}
 
-	// Mark as running.
 	if err := s.execRepo.MarkStarted(ctx, execID); err != nil {
 		s.logger.Warn("failed to mark execution as started", zap.Error(err))
 	}
@@ -138,27 +170,39 @@ func (s *executionService) Execute(ctx context.Context, orgID uuid.UUID, agentID
 	execRecord.Status = model.ExecutionStatusRunning
 	execRecord.StartedAt = &now
 
-	// Update agent status to active.
 	_ = s.agentRepo.UpdateStatus(ctx, agentID, "active")
 
-	// Route to the correct engine and run.
-	runner := s.engineRouter.For(engineType)
-	result := runner.Run(ctx, execID, agent, req.Prompt, agentTools)
+	return &startedExec{
+		exec:       execRecord,
+		agent:      agent,
+		orgID:      orgID,
+		agentID:    agentID,
+		req:        req,
+		agentTools: agentTools,
+		engineType: engineType,
+	}, nil
+}
 
-	// Restore agent status.
-	_ = s.agentRepo.UpdateStatus(ctx, agentID, "idle")
+func (s *executionService) finish(ctx context.Context, st *startedExec) (*model.AgentExecution, error) {
+	if len(st.req.SkillSlugs) > 0 {
+		ctx = executor.WithRunOptions(ctx, executor.RunOptions{
+			SkillSlugs: st.req.SkillSlugs,
+		})
+	}
+	runner := s.engineRouter.For(st.engineType)
+	result := runner.Run(ctx, st.exec.ID, st.agent, st.req.Prompt, st.agentTools)
 
-	// Persist the result.
-	if err := s.execRepo.PersistResult(ctx, execID, result); err != nil {
+	_ = s.agentRepo.UpdateStatus(ctx, st.agentID, "idle")
+
+	if err := s.execRepo.PersistResult(ctx, st.exec.ID, result); err != nil {
 		s.logger.Error("failed to persist execution result", zap.Error(err))
 	}
 
-	// Record usage and cost asynchronously.
 	if s.govSvc != nil {
 		usageExec := &model.AgentExecution{
-			ID:           execID,
-			AgentID:      agentID,
-			OrgID:        orgID,
+			ID:           st.exec.ID,
+			AgentID:      st.agentID,
+			OrgID:        st.orgID,
 			TotalTokens:  result.TotalTokens,
 			InputTokens:  result.InputTokens,
 			OutputTokens: result.OutputTokens,
@@ -181,23 +225,21 @@ func (s *executionService) Execute(ctx context.Context, orgID uuid.UUID, agentID
 		}()
 	}
 
-	// Return the fully populated record.
-	completed, err := s.execRepo.GetByID(ctx, execID)
+	completed, err := s.execRepo.GetByID(ctx, st.exec.ID)
 	if err != nil {
-		// Fallback: build the record from what we have.
 		completedAt := time.Now()
-		execRecord.CompletedAt = &completedAt
+		st.exec.CompletedAt = &completedAt
 		if result.Err != nil {
 			errMsg := result.Err.Error()
-			execRecord.Status = model.ExecutionStatusFailed
-			execRecord.ErrorMessage = &errMsg
+			st.exec.Status = model.ExecutionStatusFailed
+			st.exec.ErrorMessage = &errMsg
 		} else {
-			execRecord.Status = model.ExecutionStatusCompleted
-			execRecord.Output = &result.FinalAnswer
+			st.exec.Status = model.ExecutionStatusCompleted
+			st.exec.Output = &result.FinalAnswer
 		}
-		execRecord.TotalTokens = result.TotalTokens
-		execRecord.Iterations = result.Iterations
-		return execRecord, nil
+		st.exec.TotalTokens = result.TotalTokens
+		st.exec.Iterations = result.Iterations
+		return st.exec, nil
 	}
 	return completed, nil
 }

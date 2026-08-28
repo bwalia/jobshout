@@ -21,14 +21,14 @@ func registerReview(reg *Registry, d Deps) {
 
 	reg.Register(newTool(
 		"review_pull_request",
-		"Queue an AI review of a GitHub pull request via review-bot. Pass repo as owner/name (or a github.com URL) and pr_number. Defaults to dry_run=true so findings are not posted. Poll with review_run_get.",
+		"Queue an AI review of a GitHub pull request via review-bot. Omit unknown fields; the tool will ask. Do not invent a repo or PR number. Pass repo as owner/name (or a github.com URL) and pr_number. Defaults to dry_run=true so findings are not posted. Poll with review_run_get.",
 		"security", model.PermAgentsExecute, false, false,
 		tools.ObjectSchema(map[string]any{
-			"repo":      map[string]any{"type": "string", "description": "owner/name or a GitHub pull request URL"},
-			"pr_number": map[string]any{"type": "integer", "description": "Pull request number"},
+			"repo":      map[string]any{"type": "string", "description": "owner/name or a GitHub pull request URL. Omit if unknown."},
+			"pr_number": map[string]any{"type": "integer", "description": "Pull request number. Omit if unknown."},
 			"dry_run":   map[string]any{"type": "boolean", "description": "If true (default), do not post comments on GitHub"},
 			"force":     map[string]any{"type": "boolean", "description": "Re-review even if this commit was already started"},
-		}, "repo", "pr_number"),
+		}),
 		func(ctx context.Context, input map[string]any) (*Result, error) {
 			ident := MustIdentity(ctx)
 			if !d.Reviews.Enabled() {
@@ -82,7 +82,7 @@ func registerReview(reg *Registry, d Deps) {
 			ident := MustIdentity(ctx)
 			id, err := uuid.Parse(strArg(input, "run_id"))
 			if err != nil {
-				return &Result{Missing: []string{"review_run"}, Question: "Which PR review should I check?"}, nil
+				return &Result{Missing: []string{"run_id"}, Question: "Which PR review should I check?"}, nil
 			}
 			run, err := d.Reviews.GetRun(ctx, id, ident.OrgID)
 			if err != nil {
@@ -154,7 +154,7 @@ func reviewErr(d Deps, err error) (*Result, error) {
 		}}, nil
 	}
 	if errors.Is(err, service.ErrReviewRunNotFound) {
-		return &Result{Missing: []string{"review_run"}, Question: "I couldn't find that PR review. Which run should I check?"}, nil
+		return &Result{Missing: []string{"run_id"}, Question: "I couldn't find that PR review. Which run should I check?"}, nil
 	}
 	return nil, err
 }

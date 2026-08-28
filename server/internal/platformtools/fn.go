@@ -2,8 +2,10 @@ package platformtools
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/jobshout/server/internal/tools"
@@ -115,13 +117,24 @@ func intArg(input map[string]any, key string, fallback int) int {
 	switch x := v.(type) {
 	case int:
 		return x
+	case int32:
+		return int(x)
 	case int64:
 		return int(x)
 	case float64:
 		return int(x)
-	default:
-		return fallback
+	case json.Number:
+		if i, err := x.Int64(); err == nil {
+			return int(i)
+		}
+	case string:
+		s := strings.TrimSpace(x)
+		s = strings.TrimPrefix(s, "#")
+		if i, err := strconv.Atoi(s); err == nil {
+			return i
+		}
 	}
+	return fallback
 }
 
 var (

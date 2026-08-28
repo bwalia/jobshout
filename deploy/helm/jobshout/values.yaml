@@ -114,6 +114,11 @@ ai:
   # windows big models support; model discovery caps it per model, so a value
   # above what a model can hold is lowered rather than rejected.
   ollamaNumCtx: 8192
+  # Chat is pinned separately from ollamaModel so workers stay on llama3:latest
+  # while the control-desk conversation uses a tool-capable model.
+  chatModel: "qwen3-coder:30b"
+  chatModelFallback: "llama3.1:8b"
+  chatNumCtx: 16384
   openaiBaseURL: "https://api.openai.com"
   openaiModel: "gpt-4o-mini"
   # Per-task model selection. When true, an agent whose modelProvider is "auto"
