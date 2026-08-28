@@ -2,6 +2,7 @@ package platformtools
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -233,6 +234,46 @@ func TestAgentExecute_PRReviewerAsksPRNumber(t *testing.T) {
 	}
 	if res == nil || len(res.Missing) == 0 || res.Missing[0] != "pr_number" {
 		t.Fatalf("missing = %+v; want pr_number", res)
+	}
+}
+
+func TestAgentExecute_PRNumberStringDispatches(t *testing.T) {
+	var got int
+	exec := &stubExec{}
+	reg, ctx := executeReg(t, []model.Agent{builtinAgent("PR Reviewer", model.BuiltinPRReviewer)}, exec,
+		newTool("review_pull_request", "review", "security", "", false, false, tools.ObjectSchema(map[string]any{}),
+			func(_ context.Context, in map[string]any) (*Result, error) {
+				got = intArg(in, "pr_number", 0)
+				if got < 1 {
+					return &Result{Missing: []string{"pr_number"}, Question: "Which pull request number?"}, nil
+				}
+				return &Result{Data: map[string]any{"pr": got}}, nil
+			}),
+	)
+	tool, _ := reg.Get("agent_execute")
+	res, err := tool.Run(ctx, map[string]any{
+		"name": "PR Reviewer", "repo": "acme/api", "pr_number": "42",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res != nil && len(res.Missing) > 0 {
+		t.Fatalf("string pr_number must dispatch, missing=%v", res.Missing)
+	}
+	if got != 42 {
+		t.Fatalf("pr_number = %d; want 42", got)
+	}
+}
+
+func TestIntArg_ParsesNumericStrings(t *testing.T) {
+	if intArg(map[string]any{"n": "99"}, "n", 0) != 99 {
+		t.Fatal("string")
+	}
+	if intArg(map[string]any{"n": "#12"}, "n", 0) != 12 {
+		t.Fatal("hash prefix")
+	}
+	if intArg(map[string]any{"n": json.Number("7")}, "n", 0) != 7 {
+		t.Fatal("json.Number")
 	}
 }
 

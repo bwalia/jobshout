@@ -37,7 +37,7 @@ func Window(history []model.ChatMessage, budget int) (kept []model.ChatMessage, 
 		budget = windowTokenBudget
 	}
 	if len(history) <= minTurns {
-		return history, nil
+		return dropLeadingOrphanTools(history), nil
 	}
 	used := 0
 	cut := 0
@@ -50,7 +50,15 @@ func Window(history []model.ChatMessage, budget int) (kept []model.ChatMessage, 
 		used += t
 		cut = i
 	}
-	return history[cut:], history[:cut]
+	kept = dropLeadingOrphanTools(history[cut:])
+	return kept, history[:cut]
+}
+
+func dropLeadingOrphanTools(kept []model.ChatMessage) []model.ChatMessage {
+	for len(kept) > 0 && kept[0].Role == model.ChatRoleTool {
+		kept = kept[1:]
+	}
+	return kept
 }
 
 func toLLMHistory(msgs []model.ChatMessage) []llm.Message {
