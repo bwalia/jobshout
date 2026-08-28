@@ -82,8 +82,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # int-spectoncr.diytaxreturn.co.uk (pop1 edge) is reachable from the jobshout
-  # self-hosted runner; spectoncr.workstation.co.uk (pop0) is not. Same registry.
+  # Helm / k3s pull name. Do not change: nodes already mirror this host to
+  # http://127.0.0.1:30500. CI *pushes* over that NodePort on the LAN (see
+  # build job) so blob PUTs do not hairpin Mac → lon1 → k3s and 502 at 180s.
   IMAGE_REGISTRY: int-spectoncr.diytaxreturn.co.uk
   IMAGE_NAMESPACE: jobshout
   TARGET_ENV: ${{ github.event.inputs.TARGET_ENV || 'int' }}
@@ -205,14 +206,60 @@ jobs:
           # here has been pushed.
           ref: ${{ github.sha }}
 
+      - name: Pick LAN SpectonCR NodePort
+        id: push_host
+        run: |
+          set -euo pipefail
+          # Same registry k3s pulls as int-spectoncr.diytaxreturn.co.uk (repo is
+          # jobshout/<img>; hostname is only the client endpoint). debian007
+          # :30500 is connection-refused from this LAN; other workers answer.
+          PUSH=""
+          for h in 192.168.1.23 192.168.1.140 192.168.1.104 192.168.1.47 192.168.1.36; do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 5 \
+              "http://${h}:30500/v2/" || echo 000)
+            if [ "$code" = "401" ] || [ "$code" = "200" ]; then
+              PUSH="${h}:30500"
+              break
+            fi
+          done
+          if [ -z "$PUSH" ]; then
+            echo "::error::SpectonCR NodePort :30500 not reachable on the LAN. Do not fall back to lon1 — blob PUTs 502 at 180s on that path."
+            exit 1
+          fi
+          echo "host=$PUSH" >> "$GITHUB_OUTPUT"
+          echo "PUSH_REGISTRY=$PUSH" >> "$GITHUB_ENV"
+          echo "Pushing via http://$PUSH (k8s still pulls $IMAGE_REGISTRY)"
+
       - name: Registry login (SpectonCR)
-        run: docker login "$IMAGE_REGISTRY" -u "${{ secrets.REGISTRY_USERNAME }}" -p "${{ secrets.REGISTRY_PASSWORD }}"
+        env:
+          PUSH_REGISTRY: ${{ steps.push_host.outputs.host }}
+        run: |
+          set -euo pipefail
+          docker login "$IMAGE_REGISTRY" -u "${{ secrets.REGISTRY_USERNAME }}" -p "${{ secrets.REGISTRY_PASSWORD }}"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          p = Path.home() / ".docker" / "config.json"
+          cfg = json.loads(p.read_text()) if p.exists() else {}
+          auths = cfg.setdefault("auths", {})
+          want = os.environ["IMAGE_REGISTRY"]
+          src = next((v for k, v in auths.items() if want in k), None)
+          if not src:
+              raise SystemExit(f"docker login did not store auth for {want}")
+          host = os.environ["PUSH_REGISTRY"]
+          auths[host] = src
+          auths[f"http://{host}"] = src
+          p.write_text(json.dumps(cfg, indent=2) + "\n")
+          print(f"reused {want} credentials for {host}")
+          PY
 
       - name: Build & push server, web, python-sidecar, review-bot (linux/amd64)
+        env:
+          PUSH_REGISTRY: ${{ steps.push_host.outputs.host }}
         run: |
           set -euo pipefail
           VERSION="${{ needs.compute-version.outputs.next_version }}"
-          NS="$IMAGE_REGISTRY/$IMAGE_NAMESPACE"
+          NS="$PUSH_REGISTRY/$IMAGE_NAMESPACE"
 
           # k3s1 nodes are amd64 but this runner is an arm64 Mac, so cross-build
           # for linux/amd64 with buildx (QEMU) and push directly — same as
@@ -225,10 +272,22 @@ jobs:
           # pushes an OCI index with an unknown/unknown attestation that k3s
           # containerd rejects with the same "no match for platform" error —
           # which is what happened to web/server:40e5c53 on int.
-          docker buildx inspect jsbuilder >/dev/null 2>&1 \
-            || docker buildx create --name jsbuilder --driver docker-container --bootstrap
+          #
+          # jobshout-lan (not the shared jsbuilder) so HTTP NodePort is allowed
+          # without changing other workflows on this Mac.
+          CFG="${RUNNER_TEMP:-/tmp}/jobshout-buildkitd.toml"
+          python3 - "$CFG" "$PUSH_REGISTRY" <<'PY'
+          from pathlib import Path
+          import sys
+          cfg, host = sys.argv[1], sys.argv[2]
+          Path(cfg).write_text(
+              f'[registry."{host}"]\n  http = true\n  insecure = true\n'
+          )
+          PY
+          docker buildx rm jobshout-lan >/dev/null 2>&1 || true
+          docker buildx create --name jobshout-lan --driver docker-container --bootstrap --config "$CFG"
           bx() {
-            docker buildx build --builder jsbuilder --platform linux/amd64 \
+            docker buildx build --builder jobshout-lan --platform linux/amd64 \
               --provenance=false --sbom=false --push "$@"
           }
 
@@ -247,23 +306,26 @@ jobs:
             -t "$NS/review-bot:$VERSION" -t "$NS/review-bot:latest" review-bot
 
       - name: Assert pushed images are linux/amd64
+        env:
+          PUSH_REGISTRY: ${{ steps.push_host.outputs.host }}
         run: |
           set -euo pipefail
           VERSION="${{ needs.compute-version.outputs.next_version }}"
-          NS="$IMAGE_REGISTRY/$IMAGE_NAMESPACE"
+          NS="$PUSH_REGISTRY/$IMAGE_NAMESPACE"
 
           # A single-platform OCI manifest does not print "linux/amd64" in
           # `imagetools inspect` text — only indexes do. Reject attestation
           # indexes / arm64 lists; prove amd64 by running the image.
+          # Inspect/load through jobshout-lan so HTTP NodePort is allowed.
           assert_not_multiarch_junk() {
             local img="$1"
             echo "Inspecting $img"
-            docker buildx imagetools inspect "$img"
+            docker buildx imagetools inspect --builder jobshout-lan "$img"
             python3 - "$img" <<'PY'
           import json, subprocess, sys
           img = sys.argv[1]
           raw = subprocess.check_output(
-              ["docker", "buildx", "imagetools", "inspect", "--raw", img]
+              ["docker", "buildx", "imagetools", "inspect", "--builder", "jobshout-lan", "--raw", img]
           )
           m = json.loads(raw)
           mt = m.get("mediaType") or ""
@@ -294,13 +356,22 @@ jobs:
           assert_not_multiarch_junk "$NS/review-bot:$VERSION"
 
           echo "Runtime arch smoke (uname -m must be x86_64 under --platform=linux/amd64)"
-          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh "$NS/server:$VERSION" \
+          load_lan() {
+            local src="$1" local_tag="$2"
+            printf 'FROM %s\n' "$src" | docker buildx build --builder jobshout-lan \
+              --platform linux/amd64 --provenance=false --load -t "$local_tag" -
+          }
+          load_lan "$NS/server:$VERSION" jobshout/server:smoke
+          load_lan "$NS/web:$VERSION" jobshout/web:smoke
+          load_lan "$NS/python-sidecar:$VERSION" jobshout/python-sidecar:smoke
+          load_lan "$NS/review-bot:$VERSION" jobshout/review-bot:smoke
+          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh jobshout/server:smoke \
             -c 'test -x /app/jobshout-server && uname -m | grep -qx x86_64'
-          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh "$NS/web:$VERSION" \
+          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh jobshout/web:smoke \
             -c 'uname -m | grep -qx x86_64'
-          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh "$NS/python-sidecar:$VERSION" \
+          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh jobshout/python-sidecar:smoke \
             -c 'uname -m | grep -qx x86_64'
-          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh "$NS/review-bot:$VERSION" \
+          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh jobshout/review-bot:smoke \
             -c 'uname -m | grep -qx x86_64 && command -v opencode >/dev/null && command -v git >/dev/null'
 
   # ─── claim the version: push the tag + cut the release ─────────────
