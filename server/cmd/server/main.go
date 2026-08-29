@@ -458,7 +458,8 @@ func main() {
 		logger.Info("research agent initialised",
 			zap.Int("max_sources", research.DefaultAgentConfig().MaxSources))
 	}
-	researchSvc := service.NewResearchService(researchAgent, researchClient, agentRepo, logger)
+	researchRunRepo := repository.NewResearchRunRepository(pool)
+	researchSvc := service.NewResearchService(researchAgent, researchClient, agentRepo, researchRunRepo, logger)
 
 	var blogRunner *blog.Runner
 	if blogLLM, err := llmRouter.For(cfg.LLMProvider); err != nil {
@@ -744,6 +745,7 @@ func main() {
 	leaderboardHandler := handler.NewLeaderboardHandler(leaderboardSvc)
 	blogHandler := handler.NewBlogHandler(blogSvc)
 	researchHandler := handler.NewResearchHandler(researchSvc)
+	agentSchemaHandler := handler.NewAgentSchemaHandler()
 	pentestHandler := handler.NewPentestHandler(pentestSvc)
 	reviewHandler := handler.NewReviewHandler(reviewSvc)
 	mailHandler := handler.NewMailHandler(mailSvc, mailCfg.FrontendBaseURL)
@@ -972,6 +974,10 @@ func main() {
 			// Research is exposed on its own, not only via the article
 			// pipeline: "find out about X and come back with sources you have
 			// actually read" is a capability other callers want too.
+			// The agent input contract, so the Task Manager's copy can be
+			// checked against the server's rather than kept in step by hand.
+			r.Get("/agent-schemas", agentSchemaHandler.List)
+
 			r.Route("/research", func(r chi.Router) {
 				// The long budget this route needs is applied by
 				// requestTimeout below, not here — chi middleware nests rather
@@ -979,6 +985,14 @@ func main() {
 				// one that has already set a shorter deadline.
 				r.Post("/", researchHandler.Research)
 				r.Get("/trending", researchHandler.Trending)
+				// Runs are the pollable form of the same capability: research
+				// started here leaves a row the board and the Task Manager can
+				// follow, instead of living only in the response body.
+				r.Route("/runs", func(r chi.Router) {
+					r.Get("/", researchHandler.ListRuns)
+					r.Post("/", researchHandler.StartRun)
+					r.Get("/{runID}", researchHandler.GetRun)
+				})
 			})
 
 			// Penetration Testing (Strix)

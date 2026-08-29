@@ -3,6 +3,7 @@ package blog
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"regexp"
 	"strings"
 	"time"
@@ -134,11 +135,78 @@ func coverSubtitleText(title, topic string) string {
 	return strings.Join(words, " ")
 }
 
+// coverVariant is the set of axes a cover is allowed to vary along.
+//
+// The pinned axes — charcoal navy ground, flat vector style, no lettering
+// beyond the title — are what make the covers a set. These four are what stop
+// them being the same picture with a different noun in it.
+type coverVariant struct {
+	accent      string
+	composition string
+	arrangement string
+	lighting    string
+}
+
+// The curated option sets. These are deliberately short and hand-picked rather
+// than open-ended: the failure mode being avoided is not "too few covers", it
+// is the same model producing a photograph for one article and a cartoon for
+// the next when left to invent its own treatment.
+var (
+	coverAccents = []string{
+		"teal and cyan",
+		"violet and indigo",
+		"amber and coral",
+		"emerald and mint",
+	}
+	coverCompositions = []string{
+		"Large bold white sans-serif title text on the LEFT side",
+		"Large bold white sans-serif title text on the RIGHT side",
+		"Large bold white sans-serif title text across the LOWER THIRD",
+	}
+	coverArrangements = []string{
+		"a single large hero object as the focal point",
+		"a small cluster of three related objects arranged in a loose triangle",
+		"two objects at different depths, one near and softly blurred, one far and sharp",
+	}
+	coverLightings = []string{
+		"lit by a soft rim light from the left",
+		"lit from above with a gentle pool of light falling across the subject",
+		"backlit with a halo glow behind the subject and long soft shadows forward",
+	}
+)
+
+// variantFor picks a cover's varying axes deterministically from its topic.
+//
+// Deterministic rather than random for two reasons: re-running a topic should
+// not silently produce a different cover, and the eval suite needs to be able
+// to assert distinctiveness without chasing a moving target.
+//
+// Each axis divides the hash by a different prime before taking its modulus.
+// Reusing the raw hash for all four would make them move in lockstep — accent
+// and composition would be perfectly correlated — which collapses 108 possible
+// treatments back down to 4.
+func variantFor(topic string) coverVariant {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(strings.ToLower(strings.TrimSpace(topic))))
+	n := uint32(h.Sum32())
+	pick := func(opts []string, divisor uint32) string {
+		return opts[(n/divisor)%uint32(len(opts))]
+	}
+	return coverVariant{
+		accent:      pick(coverAccents, 1),
+		composition: pick(coverCompositions, 7),
+		arrangement: pick(coverArrangements, 13),
+		lighting:    pick(coverLightings, 29),
+	}
+}
+
 // coverPrompt fills the dark-mode editorial cover template for z-image-turbo.
 //
 // Turbo ignores separate negative prompts, so exclusions and exact title
-// strings live in the positive prompt. The topic drives the metaphor; the
-// title (trimmed) is lettered on the left.
+// strings live in the positive prompt. The topic drives the metaphor and, via
+// variantFor, the accent colour, the title's placement, how the focal objects
+// are arranged and where the light comes from — so two articles read as the
+// same publication without looking like the same cover.
 func coverPrompt(title, topic string) string {
 	topic = strings.TrimSpace(topic)
 	title = strings.TrimSpace(title)
@@ -153,24 +221,28 @@ func coverPrompt(title, topic string) string {
 
 	headline := coverTitleText(title, topic)
 	subtitle := coverSubtitleText(title, topic)
+	// Keyed on the subject rather than the title so a retitled article keeps
+	// its cover treatment, and so an empty title still varies.
+	v := variantFor(subject)
 
 	return fmt.Sprintf(
 		"A high-quality, ultra-detailed modern editorial blog cover illustration "+
 			"about %s on a deep charcoal navy background with a subtle dark gradient. "+
-			"Large bold white sans-serif title text on the LEFT side that says %q, "+
-			"with a smaller thin teal subtitle below it that says %q, "+
+			"%s that says %q, "+
+			"with a smaller thin %s subtitle below it that says %q, "+
 			"both razor-sharp, crisp, high contrast, and easy to read. "+
-			"On the opposite side, one or two glowing visual objects as the focal point — "+
+			"Away from the text, %s — "+
 			"a concrete visual metaphor for the topic using tools, documents, agents, networks or machines as simple shapes — "+
-			"emitting soft teal and cyan light that gently illuminates the dark surroundings, "+
-			"small coral accent dots and thin geometric lines floating nearby. "+
+			"emitting soft %s light that gently illuminates the dark surroundings, %s, "+
+			"small contrasting accent dots and thin geometric lines floating nearby. "+
 			"Flat vector illustration style with finely detailed subtle grain texture and smooth polished gradient shading, "+
-			"soft rim glow around the subject, gentle ambient light falloff, crisp clean edges, "+
+			"gentle ambient light falloff, crisp clean edges, "+
 			"meticulous professional finish, balanced asymmetric composition, wide 16:9 landscape framing, "+
 			"sharp high-resolution rendering, premium dark-mode tech-blog aesthetic, "+
 			"uncluttered layout with generous breathing room around the text. "+
 			"No logos, no watermarks, no UI chrome, no extra text beyond the title and subtitle.",
-		subject, headline, subtitle,
+		subject, v.composition, headline, v.accent, subtitle,
+		v.arrangement, v.accent, v.lighting,
 	)
 }
 

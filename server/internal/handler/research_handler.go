@@ -3,11 +3,14 @@ package handler
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 
 	"github.com/jobshout/server/internal/middleware"
+	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/research"
 	"github.com/jobshout/server/internal/service"
 )
@@ -103,4 +106,106 @@ func (h *ResearchHandler) Trending(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	RespondJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+// StartRun handles POST /api/v1/research/runs.
+//
+// Returns 202 with the run to poll rather than the brief itself. This is the
+// endpoint that replaces holding a request open for the length of a research
+// run: the Task Manager used to wait three minutes in the browser and then
+// write the findings into the task's description, because there was no run row
+// to come back to.
+func (h *ResearchHandler) StartRun(w http.ResponseWriter, r *http.Request) {
+	var req model.CreateResearchRunRequest
+	if !DecodeJSON(w, r, &req) {
+		return
+	}
+	if len(strings.TrimSpace(req.Topic)) < 3 {
+		RespondError(w, http.StatusBadRequest, "topic is required")
+		return
+	}
+
+	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid org_id in token")
+		return
+	}
+	if !h.svc.Available() {
+		RespondError(w, http.StatusServiceUnavailable,
+			"research is not configured (an LLM provider must be reachable)")
+		return
+	}
+
+	opts := service.ResearchRunOptions{
+		Source: model.ResearchSourceTaskManager,
+		TaskID: req.TaskID,
+	}
+	if uid, err := uuid.Parse(middleware.GetUserID(r.Context())); err == nil {
+		opts.RequestedBy = &uid
+	}
+	agentReq := research.Request{Topic: req.Topic, Context: req.Context, URLs: req.URLs}
+
+	// wait=true keeps the synchronous shape for callers that have not moved to
+	// polling yet. It is deliberately opt-in: the default is the one that does
+	// not depend on a browser staying open.
+	if req.Wait {
+		out, err := h.svc.Run(r.Context(), orgID, agentReq, nil, opts)
+		if err != nil {
+			RespondError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		RespondJSON(w, http.StatusOK, out.Run)
+		return
+	}
+
+	run, err := h.svc.StartAsync(r.Context(), orgID, agentReq, opts)
+	if err != nil {
+		RespondError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	RespondJSON(w, http.StatusAccepted, run)
+}
+
+// GetRun handles GET /api/v1/research/runs/{runID}.
+func (h *ResearchHandler) GetRun(w http.ResponseWriter, r *http.Request) {
+	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid org_id in token")
+		return
+	}
+	runID, err := uuid.Parse(chi.URLParam(r, "runID"))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid run id")
+		return
+	}
+	run, err := h.svc.GetRun(r.Context(), orgID, runID)
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if run == nil {
+		RespondError(w, http.StatusNotFound, "research run not found")
+		return
+	}
+	RespondJSON(w, http.StatusOK, run)
+}
+
+// ListRuns handles GET /api/v1/research/runs.
+func (h *ResearchHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
+	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid org_id in token")
+		return
+	}
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
+	params := model.PaginationParams{Page: page, PerPage: perPage}
+	params.Normalize()
+
+	runs, err := h.svc.ListRuns(r.Context(), orgID, params)
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	RespondJSON(w, http.StatusOK, runs)
 }

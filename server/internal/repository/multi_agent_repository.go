@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jobshout/server/internal/model"
+	"github.com/jobshout/server/internal/research"
 )
 
 // MultiAgentRepository manages persistence for multi-agent collaboration jobs.
@@ -217,6 +218,18 @@ func (r *multiAgentRepository) BoardEntries(ctx context.Context, orgID uuid.UUID
 			      AND a.metadata->>'builtin' = 'researcher'
 			WHERE t.org_id = $1 AND t.status = 'researching'
 		),
+		research_activity AS (
+			SELECT r.agent_id,
+			       'research'::text AS kind,
+			       r.id             AS source_id,
+			       r.status::text   AS status,
+			       NULLIF(r.phase, '')::text AS step_key,
+			       COALESCE(NULLIF(r.topic, ''), r.status)::text AS detail,
+			       'researcher'::text AS job_role,
+			       r.updated_at     AS created_at
+			FROM research_runs r
+			WHERE r.org_id = $1 AND r.agent_id IS NOT NULL
+		),
 		combined AS (
 			SELECT u.*, ROW_NUMBER() OVER (PARTITION BY u.agent_id ORDER BY u.created_at DESC) AS rn
 			FROM (
@@ -224,6 +237,7 @@ func (r *multiAgentRepository) BoardEntries(ctx context.Context, orgID uuid.UUID
 				UNION ALL SELECT * FROM blog_activity
 				UNION ALL SELECT * FROM mail_activity
 				UNION ALL SELECT * FROM mail_research_activity
+				UNION ALL SELECT * FROM research_activity
 			) u
 		)
 		SELECT a.id, a.name, a.role, a.avatar_url,
@@ -315,6 +329,24 @@ func boardActivity(kind, status, stepKey *string) string {
 		case model.MailThreadDraftReady:
 			return model.ActivityReviewing
 		case model.MailThreadNew, model.MailThreadClassifying, model.MailThreadResearching:
+			return model.ActivityExecuting
+		}
+		return model.ActivityIdle
+
+	case "research":
+		// A research run's phase (planning/searching/reading/verifying) is
+		// carried in stepKey. Planning gets its own column because it is the
+		// one phase where the agent has not yet touched the network — the rest
+		// is ordinary work.
+		switch *status {
+		case model.ResearchRunFailed:
+			return model.ActivityFailed
+		case model.ResearchRunQueued:
+			return model.ActivityPlanning
+		case model.ResearchRunRunning:
+			if stepKey != nil && *stepKey == research.PhasePlanning {
+				return model.ActivityPlanning
+			}
 			return model.ActivityExecuting
 		}
 		return model.ActivityIdle

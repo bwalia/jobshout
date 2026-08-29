@@ -1,0 +1,36 @@
+{
+  "name": "multi_link",
+  "description": "Two links in one message; both must reach the research request.",
+  "message": {
+    "gmail_thread_id": "t-multi",
+    "gmail_message_id": "m-multi",
+    "from_email": "ravi@buyer.example",
+    "from_name": "Ravi",
+    "to_email": "sales@ourco.example",
+    "subject": "Comparing two machines",
+    "body": "Which of these is better for aluminium? https://example.com/lathe-9000 or https://example.com/mill-4200 — thanks."
+  },
+  "classify_reply": "{\"intent\":\"question\",\"needs_research\":true,\"urgency\":\"normal\",\"suggested_action\":\"reply\",\"reason\":\"comparison of two linked products\",\"triage_label\":\"sales\"}",
+  "draft_reply": "{\"subject\":\"Re: Comparing two machines\",\"body\":\"Hi Ravi,\\n\\nFor aluminium the mill-4200 (https://example.com/mill-4200) is the better fit; the lathe-9000 (https://example.com/lathe-9000) is optimised for steel.\\n\\nBest,\\nSales\",\"to\":\"ravi@buyer.example\",\"cc\":\"\"}",
+  "research": {
+    "available": true,
+    "brief": {
+      "topic": "lathe-9000 versus mill-4200 for aluminium",
+      "summary": "The mill-4200 is rated for aluminium; the lathe-9000 is optimised for steel.",
+      "findings": [
+        {"claim": "The mill-4200 is rated for aluminium.", "source_url": "https://example.com/mill-4200", "quote": "Suitable for aluminium"},
+        {"claim": "The lathe-9000 is optimised for steel.", "source_url": "https://example.com/lathe-9000", "quote": "Optimised for steel"}
+      ],
+      "sources": [
+        {"url": "https://example.com/mill-4200", "title": "Mill 4200", "site": "example.com"},
+        {"url": "https://example.com/lathe-9000", "title": "Lathe 9000", "site": "example.com"}
+      ]
+    }
+  },
+  "expect": {
+    "thread_status": "draft_ready",
+    "draft_expected": true,
+    "research_expected": true,
+    "sender_urls_reach_research": true
+  }
+}

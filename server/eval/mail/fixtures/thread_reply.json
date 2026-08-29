@@ -1,0 +1,22 @@
+{
+  "name": "thread_reply",
+  "description": "A message already prefixed Re: must not gain a second prefix.",
+  "message": {
+    "gmail_thread_id": "t-re",
+    "gmail_message_id": "m-re",
+    "from_email": "jo@client.example",
+    "from_name": "Jo",
+    "to_email": "support@ourco.example",
+    "subject": "Re: Delivery slot",
+    "body": "Following up on the below - is Tuesday still fine?"
+  },
+  "classify_reply": "{\"intent\":\"question\",\"needs_research\":false,\"urgency\":\"normal\",\"suggested_action\":\"reply\",\"reason\":\"follow up on delivery slot\",\"triage_label\":\"support\"}",
+  "draft_reply": "{\"subject\":\"Re: Delivery slot\",\"body\":\"Hi Jo,\\n\\nTuesday still works.\\n\\nBest,\\nSupport\",\"to\":\"jo@client.example\",\"cc\":\"\"}",
+  "research": {"available": true},
+  "expect": {
+    "thread_status": "draft_ready",
+    "draft_expected": true,
+    "research_expected": false,
+    "subject_no_double_prefix": true
+  }
+}

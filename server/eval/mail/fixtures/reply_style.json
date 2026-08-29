@@ -1,0 +1,34 @@
+{
+  "name": "reply_style",
+  "description": "Operator reply instructions must reach the draft prompt.",
+  "message": {
+    "gmail_thread_id": "t-style",
+    "gmail_message_id": "m-style",
+    "from_email": "kim@client.example",
+    "from_name": "Kim",
+    "to_email": "support@ourco.example",
+    "subject": "Invoice query",
+    "body": "Can you confirm invoice 4471 was received?"
+  },
+  "classify_reply": "{\"intent\":\"question\",\"needs_research\":false,\"urgency\":\"normal\",\"suggested_action\":\"reply\",\"reason\":\"invoice confirmation\",\"triage_label\":\"billing\"}",
+  "draft_reply": "{\"subject\":\"Re: Invoice query\",\"body\":\"Invoice 4471 received. Payment is scheduled for Friday.\",\"to\":\"kim@client.example\",\"cc\":\"\"}",
+  "connection": {
+    "knowledge_urls": ["https://ourco.example/billing"],
+    "reply_instructions": "Terse. No greeting, no sign-off."
+  },
+  "research": {
+    "available": true,
+    "brief": {
+      "topic": "billing",
+      "summary": "Invoices are settled on Fridays.",
+      "findings": [{"claim": "Invoices are settled on Fridays.", "source_url": "https://ourco.example/billing", "quote": "settled Fridays"}],
+      "sources": [{"url": "https://ourco.example/billing", "title": "Billing", "site": "ourco.example"}]
+    }
+  },
+  "expect": {
+    "thread_status": "draft_ready",
+    "draft_expected": true,
+    "research_expected": true,
+    "reply_instructions_in_prompt": true
+  }
+}

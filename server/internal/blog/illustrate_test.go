@@ -169,8 +169,11 @@ func TestCoverPrompt_NamesASubjectAndPinsTheStyle(t *testing.T) {
 	if !strings.Contains(got, "16:9") {
 		t.Errorf("prompt should ask for a wide cover: %q", got)
 	}
-	if !strings.Contains(got, "LEFT") {
-		t.Errorf("prompt should place title text on the left: %q", got)
+	// Placement is a varying axis now, so the invariant is that the prompt
+	// commits to one of the curated placements — not that it picks a
+	// particular one, which would only hold for topics that hash that way.
+	if !strings.Contains(got, "LEFT") && !strings.Contains(got, "RIGHT") && !strings.Contains(got, "LOWER THIRD") {
+		t.Errorf("prompt should place the title explicitly: %q", got)
 	}
 
 	fallback := coverPrompt("", "kubernetes networking")

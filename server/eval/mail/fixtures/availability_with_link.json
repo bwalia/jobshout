@@ -1,0 +1,30 @@
+{
+  "name": "availability_with_link",
+  "description": "Stock availability question with a product link.",
+  "message": {
+    "gmail_thread_id": "t-avail",
+    "gmail_message_id": "m-avail",
+    "from_email": "sam@buyer.example",
+    "from_name": "Sam Procurement",
+    "to_email": "sales@ourco.example",
+    "subject": "Do you have the XR-200 in stock?",
+    "body": "Do you have this machine available? https://example.com/lathe-9000 — we need it on site by March."
+  },
+  "classify_reply": "{\"intent\":\"question\",\"needs_research\":true,\"urgency\":\"normal\",\"suggested_action\":\"reply\",\"reason\":\"stock availability for a linked product\",\"triage_label\":\"sales\"}",
+  "draft_reply": "{\"subject\":\"Re: Do you have the XR-200 in stock?\",\"body\":\"Hi Sam,\\n\\nThe XR-200 is in stock with a six week lead time (https://example.com/lathe-9000), so a March delivery is comfortable.\\n\\nBest,\\nSales\",\"to\":\"sam@buyer.example\",\"cc\":\"\"}",
+  "research": {
+    "available": true,
+    "brief": {
+      "topic": "XR-200 availability",
+      "summary": "The XR-200 is in stock with a six week lead time.",
+      "findings": [{"claim": "The XR-200 is currently in stock.", "source_url": "https://example.com/lathe-9000", "quote": "In stock"}],
+      "sources": [{"url": "https://example.com/lathe-9000", "title": "XR-200 lathe", "site": "example.com"}]
+    }
+  },
+  "expect": {
+    "thread_status": "draft_ready",
+    "draft_expected": true,
+    "research_expected": true,
+    "sender_urls_reach_research": true
+  }
+}

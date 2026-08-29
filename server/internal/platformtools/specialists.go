@@ -305,9 +305,16 @@ func registerSpecialists(reg *Registry, d Deps) {
 	if d.Mail != nil {
 		reg.Register(newTool(
 			"mail_sync",
-			"Sync the organisation Gmail inbox now. The Mail Agent classifies new mail and drafts replies; nothing is sent.",
+			"Sync the organisation Gmail inbox now, optionally saving the Mail Agent playbook first: which senders, subject prefixes and labels to watch, which pages to answer from, what to look for in them, and how the reply should read. The agent classifies new mail and drafts replies; nothing is sent.",
 			"insight", model.PermAgentsExecute, false, false,
-			tools.ObjectSchema(map[string]any{}),
+			tools.ObjectSchema(map[string]any{
+				"senders":            map[string]any{"type": "string", "description": "Comma-separated senders to watch. Empty means all unread mail."},
+				"subject_prefixes":   map[string]any{"type": "string", "description": "Comma-separated subject prefixes."},
+				"labels":             map[string]any{"type": "string", "description": "Comma-separated Gmail labels."},
+				"knowledge_urls":     map[string]any{"type": "string", "description": "http(s) pages to answer from, one per line or comma-separated."},
+				"research_focus":     map[string]any{"type": "string", "description": "What to look for in those pages."},
+				"reply_instructions": map[string]any{"type": "string", "description": "How the reply should read: tone, length, must-include."},
+			}),
 			func(ctx context.Context, input map[string]any) (*Result, error) {
 				ident := MustIdentity(ctx)
 				if !d.Mail.Available(ctx, ident.OrgID) {
@@ -315,6 +322,16 @@ func registerSpecialists(reg *Registry, d Deps) {
 						"available": false,
 						"message":   "Gmail is not connected. Open Mail Agent to connect the shared mailbox.",
 					}}, nil
+				}
+				// Save the playbook before syncing, so a sync started in the
+				// same breath uses it. Only fields the caller actually supplied
+				// are written: an omitted field must not wipe a playbook the
+				// operator saved in the Task Manager, which is the same rule
+				// mailFormIsBlank enforces on the web side.
+				if patch, ok := mailPlaybookPatch(input); ok {
+					if _, err := d.Mail.UpdateConnection(ctx, ident.OrgID, patch); err != nil {
+						return nil, err
+					}
 				}
 				if err := d.Mail.EnqueueSync(ctx, ident.OrgID); err != nil {
 					return nil, err
@@ -364,4 +381,64 @@ func pentestTargetAllowed(target string) bool {
 		}
 	}
 	return strings.TrimSpace(target) != ""
+}
+
+// mailPlaybookPatch builds a connection patch from the playbook fields a caller
+// supplied, reporting false when none were.
+//
+// Watch rules travel together: MailWatchRules is a single value on the
+// connection, so supplying any one of senders/prefixes/labels rewrites all
+// three. The others are independent and are only written when present.
+func mailPlaybookPatch(input map[string]any) (model.UpdateMailConnectionRequest, bool) {
+	var patch model.UpdateMailConnectionRequest
+	changed := false
+
+	senders, hasSenders := input["senders"]
+	prefixes, hasPrefixes := input["subject_prefixes"]
+	labels, hasLabels := input["labels"]
+	if hasSenders || hasPrefixes || hasLabels {
+		patch.Rules = &model.MailWatchRules{
+			Senders:         splitList(fmt.Sprint(orEmpty(senders))),
+			SubjectPrefixes: splitList(fmt.Sprint(orEmpty(prefixes))),
+			Labels:          splitList(fmt.Sprint(orEmpty(labels))),
+		}
+		changed = true
+	}
+	if v, ok := input["knowledge_urls"]; ok {
+		urls := splitList(fmt.Sprint(orEmpty(v)))
+		patch.KnowledgeURLs = &urls
+		changed = true
+	}
+	if v, ok := input["research_focus"]; ok {
+		s := strings.TrimSpace(fmt.Sprint(orEmpty(v)))
+		patch.ResearchFocus = &s
+		changed = true
+	}
+	if v, ok := input["reply_instructions"]; ok {
+		s := strings.TrimSpace(fmt.Sprint(orEmpty(v)))
+		patch.ReplyInstructions = &s
+		changed = true
+	}
+	return patch, changed
+}
+
+func orEmpty(v any) any {
+	if v == nil {
+		return ""
+	}
+	return v
+}
+
+// splitList accepts either a comma-separated or newline-separated list, because
+// the Task Manager uses commas for watch rules and newlines for knowledge URLs
+// and a chat user will not know the difference.
+func splitList(raw string) []string {
+	fields := strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == '\n' })
+	out := make([]string, 0, len(fields))
+	for _, f := range fields {
+		if s := strings.TrimSpace(f); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }

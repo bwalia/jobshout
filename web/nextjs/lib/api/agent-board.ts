@@ -8,10 +8,23 @@ export interface AgentBoardEntry {
   avatar_url: string | null;
   activity: AgentActivity;
   current_job_id?: string;
-  job_role?: "planner" | "executor" | "reviewer" | "writer";
   /**
-   * What the agent is doing: the task prompt for a collaboration job, or the
-   * label of the running step for an article run.
+   * Which seat the agent occupies in whatever it is doing. Must stay in step
+   * with the job_role values the board query emits in
+   * server/internal/repository/multi_agent_repository.go — "mail" and
+   * "researcher" come from the mail and research arms of that union.
+   */
+  job_role?:
+    | "planner"
+    | "executor"
+    | "reviewer"
+    | "writer"
+    | "mail"
+    | "researcher";
+  /**
+   * What the agent is doing: the task prompt for a collaboration job, the
+   * label of the running step for an article run, the subject line for a mail
+   * thread, or the topic for a research run.
    */
   current_job_prompt?: string;
   last_active_at?: string;

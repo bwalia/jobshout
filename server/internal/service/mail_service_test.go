@@ -379,6 +379,32 @@ func (f *fakeResearch) EnsureResearcher(ctx context.Context, orgID uuid.UUID) (*
 }
 func (f *fakeResearch) Available() bool { return true }
 
+// Run satisfies the persistence-aware surface. The fake records no run row —
+// these tests are about mail behaviour, not research bookkeeping — so the
+// outcome carries a nil Run, which is the same shape the real service produces
+// when no repository is wired.
+func (f *fakeResearch) Run(ctx context.Context, orgID uuid.UUID, req research.Request, progress research.ProgressFunc, _ ResearchRunOptions) (*ResearchOutcome, error) {
+	brief, err := f.Research(ctx, orgID, req, progress)
+	if err != nil {
+		return nil, err
+	}
+	return &ResearchOutcome{Brief: brief}, nil
+}
+
+// StartAsync is not exercised by the mail tests — mail always waits for its
+// brief — but the fake must satisfy the interface.
+func (f *fakeResearch) StartAsync(context.Context, uuid.UUID, research.Request, ResearchRunOptions) (*model.ResearchRun, error) {
+	return nil, nil
+}
+
+func (f *fakeResearch) GetRun(context.Context, uuid.UUID, uuid.UUID) (*model.ResearchRun, error) {
+	return nil, nil
+}
+
+func (f *fakeResearch) ListRuns(context.Context, uuid.UUID, model.PaginationParams) (*model.PaginatedResponse[model.ResearchRun], error) {
+	return &model.PaginatedResponse[model.ResearchRun]{}, nil
+}
+
 func mailTestCfg() mail.Config {
 	return mail.Config{
 		ClientID: "cid", ClientSecret: "csec",

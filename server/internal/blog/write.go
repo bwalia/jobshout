@@ -319,23 +319,29 @@ Rules:
 // block on a server with no image provider, and the article would arrive with
 // paragraphs referring to figures that are not there.
 //
-// It is deliberately stingier than the diagram rules. A diagram costs the model
-// a few hundred tokens; an illustration costs tens of seconds of a single
-// shared GPU, and an article does not need three of them.
-const illustrationRules = `
+// The budget is interpolated from maxInlineIllustrations rather than written
+// out, because the two disagreed for a while: the pipeline allowed three and
+// this prompt allowed one, so a model told a picture was rarely worth having
+// and capped at a single instance reliably asked for none. Deriving the number
+// makes that particular drift unrepresentable. illustrateBody remains the
+// enforcement — a prompt is advice, and blocks past the cap are dropped there.
+var illustrationRules = fmt.Sprintf(`
 ILLUSTRATIONS:
 
-You may request AT MOST ONE generated illustration, and only where a picture
-genuinely sets up the subject — an opening image for a long piece, or a single
-concrete scene the prose then unpacks. Most articles need none. A diagram is
-almost always the better choice: a diagram carries information, an illustration
-carries atmosphere.
+You may request up to %d generated illustrations, and should use at least one in
+a long piece. They earn their place at a section boundary in an expository
+stretch — an opening image that sets up the subject, or a concrete scene the
+prose then unpacks — where a diagram would be false precision because there is
+no real structure to draw.
+
+Prefer a diagram whenever the content genuinely has structure: a diagram carries
+information, an illustration carries atmosphere, and a reader can tell.
 
 Request one by writing an illustration fence whose body describes the picture:
 
-  ` + "```" + `illustration
+  `+"```"+`illustration
   A lighthouse on a rocky shore at dawn, seen from the water
-  ` + "```" + `
+  `+"```"+`
 
 Rules:
 - Describe a CONCRETE SCENE — a thing that could be photographed. "A lighthouse
@@ -344,9 +350,11 @@ Rules:
   models render lettering badly, and a diagram belongs in a mermaid fence.
 - Do not use one to replace a diagram, and never to illustrate a claim that
   needs a source.
+- Spread them out: never two in adjacent sections, and never two that describe
+  the same scene.
 - The description becomes the image's alt text, so write it as a sentence a
   screen-reader user would find useful.
-`
+`, maxInlineIllustrations)
 
 // visualRules is the visual half of the drafting prompt: diagrams always, plus
 // illustrations when this run has a generator behind it.

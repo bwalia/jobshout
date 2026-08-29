@@ -1,0 +1,21 @@
+{
+  "name": "question_no_link",
+  "description": "An answerable question with no link and no need for the web.",
+  "message": {
+    "gmail_thread_id": "t-hours",
+    "gmail_message_id": "m-hours",
+    "from_email": "pat@client.example",
+    "from_name": "Pat",
+    "to_email": "ops@ourco.example",
+    "subject": "What are your opening hours?",
+    "body": "Quick one - what time do you open on Saturdays?"
+  },
+  "classify_reply": "{\"intent\":\"question\",\"needs_research\":false,\"urgency\":\"low\",\"suggested_action\":\"reply\",\"reason\":\"simple factual question about our own hours\",\"triage_label\":\"support\"}",
+  "draft_reply": "{\"subject\":\"Re: What are your opening hours?\",\"body\":\"Hi Pat,\\n\\nWe are open 9am to 1pm on Saturdays.\\n\\nBest,\\nOps\",\"to\":\"pat@client.example\",\"cc\":\"\"}",
+  "research": {"available": true},
+  "expect": {
+    "thread_status": "draft_ready",
+    "draft_expected": true,
+    "research_expected": false
+  }
+}

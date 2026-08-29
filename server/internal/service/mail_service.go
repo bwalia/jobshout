@@ -491,20 +491,39 @@ func (s *mailService) processThread(ctx context.Context, th *model.MailThread, m
 			req = research.Request{
 				Topic:   topic,
 				Context: "Write a factual briefing that can be used in a short professional email reply.\n\n" + strings.TrimSpace(msg.Body),
+				// Links the sender pasted are the subject of the question far
+				// more often than the subject line is: "what does this cost?"
+				// is answerable only by reading the page it points at. Putting
+				// them in URLs selects the agent's direct-fetch path, so the
+				// link is read rather than searched around. Empty when the
+				// message has no usable link, which falls back to open-web
+				// search exactly as before.
+				URLs: mail.SenderLinks(msg.Body, mail.MaxSenderLinks),
 			}
 		}
-		b, rerr := s.research.Research(ctx, th.OrgID, req, nil)
+		// Run rather than Research so the handoff is recorded: the id stored on
+		// the thread below then names a real research_runs row. It used to be a
+		// fresh uuid.New(), which could never be dereferenced by anything.
+		out, rerr := s.research.Run(ctx, th.OrgID, req, nil, ResearchRunOptions{
+			Source: model.ResearchSourceMail,
+		})
 		if rerr != nil {
 			s.logger.Warn("mail: research handoff failed, drafting without it", zap.Error(rerr))
 		} else {
+			b := out.Brief
 			brief = b
 			sum := b.Summary
 			if sum == "" && len(b.Warnings) > 0 {
 				sum = strings.Join(b.Warnings, " ")
 			}
 			th.ResearchSummary = &sum
-			id := uuid.New()
-			th.ResearchBriefID = &id
+			// Nil when research runs are not persisted on this server, in which
+			// case the thread simply carries no reference rather than a
+			// fabricated one.
+			if out.Run != nil {
+				id := out.Run.ID
+				th.ResearchBriefID = &id
+			}
 			if raw, merr := json.Marshal(b); merr == nil {
 				th.ResearchFindings = raw
 			}

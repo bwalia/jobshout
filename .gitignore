@@ -58,3 +58,8 @@ __pycache__/
 strix-service/strix_runs/
 strix_runs/
 .serena/
+
+# Generated evaluation reports. Suites write <pkg>/out/<suite>.{json,md}; the
+# report is an artefact for a human to read, not a source of truth.
+server/eval/*/out/
+server/internal/blog/out/

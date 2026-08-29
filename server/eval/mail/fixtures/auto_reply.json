@@ -1,0 +1,20 @@
+{
+  "name": "auto_reply",
+  "description": "An out-of-office bounce must not be answered.",
+  "message": {
+    "gmail_thread_id": "t-ooo",
+    "gmail_message_id": "m-ooo",
+    "from_email": "no-reply@client.example",
+    "from_name": "Automatic reply",
+    "to_email": "ops@ourco.example",
+    "subject": "Automatic reply: Out of office",
+    "body": "I am out of the office until Monday and will not be reading email."
+  },
+  "classify_reply": "{\"intent\":\"other\",\"needs_research\":false,\"urgency\":\"low\",\"suggested_action\":\"ignore\",\"reason\":\"automatic out of office reply\",\"triage_label\":\"auto\"}",
+  "research": {"available": true},
+  "expect": {
+    "thread_status": "ignored",
+    "draft_expected": false,
+    "research_expected": false
+  }
+}

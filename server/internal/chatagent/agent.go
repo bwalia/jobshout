@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -246,7 +247,7 @@ func (a *Agent) loop(ctx context.Context, req TurnRequest, meta map[string]any, 
 	kept, evicted := Window(req.History, windowTokenBudget)
 	summary := readSummary(meta)
 	if len(evicted) > 0 {
-		summary = rollSummary(summary, evicted)
+		summary = a.rollSummary(ctx, summary, evicted)
 		meta[model.ChatMetaSummary] = summary
 	}
 	entities := readEntities(meta)
@@ -758,7 +759,41 @@ func appendUnique(dst, src []string) []string {
 	return dst
 }
 
-func rollSummary(existing string, evicted []model.ChatMessage) string {
+// summaryBudget is the size the rolling summary is kept under.
+const summaryBudget = 3000
+
+// summaryCompressAt is the size above which the summary is handed to the model
+// to be rewritten. Below it, appending is both cheaper and lossless.
+const summaryCompressAt = 2400
+
+// rollSummary folds evicted turns into the session summary.
+//
+// The naive version of this concatenated turns verbatim and then kept the last
+// 3000 bytes. That discarded the wrong end: the oldest content is where the
+// decisions live — the repo being worked on, the topic chosen, the constraint
+// given in turn two — while recent turns are still in the live window anyway.
+// It also cut mid-rune, which put a replacement character in the system prompt.
+//
+// So: append while there is room, and when there is not, ask the model to
+// rewrite the whole thing — old summary and new turns together — so old
+// material is re-compressed rather than dropped. A failed compression falls
+// back to trimming, because a degraded summary beats a failed turn.
+func (a *Agent) rollSummary(ctx context.Context, existing string, evicted []model.ChatMessage) string {
+	appended := appendTurns(existing, evicted)
+	if len(appended) <= summaryCompressAt || a.client == nil {
+		return trimSummary(appended)
+	}
+
+	compressed, err := a.compressSummary(ctx, appended)
+	if err != nil {
+		a.logger.Warn("chatagent: summary compression failed, trimming instead", zap.Error(err))
+		return trimSummary(appended)
+	}
+	return trimSummary(compressed)
+}
+
+// appendTurns adds the evicted user and agent turns to the running summary.
+func appendTurns(existing string, evicted []model.ChatMessage) string {
 	var b strings.Builder
 	if existing != "" {
 		b.WriteString(existing)
@@ -772,19 +807,75 @@ func rollSummary(existing string, evicted []model.ChatMessage) string {
 		if line == "" {
 			continue
 		}
-		if len(line) > 240 {
-			line = line[:240] + "…"
+		if len([]rune(line)) > 240 {
+			line = string([]rune(line)[:240]) + "…"
 		}
 		b.WriteString(m.Role)
 		b.WriteString(": ")
 		b.WriteString(line)
 		b.WriteString("\n")
 	}
-	s := b.String()
-	if len(s) > 3000 {
-		s = s[len(s)-3000:]
+	return b.String()
+}
+
+// compressSummary asks the model to rewrite the summary within budget.
+//
+// The prompt names what must survive, because a summariser left to its own
+// judgement keeps the narrative and drops the identifiers — and the identifiers
+// are the whole reason the summary exists.
+func (a *Agent) compressSummary(ctx context.Context, full string) (string, error) {
+	const prompt = `Rewrite the conversation notes below as a compact set of durable facts.
+
+Keep, in this order of priority:
+- decisions the user made, and constraints or preferences they stated
+- identifiers: repository names, pull request numbers, topics, run ids, file paths, email addresses
+- open questions and anything the user is still waiting for
+
+Drop pleasantries, restatements, and anything already resolved.
+Write terse third-person bullet points. No preamble, no heading, under 200 words.
+
+NOTES:
+`
+	resp, err := a.client.Generate(ctx, llm.GenerateRequest{
+		MaxTokens:   400,
+		Temperature: 0.2,
+		Messages: []llm.Message{
+			{Role: llm.RoleSystem, Content: "You compress conversation notes without losing identifiers or decisions."},
+			{Role: llm.RoleUser, Content: prompt + full},
+		},
+	})
+	if err != nil {
+		return "", err
 	}
-	return s
+	out := strings.TrimSpace(SanitiseMessage(resp.Content))
+	if out == "" {
+		return "", errors.New("chatagent: compression returned nothing")
+	}
+	return out, nil
+}
+
+// trimSummary enforces the budget without splitting a rune or a line.
+//
+// It keeps the OLDEST content, which is the opposite of what the previous
+// implementation did and the point of the fix: early turns carry the standing
+// facts, and recent turns are still in the live window.
+func trimSummary(s string) string {
+	if len(s) <= summaryBudget {
+		return s
+	}
+	// The budget is in bytes, so back the cut off to the start of a rune —
+	// slicing at a fixed byte offset is what used to leave a half-encoded
+	// character in the system prompt.
+	cut := summaryBudget
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	out := s[:cut]
+	// Prefer a line boundary so the summary never ends mid-sentence.
+	if nl := strings.LastIndexByte(out, '\n'); nl > summaryBudget/2 {
+		out = out[:nl]
+	}
+	return strings.TrimSpace(out)
 }
 
 func failResponse(msg string, start time.Time) model.ChatResponse {

@@ -42,14 +42,14 @@ func runAgentExecute(ctx context.Context, d Deps, reg *Registry, input map[strin
 		}
 	}
 
-	if builtin == model.BuiltinMail {
-		tool := "mail_list_drafts"
-		if strings.Contains(strings.ToLower(prompt), "sync") {
-			tool = "mail_sync"
-		}
-		return dispatchTool(ctx, reg, tool, input)
-	}
-
+	// The Mail Agent used to be routed by looking for the word "sync" in the
+	// prompt, with a two-way choice and no schema, because agentschema had no
+	// Mail fields to work from. It has them now, so Mail goes through the same
+	// path as every other builtin: the playbook is collected as ordinary
+	// interview slots and handed to mail_sync.
+	//
+	// Asking to read drafts is a query, not an execution, and the model reaches
+	// mail_list_drafts directly for that.
 	if slot, question, opts := schema.NextMissing(vals); slot != "" {
 		if slot == "prompt" {
 			question = fmt.Sprintf("What should %s do?", agent.Name)

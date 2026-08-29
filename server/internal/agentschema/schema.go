@@ -57,13 +57,17 @@ func ForBuiltin(builtin string) Schema {
 			SpecialistTool: "pentest_start",
 			Fields: []Field{
 				{Key: "target", Label: "Target", Question: "What URL or path should I test?", Required: true, MinLength: 3},
-				{Key: "scan_mode", Label: "Scan mode", Default: "quick", Options: []model.ClarifyOption{
+				// Required with a default, matching the TypeScript copy. The
+				// two are equivalent in behaviour — NextMissing skips a field
+				// that has a default — but stating it the same way on both
+				// sides keeps the contract single-meaning.
+				{Key: "scan_mode", Label: "Scan mode", Required: true, Default: "quick", Options: []model.ClarifyOption{
 					{Label: "Quick (5–15 min)", Value: "quick"},
 					{Label: "Standard (30–60 min)", Value: "standard"},
 					{Label: "Deep (1–2+ hours)", Value: "deep"},
 				}},
-				{Key: "instruction", Label: "Instruction"},
 				{Key: "max_budget", Label: "Max budget"},
+				{Key: "instruction", Label: "Instruction"},
 			},
 		}
 	case model.BuiltinPRReviewer:
@@ -73,13 +77,46 @@ func ForBuiltin(builtin string) Schema {
 			Fields: []Field{
 				{Key: "repo", Label: "Repository", Question: "Which GitHub repo should I review? Use owner/name.", Required: true, MinLength: 3},
 				{Key: "pr_number", Label: "Pull request number", Question: "Which pull request number?", Required: true},
+				// KNOWN DIVERGENCE, deliberately left alone: this defaults to
+				// preview-only, while input-schemas.ts defaults the same field
+				// to false. So the same agent posts real comments to a public
+				// pull request when launched from the Task Manager and posts
+				// nothing when launched from chat.
+				//
+				// It is not obvious which is right. Migration 031
+				// (pr_reviewer_post_by_default) reseeded the agent's system
+				// prompt to say it "posts the review to the PR by default",
+				// which sides with the Task Manager; review.go's tool defaults
+				// dry := true, which sides with chat. Reconciling them changes
+				// whether an agent writes in public, so it is a product call
+				// rather than a tidy-up, and the parity test documents the
+				// divergence instead of guessing at it.
 				{Key: "dry_run", Label: "Preview only", Default: "true"},
 			},
 		}
 	case model.BuiltinMail:
+		// The Mail Agent's playbook: which mail to watch, which pages to
+		// research it from, and how the reply should read. None of it is
+		// required — an empty playbook means "unread inbox, open web when the
+		// classifier asks for it", which is a reasonable default.
+		//
+		// This used to be an empty field list, which is why the agent was
+		// usable from the Task Manager and nearly unusable from chat: the two
+		// copies of this contract had drifted, and only one of them knew the
+		// agent had a playbook at all.
 		return Schema{
 			Builtin:        model.BuiltinMail,
-			SpecialistTool: "mail_list_drafts",
+			SpecialistTool: "mail_sync",
+			Fields: []Field{
+				{Key: "senders", Label: "Watch senders",
+					Question: "Which senders should I watch? Leave empty for all unread mail."},
+				{Key: "subject_prefixes", Label: "Subject prefixes"},
+				{Key: "labels", Label: "Gmail labels"},
+				{Key: "knowledge_urls", Label: "Knowledge links",
+					Question: "Which pages should I answer from? One http(s) URL per line."},
+				{Key: "research_focus", Label: "What to look for in those pages"},
+				{Key: "reply_instructions", Label: "How the reply should read"},
+			},
 		}
 	default:
 		return Schema{

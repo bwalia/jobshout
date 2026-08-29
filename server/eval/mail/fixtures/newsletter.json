@@ -1,0 +1,20 @@
+{
+  "name": "newsletter",
+  "description": "A marketing blast must be ignored, with no draft written.",
+  "message": {
+    "gmail_thread_id": "t-news",
+    "gmail_message_id": "m-news",
+    "from_email": "news@vendor.example",
+    "from_name": "Vendor Weekly",
+    "to_email": "ops@ourco.example",
+    "subject": "Your March newsletter is here",
+    "body": "This week in vendor news: five trends you cannot ignore. Unsubscribe at any time."
+  },
+  "classify_reply": "{\"intent\":\"fyi\",\"needs_research\":false,\"urgency\":\"low\",\"suggested_action\":\"ignore\",\"reason\":\"marketing newsletter\",\"triage_label\":\"newsletter\"}",
+  "research": {"available": true},
+  "expect": {
+    "thread_status": "ignored",
+    "draft_expected": false,
+    "research_expected": false
+  }
+}
