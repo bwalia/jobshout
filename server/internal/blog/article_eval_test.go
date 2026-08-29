@@ -38,8 +38,11 @@ func TestEval_IllustrationRulesOnlyWhenEnabled(t *testing.T) {
 	if strings.Contains(with, "Most articles need none") {
 		t.Fatal("prompt must not discourage body images")
 	}
-	if !strings.Contains(with, "ONE or TWO") {
-		t.Fatal("prompt should ask for one or two body images")
+	if !strings.Contains(with, "exactly ONE") {
+		t.Fatal("prompt should ask for one explanatory body image")
+	}
+	if !strings.Contains(with, "One mermaid diagram is enough") {
+		t.Fatal("prompt should prefer an image over a second flowchart")
 	}
 }
 
@@ -47,11 +50,11 @@ func TestEval_DraftWithoutFencesGetsBodyImages(t *testing.T) {
 	md := "# Title\n\nIntro.\n\n## Control planes\n\nProse about reconciliation.\n\n## Observability\n\nMore prose.\n"
 	out := ensureIllustrationFences(md, &writePlan{Sections: []string{"Control planes", "Observability"}})
 	n := len(illustrationFence.FindAllString(out, -1))
-	if n < 1 {
-		t.Fatalf("expected at least one illustration fence, got %d:\n%s", n, out)
+	if n != 1 {
+		t.Fatalf("expected exactly one illustration fence, got %d:\n%s", n, out)
 	}
-	if n > maxInlineIllustrations {
-		t.Fatalf("too many fences: %d", n)
+	if !strings.Contains(out, "reconciliation") {
+		t.Fatalf("scene should use the section prose, not a stock heading photo:\n%s", out)
 	}
 
 	fake := &fakeIllustrator{enabled: true}
@@ -103,5 +106,51 @@ func TestEval_EnsureFencesIdempotentWhenAlreadyPresent(t *testing.T) {
 	md := "# T\n\n```illustration\nAlready here\n```\n\n## Next\n"
 	if got := ensureIllustrationFences(md, nil); got != md {
 		t.Fatalf("should not rewrite an already-illustrated draft:\n%s", got)
+	}
+}
+
+func TestEval_SecondMermaidBecomesAnIllustration(t *testing.T) {
+	md := "# Title\n\n## Path\n\nAgents rank issuers then hand a shortlist to a trader.\n\n" +
+		"```mermaid\nflowchart TD\n A --> B\n```\n\n" +
+		"## Loop\n\nA control plane reconciles desired state against live positions.\n\n" +
+		"```mermaid\nflowchart TD\n C --> D\n```\n"
+	out := ensureIllustrationFences(md, &writePlan{Title: "AI Agents in Finance"})
+	if n := len(mermaidFence.FindAllString(out, -1)); n != 1 {
+		t.Fatalf("want 1 mermaid, got %d:\n%s", n, out)
+	}
+	if n := len(illustrationFence.FindAllString(out, -1)); n != 1 {
+		t.Fatalf("want 1 illustration, got %d:\n%s", n, out)
+	}
+	if !strings.Contains(out, "reconcile") && !strings.Contains(out, "desired state") {
+		t.Fatalf("illustration should use the second section's prose:\n%s", out)
+	}
+	if strings.Contains(out, "photographed from a clear vantage") {
+		t.Fatalf("stock heading photo leaked into the prompt:\n%s", out)
+	}
+}
+
+func TestEval_AlreadyIllustratedDropsExtraMermaid(t *testing.T) {
+	md := "```illustration\nAn agent handing a shortlist to a trader\n```\n\n" +
+		"```mermaid\nflowchart TD\n A --> B\n```\n\n" +
+		"```mermaid\nflowchart TD\n C --> D\n```\n"
+	out := ensureIllustrationFences(md, nil)
+	if n := len(mermaidFence.FindAllString(out, -1)); n != 1 {
+		t.Fatalf("want 1 mermaid, got %d:\n%s", n, out)
+	}
+	if n := len(illustrationFence.FindAllString(out, -1)); n != 1 {
+		t.Fatalf("want the existing illustration only, got %d:\n%s", n, out)
+	}
+	if !strings.Contains(out, "An agent handing a shortlist to a trader") {
+		t.Fatal("existing illustration was rewritten")
+	}
+}
+
+func TestEval_SectionSceneUsesProseNotStockPhoto(t *testing.T) {
+	got := sectionScene("Bond issuance", "An agent ranks issuers and hands a shortlist to the syndicate desk.", "AI in finance")
+	if !strings.Contains(got, "ranks issuers") {
+		t.Fatalf("lost the mechanism: %q", got)
+	}
+	if strings.Contains(got, "photographed from a clear vantage") {
+		t.Fatalf("stock heading photo leaked: %q", got)
 	}
 }
