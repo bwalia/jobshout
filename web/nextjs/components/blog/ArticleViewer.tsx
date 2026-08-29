@@ -178,6 +178,31 @@ export function ArticleViewer({ article }: { article: BlogArticle }) {
                     </code>
                   );
                 },
+                // Inline illustrations are stored at /api/v1/images/file/… —
+                // a relative <img> hits this Next.js origin and 404s, which
+                // is why the prompt was showing as a broken image's alt text.
+                img({ src, alt }) {
+                  if (!src) return null;
+                  const fromStore =
+                    src.startsWith("/api/v1/images/") || src.startsWith("data:");
+                  if (fromStore) {
+                    return (
+                      <StoredImage
+                        src={src}
+                        alt={alt ?? ""}
+                        className="my-4 aspect-[3/2] w-full rounded-lg border border-border object-cover"
+                      />
+                    );
+                  }
+                  return (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={src}
+                      alt={alt ?? ""}
+                      className="my-4 w-full rounded-lg border border-border"
+                    />
+                  );
+                },
               }}
             >
               {article.markdown}

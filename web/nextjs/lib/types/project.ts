@@ -44,6 +44,7 @@ export interface Task {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  metadata?: Record<string, unknown> | null;
   labels?: TaskLabel[];
   subtask_count?: number;
 }
@@ -63,6 +64,7 @@ export interface CreateTaskRequest {
   story_points?: number;
   due_date?: string;
   parent_id?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface UpdateTaskRequest {
