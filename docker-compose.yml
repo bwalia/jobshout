@@ -141,6 +141,7 @@ services:
       GMAIL_OAUTH_REDIRECT_URL: ${GMAIL_OAUTH_REDIRECT_URL:-http://localhost:8190/api/v1/mail/connection/oauth/callback}
       MAIL_POLL_INTERVAL: ${MAIL_POLL_INTERVAL:-5m}
       MAIL_RECONCILE_INTERVAL: ${MAIL_RECONCILE_INTERVAL:-15s}
+      MAIL_SIMULATE: ${MAIL_SIMULATE:-0}
     ports:
       - "${SERVER_HOST_PORT:-8190}:8080"
     depends_on:

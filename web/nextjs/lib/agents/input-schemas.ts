@@ -25,6 +25,8 @@ export interface AgentField {
   min?: number;
   placeholder?: string;
   help?: string;
+  /** Optional section heading shown above this field in Task Manager. */
+  group?: string;
   options?: AgentFieldOption[];
   defaultValue?: string | boolean;
 }
@@ -37,7 +39,8 @@ export type AgentBuiltin =
   | "researcher"
   | "pentester"
   | "pr_reviewer"
-  | "mail";
+  | "mail"
+  | "images";
 
 /**
  * How a selected agent should be launched from Task Manager.
@@ -214,7 +217,7 @@ const SCHEMAS: Record<AgentBuiltin, AgentInputSchema> = {
         key: "dry_run",
         label: "Preview only — do not post comments on GitHub",
         type: "checkbox",
-        defaultValue: false,
+        defaultValue: true,
       },
     ],
     titleFrom: (v) =>
@@ -226,44 +229,50 @@ const SCHEMAS: Record<AgentBuiltin, AgentInputSchema> = {
   },
   mail: {
     kind: "mail",
-    hint: "Saves watch rules and the knowledge playbook on the shared mailbox, then syncs Gmail. Connect Gmail on Mail Agent first if you have not. Nothing is sent until you Approve a draft.",
+    hint: "Saves who to watch and how to answer, then syncs Gmail. Connect Gmail on Mail Agent first if you have not. Nothing is sent until you Approve a draft. Links inside incoming mail are researched automatically.",
     fields: [
       {
         key: "senders",
         label: "Watch senders",
         type: "text",
+        group: "Who to watch",
         placeholder: "ops@example.com, support@client.com",
-        help: "Comma-separated. Empty = all unread in the last 7 days.",
+        help: "Comma-separated. Empty = all unread mail from the last 7 days.",
       },
       {
         key: "subject_prefixes",
         label: "Subject prefixes",
         type: "text",
+        group: "Who to watch",
         placeholder: "[support], [billing]",
       },
       {
         key: "labels",
         label: "Gmail labels",
         type: "text",
+        group: "Who to watch",
         placeholder: "INBOX, Support",
       },
       {
         key: "knowledge_urls",
-        label: "Knowledge links",
+        label: "Extra knowledge links",
         type: "textarea",
+        group: "How to answer",
         placeholder: "https://example.com/pricing",
-        help: "One http(s) URL per line. Matching mail is researched from these pages only. Empty = open web when the classifier asks.",
+        help: "Optional extra pages (one URL per line). Incoming mail links are researched too.",
       },
       {
         key: "research_focus",
-        label: "What to look for in those pages",
+        label: "What to look for",
         type: "textarea",
+        group: "How to answer",
         placeholder: "Prices, SLA, refund window…",
       },
       {
         key: "reply_instructions",
         label: "How the reply should read",
         type: "textarea",
+        group: "How to answer",
         placeholder: "Tone, length, must-include, must-avoid",
       },
     ],
@@ -285,11 +294,30 @@ const SCHEMAS: Record<AgentBuiltin, AgentInputSchema> = {
       return parts.length ? parts.join("\n\n") : undefined;
     },
   },
+  images: {
+    kind: "images",
+    hint: "Generate one image from a prompt. The board task stores the result.",
+    fields: [
+      {
+        key: "prompt",
+        label: "Image prompt",
+        type: "textarea",
+        required: true,
+        minLength: 3,
+        placeholder: "A dark editorial cover of a harbour at night…",
+      },
+    ],
+    titleFrom: (v) => {
+      const p = v.prompt?.trim() || "image";
+      return `Image: ${p.slice(0, 80)}`;
+    },
+    descriptionFrom: (v) => v.prompt?.trim() || undefined,
+  },
 };
 
-/** True when this schema launches via a specialist API (not generic task run). */
+/** True when this schema launches via the specialist launcher (not generic task run). */
 export function isSpecialistSchema(schema: AgentInputSchema): boolean {
-  return schema.kind !== "task_run" && schema.kind !== "images";
+  return schema.kind !== "task_run";
 }
 
 /** Resolve the input schema for an agent (builtin specialist or generic). */

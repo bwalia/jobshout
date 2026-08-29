@@ -94,6 +94,7 @@ func (s *taskService) Create(ctx context.Context, createdBy uuid.UUID, req model
 		StoryPoints:     req.StoryPoints,
 		DueDate:         dueDate,
 		CreatedBy:       &createdBy,
+		Metadata:        req.Metadata,
 	}
 
 	if err := s.repo.Create(ctx, task); err != nil {
@@ -170,6 +171,9 @@ func (s *taskService) Update(ctx context.Context, id uuid.UUID, req model.Update
 	if req.DueDate != nil {
 		t, _ := time.Parse("2006-01-02", *req.DueDate)
 		task.DueDate = &t
+	}
+	if req.Metadata != nil {
+		task.Metadata = req.Metadata
 	}
 
 	if err := s.repo.Update(ctx, task); err != nil {

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -41,33 +42,27 @@ func (r *taskRepository) Create(ctx context.Context, task *model.Task) error {
 	}
 	task.Position = maxPos
 
+	meta, err := json.Marshal(task.Metadata)
+	if err != nil || task.Metadata == nil {
+		meta = []byte("{}")
+	}
+
 	query := `
 		INSERT INTO tasks (id, project_id, parent_id, title, description, status, priority,
-			assigned_agent_id, assigned_user_id, story_points, due_date, position, created_by, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())
+			assigned_agent_id, assigned_user_id, story_points, due_date, position, created_by, metadata, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())
 		RETURNING created_at, updated_at`
 
 	return r.pool.QueryRow(ctx, query,
 		task.ID, task.ProjectID, task.ParentID, task.Title, task.Description,
 		task.Status, task.Priority, task.AssignedAgentID, task.AssignedUserID,
-		task.StoryPoints, task.DueDate, task.Position, task.CreatedBy,
+		task.StoryPoints, task.DueDate, task.Position, task.CreatedBy, meta,
 	).Scan(&task.CreatedAt, &task.UpdatedAt)
 }
 
 func (r *taskRepository) FindByID(ctx context.Context, id uuid.UUID) (*model.Task, error) {
-	query := `
-		SELECT id, project_id, parent_id, title, description, status, priority,
-			assigned_agent_id, assigned_user_id, story_points, due_date, position,
-			created_by, created_at, updated_at
-		FROM tasks WHERE id = $1`
-
-	t := &model.Task{}
-	err := r.pool.QueryRow(ctx, query, id).Scan(
-		&t.ID, &t.ProjectID, &t.ParentID, &t.Title, &t.Description,
-		&t.Status, &t.Priority, &t.AssignedAgentID, &t.AssignedUserID,
-		&t.StoryPoints, &t.DueDate, &t.Position, &t.CreatedBy,
-		&t.CreatedAt, &t.UpdatedAt,
-	)
+	query := `SELECT ` + taskColumns + ` FROM tasks WHERE id = $1`
+	t, err := scanTask(r.pool.QueryRow(ctx, query, id))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
@@ -86,9 +81,7 @@ func (r *taskRepository) ListByProject(ctx context.Context, projectID uuid.UUID,
 	}
 
 	query := `
-		SELECT id, project_id, parent_id, title, description, status, priority,
-			assigned_agent_id, assigned_user_id, story_points, due_date, position,
-			created_by, created_at, updated_at
+		SELECT ` + taskColumns + `
 		FROM tasks WHERE project_id = $1
 		ORDER BY status, position ASC
 		LIMIT $2 OFFSET $3`
@@ -101,16 +94,11 @@ func (r *taskRepository) ListByProject(ctx context.Context, projectID uuid.UUID,
 
 	tasks := make([]model.Task, 0)
 	for rows.Next() {
-		var t model.Task
-		if err := rows.Scan(
-			&t.ID, &t.ProjectID, &t.ParentID, &t.Title, &t.Description,
-			&t.Status, &t.Priority, &t.AssignedAgentID, &t.AssignedUserID,
-			&t.StoryPoints, &t.DueDate, &t.Position, &t.CreatedBy,
-			&t.CreatedAt, &t.UpdatedAt,
-		); err != nil {
+		t, err := scanTask(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scanning task: %w", err)
 		}
-		tasks = append(tasks, t)
+		tasks = append(tasks, *t)
 	}
 
 	totalPages := total / params.PerPage
@@ -134,9 +122,7 @@ func (r *taskRepository) ListByOrg(ctx context.Context, orgID uuid.UUID, params 
 	}
 
 	query := `
-		SELECT id, project_id, parent_id, title, description, status, priority,
-			assigned_agent_id, assigned_user_id, story_points, due_date, position,
-			created_by, created_at, updated_at
+		SELECT ` + taskColumns + `
 		FROM tasks WHERE project_id IN (SELECT id FROM projects WHERE org_id = $1)
 		ORDER BY updated_at DESC
 		LIMIT $2 OFFSET $3`
@@ -149,16 +135,11 @@ func (r *taskRepository) ListByOrg(ctx context.Context, orgID uuid.UUID, params 
 
 	tasks := make([]model.Task, 0)
 	for rows.Next() {
-		var t model.Task
-		if err := rows.Scan(
-			&t.ID, &t.ProjectID, &t.ParentID, &t.Title, &t.Description,
-			&t.Status, &t.Priority, &t.AssignedAgentID, &t.AssignedUserID,
-			&t.StoryPoints, &t.DueDate, &t.Position, &t.CreatedBy,
-			&t.CreatedAt, &t.UpdatedAt,
-		); err != nil {
+		t, err := scanTask(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scanning org task: %w", err)
 		}
-		tasks = append(tasks, t)
+		tasks = append(tasks, *t)
 	}
 
 	totalPages := total / params.PerPage
@@ -202,18 +183,47 @@ func (r *taskRepository) AddComment(ctx context.Context, comment *model.TaskComm
 }
 
 func (r *taskRepository) Update(ctx context.Context, task *model.Task) error {
+	meta, err := json.Marshal(task.Metadata)
+	if err != nil || task.Metadata == nil {
+		meta = []byte("{}")
+	}
 	query := `
 		UPDATE tasks SET title = $1, description = $2, priority = $3,
 			assigned_agent_id = $4, assigned_user_id = $5, story_points = $6,
-			due_date = $7, updated_at = NOW()
-		WHERE id = $8
+			due_date = $7, metadata = $8, updated_at = NOW()
+		WHERE id = $9
 		RETURNING updated_at`
 
 	return r.pool.QueryRow(ctx, query,
 		task.Title, task.Description, task.Priority,
 		task.AssignedAgentID, task.AssignedUserID, task.StoryPoints,
-		task.DueDate, task.ID,
+		task.DueDate, meta, task.ID,
 	).Scan(&task.UpdatedAt)
+}
+
+const taskColumns = `
+	id, project_id, parent_id, title, description, status, priority,
+	assigned_agent_id, assigned_user_id, story_points, due_date, position,
+	created_by, metadata, created_at, updated_at`
+
+func scanTask(row pgx.Row) (*model.Task, error) {
+	t := &model.Task{}
+	var metaRaw []byte
+	if err := row.Scan(
+		&t.ID, &t.ProjectID, &t.ParentID, &t.Title, &t.Description,
+		&t.Status, &t.Priority, &t.AssignedAgentID, &t.AssignedUserID,
+		&t.StoryPoints, &t.DueDate, &t.Position, &t.CreatedBy, &metaRaw,
+		&t.CreatedAt, &t.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+	if len(metaRaw) > 0 {
+		_ = json.Unmarshal(metaRaw, &t.Metadata)
+	}
+	if t.Metadata == nil {
+		t.Metadata = map[string]any{}
+	}
+	return t, nil
 }
 
 func (r *taskRepository) Delete(ctx context.Context, id uuid.UUID) error {

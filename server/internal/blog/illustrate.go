@@ -139,9 +139,12 @@ func coverSubtitleText(title, topic string) string {
 // Turbo ignores separate negative prompts, so exclusions and exact title
 // strings live in the positive prompt. The topic drives the metaphor; the
 // title (trimmed) is lettered on the left.
-func coverPrompt(title, topic string) string {
+func coverPrompt(title, topic string, metaphor, objects, accent string) string {
 	topic = strings.TrimSpace(topic)
 	title = strings.TrimSpace(title)
+	metaphor = strings.TrimSpace(metaphor)
+	objects = strings.TrimSpace(objects)
+	accent = strings.TrimSpace(accent)
 
 	subject := topic
 	if subject == "" {
@@ -154,6 +157,20 @@ func coverPrompt(title, topic string) string {
 	headline := coverTitleText(title, topic)
 	subtitle := coverSubtitleText(title, topic)
 
+	focal := "a concrete visual metaphor for the topic"
+	if metaphor != "" {
+		focal = metaphor
+	}
+	if objects != "" {
+		focal += " — " + objects
+	} else if metaphor == "" {
+		focal += " using tools, documents, agents, networks or machines as simple shapes"
+	}
+	accentClause := "small coral accent dots and thin geometric lines floating nearby"
+	if accent != "" {
+		accentClause = "small " + accent + " and coral accent dots and thin geometric lines floating nearby"
+	}
+
 	return fmt.Sprintf(
 		"A high-quality, ultra-detailed modern editorial blog cover illustration "+
 			"about %s on a deep charcoal navy background with a subtle dark gradient. "+
@@ -161,17 +178,80 @@ func coverPrompt(title, topic string) string {
 			"with a smaller thin teal subtitle below it that says %q, "+
 			"both razor-sharp, crisp, high contrast, and easy to read. "+
 			"On the opposite side, one or two glowing visual objects as the focal point — "+
-			"a concrete visual metaphor for the topic using tools, documents, agents, networks or machines as simple shapes — "+
+			"%s — "+
 			"emitting soft teal and cyan light that gently illuminates the dark surroundings, "+
-			"small coral accent dots and thin geometric lines floating nearby. "+
+			"%s. "+
 			"Flat vector illustration style with finely detailed subtle grain texture and smooth polished gradient shading, "+
 			"soft rim glow around the subject, gentle ambient light falloff, crisp clean edges, "+
 			"meticulous professional finish, balanced asymmetric composition, wide 16:9 landscape framing, "+
 			"sharp high-resolution rendering, premium dark-mode tech-blog aesthetic, "+
 			"uncluttered layout with generous breathing room around the text. "+
 			"No logos, no watermarks, no UI chrome, no extra text beyond the title and subtitle.",
-		subject, headline, subtitle,
+		subject, headline, subtitle, focal, accentClause,
 	)
+}
+
+// ensureIllustrationFences inserts 1–2 body illustration blocks when the
+// writer emitted none. Headings become concrete scene prompts.
+func ensureIllustrationFences(markdown string, plan *writePlan) string {
+	if illustrationFence.MatchString(markdown) {
+		return markdown
+	}
+	headings := collectH2s(markdown)
+	if len(headings) == 0 && plan != nil {
+		headings = plan.Sections
+	}
+	if len(headings) == 0 {
+		return markdown
+	}
+	n := 2
+	if len(headings) < n {
+		n = 1
+	}
+	var b strings.Builder
+	inserted := 0
+	lines := strings.Split(markdown, "\n")
+	for i, line := range lines {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(line)
+		if inserted >= n {
+			continue
+		}
+		trim := strings.TrimSpace(line)
+		if strings.HasPrefix(trim, "## ") && !strings.HasPrefix(trim, "### ") {
+			scene := headingScene(strings.TrimPrefix(trim, "## "))
+			b.WriteString("\n\n```illustration\n")
+			b.WriteString(scene)
+			b.WriteString("\n```\n")
+			inserted++
+		}
+	}
+	if inserted == 0 {
+		scene := headingScene(headings[0])
+		return markdown + "\n\n```illustration\n" + scene + "\n```\n"
+	}
+	return b.String()
+}
+
+func collectH2s(markdown string) []string {
+	var out []string
+	for _, line := range strings.Split(markdown, "\n") {
+		trim := strings.TrimSpace(line)
+		if strings.HasPrefix(trim, "## ") && !strings.HasPrefix(trim, "### ") {
+			out = append(out, strings.TrimSpace(strings.TrimPrefix(trim, "## ")))
+		}
+	}
+	return out
+}
+
+func headingScene(heading string) string {
+	h := strings.TrimSpace(heading)
+	if h == "" {
+		h = "the subject"
+	}
+	return "A concrete scene illustrating " + h + ", photographed from a clear vantage, no text or labels"
 }
 
 // generateCover draws an article's cover image with coverModel.
@@ -184,7 +264,7 @@ func coverPrompt(title, topic string) string {
 // whether an article without a picture is still an article. It is: see
 // Runner.Generate.
 func (r *Runner) generateCover(ctx context.Context, orgID uuid.UUID, a *GeneratedArticle) error {
-	prompt := coverPrompt(a.Title, a.Topic)
+	prompt := coverPrompt(a.Title, a.Topic, a.CoverMetaphor, a.CoverObjects, a.CoverAccent)
 
 	var lastErr error
 	for attempt := 1; attempt <= coverMaxAttempts; attempt++ {

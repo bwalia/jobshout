@@ -17,6 +17,8 @@ type Config struct {
 	FrontendBaseURL   string
 	PollInterval      time.Duration
 	ReconcileInterval time.Duration
+	// Simulate is local-only: a fake inbox, no Google. Set MAIL_SIMULATE=1.
+	Simulate bool
 }
 
 // LoadConfig reads GMAIL_* / MAIL_* / FRONTEND_BASE_URL from the environment.
@@ -37,7 +39,25 @@ func LoadConfig() Config {
 	}
 	c.PollInterval = envDuration("MAIL_POLL_INTERVAL", 5*time.Minute)
 	c.ReconcileInterval = envDuration("MAIL_RECONCILE_INTERVAL", 15*time.Second)
+	c.Simulate = SimulateEnabled()
+	if c.Simulate {
+		if c.ClientID == "" {
+			c.ClientID = "simulate"
+		}
+		if c.ClientSecret == "" {
+			c.ClientSecret = "simulate"
+		}
+		if c.TokenKey == "" {
+			c.TokenKey = "mail-simulate-local-only-not-for-production"
+		}
+	}
 	return c
+}
+
+// SimulateEnabled is true when MAIL_SIMULATE is 1/true/yes.
+func SimulateEnabled() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("MAIL_SIMULATE")))
+	return v == "1" || v == "true" || v == "yes"
 }
 
 // Configured reports whether an operator has supplied the OAuth client and
