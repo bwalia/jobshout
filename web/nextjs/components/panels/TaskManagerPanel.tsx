@@ -614,9 +614,23 @@ function AgentDetailView({
           <button
             type="button"
             onClick={() => setCreateOpen(true)}
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border px-3 text-sm hover:bg-secondary"
+          >
+            <Plus className="h-4 w-4" /> New task
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (tasks[0]) {
+                setRunTask(tasks[0]);
+                return;
+              }
+              setCreateOpen(true);
+            }}
             className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90"
           >
-            <Rocket className="h-4 w-4" /> Run agent
+            <Rocket className="h-4 w-4" />{" "}
+            {tasks[0] ? "Run task" : "Run agent"}
           </button>
         </div>
       </div>
@@ -625,8 +639,8 @@ function AgentDetailView({
         <h3 className="mb-2 text-sm font-medium">Assigned tasks</h3>
         {tasks.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No tasks yet. Use Run agent to create one with this agent&apos;s
-            inputs and execute it.
+            No tasks yet. Use Run agent to fill this agent&apos;s inputs and
+            execute it.
           </p>
         ) : (
           <ul className="divide-y divide-border rounded-lg border border-border">
@@ -668,7 +682,15 @@ function AgentDetailView({
           projects={projects}
           initialAgentId={agent.id}
           onClose={() => setCreateOpen(false)}
-          onLaunched={onLaunched}
+          onSaved={(t) => {
+            setCreateOpen(false);
+            setRunTask(t);
+          }}
+          onLaunched={(result) => {
+            setCreateOpen(false);
+            setRunTask(null);
+            onLaunched(result);
+          }}
         />
       )}
 

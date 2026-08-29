@@ -16,6 +16,7 @@ test.describe("Navigation & Layout", () => {
     { href: "/panel/dashboard", heading: /Good (morning|afternoon|evening)/ },
     { href: "/panel/task-board", heading: /Task Board/ },
     { href: "/panel/task-manager", heading: /Task Manager/ },
+    { href: "/panel/artifacts", heading: /Artifacts/ },
     { href: "/panel/workflows", heading: /Workflows/ },
   ];
 
@@ -45,6 +46,7 @@ test.describe("Navigation & Layout", () => {
     await expect(aside.getByRole("link", { name: "Dashboard" })).toBeVisible();
     await expect(aside.getByRole("link", { name: "Task Board" })).toBeVisible();
     await expect(aside.getByRole("link", { name: "Task Manager" })).toBeVisible();
+    await expect(aside.getByRole("link", { name: "Artifacts" })).toBeVisible();
     await expect(aside.getByRole("link", { name: "Automations" })).toBeVisible();
 
     await aside.getByRole("button", { name: /new chat/i }).click();

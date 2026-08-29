@@ -12,8 +12,8 @@ import {
   validateSchemaValues,
 } from "@/lib/agents/input-schemas";
 import {
+  hydrateLaunchValues,
   launchAgentForTask,
-  launchValuesFromTask,
   type LaunchResult,
 } from "@/lib/agents/launch";
 import { fetchMailFormValues, mailFormIsBlank } from "@/lib/agents/mail-playbook";
@@ -93,9 +93,7 @@ export function RunTaskDialog({
   );
 
   useEffect(() => {
-    const defaults = defaultValuesForSchema(schema);
-    const stored = launchValuesFromTask(task);
-    setValues({ ...defaults, ...stored });
+    setValues(hydrateLaunchValues(task, schema));
     setFieldErrors({});
     setTouchedSubmit(false);
     setLaunchError(null);
