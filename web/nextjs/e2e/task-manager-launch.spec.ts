@@ -55,4 +55,32 @@ test.describe("Task Manager launch fields", () => {
     await expect(page.locator("#agent-field-senders")).toBeVisible();
     await expect(page.locator("#agent-field-knowledge_urls")).toBeVisible();
   });
+
+  test("Run on a created task reuses the saved topic instead of a blank form", async ({
+    page,
+  }) => {
+    await navigateTo(page, "/panel/task-manager");
+    await page.click('button:has-text("New task")');
+    const agentSelect = page.locator("#create-task-agent");
+    const value = await agentSelect
+      .locator("option", { hasText: "Research Agent" })
+      .first()
+      .getAttribute("value");
+    await agentSelect.selectOption(value!);
+    await page.locator("#agent-field-topic").fill("kubernetes cost optimisation");
+    await page.getByRole("button", { name: "Create task" }).click();
+    await expect(page.getByRole("heading", { name: /new task/i })).toHaveCount(0, {
+      timeout: 8_000,
+    });
+    await expect(
+      page.getByRole("heading", { name: /Research: kubernetes cost optimisation/i }),
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: /^Run$/ }).click();
+    await expect(page.getByRole("heading", { name: /run task with an agent/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /new task/i })).toHaveCount(0);
+    await expect(page.locator("#agent-field-topic")).toHaveValue(
+      "kubernetes cost optimisation",
+    );
+  });
 });

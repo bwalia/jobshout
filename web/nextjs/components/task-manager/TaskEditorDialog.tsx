@@ -445,6 +445,10 @@ function CreateTaskForm({
       description: d,
       priority,
       assigned_agent_id: selectedAgent.id,
+      metadata: {
+        launch_values: { ...values },
+        launch_kind: schema.kind,
+      },
     });
   }
 
@@ -469,7 +473,6 @@ function CreateTaskForm({
     setFormError(null);
     try {
       const created = await createBoardTask();
-      onSaved?.(created);
       const result = await launchAgentForTask({
         agent: selectedAgent,
         task: created,

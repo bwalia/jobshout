@@ -1,10 +1,11 @@
 "use client";
 
 import { Suspense } from "react";
-import { notFound } from "next/navigation";
+import { notFound, useParams } from "next/navigation";
 import { DashboardPanel } from "@/components/panels/DashboardPanel";
 import { TaskBoardPanel } from "@/components/panels/TaskBoardPanel";
 import { TaskManagerPanel } from "@/components/panels/TaskManagerPanel";
+import { ArtifactsPanel } from "@/components/panels/ArtifactsPanel";
 import { PluginsSkillsPanel } from "@/components/panels/PluginsSkillsPanel";
 import { PANELS, type PanelId } from "@/lib/panels";
 
@@ -21,12 +22,19 @@ const VALID = new Set(
   PANELS.map((p) => p.id).filter((id): id is Exclude<PanelId, "chat"> => id !== "chat")
 );
 
-export default function PanelPage({
-  params,
-}: {
-  params: { panel: string };
-}) {
-  const panel = params.panel as PanelId;
+export default function PanelPage() {
+  const params = useParams<{ panel: string }>();
+  const panel = params.panel;
+
+  // An empty slug is the client hook hydrating, not a missing page. notFound()
+  // here is sticky and is what made /panel/artifacts flash a 404 locally.
+  if (!panel) {
+    return (
+      <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
+        Loading…
+      </div>
+    );
+  }
   if (!VALID.has(panel as Exclude<PanelId, "chat">)) notFound();
 
   return (
@@ -50,6 +58,8 @@ function PanelBody({ panel }: { panel: Exclude<PanelId, "chat"> }) {
       return <TaskBoardPanel />;
     case "task-manager":
       return <TaskManagerPanel />;
+    case "artifacts":
+      return <ArtifactsPanel />;
     case "scheduler":
       return (
         <div className="p-6">

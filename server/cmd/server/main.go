@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -297,6 +298,17 @@ func main() {
 	var imgStore imagestore.Store
 	if minioClient != nil {
 		imgStore = imagestore.NewMinIOStore(minioClient, cfg.MinIOBucketImages)
+	} else {
+		// MinIO is optional locally. Without somewhere to write, the GPU still
+		// draws covers and inline pictures, then the article pipeline drops them
+		// because a cover with no URL is not a cover. A directory next to the
+		// process is enough for the same /api/v1/images/file/… URLs.
+		dir := os.Getenv("IMAGE_STORE_DIR")
+		if dir == "" {
+			dir = filepath.Join(".", ".dev-data", "images")
+		}
+		imgStore = imagestore.NewDirStore(dir)
+		logger.Info("image storage using local directory (MinIO unset)", zap.String("dir", dir))
 	}
 	imageSvc := service.NewImageService(imageRouter, imgStore, repository.NewImageRepository(pool), logger)
 	if imageSvc.Enabled() {

@@ -1,3 +1,7 @@
+import {
+  defaultValuesForSchema,
+  type AgentInputSchema,
+} from "@/lib/agents/input-schemas";
 import { apiClient } from "@/lib/api/client";
 import type { Agent } from "@/lib/types/agent";
 import type { Task } from "@/lib/types/project";
@@ -42,6 +46,64 @@ export function launchValuesFromTask(
     out[k] = String(v);
   }
   return out;
+}
+
+/** Stored launch_values, then title/description fallbacks, then schema defaults. */
+export function hydrateLaunchValues(
+  task: Task | null | undefined,
+  schema: AgentInputSchema
+): Record<string, string> {
+  return {
+    ...defaultValuesForSchema(schema),
+    ...deriveLaunchValues(task, schema),
+    ...launchValuesFromTask(task),
+  };
+}
+
+function deriveLaunchValues(
+  task: Task | null | undefined,
+  schema: AgentInputSchema
+): Record<string, string> {
+  if (!task) return {};
+  const title = (task.title ?? "").trim();
+  const desc = (task.description ?? "").trim();
+  const topicLine = desc.match(/^Topic:\s*(.+)$/m)?.[1]?.trim();
+  const afterPrefix = (prefix: string) =>
+    title.startsWith(prefix) ? title.slice(prefix.length).trim() : "";
+
+  switch (schema.kind) {
+    case "researcher":
+    case "article_writer": {
+      const prefix = schema.kind === "researcher" ? "Research: " : "Write: ";
+      const topic = topicLine || afterPrefix(prefix) || title;
+      const context = desc.replace(/^Topic:\s*.+\n*/m, "").trim();
+      return { topic, ...(context ? { context } : {}) };
+    }
+    case "images":
+      return { prompt: afterPrefix("Image: ") || desc || title };
+    case "pentester": {
+      const targetLine = desc.match(/^Target:\s*(.+)$/m)?.[1]?.trim();
+      return { target: targetLine || afterPrefix("Pentest: ") || title };
+    }
+    case "pr_reviewer": {
+      const rest = afterPrefix("Review: ");
+      const hash = rest.lastIndexOf("#");
+      if (hash > 0) {
+        return {
+          repo: rest.slice(0, hash),
+          pr_number: rest.slice(hash + 1),
+        };
+      }
+      return {};
+    }
+    case "task_run":
+      return {
+        title,
+        ...(desc ? { description: desc } : {}),
+      };
+    default:
+      return {};
+  }
 }
 
 /**

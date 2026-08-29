@@ -61,6 +61,7 @@ const nextConfig = {
         permanent: false,
       },
       // Keep /articles/:runId for article detail (linked from Articles list)
+      { source: "/artifacts", destination: "/panel/artifacts", permanent: false },
       {
         source: "/images",
         destination: "/panel/task-manager?agent=images",
