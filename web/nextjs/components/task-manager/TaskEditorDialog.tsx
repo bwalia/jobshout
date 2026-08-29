@@ -486,9 +486,7 @@ function CreateTaskForm({
               : result.kind === "pr_reviewer"
                 ? "PR review queued"
                 : result.kind === "mail"
-                  ? result.syncQueued
-                    ? "Mailbox sync queued"
-                    : "Playbook saved. Connect Gmail on Mail Agent to sync."
+                  ? "Playbook saved and mailbox sync queued"
                   : "Agent run started"
       );
       onLaunched?.(result);

@@ -75,3 +75,22 @@ func TestIsThinPrompt(t *testing.T) {
 		}
 	}
 }
+
+// Tool calls carry plumbing — the agent's name, a volunteered reason — that is
+// not an answer to any interview slot. Recording it as one made a chat-started
+// run look different from a form-started run with the same inputs.
+func TestPick_KeepsOnlyDeclaredSlots(t *testing.T) {
+	s := ForBuiltin(model.BuiltinArticleWriter)
+	got := s.Pick(map[string]string{
+		"name":   "Article Writer",
+		"reason": "the user asked",
+		"topic":  "Kubernetes cost control",
+		"model":  "",
+	})
+	if len(got) != 1 {
+		t.Fatalf("picked %v; want only topic", got)
+	}
+	if got["topic"] != "Kubernetes cost control" {
+		t.Fatalf("topic = %q", got["topic"])
+	}
+}

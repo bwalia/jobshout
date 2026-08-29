@@ -185,9 +185,7 @@ export function RunTaskDialog({
           result.kind === "researcher"
             ? "Research complete"
             : result.kind === "mail"
-              ? result.syncQueued
-                ? "Mailbox sync queued"
-                : "Playbook saved. Connect Gmail on Mail Agent to sync."
+              ? "Playbook saved and mailbox sync queued"
               : "Agent run started"
         );
         onSpecialistLaunched?.(result);

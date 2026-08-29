@@ -8,6 +8,7 @@ import (
 	"github.com/jobshout/server/internal/agentschema"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/repository"
+	"github.com/jobshout/server/internal/service"
 )
 
 func runAgentExecute(ctx context.Context, d Deps, reg *Registry, input map[string]any) (*Result, error) {
@@ -42,13 +43,10 @@ func runAgentExecute(ctx context.Context, d Deps, reg *Registry, input map[strin
 		}
 	}
 
-	// The Mail Agent used to be routed by looking for the word "sync" in the
-	// prompt, with a two-way choice and no schema, because agentschema had no
-	// Mail fields to work from. It has them now, so Mail goes through the same
-	// path as every other builtin: the playbook is collected as ordinary
-	// interview slots and handed to mail_sync.
-	//
-	// Asking to read drafts is a query, not an execution, and the model reaches
+	// Every builtin now walks the same interview. The Mail Agent used to be
+	// special-cased here on whether the prompt contained the word "sync",
+	// because agentschema had no Mail fields to work from; it has them now.
+	// Reading drafts is a query rather than an execution, and the model reaches
 	// mail_list_drafts directly for that.
 	if slot, question, opts := schema.NextMissing(vals); slot != "" {
 		if slot == "prompt" {
@@ -58,43 +56,52 @@ func runAgentExecute(ctx context.Context, d Deps, reg *Registry, input map[strin
 	}
 	vals = schema.ApplyDefaults(vals)
 
-	if schema.SpecialistTool != "" {
-		args := map[string]any{}
-		for k, v := range vals {
-			if v != "" {
-				args[k] = v
-			}
-		}
-		return dispatchTool(ctx, reg, schema.SpecialistTool, args)
-	}
-
-	if agentschema.IsThinPrompt(prompt, agent.Name) {
+	if agentschema.IsThinPrompt(prompt, agent.Name) && builtin == "" {
 		return &Result{
 			Missing:  []string{"prompt"},
 			Question: fmt.Sprintf("What should %s do?", agent.Name),
 		}, nil
 	}
-	if d.Exec == nil {
-		return nil, fmt.Errorf("execution is not configured")
+	if builtin == "" && vals["prompt"] == "" {
+		vals["prompt"] = prompt
 	}
-	exec, err := d.Exec.Start(ctx, ident.OrgID, agent.ID, model.ExecuteAgentRequest{Prompt: prompt})
+
+	// Every execution goes through the Task Manager's front door, including
+	// this one. Calling the specialist directly — which is what this used to do
+	// — left no run row and no board entry, so work started from chat was
+	// invisible everywhere else. The run id comes back immediately; the
+	// specialist's own row carries progress from there.
+	if d.AgentRuns == nil {
+		return nil, fmt.Errorf("agent execution is not configured")
+	}
+	run, _, err := d.AgentRuns.Start(ctx, ident.OrgID, model.CreateAgentRunRequest{
+		AgentID: agent.ID,
+		// Narrowed to the schema's own slots: the tool call also carries the
+		// agent's name and whatever reason the model volunteered, and recording
+		// those as inputs would make the same request look different depending
+		// on which surface sent it.
+		Inputs: schema.Pick(vals),
+	}, &ident.UserID, model.AgentRunSourceChat)
 	if err != nil {
+		// A missing slot is a question, not a failure: the same validation the
+		// Task Manager renders against a form field is asked here in words.
+		if miss, ok := service.AsMissingInput(err); ok {
+			return &Result{Missing: miss.Missing, Question: miss.Question, Options: miss.Options}, nil
+		}
 		return nil, err
 	}
+
 	aref := agentRef(*agent)
-	eref := executionRef(*exec, agent.Name)
-	status := exec.Status
-	if status == "" {
-		status = model.ExecutionStatusRunning
-	}
 	return &Result{
 		Data: map[string]any{
 			"agent":  agent.Name,
-			"status": status,
+			"status": run.Status,
+			"run_id": run.ID.String(),
+			"kind":   run.ExternalKind,
 			"reason": strArg(input, "reason"),
 		},
-		Entity:   &eref,
-		Entities: []model.EntityRef{aref, eref},
+		Entity:   &aref,
+		Entities: []model.EntityRef{aref},
 	}, nil
 }
 

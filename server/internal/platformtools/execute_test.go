@@ -106,15 +106,58 @@ func builtinAgent(name, builtin string) model.Agent {
 	}
 }
 
+// stubAgentRuns records what the chat surface asked the Task Manager to run.
+//
+// Chat no longer dispatches specialist tools itself: every execution goes
+// through this front door so it is recorded and reaches the agent board. These
+// tests therefore assert on what was handed to the front door, not on which
+// tool ran.
+type stubAgentRuns struct {
+	startN  int
+	lastReq model.CreateAgentRunRequest
+	lastSrc string
+	err     error
+}
+
+func (s *stubAgentRuns) Start(_ context.Context, orgID uuid.UUID, req model.CreateAgentRunRequest, _ *uuid.UUID, source string) (*model.AgentRun, *model.Agent, error) {
+	s.startN++
+	s.lastReq = req
+	s.lastSrc = source
+	if s.err != nil {
+		return nil, nil, s.err
+	}
+	return &model.AgentRun{
+			ID: uuid.New(), OrgID: orgID, AgentID: req.AgentID,
+			Status: model.AgentRunQueued, ExternalKind: "test_run",
+		},
+		&model.Agent{ID: req.AgentID, Name: "stub"}, nil
+}
+
+func (s *stubAgentRuns) GetRun(context.Context, uuid.UUID, uuid.UUID) (*model.AgentRun, error) {
+	return nil, nil
+}
+
+func (s *stubAgentRuns) ListRuns(context.Context, uuid.UUID, model.PaginationParams) (*model.PaginatedResponse[model.AgentRun], error) {
+	return &model.PaginatedResponse[model.AgentRun]{}, nil
+}
+
+var _ service.AgentRunService = (*stubAgentRuns)(nil)
+
 func executeReg(t *testing.T, agents []model.Agent, exec *stubExec, extra ...PlatformTool) (*Registry, context.Context) {
+	reg, ctx, _ := executeRegRuns(t, agents, exec, extra...)
+	return reg, ctx
+}
+
+func executeRegRuns(t *testing.T, agents []model.Agent, exec *stubExec, extra ...PlatformTool) (*Registry, context.Context, *stubAgentRuns) {
 	t.Helper()
 	reg := NewRegistry()
-	registerAgents(reg, Deps{Agents: &stubAgents{items: agents}, Exec: exec})
+	runs := &stubAgentRuns{}
+	registerAgents(reg, Deps{Agents: &stubAgents{items: agents}, Exec: exec, AgentRuns: runs})
 	for _, tool := range extra {
 		reg.Register(tool)
 	}
 	ctx := WithIdentity(context.Background(), Identity{OrgID: uuid.New(), UserID: uuid.New()})
-	return reg, ctx
+	return reg, ctx, runs
 }
 
 func TestAgentExecute_SchemaHasNoRequired(t *testing.T) {
@@ -132,7 +175,7 @@ func TestAgentExecute_SchemaHasNoRequired(t *testing.T) {
 func TestAgentExecute_ResearcherInterviewsTopic(t *testing.T) {
 	exec := &stubExec{}
 	researchN := 0
-	reg, ctx := executeReg(t, []model.Agent{builtinAgent("Research Agent", model.BuiltinResearcher)}, exec,
+	reg, ctx, runs := executeRegRuns(t, []model.Agent{builtinAgent("Research Agent", model.BuiltinResearcher)}, exec,
 		newTool("research_run", "research", "insight", "", false, false, tools.ObjectSchema(map[string]any{}),
 			func(_ context.Context, in map[string]any) (*Result, error) {
 				researchN++
@@ -147,23 +190,30 @@ func TestAgentExecute_ResearcherInterviewsTopic(t *testing.T) {
 	if res == nil || len(res.Missing) == 0 || res.Missing[0] != "topic" {
 		t.Fatalf("missing = %+v; want topic", res)
 	}
+	if runs.startN != 0 {
+		t.Fatal("must not start a run before the topic is known")
+	}
 	if exec.executeN != 0 || exec.startN != 0 {
 		t.Fatal("must not launch before topic")
-	}
-	if researchN != 0 {
-		t.Fatal("research_run must not run yet")
 	}
 
 	res, err = tool.Run(ctx, map[string]any{"name": "Research Agent", "topic": "Kubernetes cost optimisation"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if researchN != 1 {
-		t.Fatalf("research_run = %d", researchN)
+	// The run goes through the Task Manager rather than straight into the
+	// specialist tool, which is what makes it visible on the board.
+	if runs.startN != 1 {
+		t.Fatalf("agent runs started = %d; want 1", runs.startN)
 	}
-	data, _ := res.Data.(map[string]any)
-	if strArg(data, "topic") != "Kubernetes cost optimisation" {
-		t.Fatalf("topic = %#v", res.Data)
+	if got := runs.lastReq.Inputs["topic"]; got != "Kubernetes cost optimisation" {
+		t.Fatalf("topic handed to the front door = %q", got)
+	}
+	if runs.lastSrc != model.AgentRunSourceChat {
+		t.Fatalf("source = %q; want %q", runs.lastSrc, model.AgentRunSourceChat)
+	}
+	if researchN != 0 {
+		t.Fatal("chat must not dispatch the specialist itself — the runner does that")
 	}
 	if exec.executeN != 0 || exec.startN != 0 {
 		t.Fatal("researcher must not call blocking Execute/Start")
@@ -238,18 +288,7 @@ func TestAgentExecute_PRReviewerAsksPRNumber(t *testing.T) {
 }
 
 func TestAgentExecute_PRNumberStringDispatches(t *testing.T) {
-	var got int
-	exec := &stubExec{}
-	reg, ctx := executeReg(t, []model.Agent{builtinAgent("PR Reviewer", model.BuiltinPRReviewer)}, exec,
-		newTool("review_pull_request", "review", "security", "", false, false, tools.ObjectSchema(map[string]any{}),
-			func(_ context.Context, in map[string]any) (*Result, error) {
-				got = intArg(in, "pr_number", 0)
-				if got < 1 {
-					return &Result{Missing: []string{"pr_number"}, Question: "Which pull request number?"}, nil
-				}
-				return &Result{Data: map[string]any{"pr": got}}, nil
-			}),
-	)
+	reg, ctx, runs := executeRegRuns(t, []model.Agent{builtinAgent("PR Reviewer", model.BuiltinPRReviewer)}, &stubExec{})
 	tool, _ := reg.Get("agent_execute")
 	res, err := tool.Run(ctx, map[string]any{
 		"name": "PR Reviewer", "repo": "acme/api", "pr_number": "42",
@@ -260,8 +299,16 @@ func TestAgentExecute_PRNumberStringDispatches(t *testing.T) {
 	if res != nil && len(res.Missing) > 0 {
 		t.Fatalf("string pr_number must dispatch, missing=%v", res.Missing)
 	}
-	if got != 42 {
-		t.Fatalf("pr_number = %d; want 42", got)
+	if runs.startN != 1 {
+		t.Fatalf("agent runs started = %d; want 1", runs.startN)
+	}
+	// Inputs stay as the strings the interview collected; the runner is what
+	// parses them, so a model sending "42" and a form sending 42 arrive alike.
+	if got := runs.lastReq.Inputs["pr_number"]; got != "42" {
+		t.Fatalf("pr_number = %q; want \"42\"", got)
+	}
+	if got := runs.lastReq.Inputs["repo"]; got != "acme/api" {
+		t.Fatalf("repo = %q", got)
 	}
 }
 
@@ -295,7 +342,7 @@ func TestAgentExecute_GenericAsksPrompt(t *testing.T) {
 
 func TestAgentExecute_GenericStartIsAsync(t *testing.T) {
 	exec := &stubExec{executeSleep: 3 * time.Second}
-	reg, ctx := executeReg(t, []model.Agent{{ID: uuid.New(), Name: "Custom", Role: "helper"}}, exec)
+	reg, ctx, runs := executeRegRuns(t, []model.Agent{{ID: uuid.New(), Name: "Custom", Role: "helper"}}, exec)
 	tool, _ := reg.Get("agent_execute")
 	start := time.Now()
 	res, err := tool.Run(ctx, map[string]any{"name": "Custom", "prompt": "summarise last week's incidents"})
@@ -304,20 +351,21 @@ func TestAgentExecute_GenericStartIsAsync(t *testing.T) {
 		t.Fatal(err)
 	}
 	if elapsed > 2*time.Second {
-		t.Fatalf("blocked for %s; Start should return immediately", elapsed)
+		t.Fatalf("blocked for %s; starting a run should return immediately", elapsed)
 	}
-	if exec.startN != 1 {
-		t.Fatalf("start = %d", exec.startN)
+	if runs.startN != 1 {
+		t.Fatalf("agent runs started = %d; want 1", runs.startN)
 	}
+	if got := runs.lastReq.Inputs["prompt"]; got != "summarise last week's incidents" {
+		t.Fatalf("prompt handed to the front door = %q", got)
+	}
+	// The generic runner is what reaches ExecutionService, and it runs on the
+	// service's worker rather than inside this tool call.
 	if exec.executeN != 0 {
 		t.Fatal("must not call blocking Execute")
 	}
-	if res.Entity == nil || res.Entity.Kind != model.EntityExecution {
-		t.Fatalf("entity = %+v", res.Entity)
-	}
-	data, _ := res.Data.(map[string]any)
-	if strArg(data, "status") != model.ExecutionStatusRunning {
-		t.Fatalf("status = %#v", res.Data)
+	if res == nil || res.Entity == nil {
+		t.Fatalf("expected an agent entity to reference, got %+v", res)
 	}
 }
 

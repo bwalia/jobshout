@@ -230,6 +230,22 @@ func (r *multiAgentRepository) BoardEntries(ctx context.Context, orgID uuid.UUID
 			FROM research_runs r
 			WHERE r.org_id = $1 AND r.agent_id IS NOT NULL
 		),
+		agent_run_activity AS (
+			SELECT ar.agent_id,
+			       'agent_run'::text AS kind,
+			       ar.id             AS source_id,
+			       ar.status::text   AS status,
+			       NULLIF(ar.external_kind, '')::text AS step_key,
+			       COALESCE(NULLIF(ar.inputs->>'topic', ''),
+			                NULLIF(ar.inputs->>'target', ''),
+			                NULLIF(ar.inputs->>'repo', ''),
+			                NULLIF(ar.inputs->>'prompt', ''),
+			                ar.status)::text AS detail,
+			       'executor'::text  AS job_role,
+			       ar.updated_at     AS created_at
+			FROM agent_runs ar
+			WHERE ar.org_id = $1
+		),
 		combined AS (
 			SELECT u.*, ROW_NUMBER() OVER (PARTITION BY u.agent_id ORDER BY u.created_at DESC) AS rn
 			FROM (
@@ -238,6 +254,12 @@ func (r *multiAgentRepository) BoardEntries(ctx context.Context, orgID uuid.UUID
 				UNION ALL SELECT * FROM mail_activity
 				UNION ALL SELECT * FROM mail_research_activity
 				UNION ALL SELECT * FROM research_activity
+				-- The catch-all arm: pentest, review and generic runs reached
+				-- the board through nothing before this, because the board reads
+				-- specialist tables and those runs wrote to different ones.
+				-- Specialist arms above still win when they are more recent,
+				-- since they carry richer detail than the envelope does.
+				UNION ALL SELECT * FROM agent_run_activity
 			) u
 		)
 		SELECT a.id, a.name, a.role, a.avatar_url,
@@ -329,6 +351,20 @@ func boardActivity(kind, status, stepKey *string) string {
 		case model.MailThreadDraftReady:
 			return model.ActivityReviewing
 		case model.MailThreadNew, model.MailThreadClassifying, model.MailThreadResearching:
+			return model.ActivityExecuting
+		}
+		return model.ActivityIdle
+
+	case "agent_run":
+		// The envelope only knows that work was dispatched, not how it is
+		// going: the specialist row named by external_run_id owns that. So a
+		// dispatched run reads as executing until it is closed out, and a
+		// specialist arm takes over the card as soon as it has something more
+		// specific to say.
+		switch *status {
+		case model.AgentRunFailed:
+			return model.ActivityFailed
+		case model.AgentRunQueued, model.AgentRunRunning:
 			return model.ActivityExecuting
 		}
 		return model.ActivityIdle

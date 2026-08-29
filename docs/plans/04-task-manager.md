@@ -1,6 +1,6 @@
 # Plan 4 — Task Manager
 
-> ## Execution status — 2026-08-29 — **partially done**
+> ## Execution status — 2026-08-29 — **done**
 >
 > **Done — defect 1, the live drift, is fixed and cannot silently recur:**
 >
@@ -29,12 +29,45 @@
 > the divergence is now **pinned by `TestKnownDefaultDivergence_PRReviewerDryRun`**
 > and documented at the field, rather than guessed at. **This needs your call.**
 >
-> **Not done — the Agent Run Contract (phases 1–4).** `POST /api/v1/agent-runs`,
-> the `agent_runs` table, collapsing `launch.ts`'s client-side switch, unifying
-> the board on one join, and routing chat through it. This is the large,
-> invasive part, and doing it hurriedly would be worse than not doing it. Note
-> that defect 3 is now materially smaller: research runs reach the board (plan
-> 3), leaving pentest, review and generic `task_runs` outside it.
+> **Done — the Agent Run Contract (phases 1–4).**
+>
+> - `agent_runs` (migration 036), model, repository, and `AgentRunService` — the
+>   one front door. Runners are registered by builtin marker rather than
+>   selected by a switch, so `Schema()` is a method on the thing that runs and
+>   the two cannot drift.
+> - `POST/GET /api/v1/agent-runs`. A missing required slot is a 400 carrying the
+>   field and the question — the same shape chat renders as a clarification, so
+>   both surfaces ask the same thing in their own idiom.
+> - `launch.ts` is one call. Its per-agent switch is gone, and with it the
+>   180-second browser request and the orphaned-task case.
+> - Chat's `agent_execute` dispatches through the same service, so **a run
+>   started in chat is recorded and reaches the board** — the brief's explicit
+>   requirement, previously unmet.
+> - The board gained an `agent_run` arm, so pentest, review and generic runs
+>   reach it for the first time. Specialist arms still win when more recent,
+>   because they carry richer detail than the envelope does.
+>
+> **Two design corrections made while building it.**
+>
+> This plan assumed dispatch had to happen on a worker. It does not: every
+> runner is a *hand-off* — blog spawns its own goroutine, pentest and review
+> write rows a reconciler collects, research has its own worker — so none blocks.
+> Dispatching inline is what lets the 202 carry `external_run_id`, which is what
+> keeps the Task Manager's deep links to the article, scan or review working. On
+> a worker that id would not exist yet.
+>
+> Mail's "Gmail is not connected" message was immediate before and would have
+> become a run that failed a second later. `AgentRunPrechecker` is an optional
+> capability interface — the same idiom as `llm.ToolCapableClient` — that lets a
+> runner refuse synchronously. Mail refuses only when there is nothing to save
+> *and* nowhere to sync, so an operator's playbook is still kept when the
+> mailbox is disconnected.
+>
+> **The eval found drift the plan had not predicted, twice.** The parity test
+> caught the pentester's field order and `scan_mode`; the contract eval caught
+> chat recording the agent's own `name` as though it were an interview answer,
+> which made identical requests look different depending on their surface.
+> `Schema.Pick` narrows inputs to declared slots.
 
 Verified against `feat/landing-page` @ `063cce3`. This is the spine: Plan 5
 depends on it, Plan 2 Phase 4 depends on it, and Plan 3 Phase 3 feeds it.

@@ -328,7 +328,7 @@ func registerSpecialists(reg *Registry, d Deps) {
 				// are written: an omitted field must not wipe a playbook the
 				// operator saved in the Task Manager, which is the same rule
 				// mailFormIsBlank enforces on the web side.
-				if patch, ok := mailPlaybookPatch(input); ok {
+				if patch, ok := mailPlaybookArgs(input); ok {
 					if _, err := d.Mail.UpdateConnection(ctx, ident.OrgID, patch); err != nil {
 						return nil, err
 					}
@@ -383,62 +383,16 @@ func pentestTargetAllowed(target string) bool {
 	return strings.TrimSpace(target) != ""
 }
 
-// mailPlaybookPatch builds a connection patch from the playbook fields a caller
-// supplied, reporting false when none were.
-//
-// Watch rules travel together: MailWatchRules is a single value on the
-// connection, so supplying any one of senders/prefixes/labels rewrites all
-// three. The others are independent and are only written when present.
-func mailPlaybookPatch(input map[string]any) (model.UpdateMailConnectionRequest, bool) {
-	var patch model.UpdateMailConnectionRequest
-	changed := false
-
-	senders, hasSenders := input["senders"]
-	prefixes, hasPrefixes := input["subject_prefixes"]
-	labels, hasLabels := input["labels"]
-	if hasSenders || hasPrefixes || hasLabels {
-		patch.Rules = &model.MailWatchRules{
-			Senders:         splitList(fmt.Sprint(orEmpty(senders))),
-			SubjectPrefixes: splitList(fmt.Sprint(orEmpty(prefixes))),
-			Labels:          splitList(fmt.Sprint(orEmpty(labels))),
+// mailPlaybookArgs converts stringish tool args and defers to the canonical
+// patch builder in the service layer, so the chat tool and the Mail runner
+// cannot disagree about what saving a playbook means.
+func mailPlaybookArgs(input map[string]any) (model.UpdateMailConnectionRequest, bool) {
+	vals := map[string]string{}
+	for k, v := range input {
+		if v == nil {
+			continue
 		}
-		changed = true
+		vals[k] = strings.TrimSpace(fmt.Sprint(v))
 	}
-	if v, ok := input["knowledge_urls"]; ok {
-		urls := splitList(fmt.Sprint(orEmpty(v)))
-		patch.KnowledgeURLs = &urls
-		changed = true
-	}
-	if v, ok := input["research_focus"]; ok {
-		s := strings.TrimSpace(fmt.Sprint(orEmpty(v)))
-		patch.ResearchFocus = &s
-		changed = true
-	}
-	if v, ok := input["reply_instructions"]; ok {
-		s := strings.TrimSpace(fmt.Sprint(orEmpty(v)))
-		patch.ReplyInstructions = &s
-		changed = true
-	}
-	return patch, changed
-}
-
-func orEmpty(v any) any {
-	if v == nil {
-		return ""
-	}
-	return v
-}
-
-// splitList accepts either a comma-separated or newline-separated list, because
-// the Task Manager uses commas for watch rules and newlines for knowledge URLs
-// and a chat user will not know the difference.
-func splitList(raw string) []string {
-	fields := strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == '\n' })
-	out := make([]string, 0, len(fields))
-	for _, f := range fields {
-		if s := strings.TrimSpace(f); s != "" {
-			out = append(out, s)
-		}
-	}
-	return out
+	return service.MailPlaybookPatch(vals)
 }

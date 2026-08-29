@@ -1,6 +1,6 @@
 # Plan 5 — Chatbot
 
-> ## Execution status — 2026-08-29 — **phase 1 done**
+> ## Execution status — 2026-08-29 — **phases 1 and 3 done**
 >
 > **Done — the memory defect, which was the substantive complaint.**
 > `rollSummary` no longer concatenates verbatim and truncates to the last 3000
@@ -17,10 +17,20 @@
 > the fix itself: `trimSummary` was enforcing a byte budget in runes, so
 > multi-byte text overran it by 2.4×.
 >
+> **Done — phase 3, routing execution through the Task Manager.** Plan 4's
+> contract now exists, so `agent_execute` starts an `agent_run` instead of
+> calling a specialist tool directly. Every chat-started execution is recorded
+> and appears on the board, which was the brief's explicit requirement.
+>
+> This changes what a chat user sees for the execution intent: "started — here
+> is the run" rather than the specialist's output inline. That is the price of
+> the requirement, and it suits the existing rich-card chat UI, which already
+> polls run detail. The read-only tools (`research_run` for a quick inline
+> answer, `mail_list_drafts`, `article_run_get`) are unchanged, so asking a
+> question still answers it in the turn.
+>
 > **Not done:** Suite A (intent → tool), Suite C (honesty regression net),
-> Suite D (model A/B). Phase 3 — routing chat executions through the Task
-> Manager — is blocked on plan 4's Agent Run Contract; there is still nothing to
-> route to, so `dispatchTool` continues to call specialists directly.
+> Suite D (model A/B).
 >
 > Phase 2 (intent shaping) remains correctly deferred: without Suite A there is
 > no baseline, and this plan's own advice is not to reach for a router until the

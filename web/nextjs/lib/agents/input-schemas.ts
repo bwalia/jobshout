@@ -438,3 +438,44 @@ export function runInputsFromValues(
   }
   return out;
 }
+
+/**
+ * String-valued inputs for POST /agent-runs.
+ *
+ * The server's interview contract (server/internal/agentschema) is string-keyed
+ * throughout — chat collects strings, and each runner parses what it needs — so
+ * numbers and checkboxes are sent as their string form rather than as JSON
+ * types. That keeps one representation of "the answers to the interview"
+ * instead of one per surface.
+ *
+ * Generic agents are the exception worth naming: this form asks for a title and
+ * a description, while the server's generic schema asks for a single prompt, so
+ * the two are joined here. When the run belongs to a board task the server
+ * rebuilds the prompt from the task itself; this value is what a run with no
+ * task uses.
+ */
+export function agentRunInputs(
+  schema: AgentInputSchema,
+  values: Record<string, string>
+): Record<string, string> {
+  const out: Record<string, string> = {};
+
+  if (schema.kind === "task_run") {
+    const title = values.title?.trim() ?? "";
+    const description = values.description?.trim() ?? "";
+    const prompt = [title, description].filter(Boolean).join("\n\n");
+    if (prompt) out.prompt = prompt;
+    for (const [k, v] of Object.entries(values)) {
+      if (k === "title" || k === "description") continue;
+      if (v?.trim()) out[k] = v.trim();
+    }
+    return out;
+  }
+
+  for (const f of schema.fields) {
+    const raw = values[f.key];
+    if (raw == null || raw === "") continue;
+    out[f.key] = f.type === "checkbox" ? String(raw === "true") : raw;
+  }
+  return out;
+}

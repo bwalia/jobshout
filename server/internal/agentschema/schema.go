@@ -173,6 +173,22 @@ func (s Schema) NextMissing(vals map[string]string) (slot, question string, opti
 	return "", "", nil
 }
 
+// Pick narrows a value map to the slots this schema declares.
+//
+// Tool calls arrive carrying plumbing the agent has no use for — the agent's
+// own name, a "reason" the model volunteered — and anything left in would be
+// recorded as though the user had answered it. Narrowing here is what makes a
+// run started from chat and one started from a form record identical inputs.
+func (s Schema) Pick(vals map[string]string) map[string]string {
+	out := make(map[string]string, len(s.Fields))
+	for _, f := range s.Fields {
+		if v, ok := vals[f.Key]; ok && strings.TrimSpace(v) != "" {
+			out[f.Key] = v
+		}
+	}
+	return out
+}
+
 // ApplyDefaults fills empty optional/defaulted fields.
 func (s Schema) ApplyDefaults(vals map[string]string) map[string]string {
 	if vals == nil {

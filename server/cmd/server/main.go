@@ -546,6 +546,19 @@ func main() {
 		researchSvc, mailCfg, logger,
 	)
 	mailReconciler := service.NewMailReconciler(mailSvc, mailCfg.ReconcileInterval, logger)
+	// The one front door for running an agent. Runners wrap the pipelines that
+	// already exist; registering them here is what makes a new agent reachable
+	// from every surface at once rather than from whichever one learned about it.
+	agentRunRepo := repository.NewAgentRunRepository(pool)
+	agentRunSvc := service.NewAgentRunService(agentRunRepo, agentRepo, logger,
+		service.NewArticleRunner(blogSvc),
+		service.NewResearchRunner(researchSvc),
+		service.NewPentestRunner(pentestSvc),
+		service.NewReviewRunner(reviewSvc),
+		service.NewMailRunner(mailSvc),
+		service.NewGenericRunner(taskRunSvc, execSvc),
+	)
+	agentRunHandler := handler.NewAgentRunHandler(agentRunSvc)
 	if mailCfg.Configured() {
 		logger.Info("mail agent oauth configured",
 			zap.String("redirect_url", mailCfg.RedirectURL),
@@ -623,6 +636,7 @@ func main() {
 	platformReg := platformtools.NewRegistryWithTools(platformtools.Deps{
 		Agents:          agentSvc,
 		Exec:            execSvc,
+		AgentRuns:       agentRunSvc,
 		Workflows:       workflowSvc,
 		Tasks:           taskSvc,
 		Projects:        projectSvc,
@@ -746,6 +760,7 @@ func main() {
 	blogHandler := handler.NewBlogHandler(blogSvc)
 	researchHandler := handler.NewResearchHandler(researchSvc)
 	agentSchemaHandler := handler.NewAgentSchemaHandler()
+
 	pentestHandler := handler.NewPentestHandler(pentestSvc)
 	reviewHandler := handler.NewReviewHandler(reviewSvc)
 	mailHandler := handler.NewMailHandler(mailSvc, mailCfg.FrontendBaseURL)
@@ -977,6 +992,14 @@ func main() {
 			// The agent input contract, so the Task Manager's copy can be
 			// checked against the server's rather than kept in step by hand.
 			r.Get("/agent-schemas", agentSchemaHandler.List)
+
+			// Agent runs: the single entry point every surface uses to start
+			// an agent, and the row the board reads.
+			r.Route("/agent-runs", func(r chi.Router) {
+				r.Get("/", agentRunHandler.List)
+				r.Post("/", agentRunHandler.Create)
+				r.Get("/{runID}", agentRunHandler.Get)
+			})
 
 			r.Route("/research", func(r chi.Router) {
 				// The long budget this route needs is applied by

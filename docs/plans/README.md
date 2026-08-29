@@ -2,17 +2,17 @@
 
 > ## Execution status — 2026-08-29
 >
-> Plans 1, 2 and 3 are done. Plan 4 is partially done (the live schema drift is
-> fixed and guarded; the Agent Run Contract is not built). Plan 5's memory fix
-> is done; its eval suites and the routing phase are not.
+> Plans 1–4 are done. Plan 5's memory fix and its routing phase are done; its
+> eval suites (intent, honesty, model A/B) are not.
 >
 > Each plan carries its own status block. Two things worth reading there:
 > plan 1's eval found the exact bug it was written for, and plan 4's `dry_run`
 > recommendation turned out to be **wrong** — it needs a product decision from
 > you, and is pinned by a test until you make it.
 >
-> Everything below `go test ./...` green: 30 packages, including three new
-> suites (`eval/harness`, `eval/mail`, `eval/research`).
+> Everything below `go test ./...` green: 31 packages and 161 eval checks,
+> including four new suites (`eval/harness`, `eval/mail`, `eval/research`,
+> `eval/taskmanager`).
 
 Rewritten 2026-08-29 against `feat/landing-page` @ `063cce3`, **after** the
 master merge that brought in `feat/mail-research-links` and

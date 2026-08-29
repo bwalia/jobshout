@@ -1,40 +1,52 @@
 import { apiClient } from "@/lib/api/client";
-import { createTaskRun } from "@/lib/api/task-runs";
-import { updateTask } from "@/lib/api/tasks";
-import { generateBlog } from "@/lib/api/blog";
 import type { AgentInputSchema } from "@/lib/agents/input-schemas";
-import { runInputsFromValues } from "@/lib/agents/input-schemas";
-import {
-  mailFormIsBlank,
-  mailPatchFromFormValues,
-  resolveMailLaunchValues,
-} from "@/lib/agents/mail-playbook";
+import { agentRunInputs } from "@/lib/agents/input-schemas";
 import type { Agent } from "@/lib/types/agent";
 import type { Task } from "@/lib/types/project";
-import type { TaskRun } from "@/lib/types/task-run";
-import type { ScanMode } from "@/types/pentest";
-import type { PentestRun } from "@/types/pentest";
-import type { ReviewRun } from "@/types/review";
-import type { BlogRun } from "@/lib/types/blog";
-import axios from "axios";
 
-export type LaunchResult =
-  | { kind: "task_run"; run: TaskRun; task: Task }
-  | { kind: "pentester"; run: PentestRun; task: Task }
-  | { kind: "pr_reviewer"; run: ReviewRun; task: Task }
-  | { kind: "article_writer"; run: BlogRun; task: Task }
-  | { kind: "researcher"; brief: ResearchBrief; task: Task }
-  | { kind: "mail"; task: Task; syncQueued: boolean };
+/** One execution of one agent — mirrors `model.AgentRun` on the server. */
+export interface AgentRun {
+  id: string;
+  org_id: string;
+  agent_id: string;
+  task_id?: string;
+  builtin?: string;
+  source: string;
+  status: "queued" | "running" | "completed" | "failed";
+  external_run_id?: string;
+  external_kind?: string;
+  error_message?: string;
+  created_at: string;
+}
 
-interface ResearchBrief {
-  topic?: string;
-  summary?: string;
-  findings?: { claim?: string; source_url?: string }[];
-  sources?: { url?: string; title?: string }[];
+/** 202 body of POST /agent-runs. */
+export interface LaunchResult {
+  /** The schema kind that was launched, so callers can word their own toast. */
+  kind: AgentInputSchema["kind"];
+  run: AgentRun;
+  agent: string;
+  task: Task;
+}
+
+/** 400 body when a required input is empty — the same shape chat renders. */
+export interface MissingInput {
+  missing: string[];
+  question: string;
+  options?: { label: string; value: string }[];
 }
 
 /**
- * After the board task exists, kick off the right executor for the chosen agent.
+ * Start an agent for a board task.
+ *
+ * This used to be a switch: a branch per agent, each posting to a different
+ * endpoint from the browser. That meant the server had no single entry point
+ * for "run agent X" — chat had to reimplement the fan-out, a closed tab could
+ * lose a run, and most run types never reached the agent board because the
+ * board reads specialist tables and each branch wrote to a different one.
+ *
+ * There is now one call. The server resolves the agent's builtin, validates the
+ * inputs against the same schema this form was rendered from, records the run
+ * and dispatches it.
  */
 export async function launchAgentForTask(opts: {
   agent: Agent;
@@ -44,110 +56,36 @@ export async function launchAgentForTask(opts: {
 }): Promise<LaunchResult> {
   const { agent, task, schema, values } = opts;
 
-  switch (schema.kind) {
-    case "pentester": {
-      const payload: Record<string, unknown> = {
-        agent_id: agent.id,
-        task_id: task.id,
-        target: values.target.trim(),
-        scan_mode: (values.scan_mode || "quick") as ScanMode,
-      };
-      if (values.max_budget?.trim()) {
-        payload.max_budget = parseInt(values.max_budget, 10);
-      }
-      if (values.instruction?.trim()) {
-        payload.instruction = values.instruction.trim();
-      }
-      const { data: run } = await apiClient.post<PentestRun>(
-        "/pentest-runs",
-        payload
-      );
-      return { kind: "pentester", run, task };
-    }
-    case "pr_reviewer": {
-      const { data: run } = await apiClient.post<ReviewRun>("/review-runs", {
-        repo: values.repo.trim(),
-        pr_number: parseInt(values.pr_number, 10),
-        dry_run: values.dry_run === "true",
-        agent_id: agent.id,
-      });
-      return { kind: "pr_reviewer", run, task };
-    }
-    case "article_writer": {
-      const run = await generateBlog({
-        briefs: [
-          {
-            topic: values.topic.trim(),
-            context: values.context?.trim() || undefined,
-          },
-        ],
-        model: values.model?.trim() || undefined,
-      });
-      return { kind: "article_writer", run, task };
-    }
-    case "researcher": {
-      // Research runs synchronously and can take longer than the default 30s.
-      const { data: brief } = await apiClient.post<ResearchBrief>(
-        "/research",
-        {
-          topic: values.topic.trim(),
-          context: values.context?.trim() || undefined,
-        },
-        { timeout: 180_000 }
-      );
-      // Persist findings on the board task so Create & run leaves a readable artefact.
-      const updated = await updateTask(task.id, {
-        description: formatResearchBrief(brief, task.description),
-        status: "done",
-      }).catch(() => task);
-      return { kind: "researcher", brief, task: updated };
-    }
-    case "mail": {
-      const toSave = await resolveMailLaunchValues(values);
-      // Empty form + no saved playbook: skip PATCH so we never wipe a mailbox
-      // that GET could not see (or that the dialog had not hydrated yet).
-      if (!mailFormIsBlank(toSave)) {
-        await apiClient.patch("/mail/connection", mailPatchFromFormValues(toSave));
-      }
-      try {
-        await apiClient.post("/mail/sync");
-        return { kind: "mail", task, syncQueued: true };
-      } catch (err) {
-        const status = axios.isAxiosError(err) ? err.response?.status : undefined;
-        // Playbook is saved; 409/503 means Gmail is not connected or not configured.
-        if (status === 409 || status === 503) {
-          return { kind: "mail", task, syncQueued: false };
-        }
-        throw err;
-      }
-    }
-    default: {
-      const inputs = runInputsFromValues(schema, values);
-      const payload: Parameters<typeof createTaskRun>[1] = {
-        agent_id: agent.id,
-      };
-      if (Object.keys(inputs).length) payload.inputs = inputs;
-      const run = await createTaskRun(task.id, payload);
-      return { kind: "task_run", run, task };
-    }
-  }
+  const { data } = await apiClient.post<{
+    run: AgentRun;
+    agent: string;
+    kind: string;
+  }>("/agent-runs", {
+    agent_id: agent.id,
+    task_id: task.id,
+    inputs: agentRunInputs(schema, values),
+  });
+
+  return { kind: schema.kind, run: data.run, agent: data.agent, task };
 }
 
-function formatResearchBrief(
-  brief: ResearchBrief,
-  prior?: string | null
-): string {
-  const parts: string[] = [];
-  if (prior?.trim()) parts.push(prior.trim());
-  if (brief.summary?.trim()) {
-    parts.push(`## Summary\n\n${brief.summary.trim()}`);
+/**
+ * Read a 400 from `launchAgentForTask` as a missing-input prompt.
+ *
+ * Returns null for any other failure, so a caller can fall back to showing the
+ * error rather than inventing a field to blame.
+ */
+export function asMissingInput(err: unknown): MissingInput | null {
+  const body = (err as { response?: { status?: number; data?: unknown } })
+    ?.response;
+  if (body?.status !== 400) return null;
+  const data = body.data as Partial<MissingInput> | undefined;
+  if (!data || !Array.isArray(data.missing) || data.missing.length === 0) {
+    return null;
   }
-  if (brief.findings?.length) {
-    const lines = brief.findings.map((f) => {
-      const claim = f.claim?.trim() || "(finding)";
-      return f.source_url ? `- ${claim} ([source](${f.source_url}))` : `- ${claim}`;
-    });
-    parts.push(`## Findings\n\n${lines.join("\n")}`);
-  }
-  return parts.join("\n\n") || prior || "";
+  return {
+    missing: data.missing,
+    question: data.question ?? "That field is required.",
+    options: data.options,
+  };
 }

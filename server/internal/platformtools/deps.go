@@ -11,7 +11,11 @@ import (
 // Deps is the service bundle platform tools call into. Fields may be nil;
 // the corresponding tools then return a clear "not configured" result.
 type Deps struct {
-	Agents          service.AgentService
+	Agents service.AgentService
+	// AgentRuns is the single front door for starting an agent. Chat dispatches
+	// through it so a run started here is recorded and reaches the board, the
+	// same as one started from the Task Manager.
+	AgentRuns       service.AgentRunService
 	Exec            service.ExecutionService
 	Workflows       service.WorkflowService
 	Tasks           service.TaskService

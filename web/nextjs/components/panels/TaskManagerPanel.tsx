@@ -132,23 +132,29 @@ export function TaskManagerPanel() {
       : null;
 
   function handleLaunchResult(result: LaunchResult) {
+    // Deep links point at the specialist row the run created — the article,
+    // scan or review — not at the agent-run envelope that names it. The server
+    // dispatches inline, so external_run_id is already set by the time the 202
+    // comes back; falling back to the envelope id keeps navigation working if a
+    // runner ever has nothing external to point at.
+    const specialistId = result.run.external_run_id || result.run.id;
     switch (result.kind) {
       case "pentester":
         setSelection({ kind: "builtin", id: "pentest" });
         router.replace(
-          `/panel/task-manager?agent=pentest&run=${result.run.id}`,
+          `/panel/task-manager?agent=pentest&run=${specialistId}`,
           { scroll: false }
         );
         break;
       case "pr_reviewer":
         setSelection({ kind: "builtin", id: "review" });
         router.replace(
-          `/panel/task-manager?agent=review&run=${result.run.id}`,
+          `/panel/task-manager?agent=review&run=${specialistId}`,
           { scroll: false }
         );
         break;
       case "article_writer":
-        router.push(`/articles/${result.run.id}`);
+        router.push(`/articles/${specialistId}`);
         break;
       case "mail":
         setSelection({ kind: "builtin", id: "mail" });
