@@ -44,6 +44,7 @@ export interface Task {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  metadata?: Record<string, unknown> | null;
   labels?: TaskLabel[];
   subtask_count?: number;
 }

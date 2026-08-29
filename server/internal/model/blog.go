@@ -251,6 +251,8 @@ type GenerateBlogRequest struct {
 	// and rejected in that combination rather than quietly ignored.
 	Focus       []string `json:"focus,omitempty"`
 	MaxArticles int      `json:"max_articles,omitempty"`
+	// TaskID, when set, is the Task Manager board card this run belongs to.
+	TaskID *uuid.UUID `json:"task_id,omitempty"`
 	// AutoPublish files the finished articles in the CMS without waiting for
 	// someone to press the button.
 	//

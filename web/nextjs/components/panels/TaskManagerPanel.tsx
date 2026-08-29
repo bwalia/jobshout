@@ -132,48 +132,14 @@ export function TaskManagerPanel() {
       : null;
 
   function handleLaunchResult(result: LaunchResult) {
-    switch (result.kind) {
-      case "pentester":
-        setSelection({ kind: "builtin", id: "pentest" });
-        router.replace(
-          `/panel/task-manager?agent=pentest&run=${result.run.id}`,
-          { scroll: false }
-        );
-        break;
-      case "pr_reviewer":
-        setSelection({ kind: "builtin", id: "review" });
-        router.replace(
-          `/panel/task-manager?agent=review&run=${result.run.id}`,
-          { scroll: false }
-        );
-        break;
-      case "article_writer":
-        router.push(`/articles/${result.run.id}`);
-        break;
-      case "mail":
-        setSelection({ kind: "builtin", id: "mail" });
-        router.replace("/panel/task-manager?agent=mail", { scroll: false });
-        break;
-      case "researcher": {
-        const params = new URLSearchParams({
-          project: result.task.project_id,
-          task: result.task.id,
-        });
-        setSelection({ kind: "project", id: result.task.project_id });
-        router.replace(`/panel/task-manager?${params}`, { scroll: false });
-        break;
-      }
-      case "task_run": {
-        const params = new URLSearchParams({
-          project: result.task.project_id,
-          task: result.task.id,
-          run: result.run.id,
-        });
-        setSelection({ kind: "project", id: result.task.project_id });
-        router.replace(`/panel/task-manager?${params}`, { scroll: false });
-        break;
-      }
-    }
+    if (!result.task) return;
+    const params = new URLSearchParams({
+      project: result.task.project_id,
+      task: result.task.id,
+    });
+    if (result.run_id) params.set("run", result.run_id);
+    setSelection({ kind: "project", id: result.task.project_id });
+    router.replace(`/panel/task-manager?${params.toString()}`, { scroll: false });
   }
 
   return (
@@ -582,10 +548,8 @@ function ProjectTasksView({
           onClose={() => setEditorOpen(false)}
           onSaved={(t) => setSelectedId(t.id)}
           onLaunched={(result) => {
-            if (result.kind === "task_run") {
-              setSelectedId(result.task.id);
-              setFocusRunId(result.run.id);
-            }
+            setSelectedId(result.task.id);
+            if (result.run_id) setFocusRunId(result.run_id);
             onLaunched(result);
           }}
         />

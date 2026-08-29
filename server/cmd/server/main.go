@@ -55,6 +55,7 @@ import (
 	"github.com/jobshout/server/internal/selector"
 	"github.com/jobshout/server/internal/service"
 	"github.com/jobshout/server/internal/strix"
+	"github.com/jobshout/server/internal/tasklaunch"
 	"github.com/jobshout/server/internal/tools"
 	ws "github.com/jobshout/server/internal/websocket"
 	wfengine "github.com/jobshout/server/internal/workflow"
@@ -129,7 +130,8 @@ func requestTimeout(next http.Handler) http.Handler {
 		// pages and makes a model call per source. Minutes of real work, not a
 		// stuck request. Trending under the same prefix is only HTTP calls, so
 		// it keeps the default.
-		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/research") {
+		if r.Method == http.MethodPost && (strings.HasSuffix(r.URL.Path, "/research") ||
+			strings.HasSuffix(r.URL.Path, "/tasks/launch")) {
 			timeout = researchRequestTimeout
 		}
 		// One call to a single GPU, which draws for tens of seconds and may
@@ -539,11 +541,30 @@ func main() {
 	} else {
 		mailLLM = c
 	}
+	var gmailAPI mail.GmailAPI
+	if mailCfg.Simulate {
+		gmailAPI = mail.NewSimulatedGmail()
+		logger.Warn("mail: MAIL_SIMULATE is on — inbox is fake, Google is not called")
+	} else {
+		gmailAPI = mail.NewGmailAPI(nil, logger)
+	}
 	mailSvc := service.NewMailService(
-		mailRepo, agentRepo, mail.NewGmailAPI(nil, logger),
+		mailRepo, agentRepo, gmailAPI,
 		mail.NewClassifier(mailLLM, logger), mail.NewDrafter(mailLLM, logger),
 		researchSvc, mailCfg, logger,
 	)
+	launchSvc := &tasklaunch.Service{
+		Agents:   agentSvc,
+		Tasks:    taskSvc,
+		Projects: projectSvc,
+		Research: researchSvc,
+		Blog:     blogSvc,
+		Mail:     mailSvc,
+		Pentest:  pentestSvc,
+		Reviews:  reviewSvc,
+		Images:   imageSvc,
+		TaskRuns: taskRunSvc,
+	}
 	mailReconciler := service.NewMailReconciler(mailSvc, mailCfg.ReconcileInterval, logger)
 	if mailCfg.Configured() {
 		logger.Info("mail agent oauth configured",
@@ -653,6 +674,7 @@ func main() {
 		Embedder:        toolEmbedder,
 		Pool:            pool,
 		Memory:          memorySvc,
+		Launch:          launchSvc,
 	})
 	chatGuard := platformtools.NewGuard(rbacSvc, govSvc)
 	chatAgent := chatagent.New(chatClient, platformReg, chatGuard, memorySvc, logger)
@@ -715,7 +737,7 @@ func main() {
 	imageHandler := handler.NewImageHandler(imageSvc)
 	agentHandler := handler.NewAgentHandler(agentSvc)
 	projectHandler := handler.NewProjectHandler(projectSvc)
-	taskHandler := handler.NewTaskHandler(taskSvc)
+	taskHandler := handler.NewTaskHandler(taskSvc, launchSvc)
 	taskRunHandler := handler.NewTaskRunHandler(taskRunSvc)
 	orgHandler := handler.NewOrganizationHandler(orgRepo)
 	marketplaceHandler := handler.NewMarketplaceHandler(pool, logger)
@@ -884,6 +906,7 @@ func main() {
 			r.Route("/tasks", func(r chi.Router) {
 				r.Get("/", taskHandler.List)
 				r.Post("/", taskHandler.Create)
+				r.Post("/launch", taskHandler.Launch)
 				r.Route("/{taskID}", func(r chi.Router) {
 					r.Get("/", taskHandler.GetByID)
 					r.Put("/", taskHandler.Update)
@@ -1011,6 +1034,11 @@ func main() {
 				r.Patch("/drafts/{id}", mailHandler.PatchDraft)
 				r.Post("/drafts/{id}/approve", mailHandler.ApproveDraft)
 				r.Post("/drafts/{id}/reject", mailHandler.RejectDraft)
+				if mailCfg.Simulate {
+					r.Post("/simulate/connect", mailHandler.SimulateConnect)
+					r.Post("/simulate/inbox", mailHandler.SimulateInbox)
+					r.Post("/simulate/sync", mailHandler.SimulateSync)
+				}
 			})
 
 			// Plugins (user-defined LangGraph/LangChain workflows)

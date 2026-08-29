@@ -473,7 +473,6 @@ function CreateTaskForm({
       const result = await launchAgentForTask({
         agent: selectedAgent,
         task: created,
-        schema,
         values,
       });
       toast.success(
@@ -486,10 +485,12 @@ function CreateTaskForm({
               : result.kind === "pr_reviewer"
                 ? "PR review queued"
                 : result.kind === "mail"
-                  ? result.syncQueued
+                  ? result.sync_queued
                     ? "Mailbox sync queued"
                     : "Playbook saved. Connect Gmail on Mail Agent to sync."
-                  : "Agent run started"
+                  : result.kind === "images"
+                    ? "Image generated"
+                    : "Agent run started"
       );
       onLaunched?.(result);
       onClose();

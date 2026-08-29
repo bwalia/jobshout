@@ -11,7 +11,11 @@ import {
   schemaValuesValid,
   validateSchemaValues,
 } from "@/lib/agents/input-schemas";
-import { launchAgentForTask, type LaunchResult } from "@/lib/agents/launch";
+import {
+  launchAgentForTask,
+  launchValuesFromTask,
+  type LaunchResult,
+} from "@/lib/agents/launch";
 import { fetchMailFormValues, mailFormIsBlank } from "@/lib/agents/mail-playbook";
 import { apiErrorMessage } from "@/lib/api/client";
 import { useSkills } from "@/lib/hooks/useSkills";
@@ -89,7 +93,9 @@ export function RunTaskDialog({
   );
 
   useEffect(() => {
-    setValues(defaultValuesForSchema(schema));
+    const defaults = defaultValuesForSchema(schema);
+    const stored = launchValuesFromTask(task);
+    setValues({ ...defaults, ...stored });
     setFieldErrors({});
     setTouchedSubmit(false);
     setLaunchError(null);
@@ -110,7 +116,7 @@ export function RunTaskDialog({
     return () => {
       cancelled = true;
     };
-  }, [schema]);
+  }, [schema, task]);
 
   const availableSlugs = useMemo(
     () => (skills ?? []).map((s) => s.slug),
@@ -178,17 +184,18 @@ export function RunTaskDialog({
         const result = await launchAgentForTask({
           agent: selectedAgent,
           task,
-          schema,
           values,
         });
         toast.success(
           result.kind === "researcher"
             ? "Research complete"
             : result.kind === "mail"
-              ? result.syncQueued
+              ? result.sync_queued
                 ? "Mailbox sync queued"
                 : "Playbook saved. Connect Gmail on Mail Agent to sync."
-              : "Agent run started"
+              : result.kind === "images"
+                ? "Image generated"
+                : "Agent run started"
         );
         onSpecialistLaunched?.(result);
         onClose();
