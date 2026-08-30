@@ -45,6 +45,7 @@ type MailConnection struct {
 	WatchSenders          []string   `json:"watch_senders"`
 	WatchSubjectPrefixes  []string   `json:"watch_subject_prefixes"`
 	WatchKnowledgeURLs    []string   `json:"knowledge_urls"`
+	KnowledgeNotes        string     `json:"knowledge_notes"`
 	ResearchFocus         string     `json:"research_focus"`
 	ReplyInstructions     string     `json:"reply_instructions"`
 	Status                string     `json:"status"`
@@ -83,6 +84,7 @@ type MailConnectionStatus struct {
 	AllowMailboxMutations bool           `json:"allow_mailbox_mutations"`
 	Rules                 MailWatchRules `json:"rules"`
 	KnowledgeURLs         []string       `json:"knowledge_urls"`
+	KnowledgeNotes        string         `json:"knowledge_notes"`
 	ResearchFocus         string         `json:"research_focus"`
 	ReplyInstructions     string         `json:"reply_instructions"`
 	Scopes                []string       `json:"scopes,omitempty"`
@@ -175,6 +177,7 @@ type UpdateMailConnectionRequest struct {
 	AllowMailboxMutations *bool           `json:"allow_mailbox_mutations"`
 	Rules                 *MailWatchRules `json:"rules"`
 	KnowledgeURLs         *[]string       `json:"knowledge_urls"`
+	KnowledgeNotes        *string         `json:"knowledge_notes"`
 	ResearchFocus         *string         `json:"research_focus"`
 	ReplyInstructions     *string         `json:"reply_instructions"`
 }

@@ -19,6 +19,11 @@ type Config struct {
 	ReconcileInterval time.Duration
 	// Simulate is local-only: a fake inbox, no Google. Set MAIL_SIMULATE=1.
 	Simulate bool
+	// DraftModel overrides the provider's default model for reply drafting
+	// only (MAIL_MODEL). Classification stays on the default model on purpose:
+	// triage runs on every inbound mail and must stay fast, while draft
+	// quality is worth a slower reasoning model. Empty keeps the default.
+	DraftModel string
 }
 
 // LoadConfig reads GMAIL_* / MAIL_* / FRONTEND_BASE_URL from the environment.
@@ -39,6 +44,7 @@ func LoadConfig() Config {
 	}
 	c.PollInterval = envDuration("MAIL_POLL_INTERVAL", 5*time.Minute)
 	c.ReconcileInterval = envDuration("MAIL_RECONCILE_INTERVAL", 15*time.Second)
+	c.DraftModel = strings.TrimSpace(os.Getenv("MAIL_MODEL"))
 	c.Simulate = SimulateEnabled()
 	if c.Simulate {
 		if c.ClientID == "" {

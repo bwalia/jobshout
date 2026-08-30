@@ -390,7 +390,7 @@ func (s *Service) launchMail(ctx context.Context, req Request, taskID uuid.UUID)
 }
 
 func mailValuesBlank(v map[string]string) bool {
-	for _, k := range []string{"senders", "subject_prefixes", "labels", "knowledge_urls", "research_focus", "reply_instructions"} {
+	for _, k := range []string{"senders", "subject_prefixes", "labels", "knowledge_notes", "knowledge_urls", "research_focus", "reply_instructions"} {
 		if strings.TrimSpace(v[k]) != "" {
 			return false
 		}
@@ -405,11 +405,13 @@ func mailPatchFromValues(v map[string]string) model.UpdateMailConnectionRequest 
 		SubjectPrefixes: splitComma(v["subject_prefixes"]),
 	}
 	urls := splitLines(v["knowledge_urls"])
+	notes := strings.TrimSpace(v["knowledge_notes"])
 	focus := strings.TrimSpace(v["research_focus"])
 	style := strings.TrimSpace(v["reply_instructions"])
 	return model.UpdateMailConnectionRequest{
 		Rules:             &rules,
 		KnowledgeURLs:     &urls,
+		KnowledgeNotes:    &notes,
 		ResearchFocus:     &focus,
 		ReplyInstructions: &style,
 	}

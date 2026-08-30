@@ -24,6 +24,9 @@ type DraftOptions struct {
 	// ReplyInstructions is how the reply should read. Empty keeps the default
 	// concise professional tone.
 	ReplyInstructions string
+	// KnowledgeNotes is the operator's own text about prices, products and
+	// policies. When set it is the primary source of facts for the reply.
+	KnowledgeNotes string
 	// PinnedKnowledge is true when findings (if any) came from the org's
 	// pinned knowledge pages rather than an open-web search.
 	PinnedKnowledge bool
@@ -31,15 +34,19 @@ type DraftOptions struct {
 
 type llmDrafter struct {
 	llm    llm.Client
+	model  string
 	logger *zap.Logger
 }
 
-// NewDrafter returns an LLM drafter, falling back to HeuristicDraft.
-func NewDrafter(client llm.Client, logger *zap.Logger) Drafter {
+// NewDrafter returns an LLM drafter, falling back to HeuristicDraft. model
+// overrides the provider's default model for drafting (empty keeps it); a
+// reasoning model's thinking phase is requested automatically when the model
+// supports one.
+func NewDrafter(client llm.Client, model string, logger *zap.Logger) Drafter {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &llmDrafter{llm: client, logger: logger}
+	return &llmDrafter{llm: client, model: model, logger: logger}
 }
 
 func (d *llmDrafter) Draft(ctx context.Context, msg InboxMessage, class ClassifyResult, brief *research.Brief, opts DraftOptions) (Draft, error) {
@@ -52,12 +59,13 @@ func (d *llmDrafter) Draft(ctx context.Context, msg InboxMessage, class Classify
 		d.logger.Warn("mail: draft failed, using heuristic", zap.Error(err))
 		return HeuristicDraft(msg, brief), nil
 	}
-	// When the reply is grounded in research, every money amount in the draft
-	// must come from the findings, the sender's own email, or the operator's
-	// instructions. The model has been observed inventing stale prices when the
-	// pinned page states none — an honest "not listed" beats a wrong figure.
-	if brief != nil || opts.PinnedKnowledge {
-		allowed := []string{briefText(brief), msg.Subject, msg.Body, opts.ReplyInstructions}
+	// When the reply is grounded in research or operator knowledge, every money
+	// amount in the draft must come from those sources, the sender's own email,
+	// or the operator's instructions. The model has been observed inventing
+	// stale prices when the source states none — an honest "not listed" beats
+	// a wrong figure.
+	if brief != nil || opts.PinnedKnowledge || strings.TrimSpace(opts.KnowledgeNotes) != "" {
+		allowed := []string{briefText(brief), msg.Subject, msg.Body, opts.ReplyInstructions, opts.KnowledgeNotes}
 		bad := unsupportedAmounts(draft.Body, allowed...)
 		if len(bad) == 0 {
 			return draft, nil
@@ -83,13 +91,23 @@ func (d *llmDrafter) generate(ctx context.Context, msg InboxMessage, prompt stri
 	}
 	err := llm.GenerateJSON(ctx, "mail-draft", prompt, &out,
 		func(ctx context.Context, prompt string) (string, error) {
-			resp, err := d.llm.Generate(ctx, llm.GenerateRequest{
-				MaxTokens: 800,
+			req := llm.GenerateRequest{
+				Model: d.model,
+				// Thinking runs before the answer and counts against the same
+				// budget, so this is well above the ~800 tokens a reply needs.
+				MaxTokens: 2500,
+				Think:     true,
 				Messages: []llm.Message{
 					{Role: llm.RoleSystem, Content: draftSystem},
 					{Role: llm.RoleUser, Content: prompt},
 				},
-			})
+			}
+			resp, err := d.llm.Generate(ctx, req)
+			if err != nil && errors.Is(err, llm.ErrOnlyThinking) {
+				d.logger.Warn("mail: draft thinking exhausted the token budget, retrying without thinking", zap.Error(err))
+				req.Think = false
+				resp, err = d.llm.Generate(ctx, req)
+			}
 			if err != nil {
 				return "", err
 			}
@@ -125,7 +143,7 @@ func (d *llmDrafter) generate(ctx context.Context, msg InboxMessage, prompt stri
 const draftSystem = `You draft organisation email replies. Reply with JSON only: subject, body, to, cc.
 The body is plain text. Be concise and professional.
 You have not sent this message. Never say you have sent it, never invent a message-id, never claim the Research Agent found something it did not.
-If research findings are provided, use only those facts; do not invent citations.`
+If operator knowledge or research findings are provided, use only those facts; do not invent citations.`
 
 // BuildDraftPrompt is exported so tests can assert research is folded in and
 // the prompt forbids claiming the mail was sent.
@@ -150,6 +168,10 @@ func BuildDraftPrompt(msg InboxMessage, class ClassifyResult, brief *research.Br
 		}
 		researchBlock = b.String()
 	}
+	var knowledgeBlock string
+	if notes := strings.TrimSpace(opts.KnowledgeNotes); notes != "" {
+		knowledgeBlock = "\nOperator-provided knowledge (use only these facts):\n" + notes + "\n"
+	}
 
 	return fmt.Sprintf(`Draft a reply to this email. Return JSON:
 {"subject":"...","body":"...","to":"%s","cc":""}
@@ -161,14 +183,15 @@ From: %s <%s>
 Subject: %s
 
 %s
-%s`, msg.FromEmail, class.Intent, class.SuggestedAction, class.Reason,
+%s%s`, msg.FromEmail, class.Intent, class.SuggestedAction, class.Reason,
 		draftOperatorGuidance(opts),
-		msg.FromName, msg.FromEmail, msg.Subject, body, researchBlock)
+		msg.FromName, msg.FromEmail, msg.Subject, body, knowledgeBlock, researchBlock)
 }
 
 func draftOperatorGuidance(opts DraftOptions) string {
 	reply := strings.TrimSpace(opts.ReplyInstructions)
-	if !opts.PinnedKnowledge && reply == "" {
+	hasNotes := strings.TrimSpace(opts.KnowledgeNotes) != ""
+	if !opts.PinnedKnowledge && !hasNotes && reply == "" {
 		return ""
 	}
 	if reply == "" {
@@ -178,7 +201,16 @@ func draftOperatorGuidance(opts DraftOptions) string {
 	b.WriteString("\nREPLY INSTRUCTIONS FROM THE OPERATOR (follow these; they override default tone):\n")
 	b.WriteString(reply)
 	b.WriteByte('\n')
-	if opts.PinnedKnowledge {
+	if hasNotes {
+		b.WriteString("The operator wrote the knowledge block below; it is the source of truth for this reply.\n")
+		b.WriteString("Use only those facts. Quote a price, version, date, or other figure ONLY if it appears in the provided knowledge")
+		if opts.PinnedKnowledge {
+			b.WriteString(" or the research findings")
+		}
+		b.WriteString(".\n")
+		b.WriteString("If the knowledge does not state the answer, say we will confirm the exact details and follow up.\n")
+		b.WriteString("Never fill the gap from memory, and never tell the sender to visit a website or retailer instead of answering.\n")
+	} else if opts.PinnedKnowledge {
 		b.WriteString("Research findings come from the organisation's pinned knowledge pages.\n")
 		b.WriteString("Use only those facts. Quote a price, version, date, or other figure ONLY if it appears in the findings.\n")
 		b.WriteString("If the findings do not state the answer (or are empty), say it is not listed on those pages and we will follow up with exact details.\n")
@@ -239,7 +271,7 @@ func briefText(brief *research.Brief) string {
 }
 
 func amountCorrection(amounts []string) string {
-	return fmt.Sprintf("\n\nIMPORTANT: your previous draft quoted %s, which appears neither in the research findings nor in the sender's email. Those figures may be wrong. Rewrite the reply without any figure that is not in the findings. If the findings do not state the figure, say it is not listed on our reference pages and we will follow up with exact details.",
+	return fmt.Sprintf("\n\nIMPORTANT: your previous draft quoted %s, which appears neither in the provided knowledge or research findings nor in the sender's email. Those figures may be wrong. Rewrite the reply without any figure that is not in those sources. If they do not state the figure, say we will confirm the exact details and follow up.",
 		strings.Join(amounts, ", "))
 }
 
@@ -248,7 +280,7 @@ func amountCorrection(amounts []string) string {
 func noFigureDraft(msg InboxMessage) Draft {
 	return Draft{
 		ThreadID: msg.GmailThreadID,
-		Body: "Thanks for your email. The exact figures you asked about are not stated in our reference pages, " +
+		Body: "Thanks for your email. The exact figures you asked about are not in our reference material, " +
 			"so rather than guess we will confirm the details and follow up with you shortly.",
 		Subject: replySubject(msg.Subject),
 		To:      msg.FromEmail,

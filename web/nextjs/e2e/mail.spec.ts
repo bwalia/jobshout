@@ -106,6 +106,7 @@ test.describe("Mail Agent", () => {
           subject_prefixes: ["[support]"],
         },
         knowledge_urls: ["https://example.com/pricing"],
+        knowledge_notes: "Team plan: £40/user. Refunds within 30 days.",
         research_focus: "prices and SLA",
         reply_instructions: "Be warm and short.",
       }),
@@ -115,6 +116,7 @@ test.describe("Mail Agent", () => {
       connected: boolean;
       rules: { senders: string[]; subject_prefixes: string[] };
       knowledge_urls?: string[];
+      knowledge_notes?: string;
       research_focus?: string;
       reply_instructions?: string;
     };
@@ -122,6 +124,7 @@ test.describe("Mail Agent", () => {
     expect(st.rules.senders).toContain("ops@example.com");
     expect(st.rules.subject_prefixes).toContain("[support]");
     expect(st.knowledge_urls).toContain("https://example.com/pricing");
+    expect(st.knowledge_notes).toBe("Team plan: £40/user. Refunds within 30 days.");
     expect(st.research_focus).toBe("prices and SLA");
     expect(st.reply_instructions).toBe("Be warm and short.");
   });

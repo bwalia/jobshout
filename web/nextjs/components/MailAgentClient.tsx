@@ -46,6 +46,7 @@ export function MailAgentClient() {
   const [senders, setSenders] = useState("");
   const [prefixes, setPrefixes] = useState("");
   const [labels, setLabels] = useState("");
+  const [knowledgeNotes, setKnowledgeNotes] = useState("");
   const [knowledgeUrls, setKnowledgeUrls] = useState("");
   const [researchFocus, setResearchFocus] = useState("");
   const [replyInstructions, setReplyInstructions] = useState("");
@@ -56,6 +57,7 @@ export function MailAgentClient() {
     setSenders((data.rules?.senders ?? []).join(", "));
     setPrefixes((data.rules?.subject_prefixes ?? []).join(", "));
     setLabels((data.rules?.labels ?? []).join(", "));
+    setKnowledgeNotes(data.knowledge_notes ?? "");
     setKnowledgeUrls((data.knowledge_urls ?? []).join("\n"));
     setResearchFocus(data.research_focus ?? "");
     setReplyInstructions(data.reply_instructions ?? "");
@@ -181,6 +183,7 @@ export function MailAgentClient() {
           labels: split(labels),
           subject_prefixes: split(prefixes),
         },
+        knowledge_notes: knowledgeNotes.trim(),
         knowledge_urls: knowledgeUrls
           .split("\n")
           .map((x) => x.trim())
@@ -361,11 +364,28 @@ export function MailAgentClient() {
                 />
               </label>
               <label className="text-xs text-muted-foreground">
-                Knowledge links (one URL per line)
+                What should the agent know when replying?
+                <textarea
+                  value={knowledgeNotes}
+                  onChange={(e) => setKnowledgeNotes(e.target.value)}
+                  rows={8}
+                  placeholder={
+                    "Mac Studio M5 Max: $2,499\nMac Studio M5 Ultra: $5,499\nRefunds within 30 days, shipping 3–5 working days…"
+                  }
+                  className="mt-1 w-full rounded-md border border-input bg-background p-3 font-mono text-sm"
+                />
+                <span className="mt-1 block text-[11px]">
+                  Prices, products, policies — plain text or markdown. Replies
+                  quote only what is written here; anything missing gets an
+                  honest &quot;we&apos;ll follow up&quot;.
+                </span>
+              </label>
+              <label className="text-xs text-muted-foreground">
+                Knowledge links (optional, one URL per line)
                 <textarea
                   value={knowledgeUrls}
                   onChange={(e) => setKnowledgeUrls(e.target.value)}
-                  rows={3}
+                  rows={2}
                   placeholder="https://example.com/pricing"
                   className="mt-1 w-full rounded-md border border-input bg-background p-3 text-sm"
                 />
@@ -391,8 +411,9 @@ export function MailAgentClient() {
                 />
               </label>
               <p className="text-xs text-muted-foreground">
-                When links are set, matching mail is researched from those pages
-                only — not the open web. Empty links keep today&apos;s behaviour.
+                Your notes are the source of truth for drafts. Links are
+                optional extra pages researched on top of them; with neither,
+                drafts fall back to open-web research.
               </p>
               <button
                 type="button"

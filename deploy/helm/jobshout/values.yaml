@@ -120,6 +120,10 @@ ai:
   # while the control-desk conversation uses a tool-capable model.
   chatModel: "qwen3-coder:30b"
   chatModelFallback: "llama3.1:8b"
+  # Mail reply drafting is pinned separately too: draft quality is worth a
+  # slow reasoning model (its thinking phase engages automatically), while
+  # classification stays on the fast worker model. Empty keeps ollamaModel.
+  mailModel: "muse-glimmer:latest"
   chatNumCtx: 16384
   openaiBaseURL: "https://api.openai.com"
   openaiModel: "gpt-4o-mini"

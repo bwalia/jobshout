@@ -4,7 +4,10 @@
 // configuration or per-agent overrides.
 package llm
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 // Role constants for chat messages.
 const (
@@ -63,6 +66,12 @@ type GenerateRequest struct {
 	// (the default) preserves the previous behavior; clients that don't support
 	// tool-calling ignore this field.
 	ToolDefs []ToolDef
+	// Think asks a reasoning model to run its thinking phase before answering.
+	// It is honoured only when the resolved model advertises the thinking
+	// capability — on every other model (and every non-Ollama provider today)
+	// it is a no-op. Callers that set it should budget MaxTokens generously:
+	// thinking tokens count against the same limit as the answer.
+	Think bool
 	// OnToken, when set, receives each content chunk as it arrives from a
 	// streaming provider, before the full Content is returned on the response.
 	// It is a process-local callback, never serialised; clients that do not
@@ -88,6 +97,11 @@ type GenerateResponse struct {
 	// unless ToolDefs were sent and the provider returned tool calls.
 	ToolCalls []ToolCall
 }
+
+// ErrOnlyThinking reports a reply whose entire token budget went to a reasoning
+// model's thinking phase, leaving no answer. Callers that requested thinking
+// can errors.Is on it and retry without.
+var ErrOnlyThinking = errors.New("returned only reasoning and no content")
 
 // Client is the interface every LLM provider must satisfy.
 type Client interface {

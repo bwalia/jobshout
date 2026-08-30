@@ -63,6 +63,8 @@ func TitleFrom(kind string, v map[string]string) (title, description string) {
 				f = f[:80]
 			}
 			title = "Mail: " + f
+		} else if strings.TrimSpace(v["knowledge_notes"]) != "" {
+			title = "Mail: draft from operator knowledge"
 		} else if strings.TrimSpace(v["knowledge_urls"]) != "" {
 			title = "Mail: research pinned pages and draft"
 		} else {
@@ -71,6 +73,12 @@ func TitleFrom(kind string, v map[string]string) (title, description string) {
 		var parts []string
 		if s := strings.TrimSpace(v["senders"]); s != "" {
 			parts = append(parts, "Senders: "+s)
+		}
+		if n := strings.TrimSpace(v["knowledge_notes"]); n != "" {
+			if len(n) > 200 {
+				n = n[:200]
+			}
+			parts = append(parts, "Knowledge: "+n)
 		}
 		if u := strings.TrimSpace(v["knowledge_urls"]); u != "" {
 			parts = append(parts, u)
