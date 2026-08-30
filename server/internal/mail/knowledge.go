@@ -38,6 +38,26 @@ var imageSuffixes = []string{".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", "
 // disallowed scheme (javascript:, data:) or a non-http(s) URL.
 var ErrInvalidKnowledgeURL = errors.New("mail: invalid knowledge url")
 
+// MaxKnowledgeNotesLen caps operator knowledge notes. 16KB of text is roughly
+// 4k tokens — enough for a full price list and policies while leaving the
+// draft model room for the email itself.
+const MaxKnowledgeNotesLen = 16 * 1024
+
+// ErrKnowledgeNotesTooLong is returned when PATCH knowledge_notes exceeds
+// MaxKnowledgeNotesLen after trimming.
+var ErrKnowledgeNotesTooLong = fmt.Errorf("mail: knowledge notes exceed %d characters", MaxKnowledgeNotesLen)
+
+// SanitizeKnowledgeNotes trims the operator's knowledge notes and enforces the
+// length cap. Content is stored verbatim — it is the operator's own text, shown
+// only to their draft model, never rendered as HTML.
+func SanitizeKnowledgeNotes(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if len(s) > MaxKnowledgeNotesLen {
+		return "", ErrKnowledgeNotesTooLong
+	}
+	return s, nil
+}
+
 // SanitizeKnowledgeURLs trims entries, drops blanks, keeps http(s) only, and
 // caps the list. javascript: and data: are rejected rather than dropped so the
 // operator can see the mistake.

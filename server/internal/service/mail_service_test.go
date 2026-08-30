@@ -88,6 +88,7 @@ func (m *mailMemRepo) UpdateConnectionMeta(ctx context.Context, c *model.MailCon
 	ex.WatchSenders = c.WatchSenders
 	ex.WatchSubjectPrefixes = c.WatchSubjectPrefixes
 	ex.WatchKnowledgeURLs = c.WatchKnowledgeURLs
+	ex.KnowledgeNotes = c.KnowledgeNotes
 	ex.ResearchFocus = c.ResearchFocus
 	ex.ReplyInstructions = c.ReplyInstructions
 	return nil
@@ -397,7 +398,7 @@ func setupMail(t *testing.T, gmail *fakeGmail, class mail.Classifier, researchSv
 	if class == nil {
 		class = mail.NewClassifier(nil, zap.NewNop())
 	}
-	drafter := mail.NewDrafter(nil, zap.NewNop())
+	drafter := mail.NewDrafter(nil, "", zap.NewNop())
 	svc := NewMailService(repo, agents, gmail, class, drafter, researchSvc, cfg, zap.NewNop()).(*mailService)
 	orgID := uuid.New()
 	if _, err := svc.EnsureMailAgent(context.Background(), orgID); err != nil {
@@ -634,6 +635,67 @@ func TestProcessResearchesPinnedURLsEvenWhenNeedsResearchFalse(t *testing.T) {
 	}
 }
 
+func TestProcessSkipsOpenWebResearchWhenNotesPresent(t *testing.T) {
+	rs := &fakeResearch{}
+	class := scriptClass{result: mail.ClassifyResult{
+		Intent: "question", NeedsResearch: true, SuggestedAction: "reply", Reason: "asks price", TriageLabel: "sales", Urgency: "normal",
+	}}
+	gmail := &fakeGmail{
+		email:  "org@example.com",
+		tokens: mail.TokenSet{AccessToken: "a", RefreshToken: "r", Expiry: time.Now().Add(time.Hour)},
+		messages: []mail.InboxMessage{{
+			GmailThreadID: "th-notes", FromEmail: "alex@c.com", Subject: "Mac Studio price?",
+			Body: "How much is the Mac Studio?",
+		}},
+	}
+	svc, repo, orgID := setupMail(t, gmail, class, rs)
+	connectOrg(t, svc, repo, orgID)
+	c, _ := repo.GetConnectionByOrg(context.Background(), orgID)
+	c.KnowledgeNotes = "Mac Studio M5 Max: $2,499. M5 Ultra: $5,499."
+	if err := repo.UpsertConnection(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.SyncNow(context.Background(), orgID); err != nil {
+		t.Fatal(err)
+	}
+	if rs.calls != 0 {
+		t.Fatalf("notes answer the mail — open-web research must not run, calls=%d", rs.calls)
+	}
+	listed, _ := repo.ListThreads(context.Background(), orgID, model.PaginationParams{})
+	if len(listed.Data) != 1 || listed.Data[0].Status != model.MailThreadDraftReady {
+		t.Fatalf("thread %+v", listed.Data)
+	}
+}
+
+func TestProcessStillResearchesPinnedURLsAlongsideNotes(t *testing.T) {
+	rs := &fakeResearch{}
+	class := scriptClass{result: mail.ClassifyResult{
+		Intent: "question", NeedsResearch: false, SuggestedAction: "reply", Reason: "asks price", TriageLabel: "sales", Urgency: "normal",
+	}}
+	gmail := &fakeGmail{
+		email:  "org@example.com",
+		tokens: mail.TokenSet{AccessToken: "a", RefreshToken: "r", Expiry: time.Now().Add(time.Hour)},
+		messages: []mail.InboxMessage{{
+			GmailThreadID: "th-notes-pinned", FromEmail: "alex@c.com", Subject: "Team plan?",
+			Body: "How much is the team plan?",
+		}},
+	}
+	svc, repo, orgID := setupMail(t, gmail, class, rs)
+	connectOrg(t, svc, repo, orgID)
+	c, _ := repo.GetConnectionByOrg(context.Background(), orgID)
+	c.KnowledgeNotes = "Solo plan: £10/user."
+	c.WatchKnowledgeURLs = []string{"https://example.com/pricing"}
+	if err := repo.UpsertConnection(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.SyncNow(context.Background(), orgID); err != nil {
+		t.Fatal(err)
+	}
+	if rs.calls != 1 {
+		t.Fatalf("pinned pages should still be researched on top of notes, calls=%d", rs.calls)
+	}
+}
+
 func TestProcessIgnoreMailDoesNotResearchEvenWithPinnedURLs(t *testing.T) {
 	rs := &fakeResearch{}
 	class := scriptClass{result: mail.ClassifyResult{
@@ -708,6 +770,39 @@ func TestUpdateConnectionRoundTripsKnowledgePlaybook(t *testing.T) {
 	}
 	if len(st2.KnowledgeURLs) != 2 {
 		t.Fatalf("reload urls %+v", st2.KnowledgeURLs)
+	}
+}
+
+func TestUpdateConnectionRoundTripsKnowledgeNotes(t *testing.T) {
+	svc, repo, orgID := setupMail(t, &fakeGmail{}, nil, nil)
+	notes := "  Mac Studio M5 Max: $2,499\nRefunds within 30 days.  "
+	st, err := svc.UpdateConnection(context.Background(), orgID, model.UpdateMailConnectionRequest{
+		KnowledgeNotes: &notes,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Mac Studio M5 Max: $2,499\nRefunds within 30 days."
+	if st.KnowledgeNotes != want {
+		t.Errorf("status notes %q", st.KnowledgeNotes)
+	}
+	c, err := repo.GetConnectionByOrg(context.Background(), orgID)
+	if err != nil || c == nil {
+		t.Fatalf("row: %v", err)
+	}
+	if c.KnowledgeNotes != want {
+		t.Errorf("stored notes %q", c.KnowledgeNotes)
+	}
+}
+
+func TestUpdateConnectionRejectsOversizedKnowledgeNotes(t *testing.T) {
+	svc, _, orgID := setupMail(t, &fakeGmail{}, nil, nil)
+	big := strings.Repeat("x", mail.MaxKnowledgeNotesLen+1)
+	_, err := svc.UpdateConnection(context.Background(), orgID, model.UpdateMailConnectionRequest{
+		KnowledgeNotes: &big,
+	})
+	if !errors.Is(err, mail.ErrKnowledgeNotesTooLong) {
+		t.Fatalf("want ErrKnowledgeNotesTooLong, got %v", err)
 	}
 }
 

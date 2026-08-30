@@ -562,7 +562,7 @@ func main() {
 	}
 	mailSvc := service.NewMailService(
 		mailRepo, agentRepo, gmailAPI,
-		mail.NewClassifier(mailLLM, logger), mail.NewDrafter(mailLLM, logger),
+		mail.NewClassifier(mailLLM, logger), mail.NewDrafter(mailLLM, mailCfg.DraftModel, logger),
 		researchSvc, mailCfg, logger,
 	)
 	blogSvc.BindTasks(taskSvc)

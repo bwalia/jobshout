@@ -30,6 +30,7 @@ export interface MailConnectionStatus {
   allow_mailbox_mutations: boolean;
   rules: MailWatchRules;
   knowledge_urls?: string[];
+  knowledge_notes?: string;
   research_focus?: string;
   reply_instructions?: string;
   scopes?: string[];

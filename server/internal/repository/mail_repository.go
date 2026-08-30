@@ -51,7 +51,7 @@ func NewMailRepository(pool *pgxpool.Pool) MailRepository {
 const mailConnColumns = `
 	id, org_id, agent_id, google_email, refresh_token_enc, token_expiry, scopes,
 	allow_mailbox_mutations, watch_labels, watch_senders, watch_subject_prefixes,
-	watch_knowledge_urls, research_focus, reply_instructions,
+	watch_knowledge_urls, knowledge_notes, research_focus, reply_instructions,
 	status, status_error, last_sync_at, next_sync_at, sync_lease_until,
 	connected_at, disconnected_at, created_at, updated_at`
 
@@ -61,7 +61,7 @@ func scanMailConn(row pgx.Row) (*model.MailConnection, error) {
 	err := row.Scan(
 		&c.ID, &c.OrgID, &c.AgentID, &c.GoogleEmail, &c.RefreshTokenEnc, &c.TokenExpiry, &scopes,
 		&c.AllowMailboxMutations, &labels, &senders, &prefixes,
-		&knowledge, &c.ResearchFocus, &c.ReplyInstructions,
+		&knowledge, &c.KnowledgeNotes, &c.ResearchFocus, &c.ReplyInstructions,
 		&c.Status, &c.StatusError, &c.LastSyncAt, &c.NextSyncAt, &c.SyncLeaseUntil,
 		&c.ConnectedAt, &c.DisconnectedAt, &c.CreatedAt, &c.UpdatedAt,
 	)
@@ -90,11 +90,11 @@ const upsertConnectionSQL = `
 		INSERT INTO mail_connections (
 			id, org_id, agent_id, google_email, refresh_token_enc, token_expiry, scopes,
 			allow_mailbox_mutations, watch_labels, watch_senders, watch_subject_prefixes,
-			watch_knowledge_urls, research_focus, reply_instructions,
+			watch_knowledge_urls, knowledge_notes, research_focus, reply_instructions,
 			status, status_error, last_sync_at, next_sync_at, sync_lease_until,
 			connected_at, disconnected_at
 		) VALUES (
-			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21
+			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22
 		)
 		ON CONFLICT (org_id) DO UPDATE SET
 			agent_id = EXCLUDED.agent_id,
@@ -107,6 +107,7 @@ const upsertConnectionSQL = `
 			watch_senders = EXCLUDED.watch_senders,
 			watch_subject_prefixes = EXCLUDED.watch_subject_prefixes,
 			watch_knowledge_urls = EXCLUDED.watch_knowledge_urls,
+			knowledge_notes = EXCLUDED.knowledge_notes,
 			research_focus = EXCLUDED.research_focus,
 			reply_instructions = EXCLUDED.reply_instructions,
 			status = EXCLUDED.status,
@@ -126,7 +127,7 @@ func (r *mailRepository) UpsertConnection(ctx context.Context, c *model.MailConn
 	return r.pool.QueryRow(ctx, upsertConnectionSQL,
 		c.ID, c.OrgID, c.AgentID, c.GoogleEmail, c.RefreshTokenEnc, c.TokenExpiry, nzStrings(c.Scopes),
 		c.AllowMailboxMutations, nzStrings(c.WatchLabels), nzStrings(c.WatchSenders), nzStrings(c.WatchSubjectPrefixes),
-		nzStrings(c.WatchKnowledgeURLs), c.ResearchFocus, c.ReplyInstructions,
+		nzStrings(c.WatchKnowledgeURLs), c.KnowledgeNotes, c.ResearchFocus, c.ReplyInstructions,
 		c.Status, c.StatusError, c.LastSyncAt, c.NextSyncAt, c.SyncLeaseUntil, c.ConnectedAt, c.DisconnectedAt,
 	).Scan(&c.ID, &c.CreatedAt, &c.UpdatedAt)
 }
@@ -167,8 +168,9 @@ const updateConnectionMetaSQL = `
 			watch_senders = $4,
 			watch_subject_prefixes = $5,
 			watch_knowledge_urls = $6,
-			research_focus = $7,
-			reply_instructions = $8,
+			knowledge_notes = $7,
+			research_focus = $8,
+			reply_instructions = $9,
 			updated_at = NOW()
 		WHERE org_id = $1
 		RETURNING updated_at`
@@ -176,7 +178,7 @@ const updateConnectionMetaSQL = `
 func (r *mailRepository) UpdateConnectionMeta(ctx context.Context, c *model.MailConnection) error {
 	return r.pool.QueryRow(ctx, updateConnectionMetaSQL,
 		c.OrgID, c.AllowMailboxMutations, nzStrings(c.WatchLabels), nzStrings(c.WatchSenders), nzStrings(c.WatchSubjectPrefixes),
-		nzStrings(c.WatchKnowledgeURLs), c.ResearchFocus, c.ReplyInstructions,
+		nzStrings(c.WatchKnowledgeURLs), c.KnowledgeNotes, c.ResearchFocus, c.ReplyInstructions,
 	).Scan(&c.UpdatedAt)
 }
 

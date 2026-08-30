@@ -201,6 +201,7 @@ func (s *mailService) ConnectionStatus(ctx context.Context, orgID uuid.UUID) (*m
 		ScopesDocumented:  mail.ScopeDocs(),
 		Rules:             model.MailWatchRules{Labels: []string{}, Senders: []string{}, SubjectPrefixes: []string{}},
 		KnowledgeURLs:     []string{},
+		KnowledgeNotes:    "",
 		ResearchFocus:     "",
 		ReplyInstructions: "",
 	}
@@ -228,6 +229,7 @@ func (s *mailService) ConnectionStatus(ctx context.Context, orgID uuid.UUID) (*m
 	if st.KnowledgeURLs == nil {
 		st.KnowledgeURLs = []string{}
 	}
+	st.KnowledgeNotes = c.KnowledgeNotes
 	st.ResearchFocus = c.ResearchFocus
 	st.ReplyInstructions = c.ReplyInstructions
 	st.Scopes = c.Scopes
@@ -369,6 +371,13 @@ func (s *mailService) UpdateConnection(ctx context.Context, orgID uuid.UUID, req
 			return nil, err
 		}
 		c.WatchKnowledgeURLs = urls
+	}
+	if req.KnowledgeNotes != nil {
+		notes, err := mail.SanitizeKnowledgeNotes(*req.KnowledgeNotes)
+		if err != nil {
+			return nil, err
+		}
+		c.KnowledgeNotes = notes
 	}
 	if req.ResearchFocus != nil {
 		c.ResearchFocus = strings.TrimSpace(*req.ResearchFocus)
@@ -542,8 +551,15 @@ func (s *mailService) processThread(ctx context.Context, th *model.MailThread, m
 		return s.repo.UpdateThread(ctx, th)
 	}
 
+	var notes string
+	if c != nil {
+		notes = strings.TrimSpace(c.KnowledgeNotes)
+	}
 	pinnedReq, pinned := mailKnowledgeRequest(c, msg)
-	wantResearch := pinned || class.NeedsResearch
+	// Operator-written knowledge notes are the primary source when present:
+	// they already answer the mail, so the open-web fallback is skipped.
+	// Pinned pages and inbound links still add findings on top of the notes.
+	wantResearch := pinned || (notes == "" && class.NeedsResearch)
 
 	var brief *research.Brief
 	if wantResearch && s.research != nil && s.research.Available() {
@@ -580,10 +596,12 @@ func (s *mailService) processThread(ctx context.Context, th *model.MailThread, m
 		s.logger.Info("mail: research requested but Research Agent is unavailable; drafting without it")
 	}
 
-	opts := mail.DraftOptions{}
-	if pinned && c != nil {
-		opts.PinnedKnowledge = true
+	opts := mail.DraftOptions{KnowledgeNotes: notes}
+	if c != nil {
 		opts.ReplyInstructions = c.ReplyInstructions
+	}
+	if pinned {
+		opts.PinnedKnowledge = true
 	}
 	draft, err := s.drafter.Draft(ctx, msg, class, brief, opts)
 	if err != nil {

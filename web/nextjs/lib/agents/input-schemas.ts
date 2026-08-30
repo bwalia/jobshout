@@ -254,12 +254,21 @@ const SCHEMAS: Record<AgentBuiltin, AgentInputSchema> = {
         placeholder: "INBOX, Support",
       },
       {
+        key: "knowledge_notes",
+        label: "What the agent should know",
+        type: "textarea",
+        group: "How to answer",
+        placeholder:
+          "Mac Studio M5 Max: $2,499\nMac Studio M5 Ultra: $5,499\nRefunds within 30 days, shipping 3–5 working days…",
+        help: "Prices, products, policies — plain text or markdown. Replies quote only what is written here.",
+      },
+      {
         key: "knowledge_urls",
-        label: "Extra knowledge links",
+        label: "Knowledge links (optional)",
         type: "textarea",
         group: "How to answer",
         placeholder: "https://example.com/pricing",
-        help: "Optional extra pages (one URL per line). Incoming mail links are researched too.",
+        help: "Optional pages to research on top of your notes (one URL per line). Incoming mail links are researched too.",
       },
       {
         key: "research_focus",
@@ -279,6 +288,7 @@ const SCHEMAS: Record<AgentBuiltin, AgentInputSchema> = {
     titleFrom: (v) => {
       const focus = v.research_focus?.trim();
       if (focus) return `Mail: ${focus.slice(0, 80)}`;
+      if (v.knowledge_notes?.trim()) return "Mail: draft from operator knowledge";
       const urls = v.knowledge_urls?.trim();
       if (urls) return "Mail: research pinned pages and draft";
       return "Mail: sync inbox and draft";
@@ -286,6 +296,9 @@ const SCHEMAS: Record<AgentBuiltin, AgentInputSchema> = {
     descriptionFrom: (v) => {
       const parts: string[] = [];
       if (v.senders?.trim()) parts.push(`Senders: ${v.senders.trim()}`);
+      if (v.knowledge_notes?.trim()) {
+        parts.push(`Knowledge: ${v.knowledge_notes.trim().slice(0, 200)}`);
+      }
       if (v.knowledge_urls?.trim()) parts.push(v.knowledge_urls.trim());
       if (v.research_focus?.trim()) parts.push(`Look for: ${v.research_focus.trim()}`);
       if (v.reply_instructions?.trim()) {

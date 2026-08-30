@@ -3,6 +3,7 @@ package mail
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -135,7 +136,7 @@ func TestDraftRedraftsWhenAmountNotInFindings(t *testing.T) {
 	brief := &research.Brief{Findings: []research.Finding{{
 		Claim: "M5 Max starts at $2,499", SourceURL: "https://www.apple.com/mac-studio/",
 	}}}
-	d := NewDrafter(fake, nil)
+	d := NewDrafter(fake, "", nil)
 	got, err := d.Draft(context.Background(), fixtureSupportQuestion(),
 		ClassifyResult{Intent: "question"}, brief, DraftOptions{PinnedKnowledge: true})
 	if err != nil {
@@ -157,7 +158,7 @@ func TestDraftFallsBackWhenModelKeepsInventingAmounts(t *testing.T) {
 		draftJSON("The Mac Studio is $1,999."),
 	}}
 	brief := &research.Brief{Summary: "The pinned page lists no prices."}
-	d := NewDrafter(fake, nil)
+	d := NewDrafter(fake, "", nil)
 	got, err := d.Draft(context.Background(), fixtureSupportQuestion(),
 		ClassifyResult{Intent: "question"}, brief, DraftOptions{PinnedKnowledge: true})
 	if err != nil {
@@ -174,12 +175,159 @@ func TestDraftFallsBackWhenModelKeepsInventingAmounts(t *testing.T) {
 	}
 }
 
+func TestBuildDraftPromptIncludesKnowledgeNotes(t *testing.T) {
+	p := BuildDraftPrompt(fixtureSupportQuestion(), ClassifyResult{
+		Intent: "question", SuggestedAction: "reply", Reason: "asks for a price",
+	}, nil, DraftOptions{
+		KnowledgeNotes: "Mac Studio M5 Max: $2,499\nRefunds within 30 days.",
+	})
+	for _, want := range []string{
+		"Operator-provided knowledge (use only these facts):",
+		"Mac Studio M5 Max: $2,499",
+		"Refunds within 30 days.",
+		"ONLY if it appears in the provided knowledge",
+		"Never fill the gap from memory",
+		"never tell the sender to visit a website",
+		"Never claim this reply has been sent",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("prompt missing %q", want)
+		}
+	}
+}
+
+func TestBuildDraftPromptCombinesNotesAndPinnedFindings(t *testing.T) {
+	p := BuildDraftPrompt(fixtureSupportQuestion(), ClassifyResult{Intent: "question"},
+		&research.Brief{Summary: "The pinned page lists the M5 Ultra at $5,499."},
+		DraftOptions{
+			KnowledgeNotes:  "M5 Max: $2,499",
+			PinnedKnowledge: true,
+		})
+	for _, want := range []string{
+		"Operator-provided knowledge (use only these facts):",
+		"M5 Max: $2,499",
+		"Research findings (use only these facts):",
+		"$5,499",
+		"ONLY if it appears in the provided knowledge or the research findings",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("prompt missing %q", want)
+		}
+	}
+}
+
+func TestDraftQuotesPricesFromKnowledgeNotes(t *testing.T) {
+	fake := &scriptedLLM{replies: []string{
+		draftJSON("The M5 Max starts at $2,499 and the M5 Ultra at $5,499."),
+	}}
+	d := NewDrafter(fake, "", nil)
+	got, err := d.Draft(context.Background(), fixtureSupportQuestion(),
+		ClassifyResult{Intent: "question"}, nil, DraftOptions{
+			KnowledgeNotes: "M5 Max: $2,499. M5 Ultra: $5,499.",
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fake.calls != 1 {
+		t.Errorf("calls = %d, amounts from the notes should not trigger a redraft", fake.calls)
+	}
+	if !strings.Contains(got.Body, "$2,499") || !strings.Contains(got.Body, "$5,499") {
+		t.Errorf("prices from notes lost: %s", got.Body)
+	}
+}
+
+func TestDraftRedraftsWhenAmountNotInKnowledgeNotes(t *testing.T) {
+	fake := &scriptedLLM{replies: []string{
+		draftJSON("The Mac Studio is $1,999."),
+	}}
+	d := NewDrafter(fake, "", nil)
+	got, err := d.Draft(context.Background(), fixtureSupportQuestion(),
+		ClassifyResult{Intent: "question"}, nil, DraftOptions{
+			KnowledgeNotes: "We sell the Mac Studio. Ask sales for a quote.",
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got.Body, "$") {
+		t.Errorf("invented price survived the notes guard: %s", got.Body)
+	}
+	if !strings.Contains(got.Body, "follow up") {
+		t.Errorf("fallback should promise a follow-up: %s", got.Body)
+	}
+}
+
+// capturingLLM records each GenerateRequest and replies with a fixed draft.
+type capturingLLM struct {
+	reqs []llm.GenerateRequest
+}
+
+func (c *capturingLLM) Generate(ctx context.Context, req llm.GenerateRequest) (*llm.GenerateResponse, error) {
+	c.reqs = append(c.reqs, req)
+	return &llm.GenerateResponse{Content: draftJSON("Thanks, we will reply shortly.")}, nil
+}
+
+func (c *capturingLLM) ProviderName() string { return "capturing" }
+
+func TestDraftRequestsConfiguredModelAndThinking(t *testing.T) {
+	fake := &capturingLLM{}
+	d := NewDrafter(fake, "muse-glimmer:latest", nil)
+	if _, err := d.Draft(context.Background(), fixtureSupportQuestion(),
+		ClassifyResult{Intent: "question"}, nil, DraftOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.reqs) != 1 {
+		t.Fatalf("calls = %d", len(fake.reqs))
+	}
+	req := fake.reqs[0]
+	if req.Model != "muse-glimmer:latest" {
+		t.Errorf("model = %q", req.Model)
+	}
+	if !req.Think {
+		t.Error("draft request should ask for thinking")
+	}
+	if req.MaxTokens < 2000 {
+		t.Errorf("MaxTokens = %d — thinking counts against the budget, so it must be generous", req.MaxTokens)
+	}
+}
+
+// onlyThinkingLLM fails thinking requests the way Ollama does when the model
+// spends the whole budget reasoning, and answers once thinking is off.
+type onlyThinkingLLM struct {
+	calls int
+}
+
+func (o *onlyThinkingLLM) Generate(ctx context.Context, req llm.GenerateRequest) (*llm.GenerateResponse, error) {
+	o.calls++
+	if req.Think {
+		return nil, fmt.Errorf("ollama: model %q %w", req.Model, llm.ErrOnlyThinking)
+	}
+	return &llm.GenerateResponse{Content: draftJSON("Thanks, happy to help.")}, nil
+}
+
+func (o *onlyThinkingLLM) ProviderName() string { return "only-thinking" }
+
+func TestDraftRetriesWithoutThinkingWhenBudgetExhausted(t *testing.T) {
+	fake := &onlyThinkingLLM{}
+	d := NewDrafter(fake, "muse-glimmer:latest", nil)
+	got, err := d.Draft(context.Background(), fixtureSupportQuestion(),
+		ClassifyResult{Intent: "question"}, nil, DraftOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fake.calls != 2 {
+		t.Errorf("calls = %d, want thinking attempt then plain retry", fake.calls)
+	}
+	if !strings.Contains(got.Body, "happy to help") {
+		t.Errorf("retry draft lost: %s", got.Body)
+	}
+}
+
 func TestDraftKeepsSourcedAmountsWithoutRedraft(t *testing.T) {
 	fake := &scriptedLLM{replies: []string{
 		draftJSON("The M5 Max starts at $2,499 and the M5 Ultra at $5,499."),
 	}}
 	brief := &research.Brief{Summary: "M5 Max starts at $2,499; M5 Ultra starts at $5,499."}
-	d := NewDrafter(fake, nil)
+	d := NewDrafter(fake, "", nil)
 	got, err := d.Draft(context.Background(), fixtureSupportQuestion(),
 		ClassifyResult{Intent: "question"}, brief, DraftOptions{PinnedKnowledge: true})
 	if err != nil {

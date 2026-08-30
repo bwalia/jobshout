@@ -53,6 +53,7 @@ test.describe("Task Manager launch fields", () => {
     });
     await expect(page.getByText("How to answer").first()).toBeVisible();
     await expect(page.locator("#agent-field-senders")).toBeVisible();
+    await expect(page.locator("#agent-field-knowledge_notes")).toBeVisible();
     await expect(page.locator("#agent-field-knowledge_urls")).toBeVisible();
 
     await pickAgent("Image Generator");

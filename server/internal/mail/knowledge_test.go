@@ -68,6 +68,25 @@ func TestSanitizeKnowledgeURLsDedupe(t *testing.T) {
 	}
 }
 
+func TestSanitizeKnowledgeNotesTrimsAndKeepsContent(t *testing.T) {
+	got, err := SanitizeKnowledgeNotes("  Mac Studio M5 Max: $2,499\nRefunds within 30 days.  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "Mac Studio M5 Max: $2,499\nRefunds within 30 days." {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestSanitizeKnowledgeNotesRejectsOversized(t *testing.T) {
+	if _, err := SanitizeKnowledgeNotes(strings.Repeat("a", MaxKnowledgeNotesLen+1)); err == nil {
+		t.Fatal("oversized notes accepted")
+	}
+	if got, err := SanitizeKnowledgeNotes(strings.Repeat("a", MaxKnowledgeNotesLen)); err != nil || len(got) != MaxKnowledgeNotesLen {
+		t.Fatalf("at-cap notes rejected: %v", err)
+	}
+}
+
 func TestExtractInboundURLsKeepsProductLink(t *testing.T) {
 	got := ExtractInboundURLs(
 		"Price of this machine?",

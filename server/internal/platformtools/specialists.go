@@ -324,6 +324,7 @@ func registerSpecialists(reg *Registry, d Deps) {
 				"senders":            map[string]any{"type": "string"},
 				"subject_prefixes":   map[string]any{"type": "string"},
 				"labels":             map[string]any{"type": "string"},
+				"knowledge_notes":    map[string]any{"type": "string"},
 				"knowledge_urls":     map[string]any{"type": "string"},
 				"research_focus":     map[string]any{"type": "string"},
 				"reply_instructions": map[string]any{"type": "string"},
