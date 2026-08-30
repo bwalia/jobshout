@@ -320,6 +320,8 @@ func (a *Agent) researchPinned(ctx context.Context, req Request, brief *Brief, p
 		return brief, nil
 	}
 
+	docs = a.expandPinnedForPrices(ctx, req, docs, brief, tried, progress)
+
 	findings := a.extractAll(ctx, req, docs, brief)
 	if len(findings) == 0 {
 		progress.report(PhaseSynthesised, "no claims extracted from pinned pages")
