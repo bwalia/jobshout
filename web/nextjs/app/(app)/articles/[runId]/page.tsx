@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Ban,
@@ -28,8 +28,6 @@ import { cn } from "@/lib/utils/cn";
 export default function ArticleRunPage() {
   const params = useParams();
   const runId = String(params.runId ?? "");
-  const searchParams = useSearchParams();
-  const articleParam = searchParams.get("article");
 
   const router = useRouter();
   const { data: run, isLoading, isError } = useBlogRun(runId);
@@ -50,7 +48,7 @@ export default function ArticleRunPage() {
     writing && articleCount > 0
   );
 
-  const [selectedId, setSelectedId] = useState<string | null>(articleParam);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected =
     articles?.find((a) => a.id === selectedId) ?? articles?.[0] ?? null;
 
@@ -80,11 +78,11 @@ export default function ArticleRunPage() {
       {/* Header */}
       <div>
         <Link
-          href="/panel/artifacts"
+          href="/articles"
           className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" />
-          Artifacts
+          Articles
         </Link>
 
         <div className="mt-2 flex items-start justify-between gap-4">
@@ -171,7 +169,7 @@ export default function ArticleRunPage() {
                 onClick={() => {
                   if (confirm("Delete this run and its articles?")) {
                     remove.mutate(runId, {
-                      onSuccess: () => router.push("/panel/artifacts"),
+                      onSuccess: () => router.push("/articles"),
                     });
                   }
                 }}

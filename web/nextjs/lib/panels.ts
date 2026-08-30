@@ -14,7 +14,6 @@ import {
   Cpu,
   Settings,
   History,
-  Archive,
 } from "lucide-react";
 
 export type PanelId =
@@ -22,7 +21,6 @@ export type PanelId =
   | "dashboard"
   | "task-board"
   | "task-manager"
-  | "artifacts"
   | "scheduler"
   | "sprints"
   | "sessions"
@@ -46,7 +44,6 @@ export const PANELS: PanelDef[] = [
   { id: "dashboard", label: "Dashboard", href: "/panel/dashboard", icon: LayoutDashboard },
   { id: "task-board", label: "Task Board", href: "/panel/task-board", icon: Kanban },
   { id: "task-manager", label: "Task Manager", href: "/panel/task-manager", icon: ListTree },
-  { id: "artifacts", label: "Artifacts", href: "/panel/artifacts", icon: Archive },
   { id: "scheduler", label: "Scheduler", href: "/panel/scheduler", icon: Clock },
   { id: "sprints", label: "Sprints", href: "/panel/sprints", icon: Goal },
   { id: "sessions", label: "Sessions", href: "/panel/sessions", icon: History },
@@ -120,7 +117,6 @@ export const ROUTE_MIGRATION: { from: string; to: string; note: string }[] = [
   { from: "/agents/mail", to: "/panel/task-manager?agent=mail", note: "Mail Agent in Task Manager" },
   { from: "/articles", to: "/panel/task-manager?agent=articles", note: "Articles bot in Task Manager" },
   { from: "/articles/[runId]", to: "/articles/[runId]", note: "Article run detail kept" },
-  { from: "/artifacts", to: "/panel/artifacts", note: "Artifacts library panel" },
   { from: "/images", to: "/panel/task-manager?agent=images", note: "Images bot in Task Manager" },
   { from: "/sessions", to: "/panel/sessions", note: "Session Manager panel" },
   { from: "/scheduler", to: "/panel/scheduler", note: "Scheduler panel" },

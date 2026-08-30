@@ -1,10 +1,7 @@
 package model
 
 import (
-	"fmt"
-	"strings"
 	"time"
-
 	"github.com/google/uuid"
 )
 
@@ -21,10 +18,9 @@ type Task struct {
 	StoryPoints     *int       `json:"story_points"`
 	DueDate         *time.Time `json:"due_date"`
 	Position        int        `json:"position"`
-	CreatedBy       *uuid.UUID     `json:"created_by"`
-	CreatedAt       time.Time      `json:"created_at"`
-	UpdatedAt       time.Time      `json:"updated_at"`
-	Metadata        map[string]any `json:"metadata,omitempty"`
+	CreatedBy       *uuid.UUID `json:"created_by"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 type CreateTaskRequest struct {
@@ -36,8 +32,7 @@ type CreateTaskRequest struct {
 	AssignedUserID  *string `json:"assigned_user_id"`
 	StoryPoints     *int    `json:"story_points"`
 	DueDate         *string `json:"due_date"`
-	ParentID        *string        `json:"parent_id"`
-	Metadata        map[string]any `json:"metadata,omitempty"`
+	ParentID        *string `json:"parent_id"`
 }
 
 type UpdateTaskRequest struct {
@@ -47,8 +42,7 @@ type UpdateTaskRequest struct {
 	AssignedAgentID *string `json:"assigned_agent_id"`
 	AssignedUserID  *string `json:"assigned_user_id"`
 	StoryPoints     *int    `json:"story_points"`
-	DueDate         *string        `json:"due_date"`
-	Metadata        map[string]any `json:"metadata,omitempty"`
+	DueDate         *string `json:"due_date"`
 }
 
 type TransitionTaskRequest struct {
@@ -71,29 +65,4 @@ type TaskComment struct {
 
 type AddCommentRequest struct {
 	Body string `json:"body" validate:"required,min=1"`
-}
-
-const (
-	TaskMetaLaunchValues = "launch_values"
-	TaskMetaLaunchKind   = "launch_kind"
-	TaskMetaRunID        = "run_id"
-)
-
-// LaunchValues reads the last specialist form values stored on the task.
-func (t *Task) LaunchValues() map[string]string {
-	if t == nil || t.Metadata == nil {
-		return nil
-	}
-	raw, ok := t.Metadata[TaskMetaLaunchValues].(map[string]any)
-	if !ok {
-		return nil
-	}
-	out := make(map[string]string, len(raw))
-	for k, v := range raw {
-		if v == nil {
-			continue
-		}
-		out[k] = strings.TrimSpace(fmt.Sprint(v))
-	}
-	return out
 }

@@ -51,11 +51,6 @@ type MailService interface {
 	UpdateDraft(ctx context.Context, orgID, draftID uuid.UUID, req model.UpdateMailDraftRequest) (*model.MailDraft, error)
 	ApproveSend(ctx context.Context, orgID, draftID, userID uuid.UUID) (*model.MailDraft, error)
 	Reject(ctx context.Context, orgID, draftID, userID uuid.UUID) (*model.MailDraft, error)
-
-	// Local MAIL_SIMULATE only. Production Gmail is never used when these run.
-	SimulateEnabled() bool
-	ConnectSimulated(ctx context.Context, orgID uuid.UUID) (*model.MailConnectionStatus, error)
-	PushSimulatedInbox(msgs []mail.InboxMessage) error
 }
 
 type mailService struct {
@@ -729,20 +724,12 @@ func (s *mailService) accessToken(ctx context.Context, c *model.MailConnection) 
 }
 
 // mailKnowledgeRequest builds a pinned-URL research.Request when the mailbox
-// has knowledge pages or the inbound mail itself contains http(s) links.
-// ok is false when the merged list is empty (open-web path).
+// has knowledge pages. ok is false when the list is empty (open-web path).
 func mailKnowledgeRequest(c *model.MailConnection, msg mail.InboxMessage) (research.Request, bool) {
-	var playbook []string
-	var focus string
-	if c != nil {
-		playbook = c.WatchKnowledgeURLs
-		focus = strings.TrimSpace(c.ResearchFocus)
-	}
-	inbound := mail.ExtractInboundURLs(msg.Subject, msg.Body)
-	urls := mail.MergeKnowledgeURLs(playbook, inbound)
-	if len(urls) == 0 {
+	if c == nil || len(c.WatchKnowledgeURLs) == 0 {
 		return research.Request{}, false
 	}
+	focus := strings.TrimSpace(c.ResearchFocus)
 	subject := strings.TrimSpace(msg.Subject)
 	body := strings.TrimSpace(msg.Body)
 	topic := focus
@@ -765,80 +752,6 @@ func mailKnowledgeRequest(c *model.MailConnection, msg mail.InboxMessage) (resea
 	return research.Request{
 		Topic:   topic,
 		Context: b.String(),
-		URLs:    urls,
+		URLs:    append([]string(nil), c.WatchKnowledgeURLs...),
 	}, true
-}
-
-func (s *mailService) SimulateEnabled() bool {
-	return s != nil && s.cfg.Simulate
-}
-
-func (s *mailService) ConnectSimulated(ctx context.Context, orgID uuid.UUID) (*model.MailConnectionStatus, error) {
-	if !s.SimulateEnabled() || !s.Configured() {
-		return nil, ErrMailNotConfigured
-	}
-	enc, err := mail.Encrypt(s.key, []byte("sim-refresh"))
-	if err != nil {
-		return nil, err
-	}
-	agent, _ := s.EnsureMailAgent(ctx, orgID)
-	now := time.Now()
-	email := "sim@jobshout.local"
-	if p, ok := s.gmail.(interface {
-		Profile(context.Context, string) (string, error)
-	}); ok {
-		if got, perr := p.Profile(ctx, "sim-access"); perr == nil && got != "" {
-			email = got
-		}
-	}
-	conn := &model.MailConnection{
-		OrgID:                orgID,
-		GoogleEmail:          email,
-		RefreshTokenEnc:      enc,
-		Scopes:               mail.RequestedScopes(),
-		Status:               model.MailConnConnected,
-		ConnectedAt:          &now,
-		NextSyncAt:           &now,
-		WatchLabels:          []string{},
-		WatchSenders:         []string{},
-		WatchSubjectPrefixes: []string{},
-		WatchKnowledgeURLs:   []string{},
-	}
-	if agent != nil {
-		conn.AgentID = &agent.ID
-	}
-	if existing, _ := s.repo.GetConnectionByOrg(ctx, orgID); existing != nil {
-		conn.AllowMailboxMutations = existing.AllowMailboxMutations
-		conn.WatchLabels = existing.WatchLabels
-		conn.WatchSenders = existing.WatchSenders
-		conn.WatchSubjectPrefixes = existing.WatchSubjectPrefixes
-		conn.WatchKnowledgeURLs = existing.WatchKnowledgeURLs
-		conn.ResearchFocus = existing.ResearchFocus
-		conn.ReplyInstructions = existing.ReplyInstructions
-	}
-	if err := s.repo.UpsertConnection(ctx, conn); err != nil {
-		return nil, err
-	}
-	if clearer, ok := s.gmail.(interface{ ClearInbox() }); ok {
-		clearer.ClearInbox()
-	}
-	s.logger.Info("mail: simulated mailbox connected", zap.String("org_id", orgID.String()))
-	return s.ConnectionStatus(ctx, orgID)
-}
-
-func (s *mailService) PushSimulatedInbox(msgs []mail.InboxMessage) error {
-	if !s.SimulateEnabled() {
-		return ErrMailNotConfigured
-	}
-	pusher, ok := s.gmail.(interface {
-		Push(msgs ...mail.InboxMessage)
-	})
-	if !ok {
-		return fmt.Errorf("mail: simulated inbox is not wired")
-	}
-	if clearer, ok := s.gmail.(interface{ ClearInbox() }); ok {
-		clearer.ClearInbox()
-	}
-	pusher.Push(msgs...)
-	return nil
 }

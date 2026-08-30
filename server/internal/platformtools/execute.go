@@ -42,9 +42,12 @@ func runAgentExecute(ctx context.Context, d Deps, reg *Registry, input map[strin
 		}
 	}
 
-	if builtin == model.BuiltinMail && strings.Contains(strings.ToLower(prompt), "draft") &&
-		!strings.Contains(strings.ToLower(prompt), "sync") && d.Launch == nil {
-		return dispatchTool(ctx, reg, "mail_list_drafts", input)
+	if builtin == model.BuiltinMail {
+		tool := "mail_list_drafts"
+		if strings.Contains(strings.ToLower(prompt), "sync") {
+			tool = "mail_sync"
+		}
+		return dispatchTool(ctx, reg, tool, input)
 	}
 
 	if slot, question, opts := schema.NextMissing(vals); slot != "" {
@@ -54,10 +57,6 @@ func runAgentExecute(ctx context.Context, d Deps, reg *Registry, input map[strin
 		return &Result{Missing: []string{slot}, Question: question, Options: opts}, nil
 	}
 	vals = schema.ApplyDefaults(vals)
-
-	if d.Launch != nil {
-		return launchAgent(ctx, d, agent, vals)
-	}
 
 	if schema.SpecialistTool != "" {
 		args := map[string]any{}

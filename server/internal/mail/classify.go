@@ -80,7 +80,7 @@ Return JSON:
   "triage_label": "short label e.g. support, sales, newsletter"
 }
 
-needs_research is true when a useful reply needs current facts from the web (versions, outages, docs, prices) that are not already in the email, or when the email includes a product/docs URL that should be read before drafting. Small talk, thanks, scheduling, and newsletters do not need research.
+needs_research is true only when a useful reply needs current facts from the web (versions, outages, docs, prices) that are not already in the email. Small talk, thanks, scheduling, and newsletters do not need research.
 suggested_action is ignore for newsletters, bounce mail, no-reply notifications, and obvious spam.
 
 From: %s <%s>
@@ -160,11 +160,6 @@ func HeuristicClassify(msg InboxMessage) ClassifyResult {
 			out.Reason = "The question looks like it needs current facts."
 			break
 		}
-	}
-	if !out.NeedsResearch && len(ExtractInboundURLs(msg.Subject, msg.Body)) > 0 {
-		out.NeedsResearch = true
-		out.TriageLabel = "research"
-		out.Reason = "The email includes a link to research before drafting."
 	}
 	return out
 }

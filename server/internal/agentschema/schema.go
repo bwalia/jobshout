@@ -79,15 +79,7 @@ func ForBuiltin(builtin string) Schema {
 	case model.BuiltinMail:
 		return Schema{
 			Builtin:        model.BuiltinMail,
-			SpecialistTool: "mail_sync",
-			Fields: []Field{
-				{Key: "senders", Label: "Watch senders", Question: "Any sender addresses to watch? Leave blank for all unread mail."},
-				{Key: "subject_prefixes", Label: "Subject prefixes"},
-				{Key: "labels", Label: "Gmail labels"},
-				{Key: "knowledge_urls", Label: "Knowledge links", Question: "Any pricing or product pages I should read? One URL per line."},
-				{Key: "research_focus", Label: "What to look for"},
-				{Key: "reply_instructions", Label: "How the reply should read"},
-			},
+			SpecialistTool: "mail_list_drafts",
 		}
 	default:
 		return Schema{

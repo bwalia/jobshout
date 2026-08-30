@@ -1,9 +1,7 @@
 package blog
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -26,50 +24,7 @@ type writePlan struct {
 	// into the draft prompt to keep a long article pointed the same way.
 	Angle    string   `json:"angle"`
 	Sections []string `json:"sections"`
-	// Cover fields keep the house style (charcoal navy, teal/coral) while
-	// giving each article its own metaphor so covers do not look identical.
-	CoverMetaphor string         `json:"cover_metaphor"`
-	CoverObjects  flexibleString `json:"cover_objects"`
-	CoverAccent   string         `json:"cover_accent"`
 }
-
-// flexibleString accepts a JSON string or an array of strings (joined with
-// commas). Models often return cover_objects as ["lighthouse","hull"].
-type flexibleString string
-
-func (s *flexibleString) UnmarshalJSON(b []byte) error {
-	b = bytes.TrimSpace(b)
-	if len(b) == 0 || string(b) == "null" {
-		*s = ""
-		return nil
-	}
-	if b[0] == '"' {
-		var v string
-		if err := json.Unmarshal(b, &v); err != nil {
-			return err
-		}
-		*s = flexibleString(strings.TrimSpace(v))
-		return nil
-	}
-	if b[0] == '[' {
-		var v []string
-		if err := json.Unmarshal(b, &v); err != nil {
-			return err
-		}
-		parts := make([]string, 0, len(v))
-		for _, p := range v {
-			p = strings.TrimSpace(p)
-			if p != "" {
-				parts = append(parts, p)
-			}
-		}
-		*s = flexibleString(strings.Join(parts, ", "))
-		return nil
-	}
-	return fmt.Errorf("want string or array of strings")
-}
-
-func (s flexibleString) String() string { return string(s) }
 
 // plan chooses a title and an outline from the research brief.
 func (r *Runner) plan(ctx context.Context, modelName string, brief model.BlogBrief, rb *research.Brief) (*writePlan, error) {
@@ -93,12 +48,9 @@ Decide:
    concrete and under 70 characters. No colons-and-subtitles, no "A Guide To".
 2. One sentence on the angle: what a reader gets from this piece.
 3. Four to six section headings that deliver that angle.
-4. A cover brief: one concrete visual metaphor unique to this topic, one or two
-   focal objects (not generic "tools, documents, agents"), and a one-word
-   accent note (e.g. "amber", "ice", "copper") that still sits with teal/coral.
 
 Respond with JSON only, in exactly this shape:
-{"title": "...", "angle": "...", "sections": ["...", "..."], "cover_metaphor": "...", "cover_objects": "...", "cover_accent": "..."}`,
+{"title": "...", "angle": "...", "sections": ["...", "..."]}`,
 		brief.Topic,
 		guidanceOrNone(brief.Context),
 		orNone(rb.Summary),
@@ -326,11 +278,10 @@ you changed.`,
 const diagramRules = `
 DIAGRAMS:
 
-Include one Mermaid diagram where a diagram genuinely explains something
-faster than a paragraph — a request path, a protocol exchange, a lifecycle,
-a data model. Do not add one to every section, and do not add one that
-merely restates a list. A second visual idea belongs in an illustration,
-not another flowchart.
+Include one or two Mermaid diagrams where a diagram genuinely explains
+something faster than a paragraph — a request path, a protocol exchange, a
+lifecycle, a data model. Do not add one to every section, and do not add one
+that merely restates a list.
 
 Write them as a mermaid code fence:
 
@@ -370,30 +321,29 @@ Rules:
 //
 // It is deliberately stingier than the diagram rules. A diagram costs the model
 // a few hundred tokens; an illustration costs tens of seconds of a single
-// shared GPU, and one picture that explains the argument is enough.
+// shared GPU, and an article does not need three of them.
 const illustrationRules = `
 ILLUSTRATIONS:
 
-Request exactly ONE generated illustration that explains a mechanism the
-prose just described — not the cover, not decoration. Place it after the
-H2 it belongs to. The pipeline will add one if you forget.
-
-One mermaid diagram is enough. If a second idea is visual, use an
-illustration fence instead of another flowchart.
+You may request AT MOST ONE generated illustration, and only where a picture
+genuinely sets up the subject — an opening image for a long piece, or a single
+concrete scene the prose then unpacks. Most articles need none. A diagram is
+almost always the better choice: a diagram carries information, an illustration
+carries atmosphere.
 
 Request one by writing an illustration fence whose body describes the picture:
 
   ` + "```" + `illustration
-  An agent handing a ranked shortlist of issuers to a trader at a desk
+  A lighthouse on a rocky shore at dawn, seen from the water
   ` + "```" + `
 
 Rules:
-- The scene must show THIS article's work: who does what to what. "An agent
-  handing a ranked shortlist to a trader" works. "A modern server room" does
-  not — that could sit in any article and explains nothing.
-- Describe a CONCRETE SCENE. "The concept of reliability" produces a muddle.
-- Do not ask for text, labels, charts or UI. Image models render lettering badly.
-- Never request more than one. The pipeline drops extras.
+- Describe a CONCRETE SCENE — a thing that could be photographed. "A lighthouse
+  at dawn" works. "The concept of reliability" does not, and produces a muddle.
+- Do not ask for text, labels, diagrams, charts or UI in an illustration. Image
+  models render lettering badly, and a diagram belongs in a mermaid fence.
+- Do not use one to replace a diagram, and never to illustrate a claim that
+  needs a source.
 - The description becomes the image's alt text, so write it as a sentence a
   screen-reader user would find useful.
 `

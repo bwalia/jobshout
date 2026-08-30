@@ -34,30 +34,19 @@ export function AgentInputFields({
 }: AgentInputFieldsProps) {
   const firstRequired = fields.find((f) => f.required)?.key;
 
-  let lastGroup: string | undefined;
   return (
     <div className="space-y-4">
-      {fields.map((field) => {
-        const showGroup = Boolean(field.group && field.group !== lastGroup);
-        lastGroup = field.group ?? lastGroup;
-        return (
-          <div key={field.key} className="space-y-2">
-            {showGroup ? (
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                {field.group}
-              </p>
-            ) : null}
-            <Field
-              field={field}
-              value={values[field.key] ?? ""}
-              onChange={(v) => onChange(field.key, v)}
-              error={errors?.[field.key]}
-              disabled={disabled}
-              autoFocus={Boolean(autoFocusFirst && field.key === firstRequired)}
-            />
-          </div>
-        );
-      })}
+      {fields.map((field) => (
+        <Field
+          key={field.key}
+          field={field}
+          value={values[field.key] ?? ""}
+          onChange={(v) => onChange(field.key, v)}
+          error={errors?.[field.key]}
+          disabled={disabled}
+          autoFocus={Boolean(autoFocusFirst && field.key === firstRequired)}
+        />
+      ))}
     </div>
   );
 }

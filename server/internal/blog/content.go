@@ -49,11 +49,6 @@ type GeneratedArticle struct {
 	CoverImageSeed     int64
 	CoverImageWidth    int
 	CoverImageHeight   int
-
-	// Cover brief from the plan step — unique metaphor, shared house style.
-	CoverMetaphor string
-	CoverObjects  string
-	CoverAccent   string
 }
 
 // render fills HTML and Excerpt from Markdown. Separate from generation so the
@@ -305,19 +300,12 @@ func (r *Runner) writeOne(
 			zap.Int("sources_available", len(rb.Findings)))
 	}
 
-	if r.canIllustrate() {
-		markdown = ensureIllustrationFences(markdown, plan)
-	}
-
 	return &GeneratedArticle{
-		Topic:         brief.Topic,
-		Title:         plan.Title,
-		Markdown:      markdown,
-		References:    refs,
-		WordCount:     len(strings.Fields(markdown)),
-		CoverMetaphor: plan.CoverMetaphor,
-		CoverObjects:  plan.CoverObjects.String(),
-		CoverAccent:   plan.CoverAccent,
+		Topic:      brief.Topic,
+		Title:      plan.Title,
+		Markdown:   markdown,
+		References: refs,
+		WordCount:  len(strings.Fields(markdown)),
 	}, nil
 }
 

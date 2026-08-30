@@ -1,8 +1,3 @@
-const apiBase = (process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8080").replace(
-  /\/$/,
-  ""
-);
-
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
@@ -11,12 +6,6 @@ const nextConfig = {
       // Static marketing page in public/landing; its asset paths are absolute
       // (/landing/...) so it serves correctly with or without a trailing slash.
       { source: "/landing", destination: "/landing/index.html" },
-      // Article markdown uses /api/v1/images/file/… — without this, a plain
-      // <img> on the Next origin 404s and the prompt shows as alt text.
-      {
-        source: "/api/v1/images/file/:path*",
-        destination: `${apiBase}/api/v1/images/file/:path*`,
-      },
     ];
   },
   images: {
@@ -72,7 +61,6 @@ const nextConfig = {
         permanent: false,
       },
       // Keep /articles/:runId for article detail (linked from Articles list)
-      { source: "/artifacts", destination: "/panel/artifacts", permanent: false },
       {
         source: "/images",
         destination: "/panel/task-manager?agent=images",

@@ -58,7 +58,7 @@ function fallbackHref(entity: EntityRef): string {
     case "workflow_run":
       return entity.id ? `/workflows/${entity.id}` : "/panel/workflows";
     case "article_run":
-      return entity.id ? `/articles/${entity.id}` : "/panel/artifacts";
+      return entity.id ? `/articles/${entity.id}` : "/panel/task-manager?agent=articles";
     case "pentest_run":
       return entity.id
         ? `/panel/task-manager?agent=pentest&run=${entity.id}`
@@ -72,7 +72,7 @@ function fallbackHref(entity: EntityRef): string {
         ? `/panel/task-manager?agent=mail&thread=${entity.id}`
         : "/panel/task-manager?agent=mail";
     case "image":
-      return "/panel/artifacts?kind=image";
+      return "/panel/task-manager?agent=images";
     case "sprint":
       return "/panel/sprints";
     default:

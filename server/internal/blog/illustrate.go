@@ -65,9 +65,11 @@ const (
 
 // maxInlineIllustrations bounds how many pictures one article may request.
 //
-// Each costs tens of seconds on a single shared GPU. One body image is enough
-// to explain a mechanism the mermaid diagram does not; extras are dropped.
-const maxInlineIllustrations = 1
+// Each costs tens of seconds on a single shared GPU, so an article that asks
+// for nine holds up every other run behind it. Three is enough to illustrate a
+// long piece and small enough that the pipeline stays predictable; blocks past
+// the limit are dropped rather than queued.
+const maxInlineIllustrations = 3
 
 // illustrationFence matches an ```illustration block and captures its body.
 //
@@ -137,12 +139,9 @@ func coverSubtitleText(title, topic string) string {
 // Turbo ignores separate negative prompts, so exclusions and exact title
 // strings live in the positive prompt. The topic drives the metaphor; the
 // title (trimmed) is lettered on the left.
-func coverPrompt(title, topic string, metaphor, objects, accent string) string {
+func coverPrompt(title, topic string) string {
 	topic = strings.TrimSpace(topic)
 	title = strings.TrimSpace(title)
-	metaphor = strings.TrimSpace(metaphor)
-	objects = strings.TrimSpace(objects)
-	accent = strings.TrimSpace(accent)
 
 	subject := topic
 	if subject == "" {
@@ -155,20 +154,6 @@ func coverPrompt(title, topic string, metaphor, objects, accent string) string {
 	headline := coverTitleText(title, topic)
 	subtitle := coverSubtitleText(title, topic)
 
-	focal := "a concrete visual metaphor for the topic"
-	if metaphor != "" {
-		focal = metaphor
-	}
-	if objects != "" {
-		focal += " — " + objects
-	} else if metaphor == "" {
-		focal += " using tools, documents, agents, networks or machines as simple shapes"
-	}
-	accentClause := "small coral accent dots and thin geometric lines floating nearby"
-	if accent != "" {
-		accentClause = "small " + accent + " and coral accent dots and thin geometric lines floating nearby"
-	}
-
 	return fmt.Sprintf(
 		"A high-quality, ultra-detailed modern editorial blog cover illustration "+
 			"about %s on a deep charcoal navy background with a subtle dark gradient. "+
@@ -176,324 +161,17 @@ func coverPrompt(title, topic string, metaphor, objects, accent string) string {
 			"with a smaller thin teal subtitle below it that says %q, "+
 			"both razor-sharp, crisp, high contrast, and easy to read. "+
 			"On the opposite side, one or two glowing visual objects as the focal point — "+
-			"%s — "+
+			"a concrete visual metaphor for the topic using tools, documents, agents, networks or machines as simple shapes — "+
 			"emitting soft teal and cyan light that gently illuminates the dark surroundings, "+
-			"%s. "+
+			"small coral accent dots and thin geometric lines floating nearby. "+
 			"Flat vector illustration style with finely detailed subtle grain texture and smooth polished gradient shading, "+
 			"soft rim glow around the subject, gentle ambient light falloff, crisp clean edges, "+
 			"meticulous professional finish, balanced asymmetric composition, wide 16:9 landscape framing, "+
 			"sharp high-resolution rendering, premium dark-mode tech-blog aesthetic, "+
 			"uncluttered layout with generous breathing room around the text. "+
 			"No logos, no watermarks, no UI chrome, no extra text beyond the title and subtitle.",
-		subject, headline, subtitle, focal, accentClause,
+		subject, headline, subtitle,
 	)
-}
-
-// citationMark strips [1]-style citation markers so they do not leak into
-// an image prompt.
-var citationMark = regexp.MustCompile(`\[\d+\]`)
-
-// ensureIllustrationFences makes the article's visuals one mermaid plus one
-// explanatory picture. A second flowchart is replaced by a scene taken from
-// that section's prose; if the writer drew none, one fence is inserted.
-func ensureIllustrationFences(markdown string, plan *writePlan) string {
-	markdown = preferIllustrationOverSecondDiagram(markdown, planTitle(plan))
-	markdown = keepFirstIllustrationOnly(markdown)
-	if illustrationFence.MatchString(markdown) {
-		return markdown
-	}
-	return insertOneIllustration(markdown, plan)
-}
-
-func planTitle(plan *writePlan) string {
-	if plan == nil {
-		return ""
-	}
-	return strings.TrimSpace(plan.Title)
-}
-
-// preferIllustrationOverSecondDiagram keeps the first mermaid and turns later
-// ones into a single illustration of that section. A second flowchart rarely
-// adds more than the first; a picture of the other idea does.
-func preferIllustrationOverSecondDiagram(markdown, title string) string {
-	matches := mermaidFence.FindAllStringIndex(markdown, -1)
-	if len(matches) < 2 {
-		return markdown
-	}
-	alreadyIllustrated := illustrationFence.MatchString(markdown)
-	second := matches[1]
-
-	var b strings.Builder
-	b.WriteString(markdown[:second[0]])
-	if !alreadyIllustrated {
-		heading, prose := sectionAround(markdown, second[0])
-		b.WriteString("```illustration\n")
-		b.WriteString(sectionScene(heading, prose, title))
-		b.WriteString("\n```")
-	}
-	rest := mermaidFence.ReplaceAllString(markdown[second[1]:], "")
-	b.WriteString(rest)
-	return collapseBlankRuns(b.String())
-}
-
-func keepFirstIllustrationOnly(markdown string) string {
-	matches := illustrationFence.FindAllStringIndex(markdown, -1)
-	if len(matches) <= 1 {
-		return markdown
-	}
-	var b strings.Builder
-	last := 0
-	for i, m := range matches {
-		if i == 0 {
-			b.WriteString(markdown[last:m[1]])
-			last = m[1]
-			continue
-		}
-		b.WriteString(markdown[last:m[0]])
-		last = m[1]
-	}
-	b.WriteString(markdown[last:])
-	return collapseBlankRuns(b.String())
-}
-
-func insertOneIllustration(markdown string, plan *writePlan) string {
-	title := planTitle(plan)
-	headings := collectH2s(markdown)
-	if len(headings) == 0 && plan != nil {
-		headings = plan.Sections
-	}
-
-	lines := strings.Split(markdown, "\n")
-	type candidate struct {
-		lineIdx int
-		heading string
-	}
-	var preferred, fallback []candidate
-	for i, line := range lines {
-		trim := strings.TrimSpace(line)
-		if !isH2(trim) {
-			continue
-		}
-		c := candidate{i, strings.TrimSpace(strings.TrimPrefix(trim, "## "))}
-		if sectionHasMermaidSoon(lines, i) {
-			fallback = append(fallback, c)
-		} else {
-			preferred = append(preferred, c)
-		}
-	}
-	pick := preferred
-	if len(pick) == 0 {
-		pick = fallback
-	}
-	if len(pick) == 0 {
-		heading := ""
-		if len(headings) > 0 {
-			heading = headings[0]
-		}
-		scene := sectionScene(heading, firstParagraph(markdown), title)
-		return strings.TrimRight(markdown, "\n") + "\n\n```illustration\n" + scene + "\n```\n"
-	}
-
-	c := pick[0]
-	scene := sectionScene(c.heading, firstParagraph(sectionTextFrom(lines, c.lineIdx)), title)
-	insertAt := lineAfterFirstParagraph(lines, c.lineIdx)
-
-	var b strings.Builder
-	for i, line := range lines {
-		if i > 0 {
-			b.WriteByte('\n')
-		}
-		b.WriteString(line)
-		if i == insertAt {
-			b.WriteString("\n\n```illustration\n")
-			b.WriteString(scene)
-			b.WriteString("\n```")
-		}
-	}
-	return b.String()
-}
-
-func collectH2s(markdown string) []string {
-	var out []string
-	for _, line := range strings.Split(markdown, "\n") {
-		trim := strings.TrimSpace(line)
-		if isH2(trim) {
-			out = append(out, strings.TrimSpace(strings.TrimPrefix(trim, "## ")))
-		}
-	}
-	return out
-}
-
-func isH2(trim string) bool {
-	return strings.HasPrefix(trim, "## ") && !strings.HasPrefix(trim, "### ")
-}
-
-func sectionHasMermaidSoon(lines []string, headingIdx int) bool {
-	for i := headingIdx + 1; i < len(lines) && i <= headingIdx+24; i++ {
-		trim := strings.TrimSpace(lines[i])
-		if isH2(trim) {
-			return false
-		}
-		if strings.HasPrefix(trim, "```mermaid") {
-			return true
-		}
-	}
-	return false
-}
-
-func sectionTextFrom(lines []string, headingIdx int) string {
-	var b strings.Builder
-	for i := headingIdx; i < len(lines); i++ {
-		if i > headingIdx && isH2(strings.TrimSpace(lines[i])) {
-			break
-		}
-		if i > headingIdx {
-			b.WriteByte('\n')
-		}
-		b.WriteString(lines[i])
-	}
-	return b.String()
-}
-
-func lineAfterFirstParagraph(lines []string, headingIdx int) int {
-	i := headingIdx + 1
-	for i < len(lines) && strings.TrimSpace(lines[i]) == "" {
-		i++
-	}
-	if i >= len(lines) {
-		return headingIdx
-	}
-	trim := strings.TrimSpace(lines[i])
-	if strings.HasPrefix(trim, "```") {
-		i++
-		for i < len(lines) && !strings.HasPrefix(strings.TrimSpace(lines[i]), "```") {
-			i++
-		}
-		if i < len(lines) {
-			i++
-		}
-		for i < len(lines) && strings.TrimSpace(lines[i]) == "" {
-			i++
-		}
-	}
-	if i >= len(lines) || isH2(strings.TrimSpace(lines[i])) {
-		return headingIdx
-	}
-	last := i
-	for i < len(lines) {
-		trim := strings.TrimSpace(lines[i])
-		if trim == "" || isH2(trim) || strings.HasPrefix(trim, "```") {
-			break
-		}
-		last = i
-		i++
-	}
-	return last
-}
-
-func sectionAround(markdown string, pos int) (heading, prose string) {
-	if pos < 0 {
-		pos = 0
-	}
-	if pos > len(markdown) {
-		pos = len(markdown)
-	}
-	heading = lastH2Before(markdown, pos)
-	before := markdown[:pos]
-	if i := strings.LastIndex(before, "\n## "); i >= 0 {
-		prose = firstParagraph(before[i:])
-	} else if strings.HasPrefix(strings.TrimSpace(before), "## ") {
-		prose = firstParagraph(before)
-	}
-	if prose == "" {
-		prose = firstParagraph(markdown[pos:])
-	}
-	return heading, prose
-}
-
-func lastH2Before(markdown string, pos int) string {
-	last := ""
-	for _, line := range strings.Split(markdown[:pos], "\n") {
-		trim := strings.TrimSpace(line)
-		if isH2(trim) {
-			last = strings.TrimSpace(strings.TrimPrefix(trim, "## "))
-		}
-	}
-	return last
-}
-
-func firstParagraph(s string) string {
-	var buf []string
-	inFence := false
-	for _, line := range strings.Split(s, "\n") {
-		trim := strings.TrimSpace(line)
-		if strings.HasPrefix(trim, "```") {
-			inFence = !inFence
-			continue
-		}
-		if inFence {
-			continue
-		}
-		if trim == "" || strings.HasPrefix(trim, "#") {
-			if len(buf) > 0 {
-				break
-			}
-			continue
-		}
-		buf = append(buf, trim)
-		if len(strings.Join(buf, " ")) > 280 {
-			break
-		}
-	}
-	return strings.TrimSpace(citationMark.ReplaceAllString(strings.Join(buf, " "), ""))
-}
-
-func firstSentence(s string) string {
-	s = strings.TrimSpace(s)
-	for i := 0; i < len(s); i++ {
-		if (s[i] == '.' || s[i] == '?' || s[i] == '!') && (i+1 == len(s) || s[i+1] == ' ') {
-			return strings.TrimSpace(s[:i+1])
-		}
-	}
-	if len(s) <= 220 {
-		return s
-	}
-	cut := s[:220]
-	if j := strings.LastIndex(cut, " "); j > 80 {
-		cut = cut[:j]
-	}
-	return strings.TrimSpace(cut)
-}
-
-// sectionScene builds an image prompt from the section's own argument, not a
-// stock photo of the heading ("a modern server room").
-func sectionScene(heading, prose, title string) string {
-	h := strings.TrimSpace(heading)
-	p := strings.Join(strings.Fields(strings.TrimSpace(citationMark.ReplaceAllString(prose, ""))), " ")
-	if p != "" {
-		p = firstSentence(p)
-	}
-	about := h
-	if about == "" {
-		about = strings.TrimSpace(title)
-	}
-	if about == "" {
-		about = "this section"
-	}
-	if p == "" {
-		return headingScene(about)
-	}
-	return "Editorial illustration that explains " + about + ": " + p +
-		" Show the people, systems or documents doing that work as one readable scene — not a generic office, server room or stock photo. No text, labels, logos or UI."
-}
-
-func headingScene(heading string) string {
-	h := strings.TrimSpace(heading)
-	if h == "" {
-		h = "the subject"
-	}
-	return "Editorial illustration of " + h +
-		", showing the people or systems doing that work as one readable scene. No text, labels, logos or UI."
 }
 
 // generateCover draws an article's cover image with coverModel.
@@ -506,7 +184,7 @@ func headingScene(heading string) string {
 // whether an article without a picture is still an article. It is: see
 // Runner.Generate.
 func (r *Runner) generateCover(ctx context.Context, orgID uuid.UUID, a *GeneratedArticle) error {
-	prompt := coverPrompt(a.Title, a.Topic, a.CoverMetaphor, a.CoverObjects, a.CoverAccent)
+	prompt := coverPrompt(a.Title, a.Topic)
 
 	var lastErr error
 	for attempt := 1; attempt <= coverMaxAttempts; attempt++ {

@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/jobshout/server/internal/agentschema"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/repository"
 	"github.com/jobshout/server/internal/research"
@@ -26,19 +25,15 @@ func registerSpecialists(reg *Registry, d Deps) {
 			tools.ObjectSchema(map[string]any{
 				"topic":   map[string]any{"type": "string", "description": "Subject to research. Omit if unknown."},
 				"context": map[string]any{"type": "string"},
-				"project": map[string]any{"type": "string", "description": "Project name or id when the org has more than one."},
 			}),
 			func(ctx context.Context, input map[string]any) (*Result, error) {
-				topic := strArg(input, "topic")
-				if topic == "" {
-					return &Result{Missing: []string{"topic"}, Question: "What should I research?"}, nil
-				}
-				if d.Launch != nil {
-					return launchSpecialist(ctx, d, model.BuiltinResearcher, agentschema.ValuesFromArgs(input))
-				}
 				ident := MustIdentity(ctx)
 				if !d.Research.Available() {
 					return &Result{Data: map[string]any{"available": false, "message": "Research is not configured on this server."}}, nil
+				}
+				topic := strArg(input, "topic")
+				if topic == "" {
+					return &Result{Missing: []string{"topic"}, Question: "What should I research?"}, nil
 				}
 				brief, err := d.Research.Research(ctx, ident.OrgID, research.Request{
 					Topic:   topic,
@@ -75,20 +70,16 @@ func registerSpecialists(reg *Registry, d Deps) {
 			tools.ObjectSchema(map[string]any{
 				"topic":   map[string]any{"type": "string", "description": "Subject to write about. Omit if unknown."},
 				"context": map[string]any{"type": "string"},
-				"project": map[string]any{"type": "string", "description": "Project name or id when the org has more than one."},
 			}),
 			func(ctx context.Context, input map[string]any) (*Result, error) {
+				ident := MustIdentity(ctx)
 				topic := strArg(input, "topic")
 				if topic == "" {
 					return &Result{Missing: []string{"topic"}, Question: "What should I write about?"}, nil
 				}
-				if d.Launch != nil {
-					return launchSpecialist(ctx, d, model.BuiltinArticleWriter, agentschema.ValuesFromArgs(input))
-				}
-				ident := MustIdentity(ctx)
 				uid := ident.UserID
 				run, err := d.Blog.Generate(ctx, ident.OrgID, &uid, "chat", model.GenerateBlogRequest{
-					Briefs: []model.BlogBrief{{Topic: topic, Context: strArg(input, "context")}},
+					Topics: []string{topic},
 				})
 				if err != nil {
 					return nil, err
@@ -173,9 +164,9 @@ func registerSpecialists(reg *Registry, d Deps) {
 				"target":      map[string]any{"type": "string", "description": "URL or path to test. Omit if unknown."},
 				"scan_mode":   map[string]any{"type": "string", "enum": []any{"quick", "standard", "deep"}},
 				"instruction": map[string]any{"type": "string"},
-				"project":     map[string]any{"type": "string", "description": "Project name or id when the org has more than one."},
 			}),
 			func(ctx context.Context, input map[string]any) (*Result, error) {
+				ident := MustIdentity(ctx)
 				target := strArg(input, "target")
 				if target == "" {
 					return &Result{Missing: []string{"target"}, Question: "What URL or path should I test?"}, nil
@@ -186,10 +177,6 @@ func registerSpecialists(reg *Registry, d Deps) {
 						"reason":  "That target is not in the authorised pentest scope. I will not scan it.",
 					}}, nil
 				}
-				if d.Launch != nil {
-					return launchSpecialist(ctx, d, model.BuiltinPentester, agentschema.ValuesFromArgs(input))
-				}
-				ident := MustIdentity(ctx)
 				mode := strArg(input, "scan_mode")
 				if mode == "" {
 					mode = "quick"
@@ -320,19 +307,8 @@ func registerSpecialists(reg *Registry, d Deps) {
 			"mail_sync",
 			"Sync the organisation Gmail inbox now. The Mail Agent classifies new mail and drafts replies; nothing is sent.",
 			"insight", model.PermAgentsExecute, false, false,
-			tools.ObjectSchema(map[string]any{
-				"senders":            map[string]any{"type": "string"},
-				"subject_prefixes":   map[string]any{"type": "string"},
-				"labels":             map[string]any{"type": "string"},
-				"knowledge_urls":     map[string]any{"type": "string"},
-				"research_focus":     map[string]any{"type": "string"},
-				"reply_instructions": map[string]any{"type": "string"},
-				"project":            map[string]any{"type": "string", "description": "Project name or id when the org has more than one."},
-			}),
+			tools.ObjectSchema(map[string]any{}),
 			func(ctx context.Context, input map[string]any) (*Result, error) {
-				if d.Launch != nil {
-					return launchSpecialist(ctx, d, model.BuiltinMail, agentschema.ValuesFromArgs(input))
-				}
 				ident := MustIdentity(ctx)
 				if !d.Mail.Available(ctx, ident.OrgID) {
 					return &Result{Data: map[string]any{

@@ -42,7 +42,6 @@ minio_data/
 # Logs
 *.log
 .dev-logs/
-.dev-data/
 
 # Coverage
 coverage/

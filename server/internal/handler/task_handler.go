@@ -12,74 +12,15 @@ import (
 	mw "github.com/jobshout/server/internal/middleware"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/service"
-	"github.com/jobshout/server/internal/tasklaunch"
 )
 
 type TaskHandler struct {
 	svc      service.TaskService
-	launch   *tasklaunch.Service
 	validate *validator.Validate
 }
 
-func NewTaskHandler(svc service.TaskService, launch *tasklaunch.Service) *TaskHandler {
-	return &TaskHandler{svc: svc, launch: launch, validate: validator.New()}
-}
-
-type launchTaskBody struct {
-	AgentID   string            `json:"agent_id" validate:"required,uuid"`
-	ProjectID string            `json:"project_id" validate:"omitempty,uuid"`
-	TaskID    string            `json:"task_id" validate:"omitempty,uuid"`
-	Values    map[string]string `json:"values"`
-}
-
-// Launch POST /api/v1/tasks/launch — create or reuse a board task and start the agent.
-func (h *TaskHandler) Launch(w http.ResponseWriter, r *http.Request) {
-	if h.launch == nil {
-		RespondError(w, http.StatusServiceUnavailable, "task launch is not configured")
-		return
-	}
-	var body launchTaskBody
-	if !DecodeJSON(w, r, &body) {
-		return
-	}
-	if err := h.validate.Struct(body); err != nil {
-		RespondError(w, http.StatusBadRequest, "validation failed: "+err.Error())
-		return
-	}
-	orgID, err := uuid.Parse(mw.GetOrgID(r.Context()))
-	if err != nil {
-		RespondError(w, http.StatusBadRequest, "invalid org_id in token")
-		return
-	}
-	userID, _ := uuid.Parse(mw.GetUserID(r.Context()))
-	agentID, _ := uuid.Parse(body.AgentID)
-	req := tasklaunch.Request{
-		OrgID: orgID, UserID: userID, AgentID: agentID,
-		Values: body.Values, Source: "task_manager",
-	}
-	if body.ProjectID != "" {
-		req.ProjectID, _ = uuid.Parse(body.ProjectID)
-	}
-	if body.TaskID != "" {
-		id, perr := uuid.Parse(body.TaskID)
-		if perr == nil {
-			req.TaskID = &id
-		}
-	}
-	if req.ProjectID == uuid.Nil && req.TaskID != nil {
-		task, gerr := h.svc.GetByID(r.Context(), *req.TaskID)
-		if gerr != nil {
-			RespondError(w, http.StatusNotFound, "task not found")
-			return
-		}
-		req.ProjectID = task.ProjectID
-	}
-	result, err := h.launch.Launch(r.Context(), req)
-	if err != nil {
-		RespondError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	RespondJSON(w, http.StatusAccepted, result)
+func NewTaskHandler(svc service.TaskService) *TaskHandler {
+	return &TaskHandler{svc: svc, validate: validator.New()}
 }
 
 func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {

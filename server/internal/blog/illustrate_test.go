@@ -152,7 +152,7 @@ func TestEscapeAlt_NeutralisesBracketsAndNewlines(t *testing.T) {
 }
 
 func TestCoverPrompt_NamesASubjectAndPinsTheStyle(t *testing.T) {
-	got := coverPrompt("What the Gateway API Actually Changes", "kubernetes networking", "", "", "")
+	got := coverPrompt("What the Gateway API Actually Changes", "kubernetes networking")
 	if !strings.Contains(got, "kubernetes networking") {
 		t.Errorf("prompt lost the topic subject: %q", got)
 	}
@@ -173,7 +173,7 @@ func TestCoverPrompt_NamesASubjectAndPinsTheStyle(t *testing.T) {
 		t.Errorf("prompt should place title text on the left: %q", got)
 	}
 
-	fallback := coverPrompt("", "kubernetes networking", "", "", "")
+	fallback := coverPrompt("", "kubernetes networking")
 	if !strings.Contains(fallback, "kubernetes networking") {
 		t.Errorf("empty title should fall back to the topic: %q", fallback)
 	}
