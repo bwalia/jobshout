@@ -510,3 +510,46 @@ func TestResearchRun_EmptyTopic(t *testing.T) {
 		t.Fatal("sanity")
 	}
 }
+
+// TestRunResult_HidesRunIDSoTheModelDoesNotChaseAnEmptyLookup guards the fix
+// for a live chatbot defect: after starting a research run the model would take
+// the run id from the tool result, immediately call execution_get with it, find
+// nothing (the run had only just been queued), and report the successful start
+// as "I couldn't find that". article_generate escaped this because its entity
+// ref is a concrete artifact the model treats as the answer; research_run has
+// no page, so the bare id in the result was the only thing to act on — and the
+// model acted on it. The id is kept off the model-facing data and left on the
+// entity ref, where the UI card and later "publish it" resolution read it.
+func TestRunResult_HidesRunIDSoTheModelDoesNotChaseAnEmptyLookup(t *testing.T) {
+	agent := &model.Agent{ID: uuid.New(), Name: "Research Agent"}
+	run := &model.AgentRun{ID: uuid.New(), ExternalKind: "research_run", Status: model.AgentRunRunning}
+
+	res := runResult(run, agent)
+	data, ok := res.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("data is not a map: %T", res.Data)
+	}
+	if _, present := data["run_id"]; present {
+		t.Error("run_id must not reach the model: a handed id gets fed straight to a lookup that returns nothing")
+	}
+	if _, present := data["kind"]; present {
+		t.Error("kind is run plumbing, not something the model should reason about")
+	}
+	if data["started"] != true {
+		t.Errorf("started = %v; want true", data["started"])
+	}
+	if data["agent"] != "Research Agent" {
+		t.Errorf("agent = %v; want the run's agent so the reply can name it", data["agent"])
+	}
+	msg, _ := data["message"].(string)
+	low := strings.ToLower(msg)
+	for _, want := range []string{"do not call", "status", "get", "board"} {
+		if !strings.Contains(low, want) {
+			t.Errorf("message should tell the model to stop and not look the run up; missing %q in %q", want, msg)
+		}
+	}
+	// The id still has to travel for the card and entity resolution.
+	if res.Entity == nil || res.Entity.ID == "" {
+		t.Error("entity ref must still carry an id for the UI, even though the model does not get one")
+	}
+}

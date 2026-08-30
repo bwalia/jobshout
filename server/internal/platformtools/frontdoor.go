@@ -60,9 +60,19 @@ func runResult(run *model.AgentRun, agent *model.Agent) *Result {
 	data := map[string]any{
 		"started": true,
 		"agent":   agent.Name,
-		"run_id":  run.ID.String(),
-		"kind":    run.ExternalKind,
-		"message": fmt.Sprintf("%s has started. Progress appears on the agent board; do not look the run up now, there is nothing there yet.", agent.Name),
+		// The model is deliberately not handed the run id or an external handle.
+		// The run has only just been queued, so any lookup this turn comes back
+		// empty — and a model given an id will use it: it fetches the not-yet
+		// result, gets nothing, and reports the successful start as a failure
+		// ("I couldn't find that"). Observed live for research_run, which unlike
+		// article_generate has no artifact page, so the model reached for
+		// execution_get with this very id. The id still travels on the entity ref
+		// below for the UI card and for later "publish it" resolution; the model
+		// does not need it to tell the user the work has started.
+		"message": fmt.Sprintf(
+			"%s has started. Tell the user it is underway and where to watch it, "+
+				"then stop: there is no result to fetch this turn, so do not call a "+
+				"status, get, board, or execution tool for it now.", agent.Name),
 	}
 	if run.Status == model.AgentRunFailed && run.ErrorMessage != nil {
 		data["started"] = false
