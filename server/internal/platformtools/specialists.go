@@ -271,7 +271,7 @@ func registerSpecialists(reg *Registry, d Deps) {
 	if d.Mail != nil {
 		reg.Register(newTool(
 			"mail_sync",
-			"Sync the organisation Gmail inbox now, optionally saving the Mail Agent playbook first: which senders, subject prefixes and labels to watch, which pages to answer from, what to look for in them, and how the reply should read. The agent classifies new mail and drafts replies; nothing is sent.",
+			"Check for and pull in NEW Gmail now — use this for \"check for new mail\" or \"sync my inbox\", not for viewing replies already prepared (that is mail_list_drafts). Optionally saves the Mail Agent playbook first: which senders, subject prefixes and labels to watch, which pages to answer from, what to look for in them, and how the reply should read. The agent classifies new mail and drafts replies; nothing is sent.",
 			"insight", model.PermAgentsExecute, false, false,
 			tools.ObjectSchema(map[string]any{
 				"senders":            map[string]any{"type": "string", "description": "Comma-separated senders to watch. Empty means all unread mail."},
@@ -302,7 +302,7 @@ func registerSpecialists(reg *Registry, d Deps) {
 		))
 		reg.Register(newTool(
 			"mail_list_drafts",
-			"List Mail Agent drafts waiting for a human to approve (nothing is sent from here).",
+			"Show what is waiting in the inbox: the reply drafts the Mail Agent has already prepared, pending a human's approval (nothing is sent from here). Use this to answer \"what's in my inbox\", \"any replies waiting\", or \"show me the drafts\" — it reads what is there and does not fetch new mail.",
 			"insight", model.PermAgentsRead, false, true,
 			tools.ObjectSchema(map[string]any{}),
 			func(ctx context.Context, input map[string]any) (*Result, error) {
