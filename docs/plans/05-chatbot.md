@@ -74,9 +74,16 @@
 >   prompt leg; the structural leg is that the chat registry has no mail-send
 >   tool, so the fabrication guard covers the rest).
 >
-> **Still not done:** Suite A as a committed `//go:build evallive` file (run
-> live ad-hoc so far; Suite B is committed in `summary_test.go`). Phase 2 intent
-> shaping stays deferred — at 8/8 the numbers do not call for a router.
+> **Done — Suite A is a committed `//go:build evallive` test.**
+> `eval/chat/suite_a_live_test.go` drives the running server through the same
+> HTTP path a user hits, runs all eight cases, and asserts the acceptance bar
+> (>= 7/8 with cases 2 and 8 Fatal). It skips when `CHAT_EVAL_BASE` /
+> `CHAT_EVAL_TOKEN` are unset, so it never breaks `go test ./...`. Verified
+> live: **8/8, both Fatal cases green.** Suite B is committed in
+> `summary_test.go`.
+>
+> Phase 2 intent shaping stays deferred — at 8/8 the numbers do not call for a
+> router.
 
 Verified against `feat/landing-page` @ `063cce3`. Depends on Plan 4 for Phase 3.
 Suite A / Suite D results verified live against `feat/agent-programme` @ `4d877a5`.
