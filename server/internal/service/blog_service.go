@@ -55,6 +55,8 @@ type BlogService interface {
 	ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.BlogRun], error)
 	ListArticles(ctx context.Context, runID uuid.UUID) ([]model.BlogArticle, error)
 	GetArticle(ctx context.Context, id uuid.UUID) (*model.BlogArticle, error)
+	// BindTasks updates the Task Manager card when a launched run finishes.
+	BindTasks(tasks TaskService)
 	// CanPublish reports whether the CMS connection is configured, so the UI
 	// can disable the action instead of offering a button that always fails.
 	CanPublish() bool
@@ -85,6 +87,7 @@ type blogService struct {
 	// arrive without a subject at all.
 	research  ResearchService
 	agentRepo repository.AgentRepository
+	tasks     TaskService
 	logger    *zap.Logger
 
 	mu       sync.Mutex
@@ -123,6 +126,12 @@ func NewBlogService(
 		active:        make(map[uuid.UUID]*trackedRun),
 		orphanTimeout: orphanTimeout,
 		maxRuntime:    maxRuntime,
+	}
+}
+
+func (s *blogService) BindTasks(tasks TaskService) {
+	if s != nil {
+		s.tasks = tasks
 	}
 }
 
@@ -326,6 +335,7 @@ func writeSteps(writer, researcher string) []model.BlogStep {
 		{Key: model.BlogStepReviewing, Label: "Reviewing the draft", Agent: writer, Status: model.StepStatusPending},
 		{Key: model.BlogStepRevising, Label: "Revising", Agent: writer, Status: model.StepStatusPending},
 		{Key: model.BlogStepExpanding, Label: "Expanding to full length", Agent: writer, Status: model.StepStatusPending},
+		{Key: model.BlogStepIllustrating, Label: "Illustrating the article", Agent: writer, Status: model.StepStatusPending},
 		{Key: model.BlogStepConverting, Label: "Converting to HTML", Agent: writer, Status: model.StepStatusPending},
 		{Key: model.BlogStepGenerated, Label: "Articles ready", Agent: writer, Status: model.StepStatusPending},
 	}
@@ -484,6 +494,7 @@ func (s *blogService) Generate(
 	// — the caller polls the run instead.
 	if err := s.beginGeneration(run, agent, req); err != nil {
 		s.failCreatedRun(run, errRunInterrupted)
+		s.notifyBoard(req.TaskID, "Article run failed to start.", "review")
 		return nil, err
 	}
 
@@ -656,8 +667,11 @@ func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, age
 	tracker := &stepTracker{runID: run.ID, steps: run.Steps, repo: s.repo, logger: s.logger}
 	s.setAgentStatus(persistCtx(), agent.ID, "active")
 
+	taskID := req.TaskID
+
 	if ctx.Err() != nil {
 		s.failRun(run, tracker, s.interruptCause(run.ID, ctx.Err()), log, agent)
+		s.notifyBoard(taskID, "Article run was interrupted.", "review")
 		return
 	}
 
@@ -668,6 +682,7 @@ func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, age
 		briefs, derr := s.discoverBriefs(ctx, run, req, tracker)
 		if derr != nil {
 			s.failRun(run, tracker, s.interruptCause(run.ID, derr), log, agent)
+			s.notifyBoard(taskID, "Article run failed while discovering a topic.", "review")
 			return
 		}
 		req.Briefs = briefs
@@ -698,6 +713,7 @@ func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, age
 
 	if ctx.Err() != nil {
 		s.failRun(run, tracker, s.interruptCause(run.ID, ctx.Err()), log, agent)
+		s.notifyBoard(taskID, "Article run was interrupted.", "review")
 		return
 	}
 
@@ -706,12 +722,18 @@ func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, age
 			err = fmt.Errorf("blog: no articles produced")
 		}
 		s.failRun(run, tracker, err, log, agent)
+		s.notifyBoard(taskID, "Article run failed: "+err.Error(), "review")
 		return
 	}
 
 	if !s.finishSuccessfulRun(run, tracker, err, log, agent) {
 		return
 	}
+	title := run.ID.String()
+	if len(run.Articles) > 0 && run.Articles[0].Title != "" {
+		title = run.Articles[0].Title
+	}
+	s.notifyBoard(taskID, "Article ready: "+title+"\n\nOpen /articles/"+run.ID.String(), "done")
 
 	// Filing happens after the run is recorded as completed, never instead of
 	// it. A CMS that is down or misconfigured must not turn articles that were
@@ -760,6 +782,23 @@ func (s *blogService) finishSuccessfulRun(
 	}
 	log.Info("blog: generation complete", zap.Int("articles", len(run.Articles)))
 	return true
+}
+
+func (s *blogService) notifyBoard(taskID *uuid.UUID, note, status string) {
+	if s == nil || s.tasks == nil || taskID == nil {
+		return
+	}
+	ctx := persistCtx()
+	if strings.TrimSpace(note) != "" {
+		n := note
+		if task, err := s.tasks.GetByID(ctx, *taskID); err == nil && task != nil && task.Description != nil && strings.TrimSpace(*task.Description) != "" {
+			n = strings.TrimSpace(*task.Description) + "\n\n" + note
+		}
+		_, _ = s.tasks.Update(ctx, *taskID, model.UpdateTaskRequest{Description: &n})
+	}
+	if status != "" {
+		_ = s.tasks.Transition(ctx, *taskID, status)
+	}
 }
 
 func (s *blogService) interruptCause(runID uuid.UUID, err error) error {

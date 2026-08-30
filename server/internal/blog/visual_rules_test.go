@@ -36,7 +36,7 @@ func TestIllustrationRules_TeachTheFenceThatIsActuallyParsed(t *testing.T) {
 	// that the two definitions cannot drift, and comparing against a rewritten
 	// version would defeat it.
 	const example = "  ```illustration\n" +
-		"  A lighthouse on a rocky shore at dawn, seen from the water\n" +
+		"  An agent handing a ranked shortlist of issuers to a trader at a desk\n" +
 		"  ```"
 	if !strings.Contains(rules, example) {
 		t.Fatalf("the prompt's example fence changed shape:\n%s", rules)
@@ -47,7 +47,7 @@ func TestIllustrationRules_TeachTheFenceThatIsActuallyParsed(t *testing.T) {
 		t.Error("the fence the prompt teaches is not the fence illustrateBody matches")
 	}
 	if got := illustrationFence.FindStringSubmatch(example); got == nil ||
-		!strings.Contains(got[1], "A lighthouse on a rocky shore") {
+		!strings.Contains(got[1], "An agent handing a ranked shortlist") {
 		t.Errorf("the description was not captured from the taught fence: %#v", got)
 	}
 }

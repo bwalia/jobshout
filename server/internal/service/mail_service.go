@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -43,6 +44,11 @@ type MailService interface {
 	SyncNow(ctx context.Context, orgID uuid.UUID) error
 	EnqueueSync(ctx context.Context, orgID uuid.UUID) error
 	ProcessDueSyncs(ctx context.Context, limit int) error
+	// BindTasks lets a launched sync update its Task Manager card. Optional.
+	BindTasks(tasks TaskService)
+	// BindLaunchTask records which board card this org's next sync should update.
+	// Periodic reconciler syncs with no binding leave the board alone.
+	BindLaunchTask(orgID, taskID uuid.UUID)
 
 	ListThreads(ctx context.Context, orgID uuid.UUID, pagination model.PaginationParams) (*model.PaginatedResponse[model.MailThread], error)
 	GetThread(ctx context.Context, orgID, threadID uuid.UUID) (*model.MailThreadDetail, error)
@@ -51,6 +57,11 @@ type MailService interface {
 	UpdateDraft(ctx context.Context, orgID, draftID uuid.UUID, req model.UpdateMailDraftRequest) (*model.MailDraft, error)
 	ApproveSend(ctx context.Context, orgID, draftID, userID uuid.UUID) (*model.MailDraft, error)
 	Reject(ctx context.Context, orgID, draftID, userID uuid.UUID) (*model.MailDraft, error)
+
+	// Local MAIL_SIMULATE only. Production Gmail is never used when these run.
+	SimulateEnabled() bool
+	ConnectSimulated(ctx context.Context, orgID uuid.UUID) (*model.MailConnectionStatus, error)
+	PushSimulatedInbox(msgs []mail.InboxMessage) error
 }
 
 type mailService struct {
@@ -60,9 +71,47 @@ type mailService struct {
 	classifier mail.Classifier
 	drafter    mail.Drafter
 	research   ResearchService
+	tasks      TaskService
+	launchMu   sync.Mutex
+	launchTask map[uuid.UUID]uuid.UUID // orgID → board task for the next sync
 	cfg        mail.Config
 	key        []byte
 	logger     *zap.Logger
+}
+
+func (s *mailService) BindTasks(tasks TaskService) {
+	if s != nil {
+		s.tasks = tasks
+	}
+}
+
+func (s *mailService) BindLaunchTask(orgID, taskID uuid.UUID) {
+	if s == nil {
+		return
+	}
+	s.launchMu.Lock()
+	defer s.launchMu.Unlock()
+	if s.launchTask == nil {
+		s.launchTask = map[uuid.UUID]uuid.UUID{}
+	}
+	if taskID == uuid.Nil {
+		delete(s.launchTask, orgID)
+		return
+	}
+	s.launchTask[orgID] = taskID
+}
+
+func (s *mailService) peekLaunchTask(orgID uuid.UUID) uuid.UUID {
+	if s == nil {
+		return uuid.Nil
+	}
+	s.launchMu.Lock()
+	defer s.launchMu.Unlock()
+	return s.launchTask[orgID]
+}
+
+func (s *mailService) clearLaunchTask(orgID uuid.UUID) {
+	s.BindLaunchTask(orgID, uuid.Nil)
 }
 
 // NewMailService wires the Mail Agent. gmail/classifier/drafter may be fakes in tests.
@@ -410,23 +459,38 @@ func (s *mailService) syncConnection(ctx context.Context, c *model.MailConnectio
 	if err != nil {
 		return mail.RedactErr(err)
 	}
+	launchTask := s.peekLaunchTask(c.OrgID)
+	drafted := 0
 	for _, msg := range msgs {
-		if err := s.ingestAndProcess(ctx, c, agent, msg); err != nil {
+		ok, err := s.ingestAndProcess(ctx, c, agent, msg, launchTask)
+		if err != nil {
 			s.logger.Warn("mail: thread processing failed",
 				zap.String("gmail_thread_id", msg.GmailThreadID),
 				zap.Error(mail.RedactErr(err)))
+			continue
 		}
+		if ok {
+			drafted++
+		}
+	}
+	if launchTask != uuid.Nil && drafted == 0 {
+		s.notifyMailTask(ctx, launchTask,
+			"Mailbox sync finished. No new drafts. Nothing is sent until you Approve.",
+			"done")
+	}
+	if launchTask != uuid.Nil {
+		s.clearLaunchTask(c.OrgID)
 	}
 	return nil
 }
 
-func (s *mailService) ingestAndProcess(ctx context.Context, c *model.MailConnection, agent *model.Agent, msg mail.InboxMessage) error {
+func (s *mailService) ingestAndProcess(ctx context.Context, c *model.MailConnection, agent *model.Agent, msg mail.InboxMessage, launchTask uuid.UUID) (bool, error) {
 	existing, err := s.repo.GetThreadByGmailID(ctx, c.OrgID, msg.GmailThreadID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if existing != nil && existing.Status != model.MailThreadNew && existing.Status != model.MailThreadFailed {
-		return nil
+		return false, nil
 	}
 	th := existing
 	if th == nil {
@@ -455,12 +519,15 @@ func (s *mailService) ingestAndProcess(ctx context.Context, c *model.MailConnect
 		th.Status = model.MailThreadNew
 	}
 	if err := s.repo.UpsertThread(ctx, th); err != nil {
-		return err
+		return false, err
 	}
-	return s.processThread(ctx, th, msg, c)
+	if err := s.processThread(ctx, th, msg, c, launchTask); err != nil {
+		return false, err
+	}
+	return th.Status == model.MailThreadDraftReady, nil
 }
 
-func (s *mailService) processThread(ctx context.Context, th *model.MailThread, msg mail.InboxMessage, c *model.MailConnection) error {
+func (s *mailService) processThread(ctx context.Context, th *model.MailThread, msg mail.InboxMessage, c *model.MailConnection, launchTask uuid.UUID) error {
 	th.Status = model.MailThreadClassifying
 	_ = s.repo.UpdateThread(ctx, th)
 
@@ -540,7 +607,31 @@ func (s *mailService) processThread(ctx context.Context, th *model.MailThread, m
 	}
 	th.Status = model.MailThreadDraftReady
 	th.ErrorMessage = nil
-	return s.repo.UpdateThread(ctx, th)
+	if err := s.repo.UpdateThread(ctx, th); err != nil {
+		return err
+	}
+	s.notifyMailTask(ctx, launchTask, fmt.Sprintf(
+		"Draft ready: %s\n\nOpen /panel/task-manager?agent=mail&thread=%s\nNothing is sent until you Approve.",
+		draft.Subject, th.ID), "review")
+	return nil
+}
+
+func (s *mailService) notifyMailTask(ctx context.Context, taskID uuid.UUID, note, status string) {
+	if s == nil || s.tasks == nil || taskID == uuid.Nil {
+		return
+	}
+	task, err := s.tasks.GetByID(ctx, taskID)
+	if err != nil || task == nil {
+		return
+	}
+	n := note
+	if task.Description != nil && strings.TrimSpace(*task.Description) != "" {
+		n = strings.TrimSpace(*task.Description) + "\n\n" + note
+	}
+	_, _ = s.tasks.Update(ctx, taskID, model.UpdateTaskRequest{Description: &n})
+	if status != "" {
+		_ = s.tasks.Transition(ctx, taskID, status)
+	}
 }
 
 func (s *mailService) failThread(ctx context.Context, th *model.MailThread, err error) error {
@@ -724,12 +815,20 @@ func (s *mailService) accessToken(ctx context.Context, c *model.MailConnection) 
 }
 
 // mailKnowledgeRequest builds a pinned-URL research.Request when the mailbox
-// has knowledge pages. ok is false when the list is empty (open-web path).
+// has knowledge pages or the inbound mail itself contains http(s) links.
+// ok is false when the merged list is empty (open-web path).
 func mailKnowledgeRequest(c *model.MailConnection, msg mail.InboxMessage) (research.Request, bool) {
-	if c == nil || len(c.WatchKnowledgeURLs) == 0 {
+	var playbook []string
+	var focus string
+	if c != nil {
+		playbook = c.WatchKnowledgeURLs
+		focus = strings.TrimSpace(c.ResearchFocus)
+	}
+	inbound := mail.ExtractInboundURLs(msg.Subject, msg.Body)
+	urls := mail.MergeKnowledgeURLs(playbook, inbound)
+	if len(urls) == 0 {
 		return research.Request{}, false
 	}
-	focus := strings.TrimSpace(c.ResearchFocus)
 	subject := strings.TrimSpace(msg.Subject)
 	body := strings.TrimSpace(msg.Body)
 	topic := focus
@@ -740,7 +839,14 @@ func mailKnowledgeRequest(c *model.MailConnection, msg mail.InboxMessage) (resea
 		topic = "inbound email"
 	}
 	var b strings.Builder
-	b.WriteString("Pinned knowledge pages only. Do not use other sources.")
+	switch {
+	case len(playbook) > 0 && len(inbound) == 0:
+		b.WriteString("Pinned knowledge pages only. Do not use other sources.")
+	case len(playbook) > 0:
+		b.WriteString("Read the pinned knowledge pages and the links in this email. Do not use other sources.")
+	default:
+		b.WriteString("Read the links in this inbound email. Do not use other sources.")
+	}
 	if focus != "" {
 		b.WriteString("\nLook for: ")
 		b.WriteString(focus)
@@ -752,6 +858,80 @@ func mailKnowledgeRequest(c *model.MailConnection, msg mail.InboxMessage) (resea
 	return research.Request{
 		Topic:   topic,
 		Context: b.String(),
-		URLs:    append([]string(nil), c.WatchKnowledgeURLs...),
+		URLs:    urls,
 	}, true
+}
+
+func (s *mailService) SimulateEnabled() bool {
+	return s != nil && s.cfg.Simulate
+}
+
+func (s *mailService) ConnectSimulated(ctx context.Context, orgID uuid.UUID) (*model.MailConnectionStatus, error) {
+	if !s.SimulateEnabled() || !s.Configured() {
+		return nil, ErrMailNotConfigured
+	}
+	enc, err := mail.Encrypt(s.key, []byte("sim-refresh"))
+	if err != nil {
+		return nil, err
+	}
+	agent, _ := s.EnsureMailAgent(ctx, orgID)
+	now := time.Now()
+	email := "sim@jobshout.local"
+	if p, ok := s.gmail.(interface {
+		Profile(context.Context, string) (string, error)
+	}); ok {
+		if got, perr := p.Profile(ctx, "sim-access"); perr == nil && got != "" {
+			email = got
+		}
+	}
+	conn := &model.MailConnection{
+		OrgID:                orgID,
+		GoogleEmail:          email,
+		RefreshTokenEnc:      enc,
+		Scopes:               mail.RequestedScopes(),
+		Status:               model.MailConnConnected,
+		ConnectedAt:          &now,
+		NextSyncAt:           &now,
+		WatchLabels:          []string{},
+		WatchSenders:         []string{},
+		WatchSubjectPrefixes: []string{},
+		WatchKnowledgeURLs:   []string{},
+	}
+	if agent != nil {
+		conn.AgentID = &agent.ID
+	}
+	if existing, _ := s.repo.GetConnectionByOrg(ctx, orgID); existing != nil {
+		conn.AllowMailboxMutations = existing.AllowMailboxMutations
+		conn.WatchLabels = existing.WatchLabels
+		conn.WatchSenders = existing.WatchSenders
+		conn.WatchSubjectPrefixes = existing.WatchSubjectPrefixes
+		conn.WatchKnowledgeURLs = existing.WatchKnowledgeURLs
+		conn.ResearchFocus = existing.ResearchFocus
+		conn.ReplyInstructions = existing.ReplyInstructions
+	}
+	if err := s.repo.UpsertConnection(ctx, conn); err != nil {
+		return nil, err
+	}
+	if clearer, ok := s.gmail.(interface{ ClearInbox() }); ok {
+		clearer.ClearInbox()
+	}
+	s.logger.Info("mail: simulated mailbox connected", zap.String("org_id", orgID.String()))
+	return s.ConnectionStatus(ctx, orgID)
+}
+
+func (s *mailService) PushSimulatedInbox(msgs []mail.InboxMessage) error {
+	if !s.SimulateEnabled() {
+		return ErrMailNotConfigured
+	}
+	pusher, ok := s.gmail.(interface {
+		Push(msgs ...mail.InboxMessage)
+	})
+	if !ok {
+		return fmt.Errorf("mail: simulated inbox is not wired")
+	}
+	if clearer, ok := s.gmail.(interface{ ClearInbox() }); ok {
+		clearer.ClearInbox()
+	}
+	pusher.Push(msgs...)
+	return nil
 }

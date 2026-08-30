@@ -5,6 +5,7 @@ import (
 
 	"github.com/jobshout/server/internal/repository"
 	"github.com/jobshout/server/internal/service"
+	"github.com/jobshout/server/internal/tasklaunch"
 	"github.com/jobshout/server/internal/tools"
 )
 
@@ -44,6 +45,7 @@ type Deps struct {
 	Embedder        tools.Embedder
 	Pool            *pgxpool.Pool
 	Memory          service.MemoryService
+	Launch          *tasklaunch.Service
 }
 
 // NewRegistryWithTools builds the chat platform registry. Nil deps fields

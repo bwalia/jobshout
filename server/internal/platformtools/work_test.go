@@ -49,6 +49,13 @@ func (f *fakeTasks) Create(_ context.Context, createdBy uuid.UUID, req model.Cre
 	pid, _ := uuid.Parse(req.ProjectID)
 	tk := model.Task{
 		ID: uuid.New(), ProjectID: pid, Title: req.Title, Status: "todo", Priority: req.Priority, CreatedBy: &createdBy,
+		Description: req.Description, Metadata: req.Metadata,
+	}
+	if req.AssignedAgentID != nil {
+		id, err := uuid.Parse(*req.AssignedAgentID)
+		if err == nil {
+			tk.AssignedAgentID = &id
+		}
 	}
 	f.items = append(f.items, tk)
 	return &tk, nil
@@ -79,11 +86,40 @@ func (f *fakeTasks) ListComments(context.Context, uuid.UUID) ([]model.TaskCommen
 func (f *fakeTasks) AddComment(context.Context, uuid.UUID, uuid.UUID, string) (*model.TaskComment, error) {
 	return nil, nil
 }
-func (f *fakeTasks) Update(context.Context, uuid.UUID, model.UpdateTaskRequest) (*model.Task, error) {
-	return nil, nil
+func (f *fakeTasks) Update(_ context.Context, id uuid.UUID, req model.UpdateTaskRequest) (*model.Task, error) {
+	for i := range f.items {
+		if f.items[i].ID != id {
+			continue
+		}
+		if req.Title != nil {
+			f.items[i].Title = *req.Title
+		}
+		if req.Description != nil {
+			f.items[i].Description = req.Description
+		}
+		if req.Metadata != nil {
+			f.items[i].Metadata = req.Metadata
+		}
+		if req.AssignedAgentID != nil {
+			aid, err := uuid.Parse(*req.AssignedAgentID)
+			if err == nil {
+				f.items[i].AssignedAgentID = &aid
+			}
+		}
+		return &f.items[i], nil
+	}
+	return nil, service.ErrAgentNotFound
 }
-func (f *fakeTasks) Delete(context.Context, uuid.UUID) error               { return nil }
-func (f *fakeTasks) Transition(context.Context, uuid.UUID, string) error   { return nil }
+func (f *fakeTasks) Delete(context.Context, uuid.UUID) error { return nil }
+func (f *fakeTasks) Transition(_ context.Context, id uuid.UUID, status string) error {
+	for i := range f.items {
+		if f.items[i].ID == id {
+			f.items[i].Status = status
+			return nil
+		}
+	}
+	return nil
+}
 func (f *fakeTasks) Reorder(context.Context, uuid.UUID, string, int) error { return nil }
 
 var _ service.ProjectService = (*fakeProjects)(nil)

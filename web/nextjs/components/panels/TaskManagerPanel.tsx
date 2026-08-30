@@ -132,48 +132,14 @@ export function TaskManagerPanel() {
       : null;
 
   function handleLaunchResult(result: LaunchResult) {
-    switch (result.kind) {
-      case "pentester":
-        setSelection({ kind: "builtin", id: "pentest" });
-        router.replace(
-          `/panel/task-manager?agent=pentest&run=${result.run.id}`,
-          { scroll: false }
-        );
-        break;
-      case "pr_reviewer":
-        setSelection({ kind: "builtin", id: "review" });
-        router.replace(
-          `/panel/task-manager?agent=review&run=${result.run.id}`,
-          { scroll: false }
-        );
-        break;
-      case "article_writer":
-        router.push(`/articles/${result.run.id}`);
-        break;
-      case "mail":
-        setSelection({ kind: "builtin", id: "mail" });
-        router.replace("/panel/task-manager?agent=mail", { scroll: false });
-        break;
-      case "researcher": {
-        const params = new URLSearchParams({
-          project: result.task.project_id,
-          task: result.task.id,
-        });
-        setSelection({ kind: "project", id: result.task.project_id });
-        router.replace(`/panel/task-manager?${params}`, { scroll: false });
-        break;
-      }
-      case "task_run": {
-        const params = new URLSearchParams({
-          project: result.task.project_id,
-          task: result.task.id,
-          run: result.run.id,
-        });
-        setSelection({ kind: "project", id: result.task.project_id });
-        router.replace(`/panel/task-manager?${params}`, { scroll: false });
-        break;
-      }
-    }
+    if (!result.task) return;
+    const params = new URLSearchParams({
+      project: result.task.project_id,
+      task: result.task.id,
+    });
+    if (result.run_id) params.set("run", result.run_id);
+    setSelection({ kind: "project", id: result.task.project_id });
+    router.replace(`/panel/task-manager?${params.toString()}`, { scroll: false });
   }
 
   return (
@@ -582,10 +548,8 @@ function ProjectTasksView({
           onClose={() => setEditorOpen(false)}
           onSaved={(t) => setSelectedId(t.id)}
           onLaunched={(result) => {
-            if (result.kind === "task_run") {
-              setSelectedId(result.task.id);
-              setFocusRunId(result.run.id);
-            }
+            setSelectedId(result.task.id);
+            if (result.run_id) setFocusRunId(result.run_id);
             onLaunched(result);
           }}
         />
@@ -650,9 +614,23 @@ function AgentDetailView({
           <button
             type="button"
             onClick={() => setCreateOpen(true)}
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border px-3 text-sm hover:bg-secondary"
+          >
+            <Plus className="h-4 w-4" /> New task
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (tasks[0]) {
+                setRunTask(tasks[0]);
+                return;
+              }
+              setCreateOpen(true);
+            }}
             className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90"
           >
-            <Rocket className="h-4 w-4" /> Run agent
+            <Rocket className="h-4 w-4" />{" "}
+            {tasks[0] ? "Run task" : "Run agent"}
           </button>
         </div>
       </div>
@@ -661,8 +639,8 @@ function AgentDetailView({
         <h3 className="mb-2 text-sm font-medium">Assigned tasks</h3>
         {tasks.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No tasks yet. Use Run agent to create one with this agent&apos;s
-            inputs and execute it.
+            No tasks yet. Use Run agent to fill this agent&apos;s inputs and
+            execute it.
           </p>
         ) : (
           <ul className="divide-y divide-border rounded-lg border border-border">
@@ -704,7 +682,15 @@ function AgentDetailView({
           projects={projects}
           initialAgentId={agent.id}
           onClose={() => setCreateOpen(false)}
-          onLaunched={onLaunched}
+          onSaved={(t) => {
+            setCreateOpen(false);
+            setRunTask(t);
+          }}
+          onLaunched={(result) => {
+            setCreateOpen(false);
+            setRunTask(null);
+            onLaunched(result);
+          }}
         />
       )}
 

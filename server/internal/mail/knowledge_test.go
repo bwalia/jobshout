@@ -3,6 +3,7 @@ package mail
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -64,5 +65,63 @@ func TestSanitizeKnowledgeURLsDedupe(t *testing.T) {
 	}
 	if len(got) != 1 {
 		t.Fatalf("got %d, want 1", len(got))
+	}
+}
+
+func TestExtractInboundURLsKeepsProductLink(t *testing.T) {
+	got := ExtractInboundURLs(
+		"Price of this machine?",
+		"Do you have this in stock? https://vendor.example/machine-x Thanks.",
+	)
+	if len(got) != 1 || got[0] != "https://vendor.example/machine-x" {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestExtractInboundURLsSkipsTracking(t *testing.T) {
+	got := ExtractInboundURLs("", "Click https://list-manage.com/unsub/abc or https://vendor.example/p")
+	if len(got) != 1 || got[0] != "https://vendor.example/p" {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestExtractInboundURLsDropsFooterSocialAndImages(t *testing.T) {
+	got := ExtractInboundURLs(
+		"Price?",
+		"See https://vendor.example/machine-x and https://linkedin.com/in/pat and https://vendor.example/logo.png and https://vendor.example/unsubscribe",
+	)
+	if len(got) != 1 || got[0] != "https://vendor.example/machine-x" {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestExtractInboundURLsReadsSubject(t *testing.T) {
+	got := ExtractInboundURLs("Re: https://vendor.example/sku-9", "What does this cost?")
+	if len(got) != 1 || got[0] != "https://vendor.example/sku-9" {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestExtractInboundURLsCapsAtFive(t *testing.T) {
+	var b strings.Builder
+	for i := 0; i < 8; i++ {
+		fmt.Fprintf(&b, "https://vendor.example/p/%d ", i)
+	}
+	got := ExtractInboundURLs("", b.String())
+	if len(got) != MaxInboundURLs {
+		t.Fatalf("got %d, want %d", len(got), MaxInboundURLs)
+	}
+}
+
+func TestMergeKnowledgeURLsPlaybookFirst(t *testing.T) {
+	got := MergeKnowledgeURLs(
+		[]string{"https://example.com/pricing"},
+		[]string{"https://vendor.example/machine-x", "https://example.com/pricing"},
+	)
+	if len(got) != 2 {
+		t.Fatalf("got %v", got)
+	}
+	if got[0] != "https://example.com/pricing" || got[1] != "https://vendor.example/machine-x" {
+		t.Fatalf("order %v", got)
 	}
 }
