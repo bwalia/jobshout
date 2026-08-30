@@ -218,9 +218,28 @@ func (r *Runner) WithIllustrator(images Illustrator) *Runner {
 	return r
 }
 
-// canIllustrate reports whether this run can draw.
+// canIllustrate reports whether this run can draw covers or body figures.
 func (r *Runner) canIllustrate() bool {
 	return r.images != nil && r.images.Enabled()
+}
+
+// letteringIllustrator is implemented by the production adapter when a
+// configured provider can render readable on-image text. Test fakes omit it;
+// canLetterFigures then assumes a working fake can letter.
+type letteringIllustrator interface {
+	Letters() bool
+}
+
+// canLetterFigures reports whether in-body labeled figures are worth asking
+// for. Covers can still use workstation diffusion; comparison tables cannot.
+func (r *Runner) canLetterFigures() bool {
+	if !r.canIllustrate() {
+		return false
+	}
+	if l, ok := r.images.(letteringIllustrator); ok {
+		return l.Letters()
+	}
+	return true
 }
 
 // NewRunner wires the Runner with its dependencies. cms may be nil — generation

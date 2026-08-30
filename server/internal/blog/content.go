@@ -305,7 +305,7 @@ func (r *Runner) writeOne(
 			zap.Int("sources_available", len(rb.Findings)))
 	}
 
-	if r.canIllustrate() {
+	if r.canLetterFigures() {
 		markdown = ensureIllustrationFences(markdown, plan)
 	}
 

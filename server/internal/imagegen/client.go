@@ -53,6 +53,9 @@ type GenerateRequest struct {
 	// such concept rather than being faked with prompt text, which would change
 	// the meaning of the prompt the caller wrote.
 	NegativePrompt string
+	// NoFallback skips the workstation path after a Gemini failure. Use it
+	// when the picture must letter readable labels: z-image-turbo cannot.
+	NoFallback bool
 }
 
 // GenerateResponse holds the produced image and what produced it.
