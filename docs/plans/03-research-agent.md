@@ -1,8 +1,16 @@
 # Plan 3 — Research Agent
 
-> ## Execution status — 2026-08-29
+> ## Execution status — 2026-08-29 (phase 4 added 2026-08-30)
 >
-> **Done: phases 1–3, plus evals.**
+> **Done: phases 1–4, plus evals.**
+>
+> Phase 4: a research run that completes but cannot verify enough sources
+> (`IsUsable` false, stored as `research_runs.usable`) no longer reads on the
+> agent board like any other completed run. The board query's `research_activity`
+> arm prefixes its detail with "⚠ Sources too thin to rely on — …" for that case,
+> and the board card tints the ⚠ line as a caution. Kept to the one arm and the
+> existing `detail` field — no UNION-wide column, no new DTO — because the board
+> is the only UI research surfaces in. Verified live against the DB.
 >
 > - Migration `000035_research_runs` (idempotent — `migrate.go` replays every
 >   `.up.sql` on boot), `model.ResearchRun`, `repository.ResearchRunRepository`.

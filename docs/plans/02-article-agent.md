@@ -24,9 +24,21 @@
 > API so an eval could reach it would be the tail wagging the dog. It writes its
 > report through the shared harness.
 >
-> **Outstanding:** Suite A is already covered by the existing
-> `TestIllustrateBody_*` tests. Phase 4 (surfacing cover/illustration controls)
-> still depends on plan 4's contract.
+> Suite A is already covered by the existing `TestIllustrateBody_*` tests.
+>
+> ## Phase 4 — 2026-08-30
+>
+> **Done.** Plan 4's single contract landed, so the two optional controls are
+> now surfaced. `agentschema.ForBuiltin(article_writer)` and its TypeScript twin
+> gained `cover_style` (a select over the four `coverAccents`, empty = the
+> per-topic default) and `illustrations` (on/off, on by default); the parity
+> test keeps the two copies in step. The values thread
+> `GenerateBlogRequest → blog.GenerateRequest → coverPromptWithAccent` (accent
+> override, unknown values fall back to the variant) and gate both
+> `ensureIllustrations` and `illustrateBody`, with any writer-emitted fence
+> stripped when off so the cover is untouched but the body draws nothing. The
+> Task Manager form renders both from the schema automatically. New unit tests:
+> `cover_style_test.go`.
 
 Verified against `feat/landing-page` @ `063cce3`.
 

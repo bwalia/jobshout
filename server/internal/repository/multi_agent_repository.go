@@ -224,7 +224,15 @@ func (r *multiAgentRepository) BoardEntries(ctx context.Context, orgID uuid.UUID
 			       r.id             AS source_id,
 			       r.status::text   AS status,
 			       NULLIF(r.phase, '')::text AS step_key,
-			       COALESCE(NULLIF(r.topic, ''), r.status)::text AS detail,
+			       -- A run that finished but could not verify enough sources is
+			       -- unusable. Left as a bare topic it reads on the board like any
+			       -- other completed research; the caveat the agent already knows
+			       -- is said here so a thin brief is not mistaken for a good one.
+			       CASE
+			           WHEN r.status = 'completed' AND NOT r.usable
+			               THEN '⚠ Sources too thin to rely on — ' || COALESCE(NULLIF(r.topic, ''), 'research')
+			           ELSE COALESCE(NULLIF(r.topic, ''), r.status)
+			       END::text AS detail,
 			       'researcher'::text AS job_role,
 			       r.updated_at     AS created_at
 			FROM research_runs r

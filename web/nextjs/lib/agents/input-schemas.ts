@@ -109,6 +109,30 @@ const SCHEMAS: Record<AgentBuiltin, AgentInputSchema> = {
         type: "text",
         placeholder: "agent default",
       },
+      {
+        key: "cover_style",
+        label: "Cover accent",
+        type: "select",
+        help: "Auto varies the hue by topic. Pick one to pin every cover to it.",
+        options: [
+          { value: "", label: "Auto (varies by topic)" },
+          { value: "teal and cyan", label: "Teal and cyan" },
+          { value: "violet and indigo", label: "Violet and indigo" },
+          { value: "amber and coral", label: "Amber and coral" },
+          { value: "emerald and mint", label: "Emerald and mint" },
+        ],
+      },
+      {
+        key: "illustrations",
+        label: "In-body illustrations",
+        type: "select",
+        defaultValue: "on",
+        help: "Off keeps the cover but draws no pictures inside the article.",
+        options: [
+          { value: "on", label: "On" },
+          { value: "off", label: "Off" },
+        ],
+      },
     ],
     titleFrom: (v) => `Write: ${v.topic?.trim() || "article"}`,
     descriptionFrom: (v) => {

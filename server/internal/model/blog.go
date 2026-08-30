@@ -251,6 +251,14 @@ type GenerateBlogRequest struct {
 	// and rejected in that combination rather than quietly ignored.
 	Focus       []string `json:"focus,omitempty"`
 	MaxArticles int      `json:"max_articles,omitempty"`
+	// CoverStyle pins the cover accent hue for this run. Empty keeps the
+	// per-topic default so the covers stay a set; an unrecognised value is
+	// ignored rather than rejected. Values are the blog package's coverAccents.
+	CoverStyle string `json:"cover_style,omitempty"`
+	// Illustrations toggles in-body pictures. nil (the default) draws them; a
+	// pointer to false suppresses them without affecting the cover. A pointer
+	// so an omitted field and an explicit "off" are distinguishable.
+	Illustrations *bool `json:"illustrations,omitempty"`
 	// AutoPublish files the finished articles in the CMS without waiting for
 	// someone to press the button.
 	//

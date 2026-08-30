@@ -40,6 +40,23 @@ func ForBuiltin(builtin string) Schema {
 				{Key: "topic", Label: "Topic", Question: "What should I write about?", Required: true, MinLength: 3},
 				{Key: "context", Label: "Context"},
 				{Key: "model", Label: "Model"},
+				// Cover accent override. Empty keeps the per-topic default, so the
+				// covers stay a set unless someone deliberately pins a hue. The
+				// values are the coverAccents in internal/blog/illustrate.go; an
+				// unrecognised one falls back to the default rather than erroring.
+				{Key: "cover_style", Label: "Cover accent", Options: []model.ClarifyOption{
+					{Label: "Auto (varies by topic)", Value: ""},
+					{Label: "Teal and cyan", Value: "teal and cyan"},
+					{Label: "Violet and indigo", Value: "violet and indigo"},
+					{Label: "Amber and coral", Value: "amber and coral"},
+					{Label: "Emerald and mint", Value: "emerald and mint"},
+				}},
+				// In-body illustrations toggle. On by default; Off suppresses the
+				// pictures inside the article without touching the cover.
+				{Key: "illustrations", Label: "In-body illustrations", Default: "on", Options: []model.ClarifyOption{
+					{Label: "On", Value: "on"},
+					{Label: "Off", Value: "off"},
+				}},
 			},
 		}
 	case model.BuiltinResearcher:

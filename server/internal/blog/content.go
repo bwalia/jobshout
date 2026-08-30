@@ -143,13 +143,20 @@ func (r *Runner) finalizeArticle(
 		report(progress, model.BlogStepIllustrating,
 			fmt.Sprintf("Illustrating %s", article.Title), model.AgentNameArticleWriter)
 
-		body, notes := r.illustrateBody(ctx, req.OrgID, article.Markdown)
-		article.Markdown = body
-		for _, note := range notes {
-			r.logger.Info("blog: "+note, zap.String("title", article.Title))
+		if req.wantsIllustrations() {
+			body, notes := r.illustrateBody(ctx, req.OrgID, article.Markdown)
+			article.Markdown = body
+			for _, note := range notes {
+				r.logger.Info("blog: "+note, zap.String("title", article.Title))
+			}
+		} else {
+			// In-body pictures were turned off. Any fence the writer emitted
+			// anyway is removed here so it never reaches the reader as a raw
+			// ```illustration code block. The cover below is unaffected.
+			article.Markdown = stripIllustrationFences(article.Markdown)
 		}
 
-		if err := r.generateCover(ctx, req.OrgID, article); err != nil {
+		if err := r.generateCover(ctx, req, article); err != nil {
 			r.logger.Warn("blog: could not draw a cover image",
 				zap.String("title", article.Title), zap.Error(err))
 			report(progress, model.BlogStepIllustrating,
@@ -275,15 +282,18 @@ func (r *Runner) writeOne(
 		}
 	}
 
-	// 7. Make sure the piece has a picture, if this run can draw one.
+	// 7. Make sure the piece has a picture, if this run can draw one and was
+	// not told to skip in-body pictures.
 	//
 	// After expansion so the placements are chosen against the text that will
 	// actually ship, and before the diagrams are repaired so an inserted fence
 	// goes through the same checks as one the writer wrote itself.
-	var illustrationNotes []string
-	markdown, illustrationNotes = r.ensureIllustrations(ctx, r.structuredModel(req), plan, markdown)
-	for _, note := range illustrationNotes {
-		r.logger.Info("blog: "+note, zap.String("title", plan.Title))
+	if req.wantsIllustrations() {
+		var illustrationNotes []string
+		markdown, illustrationNotes = r.ensureIllustrations(ctx, r.structuredModel(req), plan, markdown)
+		for _, note := range illustrationNotes {
+			r.logger.Info("blog: "+note, zap.String("title", plan.Title))
+		}
 	}
 
 	// 8. Repair and check the diagrams. A diagram that will not parse reaches

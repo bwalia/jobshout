@@ -200,7 +200,7 @@ func TestGenerateCover_TreatsAnUnstorableImageAsFailure(t *testing.T) {
 	r := testRunner(&fakeIllustrator{enabled: true, noURL: true})
 
 	article := &GeneratedArticle{Title: "A Title", Topic: "a topic"}
-	err := r.generateCover(context.Background(), uuid.New(), article)
+	err := r.generateCover(context.Background(), GenerateRequest{OrgID: uuid.New()}, article)
 
 	if err == nil {
 		t.Fatal("expected an error when the image cannot be stored")
@@ -214,7 +214,7 @@ func TestGenerateCover_RecordsTheSeedForReproduction(t *testing.T) {
 	r := testRunner(&fakeIllustrator{enabled: true})
 
 	article := &GeneratedArticle{Title: "A Title", Topic: "a topic"}
-	if err := r.generateCover(context.Background(), uuid.New(), article); err != nil {
+	if err := r.generateCover(context.Background(), GenerateRequest{OrgID: uuid.New()}, article); err != nil {
 		t.Fatalf("generateCover: %v", err)
 	}
 
@@ -253,7 +253,7 @@ func TestGenerateCover_RetriesQwenUntilItSucceeds(t *testing.T) {
 	r := testRunner(fake)
 
 	article := &GeneratedArticle{Title: "A Title", Topic: "ai agents for tax return"}
-	if err := r.generateCover(context.Background(), uuid.New(), article); err != nil {
+	if err := r.generateCover(context.Background(), GenerateRequest{OrgID: uuid.New()}, article); err != nil {
 		t.Fatalf("generateCover: %v", err)
 	}
 	if article.CoverImageModel != coverModel {

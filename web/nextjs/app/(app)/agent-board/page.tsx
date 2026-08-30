@@ -240,7 +240,17 @@ function AgentBoardCard({ entry }: { entry: AgentBoardEntry }) {
       </div>
 
       {entry.current_job_prompt ? (
-        <p className="mt-2.5 line-clamp-2 rounded bg-muted/60 px-2 py-1.5 text-2xs text-foreground/80">
+        <p
+          className={cn(
+            "mt-2.5 line-clamp-2 rounded px-2 py-1.5 text-2xs",
+            // A research brief the agent flagged as unusable arrives prefixed
+            // with ⚠ from the board query; tint it so it reads as a caution
+            // rather than a normal topic line.
+            entry.current_job_prompt.startsWith("⚠")
+              ? "bg-status-blocked/10 text-status-blocked"
+              : "bg-muted/60 text-foreground/80"
+          )}
+        >
           {entry.current_job_prompt}
         </p>
       ) : null}

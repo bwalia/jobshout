@@ -691,6 +691,8 @@ func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, age
 		Briefs:               req.Briefs,
 		Model:                req.Model,
 		MaxArticles:          req.MaxArticles,
+		CoverStyle:           req.CoverStyle,
+		Illustrations:        req.Illustrations,
 		AgentProseModel:      agentProse,
 		AgentStructuredModel: agentStructured,
 		OnArticle:            func(a blog.GeneratedArticle) error { return s.persistArticle(run, a) },

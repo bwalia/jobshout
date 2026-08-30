@@ -35,13 +35,26 @@ func (r *articleRunner) Start(ctx context.Context, run *model.AgentRun, _ *model
 		return "", fmt.Errorf("the article writer is not configured on this server")
 	}
 	out, err := r.blog.Generate(ctx, run.OrgID, run.RequestedBy, run.Source, model.GenerateBlogRequest{
-		Briefs: []model.BlogBrief{{Topic: in["topic"], Context: in["context"]}},
-		Model:  in["model"],
+		Briefs:        []model.BlogBrief{{Topic: in["topic"], Context: in["context"]}},
+		Model:         in["model"],
+		CoverStyle:    in["cover_style"],
+		Illustrations: illustrationsToggle(in["illustrations"]),
 	})
 	if err != nil {
 		return "", err
 	}
 	return out.ID.String(), nil
+}
+
+// illustrationsToggle maps the interview's "on"/"off" string to the blog
+// request's tri-state pointer: only an explicit "off" suppresses in-body
+// pictures; empty or anything else leaves the default (draw) in place.
+func illustrationsToggle(s string) *bool {
+	if strings.EqualFold(strings.TrimSpace(s), "off") {
+		off := false
+		return &off
+	}
+	return nil
 }
 
 // --- Researcher ----------------------------------------------------------

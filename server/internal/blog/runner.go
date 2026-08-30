@@ -96,6 +96,16 @@ type GenerateRequest struct {
 	Model       string            `json:"model,omitempty"`        // optional override for the LLM
 	MaxArticles int               `json:"max_articles,omitempty"` // safety cap; 0 = no cap below hard limit
 
+	// CoverStyle pins the cover's accent hue. Empty keeps the per-topic default
+	// so the covers still read as one publication; an unrecognised value falls
+	// back to that default rather than erroring. Values are the coverAccents in
+	// illustrate.go.
+	CoverStyle string
+	// Illustrations toggles in-body pictures. nil (the default) draws them; a
+	// pointer to false suppresses them without touching the cover. A pointer so
+	// an omitted control and an explicit "off" are distinguishable.
+	Illustrations *bool
+
 	// AgentProseModel and AgentStructuredModel are what the org configured on
 	// the Article Writer agent itself, in the UI.
 	//
@@ -221,6 +231,13 @@ func (r *Runner) WithIllustrator(images Illustrator) *Runner {
 // canIllustrate reports whether this run can draw.
 func (r *Runner) canIllustrate() bool {
 	return r.images != nil && r.images.Enabled()
+}
+
+// wantsIllustrations reports whether this request asked for in-body pictures.
+// The default (nil) is yes; only an explicit false suppresses them. The cover
+// is drawn regardless — that is a separate control.
+func (req GenerateRequest) wantsIllustrations() bool {
+	return req.Illustrations == nil || *req.Illustrations
 }
 
 // NewRunner wires the Runner with its dependencies. cms may be nil — generation

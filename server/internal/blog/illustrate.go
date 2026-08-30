@@ -200,6 +200,29 @@ func variantFor(topic string) coverVariant {
 	}
 }
 
+// normalizeAccent resolves a requested cover accent to its canonical spelling
+// in coverAccents, or "" if it matches none. A caller uses "" to mean "keep the
+// per-topic default", so an unrecognised request and no request behave alike.
+func normalizeAccent(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	for _, a := range coverAccents {
+		if strings.EqualFold(a, s) {
+			return a
+		}
+	}
+	return ""
+}
+
+// stripIllustrationFences removes every illustration block from the markdown,
+// for a run that asked for no in-body pictures. Without it a fence the writer
+// emitted anyway would render as a raw ```illustration code block.
+func stripIllustrationFences(markdown string) string {
+	return illustrationFence.ReplaceAllString(markdown, "")
+}
+
 // coverPrompt fills the dark-mode editorial cover template for z-image-turbo.
 //
 // Turbo ignores separate negative prompts, so exclusions and exact title
@@ -208,6 +231,14 @@ func variantFor(topic string) coverVariant {
 // are arranged and where the light comes from — so two articles read as the
 // same publication without looking like the same cover.
 func coverPrompt(title, topic string) string {
+	return coverPromptWithAccent(title, topic, "")
+}
+
+// coverPromptWithAccent is coverPrompt with an optional accent override. An
+// override matching one of coverAccents pins that hue; anything else (including
+// "") leaves the per-topic default in place, so an unknown value degrades to
+// the normal behaviour rather than erroring.
+func coverPromptWithAccent(title, topic, accentOverride string) string {
 	topic = strings.TrimSpace(topic)
 	title = strings.TrimSpace(title)
 
@@ -224,6 +255,9 @@ func coverPrompt(title, topic string) string {
 	// Keyed on the subject rather than the title so a retitled article keeps
 	// its cover treatment, and so an empty title still varies.
 	v := variantFor(subject)
+	if a := normalizeAccent(accentOverride); a != "" {
+		v.accent = a
+	}
 
 	return fmt.Sprintf(
 		"A high-quality, ultra-detailed modern editorial blog cover illustration "+
@@ -255,8 +289,9 @@ func coverPrompt(title, topic string) string {
 // A failure after every attempt is returned, not swallowed — the caller decides
 // whether an article without a picture is still an article. It is: see
 // Runner.Generate.
-func (r *Runner) generateCover(ctx context.Context, orgID uuid.UUID, a *GeneratedArticle) error {
-	prompt := coverPrompt(a.Title, a.Topic)
+func (r *Runner) generateCover(ctx context.Context, req GenerateRequest, a *GeneratedArticle) error {
+	orgID := req.OrgID
+	prompt := coverPromptWithAccent(a.Title, a.Topic, req.CoverStyle)
 
 	var lastErr error
 	for attempt := 1; attempt <= coverMaxAttempts; attempt++ {
