@@ -64,10 +64,19 @@
 > | User-visible message | clean | **leaks reasoning** under current template |
 > | Verdict | **keep — 8/8, clean** | routes well; not shippable as-is (leak) |
 >
-> **Still not done:** Suite A/B/C as committed test files (Suite A run live
-> ad-hoc; Suite B covered by `summary_test.go`; Suite C is the honesty
-> regression net). Phase 2 intent shaping stays deferred — at 8/8 the numbers
-> do not call for a router.
+> **Done — Suite C, the honesty regression net, is committed.** All five
+> "must never come back" properties have explicit tests:
+> - no fabricated tool results — `TestAgent_FabricationGuard_ZeroToolsNeverClaimsToolResult`, `TestAgent_FailedTool_NeverClaimsSuccess`
+> - side-effecting tools need a confirm token — `TestAgent_Destructive_RequiresConfirm`, `TestAgent_ConfirmCheckedBeforePending`
+> - no leaked template / tool markup — `TestSanitiseMessage_StripsLeakedFunctionMarkup`, `TestSanitiseMessage_StripsToolScaffolding`
+> - no orphan tool messages — `TestWindow_DropsLeadingOrphanToolRows`
+> - never claim mail was sent — `TestSystemPromptForbidsClaimingMailSent` (the
+>   prompt leg; the structural leg is that the chat registry has no mail-send
+>   tool, so the fabrication guard covers the rest).
+>
+> **Still not done:** Suite A as a committed `//go:build evallive` file (run
+> live ad-hoc so far; Suite B is committed in `summary_test.go`). Phase 2 intent
+> shaping stays deferred — at 8/8 the numbers do not call for a router.
 
 Verified against `feat/landing-page` @ `063cce3`. Depends on Plan 4 for Phase 3.
 Suite A / Suite D results verified live against `feat/agent-programme` @ `4d877a5`.

@@ -28,3 +28,23 @@ func TestSystemPromptCarriesSmallTalkGuard(t *testing.T) {
 		}
 	}
 }
+
+// Suite C, honesty net: a chat turn must never tell the user an email was sent.
+// Two things keep that true and this pins the one that lives in code we edit —
+// the prompt instruction. The other leg is structural: the chat registry has no
+// mail-send tool at all (only mail_list_drafts and mail_sync), so the general
+// fabrication guard already stops any "I sent it" claim — there is no tool to
+// have called. Sending happens only when a human clicks Approve in the Mail
+// Agent UI. If a future prompt edit drops this line, that intent is worth
+// restating loudly rather than trusting the model to infer it.
+func TestSystemPromptForbidsClaimingMailSent(t *testing.T) {
+	p := systemPrompt(time.Now(), "", nil, nil, nil, "")
+	for _, want := range []string{
+		"Never claim an email was sent",
+		"only Approve in the Mail Agent UI sends",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("system prompt lost the mail-honesty guard: missing %q", want)
+		}
+	}
+}
