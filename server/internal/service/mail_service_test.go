@@ -890,6 +890,13 @@ func TestEnqueueSyncClearsLease(t *testing.T) {
 	if got.SyncLeaseUntil != nil {
 		t.Fatal("EnqueueSync must persist sync_lease_until = NULL")
 	}
+	if got.NextSyncAt == nil || got.NextSyncAt.Location() != time.UTC {
+		// next_sync_at is a "timestamp without time zone" compared against the
+		// database's UTC NOW() in claimDuePredicate; a local time would delay the
+		// sync by the host's offset. time.Now() never yields time.UTC even on a
+		// UTC host, so this assertion is machine independent.
+		t.Fatalf("EnqueueSync must set next_sync_at in UTC, got %v", got.NextSyncAt)
+	}
 }
 
 func TestProcessDueSyncsClearsLeaseOnFailure(t *testing.T) {

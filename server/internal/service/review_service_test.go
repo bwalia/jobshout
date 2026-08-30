@@ -120,6 +120,12 @@ func TestReviewServiceCreateRunDefaultsRealRunAndQueues(t *testing.T) {
 	if run.Status != "queued" {
 		t.Fatalf("status = %s", run.Status)
 	}
+	if run.NextPollAt == nil || run.NextPollAt.Location() != time.UTC {
+		// next_poll_at is compared against the database's UTC NOW() in the
+		// reconciler's claim query; a local time would delay the first poll by
+		// the host's offset. Machine independent: time.Now() is never time.UTC.
+		t.Fatalf("CreateRun must queue next_poll_at in UTC, got %v", run.NextPollAt)
+	}
 }
 
 func TestReviewServiceCreateRunRejectsUnknownRepo(t *testing.T) {

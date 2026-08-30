@@ -76,6 +76,10 @@ func (s *reviewService) CreateRun(ctx context.Context, req model.CreateReviewRun
 	}
 
 	now := time.Now()
+	// next_poll_at is compared against the database's NOW() (UTC) by the
+	// reconciler's claim query, so it is written in UTC — see
+	// ReviewReconciler and pentestService.CreateRun for the same invariant.
+	dueNow := now.UTC()
 	run := &model.ReviewRun{
 		ID:          uuid.New(),
 		OrgID:       orgID,
@@ -86,7 +90,7 @@ func (s *reviewService) CreateRun(ctx context.Context, req model.CreateReviewRun
 		DryRun:      dryRun,
 		Force:       req.Force,
 		Status:      "queued",
-		NextPollAt:  &now,
+		NextPollAt:  &dueNow,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}

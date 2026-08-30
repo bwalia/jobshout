@@ -238,6 +238,11 @@ func (s *mailService) CompleteOAuth(ctx context.Context, state, code string) err
 	}
 	agent, _ := s.EnsureMailAgent(ctx, orgID)
 	now := time.Now()
+	// next_sync_at is compared against the database's NOW() (UTC) by the
+	// reconciler's claim predicate, so it is written in UTC — a local time on a
+	// server ahead of UTC would leave a just-connected mailbox looking not-due
+	// until wall-clock UTC caught up.
+	dueNow := now.UTC()
 	conn := &model.MailConnection{
 		OrgID:                orgID,
 		GoogleEmail:          email,
@@ -246,7 +251,7 @@ func (s *mailService) CompleteOAuth(ctx context.Context, state, code string) err
 		Scopes:               mail.RequestedScopes(),
 		Status:               model.MailConnConnected,
 		ConnectedAt:          &now,
-		NextSyncAt:           &now,
+		NextSyncAt:           &dueNow,
 		WatchLabels:          []string{},
 		WatchSenders:         []string{},
 		WatchSubjectPrefixes: []string{},
@@ -344,7 +349,7 @@ func (s *mailService) EnqueueSync(ctx context.Context, orgID uuid.UUID) error {
 	if err != nil {
 		return err
 	}
-	now := time.Now()
+	now := time.Now().UTC() // next_sync_at is compared against the DB's NOW()
 	c.NextSyncAt = &now
 	c.SyncLeaseUntil = nil
 	return s.repo.UpsertConnection(ctx, c)
@@ -359,7 +364,7 @@ func (s *mailService) SyncNow(ctx context.Context, orgID uuid.UUID) error {
 		return err
 	}
 	syncErr := s.syncConnection(ctx, c)
-	next := time.Now().Add(s.pollInterval())
+	next := time.Now().Add(s.pollInterval()).UTC() // compared against the DB's NOW()
 	_ = s.repo.MarkSynced(ctx, c.ID, time.Now(), next)
 	return syncErr
 }
@@ -374,7 +379,7 @@ func (s *mailService) ProcessDueSyncs(ctx context.Context, limit int) error {
 	}
 	for i := range conns {
 		c := &conns[i]
-		next := time.Now().Add(s.pollInterval())
+		next := time.Now().Add(s.pollInterval()).UTC() // compared against the DB's NOW()
 		if err := s.syncConnection(ctx, c); err != nil {
 			s.logger.Warn("mail: sync failed",
 				zap.String("org_id", c.OrgID.String()),

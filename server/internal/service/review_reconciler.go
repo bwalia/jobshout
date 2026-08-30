@@ -121,7 +121,8 @@ func (rc *ReviewReconciler) startRun(ctx context.Context, run *model.ReviewRun) 
 		run.StartedAt = &now
 	}
 	run.PollAttempts = 0
-	next := time.Now()
+	// UTC: next_poll_at is compared against the database's NOW() in ClaimDueRuns.
+	next := time.Now().UTC()
 	run.NextPollAt = &next
 	return rc.runRepo.Update(ctx, run)
 }
@@ -137,7 +138,7 @@ func (rc *ReviewReconciler) handleStartError(ctx context.Context, run *model.Rev
 		if run.PollAttempts >= rc.maxPollAttempts {
 			return rc.fail(ctx, run, fmt.Sprintf("review sidecar unreachable after %d attempts: %v", run.PollAttempts, err))
 		}
-		next := time.Now().Add(rc.backoff)
+		next := time.Now().Add(rc.backoff).UTC()
 		run.NextPollAt = &next
 		return rc.runRepo.Update(ctx, run)
 	}
@@ -150,14 +151,14 @@ func (rc *ReviewReconciler) pollRun(ctx context.Context, run *model.ReviewRun) e
 			return rc.fail(ctx, run, "sidecar forgot this job (it may have restarted). Start the review again.")
 		}
 		run.PollAttempts++
-		next := time.Now().Add(rc.backoff)
+		next := time.Now().Add(rc.backoff).UTC()
 		run.NextPollAt = &next
 		return rc.runRepo.Update(ctx, run)
 	}
 	run.PollAttempts = 0
 	run.StageLog = snap.StageLog
 	if !snap.Terminal() {
-		next := time.Now().Add(rc.interval)
+		next := time.Now().Add(rc.interval).UTC()
 		run.NextPollAt = &next
 		return rc.runRepo.Update(ctx, run)
 	}
