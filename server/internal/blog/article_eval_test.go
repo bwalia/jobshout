@@ -3,6 +3,7 @@ package blog
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -38,8 +39,11 @@ func TestEval_IllustrationRulesOnlyWhenEnabled(t *testing.T) {
 	if strings.Contains(with, "Most articles need none") {
 		t.Fatal("prompt must not discourage body images")
 	}
-	if !strings.Contains(with, "exactly ONE") {
-		t.Fatal("prompt should ask for one explanatory body image")
+	if !strings.Contains(with, "1–2") {
+		t.Fatal("prompt should ask for 1–2 body images")
+	}
+	if !strings.Contains(with, fmt.Sprintf("up to %d", maxInlineIllustrations)) {
+		t.Fatal("prompt budget must match maxInlineIllustrations")
 	}
 	if !strings.Contains(with, "One mermaid diagram is enough") {
 		t.Fatal("prompt should prefer an image over a second flowchart")
@@ -50,8 +54,8 @@ func TestEval_DraftWithoutFencesGetsBodyImages(t *testing.T) {
 	md := "# Title\n\nIntro.\n\n## Control planes\n\nProse about reconciliation.\n\n## Observability\n\nMore prose.\n"
 	out := ensureIllustrationFences(md, &writePlan{Sections: []string{"Control planes", "Observability"}})
 	n := len(illustrationFence.FindAllString(out, -1))
-	if n != 1 {
-		t.Fatalf("expected exactly one illustration fence, got %d:\n%s", n, out)
+	if n < 1 || n > 2 {
+		t.Fatalf("expected 1–2 illustration fences, got %d:\n%s", n, out)
 	}
 	if !strings.Contains(out, "reconciliation") {
 		t.Fatalf("scene should use the section prose, not a stock heading photo:\n%s", out)
@@ -103,9 +107,9 @@ func TestEval_CoverPromptsShareHouseStyleAndDifferByMetaphor(t *testing.T) {
 }
 
 func TestEval_EnsureFencesIdempotentWhenAlreadyPresent(t *testing.T) {
-	md := "# T\n\n```illustration\nAlready here\n```\n\n## Next\n"
+	md := "# T\n\n```illustration\nAlready here\n```\n\n## Next\n\n```illustration\nSecond scene\n```\n"
 	if got := ensureIllustrationFences(md, nil); got != md {
-		t.Fatalf("should not rewrite an already-illustrated draft:\n%s", got)
+		t.Fatalf("should not rewrite a draft that already has 1–2 fences:\n%s", got)
 	}
 }
 
@@ -118,8 +122,8 @@ func TestEval_SecondMermaidBecomesAnIllustration(t *testing.T) {
 	if n := len(mermaidFence.FindAllString(out, -1)); n != 1 {
 		t.Fatalf("want 1 mermaid, got %d:\n%s", n, out)
 	}
-	if n := len(illustrationFence.FindAllString(out, -1)); n != 1 {
-		t.Fatalf("want 1 illustration, got %d:\n%s", n, out)
+	if n := len(illustrationFence.FindAllString(out, -1)); n < 1 || n > 2 {
+		t.Fatalf("want 1–2 illustrations, got %d:\n%s", n, out)
 	}
 	if !strings.Contains(out, "reconcile") && !strings.Contains(out, "desired state") {
 		t.Fatalf("illustration should use the second section's prose:\n%s", out)

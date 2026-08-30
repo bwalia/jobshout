@@ -13,7 +13,7 @@ test.describe("Task Manager launch fields", () => {
     await loginViaUI(page, creds.email, creds.password);
   });
 
-  test("Article Writer, Research Agent, and Mail Agent show their fields", async ({
+  test("Article Writer, Research Agent, Mail Agent, and Image Generator show their fields", async ({
     page,
   }) => {
     await navigateTo(page, "/panel/task-manager");
@@ -54,6 +54,9 @@ test.describe("Task Manager launch fields", () => {
     await expect(page.getByText("How to answer").first()).toBeVisible();
     await expect(page.locator("#agent-field-senders")).toBeVisible();
     await expect(page.locator("#agent-field-knowledge_urls")).toBeVisible();
+
+    await pickAgent("Image Generator");
+    await expect(page.locator("#agent-field-prompt")).toBeVisible();
   });
 
   test("Run on a created task reuses the saved topic instead of a blank form", async ({

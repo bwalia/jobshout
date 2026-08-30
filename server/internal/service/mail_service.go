@@ -43,6 +43,9 @@ type MailService interface {
 	SyncNow(ctx context.Context, orgID uuid.UUID) error
 	EnqueueSync(ctx context.Context, orgID uuid.UUID) error
 	ProcessDueSyncs(ctx context.Context, limit int) error
+	// BindTasks lets a finished draft update the Task Manager card that
+	// launched this sync. Optional — tests and Gmail-only paths leave it nil.
+	BindTasks(tasks TaskService)
 
 	ListThreads(ctx context.Context, orgID uuid.UUID, pagination model.PaginationParams) (*model.PaginatedResponse[model.MailThread], error)
 	GetThread(ctx context.Context, orgID, threadID uuid.UUID) (*model.MailThreadDetail, error)
@@ -65,9 +68,16 @@ type mailService struct {
 	classifier mail.Classifier
 	drafter    mail.Drafter
 	research   ResearchService
+	tasks      TaskService
 	cfg        mail.Config
 	key        []byte
 	logger     *zap.Logger
+}
+
+func (s *mailService) BindTasks(tasks TaskService) {
+	if s != nil {
+		s.tasks = tasks
+	}
 }
 
 // NewMailService wires the Mail Agent. gmail/classifier/drafter may be fakes in tests.
@@ -415,23 +425,34 @@ func (s *mailService) syncConnection(ctx context.Context, c *model.MailConnectio
 	if err != nil {
 		return mail.RedactErr(err)
 	}
+	drafted := 0
 	for _, msg := range msgs {
-		if err := s.ingestAndProcess(ctx, c, agent, msg); err != nil {
+		ok, err := s.ingestAndProcess(ctx, c, agent, msg)
+		if err != nil {
 			s.logger.Warn("mail: thread processing failed",
 				zap.String("gmail_thread_id", msg.GmailThreadID),
 				zap.Error(mail.RedactErr(err)))
+			continue
 		}
+		if ok {
+			drafted++
+		}
+	}
+	if drafted == 0 {
+		s.notifyMailBoard(ctx, c.OrgID,
+			"Mailbox sync finished. No new drafts. Nothing is sent until you Approve.",
+			"done")
 	}
 	return nil
 }
 
-func (s *mailService) ingestAndProcess(ctx context.Context, c *model.MailConnection, agent *model.Agent, msg mail.InboxMessage) error {
+func (s *mailService) ingestAndProcess(ctx context.Context, c *model.MailConnection, agent *model.Agent, msg mail.InboxMessage) (bool, error) {
 	existing, err := s.repo.GetThreadByGmailID(ctx, c.OrgID, msg.GmailThreadID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if existing != nil && existing.Status != model.MailThreadNew && existing.Status != model.MailThreadFailed {
-		return nil
+		return false, nil
 	}
 	th := existing
 	if th == nil {
@@ -460,9 +481,12 @@ func (s *mailService) ingestAndProcess(ctx context.Context, c *model.MailConnect
 		th.Status = model.MailThreadNew
 	}
 	if err := s.repo.UpsertThread(ctx, th); err != nil {
-		return err
+		return false, err
 	}
-	return s.processThread(ctx, th, msg, c)
+	if err := s.processThread(ctx, th, msg, c); err != nil {
+		return false, err
+	}
+	return th.Status == model.MailThreadDraftReady, nil
 }
 
 func (s *mailService) processThread(ctx context.Context, th *model.MailThread, msg mail.InboxMessage, c *model.MailConnection) error {
@@ -545,7 +569,38 @@ func (s *mailService) processThread(ctx context.Context, th *model.MailThread, m
 	}
 	th.Status = model.MailThreadDraftReady
 	th.ErrorMessage = nil
-	return s.repo.UpdateThread(ctx, th)
+	if err := s.repo.UpdateThread(ctx, th); err != nil {
+		return err
+	}
+	s.notifyMailBoard(ctx, th.OrgID, fmt.Sprintf(
+		"Draft ready: %s\n\nOpen /panel/task-manager?agent=mail&thread=%s\nNothing is sent until you Approve.",
+		draft.Subject, th.ID), "review")
+	return nil
+}
+
+func (s *mailService) notifyMailBoard(ctx context.Context, orgID uuid.UUID, note, status string) {
+	if s == nil || s.tasks == nil {
+		return
+	}
+	listed, err := s.tasks.ListByOrg(ctx, orgID, model.PaginationParams{Page: 1, PerPage: 50})
+	if err != nil || listed == nil {
+		return
+	}
+	for i := range listed.Data {
+		task := listed.Data[i]
+		kind, _ := task.Metadata[model.TaskMetaLaunchKind].(string)
+		if kind != model.BuiltinMail || task.Status != "in_progress" {
+			continue
+		}
+		n := note
+		if prior := task.Description; prior != nil && strings.TrimSpace(*prior) != "" {
+			n = strings.TrimSpace(*prior) + "\n\n" + note
+		}
+		_, _ = s.tasks.Update(ctx, task.ID, model.UpdateTaskRequest{Description: &n})
+		if status != "" {
+			_ = s.tasks.Transition(ctx, task.ID, status)
+		}
+	}
 }
 
 func (s *mailService) failThread(ctx context.Context, th *model.MailThread, err error) error {
@@ -753,7 +808,14 @@ func mailKnowledgeRequest(c *model.MailConnection, msg mail.InboxMessage) (resea
 		topic = "inbound email"
 	}
 	var b strings.Builder
-	b.WriteString("Pinned knowledge pages only. Do not use other sources.")
+	switch {
+	case len(playbook) > 0 && len(inbound) == 0:
+		b.WriteString("Pinned knowledge pages only. Do not use other sources.")
+	case len(playbook) > 0:
+		b.WriteString("Read the pinned knowledge pages and the links in this email. Do not use other sources.")
+	default:
+		b.WriteString("Read the links in this inbound email. Do not use other sources.")
+	}
 	if focus != "" {
 		b.WriteString("\nLook for: ")
 		b.WriteString(focus)

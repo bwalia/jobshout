@@ -195,3 +195,22 @@ func (s *ImageService) Fetch(ctx context.Context, key string) ([]byte, error) {
 	}
 	return s.store.Get(ctx, key)
 }
+
+// imagesAgentSeed is the built-in Image Generator. Migration 000035 backfills
+// existing orgs; auth_service.Register covers new ones.
+func imagesAgentSeed(orgID uuid.UUID) *model.Agent {
+	desc := "Generates one image from a prompt and stores it on the Task Manager board."
+	prompt := "You generate images from a written prompt. Ask for the picture the user wants. Do not invent a subject."
+	return &model.Agent{
+		ID:           uuid.New(),
+		OrgID:        orgID,
+		Name:         "Image Generator",
+		Role:         "Image",
+		Description:  &desc,
+		SystemPrompt: &prompt,
+		Status:       "active",
+		EngineType:   model.EngineGoNative,
+		EngineConfig: map[string]any{},
+		Metadata:     map[string]any{model.MetadataKeyBuiltin: model.BuiltinImages},
+	}
+}

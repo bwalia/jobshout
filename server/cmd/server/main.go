@@ -565,6 +565,8 @@ func main() {
 		mail.NewClassifier(mailLLM, logger), mail.NewDrafter(mailLLM, logger),
 		researchSvc, mailCfg, logger,
 	)
+	blogSvc.BindTasks(taskSvc)
+	mailSvc.BindTasks(taskSvc)
 	launchSvc := &tasklaunch.Service{
 		Agents:   agentSvc,
 		Tasks:    taskSvc,
@@ -750,6 +752,7 @@ func main() {
 	agentHandler := handler.NewAgentHandler(agentSvc)
 	projectHandler := handler.NewProjectHandler(projectSvc)
 	taskHandler := handler.NewTaskHandler(taskSvc, launchSvc)
+	agentSchemaHandler := handler.NewAgentSchemaHandler()
 	taskRunHandler := handler.NewTaskRunHandler(taskRunSvc)
 	orgHandler := handler.NewOrganizationHandler(orgRepo)
 	marketplaceHandler := handler.NewMarketplaceHandler(pool, logger)
@@ -915,6 +918,7 @@ func main() {
 			})
 
 			// Tasks
+			r.Get("/agent-schemas", agentSchemaHandler.List)
 			r.Route("/tasks", func(r chi.Router) {
 				r.Get("/", taskHandler.List)
 				r.Post("/", taskHandler.Create)

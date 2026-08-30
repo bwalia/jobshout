@@ -57,13 +57,13 @@ func ForBuiltin(builtin string) Schema {
 			SpecialistTool: "pentest_start",
 			Fields: []Field{
 				{Key: "target", Label: "Target", Question: "What URL or path should I test?", Required: true, MinLength: 3},
-				{Key: "scan_mode", Label: "Scan mode", Default: "quick", Options: []model.ClarifyOption{
+				{Key: "scan_mode", Label: "Scan mode", Required: true, Default: "quick", Options: []model.ClarifyOption{
 					{Label: "Quick (5–15 min)", Value: "quick"},
 					{Label: "Standard (30–60 min)", Value: "standard"},
 					{Label: "Deep (1–2+ hours)", Value: "deep"},
 				}},
-				{Key: "instruction", Label: "Instruction"},
 				{Key: "max_budget", Label: "Max budget"},
+				{Key: "instruction", Label: "Instruction"},
 			},
 		}
 	case model.BuiltinPRReviewer:
@@ -87,6 +87,14 @@ func ForBuiltin(builtin string) Schema {
 				{Key: "knowledge_urls", Label: "Knowledge links", Question: "Any pricing or product pages I should read? One URL per line."},
 				{Key: "research_focus", Label: "What to look for"},
 				{Key: "reply_instructions", Label: "How the reply should read"},
+			},
+		}
+	case model.BuiltinImages:
+		return Schema{
+			Builtin:        model.BuiltinImages,
+			SpecialistTool: "image_generate",
+			Fields: []Field{
+				{Key: "prompt", Label: "Image prompt", Question: "What should I generate?", Required: true, MinLength: 3},
 			},
 		}
 	default:

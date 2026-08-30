@@ -65,9 +65,10 @@ const (
 
 // maxInlineIllustrations bounds how many pictures one article may request.
 //
-// Each costs tens of seconds on a single shared GPU. One body image is enough
-// to explain a mechanism the mermaid diagram does not; extras are dropped.
-const maxInlineIllustrations = 1
+// Each costs tens of seconds on a single shared GPU, so an article that asks
+// for nine holds up every other run behind it. Three is enough to illustrate a
+// long piece; the writer is asked for 1–2 and the insert pass fills that in.
+const maxInlineIllustrations = 3
 
 // illustrationFence matches an ```illustration block and captures its body.
 //
@@ -193,16 +194,21 @@ func coverPrompt(title, topic string, metaphor, objects, accent string) string {
 // an image prompt.
 var citationMark = regexp.MustCompile(`\[\d+\]`)
 
-// ensureIllustrationFences makes the article's visuals one mermaid plus one
-// explanatory picture. A second flowchart is replaced by a scene taken from
-// that section's prose; if the writer drew none, one fence is inserted.
+// ensureIllustrationFences makes the article's visuals one mermaid plus 1–2
+// explanatory pictures. A second flowchart is replaced by a scene taken from
+// that section's prose; if the writer drew none, fences are inserted at H2s.
 func ensureIllustrationFences(markdown string, plan *writePlan) string {
 	markdown = preferIllustrationOverSecondDiagram(markdown, planTitle(plan))
-	markdown = keepFirstIllustrationOnly(markdown)
-	if illustrationFence.MatchString(markdown) {
+	want := 2
+	if want > maxInlineIllustrations {
+		want = maxInlineIllustrations
+	}
+	markdown = keepFirstNIllustrations(markdown, maxInlineIllustrations)
+	have := len(illustrationFence.FindAllString(markdown, -1))
+	if have >= want {
 		return markdown
 	}
-	return insertOneIllustration(markdown, plan)
+	return insertIllustrations(markdown, plan, want-have)
 }
 
 func planTitle(plan *writePlan) string {
@@ -236,15 +242,18 @@ func preferIllustrationOverSecondDiagram(markdown, title string) string {
 	return collapseBlankRuns(b.String())
 }
 
-func keepFirstIllustrationOnly(markdown string) string {
+func keepFirstNIllustrations(markdown string, n int) string {
+	if n < 1 {
+		n = 1
+	}
 	matches := illustrationFence.FindAllStringIndex(markdown, -1)
-	if len(matches) <= 1 {
+	if len(matches) <= n {
 		return markdown
 	}
 	var b strings.Builder
 	last := 0
 	for i, m := range matches {
-		if i == 0 {
+		if i < n {
 			b.WriteString(markdown[last:m[1]])
 			last = m[1]
 			continue
@@ -254,6 +263,17 @@ func keepFirstIllustrationOnly(markdown string) string {
 	}
 	b.WriteString(markdown[last:])
 	return collapseBlankRuns(b.String())
+}
+
+func insertIllustrations(markdown string, plan *writePlan, n int) string {
+	for i := 0; i < n; i++ {
+		next := insertOneIllustration(markdown, plan)
+		if next == markdown {
+			break
+		}
+		markdown = next
+	}
+	return markdown
 }
 
 func insertOneIllustration(markdown string, plan *writePlan) string {
@@ -275,6 +295,9 @@ func insertOneIllustration(markdown string, plan *writePlan) string {
 			continue
 		}
 		c := candidate{i, strings.TrimSpace(strings.TrimPrefix(trim, "## "))}
+		if sectionHasIllustrationSoon(lines, i) {
+			continue
+		}
 		if sectionHasMermaidSoon(lines, i) {
 			fallback = append(fallback, c)
 		} else {
@@ -286,6 +309,9 @@ func insertOneIllustration(markdown string, plan *writePlan) string {
 		pick = fallback
 	}
 	if len(pick) == 0 {
+		if illustrationFence.MatchString(markdown) {
+			return markdown
+		}
 		heading := ""
 		if len(headings) > 0 {
 			heading = headings[0]
@@ -326,6 +352,19 @@ func collectH2s(markdown string) []string {
 
 func isH2(trim string) bool {
 	return strings.HasPrefix(trim, "## ") && !strings.HasPrefix(trim, "### ")
+}
+
+func sectionHasIllustrationSoon(lines []string, headingIdx int) bool {
+	for i := headingIdx + 1; i < len(lines) && i <= headingIdx+24; i++ {
+		trim := strings.TrimSpace(lines[i])
+		if isH2(trim) {
+			return false
+		}
+		if strings.HasPrefix(trim, "```illustration") {
+			return true
+		}
+	}
+	return false
 }
 
 func sectionHasMermaidSoon(lines []string, headingIdx int) bool {

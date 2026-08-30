@@ -301,7 +301,7 @@ func (s *Service) Launch(ctx context.Context, req Request) (*Result, error) {
 			out.Task = task
 		}
 		out.Message = "PR review queued"
-	case "images":
+	case model.BuiltinImages:
 		if s.Images == nil || !s.Images.Enabled() {
 			return nil, fmt.Errorf("image generation is not configured")
 		}

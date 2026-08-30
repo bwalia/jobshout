@@ -371,21 +371,21 @@ Rules:
 // It is deliberately stingier than the diagram rules. A diagram costs the model
 // a few hundred tokens; an illustration costs tens of seconds of a single
 // shared GPU, and one picture that explains the argument is enough.
-const illustrationRules = `
+var illustrationRules = fmt.Sprintf(`
 ILLUSTRATIONS:
 
-Request exactly ONE generated illustration that explains a mechanism the
-prose just described — not the cover, not decoration. Place it after the
-H2 it belongs to. The pipeline will add one if you forget.
+You may request up to %d generated illustrations, and should use 1–2 in a
+long piece. Place each after the H2 it belongs to. The pipeline will add
+1–2 if you forget.
 
 One mermaid diagram is enough. If a second idea is visual, use an
 illustration fence instead of another flowchart.
 
 Request one by writing an illustration fence whose body describes the picture:
 
-  ` + "```" + `illustration
+  `+"```"+`illustration
   An agent handing a ranked shortlist of issuers to a trader at a desk
-  ` + "```" + `
+  `+"```"+`
 
 Rules:
 - The scene must show THIS article's work: who does what to what. "An agent
@@ -393,10 +393,10 @@ Rules:
   not — that could sit in any article and explains nothing.
 - Describe a CONCRETE SCENE. "The concept of reliability" produces a muddle.
 - Do not ask for text, labels, charts or UI. Image models render lettering badly.
-- Never request more than one. The pipeline drops extras.
+- Never request more than %d. The pipeline drops extras.
 - The description becomes the image's alt text, so write it as a sentence a
   screen-reader user would find useful.
-`
+`, maxInlineIllustrations, maxInlineIllustrations)
 
 // visualRules is the visual half of the drafting prompt: diagrams always, plus
 // illustrations when this run has a generator behind it.

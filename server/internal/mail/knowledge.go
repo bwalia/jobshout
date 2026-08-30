@@ -18,18 +18,21 @@ const MaxInboundURLs = 5
 // trailing punctuation are stripped after the match.
 var inboundURLRe = regexp.MustCompile(`https?://[^\s<>"'()]+`)
 
-var trackingHostFrags = []string{
-	"unsubscribe",
-	"list-manage.",
-	"mailchimp.",
-	"sendgrid.net",
-	"sparkpostmail.com",
-	"click.",
-	"track.",
-	"email.",
-	"cndtrk.",
-	"google.com/url",
+// noisyLinkHosts are navigation, tracking or social chrome — a signature
+// link must not become the only page a reply is allowed to cite.
+var noisyLinkHosts = []string{
+	"twitter.com", "x.com", "linkedin.com", "facebook.com", "instagram.com",
+	"youtube.com", "list-manage.com", "mailchimp.com", "sendgrid.net",
+	"sparkpostmail.com", "doubleclick.net", "googletagmanager.com",
+	"google-analytics.com",
 }
+
+var noisyLinkPaths = []string{
+	"/unsubscribe", "/privacy", "/terms", "/legal", "/cookie",
+	"/preferences", "/opt-out", "/optout",
+}
+
+var imageSuffixes = []string{".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico"}
 
 // ErrInvalidKnowledgeURL is returned when PATCH knowledge_urls contains a
 // disallowed scheme (javascript:, data:) or a non-http(s) URL.
@@ -82,7 +85,7 @@ func ExtractInboundURLs(subject, body string) []string {
 	cleaned := make([]string, 0, len(raw))
 	for _, u := range raw {
 		u = strings.TrimRight(u, ".,;:!?)]}")
-		if isTrackingURL(u) {
+		if isNoisyInboundURL(u) {
 			continue
 		}
 		cleaned = append(cleaned, u)
@@ -126,10 +129,33 @@ func MergeKnowledgeURLs(playbook, inbound []string) []string {
 	return out
 }
 
-func isTrackingURL(raw string) bool {
-	lower := strings.ToLower(raw)
-	for _, frag := range trackingHostFrags {
-		if strings.Contains(lower, frag) {
+func isNoisyInboundURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return true
+	}
+	host := strings.ToLower(strings.TrimPrefix(u.Hostname(), "www."))
+	for _, h := range noisyLinkHosts {
+		if host == h || strings.HasSuffix(host, "."+h) {
+			return true
+		}
+	}
+	for _, p := range []string{"click.", "track."} {
+		if strings.HasPrefix(host, p) || strings.Contains(host, "."+p) {
+			return true
+		}
+	}
+	path := strings.ToLower(u.Path)
+	if strings.Contains(strings.ToLower(u.Host+u.Path), "google.com/url") {
+		return true
+	}
+	for _, p := range noisyLinkPaths {
+		if strings.Contains(path, p) {
+			return true
+		}
+	}
+	for _, ext := range imageSuffixes {
+		if strings.HasSuffix(path, ext) {
 			return true
 		}
 	}

@@ -82,7 +82,7 @@ func TitleFrom(kind string, v map[string]string) (title, description string) {
 			parts = append(parts, "Reply style: "+r)
 		}
 		return title, strings.Join(parts, "\n\n")
-	case "images":
+	case model.BuiltinImages:
 		p := strings.TrimSpace(v["prompt"])
 		if p == "" {
 			p = "image"

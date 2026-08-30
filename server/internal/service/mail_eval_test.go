@@ -8,6 +8,7 @@ import (
 
 	"github.com/jobshout/server/internal/mail"
 	"github.com/jobshout/server/internal/model"
+	"github.com/jobshout/server/internal/research"
 )
 
 func dummyPriceEmail() mail.InboxMessage {
@@ -158,6 +159,42 @@ func TestEval_NewsletterIgnoredNoResearchNoDraft(t *testing.T) {
 	drafts, _ := repo.ListDraftsByStatus(context.Background(), orgID, model.MailDraftDraft, model.PaginationParams{})
 	if len(drafts.Data) != 0 {
 		t.Fatalf("ignore must not draft, got %d", len(drafts.Data))
+	}
+}
+
+func TestEval_DraftUsesResearchBriefAndNeverClaimsSent(t *testing.T) {
+	rs := &fakeResearch{brief: &research.Brief{
+		Topic:   "price",
+		Summary: "The lathe-200 list price is 18400 GBP.",
+		Findings: []research.Finding{{
+			Claim: "list price is 18400 GBP", SourceURL: "https://vendor.example/lathe-200",
+		}},
+		Sources: []research.Source{{URL: "https://vendor.example/lathe-200", Title: "lathe"}},
+	}}
+	class := scriptClass{result: mail.ClassifyResult{
+		Intent: "question", NeedsResearch: true, SuggestedAction: "reply",
+		Reason: "price", TriageLabel: "sales", Urgency: "normal",
+	}}
+	gmail := &fakeGmail{
+		email:    "org@example.com",
+		tokens:   mail.TokenSet{AccessToken: "a", RefreshToken: "r", Expiry: time.Now().Add(time.Hour)},
+		messages: []mail.InboxMessage{dummyAvailabilityEmail()},
+	}
+	svc, repo, orgID := setupMail(t, gmail, class, rs)
+	connectOrg(t, svc, repo, orgID)
+	if err := svc.SyncNow(context.Background(), orgID); err != nil {
+		t.Fatal(err)
+	}
+	drafts, _ := repo.ListDraftsByStatus(context.Background(), orgID, model.MailDraftDraft, model.PaginationParams{})
+	if len(drafts.Data) != 1 {
+		t.Fatalf("drafts %d", len(drafts.Data))
+	}
+	body := strings.ToLower(drafts.Data[0].Body)
+	if strings.Contains(body, "has been sent") || strings.Contains(body, "email was sent") {
+		t.Error("draft must not claim the email was sent")
+	}
+	if !strings.Contains(drafts.Data[0].Body, "18400") {
+		t.Fatalf("draft should use the research brief, got %q", drafts.Data[0].Body)
 	}
 }
 

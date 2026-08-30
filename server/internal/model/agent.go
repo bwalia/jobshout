@@ -58,6 +58,9 @@ const (
 	// BuiltinMail is the Mail Agent: one shared org Gmail, draft-only replies,
 	// Research Agent handoff, human approve-before-send.
 	BuiltinMail = "mail"
+	// BuiltinImages is the Image Generator: one prompt in, one stored image
+	// on the Task Manager board.
+	BuiltinImages = "images"
 )
 
 // EngineConfigStructuredModel is the EngineConfig key holding the Article
