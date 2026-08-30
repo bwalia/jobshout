@@ -25,7 +25,7 @@ type IllustrationRequest struct {
 	Prompt string
 	// Model optionally names which image model to use. Empty means the
 	// service's configured default (IMAGE_DEFAULT_MODEL).
-	Model string
+	Model  string
 	Width  int
 	Height int
 	// Steps is the number of denoising steps. Zero means the provider default.
@@ -83,13 +83,8 @@ var illustrationFence = regexp.MustCompile("(?s)```illustration[ \t]*\r?\n(.*?)`
 // article and a cartoon for the next.
 const coverPromptStyle = "refined flat vector editorial illustration, crisp edges, clean geometric shapes, sharp contrast, teal and coral accents, high clarity"
 
-// coverModel is the only model blog covers may use. z-image-turbo is the
-// workstation default: fast enough for retries, strong at short title text,
-// and good enough for dark editorial covers when the prompt is structured.
-const coverModel = "z-image-turbo"
-
 // coverMaxAttempts bounds how many times a cover may be asked of the image
-// service. Three is enough to ride out a WSL-proxy 502 or a busy GPU without
+// service. Three is enough to ride out a Gemini blip or a busy GPU without
 // holding a blog run open through a dead image host.
 const coverMaxAttempts = 3
 
@@ -535,15 +530,16 @@ func headingScene(heading string) string {
 		", showing the people or systems doing that work as one readable scene. No text, labels, logos or UI."
 }
 
-// generateCover draws an article's cover image with coverModel.
+// generateCover draws an article's cover image.
+//
+// The model is left unset so the platform default applies: Gemini first when
+// a key is set, then mflux on the workstation. Naming z-image-turbo here used
+// to skip Gemini. Steps stay set so a workstation fallback still gets the
+// turbo step count.
 //
 // Transient upstream failures (WSL-proxy 502s, busy GPU, timeouts) are retried
-// with backoff against the same z-image-turbo model. There is deliberately no
-// silent swap to another model.
-//
-// A failure after every attempt is returned, not swallowed — the caller decides
-// whether an article without a picture is still an article. It is: see
-// Runner.Generate.
+// with backoff. A failure after every attempt is returned, not swallowed — the
+// caller decides whether an article without a picture is still an article.
 func (r *Runner) generateCover(ctx context.Context, orgID uuid.UUID, a *GeneratedArticle) error {
 	prompt := coverPrompt(a.Title, a.Topic, a.CoverMetaphor, a.CoverObjects, a.CoverAccent)
 
@@ -552,7 +548,6 @@ func (r *Runner) generateCover(ctx context.Context, orgID uuid.UUID, a *Generate
 		img, err := r.images.Generate(ctx, IllustrationRequest{
 			OrgID:  orgID,
 			Prompt: prompt,
-			Model:  coverModel,
 			Width:  coverWidth,
 			Height: coverHeight,
 			Steps:  coverSteps,
@@ -591,8 +586,7 @@ func (r *Runner) generateCover(ctx context.Context, orgID uuid.UUID, a *Generate
 		}
 		wait := coverRetryWaitFn(attempt)
 		if r.logger != nil {
-			r.logger.Warn("blog: cover generation failed, retrying with z-image-turbo",
-				zap.String("model", coverModel),
+			r.logger.Warn("blog: cover generation failed, retrying",
 				zap.Int("attempt", attempt),
 				zap.Duration("backoff", wait),
 				zap.Error(lastErr))
@@ -605,7 +599,7 @@ func (r *Runner) generateCover(ctx context.Context, orgID uuid.UUID, a *Generate
 		case <-timer.C:
 		}
 	}
-	return fmt.Errorf("blog: cover with %s failed after %d attempts: %w", coverModel, coverMaxAttempts, lastErr)
+	return fmt.Errorf("blog: cover failed after %d attempts: %w", coverMaxAttempts, lastErr)
 }
 
 // coverRetryWaitFn is the pause before the next cover attempt. Tests replace it
