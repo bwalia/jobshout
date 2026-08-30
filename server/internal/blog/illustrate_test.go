@@ -219,15 +219,15 @@ func TestGenerateCover_RecordsTheSeedForReproduction(t *testing.T) {
 	if article.CoverImageSeed == 0 {
 		t.Error("the seed must be stored — it is the only way to reproduce the cover")
 	}
-	if article.CoverImageProvider != "mflux" || article.CoverImageModel != coverModel {
+	if article.CoverImageProvider == "" || article.CoverImageModel == "" {
 		t.Errorf("provider/model not recorded: %+v", article)
 	}
 	if len(r.images.(*fakeIllustrator).calls) != 1 {
 		t.Fatalf("want one generation call")
 	}
 	call := r.images.(*fakeIllustrator).calls[0]
-	if call.Model != coverModel {
-		t.Errorf("cover must pin %q, got %q", coverModel, call.Model)
+	if call.Model != "" {
+		t.Errorf("cover must not pin a model (so Gemini is tried first), got %q", call.Model)
 	}
 	if call.Width != coverWidth || call.Height != coverHeight {
 		t.Errorf("cover size = %dx%d, want %dx%d", call.Width, call.Height, coverWidth, coverHeight)
@@ -237,9 +237,9 @@ func TestGenerateCover_RecordsTheSeedForReproduction(t *testing.T) {
 	}
 }
 
-// A transient 502 must be retried against qwen — never silently swapped for a
-// faster model.
-func TestGenerateCover_RetriesQwenUntilItSucceeds(t *testing.T) {
+// A transient 502 must be retried without pinning a workstation model — that
+// pin is what used to skip Gemini.
+func TestGenerateCover_RetriesUntilItSucceeds(t *testing.T) {
 	prev := coverRetryWaitFn
 	coverRetryWaitFn = func(int) time.Duration { return 0 }
 	t.Cleanup(func() { coverRetryWaitFn = prev })
@@ -251,15 +251,12 @@ func TestGenerateCover_RetriesQwenUntilItSucceeds(t *testing.T) {
 	if err := r.generateCover(context.Background(), uuid.New(), article); err != nil {
 		t.Fatalf("generateCover: %v", err)
 	}
-	if article.CoverImageModel != coverModel {
-		t.Errorf("cover model = %q, want %q", article.CoverImageModel, coverModel)
-	}
 	if fake.calls != 3 {
 		t.Errorf("got %d calls, want 3 (2 failures + success)", fake.calls)
 	}
 	for i, m := range fake.models {
-		if m != coverModel {
-			t.Errorf("call %d used %q, want %q every time", i, m, coverModel)
+		if m != "" {
+			t.Errorf("call %d pinned %q, want no model so Gemini is tried first", i, m)
 		}
 	}
 }
