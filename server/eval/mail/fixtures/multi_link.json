@@ -18,12 +18,28 @@
       "topic": "lathe-9000 versus mill-4200 for aluminium",
       "summary": "The mill-4200 is rated for aluminium; the lathe-9000 is optimised for steel.",
       "findings": [
-        {"claim": "The mill-4200 is rated for aluminium.", "source_url": "https://example.com/mill-4200", "quote": "Suitable for aluminium"},
-        {"claim": "The lathe-9000 is optimised for steel.", "source_url": "https://example.com/lathe-9000", "quote": "Optimised for steel"}
+        {
+          "claim": "The mill-4200 is rated for aluminium.",
+          "source_url": "https://example.com/mill-4200",
+          "quote": "Suitable for aluminium"
+        },
+        {
+          "claim": "The lathe-9000 is optimised for steel.",
+          "source_url": "https://example.com/lathe-9000",
+          "quote": "Optimised for steel"
+        }
       ],
       "sources": [
-        {"url": "https://example.com/mill-4200", "title": "Mill 4200", "site": "example.com"},
-        {"url": "https://example.com/lathe-9000", "title": "Lathe 9000", "site": "example.com"}
+        {
+          "url": "https://example.com/mill-4200",
+          "title": "Mill 4200",
+          "site": "example.com"
+        },
+        {
+          "url": "https://example.com/lathe-9000",
+          "title": "Lathe 9000",
+          "site": "example.com"
+        }
       ]
     }
   },
@@ -31,6 +47,9 @@
     "thread_status": "draft_ready",
     "draft_expected": true,
     "research_expected": true,
-    "sender_urls_reach_research": true
+    "sender_urls_reach_research": true,
+    "draft_mentions": [
+      "aluminium"
+    ]
   }
 }

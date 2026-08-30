@@ -17,14 +17,29 @@
     "brief": {
       "topic": "XR-200 availability",
       "summary": "The XR-200 is in stock with a six week lead time.",
-      "findings": [{"claim": "The XR-200 is currently in stock.", "source_url": "https://example.com/lathe-9000", "quote": "In stock"}],
-      "sources": [{"url": "https://example.com/lathe-9000", "title": "XR-200 lathe", "site": "example.com"}]
+      "findings": [
+        {
+          "claim": "The XR-200 is currently in stock.",
+          "source_url": "https://example.com/lathe-9000",
+          "quote": "In stock"
+        }
+      ],
+      "sources": [
+        {
+          "url": "https://example.com/lathe-9000",
+          "title": "XR-200 lathe",
+          "site": "example.com"
+        }
+      ]
     }
   },
   "expect": {
     "thread_status": "draft_ready",
     "draft_expected": true,
     "research_expected": true,
-    "sender_urls_reach_research": true
+    "sender_urls_reach_research": true,
+    "draft_mentions": [
+      "six week"
+    ]
   }
 }

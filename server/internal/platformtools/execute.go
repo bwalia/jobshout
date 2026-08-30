@@ -91,18 +91,11 @@ func runAgentExecute(ctx context.Context, d Deps, reg *Registry, input map[strin
 		return nil, err
 	}
 
-	aref := agentRef(*agent)
-	return &Result{
-		Data: map[string]any{
-			"agent":  agent.Name,
-			"status": run.Status,
-			"run_id": run.ID.String(),
-			"kind":   run.ExternalKind,
-			"reason": strArg(input, "reason"),
-		},
-		Entity:   &aref,
-		Entities: []model.EntityRef{aref},
-	}, nil
+	res := runResult(run, agent)
+	if reason := strArg(input, "reason"); reason != "" {
+		res.Data.(map[string]any)["reason"] = reason
+	}
+	return res, nil
 }
 
 func pickExecuteAgent(agents []model.Agent, name string) (*model.Agent, *Result) {

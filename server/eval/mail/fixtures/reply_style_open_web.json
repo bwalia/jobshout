@@ -1,9 +1,9 @@
 {
-  "name": "price_with_link",
-  "description": "The brief's headline use case: a buyer asks a price and pastes a product link.",
+  "name": "reply_style_open_web",
+  "description": "Operator reply instructions must reach the prompt even when the facts came from the sender's own link rather than pinned knowledge pages. They used to be gated on pinned knowledge, so the setting was silently ignored in the commonest case of all.",
   "message": {
-    "gmail_thread_id": "t-price",
-    "gmail_message_id": "m-price",
+    "gmail_thread_id": "t-style-open",
+    "gmail_message_id": "m-style-open",
     "from_email": "dana@acme.example",
     "from_name": "Dana Buyer",
     "to_email": "sales@ourco.example",
@@ -42,9 +42,15 @@
     "thread_status": "draft_ready",
     "draft_expected": true,
     "research_expected": true,
-    "sender_urls_reach_research": true,
     "draft_mentions": [
       "12,400"
-    ]
+    ],
+    "sender_urls_reach_research": true,
+    "reply_instructions_in_prompt": true
+  },
+  "connection": {
+    "knowledge_urls": [],
+    "research_focus": "",
+    "reply_instructions": "Always quote the price in GBP and offer a call."
   }
 }

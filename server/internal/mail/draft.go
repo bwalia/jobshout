@@ -25,6 +25,11 @@ type DraftOptions struct {
 	// PinnedKnowledge is true when findings (if any) came from the org's
 	// pinned knowledge pages rather than an open-web search.
 	PinnedKnowledge bool
+	// Mailbox is the address the reply goes out from. Without it the model has
+	// no one to sign as and reaches for "[Your Name]" — a draft with a blank in
+	// it cannot be sent by the person approving it, which is the whole point of
+	// the draft.
+	Mailbox string
 }
 
 type llmDrafter struct {
@@ -95,7 +100,9 @@ func (d *llmDrafter) Draft(ctx context.Context, msg InboxMessage, class Classify
 const draftSystem = `You draft organisation email replies. Reply with JSON only: subject, body, to, cc.
 The body is plain text. Be concise and professional.
 You have not sent this message. Never say you have sent it, never invent a message-id, never claim the Research Agent found something it did not.
-If research findings are provided, use only those facts; do not invent citations.`
+If research findings are provided, use only those facts; do not invent citations.
+Write a finished reply. Never leave a blank for someone to fill in: no [Your Name],
+no [Company], no {{placeholder}}. A person approves and sends this as written.`
 
 // BuildDraftPrompt is exported so tests can assert research is folded in and
 // the prompt forbids claiming the mail was sent.
@@ -138,16 +145,25 @@ Subject: %s
 
 func draftOperatorGuidance(opts DraftOptions) string {
 	reply := strings.TrimSpace(opts.ReplyInstructions)
-	if !opts.PinnedKnowledge && reply == "" {
+	mailbox := strings.TrimSpace(opts.Mailbox)
+	if !opts.PinnedKnowledge && reply == "" && mailbox == "" {
 		return ""
 	}
-	if reply == "" {
-		reply = "(none — be concise and professional)"
-	}
 	var b strings.Builder
-	b.WriteString("\nREPLY INSTRUCTIONS FROM THE OPERATOR (follow these; they override default tone):\n")
-	b.WriteString(reply)
-	b.WriteByte('\n')
+	// The sign-off comes first because it is the rule most often broken: with
+	// nobody named, a model invents a bracket for a human to fill in.
+	if mailbox != "" {
+		fmt.Fprintf(&b, "\nYou are writing from the shared mailbox %s. Sign off as that team.\n", mailbox)
+		b.WriteString("Do not sign with a personal name and never leave a placeholder to fill in.\n")
+	}
+	if reply != "" || opts.PinnedKnowledge {
+		if reply == "" {
+			reply = "(none — be concise and professional)"
+		}
+		b.WriteString("\nREPLY INSTRUCTIONS FROM THE OPERATOR (follow these; they override default tone):\n")
+		b.WriteString(reply)
+		b.WriteByte('\n')
+	}
 	if opts.PinnedKnowledge {
 		b.WriteString("Research findings come from the organisation's pinned knowledge pages.\n")
 		b.WriteString("Use only those facts. If findings are empty, do not invent prices, versions, or policy; say we will follow up.\n")

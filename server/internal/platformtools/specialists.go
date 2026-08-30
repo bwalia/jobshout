@@ -9,8 +9,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/jobshout/server/internal/model"
-	"github.com/jobshout/server/internal/repository"
-	"github.com/jobshout/server/internal/research"
 	"github.com/jobshout/server/internal/service"
 	"github.com/jobshout/server/internal/strix"
 	"github.com/jobshout/server/internal/tools"
@@ -27,7 +25,6 @@ func registerSpecialists(reg *Registry, d Deps) {
 				"context": map[string]any{"type": "string"},
 			}),
 			func(ctx context.Context, input map[string]any) (*Result, error) {
-				ident := MustIdentity(ctx)
 				if !d.Research.Available() {
 					return &Result{Data: map[string]any{"available": false, "message": "Research is not configured on this server."}}, nil
 				}
@@ -35,14 +32,10 @@ func registerSpecialists(reg *Registry, d Deps) {
 				if topic == "" {
 					return &Result{Missing: []string{"topic"}, Question: "What should I research?"}, nil
 				}
-				brief, err := d.Research.Research(ctx, ident.OrgID, research.Request{
-					Topic:   topic,
-					Context: strArg(input, "context"),
-				}, nil)
-				if err != nil {
-					return nil, err
-				}
-				return &Result{Data: brief}, nil
+				return startAgentRun(ctx, d, model.BuiltinResearcher, map[string]string{
+					"topic":   topic,
+					"context": strArg(input, "context"),
+				})
 			},
 		))
 		reg.Register(newTool(
@@ -72,20 +65,14 @@ func registerSpecialists(reg *Registry, d Deps) {
 				"context": map[string]any{"type": "string"},
 			}),
 			func(ctx context.Context, input map[string]any) (*Result, error) {
-				ident := MustIdentity(ctx)
 				topic := strArg(input, "topic")
 				if topic == "" {
 					return &Result{Missing: []string{"topic"}, Question: "What should I write about?"}, nil
 				}
-				uid := ident.UserID
-				run, err := d.Blog.Generate(ctx, ident.OrgID, &uid, "chat", model.GenerateBlogRequest{
-					Topics: []string{topic},
+				return startAgentRun(ctx, d, model.BuiltinArticleWriter, map[string]string{
+					"topic":   topic,
+					"context": strArg(input, "context"),
 				})
-				if err != nil {
-					return nil, err
-				}
-				ref := model.EntityRef{Kind: model.EntityArticle, ID: run.ID.String(), Label: strArg(input, "topic"), Href: articleHref(run.ID)}
-				return &Result{Data: map[string]any{"status": run.Status}, Entity: &ref}, nil
 			},
 		))
 		reg.Register(newTool(
@@ -166,7 +153,6 @@ func registerSpecialists(reg *Registry, d Deps) {
 				"instruction": map[string]any{"type": "string"},
 			}),
 			func(ctx context.Context, input map[string]any) (*Result, error) {
-				ident := MustIdentity(ctx)
 				target := strArg(input, "target")
 				if target == "" {
 					return &Result{Missing: []string{"target"}, Question: "What URL or path should I test?"}, nil
@@ -181,37 +167,17 @@ func registerSpecialists(reg *Registry, d Deps) {
 				if mode == "" {
 					mode = "quick"
 				}
-				agents, err := d.Agents.List(ctx, ident.OrgID, model.PaginationParams{Page: 1, PerPage: 100}, repository.AgentListFilter{})
-				if err != nil {
-					return nil, err
-				}
-				var pentester *model.Agent
-				for i := range agents.Data {
-					if agents.Data[i].IsBuiltin(model.BuiltinPentester) {
-						pentester = &agents.Data[i]
-						break
-					}
-				}
-				if pentester == nil {
-					return &Result{Data: map[string]any{"message": "No penetration testing agent is configured for this organisation."}}, nil
-				}
-				uid := ident.UserID
-				run, err := d.Pentest.CreateRun(ctx, model.CreatePentestRunRequest{
-					AgentID:     pentester.ID,
-					Target:      target,
-					ScanMode:    mode,
-					Instruction: strArg(input, "instruction"),
-				}, ident.OrgID, &uid)
+				res, err := startAgentRun(ctx, d, model.BuiltinPentester, map[string]string{
+					"target":      target,
+					"scan_mode":   mode,
+					"instruction": strArg(input, "instruction"),
+				})
 				if err != nil {
 					// Out-of-scope targets are refused in the service; surface that plainly.
 					return &Result{Data: map[string]any{"refused": true, "reason": humaniseError(err)}}, nil
 				}
-				ref := model.EntityRef{Kind: model.EntityPentest, ID: run.ID.String(), Label: target, Href: pentestHref()}
-				return &Result{
-					Data:   map[string]any{"target": target, "status": run.Status, "mode": mode},
-					Entity: &ref,
-					Effect: fmt.Sprintf("start a %s pentest against %s", mode, target),
-				}, nil
+				res.Effect = fmt.Sprintf("start a %s pentest against %s", mode, target)
+				return res, nil
 			},
 		))
 		reg.Register(newTool(
@@ -323,21 +289,15 @@ func registerSpecialists(reg *Registry, d Deps) {
 						"message":   "Gmail is not connected. Open Mail Agent to connect the shared mailbox.",
 					}}, nil
 				}
-				// Save the playbook before syncing, so a sync started in the
-				// same breath uses it. Only fields the caller actually supplied
-				// are written: an omitted field must not wipe a playbook the
-				// operator saved in the Task Manager, which is the same rule
-				// mailFormIsBlank enforces on the web side.
-				if patch, ok := mailPlaybookArgs(input); ok {
-					if _, err := d.Mail.UpdateConnection(ctx, ident.OrgID, patch); err != nil {
-						return nil, err
-					}
-				}
-				if err := d.Mail.EnqueueSync(ctx, ident.OrgID); err != nil {
+				// Saving the playbook and syncing are both the mail runner's
+				// job now; sending them through the front door is what makes a
+				// sync started from chat appear on the board.
+				res, err := startAgentRun(ctx, d, model.BuiltinMail, mailSyncInputs(input))
+				if err != nil {
 					return nil, err
 				}
-				ref := model.EntityRef{Kind: model.EntityMailThread, ID: "", Label: "Mail inbox", Href: mailHref()}
-				return &Result{Data: map[string]any{"status": "queued"}, Entity: &ref, Effect: "queue a mailbox sync"}, nil
+				res.Effect = "queue a mailbox sync"
+				return res, nil
 			},
 		))
 		reg.Register(newTool(
@@ -383,10 +343,14 @@ func pentestTargetAllowed(target string) bool {
 	return strings.TrimSpace(target) != ""
 }
 
-// mailPlaybookArgs converts stringish tool args and defers to the canonical
+// mailSyncInputs narrows a tool call to the playbook fields the caller actually
+// supplied, converting stringish tool args on the way. Only present keys
+// travel: an omitted field must not wipe a playbook the operator saved in the
+// Task Manager, which is the rule MailPlaybookPatch applies on the far side.
+// Old comment follows, kept because it still names the canonical patch builder:
 // patch builder in the service layer, so the chat tool and the Mail runner
 // cannot disagree about what saving a playbook means.
-func mailPlaybookArgs(input map[string]any) (model.UpdateMailConnectionRequest, bool) {
+func mailSyncInputs(input map[string]any) map[string]string {
 	vals := map[string]string{}
 	for k, v := range input {
 		if v == nil {
@@ -394,5 +358,5 @@ func mailPlaybookArgs(input map[string]any) (model.UpdateMailConnectionRequest, 
 		}
 		vals[k] = strings.TrimSpace(fmt.Sprint(v))
 	}
-	return service.MailPlaybookPatch(vals)
+	return vals
 }

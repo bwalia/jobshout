@@ -533,9 +533,14 @@ func (s *mailService) processThread(ctx context.Context, th *model.MailThread, m
 	}
 
 	opts := mail.DraftOptions{}
-	if pinned && c != nil {
-		opts.PinnedKnowledge = true
+	if c != nil {
+		// Tone, length and must-includes are the operator's instruction for
+		// every reply, not only the ones answered from pinned pages. Gating
+		// these on `pinned` silently ignored the setting in the commonest case
+		// of all — a question about a link the sender pasted.
 		opts.ReplyInstructions = c.ReplyInstructions
+		opts.Mailbox = c.GoogleEmail
+		opts.PinnedKnowledge = pinned
 	}
 	draft, err := s.drafter.Draft(ctx, msg, class, brief, opts)
 	if err != nil {

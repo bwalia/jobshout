@@ -73,6 +73,11 @@ type expectations struct {
 	DraftExpected    bool   `json:"draft_expected"`
 	ResearchExpected bool   `json:"research_expected"`
 
+	// DraftMentions is what the reply must actually say. It is only read by
+	// the simulated-inbox suite: with a scripted model the draft is a fixture
+	// field, so asserting on its content would assert on the fixture.
+	DraftMentions []string `json:"draft_mentions,omitempty"`
+
 	SenderURLsReachResearch  bool `json:"sender_urls_reach_research"`
 	ResearchURLsArePinned    bool `json:"research_urls_are_pinned"`
 	ReplyInstructionsInPromt bool `json:"reply_instructions_in_prompt"`

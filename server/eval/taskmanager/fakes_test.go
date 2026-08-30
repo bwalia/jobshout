@@ -222,3 +222,20 @@ func (s *stubAgentService) Delete(context.Context, uuid.UUID) error             
 func (s *stubAgentService) UpdateStatus(context.Context, uuid.UUID, string) error { return nil }
 
 var _ service.AgentService = (*stubAgentService)(nil)
+
+// The specialist services below are embedded interfaces with only the methods
+// a start tool is *allowed* to call. Anything else panics on a nil interface —
+// which is the point. These stubs are the executable form of "a specialist tool
+// may check whether it is configured, then hand off; it may not start work
+// itself".
+type stubResearchSvc struct{ service.ResearchService }
+
+func (stubResearchSvc) Available() bool { return true }
+
+type stubBlogSvc struct{ service.BlogService }
+
+type stubPentestSvc struct{ service.PentestService }
+
+type stubMailSvc struct{ service.MailService }
+
+func (stubMailSvc) Available(context.Context, uuid.UUID) bool { return true }

@@ -339,6 +339,80 @@ func TestAgentRunContractEval(t *testing.T) {
 			}},
 		})
 	})
+
+	// The contract is only "one front door" if the specialist tools use it too.
+	// They did not: research_run, article_generate, pentest_start and mail_sync
+	// each called their own service, so an agent started by name from chat was
+	// recorded and an agent started by capability was not. A live chat turn
+	// found this after the contract had supposedly landed.
+	t.Run("specialist_tools_use_the_front_door", func(t *testing.T) {
+		r := newRig(t)
+		reg := platformtools.NewRegistryWithTools(platformtools.Deps{
+			Agents:    &stubAgentService{repo: r.agents},
+			AgentRuns: r.svc,
+			Research:  stubResearchSvc{},
+			Blog:      stubBlogSvc{},
+			Pentest:   stubPentestSvc{},
+			Mail:      stubMailSvc{},
+		})
+		ctx := platformtools.WithIdentity(context.Background(),
+			platformtools.Identity{OrgID: r.orgID, UserID: uuid.New()})
+
+		calls := []struct {
+			tool    string
+			args    map[string]any
+			builtin string
+		}{
+			{"research_run", map[string]any{"topic": "grid storage"}, model.BuiltinResearcher},
+			{"article_generate", map[string]any{"topic": "grid storage"}, model.BuiltinArticleWriter},
+			{"pentest_start", map[string]any{"target": "https://example.com", "scan_mode": "quick"}, model.BuiltinPentester},
+			{"mail_sync", map[string]any{"senders": "sales@example.com"}, model.BuiltinMail},
+		}
+
+		checks := []harness.Check{}
+		for _, c := range calls {
+			c := c
+			tool, ok := reg.Get(c.tool)
+			if !ok {
+				t.Fatalf("%s is not registered", c.tool)
+			}
+			// A panic here means the tool reached past the front door into its
+			// specialist service, whose methods these stubs do not implement.
+			res, err := tool.Run(ctx, c.args)
+			checks = append(checks,
+				harness.Check{Name: c.tool + "_did_not_call_its_service_directly", Fatal: true, Fn: func() error {
+					return err
+				}},
+				harness.Check{Name: c.tool + "_did_not_ask_for_input_it_had", Fatal: true, Fn: func() error {
+					if res != nil && len(res.Missing) > 0 {
+						return errors.New(c.tool + " asked: " + res.Question)
+					}
+					return nil
+				}},
+				harness.Check{Name: c.tool + "_reached_its_runner", Fatal: true, Fn: func() error {
+					n, _ := r.runners[c.builtin].snapshot()
+					return harness.RequireAtLeast(c.tool+" runner calls", n, 1)
+				}},
+			)
+		}
+
+		all := r.runs.all()
+		checks = append(checks,
+			harness.Check{Name: "every_call_left_a_run_row", Fatal: true, Fn: func() error {
+				return harness.RequireEqual("run rows", len(all), len(calls))
+			}},
+			harness.Check{Name: "every_run_is_attributed_to_chat", Fatal: true, Fn: func() error {
+				for _, run := range all {
+					if run.Source != model.AgentRunSourceChat {
+						return errors.New("a specialist tool recorded source " + run.Source +
+							"; chat-started work must say so")
+					}
+				}
+				return nil
+			}},
+		)
+		suite.Case(t, "specialist_front_door", checks)
+	})
 }
 
 func errText(err error) string {

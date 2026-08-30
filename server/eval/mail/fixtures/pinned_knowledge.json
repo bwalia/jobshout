@@ -13,7 +13,10 @@
   "classify_reply": "{\"intent\":\"question\",\"needs_research\":false,\"urgency\":\"normal\",\"suggested_action\":\"reply\",\"reason\":\"asks about warranty\",\"triage_label\":\"sales\"}",
   "draft_reply": "{\"subject\":\"Re: Warranty terms?\",\"body\":\"Hi Lee,\\n\\nAll machines carry a 24 month warranty (https://ourco.example/warranty).\\n\\nBest,\\nSales\",\"to\":\"lee@client.example\",\"cc\":\"\"}",
   "connection": {
-    "knowledge_urls": ["https://ourco.example/warranty", "https://ourco.example/terms"],
+    "knowledge_urls": [
+      "https://ourco.example/warranty",
+      "https://ourco.example/terms"
+    ],
     "research_focus": "warranty length and exclusions"
   },
   "research": {
@@ -21,14 +24,29 @@
     "brief": {
       "topic": "warranty length and exclusions",
       "summary": "Machines carry a 24 month warranty.",
-      "findings": [{"claim": "Machines carry a 24 month warranty.", "source_url": "https://ourco.example/warranty", "quote": "24 months"}],
-      "sources": [{"url": "https://ourco.example/warranty", "title": "Warranty", "site": "ourco.example"}]
+      "findings": [
+        {
+          "claim": "Machines carry a 24 month warranty.",
+          "source_url": "https://ourco.example/warranty",
+          "quote": "24 months"
+        }
+      ],
+      "sources": [
+        {
+          "url": "https://ourco.example/warranty",
+          "title": "Warranty",
+          "site": "ourco.example"
+        }
+      ]
     }
   },
   "expect": {
     "thread_status": "draft_ready",
     "draft_expected": true,
     "research_expected": true,
-    "research_urls_are_pinned": true
+    "research_urls_are_pinned": true,
+    "draft_mentions": [
+      "24 month"
+    ]
   }
 }
