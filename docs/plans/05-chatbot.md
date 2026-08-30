@@ -1,6 +1,6 @@
 # Plan 5 — Chatbot
 
-> ## Execution status — 2026-08-29 — **phases 1 and 3 done**
+> ## Execution status — 2026-08-30 — **phases 1–4 done; Suite A 8/8**
 >
 > **Done — the memory defect, which was the substantive complaint.**
 > `rollSummary` no longer concatenates verbatim and truncates to the last 3000
@@ -29,14 +29,48 @@
 > answer, `mail_list_drafts`, `article_run_get`) are unchanged, so asking a
 > question still answers it in the turn.
 >
-> **Not done:** Suite A (intent → tool), Suite C (honesty regression net),
-> Suite D (model A/B).
+> **Done — Suite A run live and the two failures it exposed fixed (2026-08-30).**
+> Baseline against the real registry and live `qwen3-coder:30b` was 5/8. Three
+> defects, all fixed with this plan's cheap levers — no router:
+> - Case 3 (research): the front door handed the model the run id and it chased
+>   the not-yet result into an empty lookup, then reported the start as a
+>   failure. Fixed by not giving the model the id (`fbbd4f0`/`7f12d40`).
+> - Case 4/5 (mail): "what's in my inbox?" went to `mail_sync` because that
+>   tool's description led with "sync the inbox". Sharpened both descriptions so
+>   `mail_list_drafts` owns the inbox/drafts question and `mail_sync` owns "pull
+>   in new mail" (`4d877a5`).
+> - Case 8 (anti-eagerness, Fatal): a bare "hi"/"how are you?" called `help`. A
+>   rule alone did not move the model; **one worked small-talk example did**
+>   (`4d877a5`). This is exactly the plan's escalation order: descriptions, then
+>   a few-shot example, before any classification pass.
 >
-> Phase 2 (intent shaping) remains correctly deferred: without Suite A there is
-> no baseline, and this plan's own advice is not to reach for a router until the
-> numbers say the model is picking wrong tools.
+> **Suite A is now 8/8 on the default model, both Fatal cases (2 and 8)
+> satisfied, replies clean.** `prompt_test.go` pins the case-8 prompt text.
+>
+> **Done — Suite D, the model decision, made on evidence.** Suite A was run
+> against the plan's main challenger `qwen3:30b-a3b`. It routes just as well
+> (it passes case 8 out of the box) but under the current worker template
+> (`--chat-template chatml --no-jinja`, no thinking channel) it **leaks its
+> chain-of-thought into the user-visible message** ("Okay, the user asked… let
+> me check the rules…"), which `qwen3-coder` does not. That is a server chat
+> template / thinking-strip concern, not app code. With `qwen3-coder` now at
+> 8/8 clean, **the decision is to keep it**; `CHAT_MODEL` stays unchanged.
+>
+> | Suite A | qwen3-coder:30b (default) | qwen3:30b-a3b |
+> |---|---|---|
+> | Cases 1,3,4,5,6,7 | pass | pass |
+> | Case 2 (Fatal, no fabrication) | pass — clarifies, no invented topic | pass — clarifies (which agent), no invented topic |
+> | Case 8 (Fatal, no tool) | **pass** (needed the few-shot) | pass |
+> | User-visible message | clean | **leaks reasoning** under current template |
+> | Verdict | **keep — 8/8, clean** | routes well; not shippable as-is (leak) |
+>
+> **Still not done:** Suite A/B/C as committed test files (Suite A run live
+> ad-hoc; Suite B covered by `summary_test.go`; Suite C is the honesty
+> regression net). Phase 2 intent shaping stays deferred — at 8/8 the numbers
+> do not call for a router.
 
 Verified against `feat/landing-page` @ `063cce3`. Depends on Plan 4 for Phase 3.
+Suite A / Suite D results verified live against `feat/agent-programme` @ `4d877a5`.
 
 The brief calls the chatbot "very dumb / rigid" and suspects the model. The model
 is probably not the problem — `feat/chat-agent-reliability` already fixed the
