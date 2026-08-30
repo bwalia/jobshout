@@ -83,9 +83,10 @@ type Config struct {
 	// image-service/, which runs on Apple MLX and therefore cannot be scheduled
 	// onto the cluster — every ring reaches one instance of it over the network,
 	// exactly as every ring reaches one Ollama. Leaving IMAGE_BASE_URL empty
-	// disables the local path; leaving both it and OPENAI_API_KEY empty disables
-	// image generation altogether, which callers handle by skipping the work
-	// rather than failing.
+	// disables the local path. Gemini is tried first when GEMINI_API_KEY is
+	// set, and falls back to mflux. Leaving Gemini, IMAGE_BASE_URL and
+	// OPENAI_API_KEY all empty disables image generation altogether, which
+	// callers handle by skipping the work rather than failing.
 	ImageProvider     string `mapstructure:"IMAGE_PROVIDER"`
 	ImageBaseURL      string `mapstructure:"IMAGE_BASE_URL"`
 	ImageDefaultModel string `mapstructure:"IMAGE_DEFAULT_MODEL"`
@@ -100,6 +101,13 @@ type Config struct {
 	// OPENAI_DEFAULT_MODEL because a chat model name in an image request is an
 	// error that is hard to read.
 	ImageOpenAIModel string `mapstructure:"IMAGE_OPENAI_MODEL"`
+	// GeminiAPIKey enables the Gemini image provider. Unset skips it so the
+	// workstation remains the only path. The key is never defaulted.
+	GeminiAPIKey string `mapstructure:"GEMINI_API_KEY"`
+	// GeminiBaseURL is the Gemini API root. Empty means Google's public host.
+	GeminiBaseURL string `mapstructure:"GEMINI_BASE_URL"`
+	// ImageGeminiModel is the Gemini image model used when a request names none.
+	ImageGeminiModel string `mapstructure:"IMAGE_GEMINI_MODEL"`
 	// BlogCoverImages turns on cover-image generation inside article runs. Off
 	// leaves the rest of image generation available on demand — the toggle is
 	// about whether every article pays for a picture, not about whether the
@@ -246,6 +254,8 @@ func Load() (*Config, error) {
 	// Covers at 1536×864 / 28 steps routinely exceed 10m on a cold qwen load.
 	viper.SetDefault("IMAGE_TIMEOUT", "30m")
 	viper.SetDefault("IMAGE_OPENAI_MODEL", "gpt-image-1")
+	viper.SetDefault("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com")
+	viper.SetDefault("IMAGE_GEMINI_MODEL", "gemini-3.1-flash-lite-image")
 	// Off by default: a cover image costs 25 seconds of a shared GPU per
 	// article, and an operator should opt into spending that on every run.
 	viper.SetDefault("BLOG_COVER_IMAGES", false)
@@ -310,6 +320,9 @@ func Load() (*Config, error) {
 		ImageJWTSecret:       viper.GetString("IMAGE_JWT_SECRET"),
 		ImageTimeout:         viper.GetDuration("IMAGE_TIMEOUT"),
 		ImageOpenAIModel:     viper.GetString("IMAGE_OPENAI_MODEL"),
+		GeminiAPIKey:         viper.GetString("GEMINI_API_KEY"),
+		GeminiBaseURL:        viper.GetString("GEMINI_BASE_URL"),
+		ImageGeminiModel:     viper.GetString("IMAGE_GEMINI_MODEL"),
 		BlogCoverImages:      viper.GetBool("BLOG_COVER_IMAGES"),
 		EmbeddingProvider:    viper.GetString("EMBEDDING_PROVIDER"),
 		EmbeddingModel:       viper.GetString("EMBEDDING_MODEL"),

@@ -59,6 +59,8 @@ secrets:
   databasePassword: ""
   jwtSecret: ""
   openaiApiKey: ""
+  # Set via extraSecretRefs or --set-string; never committed here.
+  geminiApiKey: ""
   # Set via --set-string or Vault; never committed here.
   ollamaJwtSecret: ""
   # Gateway secret for strix-service. Distinct from ollama/image on purpose.
@@ -142,6 +144,9 @@ ai:
   # Covers at 1536×864 / 28 steps need headroom past a cold qwen load.
   imageTimeout: "30m"
   imageOpenaiModel: "gpt-image-1"
+  # Tried first when GEMINI_API_KEY is set; mflux (imageBaseURL) is the fallback.
+  imageGeminiModel: "gemini-3.1-flash-lite-image"
+  geminiBaseURL: "https://generativelanguage.googleapis.com"
   imageBucket: "images"
   # Off by default: a cover costs roughly 25 seconds of a single shared GPU per
   # article, and that is a cost an operator should choose to pay. Image

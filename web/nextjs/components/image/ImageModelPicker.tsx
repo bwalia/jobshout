@@ -20,6 +20,7 @@ interface ImageModelPickerProps {
 
 /** How a provider key is titled in the dropdown. */
 const PROVIDER_LABELS: Record<string, string> = {
+  gemini: "Gemini",
   mflux: "Local (workstation)",
   openai: "OpenAI",
 };

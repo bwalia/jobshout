@@ -294,7 +294,7 @@ func main() {
 	// The local provider runs on the workstation (see image-service/), outside
 	// the cluster, because Apple MLX cannot be scheduled onto amd64 nodes —
 	// the same arrangement Ollama already uses.
-	imageRouter := imagegen.NewRouter(cfg)
+	imageRouter := imagegen.NewRouter(cfg).WithLogger(logger)
 	var imgStore imagestore.Store
 	if minioClient != nil {
 		imgStore = imagestore.NewMinIOStore(minioClient, cfg.MinIOBucketImages)
@@ -326,7 +326,7 @@ func main() {
 			imageRouter.Warm(warmCtx)
 		}()
 	} else {
-		logger.Info("image generation not configured — set IMAGE_BASE_URL or OPENAI_API_KEY to enable it")
+		logger.Info("image generation not configured — set GEMINI_API_KEY, IMAGE_BASE_URL or OPENAI_API_KEY to enable it")
 	}
 
 	// ─── Tool registry ───────────────────────────────────────────────────────

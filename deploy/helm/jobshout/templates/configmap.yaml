@@ -29,14 +29,16 @@ data:
   OPENAI_DEFAULT_MODEL: {{ .Values.ai.openaiModel | quote }}
   # Image generation. Like Ollama, the local image model runs OUTSIDE the
   # cluster — mflux needs Apple MLX and the nodes are amd64 Linux — so every
-  # ring points at the one workstation service. An empty imageBaseURL disables
-  # the local path; the server then falls back to OpenAI images if a key is set,
-  # and to no image generation at all if not.
+  # ring points at the one workstation service. Gemini is tried first when
+  # GEMINI_API_KEY is set (from extraSecretRefs / jobshout-secrets); mflux is
+  # the fallback. An empty imageBaseURL disables the local path.
   IMAGE_PROVIDER: {{ .Values.ai.imageProvider | default "mflux" | quote }}
   IMAGE_BASE_URL: {{ .Values.ai.imageBaseURL | default "" | quote }}
   IMAGE_DEFAULT_MODEL: {{ .Values.ai.imageModel | default "z-image-turbo" | quote }}
   IMAGE_TIMEOUT: {{ .Values.ai.imageTimeout | default "10m" | quote }}
   IMAGE_OPENAI_MODEL: {{ .Values.ai.imageOpenaiModel | default "gpt-image-1" | quote }}
+  IMAGE_GEMINI_MODEL: {{ .Values.ai.imageGeminiModel | default "gemini-3.1-flash-lite-image" | quote }}
+  GEMINI_BASE_URL: {{ .Values.ai.geminiBaseURL | default "https://generativelanguage.googleapis.com" | quote }}
   # Whether every article run pays for a cover image. Off leaves generation
   # available on demand through the API and the generate_image tool.
   BLOG_COVER_IMAGES: {{ .Values.ai.blogCoverImages | default false | quote }}
