@@ -78,9 +78,9 @@ export default function ImagesPage() {
         <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-4 text-sm">
           <p className="font-medium">Image generation is not configured on this server.</p>
           <p className="mt-1 text-muted-foreground">
-            Set <code className="text-xs">IMAGE_BASE_URL</code> to reach the workstation image
-            service, or <code className="text-xs">OPENAI_API_KEY</code> to use the hosted
-            provider.
+            Set <code className="text-xs">GEMINI_API_KEY</code> to use Gemini,{" "}
+            <code className="text-xs">IMAGE_BASE_URL</code> to reach the workstation image
+            service, or <code className="text-xs">OPENAI_API_KEY</code> for OpenAI.
           </p>
         </div>
       )}

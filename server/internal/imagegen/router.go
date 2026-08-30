@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/jobshout/server/internal/config"
 )
 
@@ -17,6 +19,7 @@ import (
 type Router struct {
 	clients         map[string]Client
 	defaultProvider string
+	logger          *zap.Logger
 
 	// cache memoises model discovery. Listing models on the local path is an
 	// HTTP call to a machine that may be asleep, and a picker that hangs for
@@ -43,6 +46,13 @@ func NewRouter(cfg *config.Config) *Router {
 		)
 	}
 
+	// Gemini sits in front of the workstation when a key is set. Unqualified
+	// requests (the Image Generator agent, generate_image) try it first;
+	// Generate falls back to mflux if the hosted call fails.
+	if cfg.GeminiAPIKey != "" {
+		r.clients[ProviderGemini] = NewGeminiClient(cfg.GeminiBaseURL, cfg.GeminiAPIKey, cfg.ImageGeminiModel)
+	}
+
 	// OpenAI images ride on the same key as OpenAI chat — one credential, one
 	// place to rotate it.
 	if cfg.OpenAIAPIKey != "" {
@@ -54,14 +64,30 @@ func NewRouter(cfg *config.Config) *Router {
 	// keeps a partly-configured environment working.
 	if _, ok := r.clients[r.defaultProvider]; !ok {
 		r.defaultProvider = ""
-		for _, name := range []string{ProviderMFlux, ProviderOpenAI} {
+		for _, name := range []string{ProviderGemini, ProviderMFlux, ProviderOpenAI} {
 			if _, ok := r.clients[name]; ok {
 				r.defaultProvider = name
 				break
 			}
 		}
+	} else if r.defaultProvider == ProviderMFlux {
+		// IMAGE_PROVIDER still defaults to mflux in config and Helm. When
+		// Gemini is configured, put it in front so the picker and the agent
+		// agree on what "platform default" means.
+		if _, ok := r.clients[ProviderGemini]; ok {
+			r.defaultProvider = ProviderGemini
+		}
 	}
 
+	return r
+}
+
+// WithLogger attaches a logger so a Gemini failure that falls back to the
+// workstation is visible. Without this, a bad key looks like "mflux worked".
+func (r *Router) WithLogger(logger *zap.Logger) *Router {
+	if r != nil {
+		r.logger = logger
+	}
 	return r
 }
 
@@ -90,7 +116,7 @@ func (r *Router) DefaultProvider() string {
 // created and has since been removed should not permanently break that agent.
 func (r *Router) For(provider string) (Client, error) {
 	if r == nil || len(r.clients) == 0 {
-		return nil, fmt.Errorf("imagegen: no image provider is configured (set IMAGE_BASE_URL or OPENAI_API_KEY)")
+		return nil, fmt.Errorf("imagegen: no image provider is configured (set GEMINI_API_KEY, IMAGE_BASE_URL or OPENAI_API_KEY)")
 	}
 	if c, ok := r.clients[provider]; ok {
 		return c, nil
@@ -102,12 +128,82 @@ func (r *Router) For(provider string) (Client, error) {
 }
 
 // Generate produces an image with the named provider.
+//
+// When Gemini is configured, an unqualified request or an explicit Gemini
+// request tries Gemini first and falls back to the workstation (mflux) if
+// that call fails. A cancelled context does not fall back — the caller has
+// already given up. An explicit mflux or openai choice is honoured as-is,
+// as is a request that names a workstation model such as z-image-turbo.
 func (r *Router) Generate(ctx context.Context, provider string, req GenerateRequest) (*GenerateResponse, error) {
+	if r == nil || len(r.clients) == 0 {
+		return nil, fmt.Errorf("imagegen: no image provider is configured (set GEMINI_API_KEY, IMAGE_BASE_URL or OPENAI_API_KEY)")
+	}
+	if r.preferGemini(provider, req.Model) {
+		resp, err := r.clients[ProviderGemini].Generate(ctx, req)
+		if err == nil {
+			return resp, nil
+		}
+		if ctx.Err() != nil {
+			return nil, err
+		}
+		if fb := r.workstationFallback(); fb != nil {
+			if r.logger != nil {
+				r.logger.Warn("gemini image generation failed; falling back to workstation",
+					zap.Error(err), zap.String("fallback", fb.Provider()))
+			}
+			fbReq := req
+			if isGeminiImageModel(fbReq.Model) {
+				// mflux does not know Gemini model names; empty means its default.
+				fbReq.Model = ""
+			}
+			resp, fbErr := fb.Generate(ctx, fbReq)
+			if fbErr == nil {
+				return resp, nil
+			}
+			return nil, fmt.Errorf("imagegen: gemini failed (%v); %s fallback failed: %w", err, fb.Provider(), fbErr)
+		}
+		return nil, err
+	}
+
+	if provider == "" && req.Model != "" && !isGeminiImageModel(req.Model) {
+		if c, ok := r.clients[ProviderMFlux]; ok {
+			return c.Generate(ctx, req)
+		}
+	}
+
 	c, err := r.For(provider)
 	if err != nil {
 		return nil, err
 	}
 	return c.Generate(ctx, req)
+}
+
+// preferGemini reports whether this request should try the hosted Gemini
+// model before the workstation.
+func (r *Router) preferGemini(provider, model string) bool {
+	if r == nil {
+		return false
+	}
+	if _, ok := r.clients[ProviderGemini]; !ok {
+		return false
+	}
+	switch provider {
+	case ProviderGemini, "":
+		return model == "" || isGeminiImageModel(model)
+	default:
+		return false
+	}
+}
+
+// workstationFallback is the current local path — images.workstation / mflux.
+func (r *Router) workstationFallback() Client {
+	if r == nil {
+		return nil
+	}
+	if c, ok := r.clients[ProviderMFlux]; ok {
+		return c
+	}
+	return nil
 }
 
 // Providers lists the registered provider names, in a stable order.

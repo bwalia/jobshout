@@ -20,6 +20,8 @@ import (
 const (
 	// ProviderMFlux is the workstation image service (mflux on Apple MLX).
 	ProviderMFlux = "mflux"
+	// ProviderGemini is Google's hosted Gemini image API.
+	ProviderGemini = "gemini"
 	// ProviderOpenAI is OpenAI's hosted image API.
 	ProviderOpenAI = "openai"
 )

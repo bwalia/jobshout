@@ -124,6 +124,9 @@ services:
       IMAGE_JWT_SECRET: ${IMAGE_JWT_SECRET:-}
       IMAGE_DEFAULT_MODEL: ${IMAGE_DEFAULT_MODEL:-z-image-turbo}
       IMAGE_TIMEOUT: ${IMAGE_TIMEOUT:-30m}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_BASE_URL: ${GEMINI_BASE_URL:-https://generativelanguage.googleapis.com}
+      IMAGE_GEMINI_MODEL: ${IMAGE_GEMINI_MODEL:-gemini-3.1-flash-lite-image}
       # Pentest: workstation strix-service on 11436. Empty URL disables it.
       STRIX_ENABLED: ${STRIX_ENABLED:-true}
       STRIX_BASE_URL: ${STRIX_BASE_URL:-http://host.docker.internal:11436}
