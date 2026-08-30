@@ -86,6 +86,31 @@ func resolveCitations(markdown string, brief *research.Brief) (string, []model.B
 	return tidySpacing(rewritten), refs
 }
 
+// modelRefsHeading matches a References / Further Reading / Bibliography heading
+// the model wrote itself, and everything after it to the end of the document.
+//
+// The heading text has to be exactly one of those phrases, so a section called
+// "References to prior art" is left alone. It is matched anywhere rather than
+// only at the start of a line because a local model routinely glues the heading
+// to the end of the preceding sentence — "...into L1 cache. ## References".
+var modelRefsHeading = regexp.MustCompile(`(?is)#{1,6}[ \t]*(?:references|further reading|bibliography)[ \t]*(?:\r?\n|$).*$`)
+
+// stripModelReferences removes a references section the model produced against
+// instructions.
+//
+// The draft prompt forbids a hand-written reference list — the real one is
+// generated from resolved citations and appended by the caller. A model that
+// writes one anyway leaves the article with two "## References" headings, the
+// first full of markers and raw URLs the model invented. Cutting it here, before
+// citations resolve, keeps those invented markers out of the renumbering too.
+func stripModelReferences(markdown string) string {
+	loc := modelRefsHeading.FindStringIndex(markdown)
+	if loc == nil {
+		return markdown
+	}
+	return strings.TrimRight(markdown[:loc[0]], " \t\r\n")
+}
+
 // stripAllCitations removes every citation marker, used when there is no brief
 // to resolve them against. Markdown links are left alone.
 func stripAllCitations(markdown string) string {

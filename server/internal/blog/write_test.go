@@ -512,3 +512,48 @@ func TestCountCitations(t *testing.T) {
 		})
 	}
 }
+
+func TestStripModelReferences(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			"no references section is left alone",
+			"# Title\n\nBody with a claim [1].\n",
+			"# Title\n\nBody with a claim [1].\n",
+		},
+		{
+			"a hand-written references section is removed whole",
+			"# Title\n\nBody [1].\n\n## References\n\n[1] A source\nhttps://x.com\n",
+			"# Title\n\nBody [1].",
+		},
+		{
+			// The failure this fixes: a local model glues the heading to the end
+			// of the last sentence instead of starting a new line.
+			"a heading glued to the prose is still removed",
+			"Body ending in a sentence. ## References\n\n[1] A source\n",
+			"Body ending in a sentence.",
+		},
+		{
+			"further reading is treated the same",
+			"Body.\n\n### Further Reading\n\n- somewhere\n",
+			"Body.",
+		},
+		{
+			// "References to prior art" is a section about the work, not a link
+			// list, so the exact-phrase anchor must leave it alone.
+			"a heading that only starts with references is kept",
+			"Body.\n\n## References to prior art\n\nReal content here.\n",
+			"Body.\n\n## References to prior art\n\nReal content here.\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := stripModelReferences(tt.in); got != tt.want {
+				t.Errorf("stripModelReferences(%q)\n = %q\nwant %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}

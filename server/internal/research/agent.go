@@ -956,12 +956,20 @@ func (a *Agent) verify(ctx context.Context, req Request, findings []Finding, doc
 	}
 	if dropped := len(grounded) - len(relevant); dropped > 0 {
 		brief.Warnings = append(brief.Warnings,
-			fmt.Sprintf("dropped %d claim(s) whose quote did not support them", dropped))
+			fmt.Sprintf("dropped %d claim(s) that were off-topic or whose quote did not support them", dropped))
 	}
 	return relevant
 }
 
-// judgeRelevance asks whether each quote actually supports its claim.
+// judgeRelevance asks, for each finding, both whether the quote supports the
+// claim and whether the claim is about the article topic at all.
+//
+// The topic check is the backstop for the recovery path: when source selection
+// finds nothing on-topic it falls back to reading raw search results, and a
+// well-written page about a different subject can yield a claim its own quote
+// genuinely supports — a GNSS article cited in a piece about lathe tool wear.
+// Selection catches that before reading on the happy path; here it is caught
+// after, so the fallback cannot smuggle an off-topic source into the brief.
 //
 // Framed adversarially and in one batch: the model is told to reject by default
 // on doubt, because the failure that matters here is keeping a bad citation,
@@ -972,21 +980,30 @@ func (a *Agent) judgeRelevance(ctx context.Context, req Request, findings []Find
 		fmt.Fprintf(&b, "\n[%d]\nCLAIM: %s\nQUOTE FROM SOURCE: %s\n", i, f.Claim, f.Quote)
 	}
 
-	prompt := fmt.Sprintf(`You are fact-checking citations for an article. For each numbered pair below,
-decide whether the QUOTE genuinely supports the CLAIM.
+	prompt := fmt.Sprintf(`You are fact-checking citations for an article on this topic:
+
+ARTICLE TOPIC: %s
+
+For each numbered pair below, decide whether the QUOTE genuinely supports the
+CLAIM and whether the CLAIM belongs in an article on the topic above.
 
 Reject the pair if:
+- The CLAIM is not about the ARTICLE TOPIC. Search results share vocabulary
+  across unrelated fields — "tool", "detection", "monitoring" mean different
+  things in machining, software and finance. A claim whose quote is perfectly
+  genuine but whose subject is a different field must still be rejected.
 - The quote is about a different subject than the claim.
 - The claim asserts more than the quote establishes (e.g. the quote describes one
   case and the claim generalises it).
 - The claim reverses, exaggerates or sharpens what the quote says.
 - You are unsure. Default to rejecting.
 
-Accept only when the quote plainly establishes the claim.
+Accept only when the quote plainly establishes the claim AND the claim is about
+the article topic.
 %s
 
 Respond with JSON only, in exactly this shape, including every index above:
-{"verdicts": [{"index": 0, "supported": true}, {"index": 1, "supported": false}]}`, b.String())
+{"verdicts": [{"index": 0, "supported": true}, {"index": 1, "supported": false}]}`, req.Topic, b.String())
 
 	var parsed struct {
 		Verdicts []struct {

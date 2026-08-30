@@ -26,7 +26,7 @@ type IllustrationRequest struct {
 	Prompt string
 	// Model optionally names which image model to use. Empty means the
 	// service's configured default (IMAGE_DEFAULT_MODEL).
-	Model string
+	Model  string
 	Width  int
 	Height int
 	// Steps is the number of denoising steps. Zero means the provider default.
@@ -426,4 +426,175 @@ func escapeAlt(s string) string {
 	// image out of its own markdown.
 	s = strings.Join(strings.Fields(s), " ")
 	return s
+}
+
+// illustrationRequirement is the requirements-list bullet that tells the writer
+// pictures are available at all.
+//
+// The ILLUSTRATIONS block further down the prompt already explains the syntax,
+// but a rule that only appears in an appendix is a rule a model skims past: a
+// live run against llama3 read the whole block and requested none. The checklist
+// is where the model looks for what it must produce, so the ask goes there too.
+// Empty when this run cannot draw, so a text-only pipeline never promises a
+// picture it has no way to make.
+func (r *Runner) illustrationRequirement() string {
+	if !r.canIllustrate() {
+		return ""
+	}
+	return "- Include at least one ILLUSTRATION — see the illustration rules below.\n"
+}
+
+// illustrationPlacement is one picture the model wants, and where it belongs.
+type illustrationPlacement struct {
+	// AfterHeading is the heading text the picture should follow, copied from
+	// the article. Asking for a heading rather than a line number means a wrong
+	// answer is one we can detect and drop, instead of one that silently lands
+	// the image in the middle of a paragraph.
+	AfterHeading string `json:"after_heading"`
+	// Scene is the description handed to the image model, and the alt text.
+	Scene string `json:"scene"`
+}
+
+// markdownHeading matches an ATX heading and captures its text.
+var markdownHeading = regexp.MustCompile(`(?m)^(#{1,6})[ \t]+(.+?)[ \t]*$`)
+
+// ensureIllustrations gives an article that asked for no pictures one chance to
+// get some.
+//
+// Checked rather than trusted, for the same reason the word count is: the draft
+// prompt offers illustrations and a live run against a local model produced an
+// article with none anyway. Rather than re-draft — which would put the citations
+// and the diagrams back at risk to add a picture — this asks only where the
+// pictures go, and inserts the fences itself. The worst outcome of a bad answer
+// is a placement we cannot match and therefore drop.
+//
+// One pass, and never fatal: an article without a picture is still an article.
+func (r *Runner) ensureIllustrations(
+	ctx context.Context, modelName string, plan *writePlan, markdown string,
+) (string, []string) {
+	if !r.canIllustrate() {
+		return markdown, nil
+	}
+	if len(illustrationFence.FindAllStringIndex(markdown, 1)) > 0 {
+		return markdown, nil
+	}
+	headings := bodyHeadings(markdown)
+	if len(headings) == 0 {
+		return markdown, []string{"no section headings to place an illustration after"}
+	}
+
+	prompt := fmt.Sprintf(`This article has no illustrations. Choose where one or two would help a
+reader, and describe the picture for each.
+
+TITLE: %s
+
+SECTION HEADINGS (copy one of these EXACTLY as "after_heading"):
+%s
+
+A good illustration is a CONCRETE SCENE — something that could be photographed:
+"A machinist watching a spindle spin down in a quiet workshop" works. "The
+concept of reliability" does not. Do not ask for text, labels, charts, diagrams
+or UI; image models render lettering badly. Never put two in adjacent sections,
+and never describe the same scene twice. Write each description as a sentence a
+screen-reader user would find useful, because it becomes the alt text.
+
+Pick at most %d. Respond with JSON only, in exactly this shape:
+{"illustrations": [{"after_heading": "...", "scene": "..."}]}`,
+		plan.Title, strings.Join(headings, "\n"), maxInlineIllustrations)
+
+	var out struct {
+		Illustrations []illustrationPlacement `json:"illustrations"`
+	}
+	if err := r.generateJSON(ctx, modelName, "illustrations", prompt, maxPlanTokens, &out); err != nil {
+		return markdown, []string{fmt.Sprintf("could not choose illustration placements: %v", err)}
+	}
+	return insertIllustrations(markdown, out.Illustrations)
+}
+
+// bodyHeadings lists the H2/H3 headings a picture may be placed under.
+//
+// The H1 is excluded because the cover already sits above it, and the reference
+// list because an image among the citations is noise.
+func bodyHeadings(markdown string) []string {
+	var out []string
+	for _, m := range markdownHeading.FindAllStringSubmatch(markdown, -1) {
+		if len(m[1]) < 2 {
+			continue
+		}
+		text := strings.TrimSpace(m[2])
+		if text == "" || strings.EqualFold(text, "References") {
+			continue
+		}
+		out = append(out, text)
+	}
+	return out
+}
+
+// insertIllustrations writes an illustration fence after each named heading.
+//
+// The rules the prompt states are enforced here rather than assumed, which is
+// the same division of labour illustrateBody keeps: a prompt is advice, and
+// this is where a model that ignored it stops mattering. A placement naming a
+// heading the article does not have is dropped, because the alternative —
+// guessing at the nearest match — puts a picture somewhere nobody asked for.
+func insertIllustrations(markdown string, places []illustrationPlacement) (string, []string) {
+	if len(places) == 0 {
+		return markdown, []string{"the model chose no illustration placements"}
+	}
+
+	var notes []string
+	used := map[string]bool{}
+	scenes := map[string]bool{}
+	added := 0
+
+	for _, p := range places {
+		heading := strings.TrimSpace(p.AfterHeading)
+		scene := strings.TrimSpace(p.Scene)
+		switch {
+		case scene == "":
+			notes = append(notes, "dropped an illustration placement with no description")
+			continue
+		case added >= maxInlineIllustrations:
+			notes = append(notes, fmt.Sprintf(
+				"dropped an illustration placement beyond the limit of %d", maxInlineIllustrations))
+			continue
+		case used[strings.ToLower(heading)]:
+			notes = append(notes, fmt.Sprintf("dropped a second illustration under %q", heading))
+			continue
+		case scenes[strings.ToLower(scene)]:
+			notes = append(notes, "dropped an illustration that repeats an earlier scene")
+			continue
+		}
+
+		next, ok := insertAfterHeading(markdown, heading, "```illustration\n"+scene+"\n```")
+		if !ok {
+			notes = append(notes, fmt.Sprintf(
+				"dropped an illustration for %q, which is not a heading in the article", heading))
+			continue
+		}
+		markdown = next
+		used[strings.ToLower(heading)] = true
+		scenes[strings.ToLower(scene)] = true
+		added++
+	}
+
+	if added > 0 {
+		notes = append(notes, fmt.Sprintf("added %d illustration request(s) the draft left out", added))
+	}
+	return markdown, notes
+}
+
+// insertAfterHeading puts block immediately below the named heading, reporting
+// whether the heading was found.
+func insertAfterHeading(markdown, heading, block string) (string, bool) {
+	for _, m := range markdownHeading.FindAllStringSubmatchIndex(markdown, -1) {
+		if !strings.EqualFold(strings.TrimSpace(markdown[m[4]:m[5]]), heading) {
+			continue
+		}
+		// After the heading's line, not after its whole section: the image is
+		// the section's opening beat, and the prose below it then unpacks.
+		end := m[1]
+		return markdown[:end] + "\n\n" + block + markdown[end:], true
+	}
+	return markdown, false
 }

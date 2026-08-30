@@ -164,7 +164,8 @@ func (r *Runner) finalizeArticle(
 }
 
 // writeOne runs the full agent loop for a single brief:
-// research → plan → draft → review → revise → check diagrams → resolve citations.
+// research → plan → draft → review → revise → illustrate → check diagrams →
+// resolve citations.
 //
 // The sequence is fixed rather than being offered to the model as a set of
 // choices. Research and citation resolution are guarantees this pipeline makes
@@ -274,7 +275,18 @@ func (r *Runner) writeOne(
 		}
 	}
 
-	// 7. Repair and check the diagrams. A diagram that will not parse reaches
+	// 7. Make sure the piece has a picture, if this run can draw one.
+	//
+	// After expansion so the placements are chosen against the text that will
+	// actually ship, and before the diagrams are repaired so an inserted fence
+	// goes through the same checks as one the writer wrote itself.
+	var illustrationNotes []string
+	markdown, illustrationNotes = r.ensureIllustrations(ctx, r.structuredModel(req), plan, markdown)
+	for _, note := range illustrationNotes {
+		r.logger.Info("blog: "+note, zap.String("title", plan.Title))
+	}
+
+	// 8. Repair and check the diagrams. A diagram that will not parse reaches
 	// the reader as a block of raw Mermaid source, so it is worth settling here
 	// rather than in their browser.
 	var diagramNotes []string
@@ -283,9 +295,12 @@ func (r *Runner) writeOne(
 		r.logger.Info("blog: "+note, zap.String("title", plan.Title))
 	}
 
-	// 8. Resolve citations into a reference list. This drops markers pointing
+	// 9. Resolve citations into a reference list. This drops markers pointing
 	// at sources that were never offered and renumbers what survives, so the
 	// published article's references are exactly what it cites.
+	// A model that wrote its own reference list despite being told not to would
+	// otherwise end up with two — the invented one and the generated one below.
+	markdown = stripModelReferences(markdown)
 	rawCitations := countCitations(markdown)
 	markdown, refs := resolveCitations(markdown, rb)
 	markdown = strings.TrimRight(markdown, "\n") + referencesMarkdown(refs)

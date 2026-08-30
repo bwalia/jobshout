@@ -701,6 +701,70 @@ func TestResearch_FallsBackToSearchOrderWhenSelectionFails(t *testing.T) {
 	}
 }
 
+// The recovery path reads raw search results when selection finds nothing
+// on-topic, so it is the one place a self-consistent but off-topic source can
+// reach verification: a genuine claim, a genuine quote, and the wrong subject.
+// The topic check in judgeRelevance is the backstop that must catch it, and
+// with nothing left the run fails rather than citing the wrong field.
+func TestResearch_OffTopicSurvivesSelectionButNotTheTopicCheck(t *testing.T) {
+	backend := &fixedBackend{
+		sources: []Source{
+			{URL: "https://esa.int/phone-space-monitoring", Title: "Turn your phone into a space monitoring tool", Site: "esa.int"},
+		},
+		docs: map[string]*Document{
+			"https://esa.int/phone-space-monitoring": {
+				Source: Source{URL: "https://esa.int/phone-space-monitoring", Site: "esa.int"},
+				Text:   "A smartphone GNSS receiver can be used as a space weather monitoring tool by logging ionospheric delay.",
+			},
+		},
+	}
+	model := &scriptedLLM{responses: []scriptedResponse{
+		{trigger: "planning research", content: `{"queries": ["cnc lathe tool wear detection"]}`},
+		// Selection correctly rejects the off-topic hit; recovery then falls
+		// back to reading it in search order.
+		{trigger: "choosing which search results", content: `{"selected": []}`},
+		// Extraction produces a claim its own quote genuinely supports.
+		{trigger: "extracting citable facts", content: `{"findings": [{"claim": "A smartphone can log ionospheric delay as a space weather tool.", "quote": "A smartphone GNSS receiver can be used as a space weather monitoring tool by logging ionospheric delay."}]}`},
+		// The quote plainly supports the claim; only the topic check can reject.
+		{trigger: "fact-checking citations", content: `{"verdicts": [{"index": 0, "supported": false}]}`},
+	}}
+
+	agent := newTestAgent(t, backend, model)
+
+	_, err := agent.Research(context.Background(), Request{Topic: "tool wear detection on CNC lathes"}, nil)
+	if err == nil {
+		t.Fatal("Research cited an off-topic source that its own quote happened to support")
+	}
+	if !strings.Contains(err.Error(), "none of the") && !strings.Contains(err.Error(), "no claims") {
+		t.Errorf("error %q should say nothing verified", err)
+	}
+}
+
+// The topic reaches the relevance judge's prompt: without it the judge cannot
+// tell a same-vocabulary, different-field claim from an on-topic one, which is
+// the whole failure this backstop exists to stop.
+func TestJudgeRelevance_PromptCarriesTheArticleTopic(t *testing.T) {
+	spy := &scriptedLLM{responses: []scriptedResponse{
+		{trigger: "fact-checking citations", content: `{"verdicts": [{"index": 0, "supported": true}]}`},
+	}}
+	agent := newTestAgent(t, defaultBackend(), spy)
+	_, err := agent.judgeRelevance(context.Background(),
+		Request{Topic: "tool wear detection on CNC lathes"},
+		[]Finding{{Claim: "c", Quote: "q"}})
+	if err != nil {
+		t.Fatalf("judgeRelevance: %v", err)
+	}
+	var sawTopic bool
+	for _, p := range spy.prompts {
+		if strings.Contains(p, "tool wear detection on CNC lathes") {
+			sawTopic = true
+		}
+	}
+	if !sawTopic {
+		t.Error("the article topic never reached the relevance-judgement prompt")
+	}
+}
+
 func TestResearch_RejectsEmptyTopic(t *testing.T) {
 	agent := newTestAgent(t, defaultBackend(), &scriptedLLM{})
 	if _, err := agent.Research(context.Background(), Request{Topic: "   "}, nil); err == nil {

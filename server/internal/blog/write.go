@@ -100,7 +100,7 @@ Requirements:
 - 900-1400 words.
 - Include at least one code block where it genuinely helps.
 - Include a DIAGRAM where one genuinely helps — see the diagram rules below.
-- Cite a source with [n] wherever you state a specific fact, version, number or
+%s- Cite a source with [n] wherever you state a specific fact, version, number or
   quotation drawn from it. Do not cite a number that is not in the list above.
 - Anything describing HOW A TECHNOLOGY WORKS is a factual claim and needs a
   citation — what runs where, what a component does, what replaces what. This
@@ -121,6 +121,7 @@ Return only the markdown article — no preamble, no meta commentary.`,
 		guidanceOrNone(brief.Context),
 		formatSources(rb),
 		plan.Title,
+		r.illustrationRequirement(),
 		r.visualRules(),
 	)
 

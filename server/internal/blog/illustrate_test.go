@@ -9,6 +9,8 @@ import (
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
+
+	"github.com/jobshout/server/internal/llm"
 )
 
 // fakeIllustrator draws nothing and records what it was asked for.
@@ -309,4 +311,124 @@ func TestCanIllustrate(t *testing.T) {
 	if !testRunner(&fakeIllustrator{enabled: true}).canIllustrate() {
 		t.Error("an enabled illustrator should be usable")
 	}
+}
+
+// The article the writer handed over has no pictures in it. A runner that can
+// draw asks once where they should go, and puts the fences in itself.
+func TestEnsureIllustrations_AddsFencesToAPictureLessArticle(t *testing.T) {
+	llmStub := &stubLLM{responses: []scriptedResponse{{
+		trigger: promptIllustrate,
+		content: `{"illustrations":[
+			{"after_heading":"How spindles fail","scene":"A machinist watching a spindle spin down in a quiet workshop"},
+			{"after_heading":"What to measure","scene":"A vibration sensor clamped to a spindle housing, cables running away"}
+		]}`,
+	}}}
+	r := testRunnerWithLLM(llmStub, &fakeIllustrator{enabled: true})
+
+	markdown := "# Spindles\n\nIntro.\n\n## How spindles fail\n\nBearings.\n\n## What to measure\n\nVibration.\n"
+	out, notes := r.ensureIllustrations(context.Background(), "m", &writePlan{Title: "Spindles"}, markdown)
+
+	if got := len(illustrationFence.FindAllString(out, -1)); got != 2 {
+		t.Fatalf("want 2 illustration fences added, got %d\n%s", got, out)
+	}
+	if !strings.Contains(out, "## How spindles fail\n\n```illustration\nA machinist") {
+		t.Errorf("the fence should open the section it was placed under, got:\n%s", out)
+	}
+	if !strings.Contains(strings.Join(notes, " "), "added 2 illustration request(s)") {
+		t.Errorf("the run should say what it added, got %v", notes)
+	}
+	// Nothing but the fences: an article that came back with its prose rewritten
+	// would have had its citations and diagrams put at risk to gain a picture.
+	if !strings.Contains(out, "Bearings.") || !strings.Contains(out, "Vibration.") {
+		t.Errorf("the prose must survive untouched, got:\n%s", out)
+	}
+}
+
+// A writer that already asked for a picture is left alone — the second opinion
+// is only for an article that has none.
+func TestEnsureIllustrations_LeavesAnIllustratedArticleAlone(t *testing.T) {
+	llmStub := &stubLLM{}
+	r := testRunnerWithLLM(llmStub, &fakeIllustrator{enabled: true})
+
+	markdown := "# T\n\n## S\n\n```illustration\nA lighthouse at dawn\n```\n\nBody.\n"
+	out, notes := r.ensureIllustrations(context.Background(), "m", &writePlan{Title: "T"}, markdown)
+
+	if out != markdown || notes != nil {
+		t.Errorf("an illustrated article should come back unchanged, got %q %v", out, notes)
+	}
+	if len(llmStub.calls) != 0 {
+		t.Errorf("no model call should be made, got %d", len(llmStub.calls))
+	}
+}
+
+// A runner with no image generator must not ask, because it could not draw the
+// answer — the same reason the prompt does not offer illustrations either.
+func TestEnsureIllustrations_SilentWithoutAnIllustrator(t *testing.T) {
+	llmStub := &stubLLM{}
+	r := testRunnerWithLLM(llmStub, &fakeIllustrator{enabled: false})
+
+	markdown := "# T\n\n## S\n\nBody.\n"
+	out, _ := r.ensureIllustrations(context.Background(), "m", &writePlan{Title: "T"}, markdown)
+
+	if out != markdown || len(llmStub.calls) != 0 {
+		t.Errorf("a runner that cannot draw must not ask where to draw")
+	}
+	if r.illustrationRequirement() != "" {
+		t.Error("a runner that cannot draw must not require an illustration either")
+	}
+}
+
+// The prompt's rules are advice; these are the enforcement. A model that names
+// a heading the article does not have, repeats itself, or asks for more
+// pictures than the budget allows gets those placements dropped rather than
+// obeyed.
+func TestInsertIllustrations_EnforcesTheRulesThePromptStates(t *testing.T) {
+	markdown := "# T\n\n## One\n\na\n\n## Two\n\nb\n\n## Three\n\nc\n\n## Four\n\nd\n"
+	out, notes := insertIllustrations(markdown, []illustrationPlacement{
+		{AfterHeading: "One", Scene: "a workshop at dawn"},
+		{AfterHeading: "One", Scene: "a second picture in the same section"},
+		{AfterHeading: "Two", Scene: "A WORKSHOP AT DAWN"},
+		{AfterHeading: "Nowhere", Scene: "a heading that does not exist"},
+		{AfterHeading: "Two", Scene: ""},
+		{AfterHeading: "Two", Scene: "a lathe"},
+		{AfterHeading: "Three", Scene: "a milling machine"},
+		{AfterHeading: "Four", Scene: "one picture too many"},
+	})
+
+	if got := len(illustrationFence.FindAllString(out, -1)); got != maxInlineIllustrations {
+		t.Fatalf("want %d fences, got %d\n%s", maxInlineIllustrations, got, out)
+	}
+	joined := strings.Join(notes, "\n")
+	for _, want := range []string{
+		"dropped a second illustration under \"One\"",
+		"repeats an earlier scene",
+		"not a heading in the article",
+		"no description",
+		"beyond the limit of 3",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("want a note saying %q, got:\n%s", want, joined)
+		}
+	}
+}
+
+// The H1 is already covered by the cover image and the reference list is not a
+// place for a picture, so neither is offered to the model.
+func TestBodyHeadings_SkipsTheTitleAndTheReferences(t *testing.T) {
+	got := bodyHeadings("# Title\n\n## Real\n\n### Also real\n\n## References\n\n1. x\n")
+	want := []string{"Real", "Also real"}
+	if len(got) != len(want) {
+		t.Fatalf("want %v, got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("want %v, got %v", want, got)
+		}
+	}
+}
+
+// testRunnerWithLLM is testRunner for the phases that talk to a model.
+func testRunnerWithLLM(client llm.Client, images Illustrator) *Runner {
+	r := &Runner{llm: client, logger: zap.NewNop()}
+	return r.WithIllustrator(images)
 }

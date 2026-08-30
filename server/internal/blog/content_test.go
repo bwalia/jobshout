@@ -51,11 +51,12 @@ func (s *stubLLM) ProviderName() string { return "stub" }
 // Prompt fragments that identify each phase, so a test can script one phase
 // without knowing the wording of the others.
 const (
-	promptPlan   = "planning a technical article"
-	promptDraft  = "writing a technical article"
-	promptReview = "reviewing a draft technical article"
-	promptRevise = "revising a technical article"
-	promptExpand = "This article is too short"
+	promptPlan       = "planning a technical article"
+	promptDraft      = "writing a technical article"
+	promptReview     = "reviewing a draft technical article"
+	promptRevise     = "revising a technical article"
+	promptExpand     = "This article is too short"
+	promptIllustrate = "This article has no illustrations"
 )
 
 // writeScript builds the canned responses for a single clean article.
