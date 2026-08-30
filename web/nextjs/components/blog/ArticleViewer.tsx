@@ -178,9 +178,11 @@ export function ArticleViewer({ article }: { article: BlogArticle }) {
                     </code>
                   );
                 },
-                // Inline illustrations are stored at /api/v1/images/file/… —
+                // Inline figures are stored at /api/v1/images/file/… —
                 // a relative <img> hits this Next.js origin and 404s, which
                 // is why the prompt was showing as a broken image's alt text.
+                // object-contain keeps labels on flow/comparison figures
+                // visible; a fixed 3:2 crop used to cut them off.
                 img({ src, alt }) {
                   if (!src) return null;
                   const fromStore =
@@ -190,7 +192,7 @@ export function ArticleViewer({ article }: { article: BlogArticle }) {
                       <StoredImage
                         src={src}
                         alt={alt ?? ""}
-                        className="my-4 aspect-[3/2] w-full rounded-lg border border-border object-cover"
+                        className="my-4 h-auto w-full rounded-lg border border-border object-contain"
                       />
                     );
                   }

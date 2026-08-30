@@ -24,7 +24,18 @@ func TestVisualRules_OffersIllustrationsOnlyWhenItCanDraw(t *testing.T) {
 	if !strings.Contains(withImages, "DIAGRAMS:") {
 		t.Error("offering illustrations must not displace the diagram rules")
 	}
+
+	// A workstation-only illustrator can draw covers but cannot letter a
+	// comparison table. The writer must not be offered fences it cannot fulfil.
+	noLetters := testRunner(&noLetterIllustrator{fakeIllustrator{enabled: true}}).visualRules()
+	if strings.Contains(noLetters, "```illustration") {
+		t.Error("a path that cannot letter must not offer illustration fences")
+	}
 }
+
+type noLetterIllustrator struct{ fakeIllustrator }
+
+func (n *noLetterIllustrator) Letters() bool { return false }
 
 // The fence the prompt teaches has to be the fence illustrateBody matches, or
 // the feature is wired to nothing.
@@ -35,8 +46,8 @@ func TestIllustrationRules_TeachTheFenceThatIsActuallyParsed(t *testing.T) {
 	// appears there rather than as a tidied-up copy — the point of this test is
 	// that the two definitions cannot drift, and comparing against a rewritten
 	// version would defeat it.
-	const example = "  ```illustration\n" +
-		"  An agent handing a ranked shortlist of issuers to a trader at a desk\n" +
+	const example = "  ```illustration comparison\n" +
+		"  Polling vs webhooks: latency, operational cost, failure modes, and when each wins\n" +
 		"  ```"
 	if !strings.Contains(rules, example) {
 		t.Fatalf("the prompt's example fence changed shape:\n%s", rules)
@@ -46,8 +57,14 @@ func TestIllustrationRules_TeachTheFenceThatIsActuallyParsed(t *testing.T) {
 	if !illustrationFence.MatchString(example) {
 		t.Error("the fence the prompt teaches is not the fence illustrateBody matches")
 	}
-	if got := illustrationFence.FindStringSubmatch(example); got == nil ||
-		!strings.Contains(got[1], "An agent handing a ranked shortlist") {
+	got := illustrationFence.FindStringSubmatch(example)
+	if got == nil {
+		t.Fatal("the taught fence produced no submatch")
+	}
+	if got[1] != "comparison" {
+		t.Errorf("kind = %q, want comparison", got[1])
+	}
+	if !strings.Contains(got[2], "Polling vs webhooks") {
 		t.Errorf("the description was not captured from the taught fence: %#v", got)
 	}
 }

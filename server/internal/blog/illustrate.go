@@ -31,6 +31,10 @@ type IllustrationRequest struct {
 	// Steps is the number of denoising steps. Zero means the provider default.
 	Steps  int
 	Source string
+	// NoFallback skips the workstation (mflux) path. Labeled figures become
+	// unreadable lettering on z-image-turbo; an article without a picture is
+	// better than one with that picture.
+	NoFallback bool
 }
 
 // Illustration is what came back.
@@ -70,18 +74,12 @@ const (
 // long piece; the writer is asked for 1–2 and the insert pass fills that in.
 const maxInlineIllustrations = 3
 
-// illustrationFence matches an ```illustration block and captures its body.
+// illustrationFence matches ```illustration or ```illustration <kind>.
 //
-// The writing prompt offers this to the model as the way to ask for a picture,
-// deliberately mirroring the ```mermaid convention it already knows: a fenced
-// block whose body is a description rather than code.
-var illustrationFence = regexp.MustCompile("(?s)```illustration[ \t]*\r?\n(.*?)```")
-
-// coverPromptStyle is the visual house style pinned onto inline body
-// illustrations (not the dark cover template). Covers have to look like a set;
-// left to invent its own style, the same model produces a photograph for one
-// article and a cartoon for the next.
-const coverPromptStyle = "refined flat vector editorial illustration, crisp edges, clean geometric shapes, sharp contrast, teal and coral accents, high clarity"
+// Group 1 is the optional kind (flow, comparison, …). Group 2 is the body —
+// the facts the picture must show. The writing prompt teaches this shape so
+// a typed request survives a model that copies the example.
+var illustrationFence = regexp.MustCompile("(?s)```illustration(?:[ \t]+([A-Za-z][A-Za-z0-9_-]*))?[^\n]*\r?\n(.*?)```")
 
 // coverMaxAttempts bounds how many times a cover may be asked of the image
 // service. Three is enough to ride out a Gemini blip or a busy GPU without
@@ -189,11 +187,11 @@ func coverPrompt(title, topic string, metaphor, objects, accent string) string {
 // an image prompt.
 var citationMark = regexp.MustCompile(`\[\d+\]`)
 
-// ensureIllustrationFences makes the article's visuals one mermaid plus 1–2
-// explanatory pictures. A second flowchart is replaced by a scene taken from
-// that section's prose; if the writer drew none, fences are inserted at H2s.
+// ensureIllustrationFences adds 1–2 informational figures when the writer
+// omitted them and the section has enough facts to letter. Mermaid diagrams
+// are left alone: they already teach the path, and replacing one with a
+// raster image was how we deleted the only reliable figure in the article.
 func ensureIllustrationFences(markdown string, plan *writePlan) string {
-	markdown = preferIllustrationOverSecondDiagram(markdown, planTitle(plan))
 	want := 2
 	if want > maxInlineIllustrations {
 		want = maxInlineIllustrations
@@ -211,30 +209,6 @@ func planTitle(plan *writePlan) string {
 		return ""
 	}
 	return strings.TrimSpace(plan.Title)
-}
-
-// preferIllustrationOverSecondDiagram keeps the first mermaid and turns later
-// ones into a single illustration of that section. A second flowchart rarely
-// adds more than the first; a picture of the other idea does.
-func preferIllustrationOverSecondDiagram(markdown, title string) string {
-	matches := mermaidFence.FindAllStringIndex(markdown, -1)
-	if len(matches) < 2 {
-		return markdown
-	}
-	alreadyIllustrated := illustrationFence.MatchString(markdown)
-	second := matches[1]
-
-	var b strings.Builder
-	b.WriteString(markdown[:second[0]])
-	if !alreadyIllustrated {
-		heading, prose := sectionAround(markdown, second[0])
-		b.WriteString("```illustration\n")
-		b.WriteString(sectionScene(heading, prose, title))
-		b.WriteString("\n```")
-	}
-	rest := mermaidFence.ReplaceAllString(markdown[second[1]:], "")
-	b.WriteString(rest)
-	return collapseBlankRuns(b.String())
 }
 
 func keepFirstNIllustrations(markdown string, n int) string {
@@ -299,26 +273,33 @@ func insertOneIllustration(markdown string, plan *writePlan) string {
 			preferred = append(preferred, c)
 		}
 	}
-	pick := preferred
-	if len(pick) == 0 {
-		pick = fallback
-	}
-	if len(pick) == 0 {
-		if illustrationFence.MatchString(markdown) {
-			return markdown
+	try := append(append([]candidate{}, preferred...), fallback...)
+	for _, c := range try {
+		prose := firstParagraph(sectionTextFrom(lines, c.lineIdx))
+		kind, desc := figureForSection(plan, c.heading, prose, title)
+		_, _, planned := plannedFigure(plan, c.heading)
+		if !figureWorthInserting(kind, c.heading, prose, planned) {
+			continue
 		}
-		heading := ""
-		if len(headings) > 0 {
-			heading = headings[0]
-		}
-		scene := sectionScene(heading, firstParagraph(markdown), title)
-		return strings.TrimRight(markdown, "\n") + "\n\n```illustration\n" + scene + "\n```\n"
+		return insertFenceAfter(lines, lineAfterFirstParagraph(lines, c.lineIdx), kind, desc)
 	}
+	if illustrationFence.MatchString(markdown) {
+		return markdown
+	}
+	heading := ""
+	if len(headings) > 0 {
+		heading = headings[0]
+	}
+	prose := firstParagraph(markdown)
+	kind, desc := figureForSection(plan, heading, prose, title)
+	_, _, planned := plannedFigure(plan, heading)
+	if !figureWorthInserting(kind, heading, prose, planned) {
+		return markdown
+	}
+	return strings.TrimRight(markdown, "\n") + "\n\n" + formatIllustrationFence(kind, desc) + "\n"
+}
 
-	c := pick[0]
-	scene := sectionScene(c.heading, firstParagraph(sectionTextFrom(lines, c.lineIdx)), title)
-	insertAt := lineAfterFirstParagraph(lines, c.lineIdx)
-
+func insertFenceAfter(lines []string, insertAt int, kind illustrationKind, desc string) string {
 	var b strings.Builder
 	for i, line := range lines {
 		if i > 0 {
@@ -326,9 +307,8 @@ func insertOneIllustration(markdown string, plan *writePlan) string {
 		}
 		b.WriteString(line)
 		if i == insertAt {
-			b.WriteString("\n\n```illustration\n")
-			b.WriteString(scene)
-			b.WriteString("\n```")
+			b.WriteString("\n\n")
+			b.WriteString(formatIllustrationFence(kind, desc))
 		}
 	}
 	return b.String()
@@ -425,37 +405,6 @@ func lineAfterFirstParagraph(lines []string, headingIdx int) int {
 	return last
 }
 
-func sectionAround(markdown string, pos int) (heading, prose string) {
-	if pos < 0 {
-		pos = 0
-	}
-	if pos > len(markdown) {
-		pos = len(markdown)
-	}
-	heading = lastH2Before(markdown, pos)
-	before := markdown[:pos]
-	if i := strings.LastIndex(before, "\n## "); i >= 0 {
-		prose = firstParagraph(before[i:])
-	} else if strings.HasPrefix(strings.TrimSpace(before), "## ") {
-		prose = firstParagraph(before)
-	}
-	if prose == "" {
-		prose = firstParagraph(markdown[pos:])
-	}
-	return heading, prose
-}
-
-func lastH2Before(markdown string, pos int) string {
-	last := ""
-	for _, line := range strings.Split(markdown[:pos], "\n") {
-		trim := strings.TrimSpace(line)
-		if isH2(trim) {
-			last = strings.TrimSpace(strings.TrimPrefix(trim, "## "))
-		}
-	}
-	return last
-}
-
 func firstParagraph(s string) string {
 	var buf []string
 	inFence := false
@@ -497,37 +446,6 @@ func firstSentence(s string) string {
 		cut = cut[:j]
 	}
 	return strings.TrimSpace(cut)
-}
-
-// sectionScene builds an image prompt from the section's own argument, not a
-// stock photo of the heading ("a modern server room").
-func sectionScene(heading, prose, title string) string {
-	h := strings.TrimSpace(heading)
-	p := strings.Join(strings.Fields(strings.TrimSpace(citationMark.ReplaceAllString(prose, ""))), " ")
-	if p != "" {
-		p = firstSentence(p)
-	}
-	about := h
-	if about == "" {
-		about = strings.TrimSpace(title)
-	}
-	if about == "" {
-		about = "this section"
-	}
-	if p == "" {
-		return headingScene(about)
-	}
-	return "Editorial illustration that explains " + about + ": " + p +
-		" Show the people, systems or documents doing that work as one readable scene — not a generic office, server room or stock photo. No text, labels, logos or UI."
-}
-
-func headingScene(heading string) string {
-	h := strings.TrimSpace(heading)
-	if h == "" {
-		h = "the subject"
-	}
-	return "Editorial illustration of " + h +
-		", showing the people or systems doing that work as one readable scene. No text, labels, logos or UI."
 }
 
 // generateCover draws an article's cover image.
@@ -662,13 +580,15 @@ func (r *Runner) illustrateBody(ctx context.Context, orgID uuid.UUID, markdown s
 
 	for _, m := range matches {
 		start, end := m[0], m[1]
-		description := strings.TrimSpace(markdown[m[2]:m[3]])
+		kind, description := illustrationFromMatch(markdown, m)
 
 		out.WriteString(markdown[last:start])
 		last = end
 
-		if description == "" {
-			notes = append(notes, "dropped an illustration block with no description")
+		var ok bool
+		kind, description, ok = salvageIllustration(kind, description)
+		if !ok {
+			notes = append(notes, "dropped an illustration block with no facts to letter")
 			continue
 		}
 		if drawn >= maxInlineIllustrations {
@@ -677,15 +597,21 @@ func (r *Runner) illustrateBody(ctx context.Context, orgID uuid.UUID, markdown s
 			continue
 		}
 
+		width, height := inlineSize(kind)
 		img, err := r.images.Generate(ctx, IllustrationRequest{
-			OrgID:  orgID,
-			Prompt: description + ". Style: " + coverPromptStyle + ". Strictly no text, letters, logos or watermarks.",
-			Width:  inlineWidth,
-			Height: inlineHeight,
-			Source: "blog_inline",
+			OrgID:      orgID,
+			Prompt:     inlineImagePrompt(kind, description),
+			Width:      width,
+			Height:     height,
+			Source:     "blog_inline",
+			NoFallback: true,
 		})
-		if err != nil || img.URL == "" {
+		if err != nil || img == nil || img.URL == "" {
 			notes = append(notes, fmt.Sprintf("dropped an illustration that could not be drawn: %v", err))
+			continue
+		}
+		if !imageRendersLabels(img.Provider, img.Model) {
+			notes = append(notes, "dropped an illustration from a model that cannot letter labels")
 			continue
 		}
 
@@ -697,6 +623,21 @@ func (r *Runner) illustrateBody(ctx context.Context, orgID uuid.UUID, markdown s
 
 	out.WriteString(markdown[last:])
 	return out.String(), notes
+}
+
+// illustrationFromMatch reads kind (group 1, optional) and body (group 2)
+// out of a submatch-index slice. An unmatched kind group is -1, -1 — slicing
+// that would panic, which is why this is not done inline.
+func illustrationFromMatch(markdown string, m []int) (illustrationKind, string) {
+	kindRaw := ""
+	if len(m) >= 4 && m[2] >= 0 && m[3] >= 0 {
+		kindRaw = markdown[m[2]:m[3]]
+	}
+	body := ""
+	if len(m) >= 6 && m[4] >= 0 && m[5] >= 0 {
+		body = markdown[m[4]:m[5]]
+	}
+	return parseIllustration(kindRaw, body)
 }
 
 // escapeAlt makes a description safe to sit inside markdown alt-text brackets.

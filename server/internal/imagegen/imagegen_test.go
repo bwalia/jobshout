@@ -576,6 +576,26 @@ func TestRouter_CancelledContextDoesNotFallBack(t *testing.T) {
 	}
 }
 
+func TestRouter_NoFallbackSkipsWorkstation(t *testing.T) {
+	gemini := &stubClient{provider: ProviderGemini, err: fmt.Errorf("down")}
+	mflux := &stubClient{provider: ProviderMFlux}
+	r := NewTestRouter(ProviderGemini, map[string]Client{
+		ProviderGemini: gemini,
+		ProviderMFlux:  mflux,
+	})
+
+	_, err := r.Generate(context.Background(), ProviderGemini, GenerateRequest{
+		Prompt:     "a labeled comparison table",
+		NoFallback: true,
+	})
+	if err == nil {
+		t.Fatal("expected Gemini's error when fallback is forbidden")
+	}
+	if mflux.generateCalls != 0 {
+		t.Error("NoFallback must not draw a labeled figure on the workstation")
+	}
+}
+
 func TestRouter_GeminiClearsModelOnFallback(t *testing.T) {
 	gemini := &stubClient{provider: ProviderGemini, err: fmt.Errorf("down")}
 	mflux := &stubClient{provider: ProviderMFlux}

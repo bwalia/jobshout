@@ -146,6 +146,9 @@ func (r *Router) Generate(ctx context.Context, provider string, req GenerateRequ
 		if ctx.Err() != nil {
 			return nil, err
 		}
+		if req.NoFallback {
+			return nil, err
+		}
 		if fb := r.workstationFallback(); fb != nil {
 			if r.logger != nil {
 				r.logger.Warn("gemini image generation failed; falling back to workstation",

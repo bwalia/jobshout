@@ -61,6 +61,8 @@ type GenerateImageRequest struct {
 	Seed     int64
 	// Source records what asked for the image. Defaults to manual.
 	Source string
+	// NoFallback skips the workstation path after a hosted failure.
+	NoFallback bool
 }
 
 // GenerateImageResult is the produced image, plus where it went.
@@ -104,12 +106,13 @@ func (s *ImageService) Generate(ctx context.Context, req GenerateImageRequest) (
 	}
 
 	resp, err := s.router.Generate(ctx, req.Provider, imagegen.GenerateRequest{
-		Prompt: req.Prompt,
-		Model:  req.Model,
-		Width:  req.Width,
-		Height: req.Height,
-		Steps:  req.Steps,
-		Seed:   seed,
+		Prompt:     req.Prompt,
+		Model:      req.Model,
+		Width:      req.Width,
+		Height:     req.Height,
+		Steps:      req.Steps,
+		Seed:       seed,
+		NoFallback: req.NoFallback,
 	})
 	if err != nil {
 		return nil, err
@@ -178,6 +181,21 @@ func (s *ImageService) DefaultProvider() string {
 		return ""
 	}
 	return s.router.DefaultProvider()
+}
+
+// CanLetter reports whether a configured provider can render readable
+// on-image text. Workstation diffusion cannot; Gemini and OpenAI can.
+func (s *ImageService) CanLetter() bool {
+	if s == nil || s.router == nil {
+		return false
+	}
+	for _, p := range s.router.Providers() {
+		switch p {
+		case imagegen.ProviderGemini, imagegen.ProviderOpenAI:
+			return true
+		}
+	}
+	return false
 }
 
 // Recent lists the images this org has generated, newest first.
