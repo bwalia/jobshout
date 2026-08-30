@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/jobshout/server/internal/mail"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/research"
@@ -207,3 +209,139 @@ func TestEval_HeuristicPriceLinkNeedsResearch(t *testing.T) {
 		t.Fatal("price + link should need research")
 	}
 }
+
+func TestEval_BoardUpdateTouchesOnlyBoundLaunchTask(t *testing.T) {
+	rs := &fakeResearch{}
+	class := scriptClass{result: mail.ClassifyResult{
+		Intent: "question", NeedsResearch: false, SuggestedAction: "reply",
+		Reason: "price", TriageLabel: "sales", Urgency: "normal",
+	}}
+	gmail := &fakeGmail{
+		email:    "org@example.com",
+		tokens:   mail.TokenSet{AccessToken: "a", RefreshToken: "r", Expiry: time.Now().Add(time.Hour)},
+		messages: []mail.InboxMessage{dummyPriceEmail()},
+	}
+	svc, repo, orgID := setupMail(t, gmail, class, rs)
+	connectOrg(t, svc, repo, orgID)
+
+	bound := uuid.New()
+	other := uuid.New()
+	board := &stubMailTasks{tasks: map[uuid.UUID]*model.Task{
+		bound: {ID: bound, Status: "in_progress", Metadata: map[string]any{model.TaskMetaLaunchKind: model.BuiltinMail}},
+		other: {ID: other, Status: "in_progress", Metadata: map[string]any{model.TaskMetaLaunchKind: model.BuiltinMail}},
+	}}
+	svc.BindTasks(board)
+	svc.BindLaunchTask(orgID, bound)
+
+	if err := svc.SyncNow(context.Background(), orgID); err != nil {
+		t.Fatal(err)
+	}
+	if board.tasks[bound].Status != "review" {
+		t.Fatalf("bound task status %q, want review", board.tasks[bound].Status)
+	}
+	if board.tasks[other].Status != "in_progress" {
+		t.Fatalf("unrelated mail task was mutated: %q", board.tasks[other].Status)
+	}
+	if board.tasks[bound].Description == nil || !strings.Contains(*board.tasks[bound].Description, "Draft ready") {
+		t.Fatalf("bound task description = %v", board.tasks[bound].Description)
+	}
+}
+
+func TestEval_BoundEmptySyncMarksOnlyThatTaskDone(t *testing.T) {
+	gmail := &fakeGmail{
+		email:    "org@example.com",
+		tokens:   mail.TokenSet{AccessToken: "a", RefreshToken: "r", Expiry: time.Now().Add(time.Hour)},
+		messages: []mail.InboxMessage{mail.InboxMessage{
+			GmailThreadID: "th-news-eval-bound",
+			FromEmail:     "news@vendor.example",
+			Subject:       "This week's digest",
+			Body:          "View in browser. Click unsubscribe if you no longer want this newsletter.",
+		}},
+	}
+	svc, repo, orgID := setupMail(t, gmail, nil, &fakeResearch{})
+	connectOrg(t, svc, repo, orgID)
+	bound := uuid.New()
+	other := uuid.New()
+	board := &stubMailTasks{tasks: map[uuid.UUID]*model.Task{
+		bound: {ID: bound, Status: "in_progress", Metadata: map[string]any{model.TaskMetaLaunchKind: model.BuiltinMail}},
+		other: {ID: other, Status: "in_progress", Metadata: map[string]any{model.TaskMetaLaunchKind: model.BuiltinMail}},
+	}}
+	svc.BindTasks(board)
+	svc.BindLaunchTask(orgID, bound)
+	if err := svc.SyncNow(context.Background(), orgID); err != nil {
+		t.Fatal(err)
+	}
+	if board.tasks[bound].Status != "done" {
+		t.Fatalf("bound empty sync should finish that card, got %q", board.tasks[bound].Status)
+	}
+	if board.tasks[other].Status != "in_progress" {
+		t.Fatalf("sibling mail card was closed: %q", board.tasks[other].Status)
+	}
+}
+
+func TestEval_UnboundPeriodicSyncDoesNotCloseMailTasks(t *testing.T) {
+	gmail := &fakeGmail{
+		email:    "org@example.com",
+		tokens:   mail.TokenSet{AccessToken: "a", RefreshToken: "r", Expiry: time.Now().Add(time.Hour)},
+		messages: []mail.InboxMessage{mail.InboxMessage{
+			GmailThreadID: "th-news-eval-2",
+			FromEmail:     "news@vendor.example",
+			Subject:       "This week's digest",
+			Body:          "View in browser. Click unsubscribe if you no longer want this newsletter.",
+		}},
+	}
+	svc, repo, orgID := setupMail(t, gmail, nil, &fakeResearch{})
+	connectOrg(t, svc, repo, orgID)
+	orphan := uuid.New()
+	board := &stubMailTasks{tasks: map[uuid.UUID]*model.Task{
+		orphan: {ID: orphan, Status: "in_progress", Metadata: map[string]any{model.TaskMetaLaunchKind: model.BuiltinMail}},
+	}}
+	svc.BindTasks(board)
+	if err := svc.SyncNow(context.Background(), orgID); err != nil {
+		t.Fatal(err)
+	}
+	if board.tasks[orphan].Status != "in_progress" {
+		t.Fatalf("periodic/unbound sync closed a mail task: %q", board.tasks[orphan].Status)
+	}
+}
+
+type stubMailTasks struct {
+	tasks map[uuid.UUID]*model.Task
+}
+
+func (s *stubMailTasks) Create(context.Context, uuid.UUID, model.CreateTaskRequest) (*model.Task, error) {
+	return nil, nil
+}
+func (s *stubMailTasks) GetByID(_ context.Context, id uuid.UUID) (*model.Task, error) {
+	return s.tasks[id], nil
+}
+func (s *stubMailTasks) List(context.Context, uuid.UUID, model.PaginationParams) (*model.PaginatedResponse[model.Task], error) {
+	return nil, nil
+}
+func (s *stubMailTasks) ListByOrg(context.Context, uuid.UUID, model.PaginationParams) (*model.PaginatedResponse[model.Task], error) {
+	return nil, nil
+}
+func (s *stubMailTasks) ListComments(context.Context, uuid.UUID) ([]model.TaskComment, error) {
+	return nil, nil
+}
+func (s *stubMailTasks) AddComment(context.Context, uuid.UUID, uuid.UUID, string) (*model.TaskComment, error) {
+	return nil, nil
+}
+func (s *stubMailTasks) Update(_ context.Context, id uuid.UUID, req model.UpdateTaskRequest) (*model.Task, error) {
+	t := s.tasks[id]
+	if t == nil {
+		return nil, nil
+	}
+	if req.Description != nil {
+		t.Description = req.Description
+	}
+	return t, nil
+}
+func (s *stubMailTasks) Delete(context.Context, uuid.UUID) error { return nil }
+func (s *stubMailTasks) Transition(_ context.Context, id uuid.UUID, status string) error {
+	if t := s.tasks[id]; t != nil {
+		t.Status = status
+	}
+	return nil
+}
+func (s *stubMailTasks) Reorder(context.Context, uuid.UUID, string, int) error { return nil }

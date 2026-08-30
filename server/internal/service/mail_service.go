@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -43,9 +44,11 @@ type MailService interface {
 	SyncNow(ctx context.Context, orgID uuid.UUID) error
 	EnqueueSync(ctx context.Context, orgID uuid.UUID) error
 	ProcessDueSyncs(ctx context.Context, limit int) error
-	// BindTasks lets a finished draft update the Task Manager card that
-	// launched this sync. Optional — tests and Gmail-only paths leave it nil.
+	// BindTasks lets a launched sync update its Task Manager card. Optional.
 	BindTasks(tasks TaskService)
+	// BindLaunchTask records which board card this org's next sync should update.
+	// Periodic reconciler syncs with no binding leave the board alone.
+	BindLaunchTask(orgID, taskID uuid.UUID)
 
 	ListThreads(ctx context.Context, orgID uuid.UUID, pagination model.PaginationParams) (*model.PaginatedResponse[model.MailThread], error)
 	GetThread(ctx context.Context, orgID, threadID uuid.UUID) (*model.MailThreadDetail, error)
@@ -69,6 +72,8 @@ type mailService struct {
 	drafter    mail.Drafter
 	research   ResearchService
 	tasks      TaskService
+	launchMu   sync.Mutex
+	launchTask map[uuid.UUID]uuid.UUID // orgID → board task for the next sync
 	cfg        mail.Config
 	key        []byte
 	logger     *zap.Logger
@@ -78,6 +83,35 @@ func (s *mailService) BindTasks(tasks TaskService) {
 	if s != nil {
 		s.tasks = tasks
 	}
+}
+
+func (s *mailService) BindLaunchTask(orgID, taskID uuid.UUID) {
+	if s == nil {
+		return
+	}
+	s.launchMu.Lock()
+	defer s.launchMu.Unlock()
+	if s.launchTask == nil {
+		s.launchTask = map[uuid.UUID]uuid.UUID{}
+	}
+	if taskID == uuid.Nil {
+		delete(s.launchTask, orgID)
+		return
+	}
+	s.launchTask[orgID] = taskID
+}
+
+func (s *mailService) peekLaunchTask(orgID uuid.UUID) uuid.UUID {
+	if s == nil {
+		return uuid.Nil
+	}
+	s.launchMu.Lock()
+	defer s.launchMu.Unlock()
+	return s.launchTask[orgID]
+}
+
+func (s *mailService) clearLaunchTask(orgID uuid.UUID) {
+	s.BindLaunchTask(orgID, uuid.Nil)
 }
 
 // NewMailService wires the Mail Agent. gmail/classifier/drafter may be fakes in tests.
@@ -425,9 +459,10 @@ func (s *mailService) syncConnection(ctx context.Context, c *model.MailConnectio
 	if err != nil {
 		return mail.RedactErr(err)
 	}
+	launchTask := s.peekLaunchTask(c.OrgID)
 	drafted := 0
 	for _, msg := range msgs {
-		ok, err := s.ingestAndProcess(ctx, c, agent, msg)
+		ok, err := s.ingestAndProcess(ctx, c, agent, msg, launchTask)
 		if err != nil {
 			s.logger.Warn("mail: thread processing failed",
 				zap.String("gmail_thread_id", msg.GmailThreadID),
@@ -438,15 +473,18 @@ func (s *mailService) syncConnection(ctx context.Context, c *model.MailConnectio
 			drafted++
 		}
 	}
-	if drafted == 0 {
-		s.notifyMailBoard(ctx, c.OrgID,
+	if launchTask != uuid.Nil && drafted == 0 {
+		s.notifyMailTask(ctx, launchTask,
 			"Mailbox sync finished. No new drafts. Nothing is sent until you Approve.",
 			"done")
+	}
+	if launchTask != uuid.Nil {
+		s.clearLaunchTask(c.OrgID)
 	}
 	return nil
 }
 
-func (s *mailService) ingestAndProcess(ctx context.Context, c *model.MailConnection, agent *model.Agent, msg mail.InboxMessage) (bool, error) {
+func (s *mailService) ingestAndProcess(ctx context.Context, c *model.MailConnection, agent *model.Agent, msg mail.InboxMessage, launchTask uuid.UUID) (bool, error) {
 	existing, err := s.repo.GetThreadByGmailID(ctx, c.OrgID, msg.GmailThreadID)
 	if err != nil {
 		return false, err
@@ -483,13 +521,13 @@ func (s *mailService) ingestAndProcess(ctx context.Context, c *model.MailConnect
 	if err := s.repo.UpsertThread(ctx, th); err != nil {
 		return false, err
 	}
-	if err := s.processThread(ctx, th, msg, c); err != nil {
+	if err := s.processThread(ctx, th, msg, c, launchTask); err != nil {
 		return false, err
 	}
 	return th.Status == model.MailThreadDraftReady, nil
 }
 
-func (s *mailService) processThread(ctx context.Context, th *model.MailThread, msg mail.InboxMessage, c *model.MailConnection) error {
+func (s *mailService) processThread(ctx context.Context, th *model.MailThread, msg mail.InboxMessage, c *model.MailConnection, launchTask uuid.UUID) error {
 	th.Status = model.MailThreadClassifying
 	_ = s.repo.UpdateThread(ctx, th)
 
@@ -572,34 +610,27 @@ func (s *mailService) processThread(ctx context.Context, th *model.MailThread, m
 	if err := s.repo.UpdateThread(ctx, th); err != nil {
 		return err
 	}
-	s.notifyMailBoard(ctx, th.OrgID, fmt.Sprintf(
+	s.notifyMailTask(ctx, launchTask, fmt.Sprintf(
 		"Draft ready: %s\n\nOpen /panel/task-manager?agent=mail&thread=%s\nNothing is sent until you Approve.",
 		draft.Subject, th.ID), "review")
 	return nil
 }
 
-func (s *mailService) notifyMailBoard(ctx context.Context, orgID uuid.UUID, note, status string) {
-	if s == nil || s.tasks == nil {
+func (s *mailService) notifyMailTask(ctx context.Context, taskID uuid.UUID, note, status string) {
+	if s == nil || s.tasks == nil || taskID == uuid.Nil {
 		return
 	}
-	listed, err := s.tasks.ListByOrg(ctx, orgID, model.PaginationParams{Page: 1, PerPage: 50})
-	if err != nil || listed == nil {
+	task, err := s.tasks.GetByID(ctx, taskID)
+	if err != nil || task == nil {
 		return
 	}
-	for i := range listed.Data {
-		task := listed.Data[i]
-		kind, _ := task.Metadata[model.TaskMetaLaunchKind].(string)
-		if kind != model.BuiltinMail || task.Status != "in_progress" {
-			continue
-		}
-		n := note
-		if prior := task.Description; prior != nil && strings.TrimSpace(*prior) != "" {
-			n = strings.TrimSpace(*prior) + "\n\n" + note
-		}
-		_, _ = s.tasks.Update(ctx, task.ID, model.UpdateTaskRequest{Description: &n})
-		if status != "" {
-			_ = s.tasks.Transition(ctx, task.ID, status)
-		}
+	n := note
+	if task.Description != nil && strings.TrimSpace(*task.Description) != "" {
+		n = strings.TrimSpace(*task.Description) + "\n\n" + note
+	}
+	_, _ = s.tasks.Update(ctx, taskID, model.UpdateTaskRequest{Description: &n})
+	if status != "" {
+		_ = s.tasks.Transition(ctx, taskID, status)
 	}
 }
 

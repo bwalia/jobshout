@@ -209,7 +209,7 @@ func (s *Service) Launch(ctx context.Context, req Request) (*Result, error) {
 		}
 		out.Message = "Article run started"
 	case model.BuiltinMail:
-		syncQueued, merr := s.launchMail(ctx, req)
+		syncQueued, merr := s.launchMail(ctx, req, task.ID)
 		if merr != nil {
 			return nil, merr
 		}
@@ -368,7 +368,7 @@ func (s *Service) Launch(ctx context.Context, req Request) (*Result, error) {
 	return out, nil
 }
 
-func (s *Service) launchMail(ctx context.Context, req Request) (bool, error) {
+func (s *Service) launchMail(ctx context.Context, req Request, taskID uuid.UUID) (bool, error) {
 	if s.Mail == nil {
 		return false, fmt.Errorf("mail agent is not configured")
 	}
@@ -381,7 +381,9 @@ func (s *Service) launchMail(ctx context.Context, req Request) (bool, error) {
 	if !s.Mail.Available(ctx, req.OrgID) {
 		return false, nil
 	}
+	s.Mail.BindLaunchTask(req.OrgID, taskID)
 	if err := s.Mail.EnqueueSync(ctx, req.OrgID); err != nil {
+		s.Mail.BindLaunchTask(req.OrgID, uuid.Nil)
 		return false, err
 	}
 	return true, nil

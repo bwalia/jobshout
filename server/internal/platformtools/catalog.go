@@ -32,6 +32,10 @@ var AlwaysLoad = []string{
 	"image_generate",
 	"review_pull_request",
 	"review_run_get",
+	"research_run",
+	"article_generate",
+	"pentest_start",
+	"mail_sync",
 	"mail_list_drafts",
 }
 

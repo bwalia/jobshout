@@ -370,19 +370,10 @@ func TestClarifyFromMatch_SlotIsFieldName(t *testing.T) {
 	}
 }
 
-func TestAlwaysLoadPrefersAgentExecuteOverSpecialists(t *testing.T) {
-	if !inAlwaysLoad("agent_execute") {
-		t.Fatal("agent_execute must be always-load")
-	}
-	if !inAlwaysLoad("image_generate") {
-		t.Fatal("image_generate stays a capability")
-	}
-	if !inAlwaysLoad("mail_list_drafts") {
-		t.Fatal("listing drafts is a read tool")
-	}
-	for _, n := range []string{"research_run", "article_generate", "pentest_start", "mail_sync"} {
-		if inAlwaysLoad(n) {
-			t.Errorf("%s should be catalog-only so chat interviews via agent_execute", n)
+func TestAlwaysLoadIncludesSpecialists(t *testing.T) {
+	for _, n := range []string{"research_run", "article_generate", "pentest_start", "mail_sync", "mail_list_drafts"} {
+		if !inAlwaysLoad(n) {
+			t.Errorf("%s must be always-load", n)
 		}
 	}
 }
