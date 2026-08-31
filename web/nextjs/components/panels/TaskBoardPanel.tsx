@@ -163,14 +163,21 @@ export function TaskBoardPanel() {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto scrollbar-thin p-4">
+      <div
+        className={cn(
+          "min-h-0 flex-1",
+          view === "tasks" && projectFilter
+            ? "overflow-hidden"
+            : "overflow-auto scrollbar-thin p-4"
+        )}
+      >
         {view === "agents" ? (
           <AgentBoardView hideHeader />
         ) : projectFilter ? (
-          // Single project: full drag-and-drop board with inline task creation.
-          <div className="h-full min-h-[420px]">
-            <KanbanBoard projectId={projectFilter} />
-          </div>
+          <KanbanBoard
+            projectId={projectFilter}
+            projectName={projectNames.get(projectFilter)}
+          />
         ) : isLoading ? (
           <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
             Loading tasks…

@@ -1,27 +1,17 @@
 "use client";
 
 import { useState } from "react";
+import { Plus } from "lucide-react";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { TaskCard } from "@/components/kanban/TaskCard";
 import { CreateTaskDialog } from "@/components/kanban/CreateTaskDialog";
 import { TaskDetailModal } from "@/components/kanban/TaskDetailModal";
+import { cn } from "@/lib/utils/cn";
 import type { Task } from "@/lib/types/project";
 import type { TaskStatus } from "@/lib/types/common";
 
-// ---------------------------------------------------------------------------
-// Column colour theming
-// ---------------------------------------------------------------------------
-
-const COLUMN_ACCENT_COLOURS: Record<TaskStatus, string> = {
-  backlog: "border-zinc-500/40 bg-zinc-500/10",
-  todo: "border-sky-500/40 bg-sky-500/10",
-  in_progress: "border-blue-500/40 bg-blue-500/10",
-  review: "border-violet-500/40 bg-violet-500/10",
-  done: "border-emerald-500/40 bg-emerald-500/10",
-};
-
-const COLUMN_DOT_COLOURS: Record<TaskStatus, string> = {
+const COLUMN_DOT: Record<TaskStatus, string> = {
   backlog: "bg-zinc-400",
   todo: "bg-sky-500",
   in_progress: "bg-blue-500",
@@ -37,102 +27,130 @@ const COLUMN_LABELS: Record<TaskStatus, string> = {
   done: "Done",
 };
 
-// ---------------------------------------------------------------------------
-// KanbanColumn
-// ---------------------------------------------------------------------------
-
 interface KanbanColumnProps {
   status: TaskStatus;
   tasks: Task[];
   projectId: string;
+  assigneeNames?: Map<string, string>;
+  isDragging?: boolean;
 }
 
-/**
- * A single Kanban column.
- *
- * Features:
- * - Droppable area powered by @dnd-kit/core's `useDroppable`
- * - Sortable task list via SortableContext
- * - Inline "Add task" button that opens CreateTaskDialog
- * - Task card click opens TaskDetailModal
- */
-export function KanbanColumn({ status, tasks, projectId }: KanbanColumnProps) {
+export function KanbanColumn({
+  status,
+  tasks,
+  projectId,
+  assigneeNames,
+  isDragging,
+}: KanbanColumnProps) {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
-
-  // Make this column a valid drop target for dragged cards
   const { setNodeRef, isOver } = useDroppable({ id: status });
-
   const taskIds = tasks.map((t) => t.id);
-  const accentClass = COLUMN_ACCENT_COLOURS[status];
-  const dotClass = COLUMN_DOT_COLOURS[status];
   const label = COLUMN_LABELS[status];
+
+  function openCreate() {
+    setShowCreateDialog(true);
+  }
 
   return (
     <>
-      <div className="flex w-72 shrink-0 flex-col rounded-xl border border-border bg-background">
-        {/* Column header */}
-        <div
-          className={`flex items-center justify-between rounded-t-xl border-b px-4 py-3 ${accentClass}`}
-        >
-          <div className="flex items-center gap-2">
-            <span className={`h-2.5 w-2.5 rounded-full ${dotClass}`} />
-            <span className="text-sm font-semibold">{label}</span>
+      <div
+        className={cn(
+          "flex max-h-full w-[85vw] max-w-[22rem] shrink-0 snap-center flex-col rounded-lg bg-muted transition-all duration-200",
+          "md:w-72 md:min-w-72 md:max-w-none",
+          isOver && "bg-primary/10 shadow-lg ring-2 ring-primary",
+          isDragging && !isOver && "ring-1 ring-primary/20"
+        )}
+      >
+        <div className="flex items-center justify-between rounded-t-lg border-b border-border/70 bg-muted/80 px-3 py-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className={cn("h-3 w-3 shrink-0 rounded-full", COLUMN_DOT[status])} />
+            <h3 className="truncate text-sm font-semibold text-foreground">{label}</h3>
+            <span
+              className={cn(
+                "shrink-0 rounded-full px-2 py-0.5 text-xs font-medium",
+                "bg-background/80 text-muted-foreground"
+              )}
+            >
+              {tasks.length}
+            </span>
+            {status === "done" && (
+              <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400">
+                Done
+              </span>
+            )}
           </div>
-          {/* Task count badge */}
-          <span className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-muted px-1.5 text-xs font-medium text-muted-foreground">
-            {tasks.length}
-          </span>
+          <button
+            type="button"
+            onClick={openCreate}
+            className="rounded p-1 text-muted-foreground hover:bg-background/80 hover:text-foreground"
+            title="Add task"
+            aria-label="Add task"
+          >
+            <Plus className="h-4 w-4" />
+          </button>
         </div>
 
-        {/* Droppable + sortable task list */}
         <div
           ref={setNodeRef}
-          className={`flex min-h-[4rem] flex-1 flex-col gap-2 overflow-y-auto p-3 transition-colors ${
-            isOver ? "bg-accent/40" : ""
-          }`}
+          className={cn(
+            "min-h-[120px] flex-1 space-y-2 overflow-y-auto p-2 transition-colors",
+            isOver && "bg-primary/5"
+          )}
         >
           <SortableContext items={taskIds} strategy={verticalListSortingStrategy}>
             {tasks.map((task) => (
               <TaskCard
                 key={task.id}
                 task={task}
+                assigneeName={
+                  task.assigned_agent_id
+                    ? assigneeNames?.get(task.assigned_agent_id)
+                    : undefined
+                }
                 onOpenDetail={setSelectedTask}
               />
             ))}
           </SortableContext>
 
-          {tasks.length === 0 && !isOver && (
-            <p className="py-4 text-center text-xs text-muted-foreground">
-              No tasks
-            </p>
+          {tasks.length === 0 && (
+            <div
+              className={cn(
+                "rounded-lg border-2 border-dashed py-8 text-center text-sm transition-all",
+                isOver
+                  ? "scale-[1.02] border-primary bg-primary/10 font-medium text-primary"
+                  : isDragging
+                    ? "border-primary/30 bg-primary/5 text-primary/70"
+                    : "border-border text-muted-foreground"
+              )}
+            >
+              {isOver
+                ? "Drop task here"
+                : isDragging
+                  ? "Drag here to move"
+                  : "No tasks yet"}
+            </div>
+          )}
+
+          {tasks.length > 0 && isOver && (
+            <div className="my-1 h-1 animate-pulse rounded-full bg-primary" />
           )}
         </div>
 
-        {/* Add task button */}
-        <div className="border-t border-border p-3">
-          <button
-            type="button"
-            onClick={() => setShowCreateDialog(true)}
-            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
-            <svg
-              className="h-4 w-4"
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            Add task
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={openCreate}
+          disabled={isDragging}
+          className={cn(
+            "flex items-center gap-2 rounded-b-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground",
+            isDragging && "pointer-events-none opacity-50"
+          )}
+        >
+          <Plus className="h-4 w-4" />
+          Add a task
+        </button>
       </div>
 
-      {/* Create task dialog — rendered in a portal-like pattern via fixed positioning */}
       {showCreateDialog && (
         <CreateTaskDialog
           projectId={projectId}
@@ -141,7 +159,6 @@ export function KanbanColumn({ status, tasks, projectId }: KanbanColumnProps) {
         />
       )}
 
-      {/* Task detail modal */}
       {selectedTask && (
         <TaskDetailModal
           task={selectedTask}

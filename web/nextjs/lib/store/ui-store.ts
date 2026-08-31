@@ -5,6 +5,11 @@ interface UiState {
   sidebarCollapsed: boolean;
   mobileSidebarOpen: boolean;
   commandPaletteOpen: boolean;
+  /**
+   * When true, workspace tabs (Projects, Task Board, …) stay hidden even
+   * though you are on Dashboard. A second click on Dashboard toggles this.
+   */
+  workspaceNavCollapsed: boolean;
   /** Task Board detail drawer. */
   openTaskId: string | null;
   /** Local chat title overrides (no rename API yet). */
@@ -15,6 +20,7 @@ interface UiState {
   setMobileSidebarOpen: (v: boolean) => void;
   setCommandPaletteOpen: (v: boolean) => void;
   toggleCommandPalette: () => void;
+  setWorkspaceNavCollapsed: (v: boolean) => void;
   setOpenTaskId: (id: string | null) => void;
   setChatTitle: (sessionId: string, title: string) => void;
   clearChatTitle: (sessionId: string) => void;
@@ -26,6 +32,7 @@ export const useUiStore = create<UiState>()(
       sidebarCollapsed: false,
       mobileSidebarOpen: false,
       commandPaletteOpen: false,
+      workspaceNavCollapsed: false,
       openTaskId: null,
       chatTitleOverrides: {},
 
@@ -36,6 +43,8 @@ export const useUiStore = create<UiState>()(
       setCommandPaletteOpen: (commandPaletteOpen) => set({ commandPaletteOpen }),
       toggleCommandPalette: () =>
         set((s) => ({ commandPaletteOpen: !s.commandPaletteOpen })),
+      setWorkspaceNavCollapsed: (workspaceNavCollapsed) =>
+        set({ workspaceNavCollapsed }),
       setOpenTaskId: (openTaskId) => set({ openTaskId }),
       setChatTitle: (sessionId, title) =>
         set((s) => ({
@@ -52,6 +61,7 @@ export const useUiStore = create<UiState>()(
       name: "jobshout-ui",
       partialize: (s) => ({
         sidebarCollapsed: s.sidebarCollapsed,
+        workspaceNavCollapsed: s.workspaceNavCollapsed,
         chatTitleOverrides: s.chatTitleOverrides,
       }),
     }
