@@ -30,6 +30,16 @@ const PROVIDER_PRESETS: Record<string, { base_url: string; models: string[] }> =
   },
 };
 
+/**
+ * Defence in depth: the server masks stored keys on every read now, but this
+ * page must never print a full secret even if it receives one (older cached
+ * responses, future regressions).
+ */
+function maskedKey(key: string): string {
+  if (key.includes("****")) return key;
+  return key.length > 4 ? `••••${key.slice(-4)}` : "••••";
+}
+
 export default function LLMProvidersPage() {
   const { data: builtinProviders } = useBuiltinProviders();
   const { data: providers, isLoading } = useLLMProviders();
@@ -269,7 +279,9 @@ export default function LLMProvidersPage() {
                       {p.provider_type} &middot; {p.default_model} &middot; {p.base_url}
                     </p>
                     {p.api_key && (
-                      <p className="text-xs text-muted-foreground">Key: {p.api_key}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Key: {maskedKey(p.api_key)}
+                      </p>
                     )}
                   </div>
                 </div>
