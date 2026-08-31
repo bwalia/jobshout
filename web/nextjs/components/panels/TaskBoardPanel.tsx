@@ -7,17 +7,18 @@ import { useProjects } from "@/lib/hooks/useProjects";
 import { useTasks } from "@/lib/hooks/useTasks";
 import { TaskDetailModal } from "@/components/kanban/TaskDetailModal";
 import { KanbanBoard } from "@/components/kanban/KanbanBoard";
-import AgentBoardPage from "@/app/(app)/agent-board/page";
+import { AgentBoardView } from "@/app/(app)/agent-board/page";
 import type { Task } from "@/lib/types/project";
 import type { TaskStatus } from "@/lib/types/common";
 import { cn } from "@/lib/utils/cn";
+import { STATUS_DOT } from "@/lib/status-colors";
 
 const COLUMNS: { status: TaskStatus; label: string; dot: string }[] = [
-  { status: "backlog", label: "Backlog", dot: "bg-status-todo" },
-  { status: "todo", label: "To Do", dot: "bg-status-idle" },
-  { status: "in_progress", label: "In Progress", dot: "bg-status-progress" },
-  { status: "review", label: "Review", dot: "bg-status-review" },
-  { status: "done", label: "Done", dot: "bg-status-done" },
+  { status: "backlog", label: "Backlog", dot: STATUS_DOT.backlog },
+  { status: "todo", label: "To Do", dot: STATUS_DOT.todo },
+  { status: "in_progress", label: "In Progress", dot: STATUS_DOT.in_progress },
+  { status: "review", label: "Review", dot: STATUS_DOT.review },
+  { status: "done", label: "Done", dot: STATUS_DOT.done },
 ];
 
 type View = "tasks" | "agents";
@@ -109,7 +110,7 @@ export function TaskBoardPanel() {
   }
 
   return (
-    <div className="flex h-[calc(100dvh-3rem)] flex-col lg:h-screen">
+    <div className="flex h-full min-h-0 flex-col">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-6 py-4">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Task Board</h1>
@@ -164,7 +165,7 @@ export function TaskBoardPanel() {
 
       <div className="min-h-0 flex-1 overflow-auto scrollbar-thin p-4">
         {view === "agents" ? (
-          <AgentBoardPage />
+          <AgentBoardView hideHeader />
         ) : projectFilter ? (
           // Single project: full drag-and-drop board with inline task creation.
           <div className="h-full min-h-[420px]">

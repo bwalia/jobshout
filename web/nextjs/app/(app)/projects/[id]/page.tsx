@@ -24,7 +24,7 @@ export default function ProjectDetailPage() {
   });
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col gap-4">
+    <div className="flex h-full min-h-0 flex-col gap-4">
       {/* Breadcrumb + page header */}
       <div className="flex items-center justify-between">
         <div className="space-y-0.5">

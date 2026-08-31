@@ -1,19 +1,19 @@
 "use client";
 
 import type { MarketplaceAgent } from "@/lib/api/marketplace";
+import { THEME_BADGE } from "@/lib/status-colors";
 
 interface MarketplaceCardProps {
   agent: MarketplaceAgent;
   onImport: (agentId: string) => void;
 }
 
-// Maps category names to Tailwind background/text colour pairs for the badge
 const CATEGORY_COLORS: Record<string, string> = {
-  Engineering: "bg-blue-100 text-blue-700",
-  Design: "bg-purple-100 text-purple-700",
-  QA: "bg-green-100 text-green-700",
-  Management: "bg-orange-100 text-orange-700",
-  DevOps: "bg-red-100 text-red-700",
+  Engineering: THEME_BADGE.info,
+  Design: THEME_BADGE.purple,
+  QA: THEME_BADGE.success,
+  Management: THEME_BADGE.orange,
+  DevOps: THEME_BADGE.danger,
 };
 
 function formatDownloadCount(count: number): string {

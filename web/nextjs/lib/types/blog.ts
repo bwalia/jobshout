@@ -3,7 +3,12 @@
  * Field names are the wire format (snake_case); Go pointers become `T | null`.
  */
 
-export type BlogRunStatus = "pending" | "running" | "completed" | "failed";
+export type BlogRunStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
 
 /** Step keys, in the order the pipeline moves through them. */
 export type BlogStepKey =

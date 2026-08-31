@@ -4,6 +4,7 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { Task } from "@/lib/types/project";
 import type { Priority } from "@/lib/types/common";
+import { formatDateOnly, isDueOverdue } from "@/lib/dates";
 
 // ---------------------------------------------------------------------------
 // Priority colour helpers
@@ -28,20 +29,11 @@ const PRIORITY_LABEL_COLOURS: Record<Priority, string> = {
 // ---------------------------------------------------------------------------
 
 function formatDueDate(dateString: string): string {
-  const date = new Date(dateString);
-  const now = new Date();
-  const isOverdue = date < now;
-
-  const formatted = date.toLocaleDateString("en-GB", {
+  const formatted = formatDateOnly(dateString, {
     day: "2-digit",
     month: "short",
   });
-
-  return isOverdue ? `${formatted} (overdue)` : formatted;
-}
-
-function isDueDateOverdue(dateString: string): boolean {
-  return new Date(dateString) < new Date();
+  return isDueOverdue(dateString) ? `${formatted} (overdue)` : formatted;
 }
 
 // ---------------------------------------------------------------------------
@@ -85,7 +77,7 @@ export function TaskCard({ task, onOpenDetail }: TaskCardProps) {
 
   const priorityDot = PRIORITY_DOT_COLOURS[task.priority];
   const priorityLabel = PRIORITY_LABEL_COLOURS[task.priority];
-  const overdue = task.due_date ? isDueDateOverdue(task.due_date) : false;
+  const overdue = task.due_date ? isDueOverdue(task.due_date) : false;
 
   return (
     <div

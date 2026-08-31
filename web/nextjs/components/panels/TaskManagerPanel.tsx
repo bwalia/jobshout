@@ -15,6 +15,7 @@ import {
   BookOpen,
 } from "lucide-react";
 import Link from "next/link";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAgents } from "@/lib/hooks/useAgents";
 import { useProjects } from "@/lib/hooks/useProjects";
 import {
@@ -22,6 +23,7 @@ import {
   useProjectTasks,
   useTasks,
   useTransitionTask,
+  taskKeys,
 } from "@/lib/hooks/useTasks";
 import { STATUS_OPTIONS, statusLabel } from "@/lib/task-labels";
 import { TaskEditorDialog } from "@/components/task-manager/TaskEditorDialog";
@@ -33,14 +35,15 @@ import { AgentStatusBadge } from "@/components/agent/AgentStatusBadge";
 import { PentestAgentClient } from "@/components/PentestAgentClient";
 import { ReviewAgentClient } from "@/components/ReviewAgentClient";
 import { MailAgentClient } from "@/components/MailAgentClient";
-import ArticlesPage from "@/app/(app)/articles/page";
-import ImagesPage from "@/app/(app)/images/page";
+import { ArticlesView } from "@/app/(app)/articles/page";
+import { ImagesView } from "@/app/(app)/images/page";
 import type { LaunchResult } from "@/lib/agents/launch";
 import type { Agent } from "@/lib/types/agent";
 import type { Project, Task } from "@/lib/types/project";
 import type { TaskRun } from "@/lib/types/task-run";
 import type { TaskStatus } from "@/lib/types/common";
 import { cn } from "@/lib/utils/cn";
+import { STATUS_DOT } from "@/lib/status-colors";
 
 type Selection =
   | { kind: "project"; id: string }
@@ -56,17 +59,9 @@ const BUILTINS: {
   { id: "pentest", label: "Security Tester", icon: ShieldAlert, match: "pentester" },
   { id: "review", label: "PR Reviewer", icon: GitPullRequest, match: "pr_reviewer" },
   { id: "mail", label: "Mail Agent", icon: Mail, match: "mail" },
-  { id: "articles", label: "Articles", icon: Newspaper, match: "article_writer" },
-  { id: "images", label: "Images", icon: ImageIcon },
+  { id: "articles", label: "Article Writer", icon: Newspaper, match: "article_writer" },
+  { id: "images", label: "Image Generator", icon: ImageIcon, match: "images" },
 ];
-
-const STATUS_DOT: Record<TaskStatus, string> = {
-  backlog: "bg-muted-foreground",
-  todo: "bg-signal-info",
-  in_progress: "bg-signal-live",
-  review: "bg-signal-warn",
-  done: "bg-signal",
-};
 
 function parseSelection(
   project: string | null,
@@ -82,6 +77,7 @@ function parseSelection(
 
 export function TaskManagerPanel() {
   const router = useRouter();
+  const qc = useQueryClient();
   const searchParams = useSearchParams();
   const projectParam = searchParams.get("project");
   const agentParam = searchParams.get("agent");
@@ -134,6 +130,8 @@ export function TaskManagerPanel() {
 
   function handleLaunchResult(result: LaunchResult) {
     if (!result.task) return;
+    void qc.invalidateQueries({ queryKey: taskKeys.all });
+    void qc.invalidateQueries({ queryKey: ["metrics", "summary"] });
     const params = new URLSearchParams({
       project: result.task.project_id,
       task: result.task.id,
@@ -144,7 +142,7 @@ export function TaskManagerPanel() {
   }
 
   return (
-    <div className="flex h-[calc(100dvh-3rem)] flex-col lg:h-screen">
+    <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center justify-between border-b border-border px-6 py-4">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Task Manager</h1>
@@ -294,10 +292,14 @@ export function TaskManagerPanel() {
             </BuiltinFrame>
           )}
           {selection?.kind === "builtin" && selection.id === "articles" && (
-            <ArticlesPage />
+            <BuiltinFrame title="Article Writer">
+              <ArticlesView hideHeader />
+            </BuiltinFrame>
           )}
           {selection?.kind === "builtin" && selection.id === "images" && (
-            <ImagesPage />
+            <BuiltinFrame title="Image Generator">
+              <ImagesView hideHeader />
+            </BuiltinFrame>
           )}
           {selection?.kind === "agent" && selectedAgent && (
             <AgentDetailView

@@ -17,21 +17,22 @@ import {
   useUpdateSkill,
 } from "@/lib/hooks/useSkills";
 import type { Skill, SkillKind, CreateSkillRequest } from "@/lib/api/skills";
+import { THEME_BADGE } from "@/lib/status-colors";
 
 const KIND_META: Record<
   SkillKind,
   { label: string; icon: React.ElementType; color: string }
 > = {
-  tool: { label: "Tool", icon: Wrench, color: "text-sky-400" },
-  prompt: { label: "Prompt", icon: MessageSquareText, color: "text-violet-400" },
-  bundle: { label: "Bundle", icon: Boxes, color: "text-amber-400" },
+  tool: { label: "Tool", icon: Wrench, color: "text-sky-700 dark:text-sky-400" },
+  prompt: { label: "Prompt", icon: MessageSquareText, color: "text-violet-700 dark:text-violet-400" },
+  bundle: { label: "Bundle", icon: Boxes, color: "text-amber-700 dark:text-amber-400" },
 };
 
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
-    published: "bg-green-500/20 text-green-400",
-    draft: "bg-yellow-500/20 text-yellow-400",
-    deprecated: "bg-gray-500/20 text-gray-400",
+    published: THEME_BADGE.success,
+    draft: THEME_BADGE.warning,
+    deprecated: THEME_BADGE.muted,
   };
   return (
     <span
@@ -279,7 +280,11 @@ function SkillCard({ skill }: { skill: Skill }) {
   );
 }
 
-export default function SkillsPage() {
+export function SkillsView({
+  hideHeader = false,
+}: {
+  hideHeader?: boolean;
+}) {
   const [searchQuery, setSearchQuery] = useState("");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const { data, isLoading, isError } = useSkills();
@@ -295,15 +300,17 @@ export default function SkillsPage() {
     <>
       <div className="space-y-6">
         <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">
-              Skills
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Reusable capability bundles — tools and prompt patches — that you
-              enable per agent to shape how it works.
-            </p>
-          </div>
+          {!hideHeader && (
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight text-foreground">
+                Skills
+              </h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Reusable capability bundles — tools and prompt patches — that you
+                enable per agent to shape how it works.
+              </p>
+            </div>
+          )}
           <button
             type="button"
             onClick={() => setIsCreateOpen(true)}
@@ -378,4 +385,8 @@ export default function SkillsPage() {
       />
     </>
   );
+}
+
+export default function SkillsPage() {
+  return <SkillsView />;
 }

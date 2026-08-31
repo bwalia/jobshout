@@ -13,15 +13,28 @@ export function StoredImage({
   alt,
   className,
   loading,
+  width,
+  height,
 }: {
   src: string;
   alt: string;
   className?: string;
   loading?: "eager" | "lazy";
+  width?: number;
+  height?: number;
 }) {
   const resolved = resolveStoredImageSrc(src);
   if (!resolved) return null;
 
   // eslint-disable-next-line @next/next/no-img-element -- bytes live on the API host
-  return <img src={resolved} alt={alt} className={className} loading={loading} />;
+  return (
+    <img
+      src={resolved}
+      alt={alt}
+      className={className}
+      loading={loading}
+      width={width}
+      height={height}
+    />
+  );
 }

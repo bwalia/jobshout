@@ -124,7 +124,14 @@ func (h *TaskHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 func (h *TaskHandler) List(w http.ResponseWriter, r *http.Request) {
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
-	params := model.PaginationParams{Page: page, PerPage: perPage}
+	status := r.URL.Query().Get("status")
+	switch status {
+	case "", "backlog", "todo", "in_progress", "review", "done":
+	default:
+		RespondError(w, http.StatusBadRequest, "invalid status")
+		return
+	}
+	params := model.PaginationParams{Page: page, PerPage: perPage, Status: status}
 
 	projectIDStr := r.URL.Query().Get("project_id")
 	if projectIDStr != "" {

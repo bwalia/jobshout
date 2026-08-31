@@ -16,12 +16,13 @@ import {
   useExecutePlugin,
 } from "@/lib/hooks/usePlugins";
 import type { Plugin, CreatePluginRequest } from "@/lib/types/workflow";
+import { THEME_BADGE } from "@/lib/status-colors";
 
 function PluginStatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
-    active: "bg-green-500/20 text-green-400",
-    inactive: "bg-yellow-500/20 text-yellow-400",
-    archived: "bg-gray-500/20 text-gray-400",
+    active: THEME_BADGE.success,
+    inactive: THEME_BADGE.warning,
+    archived: THEME_BADGE.muted,
   };
   return (
     <span
@@ -218,7 +219,11 @@ function PluginCard({ plugin }: { plugin: Plugin }) {
   );
 }
 
-export default function PluginsPage() {
+export function PluginsView({
+  hideHeader = false,
+}: {
+  hideHeader?: boolean;
+}) {
   const [searchQuery, setSearchQuery] = useState("");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const { data, isLoading, isError } = usePlugins({ per_page: 50 });
@@ -233,15 +238,17 @@ export default function PluginsPage() {
     <>
       <div className="space-y-6">
         <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">
-              Plugins
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Manage custom workflow plugins with sandboxed execution and
-              versioning.
-            </p>
-          </div>
+          {!hideHeader && (
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight text-foreground">
+                Plugins
+              </h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Manage custom workflow plugins with sandboxed execution and
+                versioning.
+              </p>
+            </div>
+          )}
           <button
             type="button"
             onClick={() => setIsCreateOpen(true)}
@@ -319,4 +326,8 @@ export default function PluginsPage() {
       />
     </>
   );
+}
+
+export default function PluginsPage() {
+  return <PluginsView />;
 }

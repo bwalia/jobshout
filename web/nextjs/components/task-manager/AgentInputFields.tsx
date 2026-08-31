@@ -79,12 +79,20 @@ function Field({
 }) {
   const borderCls = error ? "border-destructive" : "border-input";
 
+  useEffect(() => {
+    if (field.type === "checkbox" && value === "" && field.defaultValue === true) {
+      onChange("true");
+    }
+  }, [field.type, field.defaultValue, value, onChange]);
+
   if (field.type === "checkbox") {
+    const checked =
+      value === "true" || (value === "" && field.defaultValue === true);
     return (
       <label className="flex cursor-pointer items-start gap-2 text-sm">
         <input
           type="checkbox"
-          checked={value === "true"}
+          checked={checked}
           onChange={(e) => onChange(e.target.checked ? "true" : "false")}
           disabled={disabled}
           className="mt-0.5 h-4 w-4 rounded border-input"

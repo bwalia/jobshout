@@ -62,7 +62,7 @@ function buildEdges(initialGraph: GraphDefinition | undefined): Edge[] {
     target: e.to,
     label: e.label,
     animated: true,
-    style: { stroke: "#6366f1" },
+    style: { stroke: "hsl(var(--primary))" },
   }));
 }
 
@@ -111,7 +111,7 @@ export function WorkflowBuilder({
   const onConnect = useCallback(
     (connection: Connection) => {
       setEdges((eds) =>
-        addEdge({ ...connection, animated: true, style: { stroke: "#6366f1" } }, eds)
+        addEdge({ ...connection, animated: true, style: { stroke: "hsl(var(--primary))" } }, eds)
       );
     },
     [setEdges]
@@ -214,7 +214,7 @@ export function WorkflowBuilder({
           deleteKeyCode={readOnly ? null : "Backspace"}
           className="bg-background"
         >
-          <Background color="#333" gap={20} />
+          <Background color="hsl(var(--border))" gap={20} />
           <Controls />
           <MiniMap
             nodeColor={(n) => {

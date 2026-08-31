@@ -211,7 +211,7 @@ const SCHEMAS: Record<AgentBuiltin, AgentInputSchema> = {
         type: "number",
         required: true,
         min: 1,
-        placeholder: "42",
+        placeholder: "e.g. 128",
       },
       {
         key: "dry_run",

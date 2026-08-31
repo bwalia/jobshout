@@ -507,9 +507,13 @@ export default function SchedulerPage() {
                   <input
                     type="number"
                     value={form.interval_seconds ?? 3600}
-                    onChange={(e) =>
-                      setForm({ ...form, interval_seconds: parseInt(e.target.value) })
-                    }
+                    onChange={(e) => {
+                      const n = parseInt(e.target.value, 10);
+                      setForm({
+                        ...form,
+                        interval_seconds: Number.isFinite(n) ? n : undefined,
+                      });
+                    }}
                     min={60}
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   />
@@ -600,8 +604,14 @@ export default function SchedulerPage() {
                   <label className="text-sm">Max retries:</label>
                   <input
                     type="number"
-                    value={form.max_retries}
-                    onChange={(e) => setForm({ ...form, max_retries: parseInt(e.target.value) })}
+                    value={form.max_retries ?? ""}
+                    onChange={(e) => {
+                      const n = parseInt(e.target.value, 10);
+                      setForm({
+                        ...form,
+                        max_retries: Number.isFinite(n) ? n : undefined,
+                      });
+                    }}
                     min={1}
                     max={10}
                     className="flex h-8 w-16 rounded-md border border-input bg-background px-2 text-sm"

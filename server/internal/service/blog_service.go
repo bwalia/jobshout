@@ -214,7 +214,7 @@ func (s *blogService) settle(runID uuid.UUID, write func()) bool {
 	current, err := s.repo.GetByID(persistCtx(), runID)
 	if err == nil && current != nil {
 		switch current.Status {
-		case model.BlogRunStatusCompleted, model.BlogRunStatusFailed:
+		case model.BlogRunStatusCompleted, model.BlogRunStatusFailed, model.BlogRunStatusCancelled:
 			return false
 		}
 	}
@@ -593,7 +593,11 @@ func (s *blogService) failRun(
 		completedAt := time.Now()
 		run.CompletedAt = &completedAt
 		msg := cause.Error()
-		run.Status = model.BlogRunStatusFailed
+		if errors.Is(cause, errRunCancelled) {
+			run.Status = model.BlogRunStatusCancelled
+		} else {
+			run.Status = model.BlogRunStatusFailed
+		}
 		run.ErrorMessage = &msg
 		if uerr := s.repo.Update(persistCtx(), run); uerr != nil {
 			log.Error("blog_svc: failed to record failure", zap.Error(uerr))
@@ -972,8 +976,8 @@ func (s *blogService) Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUI
 	if run.OrgID != orgID {
 		return nil, fmt.Errorf("blog_svc: run does not belong to this organization")
 	}
-	if run.Status != model.BlogRunStatusFailed {
-		return nil, fmt.Errorf("blog_svc: only a failed run can be retried (status is %q)", run.Status)
+	if run.Status != model.BlogRunStatusFailed && run.Status != model.BlogRunStatusCancelled {
+		return nil, fmt.Errorf("blog_svc: only a failed or cancelled run can be retried (status is %q)", run.Status)
 	}
 	if len(run.Briefs) == 0 {
 		return nil, fmt.Errorf("blog_svc: run has no topics to retry")
@@ -1043,10 +1047,10 @@ func (s *blogService) Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUI
 	return run, nil
 }
 
-// Cancel stops an in-flight run. The row is marked failed immediately so the
+// Cancel stops an in-flight run. The row is marked cancelled immediately so the
 // UI stops polling; the generation goroutine is then aborted if this process
 // is the one writing it. A run stuck at running after a deploy has no
-// goroutine here — it is still marked failed, which is what unlocks Retry.
+// goroutine here — it is still marked cancelled, which is what unlocks Retry.
 func (s *blogService) Cancel(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) (*model.BlogRun, error) {
 	run, err := s.repo.GetByID(ctx, runID)
 	if err != nil {
