@@ -119,8 +119,13 @@ export function ArticleViewer({ article }: { article: BlogArticle }) {
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="border-b border-border">
+      {/* Tabs. Sticky rather than an inner scroll region: the page scrolls in
+          the shell's <main>, and nothing between it and this component has a
+          bounded height, so an overflow-y-auto here never actually scrolls —
+          the tab bar just scrolled away with the article. Pinning it keeps
+          view switching reachable mid-article. -mx-5/px-5 bleeds it across
+          the card's padding so content scrolls under a full-width bar. */}
+      <div className="sticky top-0 z-10 -mx-5 border-b border-border bg-card px-5">
         <nav className="-mb-px flex gap-0" aria-label="Article view">
           {TABS.map(({ id, label, icon: Icon }) => (
             <button
@@ -142,7 +147,7 @@ export function ArticleViewer({ article }: { article: BlogArticle }) {
         </nav>
       </div>
 
-      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto scrollbar-thin pt-5">
+      <div className="min-w-0 pt-5">
         {tab === "article" ? (
           <article
             className={cn(

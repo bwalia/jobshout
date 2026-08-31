@@ -55,18 +55,29 @@ export default function ArticleRunPage() {
     articles?.find((a) => a.id === selectedId) ?? articles?.[0] ?? null;
 
   if (isLoading) {
+    // Mirrors the loaded layout (same gutter, rhythm, and grid) so the page
+    // doesn't visibly reflow the moment the run arrives.
     return (
-      <div className="space-y-4">
-        <div className="h-8 w-64 animate-pulse rounded bg-muted" />
-        <div className="h-64 animate-pulse rounded-xl bg-muted" />
+      <div className="space-y-6 p-6">
+        <div className="space-y-2">
+          <div className="h-4 w-24 animate-pulse rounded bg-muted" />
+          <div className="h-8 w-64 max-w-full animate-pulse rounded bg-muted" />
+          <div className="h-4 w-96 max-w-full animate-pulse rounded bg-muted" />
+        </div>
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[15rem_minmax(0,1fr)] xl:grid-cols-[18rem_minmax(0,1fr)]">
+          <div className="h-64 animate-pulse rounded-xl bg-muted" />
+          <div className="h-[28rem] animate-pulse rounded-xl bg-muted" />
+        </div>
       </div>
     );
   }
 
   if (isError || !run) {
     return (
-      <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-        Could not load this run.
+      <div className="p-6">
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          Could not load this run.
+        </div>
       </div>
     );
   }
@@ -76,7 +87,11 @@ export default function ArticleRunPage() {
     Boolean(config?.can_publish) && run.status === "completed" && !isPublished;
 
   return (
-    <div className="space-y-6">
+    // p-6: this route is deliberately kept outside the /panel/* system
+    // (lib/panels.ts), so nothing above it supplies the page gutter that
+    // every panel surface gets — without it the content sits flush against
+    // the sidebar and viewport edges.
+    <div className="space-y-6 p-6">
       {/* Header */}
       <div>
         <Link
@@ -87,9 +102,11 @@ export default function ArticleRunPage() {
           Artifacts
         </Link>
 
-        <div className="mt-2 flex items-start justify-between gap-4">
+        {/* Stacks on small screens: the action group is wider than what a
+            phone leaves for the title when they share one row. */}
+        <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
           <div className="min-w-0">
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">
+            <h1 className="break-words text-2xl font-bold tracking-tight text-foreground">
               {run.topics.length === 1
                 ? run.topics[0]
                 : `${run.topics.length} articles`}
@@ -100,7 +117,7 @@ export default function ArticleRunPage() {
             </p>
           </div>
 
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
             {(run.status === "running" || run.status === "pending") && (
               <button
                 type="button"
@@ -136,8 +153,12 @@ export default function ArticleRunPage() {
             )}
             {run.status !== "failed" && isPublished ? (
               <span className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground">
-                <CheckCircle2 className="h-4 w-4 text-status-done" />
-                Drafted in {run.cms_namespace ?? "the CMS"}
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-status-done" />
+                {/* The namespace is server-provided free text; cap it so it
+                    can't push the other actions off-screen. */}
+                <span className="max-w-[16rem] truncate">
+                  Drafted in {run.cms_namespace ?? "the CMS"}
+                </span>
               </span>
             ) : run.status === "failed" ? null : (
               <button
@@ -215,8 +236,11 @@ export default function ArticleRunPage() {
 
       {/* minmax(0,1fr) rather than 1fr: a plain 1fr track has an auto minimum,
           so a long code line or file path in the article would force the track
-          wider than the viewport and push the whole page sideways. */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[18rem_minmax(0,1fr)]">
+          wider than the viewport and push the whole page sideways.
+          The sidebar margin also kicks in at lg, so the rail starts narrower
+          there and only takes its full width at xl — otherwise the article
+          column drops to ~450px at exactly 1024px. */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[15rem_minmax(0,1fr)] xl:grid-cols-[18rem_minmax(0,1fr)]">
         {/* Left rail: progress + article picker */}
         <div className="min-w-0 space-y-6">
           <section className="rounded-xl border border-border bg-card p-5 shadow-card">
