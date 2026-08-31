@@ -45,6 +45,11 @@ func (s *taskService) Create(ctx context.Context, createdBy uuid.UUID, req model
 		priority = "medium"
 	}
 
+	status := req.Status
+	if status == "" {
+		status = "backlog"
+	}
+
 	var parentID *uuid.UUID
 	if req.ParentID != nil {
 		p, err := uuid.Parse(*req.ParentID)
@@ -87,7 +92,7 @@ func (s *taskService) Create(ctx context.Context, createdBy uuid.UUID, req model
 		ParentID:        parentID,
 		Title:           req.Title,
 		Description:     req.Description,
-		Status:          "backlog",
+		Status:          status,
 		Priority:        priority,
 		AssignedAgentID: assignedAgentID,
 		AssignedUserID:  assignedUserID,

@@ -31,6 +31,9 @@ type CreateTaskRequest struct {
 	ProjectID       string  `json:"project_id" validate:"required,uuid"`
 	Title           string  `json:"title" validate:"required,min=2"`
 	Description     *string `json:"description"`
+	// Status lets the board create a task directly in the column the user
+	// clicked "Add task" in. Empty means backlog.
+	Status          string  `json:"status" validate:"omitempty,oneof=backlog todo in_progress review done"`
 	Priority        string  `json:"priority" validate:"omitempty,oneof=low medium high critical"`
 	AssignedAgentID *string `json:"assigned_agent_id"`
 	AssignedUserID  *string `json:"assigned_user_id"`

@@ -75,6 +75,14 @@ export function TaskRunView({ task, agents, focusRunId }: TaskRunViewProps) {
   const runs = runsResp?.data ?? [];
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
+  // This component is rendered unkeyed at a fixed spot in its hosts, so React
+  // reuses the instance across task switches. Without this reset the right
+  // pane kept showing (and polling) the previous task's run under the new
+  // task's heading.
+  useEffect(() => {
+    setSelectedId(null);
+  }, [task.id]);
+
   // Default the selection to the freshly launched run, else the newest one.
   useEffect(() => {
     if (focusRunId) setSelectedId(focusRunId);

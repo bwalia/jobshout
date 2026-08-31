@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { updateTask, getTaskComments, addTaskComment } from "@/lib/api/tasks";
+import { taskKeys } from "@/lib/hooks/useTasks";
 import type { Task, UpdateTaskRequest, TaskComment } from "@/lib/types/project";
 import type { TaskStatus, Priority } from "@/lib/types/common";
 
@@ -92,9 +93,10 @@ export function TaskDetailModal({ task, onClose, onUpdated }: TaskDetailModalPro
   const updateMutation = useMutation({
     mutationFn: (payload: UpdateTaskRequest) => updateTask(task.id, payload),
     onSuccess: (updatedTask) => {
-      queryClient.invalidateQueries({
-        queryKey: ["tasks", task.project_id],
-      });
+      // This modal is opened from both the per-project board and the
+      // all-projects Task Board (a flat list under a different key), so
+      // invalidate every task query rather than guessing which one fed it.
+      queryClient.invalidateQueries({ queryKey: taskKeys.all });
       toast.success("Task updated.");
       onUpdated?.(updatedTask);
       onClose();

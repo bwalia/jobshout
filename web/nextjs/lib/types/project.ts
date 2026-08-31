@@ -58,6 +58,8 @@ export interface CreateTaskRequest {
   project_id: string;
   title: string;
   description?: string;
+  /** Column to create the task in; the server defaults to backlog. */
+  status?: TaskStatus;
   priority?: Priority;
   assigned_agent_id?: string;
   assigned_user_id?: string;
