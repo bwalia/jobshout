@@ -11,6 +11,7 @@ import {
   useWorkflowRuns,
   useWorkflowRun,
 } from "@/lib/hooks/useWorkflows";
+import { graphToSteps } from "@/lib/workflow-graph";
 import type { GraphDefinition, GraphNode, GraphEdge, WorkflowRun } from "@/lib/types/workflow";
 
 function RunStatusBadge({ status }: { status: string }) {
@@ -248,6 +249,7 @@ export default function WorkflowDetailPage() {
       payload: {
         name: workflow.name,
         description: workflow.description ?? undefined,
+        steps: graphToSteps(graph),
       },
     });
   };

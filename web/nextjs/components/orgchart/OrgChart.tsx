@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactFlow, {
   Background,
   Controls,
@@ -63,11 +63,32 @@ export function OrgChart({ agents: _agents }: OrgChartProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
 
-  // Re-initialise the canvas when the agents data changes (e.g. after a save
-  // that updates manager_id values on the backend).
-  // Using a key on the ReactFlow wrapper would cause an unmount/remount cycle,
-  // so we instead reset state when initialNodes/initialEdges change via
-  // the hook itself (which is triggered by the query invalidation in saveChart).
+  // useNodesState is plain useState underneath, so it ignores later values of
+  // initialNodes — e.g. the fresh layout after a save invalidates the agents
+  // query. Re-initialise on a real content change only (the hook rebuilds the
+  // arrays every fetch), so a user's un-saved edges are never wiped by a
+  // re-render that carries the same data.
+  const chartSignature = useMemo(
+    () =>
+      JSON.stringify({
+        nodes: initialNodes.map((n) => ({
+          id: n.id,
+          name: n.data.agent.name,
+          role: n.data.agent.role,
+          status: n.data.agent.status,
+          manager: n.data.agent.manager_id,
+        })),
+        edges: initialEdges.map((e) => e.id),
+      }),
+    [initialNodes, initialEdges]
+  );
+  const appliedSignature = useRef(chartSignature);
+  useEffect(() => {
+    if (appliedSignature.current === chartSignature) return;
+    appliedSignature.current = chartSignature;
+    setNodes(initialNodes);
+    setEdges(initialEdges);
+  }, [chartSignature, initialNodes, initialEdges, setNodes, setEdges]);
 
   // Called when the user drags a connection between two Handles
   const onConnect = useCallback(
