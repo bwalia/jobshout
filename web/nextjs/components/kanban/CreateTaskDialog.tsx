@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { createTask } from "@/lib/api/tasks";
+import { taskKeys } from "@/lib/hooks/useTasks";
 import type { Task, CreateTaskRequest } from "@/lib/types/project";
 import type { Priority, TaskStatus } from "@/lib/types/common";
 
@@ -50,7 +51,9 @@ export function CreateTaskDialog({
     mutationFn: (payload: CreateTaskRequest) => createTask(payload),
     onSuccess: (newTask) => {
       queryClient.invalidateQueries({
-        queryKey: ["tasks", projectId],
+        // The shared key every task mutation invalidates — an ad-hoc
+        // ["tasks", projectId] key here matched nothing and left boards stale.
+        queryKey: taskKeys.projectLists(projectId),
       });
       toast.success(`Task "${newTask.title}" created.`);
       onCreated?.(newTask);
@@ -69,9 +72,11 @@ export function CreateTaskDialog({
       project_id: projectId,
       title: title.trim(),
       description: description.trim() || undefined,
+      // The status column the user clicked "Add task" in — the dialog
+      // promises this below, so it must actually be sent.
+      status: initialStatus,
       priority,
       due_date: dueDate || undefined,
-      // The task is created in the status column the user clicked "Add task" in
       // The API sets position; we let the server decide initial position
     });
   }

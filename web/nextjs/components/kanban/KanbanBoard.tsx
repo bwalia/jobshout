@@ -13,7 +13,8 @@ import {
 import { arrayMove } from "@dnd-kit/sortable";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { getProjectTasks, updateTask, reorderTask } from "@/lib/api/tasks";
+import { getProjectTasks, reorderTask } from "@/lib/api/tasks";
+import { taskKeys } from "@/lib/hooks/useTasks";
 import { KanbanColumn } from "@/components/kanban/KanbanColumn";
 import { TaskCard } from "@/components/kanban/TaskCard";
 import { useKanbanStore } from "@/lib/store/kanban-store";
@@ -60,7 +61,10 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   // Data fetching
   // ---------------------------------------------------------------------------
 
-  const queryKey = ["tasks", projectId] as const;
+  // The shared per-project key: every task mutation in the app invalidates
+  // this one, so the board picks up tasks created or edited elsewhere. (An
+  // ad-hoc ["tasks", projectId] key here used to match none of them.)
+  const queryKey = taskKeys.projectLists(projectId);
 
   const { data, isLoading, isError } = useQuery({
     queryKey,
@@ -120,10 +124,13 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
       status: TaskStatus;
       position: number;
     }) => reorderTask(taskId, { status, position }),
-    onError: (error: Error, variables) => {
-      // Roll back optimistic update on failure
-      queryClient.invalidateQueries({ queryKey });
+    onError: (error: Error) => {
       toast.error(`Failed to move task: ${error.message}`);
+    },
+    // Success or failure, reconcile with the server's recomputed positions —
+    // the optimistic patch uses dense local indexes that only approximate them.
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey });
     },
   });
 
@@ -167,28 +174,68 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
       const draggedTask = allTasks.find((t) => t.id === draggedTaskId);
       if (!draggedTask) return;
 
+      const sourceStatus = draggedTask.status;
+      const sourceColumn = tasksByStatus[sourceStatus];
+      const sourceIndex = sourceColumn.findIndex((t) => t.id === draggedTaskId);
+      if (sourceIndex < 0) return;
+
       let targetStatus: TaskStatus;
-      let targetPosition: number;
+      let targetIndex: number;
 
       if (isColumn) {
-        // Dropped directly onto a column — place at end
+        // Dropped onto a column's background — place at the end.
         targetStatus = overId as TaskStatus;
-        targetPosition = tasksByStatus[targetStatus].length;
+        targetIndex =
+          targetStatus === sourceStatus
+            ? tasksByStatus[targetStatus].length - 1
+            : tasksByStatus[targetStatus].length;
       } else {
-        // Dropped onto another task card — find the target task's column + position
+        // Dropped onto another card — take its place (dnd-kit sortable
+        // previews the drop that way, so the result must match the preview).
         const overTask = allTasks.find((t) => t.id === overId);
         if (!overTask) return;
         targetStatus = overTask.status;
-        targetPosition = overTask.position;
+        targetIndex = tasksByStatus[targetStatus].findIndex(
+          (t) => t.id === overId
+        );
+        if (targetIndex < 0) return;
       }
 
-      // No-op: same position in same column
-      if (
-        draggedTask.status === targetStatus &&
-        draggedTask.position === targetPosition
-      ) {
+      // No-op: dropped back where it started
+      if (sourceStatus === targetStatus && sourceIndex === targetIndex) {
         return;
       }
+
+      // Final order of the affected column(s). Every neighbour is
+      // repositioned, not just the dragged card — giving two cards the same
+      // position used to make same-column drags a visual no-op (stable sort
+      // kept the old order) while the server actually moved the task.
+      const newColumns = new Map<TaskStatus, Task[]>();
+      if (sourceStatus === targetStatus) {
+        newColumns.set(
+          targetStatus,
+          arrayMove(sourceColumn, sourceIndex, targetIndex)
+        );
+      } else {
+        newColumns.set(
+          sourceStatus,
+          sourceColumn.filter((t) => t.id !== draggedTaskId)
+        );
+        const dest = [...tasksByStatus[targetStatus]];
+        dest.splice(targetIndex, 0, { ...draggedTask, status: targetStatus });
+        newColumns.set(targetStatus, dest);
+      }
+
+      // The server inserts at a *stored* position ("shift everything >= p,
+      // place at p") and stored positions can be sparse, so derive the wire
+      // position from the neighbour the card lands after — not from the
+      // dense index.
+      const finalOrder = newColumns.get(targetStatus)!;
+      const finalIndex = finalOrder.findIndex((t) => t.id === draggedTaskId);
+      const wirePosition =
+        finalIndex === 0
+          ? (finalOrder[1]?.position ?? 0)
+          : finalOrder[finalIndex - 1].position + 1;
 
       // ---------------------------------------------------------------------------
       // Optimistic update: reorder the cache immediately for instant feedback
@@ -196,11 +243,14 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
       queryClient.setQueryData(queryKey, (old: typeof data) => {
         if (!old) return old;
 
+        const placement = new Map<string, { status: TaskStatus; position: number }>();
+        newColumns.forEach((tasks, status) => {
+          tasks.forEach((t, i) => placement.set(t.id, { status, position: i }));
+        });
+
         const updatedTasks = old.data.map((t) => {
-          if (t.id === draggedTaskId) {
-            return { ...t, status: targetStatus, position: targetPosition };
-          }
-          return t;
+          const p = placement.get(t.id);
+          return p ? { ...t, ...p } : t;
         });
 
         return { ...old, data: updatedTasks };
@@ -210,7 +260,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
       transitionMutation.mutate({
         taskId: draggedTaskId,
         status: targetStatus,
-        position: targetPosition,
+        position: wirePosition,
       });
     },
     [
