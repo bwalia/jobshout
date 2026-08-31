@@ -201,7 +201,7 @@ function EditTaskForm({
           <option value="">— Unassigned —</option>
           {agents.map((a) => (
             <option key={a.id} value={a.id}>
-              {a.name} · {a.role}
+              {a.name}
             </option>
           ))}
         </select>
@@ -574,9 +574,6 @@ function CreateTaskForm({
             {agents.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.name}
-                {a.metadata?.builtin
-                  ? ` · ${a.metadata.builtin}`
-                  : ` · ${a.role}`}
               </option>
             ))}
           </select>

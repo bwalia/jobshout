@@ -147,7 +147,7 @@ func TestRetry_OnlyFailedRuns(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected retry to be refused for status %q", status)
 			}
-			if !strings.Contains(err.Error(), "only a failed run") {
+			if !strings.Contains(err.Error(), "only a failed or cancelled run") {
 				t.Errorf("error should explain the rule, got: %v", err)
 			}
 			if store.articlesCleared {
@@ -207,7 +207,7 @@ func TestCancel_RefusesFinishedRun(t *testing.T) {
 }
 
 // A run left `running` after the writer died (a deploy) has no goroutine in
-// this process. Cancel must still mark it failed, otherwise Retry and Delete
+// this process. Cancel must still mark it cancelled, otherwise Retry and Delete
 // stay locked out.
 func TestCancel_MarksOrphanFailed(t *testing.T) {
 	org := uuid.New()
@@ -221,8 +221,8 @@ func TestCancel_MarksOrphanFailed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Cancel: %v", err)
 	}
-	if got.Status != model.BlogRunStatusFailed {
-		t.Errorf("status = %q, want failed", got.Status)
+	if got.Status != model.BlogRunStatusCancelled {
+		t.Errorf("status = %q, want cancelled", got.Status)
 	}
 	if got.ErrorMessage == nil || *got.ErrorMessage != errRunCancelled.Error() {
 		t.Errorf("error_message = %v, want %q", got.ErrorMessage, errRunCancelled)

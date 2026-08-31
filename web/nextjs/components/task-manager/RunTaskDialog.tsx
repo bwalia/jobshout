@@ -294,9 +294,6 @@ export function RunTaskDialog({
               {agents.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.name}
-                  {a.metadata?.builtin
-                    ? ` · ${a.metadata.builtin}`
-                    : ` · ${a.role}`}
                 </option>
               ))}
             </select>

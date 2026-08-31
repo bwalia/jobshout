@@ -69,7 +69,37 @@ export function panelFromPath(pathname: string): PanelId {
     const slug = pathname.split("/")[2] as PanelId | undefined;
     if (slug && PANELS.some((p) => p.id === slug)) return slug;
   }
-  return "chat";
+  return legacyPanelFromPath(pathname) ?? "chat";
+}
+
+const LEGACY_PREFIXES: { prefix: string; id: PanelId }[] = [
+  { prefix: "/task-manager", id: "task-manager" },
+  { prefix: "/agent-board", id: "task-board" },
+  { prefix: "/llm-providers", id: "llm-providers" },
+  { prefix: "/org-builder", id: "org-builder" },
+  { prefix: "/marketplace", id: "marketplace" },
+  { prefix: "/plugins", id: "plugins-skills" },
+  { prefix: "/skills", id: "plugins-skills" },
+  { prefix: "/scheduler", id: "scheduler" },
+  { prefix: "/sprints", id: "sprints" },
+  { prefix: "/sessions", id: "sessions" },
+  { prefix: "/workflows", id: "workflows" },
+  { prefix: "/artifacts", id: "artifacts" },
+  { prefix: "/articles", id: "artifacts" },
+  { prefix: "/images", id: "task-manager" },
+  { prefix: "/dashboard", id: "dashboard" },
+  { prefix: "/metrics", id: "dashboard" },
+  { prefix: "/settings", id: "settings" },
+  { prefix: "/projects", id: "task-manager" },
+  { prefix: "/agents", id: "task-manager" },
+  { prefix: "/tasks", id: "task-board" },
+];
+
+function legacyPanelFromPath(pathname: string): PanelId | null {
+  for (const { prefix, id } of LEGACY_PREFIXES) {
+    if (pathname === prefix || pathname.startsWith(`${prefix}/`)) return id;
+  }
+  return null;
 }
 
 /** Workflows — top-level Automations item (Cursor "Codebase" analogue). */
@@ -90,7 +120,8 @@ export const APP_NAV_PANELS: PanelDef[] = PANELS.filter(
 );
 
 export function isAppNavPath(pathname: string): boolean {
-  return pathname.startsWith("/panel/");
+  if (pathname === "/chat" || pathname.startsWith("/chat/")) return false;
+  return true;
 }
 
 export function rememberPanelTransition(from: PanelId, to: PanelId) {

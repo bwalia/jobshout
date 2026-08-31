@@ -40,7 +40,11 @@ export function PluginsSkillsPanel() {
           </button>
         ))}
       </div>
-      {tab === "plugins" ? <PluginsPage /> : <SkillsPage />}
+      {tab === "plugins" ? (
+        <PluginsPage hideHeader />
+      ) : (
+        <SkillsPage hideHeader />
+      )}
     </div>
   );
 }

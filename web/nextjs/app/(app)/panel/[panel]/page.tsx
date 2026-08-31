@@ -86,7 +86,7 @@ function PanelBody({ panel }: { panel: Exclude<PanelId, "chat"> }) {
       );
     case "org-builder":
       return (
-        <div className="p-6">
+        <div className="h-full min-h-0 p-6">
           <OrgBuilderPage />
         </div>
       );

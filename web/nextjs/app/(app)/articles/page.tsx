@@ -50,6 +50,11 @@ const STATUS_META: Record<
     icon: AlertTriangle,
     className: "bg-status-blocked/15 text-status-blocked",
   },
+  cancelled: {
+    label: "Stopped",
+    icon: Ban,
+    className: "bg-muted text-muted-foreground",
+  },
 };
 
 function StatusBadge({ status }: { status: BlogRunStatus }) {
@@ -116,6 +121,12 @@ function RunCard({ run }: { run: BlogRun }) {
         </p>
       )}
 
+      {run.status === "cancelled" && (
+        <p className="mt-3 rounded bg-muted/60 px-2 py-1.5 text-2xs text-muted-foreground">
+          Stopped by you. Articles already written are kept.
+        </p>
+      )}
+
       {run.status === "failed" && run.error_message && (
         <p
           className="mt-3 line-clamp-3 rounded bg-destructive/5 px-2 py-1.5 text-2xs text-destructive"
@@ -151,7 +162,7 @@ function RunCard({ run }: { run: BlogRun }) {
             disabled={cancel.isPending}
             onClick={(e) =>
               act(e, () => {
-                if (confirm("Stop this run? Work in progress will be lost.")) {
+                if (confirm("Stop this run? Articles already written are kept.")) {
                   cancel.mutate(run.id);
                 }
               })
@@ -165,7 +176,7 @@ function RunCard({ run }: { run: BlogRun }) {
       )}
       {run.status !== "running" && run.status !== "pending" && (
         <div className="mt-3 flex items-center gap-2 border-t border-border pt-3">
-          {run.status === "failed" && (
+          {(run.status === "failed" || run.status === "cancelled") && (
             <button
               type="button"
               disabled={retry.isPending}
@@ -197,7 +208,11 @@ function RunCard({ run }: { run: BlogRun }) {
   );
 }
 
-export default function ArticlesPage() {
+export default function ArticlesPage({
+  hideHeader = false,
+}: {
+  hideHeader?: boolean;
+}) {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const { data, isLoading, isError } = useBlogRuns({ per_page: 50 });
@@ -214,15 +229,17 @@ export default function ArticlesPage() {
     <>
       <div className="space-y-6">
         <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">
-              Articles
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Everything the Article Writer has produced. Review here, then
-              file it in the CMS as a draft when it&apos;s ready.
-            </p>
-          </div>
+          {!hideHeader && (
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight text-foreground">
+                Articles
+              </h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Everything the Article Writer has produced. Review here, then
+                file it in the CMS as a draft when it&apos;s ready.
+              </p>
+            </div>
+          )}
           <button
             type="button"
             onClick={() => setIsCreateOpen(true)}

@@ -13,6 +13,37 @@ import { useExecution, useTaskRun, useTaskRuns } from "@/lib/hooks/useTaskRuns";
 import type { Agent } from "@/lib/types/agent";
 import type { Task } from "@/lib/types/project";
 import type { TaskRun, TaskRunStatus } from "@/lib/types/task-run";
+import Link from "next/link";
+
+function specialistLaunch(task: Task): {
+  label: string;
+  href: string | null;
+} | null {
+  const meta = task.metadata ?? {};
+  const runId = typeof meta.run_id === "string" ? meta.run_id : "";
+  const kind = typeof meta.launch_kind === "string" ? meta.launch_kind : "";
+  if (!runId && !kind) return null;
+
+  const labels: Record<string, string> = {
+    article_writer: "Article run",
+    images: "Image generation",
+    pentester: "Security test",
+    pr_reviewer: "PR review",
+    mail: "Mailbox sync",
+    researcher: "Research brief",
+  };
+  const hrefByKind: Record<string, string> = {
+    article_writer: runId ? `/articles/${runId}` : "/panel/artifacts",
+    images: "/panel/artifacts",
+    pentester: "/panel/task-manager?agent=pentest",
+    pr_reviewer: "/panel/task-manager?agent=review",
+    mail: "/panel/task-manager?agent=mail",
+  };
+  return {
+    label: labels[kind] ?? "Specialist run",
+    href: hrefByKind[kind] ?? (runId ? `/articles/${runId}` : null),
+  };
+}
 
 function statusMeta(status: TaskRunStatus): {
   label: string;
@@ -103,6 +134,26 @@ export function TaskRunView({ task, agents, focusRunId }: TaskRunViewProps) {
   }
 
   if (runs.length === 0) {
+    const launch = specialistLaunch(task);
+    if (launch) {
+      return (
+        <div className="rounded-lg border border-border bg-card/50 p-6 text-sm">
+          <p className="font-medium text-foreground">{launch.label} started</p>
+          <p className="mt-1 text-muted-foreground">
+            This specialist does not write a generic task-run row. Open the
+            launch to see progress and output.
+          </p>
+          {launch.href && (
+            <Link
+              href={launch.href}
+              className="mt-3 inline-flex text-sm font-medium text-primary hover:underline"
+            >
+              Open {launch.label.toLowerCase()}
+            </Link>
+          )}
+        </div>
+      );
+    }
     return (
       <div className="rounded-lg border border-dashed border-border bg-card/50 p-6 text-center text-sm text-muted-foreground">
         No runs yet. Use <span className="font-medium text-foreground">Run now</span> to

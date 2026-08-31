@@ -22,6 +22,7 @@ export function CommandPalette() {
   const [query, setQuery] = useState("");
   const [focusIdx, setFocusIdx] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const sessionsQuery = useChatSessions();
   const overrides = useUiStore((s) => s.chatTitleOverrides);
 
@@ -66,6 +67,8 @@ export function CommandPalette() {
         toggle();
       }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") {
+        const target = e.target as HTMLElement | null;
+        if (target?.closest("input,textarea,[contenteditable]")) return;
         e.preventDefault();
         router.push("/chat");
       }
@@ -83,6 +86,19 @@ export function CommandPalette() {
       setFocusIdx(0);
     }
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    itemRefs.current[focusIdx]?.scrollIntoView({ block: "nearest" });
+  }, [focusIdx, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -150,6 +166,9 @@ export function CommandPalette() {
               <li key={`${item.kind}-${item.id}`}>
                 <button
                   type="button"
+                  ref={(el) => {
+                    itemRefs.current[idx] = el;
+                  }}
                   onMouseEnter={() => setFocusIdx(idx)}
                   onClick={() => {
                     if (item.kind === "action") item.run();

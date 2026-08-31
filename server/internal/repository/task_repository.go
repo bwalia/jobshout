@@ -115,19 +115,28 @@ func (r *taskRepository) ListByProject(ctx context.Context, projectID uuid.UUID,
 func (r *taskRepository) ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.Task], error) {
 	params.Normalize()
 
+	where := `project_id IN (SELECT id FROM projects WHERE org_id = $1)`
+	args := []any{orgID}
+	if params.Status != "" {
+		where += ` AND status = $2`
+		args = append(args, params.Status)
+	}
+
 	var total int
-	countQuery := `SELECT COUNT(*) FROM tasks WHERE project_id IN (SELECT id FROM projects WHERE org_id = $1)`
-	if err := r.pool.QueryRow(ctx, countQuery, orgID).Scan(&total); err != nil {
+	countQuery := `SELECT COUNT(*) FROM tasks WHERE ` + where
+	if err := r.pool.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
 		return nil, fmt.Errorf("counting org tasks: %w", err)
 	}
 
-	query := `
-		SELECT ` + taskColumns + `
-		FROM tasks WHERE project_id IN (SELECT id FROM projects WHERE org_id = $1)
+	limitIdx := len(args) + 1
+	offsetIdx := len(args) + 2
+	query := fmt.Sprintf(`
+		SELECT `+taskColumns+`
+		FROM tasks WHERE %s
 		ORDER BY updated_at DESC
-		LIMIT $2 OFFSET $3`
+		LIMIT $%d OFFSET $%d`, where, limitIdx, offsetIdx)
 
-	rows, err := r.pool.Query(ctx, query, orgID, params.PerPage, params.Offset())
+	rows, err := r.pool.Query(ctx, query, append(args, params.PerPage, params.Offset())...)
 	if err != nil {
 		return nil, fmt.Errorf("listing org tasks: %w", err)
 	}

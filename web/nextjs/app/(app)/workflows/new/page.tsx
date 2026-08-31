@@ -28,7 +28,7 @@ export default function NewWorkflowPage() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-4 border-b border-border px-4 py-3">
         <button
           onClick={() => router.push("/workflows")}

@@ -113,6 +113,7 @@ export function useRetryBlogRun() {
     mutationFn: (id: string) => retryBlogRun(id),
     onSuccess: (_, id) => {
       qc.invalidateQueries({ queryKey: blogKeys.detail(id) });
+      qc.invalidateQueries({ queryKey: blogKeys.articles(id) });
       qc.invalidateQueries({ queryKey: blogKeys.lists() });
       toast.success("Article Writer is trying again");
     },
@@ -126,6 +127,7 @@ export function useCancelBlogRun() {
     mutationFn: (id: string) => cancelBlogRun(id),
     onSuccess: (_, id) => {
       qc.invalidateQueries({ queryKey: blogKeys.detail(id) });
+      qc.invalidateQueries({ queryKey: blogKeys.articles(id) });
       qc.invalidateQueries({ queryKey: blogKeys.lists() });
       toast.success("Run cancelled");
     },
@@ -137,7 +139,9 @@ export function useDeleteBlogRun() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => deleteBlogRun(id),
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
+      qc.removeQueries({ queryKey: blogKeys.detail(id) });
+      qc.removeQueries({ queryKey: blogKeys.articles(id) });
       qc.invalidateQueries({ queryKey: blogKeys.lists() });
       toast.success("Run deleted");
     },

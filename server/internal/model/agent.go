@@ -115,6 +115,8 @@ type UpdateAgentStatusRequest struct {
 type PaginationParams struct {
 	Page    int `json:"page"`
 	PerPage int `json:"per_page"`
+	// Status optionally filters list endpoints that support it (org task list).
+	Status string `json:"-"`
 }
 
 type PaginatedResponse[T any] struct {

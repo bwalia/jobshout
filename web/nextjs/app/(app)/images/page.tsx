@@ -32,7 +32,11 @@ const SOURCE_LABELS: Record<string, string> = {
   manual: "Manual",
 };
 
-export default function ImagesPage() {
+export default function ImagesPage({
+  hideHeader = false,
+}: {
+  hideHeader?: boolean;
+}) {
   const { data: modelsInfo } = useImageModels();
   const { data: history, isLoading: historyLoading } = useGeneratedImages(30);
   const generate = useGenerateImage();
@@ -66,6 +70,7 @@ export default function ImagesPage() {
 
   return (
     <div className="space-y-6">
+      {!hideHeader && (
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Images</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -73,6 +78,7 @@ export default function ImagesPage() {
           answers the <code className="text-xs">generate_image</code> tool for agents.
         </p>
       </div>
+      )}
 
       {!enabled && (
         <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-4 text-sm">

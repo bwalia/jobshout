@@ -91,7 +91,11 @@ const COLUMNS: ColumnDef[] = [
 // Page
 // ---------------------------------------------------------------------------
 
-export default function AgentBoardPage() {
+export default function AgentBoardPage({
+  hideHeader = false,
+}: {
+  hideHeader?: boolean;
+}) {
   const { data: entries, isLoading, isError } = useAgentBoard();
 
   // Group agents by activity once per render.
@@ -111,20 +115,25 @@ export default function AgentBoardPage() {
   }, [entries]);
 
   return (
-    <div className="flex h-full min-h-[calc(100vh-8rem)] flex-col gap-6">
-      {/* Page heading — JIRA-style: tight typography, helper line below. */}
-      <header className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground">
-            Agent Board
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Live view of every agent and what they&apos;re currently doing.
-            Updates every five seconds.
-          </p>
+    <div className="flex h-full min-h-0 flex-col gap-6">
+      {hideHeader ? (
+        <div className="flex justify-end">
+          <LiveIndicator loading={isLoading} />
         </div>
-        <LiveIndicator loading={isLoading} />
-      </header>
+      ) : (
+        <header className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground">
+              Agent Board
+            </h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Live view of every agent and what they&apos;re currently doing.
+              Updates every five seconds.
+            </p>
+          </div>
+          <LiveIndicator loading={isLoading} />
+        </header>
+      )}
 
       {isError ? (
         <div className="rounded-md border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
