@@ -14,6 +14,7 @@ test.describe("Navigation & Layout", () => {
 
   const panels = [
     { href: "/panel/dashboard", heading: /Good (morning|afternoon|evening)/ },
+    { href: "/panel/projects", heading: /Projects/ },
     { href: "/panel/task-board", heading: /Task Board/ },
     { href: "/panel/task-manager", heading: /Task Manager/ },
     { href: "/panel/artifacts", heading: /Artifacts/ },
@@ -44,6 +45,7 @@ test.describe("Navigation & Layout", () => {
       /Good (morning|afternoon|evening)/
     );
     await expect(aside.getByRole("link", { name: "Dashboard" })).toBeVisible();
+    await expect(aside.getByRole("link", { name: "Projects" })).toBeVisible();
     await expect(aside.getByRole("link", { name: "Task Board" })).toBeVisible();
     await expect(aside.getByRole("link", { name: "Task Manager" })).toBeVisible();
     await expect(aside.getByRole("link", { name: "Artifacts" })).toBeVisible();

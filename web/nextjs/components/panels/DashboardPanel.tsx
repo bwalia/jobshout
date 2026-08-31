@@ -395,7 +395,7 @@ export function DashboardPanel() {
             <div className="flex h-40 flex-col items-center justify-center gap-2 text-center">
               <p className="text-sm text-muted-foreground">No tasks yet.</p>
               <Link
-                href="/panel/task-manager"
+                href="/panel/projects"
                 className="text-sm font-medium text-primary hover:underline"
               >
                 Create a project to get started

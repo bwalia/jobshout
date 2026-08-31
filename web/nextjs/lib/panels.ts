@@ -3,6 +3,7 @@ import {
   Bot,
   LayoutDashboard,
   MessageSquare,
+  FolderKanban,
   Kanban,
   ListTree,
   Clock,
@@ -20,6 +21,7 @@ import {
 export type PanelId =
   | "chat"
   | "dashboard"
+  | "projects"
   | "task-board"
   | "task-manager"
   | "artifacts"
@@ -44,6 +46,7 @@ export interface PanelDef {
 export const PANELS: PanelDef[] = [
   { id: "chat", label: "Chat", href: "/chat", icon: MessageSquare },
   { id: "dashboard", label: "Dashboard", href: "/panel/dashboard", icon: LayoutDashboard },
+  { id: "projects", label: "Projects", href: "/panel/projects", icon: FolderKanban },
   { id: "task-board", label: "Task Board", href: "/panel/task-board", icon: Kanban },
   { id: "task-manager", label: "Task Manager", href: "/panel/task-manager", icon: ListTree },
   { id: "artifacts", label: "Artifacts", href: "/panel/artifacts", icon: Archive },
@@ -90,7 +93,7 @@ const LEGACY_PREFIXES: { prefix: string; id: PanelId }[] = [
   { prefix: "/dashboard", id: "dashboard" },
   { prefix: "/metrics", id: "dashboard" },
   { prefix: "/settings", id: "settings" },
-  { prefix: "/projects", id: "task-manager" },
+  { prefix: "/projects", id: "projects" },
   { prefix: "/agents", id: "task-manager" },
   { prefix: "/tasks", id: "task-board" },
 ];
@@ -142,8 +145,8 @@ export const ROUTE_MIGRATION: { from: string; to: string; note: string }[] = [
   { from: "/agent-board", to: "/panel/task-board", note: "Agents view inside Task Board" },
   { from: "/tasks", to: "/panel/task-board", note: "Merged into Task Board" },
   { from: "/task-manager", to: "/panel/task-manager", note: "Task Manager panel" },
-  { from: "/projects", to: "/panel/task-manager", note: "Projects live in Task Manager" },
-  { from: "/projects/[id]", to: "/panel/task-board?project=[id]", note: "Per-project board in Task Board" },
+  { from: "/projects", to: "/panel/projects", note: "Projects panel" },
+  { from: "/projects/[id]", to: "/panel/projects?project=[id]", note: "Project tasks under Projects" },
   { from: "/agents", to: "/panel/task-manager", note: "Agents list in Task Manager" },
   { from: "/agents/[id]", to: "/agents/[id]", note: "Rich agent profile kept, linked from Task Manager" },
   { from: "/agents/pentest", to: "/panel/task-manager?agent=pentest", note: "Security Tester in Task Manager" },

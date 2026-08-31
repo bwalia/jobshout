@@ -52,8 +52,8 @@ function fallbackHref(entity: EntityRef): string {
         : "/panel/task-board";
     case "project":
       return entity.id
-        ? `/panel/task-manager?project=${entity.id}`
-        : "/panel/task-manager";
+        ? `/panel/projects?project=${entity.id}`
+        : "/panel/projects";
     case "workflow":
     case "workflow_run":
       return entity.id ? `/workflows/${entity.id}` : "/panel/workflows";
