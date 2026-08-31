@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   ChevronDown,
+  Circle,
   ExternalLink,
   Loader2,
   Wrench,
@@ -33,7 +34,10 @@ function StatusPill({ status }: { status: string }) {
       icon: <AlertTriangle className="h-3.5 w-3.5" />,
     },
   };
-  const m = map[status] ?? map.completed;
+  const m = map[status] ?? {
+    cls: "text-muted-foreground",
+    icon: <Circle className="h-3.5 w-3.5" />,
+  };
   return (
     <span className={"inline-flex items-center gap-1 text-xs font-medium " + m.cls}>
       {m.icon}
@@ -53,10 +57,25 @@ export function ExecutionCard({
   agentId?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const { data: exec, isLoading } = useExecution(executionId);
+  const { data: exec, isLoading, isError, refetch } = useExecution(executionId);
   const detailHref = agentId
     ? `/panel/task-manager?agent=${agentId}&run=${executionId}`
     : `/panel/task-manager`;
+
+  if (isError) {
+    return (
+      <div className="mt-2 flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
+        Couldn&apos;t load this run.
+        <button
+          type="button"
+          onClick={() => void refetch()}
+          className="underline hover:text-foreground"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   if (isLoading || !exec) {
     return (
@@ -74,18 +93,20 @@ export function ExecutionCard({
 
   return (
     <div className="mt-2 overflow-hidden rounded-lg border border-border bg-card">
-      <div className="flex items-center gap-2 px-3 py-2">
-        <Zap className="h-4 w-4 text-primary" />
-        <span className="text-sm font-medium">{agentName ?? "Agent run"}</span>
+      <div className="flex min-w-0 items-center gap-2 px-3 py-2">
+        <Zap className="h-4 w-4 shrink-0 text-primary" />
+        <span className="min-w-0 truncate text-sm font-medium">
+          {agentName ?? "Agent run"}
+        </span>
         <StatusPill status={exec.status} />
-        <span className="ml-auto flex items-center gap-3 font-mono text-[11px] text-muted-foreground">
+        <span className="ml-auto flex shrink-0 items-center gap-3 font-mono text-[11px] text-muted-foreground">
           <span>{exec.total_tokens} tok</span>
           <span>${exec.cost_usd.toFixed(4)}</span>
           <span>{duration}</span>
         </span>
         <Link
           href={detailHref}
-          className="rounded p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
+          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
           title="Open in Task Manager"
         >
           <ExternalLink className="h-3.5 w-3.5" />

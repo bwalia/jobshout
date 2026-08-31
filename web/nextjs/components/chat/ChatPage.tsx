@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   useChatMessages,
@@ -37,24 +37,34 @@ export function ChatPage({ className }: { className?: string }) {
   const [streaming, setStreaming] = useState("");
   const [runningLabel, setRunningLabel] = useState<string | null>(null);
   const [pending, setPending] = useState<ChatMessage | null>(null);
+  const [turnFailed, setTurnFailed] = useState(false);
   const messagesQuery = useChatMessages(sessionId, { pollForReply: !busy });
+  const abortRef = useRef<AbortController | null>(null);
+  const turnRef = useRef(0);
+  const turnStartedAtRef = useRef(0);
+  const sessionIdRef = useRef<string | null>(sessionFromUrl);
 
   useEffect(() => {
-    if (sessionFromUrl) {
-      setSessionId(sessionFromUrl);
-      return;
-    }
-    setSessionId(null);
+    // New-chat first send sets the id, then the URL — don't treat that as a switch.
+    if (sessionFromUrl === sessionIdRef.current) return;
+    turnRef.current += 1;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    sessionIdRef.current = sessionFromUrl;
+    setSessionId(sessionFromUrl);
     setPending(null);
     setStreaming("");
     setFailedDraft(null);
     setBusy(false);
     setRunningLabel(null);
+    setTurnFailed(false);
+    setDraft("");
   }, [sessionFromUrl]);
 
   const ensureSession = useCallback(async () => {
     if (sessionId) return sessionId;
     const s = await createSession.mutateAsync();
+    sessionIdRef.current = s.id;
     setSessionId(s.id);
     router.replace(`/chat?session=${s.id}`);
     return s.id;
@@ -65,10 +75,15 @@ export function ChatPage({ className }: { className?: string }) {
       const content = text.trim();
       const token = opts?.token;
       if (!content && !token) return;
-      // What the user sees as their own message — the clicked label for a
-      // clarify pick, the typed text otherwise. The wire value stays content.
       const shown = opts?.display?.trim() || content;
+      const turn = ++turnRef.current;
+      turnStartedAtRef.current = Date.now();
+      abortRef.current?.abort();
+      const ac = new AbortController();
+      abortRef.current = ac;
+
       setFailedDraft(null);
+      setTurnFailed(false);
       setPending(optimisticUserMessage(shown, sessionId));
       setBusy(true);
       setStreaming("");
@@ -76,10 +91,12 @@ export function ChatPage({ className }: { className?: string }) {
       let id = sessionId;
       try {
         id = await ensureSession();
+        if (turn !== turnRef.current) return;
         await streamChatMessage(
           id,
           content || "yes",
           (ev) => {
+            if (turn !== turnRef.current) return;
             if (ev.type === "token" && ev.token) {
               setRunningLabel(null);
               setStreaming((s) => s + ev.token);
@@ -87,21 +104,22 @@ export function ChatPage({ className }: { className?: string }) {
             if (ev.type === "tool_call") {
               setRunningLabel(ev.label || ev.tool || "Working…");
             }
-            if (ev.type === "done") {
-              setStreaming("");
-            }
             if (ev.type === "error") {
               setFailedDraft(shown);
+              setTurnFailed(true);
             }
           },
           {
             confirmationToken: token,
             displayContent: shown !== content ? shown : undefined,
+            signal: ac.signal,
           }
         );
+        if (turn !== turnRef.current) return;
         await qc.invalidateQueries({ queryKey: chatKeys.messages(id) });
         await qc.invalidateQueries({ queryKey: chatKeys.sessions() });
       } catch (err) {
+        if (turn !== turnRef.current) return;
         if (id) {
           void qc.invalidateQueries({ queryKey: chatKeys.messages(id) });
         }
@@ -110,9 +128,10 @@ export function ChatPage({ className }: { className?: string }) {
         }
         setPending(null);
         setFailedDraft(shown);
+        setTurnFailed(true);
       } finally {
+        if (turn !== turnRef.current) return;
         setBusy(false);
-        setStreaming("");
         setRunningLabel(null);
       }
     },
@@ -126,17 +145,29 @@ export function ChatPage({ className }: { className?: string }) {
   };
 
   const messages: ChatMessage[] = withPending(messagesQuery.data ?? [], pending);
-  const waitingOnTurn = !busy && awaitingAssistant(messages);
-  const isEmpty =
-    !sessionId && messages.length === 0 && !busy && !pending;
+  const waitingOnTurn = !busy && !turnFailed && awaitingAssistant(messages);
+  const isEmpty = !sessionId && messages.length === 0 && !busy && !pending;
 
   useEffect(() => {
     if (!pending) return;
-    const synced = (messagesQuery.data ?? []).some(
-      (m) => m.role === "user" && m.content === pending.content
-    );
-    if (synced) setPending(null);
+    if (pendingSynced(messagesQuery.data ?? [], pending)) {
+      setPending(null);
+    }
   }, [messagesQuery.data, pending]);
+
+  // Keep the typed reply on screen until the persisted agent message is in
+  // the list — clearing on `done` made every turn blink out, then back in.
+  useEffect(() => {
+    if (!streaming) return;
+    const vis = (messagesQuery.data ?? []).filter(
+      (m) => m.role === "user" || m.role === "agent"
+    );
+    const last = vis[vis.length - 1];
+    if (last?.role !== "agent") return;
+    const ts = Date.parse(last.created_at);
+    if (!Number.isNaN(ts) && ts + 2000 < turnStartedAtRef.current) return;
+    setStreaming("");
+  }, [messagesQuery.data, streaming]);
 
   const failedRestore = failedDraft ? (
     <button
@@ -194,10 +225,12 @@ export function ChatPage({ className }: { className?: string }) {
       ) : (
         <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-4 py-4">
           <MessageList
+            key={sessionId ?? "new"}
             messages={messages}
             streamingText={streaming}
             runningLabel={runningLabel ?? (waitingOnTurn ? "Working…" : null)}
             busy={busy || waitingOnTurn}
+            stickToBottom={busy}
             onConfirm={(token) => void send("yes", { token })}
             onCancel={() => void send("cancel")}
             onClarify={(value, label) => void send(value, { display: label })}
@@ -223,10 +256,18 @@ function optimisticUserMessage(content: string, sessionId: string | null): ChatM
   };
 }
 
+function pendingSynced(messages: ChatMessage[], pending: ChatMessage): boolean {
+  const lastUser = [...messages].reverse().find((m) => m.role === "user");
+  if (!lastUser || lastUser.content !== pending.content) return false;
+  const lastTs = Date.parse(lastUser.created_at);
+  const pendingTs = Date.parse(pending.created_at);
+  if (Number.isNaN(lastTs) || Number.isNaN(pendingTs)) return true;
+  return lastTs >= pendingTs - 2000;
+}
+
 function withPending(messages: ChatMessage[], pending: ChatMessage | null): ChatMessage[] {
   if (!pending) return messages;
-  const last = [...messages].reverse().find((m) => m.role === "user" || m.role === "agent");
-  if (last?.role === "user" && last.content === pending.content) return messages;
+  if (pendingSynced(messages, pending)) return messages;
   return [...messages, pending];
 }
 

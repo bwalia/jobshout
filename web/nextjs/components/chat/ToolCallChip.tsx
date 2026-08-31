@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, X, Loader2 } from "lucide-react";
+import { Check, X, Loader2, Clock, Ban } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import type { ActionRecord } from "@/lib/types/chat";
 
@@ -15,20 +15,14 @@ export function ToolCallChip({
 }) {
   const status = running ? "running" : action?.status ?? "ok";
   return (
-    <details className="group rounded-md border border-border/70 bg-secondary/30 text-xs">
-      <summary className="flex cursor-pointer list-none items-center gap-2 px-2.5 py-1.5 text-muted-foreground">
-        {status === "running" ? (
-          <Loader2 className="h-3 w-3 animate-spin text-primary" />
-        ) : status === "ok" ? (
-          <Check className="h-3 w-3 text-emerald-500" />
-        ) : (
-          <X className="h-3 w-3 text-destructive" />
-        )}
-        <span className="font-medium text-foreground">
+    <details className="group min-w-0 rounded-md border border-border/70 bg-secondary/30 text-xs">
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-2.5 py-1.5 text-muted-foreground [&::-webkit-details-marker]:hidden">
+        {statusIcon(status)}
+        <span className="min-w-0 truncate font-medium text-foreground">
           {label || humanise(action?.tool)}
         </span>
-        {action?.duration_ms ? (
-          <span className="ml-auto font-mono text-[10px] opacity-60">
+        {typeof action?.duration_ms === "number" ? (
+          <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">
             {action.duration_ms}ms
           </span>
         ) : null}
@@ -47,6 +41,22 @@ export function ToolCallChip({
   );
 }
 
+function statusIcon(status: string) {
+  if (status === "running") {
+    return <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" />;
+  }
+  if (status === "ok") {
+    return <Check className="h-3 w-3 shrink-0 text-emerald-500" />;
+  }
+  if (status === "pending_confirmation") {
+    return <Clock className="h-3 w-3 shrink-0 text-amber-500" />;
+  }
+  if (status === "denied") {
+    return <Ban className="h-3 w-3 shrink-0 text-muted-foreground" />;
+  }
+  return <X className="h-3 w-3 shrink-0 text-destructive" />;
+}
+
 function humanise(tool?: string): string {
   if (!tool) return "Working…";
   return tool.replace(/_/g, " ");
@@ -55,7 +65,7 @@ function humanise(tool?: string): string {
 function stripIds(args: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(args)) {
-    if (/id$/i.test(k) || k === "id") continue;
+    if (k === "id" || /(^|_)id$/i.test(k)) continue;
     out[k] = v;
   }
   return out;

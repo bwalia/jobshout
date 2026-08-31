@@ -13,6 +13,7 @@ import {
   getChatMessages,
   sendChatMessage,
 } from "@/lib/api/chat";
+import { useUiStore } from "@/lib/store/ui-store";
 import type { ChatMessage, ChatSession, ChatTurnResult } from "@/lib/types/chat";
 import type { PaginatedResponse } from "@/lib/types/common";
 
@@ -51,7 +52,7 @@ export function awaitingAssistant(messages: ChatMessage[]): boolean {
   const last = vis[vis.length - 1];
   if (!last || last.role !== "user") return false;
   const t = Date.parse(last.created_at);
-  if (Number.isNaN(t)) return true;
+  if (Number.isNaN(t)) return false;
   return Date.now() - t < 3 * 60 * 1000;
 }
 
@@ -69,7 +70,8 @@ export function useDeleteChatSession(): UseMutationResult<void, Error, string> {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: deleteChatSession,
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
+      useUiStore.getState().clearChatTitle(id);
       qc.invalidateQueries({ queryKey: chatKeys.sessions() });
       toast.success("Chat deleted");
     },

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowUp } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 
@@ -27,8 +27,17 @@ export function Composer({
   variant?: "hero" | "docked";
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
-  const showSlash = value.startsWith("/") && !value.includes(" ");
+  const matches =
+    value.startsWith("/") && !value.includes(" ")
+      ? SLASH.filter((s) => s.cmd.startsWith(value))
+      : [];
+  const showSlash = matches.length > 0;
+  const [highlight, setHighlight] = useState(0);
   const hero = variant === "hero";
+
+  useEffect(() => {
+    setHighlight(0);
+  }, [value]);
 
   useEffect(() => {
     const el = ref.current;
@@ -37,16 +46,24 @@ export function Composer({
     el.style.height = `${Math.min(el.scrollHeight, hero ? 220 : 160)}px`;
   }, [value, hero]);
 
+  function pickSlash(i: number) {
+    const item = matches[i];
+    if (item) onChange(item.hint);
+  }
+
   return (
     <div className="relative w-full">
       {showSlash ? (
         <ul className="absolute bottom-full mb-1 w-full rounded-lg border border-border bg-card p-1 shadow-lg">
-          {SLASH.filter((s) => s.cmd.startsWith(value)).map((s) => (
+          {matches.map((s, i) => (
             <li key={s.cmd}>
               <button
                 type="button"
-                className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm hover:bg-secondary"
-                onClick={() => onChange(s.hint)}
+                className={cn(
+                  "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm hover:bg-secondary",
+                  i === highlight && "bg-secondary"
+                )}
+                onClick={() => pickSlash(i)}
               >
                 <span className="font-mono text-xs">{s.cmd}</span>
                 <span className="text-muted-foreground">{s.hint}</span>
@@ -65,7 +82,6 @@ export function Composer({
           ref={ref}
           rows={hero ? 3 : 1}
           value={value}
-          disabled={disabled}
           placeholder={
             placeholder ??
             (hero
@@ -79,6 +95,23 @@ export function Composer({
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {
             if (e.nativeEvent.isComposing) return;
+            if (showSlash) {
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setHighlight((h) => (h + 1) % matches.length);
+                return;
+              }
+              if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setHighlight((h) => (h - 1 + matches.length) % matches.length);
+                return;
+              }
+              if (e.key === "Tab" || e.key === "Enter") {
+                e.preventDefault();
+                pickSlash(highlight);
+                return;
+              }
+            }
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               if (!disabled && value.trim()) onSend();
