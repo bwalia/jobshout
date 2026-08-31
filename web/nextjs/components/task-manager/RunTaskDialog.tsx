@@ -97,6 +97,17 @@ export function RunTaskDialog({
     setFieldErrors({});
     setTouchedSubmit(false);
     setLaunchError(null);
+    // The generic-agent overrides are per-agent choices: switching agents
+    // must not silently carry an engine/model/skills/debug config into the
+    // payload of a different agent (or resurface it after a specialist
+    // round-trip).
+    setPromptOverride("");
+    setEngine("");
+    setModelProvider("");
+    setModelName("");
+    setSelectedSlugs([]);
+    setExtraSlug("");
+    setDebug(false);
     if (schema.kind !== "mail") {
       setMailboxLoad("idle");
       return;

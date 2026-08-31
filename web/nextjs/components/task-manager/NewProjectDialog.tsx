@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { X } from "lucide-react";
+import { apiErrorMessage } from "@/lib/api/client";
 import { useCreateProject } from "@/lib/hooks/useProjects";
 import type { Priority } from "@/lib/types/common";
 import type { Project } from "@/lib/types/project";
@@ -20,17 +21,25 @@ export function NewProjectDialog({
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<Priority>("medium");
   const [dueDate, setDueDate] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
-    const project = await createProject.mutateAsync({
-      name: name.trim(),
-      description: description.trim() || undefined,
-      priority,
-      due_date: dueDate || undefined,
-    });
-    onCreated(project);
+    setError(null);
+    try {
+      const project = await createProject.mutateAsync({
+        name: name.trim(),
+        description: description.trim() || undefined,
+        priority,
+        due_date: dueDate || undefined,
+      });
+      onCreated(project);
+    } catch (err) {
+      // Without this the dialog just flipped back to "Create Project" with no
+      // explanation (and an unhandled rejection in the console).
+      setError(apiErrorMessage(err, "Failed to create project"));
+    }
   }
 
   return (
@@ -115,6 +124,15 @@ export function NewProjectDialog({
             />
           </div>
         </div>
+
+        {error && (
+          <p
+            role="alert"
+            className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+          >
+            {error}
+          </p>
+        )}
 
         <div className="flex justify-end gap-2 pt-1">
           <button
