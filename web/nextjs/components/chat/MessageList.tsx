@@ -19,7 +19,7 @@ export function MessageList({
   runningLabel?: string | null;
   onConfirm?: (token: string) => void;
   onCancel?: () => void;
-  onClarify?: (value: string) => void;
+  onClarify?: (value: string, label: string) => void;
   busy?: boolean;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);

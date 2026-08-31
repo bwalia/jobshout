@@ -31,7 +31,7 @@ type ChatService interface {
 	DeleteSession(ctx context.Context, orgID, userID, sessionID uuid.UUID) error
 
 	SendMessage(ctx context.Context, orgID, userID, sessionID uuid.UUID, content, source string) (*model.ChatMessage, *model.ChatMessage, error)
-	SendTurn(ctx context.Context, orgID, userID, sessionID uuid.UUID, content, source, confirmToken string, stream chatagent.StreamFunc) (*model.ChatTurnResult, error)
+	SendTurn(ctx context.Context, orgID, userID, sessionID uuid.UUID, content, displayContent, source, confirmToken string, stream chatagent.StreamFunc) (*model.ChatTurnResult, error)
 	SendWithConfirm(ctx context.Context, orgID, userID, sessionID uuid.UUID, content, source, confirmToken string) (*model.ChatTurnResult, error)
 	GetHistory(ctx context.Context, orgID, userID, sessionID uuid.UUID, limit int) ([]model.ChatMessage, error)
 	ListSessions(ctx context.Context, orgID, userID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.ChatSession], error)
@@ -118,7 +118,7 @@ func (s *chatService) DeleteSession(ctx context.Context, orgID, userID, sessionI
 }
 
 func (s *chatService) SendMessage(ctx context.Context, orgID, userID, sessionID uuid.UUID, content, source string) (*model.ChatMessage, *model.ChatMessage, error) {
-	turn, err := s.SendTurn(ctx, orgID, userID, sessionID, content, source, "", nil)
+	turn, err := s.SendTurn(ctx, orgID, userID, sessionID, content, "", source, "", nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -126,13 +126,17 @@ func (s *chatService) SendMessage(ctx context.Context, orgID, userID, sessionID 
 }
 
 func (s *chatService) SendWithConfirm(ctx context.Context, orgID, userID, sessionID uuid.UUID, content, source, confirmToken string) (*model.ChatTurnResult, error) {
-	return s.SendTurn(ctx, orgID, userID, sessionID, content, source, confirmToken, nil)
+	return s.SendTurn(ctx, orgID, userID, sessionID, content, "", source, confirmToken, nil)
 }
 
-func (s *chatService) SendTurn(ctx context.Context, orgID, userID, sessionID uuid.UUID, content, source, confirmToken string, stream chatagent.StreamFunc) (*model.ChatTurnResult, error) {
+func (s *chatService) SendTurn(ctx context.Context, orgID, userID, sessionID uuid.UUID, content, displayContent, source, confirmToken string, stream chatagent.StreamFunc) (*model.ChatTurnResult, error) {
 	if source == "" {
 		source = model.ChatSourceWeb
 	}
+	// A clarify pick sends the machine value as content and the clicked label
+	// as displayContent; the transcript shows the label, the agent acts on the
+	// value, and the value is kept in metadata for traceability.
+	display := strings.TrimSpace(displayContent)
 
 	// Reloading (or the 30s request-timeout middleware) cancels r.Context().
 	// The turn has to outlive that: tools already ran, and the reply must
@@ -157,6 +161,10 @@ func (s *chatService) SendTurn(ctx context.Context, orgID, userID, sessionID uui
 		Content:   content,
 		Metadata:  map[string]any{},
 	}
+	if display != "" && display != content {
+		userMsg.Content = display
+		userMsg.Metadata["submitted_value"] = content
+	}
 	if err := s.chatRepo.AppendMessage(runCtx, userMsg); err != nil {
 		return nil, fmt.Errorf("chat_svc: persist user message: %w", err)
 	}
@@ -175,7 +183,8 @@ func (s *chatService) SendTurn(ctx context.Context, orgID, userID, sessionID uui
 		meta = map[string]any{}
 	}
 	if _, ok := meta["title"]; !ok {
-		meta["title"] = titleFrom(content)
+		// The human-readable form when the turn is a clarify pick.
+		meta["title"] = titleFrom(userMsg.Content)
 	}
 	meta[model.ChatMetaTurnStartedAt] = time.Now().UTC().Format(time.RFC3339)
 	if err := s.chatRepo.UpdateSessionMetadata(runCtx, sessionID, meta); err != nil {

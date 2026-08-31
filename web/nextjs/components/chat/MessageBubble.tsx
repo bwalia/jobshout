@@ -19,7 +19,7 @@ export function MessageBubble({
   message: ChatMessage;
   onConfirm?: (token: string) => void;
   onCancel?: () => void;
-  onClarify?: (value: string) => void;
+  onClarify?: (value: string, label: string) => void;
   busy?: boolean;
 }) {
   const mine = message.role === "user";

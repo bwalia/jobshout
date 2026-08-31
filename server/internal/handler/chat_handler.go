@@ -131,7 +131,7 @@ func (h *ChatHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		source = model.ChatSourceWeb
 	}
 
-	turn, err := h.svc.SendTurn(r.Context(), orgID, userID, sessionID, req.Content, source, req.ConfirmationToken, nil)
+	turn, err := h.svc.SendTurn(r.Context(), orgID, userID, sessionID, req.Content, req.DisplayContent, source, req.ConfirmationToken, nil)
 	if err != nil {
 		RespondError(w, http.StatusInternalServerError, "couldn't send that message")
 		return
@@ -189,7 +189,7 @@ func (h *ChatHandler) StreamMessage(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 	}
 
-	_, err = h.svc.SendTurn(r.Context(), orgID, userID, sessionID, req.Content, source, req.ConfirmationToken, writeEv)
+	_, err = h.svc.SendTurn(r.Context(), orgID, userID, sessionID, req.Content, req.DisplayContent, source, req.ConfirmationToken, writeEv)
 	if err != nil {
 		writeEv(chatagent.Event{Type: chatagent.EventError, Error: "couldn't send that message"})
 	}

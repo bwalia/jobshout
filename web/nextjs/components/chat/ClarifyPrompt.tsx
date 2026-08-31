@@ -7,7 +7,11 @@ export function ClarifyPrompt({
   onPick,
 }: {
   clarify: ClarifyRequest;
-  onPick: (value: string) => void;
+  /**
+   * value is the machine value the agent resolves on (often an ID); label is
+   * what the user clicked and what the transcript should show.
+   */
+  onPick: (value: string, label: string) => void;
 }) {
   return (
     <div className="mt-3">
@@ -18,7 +22,7 @@ export function ClarifyPrompt({
             <button
               key={opt.value}
               type="button"
-              onClick={() => onPick(opt.value)}
+              onClick={() => onPick(opt.value, opt.label)}
               className="rounded-full border border-border bg-secondary/50 px-3 py-1 text-xs font-medium hover:border-primary/50 hover:bg-primary/10"
             >
               {opt.label}
