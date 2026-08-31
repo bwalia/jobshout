@@ -27,9 +27,16 @@ import {
   rememberPanelTransition,
 } from "@/lib/panels";
 
+function startOfLocalDay(d: Date): number {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x.getTime();
+}
+
 function groupByRecency(sessions: ChatSession[]) {
-  const now = Date.now();
-  const day = 86400000;
+  const today = startOfLocalDay(new Date());
+  const yesterday = today - 86400000;
+  const week = today - 6 * 86400000;
   const groups: { label: string; items: ChatSession[] }[] = [
     { label: "Today", items: [] },
     { label: "Yesterday", items: [] },
@@ -38,10 +45,10 @@ function groupByRecency(sessions: ChatSession[]) {
   ];
   for (const s of sessions) {
     const t = Date.parse(s.updated_at);
-    const age = now - (Number.isNaN(t) ? now : t);
-    if (age < day) groups[0].items.push(s);
-    else if (age < 2 * day) groups[1].items.push(s);
-    else if (age < 7 * day) groups[2].items.push(s);
+    const day = Number.isNaN(t) ? today : startOfLocalDay(new Date(t));
+    if (day >= today) groups[0].items.push(s);
+    else if (day >= yesterday) groups[1].items.push(s);
+    else if (day >= week) groups[2].items.push(s);
     else groups[3].items.push(s);
   }
   return groups.filter((g) => g.items.length > 0);
@@ -268,7 +275,13 @@ function SidebarBody({
                           </button>
                         )}
                         {renamingId !== s.id && (
-                          <div className="absolute right-1 top-1/2 hidden -translate-y-1/2 items-center gap-0.5 group-hover:flex">
+                          <div
+                            className={cn(
+                              "absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5",
+                              !active &&
+                                "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-within:opacity-100"
+                            )}
+                          >
                             <button
                               type="button"
                               aria-label="Rename"

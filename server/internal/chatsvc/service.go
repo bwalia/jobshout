@@ -248,10 +248,7 @@ func (s *chatService) SendTurn(ctx context.Context, orgID, userID, sessionID uui
 		}
 	}
 
-	agentMeta := map[string]any{
-		"response": resp,
-		"actions":  resp.Actions,
-	}
+	agentMeta := agentCardMeta(resp)
 	agentMsg := &model.ChatMessage{
 		ID:        uuid.New(),
 		SessionID: sessionID,
@@ -318,4 +315,54 @@ func titleFrom(content string) string {
 		return strings.TrimSpace(s[:80]) + "…"
 	}
 	return s
+}
+
+// agentCardMeta is what the chat bubble reads to render ExecutionCard /
+// WorkflowCard. Those keys used to be omitted, so the cards were dead code.
+func agentCardMeta(resp model.ChatResponse) map[string]any {
+	meta := map[string]any{
+		"response": resp,
+		"actions":  resp.Actions,
+	}
+	for _, e := range resp.Entities {
+		switch e.Kind {
+		case model.EntityExecution:
+			if e.ID != "" {
+				meta["execution_id"] = e.ID
+			}
+			if e.Label != "" && e.Label != "execution" {
+				meta["agent_name"] = e.Label
+			}
+			if id := agentIDFromHref(e.Href); id != "" {
+				meta["agent_id"] = id
+			}
+		case model.EntityWorkflowRun:
+			if e.ID != "" {
+				meta["workflow_run_id"] = e.ID
+			}
+		case model.EntityAgent:
+			if e.ID != "" {
+				meta["agent_id"] = e.ID
+			}
+			if e.Label != "" {
+				meta["agent_name"] = e.Label
+			}
+		}
+	}
+	return meta
+}
+
+func agentIDFromHref(href string) string {
+	const prefix = "/agents/"
+	if !strings.HasPrefix(href, prefix) {
+		return ""
+	}
+	id := strings.TrimPrefix(href, prefix)
+	if i := strings.IndexAny(id, "/?"); i >= 0 {
+		id = id[:i]
+	}
+	if _, err := uuid.Parse(id); err != nil {
+		return ""
+	}
+	return id
 }
