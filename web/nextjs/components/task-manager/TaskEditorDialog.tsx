@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Rocket, X } from "lucide-react";
 import { toast } from "sonner";
 
@@ -18,6 +18,7 @@ import { launchAgentForTask, type LaunchResult } from "@/lib/agents/launch";
 import { fetchMailFormValues, mailFormIsBlank } from "@/lib/agents/mail-playbook";
 import { apiErrorMessage } from "@/lib/api/client";
 import { useCreateTask, useUpdateTask } from "@/lib/hooks/useTasks";
+import { PRIORITY_OPTIONS, STATUS_OPTIONS } from "@/lib/task-labels";
 import type { Agent } from "@/lib/types/agent";
 import type { Priority, TaskStatus } from "@/lib/types/common";
 import type { Project, Task } from "@/lib/types/project";
@@ -25,14 +26,6 @@ import type { Project, Task } from "@/lib/types/project";
 const inputCls =
   "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
-const STATUSES: TaskStatus[] = [
-  "backlog",
-  "todo",
-  "in_progress",
-  "review",
-  "done",
-];
-const PRIORITIES: Priority[] = ["low", "medium", "high", "critical"];
 
 interface TaskEditorDialogProps {
   /** Present => edit that task; absent => create a new one. */
@@ -59,11 +52,16 @@ interface TaskEditorDialogProps {
 export function TaskEditorDialog(props: TaskEditorDialogProps) {
   const { onClose, task } = props;
   const isEdit = Boolean(task);
+  // While a save or launch is in flight (launches can run minutes), a stray
+  // backdrop click must not silently discard the dialog and its progress.
+  const [busy, setBusy] = useState(false);
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onClick={onClose}
+      onClick={() => {
+        if (!busy) onClose();
+      }}
     >
       <div
         className="flex max-h-[90vh] w-full max-w-lg flex-col rounded-xl border border-border bg-card shadow-xl"
@@ -80,7 +78,8 @@ export function TaskEditorDialog(props: TaskEditorDialogProps) {
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            disabled={busy}
+            className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
             aria-label="Close"
           >
             <X className="h-5 w-5" />
@@ -92,6 +91,7 @@ export function TaskEditorDialog(props: TaskEditorDialogProps) {
             task={task}
             agents={props.agents}
             onClose={onClose}
+            onBusyChange={setBusy}
             onSaved={props.onSaved}
           />
         ) : (
@@ -102,6 +102,7 @@ export function TaskEditorDialog(props: TaskEditorDialogProps) {
             agents={props.agents}
             initialAgentId={props.initialAgentId}
             onClose={onClose}
+            onBusyChange={setBusy}
             onSaved={props.onSaved}
             onLaunched={props.onLaunched}
           />
@@ -116,11 +117,13 @@ function EditTaskForm({
   task,
   agents,
   onClose,
+  onBusyChange,
   onSaved,
 }: {
   task: Task;
   agents: Agent[];
   onClose: () => void;
+  onBusyChange?: (busy: boolean) => void;
   onSaved?: (task: Task) => void;
 }) {
   const updateTask = useUpdateTask();
@@ -141,6 +144,11 @@ function EditTaskForm({
 
   const titleOk = !validateTaskTitle(title);
   const pending = updateTask.isPending;
+
+  useEffect(() => {
+    onBusyChange?.(pending);
+    return () => onBusyChange?.(false);
+  }, [pending, onBusyChange]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -252,9 +260,9 @@ function EditTaskForm({
             onChange={(e) => setStatus(e.target.value as TaskStatus)}
             className={inputCls}
           >
-            {STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {s.replace("_", " ")}
+            {STATUS_OPTIONS.map((s) => (
+              <option key={s.value} value={s.value}>
+                {s.label}
               </option>
             ))}
           </select>
@@ -266,9 +274,9 @@ function EditTaskForm({
             onChange={(e) => setPriority(e.target.value as Priority)}
             className={inputCls}
           >
-            {PRIORITIES.map((p) => (
-              <option key={p} value={p}>
-                {p}
+            {PRIORITY_OPTIONS.map((p) => (
+              <option key={p.value} value={p.value}>
+                {p.label}
               </option>
             ))}
           </select>
@@ -325,6 +333,7 @@ function CreateTaskForm({
   agents,
   initialAgentId,
   onClose,
+  onBusyChange,
   onSaved,
   onLaunched,
 }: {
@@ -334,6 +343,7 @@ function CreateTaskForm({
   agents: Agent[];
   initialAgentId?: string;
   onClose: () => void;
+  onBusyChange?: (busy: boolean) => void;
   onSaved?: (task: Task) => void;
   onLaunched?: (result: LaunchResult) => void;
 }) {
@@ -362,11 +372,19 @@ function CreateTaskForm({
     "idle"
   );
 
+  // The board task created by the last "Create & run" attempt. Kept so a
+  // failed or timed-out launch can be retried without POSTing a duplicate
+  // task — three retries used to mean three identical board tasks.
+  const createdTaskRef = useRef<Task | null>(null);
+
   useEffect(() => {
     setValues(defaultValuesForSchema(schema));
     setFieldErrors({});
     setFormError(null);
     setTouchedSubmit(false);
+    // A different agent means a different task shape — stop reusing the one
+    // created for the previous agent.
+    createdTaskRef.current = null;
     if (schema.kind !== "mail") {
       setMailboxLoad("idle");
       return;
@@ -388,6 +406,16 @@ function CreateTaskForm({
 
   const pending = createTask.isPending || launching;
   const resolvedProjectId = fixedProjectId || projectId;
+
+  useEffect(() => {
+    onBusyChange?.(pending);
+    return () => onBusyChange?.(false);
+  }, [pending, onBusyChange]);
+
+  // Changing project also invalidates any task created for the previous one.
+  useEffect(() => {
+    createdTaskRef.current = null;
+  }, [resolvedProjectId]);
   const mailReady = schema.kind !== "mail" || mailboxLoad === "ready";
   const schemaOk =
     Boolean(selectedAgent) && schemaValuesValid(schema, values);
@@ -452,12 +480,20 @@ function CreateTaskForm({
     });
   }
 
+  /** Creates the board task once; failed-launch retries reuse it. */
+  async function ensureBoardTask(): Promise<Task> {
+    if (createdTaskRef.current) return createdTaskRef.current;
+    const created = await createBoardTask();
+    createdTaskRef.current = created;
+    return created;
+  }
+
   async function handleCreateOnly(e: React.FormEvent) {
     e.preventDefault();
     if (pending) return;
     if (!assertCreateReady()) return;
     try {
-      const created = await createBoardTask();
+      const created = await ensureBoardTask();
       onSaved?.(created);
       onClose();
     } catch (err) {
@@ -472,7 +508,7 @@ function CreateTaskForm({
     setLaunching(true);
     setFormError(null);
     try {
-      const created = await createBoardTask();
+      const created = await ensureBoardTask();
       const result = await launchAgentForTask({
         agent: selectedAgent,
         task: created,
@@ -499,7 +535,13 @@ function CreateTaskForm({
       onClose();
     } catch (err) {
       const msg = apiErrorMessage(err, "Failed to launch agent");
-      setFormError(msg);
+      // Tell the user the task exists so a retry is understood as re-running
+      // it, not creating another one.
+      setFormError(
+        createdTaskRef.current
+          ? `${msg} — the task was created; Create & run retries the run on the same task.`
+          : msg
+      );
       toast.error(msg);
     } finally {
       setLaunching(false);
@@ -596,9 +638,9 @@ function CreateTaskForm({
                 onChange={(e) => setPriority(e.target.value as Priority)}
                 className={inputCls}
               >
-                {PRIORITIES.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
+                {PRIORITY_OPTIONS.map((p) => (
+                  <option key={p.value} value={p.value}>
+                    {p.label}
                   </option>
                 ))}
               </select>

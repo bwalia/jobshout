@@ -215,7 +215,12 @@ function RepoField({
         if (cancelled) return;
         const list = data.allowed ?? [];
         setAllowed(list);
-        if (list.length && !value) onChange(list[0]);
+        // Also replace a hydrated value that's no longer allowed: leaving it
+        // rendered the <select> blank while the stale string still validated,
+        // so "Run now" would launch against a repo the UI never displayed.
+        if (list.length && (!value || !list.includes(value))) {
+          onChange(list[0]);
+        }
       } catch {
         if (!cancelled) setAllowed([]);
       }

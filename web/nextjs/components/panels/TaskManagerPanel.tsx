@@ -23,6 +23,7 @@ import {
   useTasks,
   useTransitionTask,
 } from "@/lib/hooks/useTasks";
+import { STATUS_OPTIONS, statusLabel } from "@/lib/task-labels";
 import { TaskEditorDialog } from "@/components/task-manager/TaskEditorDialog";
 import { RunTaskDialog } from "@/components/task-manager/RunTaskDialog";
 import { TaskRunView } from "@/components/task-manager/TaskRunView";
@@ -494,17 +495,9 @@ function ProjectTasksView({
                     }
                     className="h-8 rounded-md border border-input bg-background px-2 text-sm"
                   >
-                    {(
-                      [
-                        "backlog",
-                        "todo",
-                        "in_progress",
-                        "review",
-                        "done",
-                      ] as TaskStatus[]
-                    ).map((s) => (
-                      <option key={s} value={s}>
-                        {s.replace(/_/g, " ")}
+                    {STATUS_OPTIONS.map((s) => (
+                      <option key={s.value} value={s.value}>
+                        {s.label}
                       </option>
                     ))}
                   </select>
@@ -627,6 +620,9 @@ function AgentDetailView({
               }
               setCreateOpen(true);
             }}
+            title={
+              tasks[0] ? `Runs "${tasks[0].title}"` : "Create and run a task"
+            }
             className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90"
           >
             <Rocket className="h-4 w-4" />{" "}
@@ -652,7 +648,7 @@ function AgentDetailView({
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{t.title}</p>
                   <p className="text-xs text-muted-foreground">
-                    {t.status.replace(/_/g, " ")} · updated{" "}
+                    {statusLabel(t.status)} · updated{" "}
                     {new Date(t.updated_at).toLocaleString()}
                   </p>
                 </div>
@@ -671,7 +667,11 @@ function AgentDetailView({
 
       {tasks[0] && (
         <section>
-          <h3 className="mb-2 text-sm font-medium">Recent runs</h3>
+          {/* This shows one task's runs, not the agent's whole history — say
+              which task, so the heading doesn't overpromise. */}
+          <h3 className="mb-2 truncate text-sm font-medium">
+            Runs for &ldquo;{tasks[0].title}&rdquo;
+          </h3>
           <TaskRunView task={tasks[0]} agents={agents} focusRunId={null} />
         </section>
       )}

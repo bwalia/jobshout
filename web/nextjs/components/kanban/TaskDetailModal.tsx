@@ -4,28 +4,12 @@ import { useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { updateTask, getTaskComments, addTaskComment } from "@/lib/api/tasks";
+import { useAgents } from "@/lib/hooks/useAgents";
 import { taskKeys } from "@/lib/hooks/useTasks";
+import { useAuthStore } from "@/lib/store/auth-store";
+import { PRIORITY_OPTIONS, STATUS_OPTIONS } from "@/lib/task-labels";
 import type { Task, UpdateTaskRequest, TaskComment } from "@/lib/types/project";
 import type { TaskStatus, Priority } from "@/lib/types/common";
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const STATUS_OPTIONS: { value: TaskStatus; label: string }[] = [
-  { value: "backlog", label: "Backlog" },
-  { value: "todo", label: "Todo" },
-  { value: "in_progress", label: "In Progress" },
-  { value: "review", label: "Review" },
-  { value: "done", label: "Done" },
-];
-
-const PRIORITY_OPTIONS: { value: Priority; label: string }[] = [
-  { value: "low", label: "Low" },
-  { value: "medium", label: "Medium" },
-  { value: "high", label: "High" },
-  { value: "critical", label: "Critical" },
-];
 
 // ---------------------------------------------------------------------------
 // TaskDetailModal
@@ -55,6 +39,19 @@ function formatRelativeTime(isoTimestamp: string): string {
 
 export function TaskDetailModal({ task, onClose, onUpdated }: TaskDetailModalProps) {
   const queryClient = useQueryClient();
+  const { data: agentsResp } = useAgents({ per_page: 100 });
+  const agents = agentsResp?.data ?? [];
+  const currentUserId = useAuthStore((s) => s.user?.id ?? null);
+
+  // Comments only carry ids; resolve what we can rather than rendering every
+  // comment anonymously.
+  function commentAuthor(comment: TaskComment): string {
+    if (comment.agent_id) {
+      return agents.find((a) => a.id === comment.agent_id)?.name ?? "Agent";
+    }
+    if (comment.author_id && comment.author_id === currentUserId) return "You";
+    return "Team member";
+  }
 
   // Local form state initialised from the task prop
   const [title, setTitle] = useState(task.title);
@@ -242,19 +239,32 @@ export function TaskDetailModal({ task, onClose, onUpdated }: TaskDetailModalPro
             </div>
           </div>
 
-          {/* Assignee picker (simplified — shows agent ID input) */}
+          {/* Assignee picker */}
           <div className="space-y-1.5">
             <label htmlFor="task-assignee" className="text-sm font-medium">
-              Assigned Agent ID
+              Assigned Agent
             </label>
-            <input
+            <select
               id="task-assignee"
-              type="text"
               value={assignedAgentId}
               onChange={(e) => setAssignedAgentId(e.target.value)}
-              placeholder="Paste agent ID or leave blank"
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            />
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <option value="">Unassigned</option>
+              {/* Keep an unknown current assignee selectable rather than
+                  silently rendering a blank control. */}
+              {assignedAgentId &&
+                !agents.some((a) => a.id === assignedAgentId) && (
+                  <option value={assignedAgentId}>
+                    Unknown agent ({assignedAgentId.slice(0, 8)}…)
+                  </option>
+                )}
+              {agents.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* Due date */}
@@ -300,6 +310,7 @@ export function TaskDetailModal({ task, onClose, onUpdated }: TaskDetailModalPro
                       {comment.body}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
+                      {commentAuthor(comment)} ·{" "}
                       {formatRelativeTime(comment.created_at)}
                     </p>
                   </li>
