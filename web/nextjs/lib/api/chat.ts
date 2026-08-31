@@ -54,12 +54,22 @@ export async function sendChatMessage(
   return data;
 }
 
+export interface StreamChatOptions {
+  confirmationToken?: string;
+  signal?: AbortSignal;
+  /**
+   * What the transcript should show for this message when it differs from
+   * content — e.g. a clarify pick sends the option's machine value as content
+   * and the clicked label here.
+   */
+  displayContent?: string;
+}
+
 export async function streamChatMessage(
   sessionId: string,
   content: string,
   onEvent: (ev: ChatStreamEvent) => void,
-  confirmationToken?: string,
-  signal?: AbortSignal
+  options: StreamChatOptions = {}
 ): Promise<void> {
   const token =
     typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
@@ -74,9 +84,10 @@ export async function streamChatMessage(
       body: JSON.stringify({
         content,
         source: "web",
-        confirmation_token: confirmationToken || undefined,
+        confirmation_token: options.confirmationToken || undefined,
+        display_content: options.displayContent || undefined,
       }),
-      signal,
+      signal: options.signal,
     }
   );
   if (!res.ok || !res.body) {

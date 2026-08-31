@@ -61,11 +61,15 @@ export function ChatPage({ className }: { className?: string }) {
   }, [sessionId, createSession, router]);
 
   const send = useCallback(
-    async (text: string, token?: string) => {
+    async (text: string, opts?: { token?: string; display?: string }) => {
       const content = text.trim();
+      const token = opts?.token;
       if (!content && !token) return;
+      // What the user sees as their own message — the clicked label for a
+      // clarify pick, the typed text otherwise. The wire value stays content.
+      const shown = opts?.display?.trim() || content;
       setFailedDraft(null);
-      setPending(optimisticUserMessage(content, sessionId));
+      setPending(optimisticUserMessage(shown, sessionId));
       setBusy(true);
       setStreaming("");
       setRunningLabel("Working…");
@@ -87,10 +91,13 @@ export function ChatPage({ className }: { className?: string }) {
               setStreaming("");
             }
             if (ev.type === "error") {
-              setFailedDraft(content);
+              setFailedDraft(shown);
             }
           },
-          token
+          {
+            confirmationToken: token,
+            displayContent: shown !== content ? shown : undefined,
+          }
         );
         await qc.invalidateQueries({ queryKey: chatKeys.messages(id) });
         await qc.invalidateQueries({ queryKey: chatKeys.sessions() });
@@ -102,7 +109,7 @@ export function ChatPage({ className }: { className?: string }) {
           return;
         }
         setPending(null);
-        setFailedDraft(content);
+        setFailedDraft(shown);
       } finally {
         setBusy(false);
         setStreaming("");
@@ -191,9 +198,9 @@ export function ChatPage({ className }: { className?: string }) {
             streamingText={streaming}
             runningLabel={runningLabel ?? (waitingOnTurn ? "Working…" : null)}
             busy={busy || waitingOnTurn}
-            onConfirm={(token) => void send("yes", token)}
+            onConfirm={(token) => void send("yes", { token })}
             onCancel={() => void send("cancel")}
-            onClarify={(v) => void send(v)}
+            onClarify={(value, label) => void send(value, { display: label })}
           />
           {failedRestore}
           {composer}

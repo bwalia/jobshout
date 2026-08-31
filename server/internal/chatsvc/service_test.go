@@ -189,7 +189,7 @@ func TestSendTurn_SurvivesCanceledRequest(t *testing.T) {
 	var turn *model.ChatTurnResult
 	go func() {
 		var err error
-		turn, err = svc.SendTurn(reqCtx, org, user, sid, "hello", "web", "", nil)
+		turn, err = svc.SendTurn(reqCtx, org, user, sid, "hello", "", "web", "", nil)
 		errCh <- err
 	}()
 
@@ -245,7 +245,7 @@ func TestSendTurn_CanceledBeforeStartStillPersists(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	turn, err := svc.SendTurn(ctx, org, user, sid, "hello", "web", "", nil)
+	turn, err := svc.SendTurn(ctx, org, user, sid, "hello", "", "web", "", nil)
 	if err != nil {
 		t.Fatalf("already-canceled request must still complete: %v", err)
 	}
@@ -302,7 +302,7 @@ func TestSendTurn_PersistsToolTranscript(t *testing.T) {
 	agent := chatagent.New(client, reg, platformtools.NewGuard(nil, nil), nil, zap.NewNop())
 	svc := NewChatService(repo, agent, zap.NewNop())
 
-	_, err := svc.SendTurn(context.Background(), org, user, sid, "create a task", "web", "", nil)
+	_, err := svc.SendTurn(context.Background(), org, user, sid, "create a task", "", "web", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -323,7 +323,7 @@ func TestSendTurn_PersistsToolTranscript(t *testing.T) {
 		t.Fatalf("expected a tool-result row, got roles: %v", rolesOf(msgs))
 	}
 
-	_, err = svc.SendTurn(context.Background(), org, user, sid, "what was that again", "web", "", nil)
+	_, err = svc.SendTurn(context.Background(), org, user, sid, "what was that again", "", "web", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,7 +361,7 @@ func TestSendTurn_TruncatesHugeToolPayload(t *testing.T) {
 	}}
 	agent := chatagent.New(client, reg, nil, nil, zap.NewNop())
 	svc := NewChatService(repo, agent, zap.NewNop())
-	if _, err := svc.SendTurn(context.Background(), org, user, sid, "go", "web", "", nil); err != nil {
+	if _, err := svc.SendTurn(context.Background(), org, user, sid, "go", "", "web", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	msgs, _ := repo.ListMessages(context.Background(), sid, 50)
@@ -369,6 +369,56 @@ func TestSendTurn_TruncatesHugeToolPayload(t *testing.T) {
 		if m.Role == model.ChatRoleTool && len(m.Content) >= 50_000 {
 			t.Fatalf("stored %d chars", len(m.Content))
 		}
+	}
+}
+
+// A clarify pick sends the machine value as content and the clicked label as
+// display content: the transcript must show the label, the agent must act on
+// the value, and the value must stay traceable in metadata.
+func TestSendTurn_DisplayContentShowsLabelActsOnValue(t *testing.T) {
+	repo := newMemChatRepo()
+	org, user, sid := uuid.New(), uuid.New(), uuid.New()
+	if err := repo.CreateSession(context.Background(), &model.ChatSession{
+		ID: sid, OrgID: org, UserID: user, Source: model.ChatSourceWeb, Metadata: map[string]any{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	client := &recordingLLM{steps: []llm.GenerateResponse{{Content: "Task queued.", FinishReason: "stop"}}}
+	agent := chatagent.New(client, platformtools.NewRegistry(), platformtools.NewGuard(nil, nil), nil, zap.NewNop())
+	svc := NewChatService(repo, agent, zap.NewNop())
+
+	const value = "6a1f0f5e-1234-4bcd-9e8f-aaaaaaaaaaaa"
+	const label = "WSL"
+	turn, err := svc.SendTurn(context.Background(), org, user, sid, value, label, "web", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if turn.UserMessage.Content != label {
+		t.Fatalf("persisted content = %q; want the label %q", turn.UserMessage.Content, label)
+	}
+	if got := turn.UserMessage.Metadata["submitted_value"]; got != value {
+		t.Fatalf("submitted_value = %v; want %q", got, value)
+	}
+
+	var sawValue bool
+	for _, req := range client.reqs {
+		for _, m := range req.Messages {
+			if m.Role == llm.RoleUser && strings.Contains(m.Content, value) {
+				sawValue = true
+			}
+		}
+	}
+	if !sawValue {
+		t.Fatal("the agent never received the machine value")
+	}
+
+	session, err := repo.GetSession(context.Background(), sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if title, _ := session.Metadata["title"].(string); !strings.Contains(title, label) {
+		t.Fatalf("session title %q should come from the label", title)
 	}
 }
 
