@@ -109,8 +109,8 @@ function legacyPanelFromPath(pathname: string): PanelId | null {
 export const AUTOMATIONS_HREF = "/panel/workflows";
 
 /**
- * Always-visible sidebar items. Dashboard is first among app destinations;
- * clicking it (or any /panel route) reveals APP_NAV_PANELS underneath.
+ * Always-visible sidebar items. Dashboard opens the workspace; clicking it
+ * again while you are on Dashboard tucks APP_NAV_PANELS away underneath it.
  */
 export const SIDEBAR_PRIMARY: { id: string; label: string; href: string; icon: LucideIcon }[] = [
   { id: "automations", label: "Automations", href: AUTOMATIONS_HREF, icon: Bot },

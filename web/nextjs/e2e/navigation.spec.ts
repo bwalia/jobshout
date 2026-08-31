@@ -51,6 +51,13 @@ test.describe("Navigation & Layout", () => {
     await expect(aside.getByRole("link", { name: "Artifacts" })).toBeVisible();
     await expect(aside.getByRole("link", { name: "Automations" })).toBeVisible();
 
+    await aside.getByRole("link", { name: "Dashboard" }).click();
+    await expect(aside.getByRole("link", { name: "Task Board" })).toHaveCount(0);
+    await expect(page).toHaveURL(/\/panel\/dashboard/);
+
+    await aside.getByRole("link", { name: "Dashboard" }).click();
+    await expect(aside.getByRole("link", { name: "Task Board" })).toBeVisible();
+
     await aside.getByRole("button", { name: /new chat/i }).click();
     await expect(page).toHaveURL(/\/chat/);
     await expect(aside.getByRole("link", { name: "Task Board" })).toHaveCount(0);
