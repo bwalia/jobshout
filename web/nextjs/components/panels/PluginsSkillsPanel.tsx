@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { cn } from "@/lib/utils/cn";
-import PluginsPage from "@/app/(app)/plugins/page";
-import SkillsPage from "@/app/(app)/skills/page";
+import { PluginsView } from "@/app/(app)/plugins/page";
+import { SkillsView } from "@/app/(app)/skills/page";
 
 type Tab = "plugins" | "skills";
 
@@ -41,9 +41,9 @@ export function PluginsSkillsPanel() {
         ))}
       </div>
       {tab === "plugins" ? (
-        <PluginsPage hideHeader />
+        <PluginsView hideHeader />
       ) : (
-        <SkillsPage hideHeader />
+        <SkillsView hideHeader />
       )}
     </div>
   );

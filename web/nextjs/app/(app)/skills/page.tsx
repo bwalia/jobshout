@@ -280,7 +280,7 @@ function SkillCard({ skill }: { skill: Skill }) {
   );
 }
 
-export default function SkillsPage({
+export function SkillsView({
   hideHeader = false,
 }: {
   hideHeader?: boolean;
@@ -385,4 +385,8 @@ export default function SkillsPage({
       />
     </>
   );
+}
+
+export default function SkillsPage() {
+  return <SkillsView />;
 }

@@ -32,7 +32,7 @@ const SOURCE_LABELS: Record<string, string> = {
   manual: "Manual",
 };
 
-export default function ImagesPage({
+export function ImagesView({
   hideHeader = false,
 }: {
   hideHeader?: boolean;
@@ -233,4 +233,8 @@ export default function ImagesPage({
       </section>
     </div>
   );
+}
+
+export default function ImagesPage() {
+  return <ImagesView />;
 }

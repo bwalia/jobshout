@@ -208,7 +208,7 @@ function RunCard({ run }: { run: BlogRun }) {
   );
 }
 
-export default function ArticlesPage({
+export function ArticlesView({
   hideHeader = false,
 }: {
   hideHeader?: boolean;
@@ -311,4 +311,8 @@ export default function ArticlesPage({
       />
     </>
   );
+}
+
+export default function ArticlesPage() {
+  return <ArticlesView />;
 }

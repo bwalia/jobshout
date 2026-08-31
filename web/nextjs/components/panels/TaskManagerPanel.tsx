@@ -35,8 +35,8 @@ import { AgentStatusBadge } from "@/components/agent/AgentStatusBadge";
 import { PentestAgentClient } from "@/components/PentestAgentClient";
 import { ReviewAgentClient } from "@/components/ReviewAgentClient";
 import { MailAgentClient } from "@/components/MailAgentClient";
-import ArticlesPage from "@/app/(app)/articles/page";
-import ImagesPage from "@/app/(app)/images/page";
+import { ArticlesView } from "@/app/(app)/articles/page";
+import { ImagesView } from "@/app/(app)/images/page";
 import type { LaunchResult } from "@/lib/agents/launch";
 import type { Agent } from "@/lib/types/agent";
 import type { Project, Task } from "@/lib/types/project";
@@ -293,12 +293,12 @@ export function TaskManagerPanel() {
           )}
           {selection?.kind === "builtin" && selection.id === "articles" && (
             <BuiltinFrame title="Article Writer">
-              <ArticlesPage hideHeader />
+              <ArticlesView hideHeader />
             </BuiltinFrame>
           )}
           {selection?.kind === "builtin" && selection.id === "images" && (
             <BuiltinFrame title="Image Generator">
-              <ImagesPage hideHeader />
+              <ImagesView hideHeader />
             </BuiltinFrame>
           )}
           {selection?.kind === "agent" && selectedAgent && (

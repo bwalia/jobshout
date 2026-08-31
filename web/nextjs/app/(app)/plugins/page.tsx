@@ -219,7 +219,7 @@ function PluginCard({ plugin }: { plugin: Plugin }) {
   );
 }
 
-export default function PluginsPage({
+export function PluginsView({
   hideHeader = false,
 }: {
   hideHeader?: boolean;
@@ -326,4 +326,8 @@ export default function PluginsPage({
       />
     </>
   );
+}
+
+export default function PluginsPage() {
+  return <PluginsView />;
 }

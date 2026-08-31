@@ -7,7 +7,7 @@ import { useProjects } from "@/lib/hooks/useProjects";
 import { useTasks } from "@/lib/hooks/useTasks";
 import { TaskDetailModal } from "@/components/kanban/TaskDetailModal";
 import { KanbanBoard } from "@/components/kanban/KanbanBoard";
-import AgentBoardPage from "@/app/(app)/agent-board/page";
+import { AgentBoardView } from "@/app/(app)/agent-board/page";
 import type { Task } from "@/lib/types/project";
 import type { TaskStatus } from "@/lib/types/common";
 import { cn } from "@/lib/utils/cn";
@@ -165,7 +165,7 @@ export function TaskBoardPanel() {
 
       <div className="min-h-0 flex-1 overflow-auto scrollbar-thin p-4">
         {view === "agents" ? (
-          <AgentBoardPage hideHeader />
+          <AgentBoardView hideHeader />
         ) : projectFilter ? (
           // Single project: full drag-and-drop board with inline task creation.
           <div className="h-full min-h-[420px]">

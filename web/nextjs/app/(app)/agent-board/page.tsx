@@ -91,7 +91,7 @@ const COLUMNS: ColumnDef[] = [
 // Page
 // ---------------------------------------------------------------------------
 
-export default function AgentBoardPage({
+export function AgentBoardView({
   hideHeader = false,
 }: {
   hideHeader?: boolean;
@@ -154,6 +154,10 @@ export default function AgentBoardPage({
       </div>
     </div>
   );
+}
+
+export default function AgentBoardPage() {
+  return <AgentBoardView />;
 }
 
 // ---------------------------------------------------------------------------
