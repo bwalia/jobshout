@@ -7,7 +7,7 @@ import { useProjects } from "@/lib/hooks/useProjects";
 import { useTasks } from "@/lib/hooks/useTasks";
 import { TaskDetailModal } from "@/components/kanban/TaskDetailModal";
 import { KanbanBoard } from "@/components/kanban/KanbanBoard";
-import { AgentBoardView } from "@/app/(app)/agent-board/page";
+import { AgentBoardView } from "@/components/agent-board/AgentBoardView";
 import type { Task } from "@/lib/types/project";
 import type { TaskStatus } from "@/lib/types/common";
 import { cn } from "@/lib/utils/cn";
