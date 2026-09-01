@@ -68,6 +68,10 @@ func (m ModelInfo) SupportsTools() bool { return m.Has(CapTools) }
 // SupportsVision reports whether the model accepts images.
 func (m ModelInfo) SupportsVision() bool { return m.Has(CapVision) }
 
+// SupportsThinking reports whether the model has a reasoning phase that can be
+// requested per call (GenerateRequest.Think).
+func (m ModelInfo) SupportsThinking() bool { return m.Has(CapThinking) }
+
 // IsEmbeddingOnly reports whether the model can only produce embeddings, and so
 // must never appear in a chat-model picker.
 func (m ModelInfo) IsEmbeddingOnly() bool {

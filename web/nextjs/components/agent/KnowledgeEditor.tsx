@@ -2,9 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import dynamic from "next/dynamic";
+import { useTheme } from "next-themes";
 
-// Monaco is a large browser-only library; load it dynamically to keep the
-// server bundle small and avoid SSR issues with the window object.
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
   loading: () => (
@@ -14,25 +13,24 @@ const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ),
 });
 
-type SaveState = "idle" | "saving" | "saved";
+type SaveState = "idle" | "saving" | "saved" | "error";
 
 interface KnowledgeEditorProps {
-  /** Current Markdown content of the file */
   value: string;
-  /** Called on every content change */
   onChange: (value: string) => void;
-  /** Called when the user explicitly requests a save (Ctrl/Cmd+S or Save button) */
-  onSave: () => void;
+  onSave: () => void | Promise<void>;
 }
 
-// Delay in milliseconds before resetting the "Saved" indicator back to idle
 const SAVED_RESET_DELAY_MS = 2000;
 
 export function KnowledgeEditor({ value, onChange, onSave }: KnowledgeEditorProps) {
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const savedResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { resolvedTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
 
-  // Clean up the reset timer on unmount to avoid state updates on an unmounted component
+  useEffect(() => setMounted(true), []);
+
   useEffect(() => {
     return () => {
       if (savedResetTimerRef.current) {
@@ -41,24 +39,23 @@ export function KnowledgeEditor({ value, onChange, onSave }: KnowledgeEditorProp
     };
   }, []);
 
-  const triggerSave = useCallback(() => {
+  const triggerSave = useCallback(async () => {
     if (savedResetTimerRef.current) {
       clearTimeout(savedResetTimerRef.current);
     }
 
     setSaveState("saving");
-
-    // Simulate async save; in production onSave would return a Promise
-    onSave();
-
-    setSaveState("saved");
-
-    savedResetTimerRef.current = setTimeout(() => {
-      setSaveState("idle");
-    }, SAVED_RESET_DELAY_MS);
+    try {
+      await onSave();
+      setSaveState("saved");
+      savedResetTimerRef.current = setTimeout(() => {
+        setSaveState("idle");
+      }, SAVED_RESET_DELAY_MS);
+    } catch {
+      setSaveState("error");
+    }
   }, [onSave]);
 
-  // Register Ctrl/Cmd+S keyboard shortcut on the editor mount
   function handleEditorDidMount(
     editor: { addCommand: (keybinding: number, handler: () => void) => void },
     monaco: {
@@ -67,34 +64,35 @@ export function KnowledgeEditor({ value, onChange, onSave }: KnowledgeEditorProp
     }
   ): void {
     // eslint-disable-next-line no-bitwise
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, triggerSave);
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+      void triggerSave();
+    });
   }
 
   function handleChange(newValue: string | undefined): void {
     onChange(newValue ?? "");
-    // Reset save indicator when the user makes a change after a save
-    if (saveState === "saved") {
+    if (saveState === "saved" || saveState === "error") {
       setSaveState("idle");
     }
   }
 
+  const monacoTheme = mounted && resolvedTheme === "dark" ? "vs-dark" : "vs";
+
   return (
     <div className="flex h-full flex-col">
-      {/* Save status bar */}
       <div className="flex items-center justify-between border-b border-border bg-muted/30 px-4 py-1.5">
         <span className="text-xs text-muted-foreground">
           Markdown &bull; Use Ctrl/Cmd+S to save
         </span>
 
         <div className="flex items-center gap-3">
-          {/* Save state indicator */}
           {saveState === "saving" && (
             <span className="text-xs text-muted-foreground animate-pulse">
               Saving...
             </span>
           )}
           {saveState === "saved" && (
-            <span className="flex items-center gap-1 text-xs text-green-600">
+            <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
               <svg
                 className="h-3.5 w-3.5"
                 xmlns="http://www.w3.org/2000/svg"
@@ -108,10 +106,13 @@ export function KnowledgeEditor({ value, onChange, onSave }: KnowledgeEditorProp
               Saved
             </span>
           )}
+          {saveState === "error" && (
+            <span className="text-xs text-destructive">Save failed</span>
+          )}
 
           <button
             type="button"
-            onClick={triggerSave}
+            onClick={() => void triggerSave()}
             className="inline-flex h-7 items-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             Save
@@ -119,7 +120,6 @@ export function KnowledgeEditor({ value, onChange, onSave }: KnowledgeEditorProp
         </div>
       </div>
 
-      {/* Monaco editor fills remaining height */}
       <div className="flex-1 overflow-hidden">
         <MonacoEditor
           height="100%"
@@ -137,7 +137,7 @@ export function KnowledgeEditor({ value, onChange, onSave }: KnowledgeEditorProp
             automaticLayout: true,
             padding: { top: 12, bottom: 12 },
           }}
-          theme="vs-dark"
+          theme={monacoTheme}
         />
       </div>
     </div>

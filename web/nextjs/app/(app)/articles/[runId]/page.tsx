@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   Ban,
@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import {
   useBlogArticles,
+  blogKeys,
   useBlogConfig,
   useBlogRun,
   useCancelBlogRun,
@@ -21,6 +22,7 @@ import {
   usePublishBlogRun,
   useRetryBlogRun,
 } from "@/lib/hooks/useBlog";
+import { useQueryClient } from "@tanstack/react-query";
 import { RunSteps } from "@/components/blog/RunSteps";
 import { ArticleViewer } from "@/components/blog/ArticleViewer";
 import { cn } from "@/lib/utils/cn";
@@ -28,8 +30,11 @@ import { cn } from "@/lib/utils/cn";
 export default function ArticleRunPage() {
   const params = useParams();
   const runId = String(params.runId ?? "");
+  const searchParams = useSearchParams();
+  const articleParam = searchParams.get("article");
 
   const router = useRouter();
+  const qc = useQueryClient();
   const { data: run, isLoading, isError } = useBlogRun(runId);
   const { data: config } = useBlogConfig();
   const publish = usePublishBlogRun();
@@ -39,32 +44,62 @@ export default function ArticleRunPage() {
 
   const writing = run?.status === "running" || run?.status === "pending";
   const articleCount = run?.articles?.length ?? 0;
-  const { data: articles } = useBlogArticles(
+  const {
+    data: articles,
+    isLoading: articlesLoading,
+  } = useBlogArticles(
     runId,
     Boolean(run) &&
       (run?.status === "completed" ||
         run?.status === "failed" ||
+        run?.status === "cancelled" ||
         articleCount > 0),
     writing && articleCount > 0
   );
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const wasWriting = useRef(writing);
+  useEffect(() => {
+    if (wasWriting.current && !writing) {
+      void qc.invalidateQueries({ queryKey: blogKeys.articles(runId) });
+    }
+    wasWriting.current = writing;
+  }, [writing, runId, qc]);
+
   const selected =
-    articles?.find((a) => a.id === selectedId) ?? articles?.[0] ?? null;
+    articles?.find((a) => a.id === articleParam) ?? articles?.[0] ?? null;
+  const missingDeepLink =
+    Boolean(articleParam) &&
+    Boolean(articles) &&
+    !articles!.some((a) => a.id === articleParam);
+
+  function selectArticle(id: string) {
+    router.replace(`/articles/${runId}?article=${id}`, { scroll: false });
+  }
 
   if (isLoading) {
+    // Mirrors the loaded layout (same gutter, rhythm, and grid) so the page
+    // doesn't visibly reflow the moment the run arrives.
     return (
-      <div className="space-y-4">
-        <div className="h-8 w-64 animate-pulse rounded bg-muted" />
-        <div className="h-64 animate-pulse rounded-xl bg-muted" />
+      <div className="space-y-6 p-6">
+        <div className="space-y-2">
+          <div className="h-4 w-24 animate-pulse rounded bg-muted" />
+          <div className="h-8 w-64 max-w-full animate-pulse rounded bg-muted" />
+          <div className="h-4 w-96 max-w-full animate-pulse rounded bg-muted" />
+        </div>
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[15rem_minmax(0,1fr)] xl:grid-cols-[18rem_minmax(0,1fr)]">
+          <div className="h-64 animate-pulse rounded-xl bg-muted" />
+          <div className="h-[28rem] animate-pulse rounded-xl bg-muted" />
+        </div>
       </div>
     );
   }
 
   if (isError || !run) {
     return (
-      <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-        Could not load this run.
+      <div className="p-6">
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          Could not load this run.
+        </div>
       </div>
     );
   }
@@ -74,20 +109,26 @@ export default function ArticleRunPage() {
     Boolean(config?.can_publish) && run.status === "completed" && !isPublished;
 
   return (
-    <div className="space-y-6">
+    // p-6: this route is deliberately kept outside the /panel/* system
+    // (lib/panels.ts), so nothing above it supplies the page gutter that
+    // every panel surface gets — without it the content sits flush against
+    // the sidebar and viewport edges.
+    <div className="space-y-6 p-6">
       {/* Header */}
       <div>
         <Link
-          href="/articles"
+          href="/panel/artifacts"
           className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" />
-          Articles
+          Artifacts
         </Link>
 
-        <div className="mt-2 flex items-start justify-between gap-4">
+        {/* Stacks on small screens: the action group is wider than what a
+            phone leaves for the title when they share one row. */}
+        <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
           <div className="min-w-0">
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">
+            <h1 className="break-words text-2xl font-bold tracking-tight text-foreground">
               {run.topics.length === 1
                 ? run.topics[0]
                 : `${run.topics.length} articles`}
@@ -98,7 +139,7 @@ export default function ArticleRunPage() {
             </p>
           </div>
 
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
             {(run.status === "running" || run.status === "pending") && (
               <button
                 type="button"
@@ -117,7 +158,7 @@ export default function ArticleRunPage() {
                 {cancel.isPending ? "Stopping..." : "Cancel"}
               </button>
             )}
-            {run.status === "failed" && (
+            {(run.status === "failed" || run.status === "cancelled") && (
               <button
                 type="button"
                 disabled={retry.isPending}
@@ -132,12 +173,18 @@ export default function ArticleRunPage() {
                 {retry.isPending ? "Retrying..." : "Retry"}
               </button>
             )}
-            {run.status !== "failed" && isPublished ? (
+            {run.status !== "failed" &&
+            run.status !== "cancelled" &&
+            isPublished ? (
               <span className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground">
-                <CheckCircle2 className="h-4 w-4 text-status-done" />
-                Drafted in {run.cms_namespace ?? "the CMS"}
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-status-done" />
+                {/* The namespace is server-provided free text; cap it so it
+                    can't push the other actions off-screen. */}
+                <span className="max-w-[16rem] truncate">
+                  Drafted in {run.cms_namespace ?? "the CMS"}
+                </span>
               </span>
-            ) : run.status === "failed" ? null : (
+            ) : run.status === "failed" || run.status === "cancelled" ? null : (
               <button
                 type="button"
                 disabled={!canPublish || publish.isPending}
@@ -169,7 +216,7 @@ export default function ArticleRunPage() {
                 onClick={() => {
                   if (confirm("Delete this run and its articles?")) {
                     remove.mutate(runId, {
-                      onSuccess: () => router.push("/articles"),
+                      onSuccess: () => router.push("/panel/artifacts"),
                     });
                   }
                 }}
@@ -197,7 +244,18 @@ export default function ArticleRunPage() {
           </p>
         )}
 
-        {run.error_message && (
+        {run.status === "cancelled" && (
+          <div className="mt-3 rounded-md border border-border bg-muted/40 px-3 py-2">
+            <p className="text-2xs font-medium uppercase tracking-wide text-muted-foreground">
+              Stopped by you
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Articles already written are kept. Retry to finish the rest.
+            </p>
+          </div>
+        )}
+
+        {run.error_message && run.status !== "cancelled" && (
           <div className="mt-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2">
             <p className="text-2xs font-medium uppercase tracking-wide text-destructive/80">
               {run.status === "failed" ? "Run failed" : "Last action failed"}
@@ -213,8 +271,11 @@ export default function ArticleRunPage() {
 
       {/* minmax(0,1fr) rather than 1fr: a plain 1fr track has an auto minimum,
           so a long code line or file path in the article would force the track
-          wider than the viewport and push the whole page sideways. */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[18rem_minmax(0,1fr)]">
+          wider than the viewport and push the whole page sideways.
+          The sidebar margin also kicks in at lg, so the rail starts narrower
+          there and only takes its full width at xl — otherwise the article
+          column drops to ~450px at exactly 1024px. */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[15rem_minmax(0,1fr)] xl:grid-cols-[18rem_minmax(0,1fr)]">
         {/* Left rail: progress + article picker */}
         <div className="min-w-0 space-y-6">
           <section className="rounded-xl border border-border bg-card p-5 shadow-card">
@@ -234,7 +295,7 @@ export default function ArticleRunPage() {
                   <li key={a.id}>
                     <button
                       type="button"
-                      onClick={() => setSelectedId(a.id)}
+                      onClick={() => selectArticle(a.id)}
                       className={cn(
                         "w-full truncate rounded-md px-2 py-1.5 text-left text-xs transition-colors",
                         selected?.id === a.id
@@ -255,7 +316,17 @@ export default function ArticleRunPage() {
 
         {/* Right: the article itself */}
         <section className="flex min-h-[28rem] min-w-0 flex-col rounded-xl border border-border bg-card p-5 shadow-card">
-          {selected ? (
+          {missingDeepLink && (
+            <p className="mb-3 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+              That article is no longer in this run. Showing another one.
+            </p>
+          )}
+          {articlesLoading && !selected ? (
+            <div className="flex flex-1 flex-col items-center justify-center text-center">
+              <Newspaper className="h-10 w-10 animate-pulse text-muted-foreground/40" />
+              <p className="mt-3 text-sm text-muted-foreground">Loading articles…</p>
+            </div>
+          ) : selected ? (
             <ArticleViewer article={selected} />
           ) : (
             <div className="flex flex-1 flex-col items-center justify-center text-center">
@@ -263,9 +334,13 @@ export default function ArticleRunPage() {
               <p className="mt-3 text-sm text-muted-foreground">
                 {run.status === "running" || run.status === "pending"
                   ? "The Article Writer is still working. This updates automatically."
-                  : run.status === "failed" && (articles?.length ?? 0) === 0
-                    ? "This run failed before producing an article."
-                    : "No articles were produced."}
+                  : run.status === "cancelled"
+                    ? articleCount === 0
+                      ? "This run was stopped before producing an article."
+                      : "Stopped by you. Articles already written are kept."
+                    : run.status === "failed" && articleCount === 0
+                      ? "This run failed before producing an article."
+                      : "No articles were produced."}
               </p>
             </div>
           )}

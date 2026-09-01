@@ -262,6 +262,7 @@ func (a *Agent) loop(ctx context.Context, req TurnRequest, meta map[string]any, 
 			memories = hits
 		}
 	}
+	ctx = platformtools.WithMemories(ctx, memories)
 
 	sys := systemPrompt(time.Now(), summary, entities, memories, pending, a.extraSys)
 	messages := []llm.Message{{Role: llm.RoleSystem, Content: sys}}

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { apiClient } from "@/lib/api/client";
+import { apiClient, apiErrorMessage } from "@/lib/api/client";
 import type {
   MailConnectionStatus,
   MailDraft,
@@ -34,6 +34,73 @@ function statusLabel(status: string): string {
   }
 }
 
+// statusBadge maps a thread status to an at-a-glance pill. Working states
+// pulse, a ready draft is green, ignored mail is dimmed so the rows the
+// agent acted on stand out.
+function statusBadge(status: string): {
+  label: string;
+  className: string;
+  dim: boolean;
+} {
+  const base = "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium";
+  switch (status) {
+    case "new":
+      return {
+        label: "Queued",
+        className: `${base} animate-pulse bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400`,
+        dim: false,
+      };
+    case "classifying":
+      return {
+        label: "Drafting…",
+        className: `${base} animate-pulse bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400`,
+        dim: false,
+      };
+    case "researching":
+      return {
+        label: "Researching…",
+        className: `${base} animate-pulse bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400`,
+        dim: false,
+      };
+    case "draft_ready":
+      return {
+        label: "Draft ready",
+        className: `${base} bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400`,
+        dim: false,
+      };
+    case "sent":
+      return {
+        label: "Sent",
+        className: `${base} bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-400`,
+        dim: false,
+      };
+    case "rejected":
+      return {
+        label: "Rejected",
+        className: `${base} bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400`,
+        dim: true,
+      };
+    case "ignored":
+      return {
+        label: "Ignored",
+        className: `${base} bg-muted text-muted-foreground`,
+        dim: true,
+      };
+    case "failed":
+      return {
+        label: "Failed",
+        className: `${base} bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400`,
+        dim: false,
+      };
+    default:
+      return {
+        label: statusLabel(status),
+        className: `${base} bg-muted text-muted-foreground`,
+        dim: false,
+      };
+  }
+}
+
 export function MailAgentClient() {
   const search = useSearchParams();
   const [connection, setConnection] = useState<MailConnectionStatus | null>(null);
@@ -46,6 +113,10 @@ export function MailAgentClient() {
   const [senders, setSenders] = useState("");
   const [prefixes, setPrefixes] = useState("");
   const [labels, setLabels] = useState("");
+  const [knowledgeNotes, setKnowledgeNotes] = useState("");
+  const [knowledgeUrls, setKnowledgeUrls] = useState("");
+  const [researchFocus, setResearchFocus] = useState("");
+  const [replyInstructions, setReplyInstructions] = useState("");
 
   const loadConnection = useCallback(async () => {
     const { data } = await apiClient.get<MailConnectionStatus>("/mail/connection");
@@ -53,6 +124,10 @@ export function MailAgentClient() {
     setSenders((data.rules?.senders ?? []).join(", "));
     setPrefixes((data.rules?.subject_prefixes ?? []).join(", "));
     setLabels((data.rules?.labels ?? []).join(", "));
+    setKnowledgeNotes(data.knowledge_notes ?? "");
+    setKnowledgeUrls((data.knowledge_urls ?? []).join("\n"));
+    setResearchFocus(data.research_focus ?? "");
+    setReplyInstructions(data.reply_instructions ?? "");
   }, []);
 
   const loadThreads = useCallback(async () => {
@@ -175,10 +250,17 @@ export function MailAgentClient() {
           labels: split(labels),
           subject_prefixes: split(prefixes),
         },
+        knowledge_notes: knowledgeNotes.trim(),
+        knowledge_urls: knowledgeUrls
+          .split("\n")
+          .map((x) => x.trim())
+          .filter(Boolean),
+        research_focus: researchFocus,
+        reply_instructions: replyInstructions,
       });
       await loadConnection();
-    } catch {
-      setError("Could not save rules.");
+    } catch (e: unknown) {
+      setError(apiErrorMessage(e, "Could not save rules."));
     } finally {
       setBusy(false);
     }
@@ -348,6 +430,58 @@ export function MailAgentClient() {
                   className="mt-1 flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
                 />
               </label>
+              <label className="text-xs text-muted-foreground">
+                What should the agent know when replying?
+                <textarea
+                  value={knowledgeNotes}
+                  onChange={(e) => setKnowledgeNotes(e.target.value)}
+                  rows={8}
+                  placeholder={
+                    "Mac Studio M5 Max: $2,499\nMac Studio M5 Ultra: $5,499\nRefunds within 30 days, shipping 3–5 working days…"
+                  }
+                  className="mt-1 w-full rounded-md border border-input bg-background p-3 font-mono text-sm"
+                />
+                <span className="mt-1 block text-[11px]">
+                  Prices, products, policies — plain text or markdown. Replies
+                  quote only what is written here; anything missing gets an
+                  honest &quot;we&apos;ll follow up&quot;.
+                </span>
+              </label>
+              <label className="text-xs text-muted-foreground">
+                Knowledge links (optional, one URL per line)
+                <textarea
+                  value={knowledgeUrls}
+                  onChange={(e) => setKnowledgeUrls(e.target.value)}
+                  rows={2}
+                  placeholder="https://example.com/pricing"
+                  className="mt-1 w-full rounded-md border border-input bg-background p-3 text-sm"
+                />
+              </label>
+              <label className="text-xs text-muted-foreground">
+                What to look for in those pages
+                <textarea
+                  value={researchFocus}
+                  onChange={(e) => setResearchFocus(e.target.value)}
+                  rows={2}
+                  placeholder="Prices, SLA, refund window…"
+                  className="mt-1 w-full rounded-md border border-input bg-background p-3 text-sm"
+                />
+              </label>
+              <label className="text-xs text-muted-foreground">
+                How the reply should read
+                <textarea
+                  value={replyInstructions}
+                  onChange={(e) => setReplyInstructions(e.target.value)}
+                  rows={2}
+                  placeholder="Tone, length, must-include, must-avoid"
+                  className="mt-1 w-full rounded-md border border-input bg-background p-3 text-sm"
+                />
+              </label>
+              <p className="text-xs text-muted-foreground">
+                Your notes are the source of truth for drafts. Links are
+                optional extra pages researched on top of them; with neither,
+                drafts fall back to open-web research.
+              </p>
               <button
                 type="button"
                 disabled={busy}
@@ -365,27 +499,38 @@ export function MailAgentClient() {
         <div className="rounded-lg border border-border bg-card p-4 text-card-foreground">
           <h2 className="font-semibold">Inbox</h2>
           <p className="mb-3 text-sm text-muted-foreground">
-            Mail Agent is working on it when a row says classifying or researching.
+            An amber badge means the agent is still working on that mail; green
+            means a draft is ready for review. Ignored mail is dimmed.
           </p>
           {threads.length === 0 ? (
             <p className="text-sm text-muted-foreground">No threads yet. Sync now to pull unread mail.</p>
           ) : (
             <ul className="divide-y divide-border">
-              {threads.map((t) => (
-                <li key={t.id}>
-                  <button
-                    type="button"
-                    onClick={() => void openThread(t.id)}
-                    className="flex w-full flex-col items-start gap-0.5 py-3 text-left hover:bg-muted/40"
-                  >
-                    <span className="text-sm font-medium">{t.subject || "(no subject)"}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {t.from_name || t.from_email} · {statusLabel(t.status)}
-                    </span>
-                    <span className="line-clamp-1 text-xs text-muted-foreground">{t.snippet}</span>
-                  </button>
-                </li>
-              ))}
+              {threads.map((t) => {
+                const badge = statusBadge(t.status);
+                return (
+                  <li key={t.id}>
+                    <button
+                      type="button"
+                      onClick={() => void openThread(t.id)}
+                      className={`flex w-full flex-col items-start gap-0.5 py-3 text-left hover:bg-muted/40 ${
+                        badge.dim ? "opacity-55" : ""
+                      }`}
+                    >
+                      <span className="flex w-full items-center justify-between gap-2">
+                        <span className="truncate text-sm font-medium">
+                          {t.subject || "(no subject)"}
+                        </span>
+                        <span className={badge.className}>{badge.label}</span>
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {t.from_name || t.from_email}
+                      </span>
+                      <span className="line-clamp-1 text-xs text-muted-foreground">{t.snippet}</span>
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
@@ -400,10 +545,14 @@ export function MailAgentClient() {
           >
             ← Back to inbox
           </button>
-          <h2 className="text-lg font-semibold">{selected.thread.subject || "(no subject)"}</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold">{selected.thread.subject || "(no subject)"}</h2>
+            <span className={statusBadge(selected.thread.status).className}>
+              {statusBadge(selected.thread.status).label}
+            </span>
+          </div>
           <p className="text-sm text-muted-foreground">
-            From {selected.thread.from_name || selected.thread.from_email} ·{" "}
-            {statusLabel(selected.thread.status)}
+            From {selected.thread.from_name || selected.thread.from_email}
           </p>
           {selected.thread.classification && (
             <p className="mt-2 text-sm">

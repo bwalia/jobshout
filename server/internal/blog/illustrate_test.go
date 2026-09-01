@@ -20,6 +20,9 @@ type fakeIllustrator struct {
 	failAfter int
 	// noURL simulates a generator that works but has nowhere to store output.
 	noURL bool
+	// provider overrides the reported provider. Empty means gemini, which is
+	// the path that can letter labels.
+	provider string
 }
 
 func (f *fakeIllustrator) Enabled() bool { return f.enabled }
@@ -35,10 +38,14 @@ func (f *fakeIllustrator) Generate(ctx context.Context, req IllustrationRequest)
 	}
 	model := req.Model
 	if model == "" {
-		model = "z-image-turbo"
+		model = "gemini-3.1-flash-lite-image"
+	}
+	provider := f.provider
+	if provider == "" {
+		provider = "gemini"
 	}
 	return &Illustration{
-		URL: url, Provider: "mflux", Model: model,
+		URL: url, Provider: provider, Model: model,
 		Seed: int64(len(f.calls)), Width: req.Width, Height: req.Height,
 	}, nil
 }
@@ -75,6 +82,59 @@ func TestIllustrateBody_ReplacesBlocksWithImages(t *testing.T) {
 	}
 	if fake.calls[0].Source != "blog_inline" {
 		t.Errorf("source = %q, want blog_inline", fake.calls[0].Source)
+	}
+	prompt := fake.calls[0].Prompt
+	if strings.Contains(prompt, "Strictly no text") {
+		t.Error("inline prompt still bans labels")
+	}
+	if !strings.Contains(prompt, "informational") && !strings.Contains(prompt, "labels") {
+		t.Errorf("inline prompt is not asking for a labeled figure:\n%s", prompt)
+	}
+	if !fake.calls[0].NoFallback {
+		t.Error("inline figures must not fall back to workstation diffusion")
+	}
+}
+
+func TestIllustrateBody_TypedFenceSetsKindAndSize(t *testing.T) {
+	fake := &fakeIllustrator{enabled: true}
+	r := testRunner(fake)
+
+	markdown := "```illustration comparison\nPolling vs webhooks: latency, cost, failure modes\n```\n"
+	out, notes := r.illustrateBody(context.Background(), uuid.New(), markdown)
+
+	if strings.Contains(out, "```illustration") {
+		t.Errorf("typed fence survived:\n%s", out)
+	}
+	if !strings.Contains(out, "![Polling vs webhooks: latency, cost, failure modes]") {
+		t.Errorf("alt text lost the facts:\n%s", out)
+	}
+	if len(notes) != 0 {
+		t.Errorf("unexpected notes: %v", notes)
+	}
+	if len(fake.calls) != 1 {
+		t.Fatalf("made %d calls, want 1", len(fake.calls))
+	}
+	if fake.calls[0].Width != 1280 || fake.calls[0].Height != 720 {
+		t.Errorf("comparison size = %dx%d, want 1280x720", fake.calls[0].Width, fake.calls[0].Height)
+	}
+	if !strings.Contains(fake.calls[0].Prompt, "comparison table") {
+		t.Errorf("prompt did not ask for a comparison table:\n%s", fake.calls[0].Prompt)
+	}
+	if !strings.Contains(fake.calls[0].Prompt, "latency") {
+		t.Errorf("prompt lost the article facts:\n%s", fake.calls[0].Prompt)
+	}
+}
+
+func TestIllustrateBody_DropsWorkstationLettering(t *testing.T) {
+	fake := &fakeIllustrator{enabled: true, provider: "mflux"}
+	r := testRunner(fake)
+	out, notes := r.illustrateBody(context.Background(), uuid.New(),
+		"```illustration comparison\nPolling vs webhooks: latency\n```\n")
+	if strings.Contains(out, "![") {
+		t.Errorf("mflux output must not land in the article:\n%s", out)
+	}
+	if len(notes) != 1 {
+		t.Errorf("got %d notes, want 1: %v", len(notes), notes)
 	}
 }
 
@@ -152,7 +212,7 @@ func TestEscapeAlt_NeutralisesBracketsAndNewlines(t *testing.T) {
 }
 
 func TestCoverPrompt_NamesASubjectAndPinsTheStyle(t *testing.T) {
-	got := coverPrompt("What the Gateway API Actually Changes", "kubernetes networking")
+	got := coverPrompt("What the Gateway API Actually Changes", "kubernetes networking", "", "", "")
 	if !strings.Contains(got, "kubernetes networking") {
 		t.Errorf("prompt lost the topic subject: %q", got)
 	}
@@ -173,7 +233,7 @@ func TestCoverPrompt_NamesASubjectAndPinsTheStyle(t *testing.T) {
 		t.Errorf("prompt should place title text on the left: %q", got)
 	}
 
-	fallback := coverPrompt("", "kubernetes networking")
+	fallback := coverPrompt("", "kubernetes networking", "", "", "")
 	if !strings.Contains(fallback, "kubernetes networking") {
 		t.Errorf("empty title should fall back to the topic: %q", fallback)
 	}
@@ -219,15 +279,15 @@ func TestGenerateCover_RecordsTheSeedForReproduction(t *testing.T) {
 	if article.CoverImageSeed == 0 {
 		t.Error("the seed must be stored — it is the only way to reproduce the cover")
 	}
-	if article.CoverImageProvider != "mflux" || article.CoverImageModel != coverModel {
+	if article.CoverImageProvider == "" || article.CoverImageModel == "" {
 		t.Errorf("provider/model not recorded: %+v", article)
 	}
 	if len(r.images.(*fakeIllustrator).calls) != 1 {
 		t.Fatalf("want one generation call")
 	}
 	call := r.images.(*fakeIllustrator).calls[0]
-	if call.Model != coverModel {
-		t.Errorf("cover must pin %q, got %q", coverModel, call.Model)
+	if call.Model != "" {
+		t.Errorf("cover must not pin a model (so Gemini is tried first), got %q", call.Model)
 	}
 	if call.Width != coverWidth || call.Height != coverHeight {
 		t.Errorf("cover size = %dx%d, want %dx%d", call.Width, call.Height, coverWidth, coverHeight)
@@ -237,9 +297,9 @@ func TestGenerateCover_RecordsTheSeedForReproduction(t *testing.T) {
 	}
 }
 
-// A transient 502 must be retried against qwen — never silently swapped for a
-// faster model.
-func TestGenerateCover_RetriesQwenUntilItSucceeds(t *testing.T) {
+// A transient 502 must be retried without pinning a workstation model — that
+// pin is what used to skip Gemini.
+func TestGenerateCover_RetriesUntilItSucceeds(t *testing.T) {
 	prev := coverRetryWaitFn
 	coverRetryWaitFn = func(int) time.Duration { return 0 }
 	t.Cleanup(func() { coverRetryWaitFn = prev })
@@ -251,15 +311,12 @@ func TestGenerateCover_RetriesQwenUntilItSucceeds(t *testing.T) {
 	if err := r.generateCover(context.Background(), uuid.New(), article); err != nil {
 		t.Fatalf("generateCover: %v", err)
 	}
-	if article.CoverImageModel != coverModel {
-		t.Errorf("cover model = %q, want %q", article.CoverImageModel, coverModel)
-	}
 	if fake.calls != 3 {
 		t.Errorf("got %d calls, want 3 (2 failures + success)", fake.calls)
 	}
 	for i, m := range fake.models {
-		if m != coverModel {
-			t.Errorf("call %d used %q, want %q every time", i, m, coverModel)
+		if m != "" {
+			t.Errorf("call %d pinned %q, want no model so Gemini is tried first", i, m)
 		}
 	}
 }

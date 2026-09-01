@@ -9,6 +9,7 @@ import {
   Pencil,
   Trash2,
   ChevronLeft,
+  ChevronDown,
   Box,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
@@ -27,9 +28,16 @@ import {
   rememberPanelTransition,
 } from "@/lib/panels";
 
+function startOfLocalDay(d: Date): number {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x.getTime();
+}
+
 function groupByRecency(sessions: ChatSession[]) {
-  const now = Date.now();
-  const day = 86400000;
+  const today = startOfLocalDay(new Date());
+  const yesterday = today - 86400000;
+  const week = today - 6 * 86400000;
   const groups: { label: string; items: ChatSession[] }[] = [
     { label: "Today", items: [] },
     { label: "Yesterday", items: [] },
@@ -38,10 +46,10 @@ function groupByRecency(sessions: ChatSession[]) {
   ];
   for (const s of sessions) {
     const t = Date.parse(s.updated_at);
-    const age = now - (Number.isNaN(t) ? now : t);
-    if (age < day) groups[0].items.push(s);
-    else if (age < 2 * day) groups[1].items.push(s);
-    else if (age < 7 * day) groups[2].items.push(s);
+    const day = Number.isNaN(t) ? today : startOfLocalDay(new Date(t));
+    if (day >= today) groups[0].items.push(s);
+    else if (day >= yesterday) groups[1].items.push(s);
+    else if (day >= week) groups[2].items.push(s);
     else groups[3].items.push(s);
   }
   return groups.filter((g) => g.items.length > 0);
@@ -68,7 +76,7 @@ function SidebarBody({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const activeSession = searchParams.get("session");
-  const { chatTitleOverrides, setChatTitle, setCommandPaletteOpen } =
+  const { chatTitleOverrides, setChatTitle, setCommandPaletteOpen, workspaceNavCollapsed, setWorkspaceNavCollapsed } =
     useUiStore();
 
   const sessionsQuery = useChatSessions();
@@ -82,7 +90,8 @@ function SidebarBody({
 
   const groups = useMemo(() => groupByRecency(sessions), [sessions]);
   const activePanel = panelFromPath(pathname);
-  const showAppNav = isAppNavPath(pathname);
+  const onDashboard = pathname.startsWith("/panel/dashboard");
+  const showAppNav = isAppNavPath(pathname) && !workspaceNavCollapsed;
   const onEmptyChat = pathname.startsWith("/chat") && !activeSession;
 
   function goSession(id: string) {
@@ -95,6 +104,16 @@ function SidebarBody({
 
   function markPanelNav(href: string) {
     rememberPanelTransition(activePanel, panelFromPath(href));
+  }
+
+  function onDashboardClick(e: React.MouseEvent<HTMLAnchorElement>) {
+    if (onDashboard) {
+      e.preventDefault();
+      setWorkspaceNavCollapsed(!workspaceNavCollapsed);
+      return;
+    }
+    setWorkspaceNavCollapsed(false);
+    markPanelNav("/panel/dashboard");
   }
 
   function startRename(s: ChatSession) {
@@ -170,18 +189,34 @@ function SidebarBody({
 
         {SIDEBAR_PRIMARY.map((item) => {
           const Icon = item.icon;
-          const active = pathname.startsWith(item.href);
+          const isDashboard = item.id === "dashboard";
+          const active = isDashboard
+            ? onDashboard
+            : pathname.startsWith(item.href);
           return (
             <Link
               key={item.id}
               href={item.href}
               title={item.label}
               aria-current={active ? "page" : undefined}
-              onClick={() => markPanelNav(item.href)}
+              aria-expanded={isDashboard ? showAppNav : undefined}
+              onClick={isDashboard ? onDashboardClick : () => markPanelNav(item.href)}
               className={navItemClass(active, collapsed)}
             >
               <Icon className="h-4 w-4 shrink-0" />
-              {!collapsed && <span className="truncate">{item.label}</span>}
+              {!collapsed && (
+                <>
+                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                  {isDashboard && isAppNavPath(pathname) && (
+                    <ChevronDown
+                      className={cn(
+                        "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform",
+                        showAppNav && "rotate-180"
+                      )}
+                    />
+                  )}
+                </>
+              )}
             </Link>
           );
         })}
@@ -197,7 +232,8 @@ function SidebarBody({
         <nav
           className={cn(
             "flex flex-col gap-0.5 border-t border-sidebar-border px-2 pt-2",
-            collapsed && "items-center"
+            collapsed && "items-center",
+            !collapsed && "ml-2"
           )}
           aria-label="Workspace"
         >
@@ -210,7 +246,10 @@ function SidebarBody({
                 href={panel.href}
                 title={panel.label}
                 aria-current={active ? "page" : undefined}
-                onClick={() => markPanelNav(panel.href)}
+                onClick={() => {
+                setWorkspaceNavCollapsed(false);
+                markPanelNav(panel.href);
+              }}
                 className={navItemClass(active, collapsed)}
               >
                 <Icon className="h-4 w-4 shrink-0" />
@@ -268,7 +307,13 @@ function SidebarBody({
                           </button>
                         )}
                         {renamingId !== s.id && (
-                          <div className="absolute right-1 top-1/2 hidden -translate-y-1/2 items-center gap-0.5 group-hover:flex">
+                          <div
+                            className={cn(
+                              "absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5",
+                              !active &&
+                                "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-within:opacity-100"
+                            )}
+                          >
                             <button
                               type="button"
                               aria-label="Rename"

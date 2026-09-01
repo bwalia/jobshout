@@ -44,6 +44,11 @@ export interface Task {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  completed_at?: string | null;
+  last_run_id?: string | null;
+  last_run_status?: "queued" | "running" | "completed" | "failed" | null;
+  last_run_at?: string | null;
+  metadata?: Record<string, unknown> | null;
   labels?: TaskLabel[];
   subtask_count?: number;
 }
@@ -57,12 +62,15 @@ export interface CreateTaskRequest {
   project_id: string;
   title: string;
   description?: string;
+  /** Column to create the task in; the server defaults to backlog. */
+  status?: TaskStatus;
   priority?: Priority;
   assigned_agent_id?: string;
   assigned_user_id?: string;
   story_points?: number;
   due_date?: string;
   parent_id?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface UpdateTaskRequest {

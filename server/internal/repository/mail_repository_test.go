@@ -22,3 +22,17 @@ func TestUpsertConnectionSQLWritesSyncLease(t *testing.T) {
 		t.Fatal("ON CONFLICT must update sync_lease_until so a nilled lease actually clears")
 	}
 }
+
+func TestMailConnSQLIncludesKnowledgePlaybook(t *testing.T) {
+	for _, col := range []string{"watch_knowledge_urls", "research_focus", "reply_instructions"} {
+		if !strings.Contains(mailConnColumns, col) {
+			t.Errorf("mailConnColumns missing %s", col)
+		}
+		if !strings.Contains(upsertConnectionSQL, col) {
+			t.Errorf("upsertConnectionSQL missing %s", col)
+		}
+		if !strings.Contains(updateConnectionMetaSQL, col) {
+			t.Errorf("updateConnectionMetaSQL missing %s", col)
+		}
+	}
+}

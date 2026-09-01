@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -55,6 +56,7 @@ import (
 	"github.com/jobshout/server/internal/selector"
 	"github.com/jobshout/server/internal/service"
 	"github.com/jobshout/server/internal/strix"
+	"github.com/jobshout/server/internal/tasklaunch"
 	"github.com/jobshout/server/internal/tools"
 	ws "github.com/jobshout/server/internal/websocket"
 	wfengine "github.com/jobshout/server/internal/workflow"
@@ -129,7 +131,9 @@ func requestTimeout(next http.Handler) http.Handler {
 		// pages and makes a model call per source. Minutes of real work, not a
 		// stuck request. Trending under the same prefix is only HTTP calls, so
 		// it keeps the default.
-		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/research") {
+		if r.Method == http.MethodPost && (strings.HasSuffix(r.URL.Path, "/research") ||
+			strings.HasSuffix(r.URL.Path, "/tasks/launch") ||
+			strings.Contains(r.URL.Path, "/career/")) {
 			timeout = researchRequestTimeout
 		}
 		// One call to a single GPU, which draws for tens of seconds and may
@@ -292,10 +296,21 @@ func main() {
 	// The local provider runs on the workstation (see image-service/), outside
 	// the cluster, because Apple MLX cannot be scheduled onto amd64 nodes —
 	// the same arrangement Ollama already uses.
-	imageRouter := imagegen.NewRouter(cfg)
+	imageRouter := imagegen.NewRouter(cfg).WithLogger(logger)
 	var imgStore imagestore.Store
 	if minioClient != nil {
 		imgStore = imagestore.NewMinIOStore(minioClient, cfg.MinIOBucketImages)
+	} else {
+		// MinIO is optional locally. Without somewhere to write, the GPU still
+		// draws covers and inline pictures, then the article pipeline drops them
+		// because a cover with no URL is not a cover. A directory next to the
+		// process is enough for the same /api/v1/images/file/… URLs.
+		dir := os.Getenv("IMAGE_STORE_DIR")
+		if dir == "" {
+			dir = filepath.Join(".", ".dev-data", "images")
+		}
+		imgStore = imagestore.NewDirStore(dir)
+		logger.Info("image storage using local directory (MinIO unset)", zap.String("dir", dir))
 	}
 	imageSvc := service.NewImageService(imageRouter, imgStore, repository.NewImageRepository(pool), logger)
 	if imageSvc.Enabled() {
@@ -313,7 +328,7 @@ func main() {
 			imageRouter.Warm(warmCtx)
 		}()
 	} else {
-		logger.Info("image generation not configured — set IMAGE_BASE_URL or OPENAI_API_KEY to enable it")
+		logger.Info("image generation not configured — set GEMINI_API_KEY, IMAGE_BASE_URL or OPENAI_API_KEY to enable it")
 	}
 
 	// ─── Tool registry ───────────────────────────────────────────────────────
@@ -540,11 +555,34 @@ func main() {
 	} else {
 		mailLLM = c
 	}
+	var gmailAPI mail.GmailAPI
+	if mailCfg.Simulate {
+		gmailAPI = mail.NewSimulatedGmail()
+		logger.Warn("mail: MAIL_SIMULATE is on — inbox is fake, Google is not called")
+	} else {
+		gmailAPI = mail.NewGmailAPI(nil, logger)
+	}
 	mailSvc := service.NewMailService(
-		mailRepo, agentRepo, mail.NewGmailAPI(nil, logger),
-		mail.NewClassifier(mailLLM, logger), mail.NewDrafter(mailLLM, logger),
+		mailRepo, agentRepo, gmailAPI,
+		mail.NewClassifier(mailLLM, logger), mail.NewDrafter(mailLLM, mailCfg.DraftModel, logger),
 		researchSvc, mailCfg, logger,
 	)
+	blogSvc.BindTasks(taskSvc)
+	mailSvc.BindTasks(taskSvc)
+	pentestReconciler.BindTasks(taskSvc)
+	reviewReconciler.BindTasks(taskSvc)
+	launchSvc := &tasklaunch.Service{
+		Agents:   agentSvc,
+		Tasks:    taskSvc,
+		Projects: projectSvc,
+		Research: researchSvc,
+		Blog:     blogSvc,
+		Mail:     mailSvc,
+		Pentest:  pentestSvc,
+		Reviews:  reviewSvc,
+		Images:   imageSvc,
+		TaskRuns: taskRunSvc,
+	}
 	mailReconciler := service.NewMailReconciler(mailSvc, mailCfg.ReconcileInterval, logger)
 	if mailCfg.Configured() {
 		logger.Info("mail agent oauth configured",
@@ -562,6 +600,7 @@ func main() {
 		careerLLM = c
 	}
 	careerSvc := service.NewCareerService(careerRepo, agentRepo, researchClient, careerLLM, researchSvc, logger)
+	launchSvc.Career = careerSvc
 	logger.Info("career ops agent initialised")
 
 	// ─── Autonomous agent engine ────────────────────────────────────────────
@@ -664,6 +703,7 @@ func main() {
 		Embedder:        toolEmbedder,
 		Pool:            pool,
 		Memory:          memorySvc,
+		Launch:          launchSvc,
 	})
 	chatGuard := platformtools.NewGuard(rbacSvc, govSvc)
 	chatAgent := chatagent.New(chatClient, platformReg, chatGuard, memorySvc, logger)
@@ -726,7 +766,8 @@ func main() {
 	imageHandler := handler.NewImageHandler(imageSvc)
 	agentHandler := handler.NewAgentHandler(agentSvc)
 	projectHandler := handler.NewProjectHandler(projectSvc)
-	taskHandler := handler.NewTaskHandler(taskSvc)
+	taskHandler := handler.NewTaskHandler(taskSvc, launchSvc)
+	agentSchemaHandler := handler.NewAgentSchemaHandler()
 	taskRunHandler := handler.NewTaskRunHandler(taskRunSvc)
 	orgHandler := handler.NewOrganizationHandler(orgRepo)
 	marketplaceHandler := handler.NewMarketplaceHandler(pool, logger)
@@ -893,9 +934,11 @@ func main() {
 			})
 
 			// Tasks
+			r.Get("/agent-schemas", agentSchemaHandler.List)
 			r.Route("/tasks", func(r chi.Router) {
 				r.Get("/", taskHandler.List)
 				r.Post("/", taskHandler.Create)
+				r.Post("/launch", taskHandler.Launch)
 				r.Route("/{taskID}", func(r chi.Router) {
 					r.Get("/", taskHandler.GetByID)
 					r.Put("/", taskHandler.Update)
@@ -904,6 +947,7 @@ func main() {
 					r.Put("/position", taskHandler.Reorder)
 					r.Get("/comments", taskHandler.ListComments)
 					r.Post("/comments", taskHandler.AddComment)
+					r.Get("/history", taskHandler.History)
 					// On-demand agent runs of this task.
 					r.Post("/run", taskRunHandler.CreateRun)
 					r.Get("/runs", taskRunHandler.ListRuns)
@@ -1023,6 +1067,11 @@ func main() {
 				r.Patch("/drafts/{id}", mailHandler.PatchDraft)
 				r.Post("/drafts/{id}/approve", mailHandler.ApproveDraft)
 				r.Post("/drafts/{id}/reject", mailHandler.RejectDraft)
+				if mailCfg.Simulate {
+					r.Post("/simulate/connect", mailHandler.SimulateConnect)
+					r.Post("/simulate/inbox", mailHandler.SimulateInbox)
+					r.Post("/simulate/sync", mailHandler.SimulateSync)
+				}
 			})
 
 			r.Route("/career", func(r chi.Router) {

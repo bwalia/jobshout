@@ -11,7 +11,12 @@ import {
   schemaValuesValid,
   validateSchemaValues,
 } from "@/lib/agents/input-schemas";
-import { launchAgentForTask, type LaunchResult } from "@/lib/agents/launch";
+import {
+  hydrateLaunchValues,
+  launchAgentForTask,
+  type LaunchResult,
+} from "@/lib/agents/launch";
+import { fetchMailFormValues, mailFormIsBlank } from "@/lib/agents/mail-playbook";
 import { apiErrorMessage } from "@/lib/api/client";
 import { useSkills } from "@/lib/hooks/useSkills";
 import { useCreateTaskRun } from "@/lib/hooks/useTaskRuns";
@@ -83,13 +88,44 @@ export function RunTaskDialog({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   /** After a failed submit, keep live-validating so errors clear as the user fixes fields. */
   const [touchedSubmit, setTouchedSubmit] = useState(false);
+  const [mailboxLoad, setMailboxLoad] = useState<"idle" | "loading" | "ready">(
+    "idle"
+  );
 
   useEffect(() => {
-    setValues(defaultValuesForSchema(schema));
+    setValues(hydrateLaunchValues(task, schema));
     setFieldErrors({});
     setTouchedSubmit(false);
     setLaunchError(null);
-  }, [schema]);
+    // The generic-agent overrides are per-agent choices: switching agents
+    // must not silently carry an engine/model/skills/debug config into the
+    // payload of a different agent (or resurface it after a specialist
+    // round-trip).
+    setPromptOverride("");
+    setEngine("");
+    setModelProvider("");
+    setModelName("");
+    setSelectedSlugs([]);
+    setExtraSlug("");
+    setDebug(false);
+    if (schema.kind !== "mail") {
+      setMailboxLoad("idle");
+      return;
+    }
+    setMailboxLoad("loading");
+    let cancelled = false;
+    void fetchMailFormValues()
+      .then((saved) => {
+        if (cancelled || !saved) return;
+        setValues((prev) => (mailFormIsBlank(prev) ? { ...prev, ...saved } : prev));
+      })
+      .finally(() => {
+        if (!cancelled) setMailboxLoad("ready");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [schema, task]);
 
   const availableSlugs = useMemo(
     () => (skills ?? []).map((s) => s.slug),
@@ -122,9 +158,11 @@ export function RunTaskDialog({
   }
 
   const busy = launching || createRun.isPending;
+  const mailReady = schema.kind !== "mail" || mailboxLoad === "ready";
   const canRun =
     Boolean(selectedAgent) &&
     !busy &&
+    mailReady &&
     (!isSpecialist || schemaValuesValid(schema, values));
 
   async function handleRun() {
@@ -138,6 +176,10 @@ export function RunTaskDialog({
 
     // Specialist path: schema fields only — never mix with generic overrides.
     if (isSpecialist) {
+      if (!mailReady) {
+        setLaunchError("Loading saved mailbox settings…");
+        return;
+      }
       setTouchedSubmit(true);
       const errs = validateSchemaValues(schema, values);
       setFieldErrors(errs);
@@ -151,13 +193,18 @@ export function RunTaskDialog({
         const result = await launchAgentForTask({
           agent: selectedAgent,
           task,
-          schema,
           values,
         });
         toast.success(
           result.kind === "researcher"
             ? "Research complete"
-            : "Agent run started"
+            : result.kind === "mail"
+              ? result.sync_queued
+                ? "Mailbox sync queued"
+                : "Playbook saved. Connect Gmail on Mail Agent to sync."
+              : result.kind === "images"
+                ? "Image generated"
+                : "Agent run started"
         );
         onSpecialistLaunched?.(result);
         onClose();
@@ -201,7 +248,8 @@ export function RunTaskDialog({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onClick={() => {
+      onClick={(e) => {
+        e.stopPropagation();
         if (!busy) onClose();
       }}
     >
@@ -247,9 +295,6 @@ export function RunTaskDialog({
               {agents.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.name}
-                  {a.metadata?.builtin
-                    ? ` · ${a.metadata.builtin}`
-                    : ` · ${a.role}`}
                 </option>
               ))}
             </select>
@@ -258,13 +303,19 @@ export function RunTaskDialog({
             )}
           </div>
 
+          {selectedAgent && schema.kind === "mail" && mailboxLoad === "loading" ? (
+            <p className="text-xs text-muted-foreground">
+              Loading saved mailbox settings…
+            </p>
+          ) : null}
+
           {selectedAgent && isSpecialist ? (
             <AgentInputFields
               fields={schema.fields}
               values={values}
               onChange={onSpecialistFieldChange}
               errors={fieldErrors}
-              disabled={busy}
+              disabled={busy || !mailReady}
               autoFocusFirst
             />
           ) : null}

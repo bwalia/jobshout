@@ -826,6 +826,15 @@ func (s *careerService) UpsertStory(ctx context.Context, orgID, userID uuid.UUID
 	if err != nil {
 		return nil, err
 	}
+	if st.ID != uuid.Nil {
+		existing, err := s.repo.GetStoryByID(ctx, st.ID)
+		if err != nil {
+			return nil, err
+		}
+		if existing != nil && (existing.OrgID != orgID || existing.ProfileID != p.ID) {
+			return nil, ErrCareerNotFound
+		}
+	}
 	st.OrgID = orgID
 	st.ProfileID = p.ID
 	if err := s.repo.UpsertStory(ctx, &st); err != nil {
@@ -886,6 +895,10 @@ func (s *careerService) BatchEvaluate(ctx context.Context, orgID, userID uuid.UU
 		if err != nil {
 			out.Skipped++
 			s.logger.Warn("career: batch evaluate skipped", zap.String("url", it.ListingURL), zap.Error(err))
+			continue
+		}
+		if res.BlacklistHit != nil || res.Dead || res.Evaluation == nil {
+			out.Skipped++
 			continue
 		}
 		out.Evaluated++

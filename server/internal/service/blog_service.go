@@ -55,6 +55,8 @@ type BlogService interface {
 	ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.BlogRun], error)
 	ListArticles(ctx context.Context, runID uuid.UUID) ([]model.BlogArticle, error)
 	GetArticle(ctx context.Context, id uuid.UUID) (*model.BlogArticle, error)
+	// BindTasks updates the Task Manager card when a launched run finishes.
+	BindTasks(tasks TaskService)
 	// CanPublish reports whether the CMS connection is configured, so the UI
 	// can disable the action instead of offering a button that always fails.
 	CanPublish() bool
@@ -85,6 +87,7 @@ type blogService struct {
 	// arrive without a subject at all.
 	research  ResearchService
 	agentRepo repository.AgentRepository
+	tasks     TaskService
 	logger    *zap.Logger
 
 	mu       sync.Mutex
@@ -123,6 +126,12 @@ func NewBlogService(
 		active:        make(map[uuid.UUID]*trackedRun),
 		orphanTimeout: orphanTimeout,
 		maxRuntime:    maxRuntime,
+	}
+}
+
+func (s *blogService) BindTasks(tasks TaskService) {
+	if s != nil {
+		s.tasks = tasks
 	}
 }
 
@@ -205,7 +214,7 @@ func (s *blogService) settle(runID uuid.UUID, write func()) bool {
 	current, err := s.repo.GetByID(persistCtx(), runID)
 	if err == nil && current != nil {
 		switch current.Status {
-		case model.BlogRunStatusCompleted, model.BlogRunStatusFailed:
+		case model.BlogRunStatusCompleted, model.BlogRunStatusFailed, model.BlogRunStatusCancelled:
 			return false
 		}
 	}
@@ -326,6 +335,7 @@ func writeSteps(writer, researcher string) []model.BlogStep {
 		{Key: model.BlogStepReviewing, Label: "Reviewing the draft", Agent: writer, Status: model.StepStatusPending},
 		{Key: model.BlogStepRevising, Label: "Revising", Agent: writer, Status: model.StepStatusPending},
 		{Key: model.BlogStepExpanding, Label: "Expanding to full length", Agent: writer, Status: model.StepStatusPending},
+		{Key: model.BlogStepIllustrating, Label: "Illustrating the article", Agent: writer, Status: model.StepStatusPending},
 		{Key: model.BlogStepConverting, Label: "Converting to HTML", Agent: writer, Status: model.StepStatusPending},
 		{Key: model.BlogStepGenerated, Label: "Articles ready", Agent: writer, Status: model.StepStatusPending},
 	}
@@ -484,6 +494,7 @@ func (s *blogService) Generate(
 	// — the caller polls the run instead.
 	if err := s.beginGeneration(run, agent, req); err != nil {
 		s.failCreatedRun(run, errRunInterrupted)
+		s.notifyBoard(req.TaskID, "Article run failed to start.", "")
 		return nil, err
 	}
 
@@ -582,7 +593,11 @@ func (s *blogService) failRun(
 		completedAt := time.Now()
 		run.CompletedAt = &completedAt
 		msg := cause.Error()
-		run.Status = model.BlogRunStatusFailed
+		if errors.Is(cause, errRunCancelled) {
+			run.Status = model.BlogRunStatusCancelled
+		} else {
+			run.Status = model.BlogRunStatusFailed
+		}
 		run.ErrorMessage = &msg
 		if uerr := s.repo.Update(persistCtx(), run); uerr != nil {
 			log.Error("blog_svc: failed to record failure", zap.Error(uerr))
@@ -656,8 +671,11 @@ func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, age
 	tracker := &stepTracker{runID: run.ID, steps: run.Steps, repo: s.repo, logger: s.logger}
 	s.setAgentStatus(persistCtx(), agent.ID, "active")
 
+	taskID := s.resolveLaunchTaskID(persistCtx(), req.TaskID, run.ID)
+
 	if ctx.Err() != nil {
 		s.failRun(run, tracker, s.interruptCause(run.ID, ctx.Err()), log, agent)
+		s.notifyBoard(taskID, "Article run was interrupted.", "")
 		return
 	}
 
@@ -668,6 +686,7 @@ func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, age
 		briefs, derr := s.discoverBriefs(ctx, run, req, tracker)
 		if derr != nil {
 			s.failRun(run, tracker, s.interruptCause(run.ID, derr), log, agent)
+			s.notifyBoard(taskID, "Article run failed while discovering a topic.", "")
 			return
 		}
 		req.Briefs = briefs
@@ -698,6 +717,7 @@ func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, age
 
 	if ctx.Err() != nil {
 		s.failRun(run, tracker, s.interruptCause(run.ID, ctx.Err()), log, agent)
+		s.notifyBoard(taskID, "Article run was interrupted.", "")
 		return
 	}
 
@@ -706,12 +726,18 @@ func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, age
 			err = fmt.Errorf("blog: no articles produced")
 		}
 		s.failRun(run, tracker, err, log, agent)
+		s.notifyBoard(taskID, "Article run failed: "+err.Error(), "")
 		return
 	}
 
 	if !s.finishSuccessfulRun(run, tracker, err, log, agent) {
 		return
 	}
+	title := run.ID.String()
+	if len(run.Articles) > 0 && run.Articles[0].Title != "" {
+		title = run.Articles[0].Title
+	}
+	s.notifyBoard(taskID, "Article ready: "+title+"\n\nOpen /articles/"+run.ID.String(), "done")
 
 	// Filing happens after the run is recorded as completed, never instead of
 	// it. A CMS that is down or misconfigured must not turn articles that were
@@ -760,6 +786,37 @@ func (s *blogService) finishSuccessfulRun(
 	}
 	log.Info("blog: generation complete", zap.Int("articles", len(run.Articles)))
 	return true
+}
+
+func (s *blogService) resolveLaunchTaskID(ctx context.Context, known *uuid.UUID, runID uuid.UUID) *uuid.UUID {
+	if known != nil {
+		return known
+	}
+	if s == nil || s.tasks == nil || runID == uuid.Nil {
+		return nil
+	}
+	t, err := s.tasks.FindByLaunchRunID(ctx, runID)
+	if err != nil || t == nil {
+		return nil
+	}
+	return &t.ID
+}
+
+func (s *blogService) notifyBoard(taskID *uuid.UUID, note, status string) {
+	if s == nil || s.tasks == nil || taskID == nil {
+		return
+	}
+	ctx := persistCtx()
+	if strings.TrimSpace(note) != "" {
+		n := note
+		if task, err := s.tasks.GetByID(ctx, *taskID); err == nil && task != nil && task.Description != nil && strings.TrimSpace(*task.Description) != "" {
+			n = strings.TrimSpace(*task.Description) + "\n\n" + note
+		}
+		_, _ = s.tasks.Update(ctx, *taskID, model.UpdateTaskRequest{Description: &n})
+	}
+	if status != "" {
+		_ = s.tasks.Transition(ctx, *taskID, status, nil)
+	}
 }
 
 func (s *blogService) interruptCause(runID uuid.UUID, err error) error {
@@ -933,8 +990,8 @@ func (s *blogService) Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUI
 	if run.OrgID != orgID {
 		return nil, fmt.Errorf("blog_svc: run does not belong to this organization")
 	}
-	if run.Status != model.BlogRunStatusFailed {
-		return nil, fmt.Errorf("blog_svc: only a failed run can be retried (status is %q)", run.Status)
+	if run.Status != model.BlogRunStatusFailed && run.Status != model.BlogRunStatusCancelled {
+		return nil, fmt.Errorf("blog_svc: only a failed or cancelled run can be retried (status is %q)", run.Status)
 	}
 	if len(run.Briefs) == 0 {
 		return nil, fmt.Errorf("blog_svc: run has no topics to retry")
@@ -996,6 +1053,10 @@ func (s *blogService) Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUI
 	if run.Model != nil {
 		req.Model = *run.Model
 	}
+	if tid := s.resolveLaunchTaskID(ctx, nil, run.ID); tid != nil {
+		req.TaskID = tid
+		_ = s.tasks.Transition(ctx, *tid, "in_progress", nil)
+	}
 	if err := s.beginGeneration(run, agent, req); err != nil {
 		s.failCreatedRun(run, errRunInterrupted)
 		return nil, err
@@ -1004,10 +1065,10 @@ func (s *blogService) Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUI
 	return run, nil
 }
 
-// Cancel stops an in-flight run. The row is marked failed immediately so the
+// Cancel stops an in-flight run. The row is marked cancelled immediately so the
 // UI stops polling; the generation goroutine is then aborted if this process
 // is the one writing it. A run stuck at running after a deploy has no
-// goroutine here — it is still marked failed, which is what unlocks Retry.
+// goroutine here — it is still marked cancelled, which is what unlocks Retry.
 func (s *blogService) Cancel(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) (*model.BlogRun, error) {
 	run, err := s.repo.GetByID(ctx, runID)
 	if err != nil {

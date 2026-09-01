@@ -114,6 +114,8 @@ func (s *taskRunService) CreateRun(ctx context.Context, taskID uuid.UUID, req mo
 		return nil, fmt.Errorf("failed to create task run: %w", err)
 	}
 
+	s.syncBoardStatus(ctx, taskID, run.Status, requestedBy)
+
 	// Launch asynchronously and return the queued run at once: the HTTP request
 	// must not block for the whole agent run (it can take minutes and would trip
 	// the client's timeout). A detached context keeps the run alive past the
@@ -180,6 +182,48 @@ func (s *taskRunService) finalize(ctx context.Context, run *model.TaskRun) {
 		s.logger.Error("failed to persist terminal task run",
 			zap.String("run_id", run.ID.String()),
 			zap.String("status", run.Status),
+			zap.Error(err),
+		)
+	}
+	s.syncBoardStatus(ctx, run.TaskID, run.Status, nil)
+}
+
+// boardStatusForRun maps a generic task-run status onto the board column.
+// Failed runs stay where they are (in_progress after start) so the card does
+// not pretend the work is finished.
+func boardStatusForRun(runStatus string) (taskStatus string, ok bool) {
+	switch runStatus {
+	case model.TaskRunStatusQueued, model.TaskRunStatusRunning:
+		return "in_progress", true
+	case model.TaskRunStatusCompleted:
+		return "done", true
+	default:
+		return "", false
+	}
+}
+
+func (s *taskRunService) syncBoardStatus(ctx context.Context, taskID uuid.UUID, runStatus string, changedBy *uuid.UUID) {
+	status, ok := boardStatusForRun(runStatus)
+	if !ok {
+		return
+	}
+	if status == "done" {
+		active, err := s.runRepo.CountActiveByTask(ctx, taskID)
+		if err != nil {
+			s.logger.Warn("failed to count active task runs before done sync",
+				zap.String("task_id", taskID.String()),
+				zap.Error(err),
+			)
+			return
+		}
+		if active > 0 {
+			return
+		}
+	}
+	if err := s.taskRepo.TransitionStatus(ctx, taskID, status, changedBy); err != nil {
+		s.logger.Warn("failed to sync board status from task run",
+			zap.String("task_id", taskID.String()),
+			zap.String("run_status", runStatus),
 			zap.Error(err),
 		)
 	}

@@ -163,6 +163,38 @@ func TestReviewServiceCreateRunReturnsActive(t *testing.T) {
 	}
 }
 
+func TestReviewServiceCreateRunBindsTaskIDOnReuse(t *testing.T) {
+	repo := newMockReviewRunRepository()
+	svc := NewReviewService(repo, testReviewCfg(), zap.NewNop())
+	orgID := uuid.New()
+	first, err := svc.CreateRun(context.Background(), model.CreateReviewRunRequest{
+		Repo: "bwalia/jobshout", PRNumber: 11,
+	}, orgID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.TaskID != nil {
+		t.Fatal("first run should have no task yet")
+	}
+	taskID := uuid.New()
+	second, err := svc.CreateRun(context.Background(), model.CreateReviewRunRequest{
+		Repo: "bwalia/jobshout", PRNumber: 11, TaskID: &taskID,
+	}, orgID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ID != second.ID {
+		t.Fatalf("expected the active run, got %s vs %s", first.ID, second.ID)
+	}
+	if second.TaskID == nil || *second.TaskID != taskID {
+		t.Fatalf("reused run must bind the board task, got %v", second.TaskID)
+	}
+	stored := repo.runs[first.ID]
+	if stored.TaskID == nil || *stored.TaskID != taskID {
+		t.Fatalf("persisted task_id = %v", stored.TaskID)
+	}
+}
+
 func TestReviewServiceGetRunHidesOtherOrgs(t *testing.T) {
 	repo := newMockReviewRunRepository()
 	svc := NewReviewService(repo, testReviewCfg(), zap.NewNop())

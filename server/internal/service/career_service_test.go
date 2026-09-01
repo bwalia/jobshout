@@ -340,11 +340,32 @@ func (m *careerMem) ListStories(_ context.Context, _, profileID uuid.UUID) ([]mo
 	}
 	return out, nil
 }
+func (m *careerMem) GetStoryByID(_ context.Context, id uuid.UUID) (*model.CareerStory, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range m.stories {
+		if m.stories[i].ID == id {
+			s := m.stories[i]
+			return &s, nil
+		}
+	}
+	return nil, nil
+}
 func (m *careerMem) UpsertStory(_ context.Context, s *model.CareerStory) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if s.ID == uuid.Nil {
 		s.ID = uuid.New()
+	}
+	s.UpdatedAt = time.Now()
+	if s.CreatedAt.IsZero() {
+		s.CreatedAt = s.UpdatedAt
+	}
+	for i := range m.stories {
+		if m.stories[i].ID == s.ID {
+			m.stories[i] = *s
+			return nil
+		}
 	}
 	m.stories = append(m.stories, *s)
 	return nil
@@ -683,6 +704,64 @@ func TestLinkedInDraftCap(t *testing.T) {
 	}
 	if len([]rune(c.LinkedInDraft)) > 300 {
 		t.Fatalf("linkedin draft must be ≤300 runes, got %d", len([]rune(c.LinkedInDraft)))
+	}
+}
+
+func TestUpsertStoryRejectsForeignID(t *testing.T) {
+	svc, _, orgA, userA := setupCareer(t)
+	orgB, userB := uuid.New(), uuid.New()
+	mine, err := svc.UpsertStory(context.Background(), orgA, userA, model.CareerStory{Title: "Ada ship"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.UpsertStory(context.Background(), orgB, userB, model.CareerStory{
+		ID: mine.ID, Title: "overwritten",
+	})
+	if err != ErrCareerNotFound {
+		t.Fatalf("foreign story id must 404, got %v", err)
+	}
+	got, err := svc.ListStories(context.Background(), orgA, userA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Title != "Ada ship" {
+		t.Fatalf("owner story mutated: %+v", got)
+	}
+}
+
+func TestBatchEvaluateSkipsBlacklist(t *testing.T) {
+	svc, mem, orgID, userID := setupCareer(t)
+	p, err := svc.GetOrCreateProfile(context.Background(), orgID, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.AddBlacklist(context.Background(), orgID, userID, model.AddCareerBlacklistRequest{
+		Domain: "blocked.example",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_ = mem.UpsertPipelineItem(context.Background(), &model.CareerPipelineItem{
+		OrgID: orgID, ProfileID: p.ID, ListingURL: "https://jobs.blocked.example/1",
+		Company: "Blocked Co", Status: model.CareerPipelineOpen,
+	})
+	_ = mem.UpsertPipelineItem(context.Background(), &model.CareerPipelineItem{
+		OrgID: orgID, ProfileID: p.ID, ListingURL: "https://jobs.ok.example/2",
+		Company: "Ok Co", Status: model.CareerPipelineOpen,
+	})
+	out, err := svc.BatchEvaluate(context.Background(), orgID, userID, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Evaluated != 1 {
+		t.Fatalf("evaluated=%d want 1 (blacklist must not count as success)", out.Evaluated)
+	}
+	if out.Skipped < 1 {
+		t.Fatalf("skipped=%d want at least the blacklist hit", out.Skipped)
+	}
+	for _, r := range out.Results {
+		if r.BlacklistHit != nil || r.Evaluation == nil {
+			t.Fatal("batch must not return unconfirmed blacklist hits as evaluations")
+		}
 	}
 }
 

@@ -8,9 +8,9 @@ interface MetricCardProps {
   value: string;
   /**
    * Percentage change vs the previous period. Positive is shown as a live-green
-   * signal, negative as an error-red one.
+   * signal, negative as an error-red one. Omitted when the API has no trend.
    */
-  delta: number;
+  delta?: number;
   /** Optional explanatory text shown below the delta */
   description?: string;
 }
@@ -20,7 +20,7 @@ interface MetricCardProps {
  * signal-coloured delta, and an amber signal hairline that lights on hover.
  */
 export function MetricCard({ title, value, delta, description }: MetricCardProps) {
-  const isPositive = delta >= 0;
+  const isPositive = (delta ?? 0) >= 0;
 
   return (
     <div className="group relative overflow-hidden rounded-xl border border-border bg-card p-5 transition-colors hover:border-primary/40">
@@ -38,27 +38,31 @@ export function MetricCard({ title, value, delta, description }: MetricCardProps
         {value}
       </p>
 
-      <div className="mt-2 flex items-center gap-2">
-        <span
-          className={cn(
-            "tabular inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-xs font-semibold",
-            isPositive
-              ? "bg-signal-live/12 text-signal-live"
-              : "bg-signal-error/12 text-signal-error"
+      {(typeof delta === "number" || description) && (
+        <div className="mt-2 flex items-center gap-2">
+          {typeof delta === "number" && (
+            <span
+              className={cn(
+                "tabular inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-xs font-semibold",
+                isPositive
+                  ? "bg-signal-live/12 text-signal-live"
+                  : "bg-signal-error/12 text-signal-error"
+              )}
+            >
+              {isPositive ? (
+                <ArrowUpRight className="h-3 w-3" />
+              ) : (
+                <ArrowDownRight className="h-3 w-3" />
+              )}
+              {Math.abs(delta).toFixed(1)}%
+            </span>
           )}
-        >
-          {isPositive ? (
-            <ArrowUpRight className="h-3 w-3" />
-          ) : (
-            <ArrowDownRight className="h-3 w-3" />
-          )}
-          {Math.abs(delta).toFixed(1)}%
-        </span>
 
-        {description && (
-          <span className="text-xs text-muted-foreground">{description}</span>
-        )}
-      </div>
+          {description && (
+            <span className="text-xs text-muted-foreground">{description}</span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

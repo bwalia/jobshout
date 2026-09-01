@@ -3,13 +3,14 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getTasks } from "@/lib/api/tasks";
+import { getDashboardSummary } from "@/lib/api/metrics";
 import { taskKeys } from "@/lib/hooks/useTasks";
+import { formatDateOnly, isDueOverdue } from "@/lib/dates";
+import { THEME_BADGE } from "@/lib/status-colors";
 import type { Task } from "@/lib/types/project";
 import type { TaskStatus, Priority } from "@/lib/types/common";
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
+const PAGE_SIZE = 20;
 
 const ALL_STATUSES: TaskStatus[] = [
   "backlog",
@@ -29,57 +30,31 @@ const STATUS_LABELS: Record<TaskStatus, string> = {
 
 const STATUS_BADGE_STYLES: Record<TaskStatus, string> = {
   backlog: "bg-secondary text-secondary-foreground",
-  todo: "bg-blue-100 text-blue-700",
-  in_progress: "bg-yellow-100 text-yellow-700",
-  review: "bg-purple-100 text-purple-700",
-  done: "bg-green-100 text-green-700",
+  todo: THEME_BADGE.info,
+  in_progress: THEME_BADGE.warning,
+  review: THEME_BADGE.purple,
+  done: THEME_BADGE.success,
 };
 
 const PRIORITY_BADGE_STYLES: Record<Priority, string> = {
   low: "bg-secondary text-secondary-foreground",
-  medium: "bg-blue-100 text-blue-700",
-  high: "bg-orange-100 text-orange-700",
-  critical: "bg-red-100 text-red-700",
+  medium: THEME_BADGE.info,
+  high: THEME_BADGE.orange,
+  critical: THEME_BADGE.danger,
 };
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function formatDueDate(isoDate: string | null): string {
-  if (!isoDate) return "—";
-  return new Date(isoDate).toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-}
-
-function isDueOverdue(isoDate: string | null): boolean {
-  if (!isoDate) return false;
-  return new Date(isoDate) < new Date();
-}
-
-// ---------------------------------------------------------------------------
-// Loading skeleton
-// ---------------------------------------------------------------------------
 
 function TableRowSkeleton() {
   return (
     <tr className="animate-pulse border-b border-border">
-      {/* Title */}
       <td className="px-4 py-3">
         <div className="h-4 w-56 rounded bg-muted" />
       </td>
-      {/* Status */}
       <td className="px-4 py-3">
         <div className="h-5 w-20 rounded-full bg-muted" />
       </td>
-      {/* Priority */}
       <td className="px-4 py-3">
         <div className="h-5 w-16 rounded-full bg-muted" />
       </td>
-      {/* Due Date */}
       <td className="px-4 py-3">
         <div className="h-4 w-24 rounded bg-muted" />
       </td>
@@ -87,31 +62,39 @@ function TableRowSkeleton() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Page component
-// ---------------------------------------------------------------------------
-
 export default function TasksPage() {
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "all">("all");
+  const [page, setPage] = useState(1);
 
-  // Fetch all org-wide tasks; no project_id means the backend returns every
-  // task the current user has access to across the organisation.
+  const listParams = {
+    page,
+    per_page: PAGE_SIZE,
+    ...(statusFilter === "all" ? {} : { status: statusFilter }),
+  };
+
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: taskKeys.list({}),
-    queryFn: () => getTasks({}),
+    queryKey: taskKeys.list(listParams),
+    queryFn: () => getTasks(listParams),
   });
 
-  const allTasks: Task[] = data?.data ?? [];
+  const { data: summary } = useQuery({
+    queryKey: ["metrics", "summary"],
+    queryFn: getDashboardSummary,
+  });
 
-  // Client-side status filter applied on top of the full org-wide result set.
-  const filteredTasks: Task[] =
-    statusFilter === "all"
-      ? allTasks
-      : allTasks.filter((task) => task.status === statusFilter);
+  const tasks: Task[] = data?.data ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, data?.total_pages ?? 1);
+  const byStatus = summary?.tasks_by_status ?? {};
+  const allCount = summary?.total_tasks ?? total;
+
+  function selectStatus(next: TaskStatus | "all") {
+    setStatusFilter(next);
+    setPage(1);
+  }
 
   return (
     <div className="space-y-6">
-      {/* Page header */}
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Tasks</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -119,11 +102,10 @@ export default function TasksPage() {
         </p>
       </div>
 
-      {/* Status filter bar */}
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
-          onClick={() => setStatusFilter("all")}
+          onClick={() => selectStatus("all")}
           className={[
             "inline-flex items-center rounded-full px-3 py-1 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             statusFilter === "all"
@@ -132,20 +114,16 @@ export default function TasksPage() {
           ].join(" ")}
         >
           All
-          {/* Show the live total once data has loaded */}
-          {!isLoading && (
-            <span className="ml-1.5 text-xs opacity-70">{allTasks.length}</span>
-          )}
+          <span className="ml-1.5 text-xs opacity-70">{allCount}</span>
         </button>
 
         {ALL_STATUSES.map((status) => {
-          // Count is derived from the live data; falls back to 0 while loading.
-          const count = allTasks.filter((t) => t.status === status).length;
+          const count = byStatus[status] ?? 0;
           return (
             <button
               key={status}
               type="button"
-              onClick={() => setStatusFilter(status)}
+              onClick={() => selectStatus(status)}
               className={[
                 "inline-flex items-center rounded-full px-3 py-1 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 statusFilter === status
@@ -154,15 +132,12 @@ export default function TasksPage() {
               ].join(" ")}
             >
               {STATUS_LABELS[status]}
-              {!isLoading && (
-                <span className="ml-1.5 text-xs opacity-70">{count}</span>
-              )}
+              <span className="ml-1.5 text-xs opacity-70">{count}</span>
             </button>
           );
         })}
       </div>
 
-      {/* Error state */}
       {isError && (
         <div className="rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           Failed to load tasks:{" "}
@@ -170,7 +145,6 @@ export default function TasksPage() {
         </div>
       )}
 
-      {/* Tasks table */}
       <div className="overflow-x-auto rounded-xl border border-border">
         <table className="w-full text-sm">
           <thead>
@@ -182,25 +156,17 @@ export default function TasksPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {/* Loading skeletons – render 6 placeholder rows while fetching */}
             {isLoading &&
               Array.from({ length: 6 }).map((_, index) => (
                 <TableRowSkeleton key={index} />
               ))}
 
-            {/* Live task rows */}
             {!isLoading &&
-              filteredTasks.map((task) => (
-                <tr
-                  key={task.id}
-                  className="transition-colors hover:bg-muted/20"
-                >
-                  {/* Title */}
+              tasks.map((task) => (
+                <tr key={task.id} className="transition-colors hover:bg-muted/20">
                   <td className="px-4 py-3">
                     <span className="font-medium">{task.title}</span>
                   </td>
-
-                  {/* Status badge */}
                   <td className="px-4 py-3">
                     <span
                       className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_BADGE_STYLES[task.status]}`}
@@ -208,8 +174,6 @@ export default function TasksPage() {
                       {STATUS_LABELS[task.status]}
                     </span>
                   </td>
-
-                  {/* Priority badge */}
                   <td className="px-4 py-3">
                     <span
                       className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${PRIORITY_BADGE_STYLES[task.priority]}`}
@@ -217,22 +181,25 @@ export default function TasksPage() {
                       {task.priority}
                     </span>
                   </td>
-
-                  {/* Due date – highlighted red when overdue and not yet done */}
                   <td
                     className={`px-4 py-3 ${
                       isDueOverdue(task.due_date) && task.status !== "done"
-                        ? "font-medium text-red-600"
+                        ? "font-medium text-red-600 dark:text-red-400"
                         : "text-muted-foreground"
                     }`}
                   >
-                    {formatDueDate(task.due_date)}
+                    {task.due_date
+                      ? formatDateOnly(task.due_date, {
+                          day: "numeric",
+                          month: "short",
+                          year: "numeric",
+                        })
+                      : "—"}
                   </td>
                 </tr>
               ))}
 
-            {/* Empty state – only shown after data has loaded */}
-            {!isLoading && !isError && filteredTasks.length === 0 && (
+            {!isLoading && !isError && tasks.length === 0 && (
               <tr>
                 <td
                   colSpan={4}
@@ -246,11 +213,35 @@ export default function TasksPage() {
         </table>
       </div>
 
-      {/* Row count – hidden while loading or in error state */}
       {!isLoading && !isError && (
-        <p className="text-xs text-muted-foreground">
-          Showing {filteredTasks.length} of {allTasks.length} tasks
-        </p>
+        <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+          <p>
+            Showing {tasks.length} of {total} tasks
+          </p>
+          {totalPages > 1 && (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                className="rounded-md border border-border px-2 py-1 hover:bg-accent disabled:opacity-40"
+              >
+                Previous
+              </button>
+              <span>
+                Page {page} of {totalPages}
+              </span>
+              <button
+                type="button"
+                disabled={page >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                className="rounded-md border border-border px-2 py-1 hover:bg-accent disabled:opacity-40"
+              >
+                Next
+              </button>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

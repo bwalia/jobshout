@@ -54,31 +54,24 @@ export async function sendChatMessage(
   return data;
 }
 
+export interface StreamChatOptions {
+  confirmationToken?: string;
+  signal?: AbortSignal;
+  /**
+   * What the transcript should show for this message when it differs from
+   * content — e.g. a clarify pick sends the option's machine value as content
+   * and the clicked label here.
+   */
+  displayContent?: string;
+}
+
 export async function streamChatMessage(
   sessionId: string,
   content: string,
   onEvent: (ev: ChatStreamEvent) => void,
-  confirmationToken?: string,
-  signal?: AbortSignal
+  options: StreamChatOptions = {}
 ): Promise<void> {
-  const token =
-    typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
-  const res = await fetch(
-    `${API_BASE_URL}/api/v1/chat/sessions/${sessionId}/messages/stream`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({
-        content,
-        source: "web",
-        confirmation_token: confirmationToken || undefined,
-      }),
-      signal,
-    }
-  );
+  const res = await postChatStream(sessionId, content, options);
   if (!res.ok || !res.body) {
     throw new Error(`Chat stream failed (${res.status})`);
   }
@@ -95,6 +88,71 @@ export async function streamChatMessage(
       const ev = parseSse(chunk);
       if (ev) onEvent(ev);
     }
+  }
+  buf += decoder.decode();
+  if (buf.trim()) {
+    const ev = parseSse(buf);
+    if (ev) onEvent(ev);
+  }
+}
+
+async function postChatStream(
+  sessionId: string,
+  content: string,
+  options: StreamChatOptions,
+  retried = false
+): Promise<Response> {
+  const token =
+    typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+  const res = await fetch(
+    `${API_BASE_URL}/api/v1/chat/sessions/${sessionId}/messages/stream`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({
+        content,
+        source: "web",
+        confirmation_token: options.confirmationToken || undefined,
+        display_content: options.displayContent || undefined,
+      }),
+      signal: options.signal,
+    }
+  );
+  if (res.status === 401 && !retried) {
+    const refreshed = await refreshAccessTokenOnce();
+    if (refreshed) {
+      return postChatStream(sessionId, content, options, true);
+    }
+  }
+  return res;
+}
+
+async function refreshAccessTokenOnce(): Promise<boolean> {
+  if (typeof window === "undefined") return false;
+  const refreshToken = localStorage.getItem("refresh_token");
+  if (!refreshToken) return false;
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/v1/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (!res.ok) return false;
+    const data = (await res.json()) as {
+      access_token?: string;
+      refresh_token?: string;
+    };
+    if (!data.access_token) return false;
+    localStorage.setItem("access_token", data.access_token);
+    if (data.refresh_token) {
+      localStorage.setItem("refresh_token", data.refresh_token);
+    }
+    return true;
+  } catch {
+    return false;
   }
 }
 

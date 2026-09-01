@@ -1,4 +1,4 @@
--- Migration 034: built-in CareerOps agent and person-scoped career tables.
+-- Migration 039: built-in CareerOps agent and person-scoped career tables.
 --
 -- CareerOps is a JobShout specialist (same family as Research / Article Writer /
 -- Mail): evaluation, tracker, and artifacts live in this API and Postgres.

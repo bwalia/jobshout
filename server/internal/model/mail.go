@@ -44,6 +44,10 @@ type MailConnection struct {
 	WatchLabels           []string   `json:"watch_labels"`
 	WatchSenders          []string   `json:"watch_senders"`
 	WatchSubjectPrefixes  []string   `json:"watch_subject_prefixes"`
+	WatchKnowledgeURLs    []string   `json:"knowledge_urls"`
+	KnowledgeNotes        string     `json:"knowledge_notes"`
+	ResearchFocus         string     `json:"research_focus"`
+	ReplyInstructions     string     `json:"reply_instructions"`
 	Status                string     `json:"status"`
 	StatusError           *string    `json:"status_error,omitempty"`
 	LastSyncAt            *time.Time `json:"last_sync_at,omitempty"`
@@ -79,6 +83,10 @@ type MailConnectionStatus struct {
 	StatusError           string         `json:"status_error,omitempty"`
 	AllowMailboxMutations bool           `json:"allow_mailbox_mutations"`
 	Rules                 MailWatchRules `json:"rules"`
+	KnowledgeURLs         []string       `json:"knowledge_urls"`
+	KnowledgeNotes        string         `json:"knowledge_notes"`
+	ResearchFocus         string         `json:"research_focus"`
+	ReplyInstructions     string         `json:"reply_instructions"`
 	Scopes                []string       `json:"scopes,omitempty"`
 	ScopesDocumented      []MailScopeDoc `json:"scopes_documented"`
 	LastSyncAt            *time.Time     `json:"last_sync_at,omitempty"`
@@ -164,8 +172,12 @@ type UpdateMailDraftRequest struct {
 	CCEmail *string `json:"cc_email"`
 }
 
-// UpdateMailConnectionRequest is PATCH /connection (rules + mutation flag).
+// UpdateMailConnectionRequest is PATCH /connection (rules + knowledge playbook).
 type UpdateMailConnectionRequest struct {
 	AllowMailboxMutations *bool           `json:"allow_mailbox_mutations"`
 	Rules                 *MailWatchRules `json:"rules"`
+	KnowledgeURLs         *[]string       `json:"knowledge_urls"`
+	KnowledgeNotes        *string         `json:"knowledge_notes"`
+	ResearchFocus         *string         `json:"research_focus"`
+	ReplyInstructions     *string         `json:"reply_instructions"`
 }

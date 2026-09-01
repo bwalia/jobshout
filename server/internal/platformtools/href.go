@@ -11,7 +11,9 @@ import (
 
 func agentHref(id uuid.UUID) string    { return "/agents/" + id.String() }
 func taskHref(id uuid.UUID) string     { return "/task-manager" }
-func projectHref(id uuid.UUID) string  { return "/projects/" + id.String() }
+func projectHref(id uuid.UUID) string {
+	return "/panel/projects?project=" + id.String()
+}
 func workflowHref(id uuid.UUID) string { return "/workflows/" + id.String() }
 func executionHref(agentID uuid.UUID) string {
 	return "/agents/" + agentID.String()

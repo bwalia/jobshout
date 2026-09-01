@@ -53,7 +53,12 @@ type StartChatSessionRequest struct {
 
 // SendChatMessageRequest is the API payload for sending a message in a session.
 type SendChatMessageRequest struct {
-	Content            string `json:"content" validate:"required,min=1"`
-	Source             string `json:"source,omitempty"`
-	ConfirmationToken  string `json:"confirmation_token,omitempty"`
+	Content           string `json:"content" validate:"required,min=1"`
+	Source            string `json:"source,omitempty"`
+	ConfirmationToken string `json:"confirmation_token,omitempty"`
+	// DisplayContent, when set, is what the transcript shows for this message
+	// instead of Content. Used by clarify option picks, where Content carries
+	// the machine value (e.g. a project UUID) and DisplayContent the label the
+	// user actually clicked. The agent always acts on Content.
+	DisplayContent string `json:"display_content,omitempty" validate:"omitempty,max=2000"`
 }

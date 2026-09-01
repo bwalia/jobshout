@@ -34,19 +34,30 @@ export function AgentInputFields({
 }: AgentInputFieldsProps) {
   const firstRequired = fields.find((f) => f.required)?.key;
 
+  let lastGroup: string | undefined;
   return (
     <div className="space-y-4">
-      {fields.map((field) => (
-        <Field
-          key={field.key}
-          field={field}
-          value={values[field.key] ?? ""}
-          onChange={(v) => onChange(field.key, v)}
-          error={errors?.[field.key]}
-          disabled={disabled}
-          autoFocus={Boolean(autoFocusFirst && field.key === firstRequired)}
-        />
-      ))}
+      {fields.map((field) => {
+        const showGroup = Boolean(field.group && field.group !== lastGroup);
+        lastGroup = field.group ?? lastGroup;
+        return (
+          <div key={field.key} className="space-y-2">
+            {showGroup ? (
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                {field.group}
+              </p>
+            ) : null}
+            <Field
+              field={field}
+              value={values[field.key] ?? ""}
+              onChange={(v) => onChange(field.key, v)}
+              error={errors?.[field.key]}
+              disabled={disabled}
+              autoFocus={Boolean(autoFocusFirst && field.key === firstRequired)}
+            />
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -68,12 +79,20 @@ function Field({
 }) {
   const borderCls = error ? "border-destructive" : "border-input";
 
+  useEffect(() => {
+    if (field.type === "checkbox" && value === "" && field.defaultValue === true) {
+      onChange("true");
+    }
+  }, [field.type, field.defaultValue, value, onChange]);
+
   if (field.type === "checkbox") {
+    const checked =
+      value === "true" || (value === "" && field.defaultValue === true);
     return (
       <label className="flex cursor-pointer items-start gap-2 text-sm">
         <input
           type="checkbox"
-          checked={value === "true"}
+          checked={checked}
           onChange={(e) => onChange(e.target.checked ? "true" : "false")}
           disabled={disabled}
           className="mt-0.5 h-4 w-4 rounded border-input"
@@ -204,7 +223,12 @@ function RepoField({
         if (cancelled) return;
         const list = data.allowed ?? [];
         setAllowed(list);
-        if (list.length && !value) onChange(list[0]);
+        // Also replace a hydrated value that's no longer allowed: leaving it
+        // rendered the <select> blank while the stale string still validated,
+        // so "Run now" would launch against a repo the UI never displayed.
+        if (list.length && (!value || !list.includes(value))) {
+          onChange(list[0]);
+        }
       } catch {
         if (!cancelled) setAllowed([]);
       }

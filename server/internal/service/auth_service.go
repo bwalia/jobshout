@@ -151,6 +151,7 @@ func (s *authService) seedBuiltinAgents(ctx context.Context, orgID, createdBy uu
 		"Security Tester": pentestSeed(orgID),
 		"PR Reviewer":     prReviewerSeed(orgID),
 		"Mail Agent":      mailAgentSeed(orgID),
+		"Image Generator": imagesAgentSeed(orgID),
 		"CareerOps":       careerOpsSeed(orgID),
 	}
 	seeded := 0

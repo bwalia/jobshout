@@ -46,24 +46,15 @@ func registerCareer(reg *Registry, d Deps) {
 				return nil, err
 			}
 			if res.BlacklistHit != nil {
-				label := res.BlacklistHit.Company
-				if label == "" {
-					label = res.BlacklistHit.Domain
-				}
-				return &Result{
-					Missing:  []string{"confirm_blacklist"},
-					Question: fmt.Sprintf("%s is on your blacklist. Evaluate it anyway?", label),
-					Options: []model.ClarifyOption{
-						{Label: "Yes, evaluate anyway", Value: "true"},
-						{Label: "No, skip", Value: "false"},
-					},
-					Data: map[string]any{"blacklist_hit": true, "company": label, "reason": res.BlacklistHit.Reason},
-				}, nil
+				return careerBlacklistClarify(res.BlacklistHit), nil
 			}
 			if res.Dead {
 				return &Result{Data: map[string]any{"dead": true, "reason": res.DeadReason}}, nil
 			}
 			ev := res.Evaluation
+			if ev == nil {
+				return &Result{Data: map[string]any{"message": "Nothing to evaluate."}}, nil
+			}
 			ref := careerRef(ev)
 			data := map[string]any{
 				"company": ev.Company, "role": ev.Role,
@@ -80,8 +71,9 @@ func registerCareer(reg *Registry, d Deps) {
 		"Cheap first-pass score for a job URL or pasted JD. Does not draft Block H.",
 		"insight", model.PermAgentsExecute, false, false,
 		tools.ObjectSchema(map[string]any{
-			"job_url": map[string]any{"type": "string"},
-			"jd_text": map[string]any{"type": "string"},
+			"job_url":           map[string]any{"type": "string"},
+			"jd_text":           map[string]any{"type": "string"},
+			"confirm_blacklist": map[string]any{"type": "boolean"},
 		}),
 		func(ctx context.Context, input map[string]any) (*Result, error) {
 			ident := MustIdentity(ctx)
@@ -92,17 +84,21 @@ func registerCareer(reg *Registry, d Deps) {
 			}
 			res, err := d.Career.Evaluate(ctx, ident.OrgID, ident.UserID, model.EvaluateCareerRequest{
 				JobURL: jobURL, JDText: jd, Mode: model.CareerEvalModeTriage,
+				ConfirmBlacklist: boolArg(input, "confirm_blacklist", false),
 			})
 			if err != nil {
 				return nil, err
 			}
 			if res.BlacklistHit != nil {
-				return &Result{Data: map[string]any{"blacklist_hit": true, "company": res.BlacklistHit.Company}}, nil
+				return careerBlacklistClarify(res.BlacklistHit), nil
 			}
 			if res.Dead {
 				return &Result{Data: map[string]any{"dead": true, "reason": res.DeadReason}}, nil
 			}
 			ev := res.Evaluation
+			if ev == nil {
+				return &Result{Data: map[string]any{"message": "Nothing to triage."}}, nil
+			}
 			ref := careerRef(ev)
 			return &Result{Data: map[string]any{"score": ev.Score.Overall, "recommendation": ev.Score.Recommendation}, Entity: &ref}, nil
 		},
@@ -592,6 +588,25 @@ func registerCareer(reg *Registry, d Deps) {
 			return &Result{Data: out}, nil
 		},
 	))
+}
+
+func careerBlacklistClarify(hit *model.CareerBlacklistEntry) *Result {
+	label := strings.TrimSpace(hit.Company)
+	if label == "" {
+		label = strings.TrimSpace(hit.Domain)
+	}
+	if label == "" {
+		label = "that company"
+	}
+	return &Result{
+		Missing:  []string{"confirm_blacklist"},
+		Question: fmt.Sprintf("%s is on your blacklist. Evaluate it anyway?", label),
+		Options: []model.ClarifyOption{
+			{Label: "Yes, evaluate anyway", Value: "true"},
+			{Label: "No, skip", Value: "false"},
+		},
+		Data: map[string]any{"blacklist_hit": true, "company": label, "reason": hit.Reason},
+	}
 }
 
 func careerRef(ev *model.CareerEvaluation) model.EntityRef {

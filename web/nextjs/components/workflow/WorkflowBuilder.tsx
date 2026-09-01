@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ReactFlow, {
   addEdge,
   Background,
@@ -39,13 +39,11 @@ interface WorkflowBuilderProps {
 
 let nodeIdCounter = 0;
 
-export function WorkflowBuilder({
-  initialGraph,
-  onSave,
-  readOnly = false,
-  executionStatus,
-}: WorkflowBuilderProps) {
-  const initialNodes: Node[] = (initialGraph?.nodes || []).map((n) => ({
+function buildNodes(
+  initialGraph: GraphDefinition | undefined,
+  executionStatus?: WorkflowBuilderProps["executionStatus"]
+): Node[] {
+  return (initialGraph?.nodes || []).map((n) => ({
     id: n.id,
     type: n.type,
     position: n.position || { x: 250, y: Number(n.id) * 150 },
@@ -55,19 +53,46 @@ export function WorkflowBuilder({
       status: executionStatus?.[n.name],
     },
   }));
+}
 
-  const initialEdges: Edge[] = (initialGraph?.edges || []).map((e) => ({
+function buildEdges(initialGraph: GraphDefinition | undefined): Edge[] {
+  return (initialGraph?.edges || []).map((e) => ({
     id: e.id || `${e.from}-${e.to}`,
     source: e.from,
     target: e.to,
     label: e.label,
     animated: true,
-    style: { stroke: "#6366f1" },
+    style: { stroke: "hsl(var(--primary))" },
   }));
+}
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+export function WorkflowBuilder({
+  initialGraph,
+  onSave,
+  readOnly = false,
+  executionStatus,
+}: WorkflowBuilderProps) {
+  const [nodes, setNodes, onNodesChange] = useNodesState(
+    buildNodes(initialGraph, executionStatus)
+  );
+  const [edges, setEdges, onEdgesChange] = useEdgesState(
+    buildEdges(initialGraph)
+  );
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
+
+  // useNodesState is plain useState underneath, so it ignores later values of
+  // initialGraph — e.g. the refetched steps after a save. Compare by content
+  // (the parent rebuilds the object every render) and reset only on a real
+  // change, so in-progress canvas edits are never clobbered by re-renders.
+  const graphSignature = JSON.stringify(initialGraph ?? null);
+  const appliedSignature = useRef(graphSignature);
+  useEffect(() => {
+    if (appliedSignature.current === graphSignature) return;
+    appliedSignature.current = graphSignature;
+    setNodes(buildNodes(initialGraph, executionStatus));
+    setEdges(buildEdges(initialGraph));
+    setSelectedNode(null);
+  }, [graphSignature, initialGraph, executionStatus, setNodes, setEdges]);
 
   // Sync executionStatus changes into node data
   useEffect(() => {
@@ -86,7 +111,7 @@ export function WorkflowBuilder({
   const onConnect = useCallback(
     (connection: Connection) => {
       setEdges((eds) =>
-        addEdge({ ...connection, animated: true, style: { stroke: "#6366f1" } }, eds)
+        addEdge({ ...connection, animated: true, style: { stroke: "hsl(var(--primary))" } }, eds)
       );
     },
     [setEdges]
@@ -189,7 +214,7 @@ export function WorkflowBuilder({
           deleteKeyCode={readOnly ? null : "Backspace"}
           className="bg-background"
         >
-          <Background color="#333" gap={20} />
+          <Background color="hsl(var(--border))" gap={20} />
           <Controls />
           <MiniMap
             nodeColor={(n) => {

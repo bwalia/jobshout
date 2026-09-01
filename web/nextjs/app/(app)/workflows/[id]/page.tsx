@@ -11,14 +11,16 @@ import {
   useWorkflowRuns,
   useWorkflowRun,
 } from "@/lib/hooks/useWorkflows";
+import { graphToSteps } from "@/lib/workflow-graph";
 import type { GraphDefinition, GraphNode, GraphEdge, WorkflowRun } from "@/lib/types/workflow";
+import { THEME_BADGE } from "@/lib/status-colors";
 
 function RunStatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
-    completed: "bg-green-500/20 text-green-400",
-    running: "bg-yellow-500/20 text-yellow-400",
-    failed: "bg-red-500/20 text-red-400",
-    pending: "bg-blue-500/20 text-blue-400",
+    completed: THEME_BADGE.success,
+    running: THEME_BADGE.warning,
+    failed: THEME_BADGE.danger,
+    pending: THEME_BADGE.info,
   };
   return (
     <span
@@ -110,9 +112,9 @@ function RunCard({
       {expanded && (
         <div className="border-t border-border">
           {currentRun.error_message && (
-            <div className="border-b border-border bg-red-500/5 px-3 py-2">
-              <p className="font-medium text-red-400 mb-0.5">Error</p>
-              <p className="text-red-400/80 whitespace-pre-wrap break-words">
+            <div className="border-b border-border bg-red-500/5 px-3 py-2 dark:bg-red-500/10">
+              <p className="mb-0.5 font-medium text-red-700 dark:text-red-400">Error</p>
+              <p className="whitespace-pre-wrap break-words text-red-700/80 dark:text-red-400/80">
                 {currentRun.error_message}
               </p>
             </div>
@@ -197,7 +199,7 @@ export default function WorkflowDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="flex h-[calc(100vh-4rem)] items-center justify-center">
+      <div className="flex h-full min-h-0 items-center justify-center">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
       </div>
     );
@@ -205,7 +207,7 @@ export default function WorkflowDetailPage() {
 
   if (!workflow) {
     return (
-      <div className="flex h-[calc(100vh-4rem)] flex-col items-center justify-center gap-3">
+      <div className="flex h-full min-h-0 flex-col items-center justify-center gap-3">
         <p className="text-sm text-muted-foreground">Workflow not found</p>
         <button
           onClick={() => router.push("/workflows")}
@@ -248,12 +250,13 @@ export default function WorkflowDetailPage() {
       payload: {
         name: workflow.name,
         description: workflow.description ?? undefined,
+        steps: graphToSteps(graph),
       },
     });
   };
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-4 border-b border-border px-4 py-3">
         <button
           onClick={() => router.push("/workflows")}

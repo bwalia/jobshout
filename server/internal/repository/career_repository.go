@@ -47,6 +47,7 @@ type CareerRepository interface {
 	ListArtifacts(ctx context.Context, applicationID uuid.UUID) ([]model.CareerArtifact, error)
 
 	ListStories(ctx context.Context, orgID, profileID uuid.UUID) ([]model.CareerStory, error)
+	GetStoryByID(ctx context.Context, id uuid.UUID) (*model.CareerStory, error)
 	UpsertStory(ctx context.Context, s *model.CareerStory) error
 
 	InsertScanRun(ctx context.Context, r *model.CareerScanRun) error
@@ -590,6 +591,23 @@ func (r *careerRepository) ListStories(ctx context.Context, orgID, profileID uui
 	return out, rows.Err()
 }
 
+func (r *careerRepository) GetStoryByID(ctx context.Context, id uuid.UUID) (*model.CareerStory, error) {
+	s := &model.CareerStory{}
+	var tags []string
+	err := r.pool.QueryRow(ctx, `
+		SELECT id, org_id, profile_id, title, situation, task, action, result, reflection, provenance, tags, created_at, updated_at
+		FROM career_stories WHERE id=$1`, id).Scan(
+		&s.ID, &s.OrgID, &s.ProfileID, &s.Title, &s.Situation, &s.Task, &s.Action, &s.Result, &s.Reflection, &s.Provenance, &tags, &s.CreatedAt, &s.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("career_repo: get story: %w", err)
+	}
+	s.Tags = nzStrings(tags)
+	return s, nil
+}
+
 func (r *careerRepository) UpsertStory(ctx context.Context, s *model.CareerStory) error {
 	if s.ID == uuid.Nil {
 		s.ID = uuid.New()
@@ -597,16 +615,22 @@ func (r *careerRepository) UpsertStory(ctx context.Context, s *model.CareerStory
 	if s.Provenance == "" {
 		s.Provenance = model.CareerStoryUser
 	}
-	return r.pool.QueryRow(ctx, `
+	err := r.pool.QueryRow(ctx, `
 		INSERT INTO career_stories (id, org_id, profile_id, title, situation, task, action, result, reflection, provenance, tags)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 		ON CONFLICT (id) DO UPDATE SET
 			title=EXCLUDED.title, situation=EXCLUDED.situation, task=EXCLUDED.task, action=EXCLUDED.action,
 			result=EXCLUDED.result, reflection=EXCLUDED.reflection, provenance=EXCLUDED.provenance, tags=EXCLUDED.tags,
 			updated_at=NOW()
+		WHERE career_stories.org_id = EXCLUDED.org_id
+		  AND career_stories.profile_id = EXCLUDED.profile_id
 		RETURNING created_at, updated_at`,
 		s.ID, s.OrgID, s.ProfileID, s.Title, s.Situation, s.Task, s.Action, s.Result, s.Reflection, s.Provenance, nzStrings(s.Tags),
 	).Scan(&s.CreatedAt, &s.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("career_repo: upsert story: %w", errors.New("not found"))
+	}
+	return err
 }
 
 func (r *careerRepository) InsertScanRun(ctx context.Context, run *model.CareerScanRun) error {

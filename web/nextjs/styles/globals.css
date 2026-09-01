@@ -45,16 +45,16 @@
     --sidebar-muted: 240 6% 93%;
     --sidebar-border: 240 8% 90%;
 
-    --status-todo: 240 5% 52%;
+    --status-todo: 240 5% 42%;
     --status-progress: 39 96% 48%;
-    --status-review: 39 96% 48%;
+    --status-review: 262 70% 52%;
     --status-done: 151 55% 38%;
     --status-blocked: 2 78% 52%;
-    --status-idle: 240 5% 55%;
+    --status-idle: 240 5% 62%;
 
-    --signal: 39 96% 48%;
+    --signal: 151 55% 38%;
     --signal-live: 151 55% 40%;
-    --signal-warn: 39 96% 48%;
+    --signal-warn: 262 70% 52%;
     --signal-error: 2 78% 52%;
     --signal-info: 220 70% 50%;
   }
@@ -94,16 +94,16 @@
     --sidebar-muted: 240 6% 12%;
     --sidebar-border: 240 6% 14%;
 
-    --status-todo: 240 5% 55%;
+    --status-todo: 240 5% 62%;
     --status-progress: 39 96% 52%;
-    --status-review: 39 96% 52%;
+    --status-review: 262 72% 68%;
     --status-done: 151 55% 45%;
     --status-blocked: 0 72% 55%;
-    --status-idle: 240 5% 48%;
+    --status-idle: 240 5% 42%;
 
-    --signal: 39 96% 52%;
+    --signal: 151 55% 45%;
     --signal-live: 151 55% 45%;
-    --signal-warn: 39 96% 52%;
+    --signal-warn: 262 72% 68%;
     --signal-error: 0 72% 55%;
     --signal-info: 220 80% 65%;
   }
@@ -167,7 +167,18 @@
     border-radius: 3px;
   }
 
-  /* Directional panel slide (~300ms ease-out + slight fade) */
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Directional panel slide (~300ms ease-out + slight fade).
+     The end frame must be `transform: none` — not translateY(0) — because
+     animation-fill-mode: both retains it forever, and any non-none transform
+     turns the wrapper into the containing block for every position: fixed
+     descendant, which broke all dialogs opened inside a panel. */
   @keyframes panel-in-from-bottom {
     from {
       opacity: 0;
@@ -175,7 +186,7 @@
     }
     to {
       opacity: 1;
-      transform: translateY(0);
+      transform: none;
     }
   }
   @keyframes panel-in-from-top {
@@ -185,7 +196,7 @@
     }
     to {
       opacity: 1;
-      transform: translateY(0);
+      transform: none;
     }
   }
   .animate-panel-from-bottom {

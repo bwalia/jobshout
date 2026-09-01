@@ -121,18 +121,31 @@ func (c *OllamaClient) SupportsTools() bool {
 // discovery cache on a miss so the answer does not depend on whether anything
 // happened to call ListModels first. A failed probe answers false.
 func (c *OllamaClient) modelSupportsTools(ctx context.Context, model string) bool {
+	info, ok := c.primedLookup(ctx, model)
+	return ok && info.SupportsTools()
+}
+
+// modelSupportsThinking resolves a model's "thinking" capability the same way.
+// False is the safe answer here too: requesting thinking from a model that
+// lacks it is an error on some Ollama builds, while skipping it merely means a
+// plain completion.
+func (c *OllamaClient) modelSupportsThinking(ctx context.Context, model string) bool {
+	info, ok := c.primedLookup(ctx, model)
+	return ok && info.SupportsThinking()
+}
+
+// primedLookup is lookupModel with a self-priming discovery call on a miss.
+func (c *OllamaClient) primedLookup(ctx context.Context, model string) (ModelInfo, bool) {
 	info, ok := c.lookupModel(model)
 	if !ok {
 		primeCtx, cancel := context.WithTimeout(ctx, modelDiscoveryTimeout)
 		defer cancel()
 		if _, err := c.ListModels(primeCtx); err != nil {
-			return false
+			return ModelInfo{}, false
 		}
-		if info, ok = c.lookupModel(model); !ok {
-			return false
-		}
+		info, ok = c.lookupModel(model)
 	}
-	return info.SupportsTools()
+	return info, ok
 }
 
 // ollamaChatRequest mirrors the Ollama /api/chat request body.
@@ -140,20 +153,22 @@ type ollamaChatRequest struct {
 	Model    string          `json:"model"`
 	Messages []ollamaMessage `json:"messages"`
 	Stream   bool            `json:"stream"`
-	// Think turns off a reasoning model's visible thinking phase.
+	// Think controls a reasoning model's thinking phase.
 	//
-	// It is always false because nothing here reads the thinking — only
-	// message.content is used — while the thinking costs real time and, worse,
-	// counts against num_predict. A reasoning model given a long prompt and a
-	// bounded budget can spend the whole budget thinking and return empty
-	// content, which surfaces as "empty response from ollama" and looks like
-	// the model failing rather than the request being mis-shaped.
+	// It defaults to false because only message.content is read, while the
+	// thinking costs real time and, worse, counts against num_predict. A
+	// reasoning model given a long prompt and a bounded budget can spend the
+	// whole budget thinking and return empty content, which surfaces as
+	// "empty response from ollama" and looks like the model failing rather
+	// than the request being mis-shaped.
+	// (Measured on muse-glimmer: 47s with thinking vs 12s without on the same
+	// prompt.)
 	//
-	// Measured on muse-glimmer, a reasoning model: the same prompt took 47s
-	// with thinking and 12s without, and the thinking it produced was
-	// degenerate — the prompt echoed back to itself.
-	//
-	// Models with no thinking phase ignore the field.
+	// A caller that wants the reasoning quality anyway sets
+	// GenerateRequest.Think and accepts those costs; it is honoured only for
+	// models whose discovery capabilities include "thinking", because sending
+	// think:true to a model without the capability is an error on some Ollama
+	// builds. Models with no thinking phase ignore the field when false.
 	Think   bool          `json:"think"`
 	Options ollamaOptions `json:"options,omitempty"`
 	// Tools carries native function definitions. Only attached when the
@@ -259,7 +274,7 @@ func (c *OllamaClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 		Model:    model,
 		Messages: msgs,
 		Stream:   true,
-		Think:    false,
+		Think:    req.Think && c.modelSupportsThinking(ctx, model),
 		Options:  opts,
 	}
 	if len(req.ToolDefs) > 0 && c.modelSupportsTools(ctx, model) {
@@ -364,8 +379,8 @@ func (c *OllamaClient) readStream(body io.Reader, model string, numPredict int, 
 	// the evidence is. A reply carrying tool calls is not empty.
 	if strings.TrimSpace(text) == "" && len(toolCalls) == 0 && thinking.Len() > 0 {
 		return nil, fmt.Errorf(
-			"ollama: model %q returned only reasoning and no content — it exhausted num_predict (%d) before answering",
-			model, numPredict)
+			"ollama: model %q %w — it exhausted num_predict (%d) before answering",
+			model, ErrOnlyThinking, numPredict)
 	}
 
 	// Ollama supplies no call IDs; synthesize stable ones so callers can echo

@@ -6,7 +6,7 @@
 
 env: int
 # Public host per environment. jobshout.co.uk has no wildcard, so each host needs
-# a Cloudflare CNAME -> pop0.wslproxy.com plus a wslproxy vhost -> the k3s Traefik
+# a Cloudflare CNAME -> lon1.pop0.uk plus a wslproxy vhost -> the k3s Traefik
 # edge (see .github/workflows/register-edge-vhost.yml).
 host: int.jobshout.co.uk
 
@@ -59,6 +59,8 @@ secrets:
   databasePassword: ""
   jwtSecret: ""
   openaiApiKey: ""
+  # Set via extraSecretRefs or --set-string; never committed here.
+  geminiApiKey: ""
   # Set via --set-string or Vault; never committed here.
   ollamaJwtSecret: ""
   # Gateway secret for strix-service. Distinct from ollama/image on purpose.
@@ -118,6 +120,10 @@ ai:
   # while the control-desk conversation uses a tool-capable model.
   chatModel: "qwen3-coder:30b"
   chatModelFallback: "llama3.1:8b"
+  # Mail reply drafting is pinned separately too: draft quality is worth a
+  # slow reasoning model (its thinking phase engages automatically), while
+  # classification stays on the fast worker model. Empty keeps ollamaModel.
+  mailModel: "muse-glimmer:latest"
   chatNumCtx: 16384
   openaiBaseURL: "https://api.openai.com"
   openaiModel: "gpt-4o-mini"
@@ -142,6 +148,9 @@ ai:
   # Covers at 1536×864 / 28 steps need headroom past a cold qwen load.
   imageTimeout: "30m"
   imageOpenaiModel: "gpt-image-1"
+  # Tried first when GEMINI_API_KEY is set; mflux (imageBaseURL) is the fallback.
+  imageGeminiModel: "gemini-3.1-flash-lite-image"
+  geminiBaseURL: "https://generativelanguage.googleapis.com"
   imageBucket: "images"
   # Off by default: a cover costs roughly 25 seconds of a single shared GPU per
   # article, and that is a cost an operator should choose to pay. Image

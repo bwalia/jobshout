@@ -11,7 +11,7 @@ export function EntityCard({ entity }: { entity: EntityRef }) {
     return (
       <Link
         href={href}
-        className="block overflow-hidden rounded-lg border border-border bg-card transition-colors hover:border-primary/40"
+        className="block min-w-0 overflow-hidden rounded-lg border border-border bg-card transition-colors hover:border-primary/40"
       >
         <StoredImage
           src={entity.url}
@@ -22,7 +22,7 @@ export function EntityCard({ entity }: { entity: EntityRef }) {
           <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
             image
           </p>
-          <p className="font-medium text-foreground">{entity.label}</p>
+          <p className="min-w-0 break-words font-medium text-foreground">{entity.label}</p>
         </div>
       </Link>
     );
@@ -30,12 +30,12 @@ export function EntityCard({ entity }: { entity: EntityRef }) {
   return (
     <Link
       href={href}
-      className="block rounded-lg border border-border bg-card px-3 py-2 text-sm transition-colors hover:border-primary/40 hover:bg-secondary/40"
+      className="block min-w-0 rounded-lg border border-border bg-card px-3 py-2 text-sm transition-colors hover:border-primary/40 hover:bg-secondary/40"
     >
       <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
         {entity.kind.replace(/_/g, " ")}
       </p>
-      <p className="font-medium text-foreground">{entity.label}</p>
+      <p className="min-w-0 break-words font-medium text-foreground">{entity.label}</p>
     </Link>
   );
 }
@@ -52,13 +52,13 @@ function fallbackHref(entity: EntityRef): string {
         : "/panel/task-board";
     case "project":
       return entity.id
-        ? `/panel/task-manager?project=${entity.id}`
-        : "/panel/task-manager";
+        ? `/panel/projects?project=${entity.id}`
+        : "/panel/projects";
     case "workflow":
     case "workflow_run":
       return entity.id ? `/workflows/${entity.id}` : "/panel/workflows";
     case "article_run":
-      return entity.id ? `/articles/${entity.id}` : "/panel/task-manager?agent=articles";
+      return entity.id ? `/articles/${entity.id}` : "/panel/artifacts";
     case "pentest_run":
       return entity.id
         ? `/panel/task-manager?agent=pentest&run=${entity.id}`
@@ -72,7 +72,7 @@ function fallbackHref(entity: EntityRef): string {
         ? `/panel/task-manager?agent=mail&thread=${entity.id}`
         : "/panel/task-manager?agent=mail";
     case "image":
-      return "/panel/task-manager?agent=images";
+      return "/panel/artifacts?kind=image";
     case "sprint":
       return "/panel/sprints";
     default:
@@ -90,7 +90,7 @@ export function EntityCardList({ entities }: { entities: EntityRef[] }) {
     return true;
   });
   return (
-    <div className={cn("mt-2 grid gap-2", unique.length > 1 && "sm:grid-cols-2")}>
+    <div className={cn("mt-2 grid min-w-0 gap-2", unique.length > 1 && "sm:grid-cols-2")}>
       {unique.map((e) => (
         <EntityCard key={`${e.kind}-${e.id}-${e.label}`} entity={e} />
       ))}

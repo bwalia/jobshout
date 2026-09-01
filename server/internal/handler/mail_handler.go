@@ -62,6 +62,8 @@ func (h *MailHandler) writeErr(w http.ResponseWriter, err error) {
 		RespondError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, service.ErrMailCannotSend), errors.Is(err, service.ErrMailDraftNotEditable):
 		RespondError(w, http.StatusForbidden, err.Error())
+	case errors.Is(err, mail.ErrInvalidKnowledgeURL), errors.Is(err, mail.ErrKnowledgeNotesTooLong):
+		RespondError(w, http.StatusBadRequest, err.Error())
 	default:
 		RespondError(w, http.StatusInternalServerError, mail.Redact(err.Error()))
 	}

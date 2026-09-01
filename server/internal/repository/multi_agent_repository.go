@@ -139,19 +139,16 @@ func (r *multiAgentRepository) MarkFailed(ctx context.Context, id uuid.UUID, err
 }
 
 func (r *multiAgentRepository) BoardEntries(ctx context.Context, orgID uuid.UUID) ([]model.AgentBoardEntry, error) {
-	// An agent's board column comes from its most recent activity, where
-	// "activity" has two sources:
+	// An agent's board column comes from its most recent activity:
 	//
-	//   1. multi_agent_jobs — the agent participated as planner/executor/reviewer.
-	//   2. blog_runs        — the agent is the article generator for that run.
-	//   3. mail_threads     — Mail Agent work, plus Research Agent while a
-	//                       thread is in researching so the board does not lie.
+	//   1. multi_agent_jobs — planner/executor/reviewer.
+	//   2. blog_runs        — article writer.
+	//   3. mail_threads     — Mail Agent, plus Research Agent while researching.
+	//   4. task_runs        — generic Task Manager runs (without this, a live
+	//                       run leaves the agent idle on the board).
 	//
 	// All are normalised into the same shape, unioned, and the newest row per
 	// agent wins. Agents with no activity at all fall through to idle.
-	//
-	// For blog runs the running step is pulled out of the steps JSONB so the
-	// card can name the exact phase the agent is on, rather than just "running".
 	const sql = `
 		WITH job_activity AS (
 			SELECT a.id AS agent_id,
@@ -165,7 +162,8 @@ func (r *multiAgentRepository) BoardEntries(ctx context.Context, orgID uuid.UUID
 			           WHEN a.id = j.executor_id THEN 'executor'
 			           WHEN a.id = j.reviewer_id THEN 'reviewer'
 			       END::text       AS job_role,
-			       j.created_at
+			       j.created_at,
+			       NULL::uuid      AS task_id
 			FROM agents a
 			JOIN multi_agent_jobs j
 			       ON j.org_id = a.org_id
@@ -180,7 +178,8 @@ func (r *multiAgentRepository) BoardEntries(ctx context.Context, orgID uuid.UUID
 			       s.key::text     AS step_key,
 			       COALESCE(s.label, b.status)::text AS detail,
 			       'writer'::text  AS job_role,
-			       b.created_at
+			       b.created_at,
+			       NULL::uuid      AS task_id
 			FROM blog_runs b
 			LEFT JOIN LATERAL (
 			    SELECT e->>'key' AS key, e->>'label' AS label
@@ -198,7 +197,8 @@ func (r *multiAgentRepository) BoardEntries(ctx context.Context, orgID uuid.UUID
 			       NULL::text      AS step_key,
 			       COALESCE(NULLIF(t.subject, ''), t.status)::text AS detail,
 			       'mail'::text    AS job_role,
-			       t.updated_at    AS created_at
+			       t.updated_at    AS created_at,
+			       NULL::uuid      AS task_id
 			FROM mail_threads t
 			WHERE t.org_id = $1 AND t.agent_id IS NOT NULL
 		),
@@ -210,12 +210,27 @@ func (r *multiAgentRepository) BoardEntries(ctx context.Context, orgID uuid.UUID
 			       'research'::text AS step_key,
 			       COALESCE(NULLIF(t.subject, ''), 'researching email')::text AS detail,
 			       'researcher'::text AS job_role,
-			       t.updated_at    AS created_at
+			       t.updated_at    AS created_at,
+			       NULL::uuid      AS task_id
 			FROM mail_threads t
 			JOIN agents a
 			       ON a.org_id = t.org_id
 			      AND a.metadata->>'builtin' = 'researcher'
 			WHERE t.org_id = $1 AND t.status = 'researching'
+		),
+		task_run_activity AS (
+			SELECT r.agent_id,
+			       'task_run'::text AS kind,
+			       r.id             AS source_id,
+			       r.status::text   AS status,
+			       NULL::text       AS step_key,
+			       COALESCE(NULLIF(t.title, ''), r.status)::text AS detail,
+			       'executor'::text AS job_role,
+			       COALESCE(r.updated_at, r.created_at) AS created_at,
+			       r.task_id        AS task_id
+			FROM task_runs r
+			LEFT JOIN tasks t ON t.id = r.task_id
+			WHERE r.org_id = $1
 		),
 		combined AS (
 			SELECT u.*, ROW_NUMBER() OVER (PARTITION BY u.agent_id ORDER BY u.created_at DESC) AS rn
@@ -224,10 +239,11 @@ func (r *multiAgentRepository) BoardEntries(ctx context.Context, orgID uuid.UUID
 				UNION ALL SELECT * FROM blog_activity
 				UNION ALL SELECT * FROM mail_activity
 				UNION ALL SELECT * FROM mail_research_activity
+				UNION ALL SELECT * FROM task_run_activity
 			) u
 		)
 		SELECT a.id, a.name, a.role, a.avatar_url,
-		       c.kind, c.source_id, c.status, c.step_key, c.detail, c.job_role, c.created_at
+		       c.kind, c.source_id, c.status, c.step_key, c.detail, c.job_role, c.created_at, c.task_id
 		FROM agents a
 		LEFT JOIN combined c ON c.agent_id = a.id AND c.rn = 1
 		WHERE a.org_id = $1
@@ -250,16 +266,19 @@ func (r *multiAgentRepository) BoardEntries(ctx context.Context, orgID uuid.UUID
 			detail    *string
 			role      *string
 			createdAt *time.Time
+			taskID    *uuid.UUID
 		)
 		if err := rows.Scan(&e.AgentID, &e.Name, &e.Role, &e.AvatarURL,
-			&kind, &sourceID, &status, &stepKey, &detail, &role, &createdAt); err != nil {
+			&kind, &sourceID, &status, &stepKey, &detail, &role, &createdAt, &taskID); err != nil {
 			return nil, fmt.Errorf("multi_agent_repo: board scan: %w", err)
 		}
 		e.Activity = boardActivity(kind, status, stepKey)
+		e.ActivityKind = kind
 		if e.Activity != model.ActivityIdle {
 			e.CurrentJobID = sourceID
 			e.JobRole = role
 			e.CurrentJobPrompt = detail
+			e.TaskID = taskID
 		}
 		e.LastActiveAt = createdAt
 		out = append(out, e)
@@ -315,6 +334,15 @@ func boardActivity(kind, status, stepKey *string) string {
 		case model.MailThreadDraftReady:
 			return model.ActivityReviewing
 		case model.MailThreadNew, model.MailThreadClassifying, model.MailThreadResearching:
+			return model.ActivityExecuting
+		}
+		return model.ActivityIdle
+
+	case "task_run":
+		switch *status {
+		case model.TaskRunStatusFailed:
+			return model.ActivityFailed
+		case model.TaskRunStatusQueued, model.TaskRunStatusRunning:
 			return model.ActivityExecuting
 		}
 		return model.ActivityIdle

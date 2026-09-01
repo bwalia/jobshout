@@ -25,6 +25,8 @@ export interface AgentField {
   min?: number;
   placeholder?: string;
   help?: string;
+  /** Optional section heading shown above this field in Task Manager. */
+  group?: string;
   options?: AgentFieldOption[];
   defaultValue?: string | boolean;
 }
@@ -37,6 +39,8 @@ export type AgentBuiltin =
   | "researcher"
   | "pentester"
   | "pr_reviewer"
+  | "mail"
+  | "images"
   | "career_ops";
 
 /**
@@ -208,13 +212,13 @@ const SCHEMAS: Record<AgentBuiltin, AgentInputSchema> = {
         type: "number",
         required: true,
         min: 1,
-        placeholder: "42",
+        placeholder: "e.g. 128",
       },
       {
         key: "dry_run",
         label: "Preview only — do not post comments on GitHub",
         type: "checkbox",
-        defaultValue: false,
+        defaultValue: true,
       },
     ],
     titleFrom: (v) =>
@@ -223,6 +227,105 @@ const SCHEMAS: Record<AgentBuiltin, AgentInputSchema> = {
       `Review ${v.repo?.trim()}#${v.pr_number?.trim()}${
         v.dry_run === "true" ? " (preview only)" : ""
       }`,
+  },
+  mail: {
+    kind: "mail",
+    hint: "Saves who to watch and how to answer, then syncs Gmail. Connect Gmail on Mail Agent first if you have not. Nothing is sent until you Approve a draft. Links inside incoming mail are researched automatically.",
+    fields: [
+      {
+        key: "senders",
+        label: "Watch senders",
+        type: "text",
+        group: "Who to watch",
+        placeholder: "ops@example.com, support@client.com",
+        help: "Comma-separated. Empty = all unread mail from the last 7 days.",
+      },
+      {
+        key: "subject_prefixes",
+        label: "Subject prefixes",
+        type: "text",
+        group: "Who to watch",
+        placeholder: "[support], [billing]",
+      },
+      {
+        key: "labels",
+        label: "Gmail labels",
+        type: "text",
+        group: "Who to watch",
+        placeholder: "INBOX, Support",
+      },
+      {
+        key: "knowledge_notes",
+        label: "What the agent should know",
+        type: "textarea",
+        group: "How to answer",
+        placeholder:
+          "Mac Studio M5 Max: $2,499\nMac Studio M5 Ultra: $5,499\nRefunds within 30 days, shipping 3–5 working days…",
+        help: "Prices, products, policies — plain text or markdown. Replies quote only what is written here.",
+      },
+      {
+        key: "knowledge_urls",
+        label: "Knowledge links (optional)",
+        type: "textarea",
+        group: "How to answer",
+        placeholder: "https://example.com/pricing",
+        help: "Optional pages to research on top of your notes (one URL per line). Incoming mail links are researched too.",
+      },
+      {
+        key: "research_focus",
+        label: "What to look for",
+        type: "textarea",
+        group: "How to answer",
+        placeholder: "Prices, SLA, refund window…",
+      },
+      {
+        key: "reply_instructions",
+        label: "How the reply should read",
+        type: "textarea",
+        group: "How to answer",
+        placeholder: "Tone, length, must-include, must-avoid",
+      },
+    ],
+    titleFrom: (v) => {
+      const focus = v.research_focus?.trim();
+      if (focus) return `Mail: ${focus.slice(0, 80)}`;
+      if (v.knowledge_notes?.trim()) return "Mail: draft from operator knowledge";
+      const urls = v.knowledge_urls?.trim();
+      if (urls) return "Mail: research pinned pages and draft";
+      return "Mail: sync inbox and draft";
+    },
+    descriptionFrom: (v) => {
+      const parts: string[] = [];
+      if (v.senders?.trim()) parts.push(`Senders: ${v.senders.trim()}`);
+      if (v.knowledge_notes?.trim()) {
+        parts.push(`Knowledge: ${v.knowledge_notes.trim().slice(0, 200)}`);
+      }
+      if (v.knowledge_urls?.trim()) parts.push(v.knowledge_urls.trim());
+      if (v.research_focus?.trim()) parts.push(`Look for: ${v.research_focus.trim()}`);
+      if (v.reply_instructions?.trim()) {
+        parts.push(`Reply style: ${v.reply_instructions.trim()}`);
+      }
+      return parts.length ? parts.join("\n\n") : undefined;
+    },
+  },
+  images: {
+    kind: "images",
+    hint: "Generate one image from a prompt. The board task stores the result.",
+    fields: [
+      {
+        key: "prompt",
+        label: "Image prompt",
+        type: "textarea",
+        required: true,
+        minLength: 3,
+        placeholder: "A dark editorial cover of a harbour at night…",
+      },
+    ],
+    titleFrom: (v) => {
+      const p = v.prompt?.trim() || "image";
+      return `Image: ${p.slice(0, 80)}`;
+    },
+    descriptionFrom: (v) => v.prompt?.trim() || undefined,
   },
   career_ops: {
     kind: "career_ops",
@@ -268,9 +371,9 @@ const SCHEMAS: Record<AgentBuiltin, AgentInputSchema> = {
   },
 };
 
-/** True when this schema launches via a specialist API (not generic task run). */
+/** True when this schema launches via the specialist launcher (not generic task run). */
 export function isSpecialistSchema(schema: AgentInputSchema): boolean {
-  return schema.kind !== "task_run" && schema.kind !== "images";
+  return schema.kind !== "task_run";
 }
 
 /** Resolve the input schema for an agent (builtin specialist or generic). */

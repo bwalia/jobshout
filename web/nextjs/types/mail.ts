@@ -29,6 +29,10 @@ export interface MailConnectionStatus {
   status_error?: string;
   allow_mailbox_mutations: boolean;
   rules: MailWatchRules;
+  knowledge_urls?: string[];
+  knowledge_notes?: string;
+  research_focus?: string;
+  reply_instructions?: string;
   scopes?: string[];
   scopes_documented: MailScopeDoc[];
   last_sync_at?: string | null;

@@ -19,17 +19,18 @@ const AVATAR_COLOURS = [
 ];
 
 function getAvatarColour(name: string): string {
-  const index = name.charCodeAt(0) % AVATAR_COLOURS.length;
-  return AVATAR_COLOURS[index];
+  const ch = name.trim().charCodeAt(0);
+  if (!Number.isFinite(ch)) return AVATAR_COLOURS[0];
+  return AVATAR_COLOURS[ch % AVATAR_COLOURS.length] ?? AVATAR_COLOURS[0];
 }
 
 function getInitials(name: string): string {
-  return name
+  const parts = name
     .split(" ")
     .filter(Boolean)
     .slice(0, 2)
-    .map((part) => part[0].toUpperCase())
-    .join("");
+    .map((part) => part[0].toUpperCase());
+  return parts.join("") || "?";
 }
 
 function performanceColour(score: number): string {
@@ -91,7 +92,7 @@ export function AgentCard({ agent, currentTask }: AgentCardProps) {
         <span
           className={`text-sm font-semibold ${performanceColour(agent.performance_score)}`}
         >
-          {agent.performance_score}%
+          {Math.round(agent.performance_score)}%
         </span>
       </div>
 

@@ -58,6 +58,9 @@ const (
 	// BuiltinMail is the Mail Agent: one shared org Gmail, draft-only replies,
 	// Research Agent handoff, human approve-before-send.
 	BuiltinMail = "mail"
+	// BuiltinImages is the Image Generator: one prompt in, one stored image
+	// on the Task Manager board.
+	BuiltinImages = "images"
 	// BuiltinCareerOps is the career specialist: evaluate jobs against a
 	// person-scoped profile, draft materials, track the pipeline. A human
 	// always submits, sends, or clicks Apply.
@@ -116,6 +119,10 @@ type UpdateAgentStatusRequest struct {
 type PaginationParams struct {
 	Page    int `json:"page"`
 	PerPage int `json:"per_page"`
+	// Status optionally filters list endpoints that support it (org task list).
+	Status string `json:"-"`
+	// AssignedAgentID optionally filters the org task list to one agent.
+	AssignedAgentID string `json:"-"`
 }
 
 type PaginatedResponse[T any] struct {
@@ -137,7 +144,7 @@ func (p *PaginationParams) Normalize() {
 	if p.PerPage < 1 {
 		p.PerPage = 20
 	}
-	if p.PerPage > 100 {
-		p.PerPage = 100
+	if p.PerPage > 200 {
+		p.PerPage = 200
 	}
 }

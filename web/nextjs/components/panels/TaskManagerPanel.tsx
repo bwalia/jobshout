@@ -16,17 +16,27 @@ import {
   BookOpen,
 } from "lucide-react";
 import Link from "next/link";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAgents } from "@/lib/hooks/useAgents";
 import { useProjects } from "@/lib/hooks/useProjects";
 import {
+  useAllTasks,
   useDeleteTask,
   useProjectTasks,
-  useTasks,
   useTransitionTask,
+  taskKeys,
 } from "@/lib/hooks/useTasks";
+import { STATUS_OPTIONS, statusLabel } from "@/lib/task-labels";
 import { TaskEditorDialog } from "@/components/task-manager/TaskEditorDialog";
 import { RunTaskDialog } from "@/components/task-manager/RunTaskDialog";
 import { TaskRunView } from "@/components/task-manager/TaskRunView";
+import { TaskActions } from "@/components/task-manager/TaskActions";
+import { TaskHistoryPanel } from "@/components/task-manager/TaskHistoryPanel";
+import {
+  TaskProgressChip,
+  TaskCountLabel,
+  formatCompletedAt,
+} from "@/components/task-manager/TaskProgressChip";
 import { NewProjectDialog } from "@/components/task-manager/NewProjectDialog";
 import { CreateAgentDialog } from "@/components/agent/CreateAgentDialog";
 import { AgentStatusBadge } from "@/components/agent/AgentStatusBadge";
@@ -34,14 +44,15 @@ import { PentestAgentClient } from "@/components/PentestAgentClient";
 import { ReviewAgentClient } from "@/components/ReviewAgentClient";
 import { MailAgentClient } from "@/components/MailAgentClient";
 import { CareerAgentClient } from "@/components/CareerAgentClient";
-import ArticlesPage from "@/app/(app)/articles/page";
-import ImagesPage from "@/app/(app)/images/page";
+import { ArticlesView } from "@/components/articles/ArticlesView";
+import { ImagesView } from "@/components/image/ImagesView";
 import type { LaunchResult } from "@/lib/agents/launch";
 import type { Agent } from "@/lib/types/agent";
 import type { Project, Task } from "@/lib/types/project";
 import type { TaskRun } from "@/lib/types/task-run";
 import type { TaskStatus } from "@/lib/types/common";
 import { cn } from "@/lib/utils/cn";
+import { STATUS_DOT } from "@/lib/status-colors";
 
 type Selection =
   | { kind: "project"; id: string }
@@ -58,17 +69,9 @@ const BUILTINS: {
   { id: "review", label: "PR Reviewer", icon: GitPullRequest, match: "pr_reviewer" },
   { id: "mail", label: "Mail Agent", icon: Mail, match: "mail" },
   { id: "career", label: "Career", icon: Briefcase, match: "career_ops" },
-  { id: "articles", label: "Articles", icon: Newspaper, match: "article_writer" },
-  { id: "images", label: "Images", icon: ImageIcon },
+  { id: "articles", label: "Article Writer", icon: Newspaper, match: "article_writer" },
+  { id: "images", label: "Image Generator", icon: ImageIcon, match: "images" },
 ];
-
-const STATUS_DOT: Record<TaskStatus, string> = {
-  backlog: "bg-muted-foreground",
-  todo: "bg-signal-info",
-  in_progress: "bg-signal-live",
-  review: "bg-signal-warn",
-  done: "bg-signal",
-};
 
 function parseSelection(
   project: string | null,
@@ -84,6 +87,7 @@ function parseSelection(
 
 export function TaskManagerPanel() {
   const router = useRouter();
+  const qc = useQueryClient();
   const searchParams = useSearchParams();
   const projectParam = searchParams.get("project");
   const agentParam = searchParams.get("agent");
@@ -92,7 +96,7 @@ export function TaskManagerPanel() {
   const projects = useMemo(() => projectsResp?.data ?? [], [projectsResp]);
   const { data: agentsResp } = useAgents({ per_page: 100 });
   const agents = useMemo(() => agentsResp?.data ?? [], [agentsResp]);
-  const { data: allTasksResp } = useTasks({ per_page: 200 });
+  const { data: allTasksResp } = useAllTasks();
 
   const taskCounts = useMemo(() => {
     const m = new Map<string, number>();
@@ -135,55 +139,27 @@ export function TaskManagerPanel() {
       : null;
 
   function handleLaunchResult(result: LaunchResult) {
-    switch (result.kind) {
-      case "pentester":
-        setSelection({ kind: "builtin", id: "pentest" });
-        router.replace(
-          `/panel/task-manager?agent=pentest&run=${result.run.id}`,
-          { scroll: false }
-        );
-        break;
-      case "pr_reviewer":
-        setSelection({ kind: "builtin", id: "review" });
-        router.replace(
-          `/panel/task-manager?agent=review&run=${result.run.id}`,
-          { scroll: false }
-        );
-        break;
-      case "article_writer":
-        router.push(`/articles/${result.run.id}`);
-        break;
-      case "researcher": {
-        const params = new URLSearchParams({
-          project: result.task.project_id,
-          task: result.task.id,
-        });
-        setSelection({ kind: "project", id: result.task.project_id });
-        router.replace(`/panel/task-manager?${params}`, { scroll: false });
-        break;
-      }
-      case "career_ops": {
-        setSelection({ kind: "builtin", id: "career" });
-        const params = new URLSearchParams({ agent: "career" });
-        if (result.evaluationId) params.set("eval", result.evaluationId);
-        router.replace(`/panel/task-manager?${params}`, { scroll: false });
-        break;
-      }
-      case "task_run": {
-        const params = new URLSearchParams({
-          project: result.task.project_id,
-          task: result.task.id,
-          run: result.run.id,
-        });
-        setSelection({ kind: "project", id: result.task.project_id });
-        router.replace(`/panel/task-manager?${params}`, { scroll: false });
-        break;
-      }
+    if (!result.task) return;
+    void qc.invalidateQueries({ queryKey: taskKeys.all });
+    void qc.invalidateQueries({ queryKey: ["metrics", "summary"] });
+    if (result.kind === "career_ops") {
+      setSelection({ kind: "builtin", id: "career" });
+      const params = new URLSearchParams({ agent: "career" });
+      if (result.evaluation_id) params.set("eval", result.evaluation_id);
+      router.replace(`/panel/task-manager?${params.toString()}`, { scroll: false });
+      return;
     }
+    const params = new URLSearchParams({
+      project: result.task.project_id,
+      task: result.task.id,
+    });
+    if (result.run_id) params.set("run", result.run_id);
+    setSelection({ kind: "project", id: result.task.project_id });
+    router.replace(`/panel/task-manager?${params.toString()}`, { scroll: false });
   }
 
   return (
-    <div className="flex h-[calc(100dvh-3rem)] flex-col lg:h-screen">
+    <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center justify-between border-b border-border px-6 py-4">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Task Manager</h1>
@@ -338,10 +314,14 @@ export function TaskManagerPanel() {
             </BuiltinFrame>
           )}
           {selection?.kind === "builtin" && selection.id === "articles" && (
-            <ArticlesPage />
+            <BuiltinFrame title="Article Writer">
+              <ArticlesView hideHeader />
+            </BuiltinFrame>
           )}
           {selection?.kind === "builtin" && selection.id === "images" && (
-            <ImagesPage />
+            <BuiltinFrame title="Image Generator">
+              <ImagesView hideHeader />
+            </BuiltinFrame>
           )}
           {selection?.kind === "agent" && selectedAgent && (
             <AgentDetailView
@@ -402,6 +382,7 @@ function ProjectTasksView({
   projectName: string;
   onLaunched: (result: LaunchResult) => void;
 }) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const taskParam = searchParams.get("task");
   const runParam = searchParams.get("run");
@@ -413,6 +394,7 @@ function ProjectTasksView({
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorTask, setEditorTask] = useState<Task | undefined>();
   const [runOpen, setRunOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [focusRunId, setFocusRunId] = useState<string | null>(runParam);
   const transition = useTransitionTask();
   const deleteTask = useDeleteTask();
@@ -422,13 +404,23 @@ function ProjectTasksView({
     setFocusRunId(runParam);
   }, [projectId, taskParam, runParam]);
 
+  function writeTaskUrl(taskId: string | null, runId?: string | null) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("project", projectId);
+    if (taskId) params.set("task", taskId);
+    else params.delete("task");
+    if (runId) params.set("run", runId);
+    else params.delete("run");
+    router.replace(`/panel/task-manager?${params.toString()}`, { scroll: false });
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold tracking-tight">{projectName}</h2>
           <p className="text-sm text-muted-foreground">
-            {tasks.length} task{tasks.length === 1 ? "" : "s"}
+            <TaskCountLabel loaded={tasks.length} total={tasksResp?.total} />
           </p>
         </div>
         <button
@@ -455,40 +447,65 @@ function ProjectTasksView({
             tasks.map((task) => {
               const agent = agents.find((a) => a.id === task.assigned_agent_id);
               const active = task.id === selectedId;
+              const completed = formatCompletedAt(task.completed_at);
               return (
-                <button
+                <div
                   key={task.id}
-                  type="button"
-                  onClick={() => {
-                    setSelectedId(task.id);
-                    setFocusRunId(null);
-                  }}
                   className={cn(
-                    "w-full rounded-md border px-3 py-2.5 text-left transition-colors",
+                    "rounded-md border px-3 py-2.5 transition-colors",
                     active
                       ? "border-primary bg-primary/10"
                       : "border-border bg-card hover:bg-secondary/60"
                   )}
                 >
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={cn(
-                        "h-2 w-2 shrink-0 rounded-full",
-                        STATUS_DOT[task.status]
-                      )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedId(task.id);
+                      setFocusRunId(null);
+                      writeTaskUrl(task.id);
+                    }}
+                    className="w-full text-left"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          "h-2 w-2 shrink-0 rounded-full",
+                          STATUS_DOT[task.status]
+                        )}
+                      />
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                        {task.title}
+                      </span>
+                    </div>
+                    <p className="mt-1 pl-4 text-xs text-muted-foreground">
+                      {agent?.name ?? "Unassigned"}
+                      {" · "}
+                      {statusLabel(task.status)}
+                      {" · "}
+                      {completed
+                        ? `Completed ${completed}`
+                        : `Updated ${new Date(task.updated_at).toLocaleString()}`}
+                    </p>
+                    <div className="mt-1.5 pl-4">
+                      <TaskProgressChip task={task} />
+                    </div>
+                  </button>
+                  <div className="mt-2 pl-4">
+                    <TaskActions
+                      task={task}
+                      size="sm"
+                      onShowHistory={() => {
+                        setSelectedId(task.id);
+                        setHistoryOpen(true);
+                        writeTaskUrl(
+                          task.id,
+                          task.id === selectedId ? runParam : null
+                        );
+                      }}
                     />
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                      {task.title}
-                    </span>
                   </div>
-                  <p className="mt-1 pl-4 text-xs text-muted-foreground">
-                    {agent?.name ?? "Unassigned"}
-                    {" · "}
-                    {task.status.replace(/_/g, " ")}
-                    {" · "}
-                    {new Date(task.updated_at).toLocaleDateString()}
-                  </p>
-                </button>
+                </div>
               );
             })
           )}
@@ -506,7 +523,7 @@ function ProjectTasksView({
                     </p>
                   )}
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
                     onClick={() => {
@@ -517,13 +534,14 @@ function ProjectTasksView({
                   >
                     Edit
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setRunOpen(true)}
-                    className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground"
-                  >
-                    <Rocket className="h-4 w-4" /> Run
-                  </button>
+                  <TaskActions
+                    task={selected}
+                    onShowHistory={() => {
+                      setHistoryOpen(true);
+                      writeTaskUrl(selected.id, runParam);
+                    }}
+                    onRun={() => setRunOpen(true)}
+                  />
                 </div>
               </div>
               <div className="flex flex-wrap gap-3 text-sm">
@@ -539,17 +557,9 @@ function ProjectTasksView({
                     }
                     className="h-8 rounded-md border border-input bg-background px-2 text-sm"
                   >
-                    {(
-                      [
-                        "backlog",
-                        "todo",
-                        "in_progress",
-                        "review",
-                        "done",
-                      ] as TaskStatus[]
-                    ).map((s) => (
-                      <option key={s} value={s}>
-                        {s.replace(/_/g, " ")}
+                    {STATUS_OPTIONS.map((s) => (
+                      <option key={s.value} value={s.value}>
+                        {s.label}
                       </option>
                     ))}
                   </select>
@@ -559,9 +569,10 @@ function ProjectTasksView({
                   className="text-xs text-destructive hover:underline"
                   onClick={() => {
                     if (confirm(`Delete "${selected.title}"?`)) {
-                      void deleteTask.mutateAsync(selected.id).then(() =>
-                        setSelectedId(null)
-                      );
+                      void deleteTask.mutateAsync(selected.id).then(() => {
+                        setSelectedId(null);
+                        writeTaskUrl(null);
+                      });
                     }
                   }}
                 >
@@ -591,12 +602,13 @@ function ProjectTasksView({
           projectId={projectId}
           agents={agents}
           onClose={() => setEditorOpen(false)}
-          onSaved={(t) => setSelectedId(t.id)}
+          onSaved={(t) => {
+            setSelectedId(t.id);
+            writeTaskUrl(t.id);
+          }}
           onLaunched={(result) => {
-            if (result.kind === "task_run") {
-              setSelectedId(result.task.id);
-              setFocusRunId(result.run.id);
-            }
+            setSelectedId(result.task.id);
+            if (result.run_id) setFocusRunId(result.run_id);
             onLaunched(result);
           }}
         />
@@ -606,8 +618,27 @@ function ProjectTasksView({
           task={selected}
           agents={agents}
           onClose={() => setRunOpen(false)}
-          onLaunched={(run: TaskRun) => setFocusRunId(run.id)}
-          onSpecialistLaunched={onLaunched}
+          onLaunched={(run: TaskRun) => {
+            setFocusRunId(run.id);
+            setHistoryOpen(true);
+          }}
+          onSpecialistLaunched={(result) => {
+            if (result.run_id) setFocusRunId(result.run_id);
+            setHistoryOpen(true);
+            onLaunched(result);
+          }}
+        />
+      )}
+      {historyOpen && selected && (
+        <TaskHistoryPanel
+          task={selected}
+          agents={agents}
+          focusRunId={focusRunId}
+          onClose={() => setHistoryOpen(false)}
+          onReRun={() => {
+            setHistoryOpen(false);
+            setRunOpen(true);
+          }}
         />
       )}
     </div>
@@ -625,13 +656,14 @@ function AgentDetailView({
   projects: Project[];
   onLaunched: (result: LaunchResult) => void;
 }) {
-  const { data: tasksResp } = useTasks({
+  const { data: tasksResp } = useAllTasks({
     assigned_agent_id: agent.id,
-    per_page: 50,
   });
   const tasks = tasksResp?.data ?? [];
   const [runTask, setRunTask] = useState<Task | null>(null);
+  const [historyTask, setHistoryTask] = useState<Task | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const runnable = tasks.find((t) => t.status !== "done") ?? null;
 
   return (
     <div className="space-y-6">
@@ -661,9 +693,28 @@ function AgentDetailView({
           <button
             type="button"
             onClick={() => setCreateOpen(true)}
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border px-3 text-sm hover:bg-secondary"
+          >
+            <Plus className="h-4 w-4" /> New task
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (runnable) {
+                setRunTask(runnable);
+                return;
+              }
+              setCreateOpen(true);
+            }}
+            title={
+              runnable
+                ? `Runs "${runnable.title}"`
+                : "Create and run a task"
+            }
             className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90"
           >
-            <Rocket className="h-4 w-4" /> Run agent
+            <Rocket className="h-4 w-4" />{" "}
+            {runnable ? "Run task" : "Run agent"}
           </button>
         </div>
       </div>
@@ -672,42 +723,47 @@ function AgentDetailView({
         <h3 className="mb-2 text-sm font-medium">Assigned tasks</h3>
         {tasks.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No tasks yet. Use Run agent to create one with this agent&apos;s
-            inputs and execute it.
+            No tasks yet. Use Run agent to fill this agent&apos;s inputs and
+            execute it.
           </p>
         ) : (
           <ul className="divide-y divide-border rounded-lg border border-border">
-            {tasks.map((t) => (
-              <li
-                key={t.id}
-                className="flex items-center justify-between gap-3 px-4 py-3"
-              >
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{t.title}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {t.status.replace(/_/g, " ")} · updated{" "}
-                    {new Date(t.updated_at).toLocaleString()}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setRunTask(t)}
-                  className="shrink-0 rounded-md border border-border px-2.5 py-1 text-xs hover:bg-secondary"
+            {tasks.map((t) => {
+              const completed = formatCompletedAt(t.completed_at);
+              return (
+                <li
+                  key={t.id}
+                  className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
                 >
-                  Run
-                </button>
-              </li>
-            ))}
+                  <button
+                    type="button"
+                    onClick={() => setHistoryTask(t)}
+                    className="min-w-0 flex-1 text-left"
+                  >
+                    <p className="truncate text-sm font-medium">{t.title}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {statusLabel(t.status)}
+                      {" · "}
+                      {completed
+                        ? `Completed ${completed}`
+                        : `Updated ${new Date(t.updated_at).toLocaleString()}`}
+                    </p>
+                    <div className="mt-1">
+                      <TaskProgressChip task={t} />
+                    </div>
+                  </button>
+                  <TaskActions
+                    task={t}
+                    size="sm"
+                    onShowHistory={() => setHistoryTask(t)}
+                    onRun={() => setRunTask(t)}
+                  />
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>
-
-      {tasks[0] && (
-        <section>
-          <h3 className="mb-2 text-sm font-medium">Recent runs</h3>
-          <TaskRunView task={tasks[0]} agents={agents} focusRunId={null} />
-        </section>
-      )}
 
       {createOpen && (
         <TaskEditorDialog
@@ -715,7 +771,15 @@ function AgentDetailView({
           projects={projects}
           initialAgentId={agent.id}
           onClose={() => setCreateOpen(false)}
-          onLaunched={onLaunched}
+          onSaved={(t) => {
+            setCreateOpen(false);
+            setRunTask(t);
+          }}
+          onLaunched={(result) => {
+            setCreateOpen(false);
+            setRunTask(null);
+            onLaunched(result);
+          }}
         />
       )}
 
@@ -724,10 +788,24 @@ function AgentDetailView({
           task={runTask}
           agents={agents}
           onClose={() => setRunTask(null)}
-          onLaunched={() => setRunTask(null)}
+          onLaunched={() => {
+            setHistoryTask(runTask);
+            setRunTask(null);
+          }}
           onSpecialistLaunched={(result) => {
             setRunTask(null);
             onLaunched(result);
+          }}
+        />
+      )}
+      {historyTask && (
+        <TaskHistoryPanel
+          task={historyTask}
+          agents={agents}
+          onClose={() => setHistoryTask(null)}
+          onReRun={() => {
+            setRunTask(historyTask);
+            setHistoryTask(null);
           }}
         />
       )}

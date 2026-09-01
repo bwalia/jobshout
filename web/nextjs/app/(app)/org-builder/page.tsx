@@ -14,7 +14,7 @@ export default function OrgBuilderPage() {
   const agents = data?.data ?? [];
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col gap-4">
+    <div className="flex h-full min-h-0 flex-col gap-4">
       {/* Page header */}
       <div className="flex items-center justify-between">
         <div>

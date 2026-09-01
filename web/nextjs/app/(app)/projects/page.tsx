@@ -7,23 +7,20 @@ import { toast } from "sonner";
 import { getProjects, createProject } from "@/lib/api/projects";
 import type { Project, CreateProjectRequest } from "@/lib/types/project";
 import type { Priority, ProjectStatus } from "@/lib/types/common";
-
-// ---------------------------------------------------------------------------
-// Styling helpers
-// ---------------------------------------------------------------------------
+import { THEME_BADGE } from "@/lib/status-colors";
 
 const STATUS_COLOURS: Record<ProjectStatus, string> = {
-  active: "bg-emerald-100 text-emerald-700",
-  paused: "bg-yellow-100 text-yellow-700",
-  completed: "bg-blue-100 text-blue-700",
-  archived: "bg-zinc-100 text-zinc-500",
+  active: THEME_BADGE.success,
+  paused: THEME_BADGE.warning,
+  completed: THEME_BADGE.info,
+  archived: THEME_BADGE.muted,
 };
 
 const PRIORITY_COLOURS: Record<Priority, string> = {
-  low: "bg-zinc-100 text-zinc-500",
-  medium: "bg-sky-100 text-sky-700",
-  high: "bg-orange-100 text-orange-700",
-  critical: "bg-red-100 text-red-700",
+  low: THEME_BADGE.muted,
+  medium: THEME_BADGE.info,
+  high: THEME_BADGE.orange,
+  critical: THEME_BADGE.danger,
 };
 
 function formatDate(dateString: string | null): string {
@@ -190,8 +187,8 @@ interface ProjectCardProps {
 }
 
 function ProjectCard({ project }: ProjectCardProps) {
-  const statusColour = STATUS_COLOURS[project.status];
-  const priorityColour = PRIORITY_COLOURS[project.priority];
+  const statusColour = STATUS_COLOURS[project.status] ?? THEME_BADGE.muted;
+  const priorityColour = PRIORITY_COLOURS[project.priority] ?? THEME_BADGE.muted;
 
   return (
     <Link

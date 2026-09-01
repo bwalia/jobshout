@@ -1,7 +1,9 @@
 package blog
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -24,10 +26,74 @@ type writePlan struct {
 	// into the draft prompt to keep a long article pointed the same way.
 	Angle    string   `json:"angle"`
 	Sections []string `json:"sections"`
+	// Cover fields keep the house style (charcoal navy, teal/coral) while
+	// giving each article its own metaphor so covers do not look identical.
+	CoverMetaphor string         `json:"cover_metaphor"`
+	CoverObjects  flexibleString `json:"cover_objects"`
+	CoverAccent   string         `json:"cover_accent"`
+	// Figures are in-body informational images (flow, comparison, …), planned
+	// only when this run can actually draw. Omitted or empty is fine.
+	Figures []figureBrief `json:"figures"`
 }
+
+// figureBrief is one planned in-body figure: a kind, the section it belongs
+// under, and the facts the picture must show.
+type figureBrief struct {
+	Kind    string `json:"kind"`
+	Section string `json:"section"`
+	Content string `json:"content"`
+}
+
+// flexibleString accepts a JSON string or an array of strings (joined with
+// commas). Models often return cover_objects as ["lighthouse","hull"].
+type flexibleString string
+
+func (s *flexibleString) UnmarshalJSON(b []byte) error {
+	b = bytes.TrimSpace(b)
+	if len(b) == 0 || string(b) == "null" {
+		*s = ""
+		return nil
+	}
+	if b[0] == '"' {
+		var v string
+		if err := json.Unmarshal(b, &v); err != nil {
+			return err
+		}
+		*s = flexibleString(strings.TrimSpace(v))
+		return nil
+	}
+	if b[0] == '[' {
+		var v []string
+		if err := json.Unmarshal(b, &v); err != nil {
+			return err
+		}
+		parts := make([]string, 0, len(v))
+		for _, p := range v {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				parts = append(parts, p)
+			}
+		}
+		*s = flexibleString(strings.Join(parts, ", "))
+		return nil
+	}
+	return fmt.Errorf("want string or array of strings")
+}
+
+func (s flexibleString) String() string { return string(s) }
 
 // plan chooses a title and an outline from the research brief.
 func (r *Runner) plan(ctx context.Context, modelName string, brief model.BlogBrief, rb *research.Brief) (*writePlan, error) {
+	figureAsk, extraJSON := "", ""
+	if r.canLetterFigures() {
+		figureAsk = `
+5. One or two in-article figures that would teach something. Each names a
+   kind (flow, comparison, architecture, process, or concept), the section
+   it belongs under, and the facts to put on the figure — labels, rows or
+   steps, not a decorative scene.`
+		extraJSON = `, "figures": [{"kind":"comparison","section":"...","content":"..."}]`
+	}
+
 	prompt := fmt.Sprintf(`You are planning a technical article for a developer audience.
 
 TOPIC (a subject, not a title):
@@ -48,13 +114,19 @@ Decide:
    concrete and under 70 characters. No colons-and-subtitles, no "A Guide To".
 2. One sentence on the angle: what a reader gets from this piece.
 3. Four to six section headings that deliver that angle.
+4. A cover brief: one concrete visual metaphor unique to this topic, one or two
+   focal objects (not generic "tools, documents, agents"), and a one-word
+   accent note (e.g. "amber", "ice", "copper") that still sits with teal/coral.
+%s
 
 Respond with JSON only, in exactly this shape:
-{"title": "...", "angle": "...", "sections": ["...", "..."]}`,
+{"title": "...", "angle": "...", "sections": ["...", "..."], "cover_metaphor": "...", "cover_objects": "...", "cover_accent": "..."%s}`,
 		brief.Topic,
 		guidanceOrNone(brief.Context),
 		orNone(rb.Summary),
 		formatFindings(rb.Findings),
+		figureAsk,
+		extraJSON,
 	)
 
 	var plan writePlan
@@ -100,6 +172,7 @@ Requirements:
 - 900-1400 words.
 - Include at least one code block where it genuinely helps.
 - Include a DIAGRAM where one genuinely helps — see the diagram rules below.
+- When comparing options, versions or trade-offs, write a markdown table.
 - Cite a source with [n] wherever you state a specific fact, version, number or
   quotation drawn from it. Do not cite a number that is not in the list above.
 - Anything describing HOW A TECHNOLOGY WORKS is a factual claim and needs a
@@ -113,6 +186,7 @@ Requirements:
   is generated separately from the citations you use.
 
 %s
+%s
 
 Return only the markdown article — no preamble, no meta commentary.`,
 		plan.Title,
@@ -122,6 +196,7 @@ Return only the markdown article — no preamble, no meta commentary.`,
 		formatSources(rb),
 		plan.Title,
 		r.visualRules(),
+		r.plannedFiguresNote(plan),
 	)
 
 	resp, err := r.generate(ctx, modelName, prompt)
@@ -185,6 +260,10 @@ Find concrete problems. Look specifically for:
 - Decision nodes in a diagram whose branches all lead to the same place, which
   makes the decision meaningless.
 - A diagram that contradicts the prose around it, or that no sentence refers to.
+- An illustration fence that describes a decorative scene, animation, or
+  generic office instead of a labeled figure (flow, comparison, architecture,
+  process, or annotated concept). Flag it so the revision can rewrite the
+  fence as a specific kind with the facts to render.
 
 List each problem as one specific, actionable sentence naming where it occurs.
 If the draft has no real problems, return an empty list — do not invent work.
@@ -234,10 +313,13 @@ claim into vagueness to avoid having to support it — a sentence that survives 
 saying nothing is worse than one that is gone.
 
 Keep everything that was already working. Preserve the H1 title, the markdown
-structure, the length, and any mermaid diagrams that were fine. If a diagram was
-flagged, fix it in place — redraw it as a mermaid fence if it was ASCII art, or
-delete it if it was not earning its space. Never convert a mermaid fence back
-into text. Do not add a "Further Reading" or "References" section.
+structure, the length, and any mermaid diagrams and illustration fences that
+were fine. If a diagram was flagged, fix it in place — redraw it as a mermaid
+fence if it was ASCII art, or delete it if it was not earning its space. Never
+convert a mermaid fence back into text. If an illustration was flagged as
+decorative, rewrite it as `+"```"+`illustration <kind> whose body lists the
+article's actual labels, rows or steps. Do not add a "Further Reading" or
+"References" section.
 
 Return only the revised markdown article — no preamble, no commentary on what
 you changed.`,
@@ -278,10 +360,11 @@ you changed.`,
 const diagramRules = `
 DIAGRAMS:
 
-Include one or two Mermaid diagrams where a diagram genuinely explains
-something faster than a paragraph — a request path, a protocol exchange, a
-lifecycle, a data model. Do not add one to every section, and do not add one
-that merely restates a list.
+Include one Mermaid diagram where a diagram genuinely explains something
+faster than a paragraph — a request path, a protocol exchange, a lifecycle,
+a data model. Do not add one to every section, and do not add one that
+merely restates a list. A second visual idea belongs in an illustration
+of the right kind, not another flowchart.
 
 Write them as a mermaid code fence:
 
@@ -321,40 +404,94 @@ Rules:
 //
 // It is deliberately stingier than the diagram rules. A diagram costs the model
 // a few hundred tokens; an illustration costs tens of seconds of a single
-// shared GPU, and an article does not need three of them.
-const illustrationRules = `
+// shared GPU, and one picture that explains the argument is enough.
+var illustrationRules = fmt.Sprintf(`
 ILLUSTRATIONS:
 
-You may request AT MOST ONE generated illustration, and only where a picture
-genuinely sets up the subject — an opening image for a long piece, or a single
-concrete scene the prose then unpacks. Most articles need none. A diagram is
-almost always the better choice: a diagram carries information, an illustration
-carries atmosphere.
+You may request up to %d generated figures, and should use 1–2 in a
+long piece. Place each after the H2 it belongs to. The pipeline will add
+1–2 if you forget.
 
-Request one by writing an illustration fence whose body describes the picture:
+These are informational figures — a reader should learn something by
+looking at them. They are not decorative art, animations, or metaphorical
+scenes of people in offices.
 
-  ` + "```" + `illustration
-  A lighthouse on a rocky shore at dawn, seen from the water
-  ` + "```" + `
+Keep mermaid for a precise sequence, state or ER diagram. Do not replace a
+mermaid fence with an illustration. A second visual idea that is a
+comparison, architecture or process belongs in an illustration fence.
+
+Pick a kind and write a fence whose body lists the facts to put on the
+figure (labels, rows, steps, parties). Do not describe a scene.
+
+Kinds:
+  flow           a labeled path: request route, data flow, handoff
+  comparison     a side-by-side table or matrix of options
+  architecture   named components and how they connect
+  process        numbered steps in order
+  concept        an annotated diagram of a mechanism
+
+Examples:
+
+  `+"```"+`illustration comparison
+  Polling vs webhooks: latency, operational cost, failure modes, and when each wins
+  `+"```"+`
+
+  `+"```"+`illustration flow
+  Client → API gateway → auth service → three workers writing to Postgres
+  `+"```"+`
 
 Rules:
-- Describe a CONCRETE SCENE — a thing that could be photographed. "A lighthouse
-  at dawn" works. "The concept of reliability" does not, and produces a muddle.
-- Do not ask for text, labels, diagrams, charts or UI in an illustration. Image
-  models render lettering badly, and a diagram belongs in a mermaid fence.
-- Do not use one to replace a diagram, and never to illustrate a claim that
-  needs a source.
+- The figure must encode THIS article's facts. "Polling vs webhooks on
+  latency and cost" works. "A modern server room" does not.
+- Name the actual labels the picture should show. A vague theme produces
+  a decorative animation; a list of terms produces a useful figure.
+- Readable text on the figure is required — labels, headers, step numbers.
+- Never request more than %d. The pipeline drops extras.
 - The description becomes the image's alt text, so write it as a sentence a
   screen-reader user would find useful.
+`, maxInlineIllustrations, maxInlineIllustrations)
+
+// tableRules is always on: a comparison the reader can scan does not need
+// an image generator, and goldmark already renders GFM tables.
+const tableRules = `
+TABLES:
+
+When the article compares options, versions, or trade-offs, write a
+GitHub-flavored markdown table in the prose — real columns the reader can
+scan. A generated comparison figure can sit next to a table; it does not
+replace one that has numbers.
 `
 
-// visualRules is the visual half of the drafting prompt: diagrams always, plus
-// illustrations when this run has a generator behind it.
+// visualRules is the visual half of the drafting prompt: diagrams and
+// tables always, plus illustrations when this run has a generator behind it.
 func (r *Runner) visualRules() string {
-	if !r.canIllustrate() {
-		return diagramRules
+	rules := diagramRules + tableRules
+	if r.canLetterFigures() {
+		rules += illustrationRules
 	}
-	return diagramRules + illustrationRules
+	return rules
+}
+
+// plannedFiguresNote reminds the writer of figures the planner already
+// chose, so the draft emits typed fences instead of inventing scenes.
+func (r *Runner) plannedFiguresNote(plan *writePlan) string {
+	if !r.canLetterFigures() || plan == nil || len(plan.Figures) == 0 {
+		return ""
+	}
+	return "PLANNED FIGURES — emit an illustration fence for each, using that kind and these facts:\n" +
+		formatFigures(plan.Figures)
+}
+
+func formatFigures(figs []figureBrief) string {
+	var b strings.Builder
+	for _, f := range figs {
+		kind := strings.TrimSpace(f.Kind)
+		if kind == "" {
+			kind = string(kindConcept)
+		}
+		fmt.Fprintf(&b, "- [%s] %s: %s\n", kind, orNone(f.Section), strings.TrimSpace(f.Content))
+	}
+	return b.String()
 }
 
 // Target article length. The draft prompt asks for this range, but asking is
@@ -406,7 +543,8 @@ Do NOT:
 - Introduce facts no source supports. If you cannot support it, do not add it.
 - Add a "Further Reading" or "References" section.
 
-Keep the existing title, structure and every citation that is already there.
+Keep the existing title, structure, every citation that is already there,
+and any mermaid or illustration fences.
 Return only the expanded markdown article — no preamble, no commentary.`,
 		currentWords, MinArticleWords, MaxArticleWords,
 		plan.Title, plan.Angle,
