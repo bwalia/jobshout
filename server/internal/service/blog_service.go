@@ -494,7 +494,7 @@ func (s *blogService) Generate(
 	// — the caller polls the run instead.
 	if err := s.beginGeneration(run, agent, req); err != nil {
 		s.failCreatedRun(run, errRunInterrupted)
-		s.notifyBoard(req.TaskID, "Article run failed to start.", "review")
+		s.notifyBoard(req.TaskID, "Article run failed to start.", "")
 		return nil, err
 	}
 
@@ -671,11 +671,11 @@ func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, age
 	tracker := &stepTracker{runID: run.ID, steps: run.Steps, repo: s.repo, logger: s.logger}
 	s.setAgentStatus(persistCtx(), agent.ID, "active")
 
-	taskID := req.TaskID
+	taskID := s.resolveLaunchTaskID(persistCtx(), req.TaskID, run.ID)
 
 	if ctx.Err() != nil {
 		s.failRun(run, tracker, s.interruptCause(run.ID, ctx.Err()), log, agent)
-		s.notifyBoard(taskID, "Article run was interrupted.", "review")
+		s.notifyBoard(taskID, "Article run was interrupted.", "")
 		return
 	}
 
@@ -686,7 +686,7 @@ func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, age
 		briefs, derr := s.discoverBriefs(ctx, run, req, tracker)
 		if derr != nil {
 			s.failRun(run, tracker, s.interruptCause(run.ID, derr), log, agent)
-			s.notifyBoard(taskID, "Article run failed while discovering a topic.", "review")
+			s.notifyBoard(taskID, "Article run failed while discovering a topic.", "")
 			return
 		}
 		req.Briefs = briefs
@@ -717,7 +717,7 @@ func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, age
 
 	if ctx.Err() != nil {
 		s.failRun(run, tracker, s.interruptCause(run.ID, ctx.Err()), log, agent)
-		s.notifyBoard(taskID, "Article run was interrupted.", "review")
+		s.notifyBoard(taskID, "Article run was interrupted.", "")
 		return
 	}
 
@@ -726,7 +726,7 @@ func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, age
 			err = fmt.Errorf("blog: no articles produced")
 		}
 		s.failRun(run, tracker, err, log, agent)
-		s.notifyBoard(taskID, "Article run failed: "+err.Error(), "review")
+		s.notifyBoard(taskID, "Article run failed: "+err.Error(), "")
 		return
 	}
 
@@ -788,6 +788,20 @@ func (s *blogService) finishSuccessfulRun(
 	return true
 }
 
+func (s *blogService) resolveLaunchTaskID(ctx context.Context, known *uuid.UUID, runID uuid.UUID) *uuid.UUID {
+	if known != nil {
+		return known
+	}
+	if s == nil || s.tasks == nil || runID == uuid.Nil {
+		return nil
+	}
+	t, err := s.tasks.FindByLaunchRunID(ctx, runID)
+	if err != nil || t == nil {
+		return nil
+	}
+	return &t.ID
+}
+
 func (s *blogService) notifyBoard(taskID *uuid.UUID, note, status string) {
 	if s == nil || s.tasks == nil || taskID == nil {
 		return
@@ -801,7 +815,7 @@ func (s *blogService) notifyBoard(taskID *uuid.UUID, note, status string) {
 		_, _ = s.tasks.Update(ctx, *taskID, model.UpdateTaskRequest{Description: &n})
 	}
 	if status != "" {
-		_ = s.tasks.Transition(ctx, *taskID, status)
+		_ = s.tasks.Transition(ctx, *taskID, status, nil)
 	}
 }
 
@@ -1038,6 +1052,10 @@ func (s *blogService) Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUI
 	req.Normalize()
 	if run.Model != nil {
 		req.Model = *run.Model
+	}
+	if tid := s.resolveLaunchTaskID(ctx, nil, run.ID); tid != nil {
+		req.TaskID = tid
+		_ = s.tasks.Transition(ctx, *tid, "in_progress", nil)
 	}
 	if err := s.beginGeneration(run, agent, req); err != nil {
 		s.failCreatedRun(run, errRunInterrupted)

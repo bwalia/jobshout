@@ -131,7 +131,12 @@ func (h *TaskHandler) List(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, http.StatusBadRequest, "invalid status")
 		return
 	}
-	params := model.PaginationParams{Page: page, PerPage: perPage, Status: status}
+	params := model.PaginationParams{
+		Page:            page,
+		PerPage:         perPage,
+		Status:          status,
+		AssignedAgentID: r.URL.Query().Get("assigned_agent_id"),
+	}
 
 	projectIDStr := r.URL.Query().Get("project_id")
 	if projectIDStr != "" {
@@ -257,11 +262,17 @@ func (h *TaskHandler) Transition(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.svc.Transition(r.Context(), id, req.Status); err != nil {
+	userID := optionalUserID(r)
+	if err := h.svc.Transition(r.Context(), id, req.Status, userID); err != nil {
 		RespondError(w, http.StatusInternalServerError, "failed to transition task")
 		return
 	}
-	RespondJSON(w, http.StatusOK, map[string]string{"status": req.Status})
+	task, err := h.svc.GetByID(r.Context(), id)
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, "failed to load task after transition")
+		return
+	}
+	RespondJSON(w, http.StatusOK, task)
 }
 
 func (h *TaskHandler) Reorder(w http.ResponseWriter, r *http.Request) {
@@ -280,9 +291,41 @@ func (h *TaskHandler) Reorder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.svc.Reorder(r.Context(), id, req.Status, req.Position); err != nil {
+	userID := optionalUserID(r)
+	if err := h.svc.Reorder(r.Context(), id, req.Status, req.Position, userID); err != nil {
 		RespondError(w, http.StatusInternalServerError, "failed to reorder task")
 		return
 	}
-	RespondJSON(w, http.StatusOK, map[string]string{"status": "reordered"})
+	task, err := h.svc.GetByID(r.Context(), id)
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, "failed to load task after reorder")
+		return
+	}
+	RespondJSON(w, http.StatusOK, task)
+}
+
+func (h *TaskHandler) History(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "taskID"))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid task ID")
+		return
+	}
+	hist, err := h.svc.History(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, service.ErrTaskNotFound) {
+			RespondError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		RespondError(w, http.StatusInternalServerError, "failed to get task history")
+		return
+	}
+	RespondJSON(w, http.StatusOK, hist)
+}
+
+func optionalUserID(r *http.Request) *uuid.UUID {
+	id, err := uuid.Parse(mw.GetUserID(r.Context()))
+	if err != nil {
+		return nil
+	}
+	return &id
 }

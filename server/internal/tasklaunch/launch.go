@@ -117,7 +117,7 @@ func (s *Service) Launch(ctx context.Context, req Request) (*Result, error) {
 		}
 		upd := model.UpdateTaskRequest{
 			Title:           &title,
-			AssignedAgentID: &agentID,
+			AssignedAgentID: model.OptionalString{Set: true, Value: &agentID},
 			Metadata:        mergeTaskMeta(task.Metadata, meta),
 		}
 		if desc != "" {
@@ -147,7 +147,7 @@ func (s *Service) Launch(ctx context.Context, req Request) (*Result, error) {
 		}
 	}
 
-	_ = s.Tasks.Transition(ctx, task.ID, "in_progress")
+	_ = s.Tasks.Transition(ctx, task.ID, "in_progress", nil)
 	task.Status = "in_progress"
 
 	out := &Result{Task: task, Kind: kind}
@@ -170,7 +170,7 @@ func (s *Service) Launch(ctx context.Context, req Request) (*Result, error) {
 			Description: &text,
 			Metadata:    mergeTaskMeta(task.Metadata, meta),
 		})
-		_ = s.Tasks.Transition(ctx, task.ID, status)
+		_ = s.Tasks.Transition(ctx, task.ID, status, nil)
 		if task != nil {
 			task.Status = status
 			out.Task = task
@@ -225,7 +225,7 @@ func (s *Service) Launch(ctx context.Context, req Request) (*Result, error) {
 				Description: &note,
 				Metadata:    mergeTaskMeta(task.Metadata, meta),
 			})
-			_ = s.Tasks.Transition(ctx, task.ID, status)
+			_ = s.Tasks.Transition(ctx, task.ID, status, nil)
 			if task != nil {
 				task.Status = status
 				out.Task = task
@@ -241,7 +241,7 @@ func (s *Service) Launch(ctx context.Context, req Request) (*Result, error) {
 				Description: &note,
 				Metadata:    mergeTaskMeta(task.Metadata, meta),
 			})
-			_ = s.Tasks.Transition(ctx, task.ID, done)
+			_ = s.Tasks.Transition(ctx, task.ID, done, nil)
 			if task != nil {
 				task.Status = done
 				out.Task = task
@@ -289,6 +289,7 @@ func (s *Service) Launch(ctx context.Context, req Request) (*Result, error) {
 			PRNumber: pr,
 			DryRun:   &dry,
 			AgentID:  &agent.ID,
+			TaskID:   &task.ID,
 		}, req.OrgID, &req.UserID)
 		if rerr != nil {
 			return nil, rerr
@@ -319,7 +320,7 @@ func (s *Service) Launch(ctx context.Context, req Request) (*Result, error) {
 		if res.URL != "" {
 			text = "Generated image: " + res.URL
 		}
-		_ = s.Tasks.Transition(ctx, task.ID, "done")
+		_ = s.Tasks.Transition(ctx, task.ID, "done", nil)
 		task, _ = s.Tasks.Update(ctx, task.ID, model.UpdateTaskRequest{Description: &text})
 		if task != nil {
 			task.Status = "done"

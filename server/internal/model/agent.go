@@ -117,6 +117,8 @@ type PaginationParams struct {
 	PerPage int `json:"per_page"`
 	// Status optionally filters list endpoints that support it (org task list).
 	Status string `json:"-"`
+	// AssignedAgentID optionally filters the org task list to one agent.
+	AssignedAgentID string `json:"-"`
 }
 
 type PaginatedResponse[T any] struct {
@@ -138,7 +140,7 @@ func (p *PaginationParams) Normalize() {
 	if p.PerPage < 1 {
 		p.PerPage = 20
 	}
-	if p.PerPage > 100 {
-		p.PerPage = 100
+	if p.PerPage > 200 {
+		p.PerPage = 200
 	}
 }

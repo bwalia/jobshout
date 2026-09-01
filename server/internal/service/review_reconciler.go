@@ -29,6 +29,7 @@ type ReviewReconciler struct {
 	backoff         time.Duration
 	maxPollAttempts int
 	logger          *zap.Logger
+	tasks           TaskService
 }
 
 func NewReviewReconciler(
@@ -54,6 +55,10 @@ func NewReviewReconciler(
 		maxPollAttempts: 20,
 		logger:          logger,
 	}
+}
+
+func (rc *ReviewReconciler) BindTasks(tasks TaskService) {
+	rc.tasks = tasks
 }
 
 func (rc *ReviewReconciler) Start(ctx context.Context) {
@@ -188,7 +193,11 @@ func (rc *ReviewReconciler) finalize(ctx context.Context, run *model.ReviewRun, 
 	rc.logger.Info("review run completed",
 		zap.String("runID", run.ID.String()),
 		zap.Stringp("decision", run.Decision))
-	return rc.runRepo.Update(ctx, run)
+	if err := rc.runRepo.Update(ctx, run); err != nil {
+		return err
+	}
+	syncSpecialistBoard(ctx, rc.tasks, run.TaskID, run.Status)
+	return nil
 }
 
 func applyReviewResult(run *model.ReviewRun, raw json.RawMessage) {
@@ -225,7 +234,11 @@ func (rc *ReviewReconciler) fail(ctx context.Context, run *model.ReviewRun, msg 
 	run.ErrorMessage = &msg
 	run.CompletedAt = &now
 	run.NextPollAt = nil
-	return rc.runRepo.Update(ctx, run)
+	if err := rc.runRepo.Update(ctx, run); err != nil {
+		return err
+	}
+	syncSpecialistBoard(ctx, rc.tasks, run.TaskID, run.Status)
+	return nil
 }
 
 func (rc *ReviewReconciler) exceededRuntime(run *model.ReviewRun) bool {

@@ -19,9 +19,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useAgents } from "@/lib/hooks/useAgents";
 import { useProjects } from "@/lib/hooks/useProjects";
 import {
+  useAllTasks,
   useDeleteTask,
   useProjectTasks,
-  useTasks,
   useTransitionTask,
   taskKeys,
 } from "@/lib/hooks/useTasks";
@@ -29,6 +29,13 @@ import { STATUS_OPTIONS, statusLabel } from "@/lib/task-labels";
 import { TaskEditorDialog } from "@/components/task-manager/TaskEditorDialog";
 import { RunTaskDialog } from "@/components/task-manager/RunTaskDialog";
 import { TaskRunView } from "@/components/task-manager/TaskRunView";
+import { TaskActions } from "@/components/task-manager/TaskActions";
+import { TaskHistoryPanel } from "@/components/task-manager/TaskHistoryPanel";
+import {
+  TaskProgressChip,
+  TaskCountLabel,
+  formatCompletedAt,
+} from "@/components/task-manager/TaskProgressChip";
 import { NewProjectDialog } from "@/components/task-manager/NewProjectDialog";
 import { CreateAgentDialog } from "@/components/agent/CreateAgentDialog";
 import { AgentStatusBadge } from "@/components/agent/AgentStatusBadge";
@@ -86,7 +93,7 @@ export function TaskManagerPanel() {
   const projects = useMemo(() => projectsResp?.data ?? [], [projectsResp]);
   const { data: agentsResp } = useAgents({ per_page: 100 });
   const agents = useMemo(() => agentsResp?.data ?? [], [agentsResp]);
-  const { data: allTasksResp } = useTasks({ per_page: 200 });
+  const { data: allTasksResp } = useAllTasks();
 
   const taskCounts = useMemo(() => {
     const m = new Map<string, number>();
@@ -360,6 +367,7 @@ function ProjectTasksView({
   projectName: string;
   onLaunched: (result: LaunchResult) => void;
 }) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const taskParam = searchParams.get("task");
   const runParam = searchParams.get("run");
@@ -371,6 +379,7 @@ function ProjectTasksView({
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorTask, setEditorTask] = useState<Task | undefined>();
   const [runOpen, setRunOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [focusRunId, setFocusRunId] = useState<string | null>(runParam);
   const transition = useTransitionTask();
   const deleteTask = useDeleteTask();
@@ -380,13 +389,23 @@ function ProjectTasksView({
     setFocusRunId(runParam);
   }, [projectId, taskParam, runParam]);
 
+  function writeTaskUrl(taskId: string | null, runId?: string | null) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("project", projectId);
+    if (taskId) params.set("task", taskId);
+    else params.delete("task");
+    if (runId) params.set("run", runId);
+    else params.delete("run");
+    router.replace(`/panel/task-manager?${params.toString()}`, { scroll: false });
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold tracking-tight">{projectName}</h2>
           <p className="text-sm text-muted-foreground">
-            {tasks.length} task{tasks.length === 1 ? "" : "s"}
+            <TaskCountLabel loaded={tasks.length} total={tasksResp?.total} />
           </p>
         </div>
         <button
@@ -413,40 +432,65 @@ function ProjectTasksView({
             tasks.map((task) => {
               const agent = agents.find((a) => a.id === task.assigned_agent_id);
               const active = task.id === selectedId;
+              const completed = formatCompletedAt(task.completed_at);
               return (
-                <button
+                <div
                   key={task.id}
-                  type="button"
-                  onClick={() => {
-                    setSelectedId(task.id);
-                    setFocusRunId(null);
-                  }}
                   className={cn(
-                    "w-full rounded-md border px-3 py-2.5 text-left transition-colors",
+                    "rounded-md border px-3 py-2.5 transition-colors",
                     active
                       ? "border-primary bg-primary/10"
                       : "border-border bg-card hover:bg-secondary/60"
                   )}
                 >
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={cn(
-                        "h-2 w-2 shrink-0 rounded-full",
-                        STATUS_DOT[task.status]
-                      )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedId(task.id);
+                      setFocusRunId(null);
+                      writeTaskUrl(task.id);
+                    }}
+                    className="w-full text-left"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          "h-2 w-2 shrink-0 rounded-full",
+                          STATUS_DOT[task.status]
+                        )}
+                      />
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                        {task.title}
+                      </span>
+                    </div>
+                    <p className="mt-1 pl-4 text-xs text-muted-foreground">
+                      {agent?.name ?? "Unassigned"}
+                      {" · "}
+                      {statusLabel(task.status)}
+                      {" · "}
+                      {completed
+                        ? `Completed ${completed}`
+                        : `Updated ${new Date(task.updated_at).toLocaleString()}`}
+                    </p>
+                    <div className="mt-1.5 pl-4">
+                      <TaskProgressChip task={task} />
+                    </div>
+                  </button>
+                  <div className="mt-2 pl-4">
+                    <TaskActions
+                      task={task}
+                      size="sm"
+                      onShowHistory={() => {
+                        setSelectedId(task.id);
+                        setHistoryOpen(true);
+                        writeTaskUrl(
+                          task.id,
+                          task.id === selectedId ? runParam : null
+                        );
+                      }}
                     />
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                      {task.title}
-                    </span>
                   </div>
-                  <p className="mt-1 pl-4 text-xs text-muted-foreground">
-                    {agent?.name ?? "Unassigned"}
-                    {" · "}
-                    {task.status.replace(/_/g, " ")}
-                    {" · "}
-                    {new Date(task.updated_at).toLocaleDateString()}
-                  </p>
-                </button>
+                </div>
               );
             })
           )}
@@ -464,7 +508,7 @@ function ProjectTasksView({
                     </p>
                   )}
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
                     onClick={() => {
@@ -475,13 +519,14 @@ function ProjectTasksView({
                   >
                     Edit
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setRunOpen(true)}
-                    className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground"
-                  >
-                    <Rocket className="h-4 w-4" /> Run
-                  </button>
+                  <TaskActions
+                    task={selected}
+                    onShowHistory={() => {
+                      setHistoryOpen(true);
+                      writeTaskUrl(selected.id, runParam);
+                    }}
+                    onRun={() => setRunOpen(true)}
+                  />
                 </div>
               </div>
               <div className="flex flex-wrap gap-3 text-sm">
@@ -509,9 +554,10 @@ function ProjectTasksView({
                   className="text-xs text-destructive hover:underline"
                   onClick={() => {
                     if (confirm(`Delete "${selected.title}"?`)) {
-                      void deleteTask.mutateAsync(selected.id).then(() =>
-                        setSelectedId(null)
-                      );
+                      void deleteTask.mutateAsync(selected.id).then(() => {
+                        setSelectedId(null);
+                        writeTaskUrl(null);
+                      });
                     }
                   }}
                 >
@@ -541,7 +587,10 @@ function ProjectTasksView({
           projectId={projectId}
           agents={agents}
           onClose={() => setEditorOpen(false)}
-          onSaved={(t) => setSelectedId(t.id)}
+          onSaved={(t) => {
+            setSelectedId(t.id);
+            writeTaskUrl(t.id);
+          }}
           onLaunched={(result) => {
             setSelectedId(result.task.id);
             if (result.run_id) setFocusRunId(result.run_id);
@@ -554,8 +603,27 @@ function ProjectTasksView({
           task={selected}
           agents={agents}
           onClose={() => setRunOpen(false)}
-          onLaunched={(run: TaskRun) => setFocusRunId(run.id)}
-          onSpecialistLaunched={onLaunched}
+          onLaunched={(run: TaskRun) => {
+            setFocusRunId(run.id);
+            setHistoryOpen(true);
+          }}
+          onSpecialistLaunched={(result) => {
+            if (result.run_id) setFocusRunId(result.run_id);
+            setHistoryOpen(true);
+            onLaunched(result);
+          }}
+        />
+      )}
+      {historyOpen && selected && (
+        <TaskHistoryPanel
+          task={selected}
+          agents={agents}
+          focusRunId={focusRunId}
+          onClose={() => setHistoryOpen(false)}
+          onReRun={() => {
+            setHistoryOpen(false);
+            setRunOpen(true);
+          }}
         />
       )}
     </div>
@@ -573,13 +641,14 @@ function AgentDetailView({
   projects: Project[];
   onLaunched: (result: LaunchResult) => void;
 }) {
-  const { data: tasksResp } = useTasks({
+  const { data: tasksResp } = useAllTasks({
     assigned_agent_id: agent.id,
-    per_page: 50,
   });
   const tasks = tasksResp?.data ?? [];
   const [runTask, setRunTask] = useState<Task | null>(null);
+  const [historyTask, setHistoryTask] = useState<Task | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const runnable = tasks.find((t) => t.status !== "done") ?? null;
 
   return (
     <div className="space-y-6">
@@ -616,19 +685,21 @@ function AgentDetailView({
           <button
             type="button"
             onClick={() => {
-              if (tasks[0]) {
-                setRunTask(tasks[0]);
+              if (runnable) {
+                setRunTask(runnable);
                 return;
               }
               setCreateOpen(true);
             }}
             title={
-              tasks[0] ? `Runs "${tasks[0].title}"` : "Create and run a task"
+              runnable
+                ? `Runs "${runnable.title}"`
+                : "Create and run a task"
             }
             className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90"
           >
             <Rocket className="h-4 w-4" />{" "}
-            {tasks[0] ? "Run task" : "Run agent"}
+            {runnable ? "Run task" : "Run agent"}
           </button>
         </div>
       </div>
@@ -642,41 +713,42 @@ function AgentDetailView({
           </p>
         ) : (
           <ul className="divide-y divide-border rounded-lg border border-border">
-            {tasks.map((t) => (
-              <li
-                key={t.id}
-                className="flex items-center justify-between gap-3 px-4 py-3"
-              >
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{t.title}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {statusLabel(t.status)} · updated{" "}
-                    {new Date(t.updated_at).toLocaleString()}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setRunTask(t)}
-                  className="shrink-0 rounded-md border border-border px-2.5 py-1 text-xs hover:bg-secondary"
+            {tasks.map((t) => {
+              const completed = formatCompletedAt(t.completed_at);
+              return (
+                <li
+                  key={t.id}
+                  className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
                 >
-                  Run
-                </button>
-              </li>
-            ))}
+                  <button
+                    type="button"
+                    onClick={() => setHistoryTask(t)}
+                    className="min-w-0 flex-1 text-left"
+                  >
+                    <p className="truncate text-sm font-medium">{t.title}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {statusLabel(t.status)}
+                      {" · "}
+                      {completed
+                        ? `Completed ${completed}`
+                        : `Updated ${new Date(t.updated_at).toLocaleString()}`}
+                    </p>
+                    <div className="mt-1">
+                      <TaskProgressChip task={t} />
+                    </div>
+                  </button>
+                  <TaskActions
+                    task={t}
+                    size="sm"
+                    onShowHistory={() => setHistoryTask(t)}
+                    onRun={() => setRunTask(t)}
+                  />
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>
-
-      {tasks[0] && (
-        <section>
-          {/* This shows one task's runs, not the agent's whole history — say
-              which task, so the heading doesn't overpromise. */}
-          <h3 className="mb-2 truncate text-sm font-medium">
-            Runs for &ldquo;{tasks[0].title}&rdquo;
-          </h3>
-          <TaskRunView task={tasks[0]} agents={agents} focusRunId={null} />
-        </section>
-      )}
 
       {createOpen && (
         <TaskEditorDialog
@@ -701,10 +773,24 @@ function AgentDetailView({
           task={runTask}
           agents={agents}
           onClose={() => setRunTask(null)}
-          onLaunched={() => setRunTask(null)}
+          onLaunched={() => {
+            setHistoryTask(runTask);
+            setRunTask(null);
+          }}
           onSpecialistLaunched={(result) => {
             setRunTask(null);
             onLaunched(result);
+          }}
+        />
+      )}
+      {historyTask && (
+        <TaskHistoryPanel
+          task={historyTask}
+          agents={agents}
+          onClose={() => setHistoryTask(null)}
+          onReRun={() => {
+            setRunTask(historyTask);
+            setHistoryTask(null);
           }}
         />
       )}

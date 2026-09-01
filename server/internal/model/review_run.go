@@ -11,6 +11,7 @@ type ReviewRun struct {
 	ID           uuid.UUID       `json:"id"`
 	OrgID        uuid.UUID       `json:"org_id"`
 	AgentID      *uuid.UUID      `json:"agent_id,omitempty"`
+	TaskID       *uuid.UUID      `json:"task_id,omitempty"`
 	RequestedBy  *uuid.UUID      `json:"requested_by,omitempty"`
 	Repo         string          `json:"repo"`
 	PRNumber     int             `json:"pr_number"`
@@ -40,4 +41,5 @@ type CreateReviewRunRequest struct {
 	DryRun   *bool      `json:"dry_run"`
 	Force    bool       `json:"force"`
 	AgentID  *uuid.UUID `json:"agent_id"`
+	TaskID   *uuid.UUID `json:"task_id"`
 }

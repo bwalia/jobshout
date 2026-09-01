@@ -31,7 +31,7 @@ import {
   useUpdateProject,
   projectKeys,
 } from "@/lib/hooks/useProjects";
-import { taskKeys, useProjectTasks, useTasks } from "@/lib/hooks/useTasks";
+import { taskKeys, useAllTasks, useProjectTasks } from "@/lib/hooks/useTasks";
 import { THEME_BADGE, STATUS_DOT } from "@/lib/status-colors";
 import { PRIORITY_OPTIONS, STATUS_OPTIONS, statusLabel } from "@/lib/task-labels";
 import type { Priority, ProjectStatus, TaskStatus } from "@/lib/types/common";
@@ -173,7 +173,7 @@ function ProjectListing() {
   const { data, isLoading, isError, isFetching, refetch } = useProjects({
     per_page: 100,
   });
-  const { data: tasksResp } = useTasks({ per_page: 200 });
+  const { data: tasksResp } = useAllTasks();
   const updateProject = useUpdateProject();
   const deleteProject = useDeleteProject();
 
@@ -591,7 +591,11 @@ function ProjectDetail({
             </div>
           </div>
         ) : view === "board" ? (
-          <KanbanBoard projectId={projectId} projectName={project?.name} />
+          <KanbanBoard
+            projectId={projectId}
+            projectName={project?.name}
+            onOpenTask={(task) => go({ task: task.id })}
+          />
         ) : (
           <div className="h-full overflow-auto p-4">
             <TaskList

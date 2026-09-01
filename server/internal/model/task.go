@@ -21,36 +21,42 @@ type Task struct {
 	StoryPoints     *int       `json:"story_points"`
 	DueDate         *time.Time `json:"due_date"`
 	Position        int        `json:"position"`
-	CreatedBy       *uuid.UUID     `json:"created_by"`
-	CreatedAt       time.Time      `json:"created_at"`
-	UpdatedAt       time.Time      `json:"updated_at"`
-	Metadata        map[string]any `json:"metadata,omitempty"`
+	CreatedBy       *uuid.UUID `json:"created_by"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+	CompletedAt     *time.Time `json:"completed_at"`
+	// Last-run fields are filled from the newest task_runs row on list/get.
+	// They are not stored on tasks.
+	LastRunID     *uuid.UUID     `json:"last_run_id,omitempty"`
+	LastRunStatus *string        `json:"last_run_status,omitempty"`
+	LastRunAt     *time.Time     `json:"last_run_at,omitempty"`
+	Metadata      map[string]any `json:"metadata,omitempty"`
 }
 
 type CreateTaskRequest struct {
-	ProjectID       string  `json:"project_id" validate:"required,uuid"`
-	Title           string  `json:"title" validate:"required,min=2"`
-	Description     *string `json:"description"`
+	ProjectID   string  `json:"project_id" validate:"required,uuid"`
+	Title       string  `json:"title" validate:"required,min=2"`
+	Description *string `json:"description"`
 	// Status lets the board create a task directly in the column the user
 	// clicked "Add task" in. Empty means backlog.
-	Status          string  `json:"status" validate:"omitempty,oneof=backlog todo in_progress review done"`
-	Priority        string  `json:"priority" validate:"omitempty,oneof=low medium high critical"`
-	AssignedAgentID *string `json:"assigned_agent_id"`
-	AssignedUserID  *string `json:"assigned_user_id"`
-	StoryPoints     *int    `json:"story_points"`
-	DueDate         *string `json:"due_date"`
+	Status          string         `json:"status" validate:"omitempty,oneof=backlog todo in_progress review done"`
+	Priority        string         `json:"priority" validate:"omitempty,oneof=low medium high critical"`
+	AssignedAgentID *string        `json:"assigned_agent_id"`
+	AssignedUserID  *string        `json:"assigned_user_id"`
+	StoryPoints     *int           `json:"story_points"`
+	DueDate         *string        `json:"due_date"`
 	ParentID        *string        `json:"parent_id"`
 	Metadata        map[string]any `json:"metadata,omitempty"`
 }
 
 type UpdateTaskRequest struct {
-	Title           *string `json:"title"`
-	Description     *string `json:"description"`
-	Priority        *string `json:"priority" validate:"omitempty,oneof=low medium high critical"`
-	AssignedAgentID *string `json:"assigned_agent_id"`
-	AssignedUserID  *string `json:"assigned_user_id"`
-	StoryPoints     *int    `json:"story_points"`
-	DueDate         *string        `json:"due_date"`
+	Title           *string        `json:"title"`
+	Description     *string        `json:"description"`
+	Priority        *string        `json:"priority" validate:"omitempty,oneof=low medium high critical"`
+	AssignedAgentID OptionalString `json:"assigned_agent_id"`
+	AssignedUserID  OptionalString `json:"assigned_user_id"`
+	StoryPoints     *int           `json:"story_points"`
+	DueDate         OptionalString `json:"due_date"`
 	Metadata        map[string]any `json:"metadata,omitempty"`
 }
 
@@ -74,6 +80,27 @@ type TaskComment struct {
 
 type AddCommentRequest struct {
 	Body string `json:"body" validate:"required,min=1"`
+}
+
+// TaskHistory is GET /tasks/{id}/history — status changes, generic runs, and
+// a specialist launch pointer when the task has no matching task_runs row.
+type TaskHistory struct {
+	CompletedAt *time.Time         `json:"completed_at"`
+	Events      []TaskHistoryEvent `json:"events"`
+}
+
+type TaskHistoryEvent struct {
+	ID          string     `json:"id"`
+	Kind        string     `json:"kind"` // status | run | specialist
+	OldStatus   *string    `json:"old_status,omitempty"`
+	NewStatus   *string    `json:"new_status,omitempty"`
+	RunID       *uuid.UUID `json:"run_id,omitempty"`
+	Status      *string    `json:"status,omitempty"`
+	AgentID     *uuid.UUID `json:"agent_id,omitempty"`
+	LaunchKind  *string    `json:"launch_kind,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	ChangedAt   *time.Time `json:"changed_at,omitempty"`
 }
 
 const (

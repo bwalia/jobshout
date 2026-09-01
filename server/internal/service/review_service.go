@@ -80,6 +80,7 @@ func (s *reviewService) CreateRun(ctx context.Context, req model.CreateReviewRun
 		ID:          uuid.New(),
 		OrgID:       orgID,
 		AgentID:     req.AgentID,
+		TaskID:      req.TaskID,
 		RequestedBy: requestedBy,
 		Repo:        repo,
 		PRNumber:    req.PRNumber,

@@ -51,6 +51,25 @@ func TestBuildRunPrompt_OverrideAndInputs(t *testing.T) {
 	}
 }
 
+func TestBoardStatusForRun(t *testing.T) {
+	cases := []struct {
+		run  string
+		want string
+		move bool
+	}{
+		{model.TaskRunStatusQueued, "in_progress", true},
+		{model.TaskRunStatusRunning, "in_progress", true},
+		{model.TaskRunStatusCompleted, "done", true},
+		{model.TaskRunStatusFailed, "", false},
+	}
+	for _, tc := range cases {
+		got, ok := boardStatusForRun(tc.run)
+		if ok != tc.move || got != tc.want {
+			t.Fatalf("%s: got (%q, %v), want (%q, %v)", tc.run, got, ok, tc.want, tc.move)
+		}
+	}
+}
+
 func TestNormalizeSlugs(t *testing.T) {
 	got := normalizeSlugs([]string{" Web-Search ", "web-search", "", "RAG", "rag"})
 	want := []string{"web-search", "rag"}

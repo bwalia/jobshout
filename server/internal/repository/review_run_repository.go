@@ -33,7 +33,7 @@ func NewReviewRunRepository(pool *pgxpool.Pool) ReviewRunRepository {
 const reviewRunColumns = `
 	id, org_id, agent_id, requested_by, repo, pr_number, dry_run, force, status,
 	remote_job_id, head_sha, decision, verdict, summary, github_url, result, stage_log,
-	error_message, poll_attempts, next_poll_at, started_at, completed_at, created_at, updated_at`
+	error_message, poll_attempts, next_poll_at, started_at, completed_at, created_at, updated_at, task_id`
 
 func scanReviewRun(row pgx.Row) (*model.ReviewRun, error) {
 	run := &model.ReviewRun{}
@@ -43,7 +43,7 @@ func scanReviewRun(row pgx.Row) (*model.ReviewRun, error) {
 		&run.DryRun, &run.Force, &run.Status, &run.RemoteJobID, &run.HeadSHA, &run.Decision,
 		&run.Verdict, &run.Summary, &run.GitHubURL, &result, &stageLog, &run.ErrorMessage,
 		&run.PollAttempts, &run.NextPollAt, &run.StartedAt, &run.CompletedAt,
-		&run.CreatedAt, &run.UpdatedAt,
+		&run.CreatedAt, &run.UpdatedAt, &run.TaskID,
 	); err != nil {
 		return nil, err
 	}
@@ -69,16 +69,16 @@ func (r *reviewRunRepository) Create(ctx context.Context, run *model.ReviewRun) 
 		INSERT INTO review_runs (
 			id, org_id, agent_id, requested_by, repo, pr_number, dry_run, force, status,
 			remote_job_id, error_message, poll_attempts, next_poll_at, stage_log,
-			created_at, updated_at
+			task_id, created_at, updated_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9,
-			$10, $11, $12, $13, $14, NOW(), NOW()
+			$10, $11, $12, $13, $14, $15, NOW(), NOW()
 		)
 		RETURNING created_at, updated_at`
 	return r.pool.QueryRow(ctx, query,
 		run.ID, run.OrgID, run.AgentID, run.RequestedBy, run.Repo, run.PRNumber,
 		run.DryRun, run.Force, run.Status, run.RemoteJobID, run.ErrorMessage,
-		run.PollAttempts, run.NextPollAt, stageLogJSON(run.StageLog),
+		run.PollAttempts, run.NextPollAt, stageLogJSON(run.StageLog), run.TaskID,
 	).Scan(&run.CreatedAt, &run.UpdatedAt)
 }
 

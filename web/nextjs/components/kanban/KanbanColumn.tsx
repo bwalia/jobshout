@@ -8,16 +8,9 @@ import { TaskCard } from "@/components/kanban/TaskCard";
 import { CreateTaskDialog } from "@/components/kanban/CreateTaskDialog";
 import { TaskDetailModal } from "@/components/kanban/TaskDetailModal";
 import { cn } from "@/lib/utils/cn";
+import { STATUS_DOT } from "@/lib/status-colors";
 import type { Task } from "@/lib/types/project";
 import type { TaskStatus } from "@/lib/types/common";
-
-const COLUMN_DOT: Record<TaskStatus, string> = {
-  backlog: "bg-zinc-400",
-  todo: "bg-sky-500",
-  in_progress: "bg-blue-500",
-  review: "bg-violet-500",
-  done: "bg-emerald-500",
-};
 
 const COLUMN_LABELS: Record<TaskStatus, string> = {
   backlog: "Backlog",
@@ -33,6 +26,7 @@ interface KanbanColumnProps {
   projectId: string;
   assigneeNames?: Map<string, string>;
   isDragging?: boolean;
+  onOpenTask?: (task: Task) => void;
 }
 
 export function KanbanColumn({
@@ -41,6 +35,7 @@ export function KanbanColumn({
   projectId,
   assigneeNames,
   isDragging,
+  onOpenTask,
 }: KanbanColumnProps) {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -64,7 +59,7 @@ export function KanbanColumn({
       >
         <div className="flex items-center justify-between rounded-t-lg border-b border-border/70 bg-muted/80 px-3 py-2">
           <div className="flex min-w-0 items-center gap-2">
-            <span className={cn("h-3 w-3 shrink-0 rounded-full", COLUMN_DOT[status])} />
+            <span className={cn("h-3 w-3 shrink-0 rounded-full", STATUS_DOT[status])} />
             <h3 className="truncate text-sm font-semibold text-foreground">{label}</h3>
             <span
               className={cn(
@@ -74,11 +69,6 @@ export function KanbanColumn({
             >
               {tasks.length}
             </span>
-            {status === "done" && (
-              <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400">
-                Done
-              </span>
-            )}
           </div>
           <button
             type="button"
@@ -108,7 +98,7 @@ export function KanbanColumn({
                     ? assigneeNames?.get(task.assigned_agent_id)
                     : undefined
                 }
-                onOpenDetail={setSelectedTask}
+                onOpenDetail={onOpenTask ?? setSelectedTask}
               />
             ))}
           </SortableContext>
@@ -159,7 +149,7 @@ export function KanbanColumn({
         />
       )}
 
-      {selectedTask && (
+      {!onOpenTask && selectedTask && (
         <TaskDetailModal
           task={selectedTask}
           onClose={() => setSelectedTask(null)}

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,8 +22,10 @@ type TaskService interface {
 	AddComment(ctx context.Context, taskID uuid.UUID, authorID uuid.UUID, body string) (*model.TaskComment, error)
 	Update(ctx context.Context, id uuid.UUID, req model.UpdateTaskRequest) (*model.Task, error)
 	Delete(ctx context.Context, id uuid.UUID) error
-	Transition(ctx context.Context, id uuid.UUID, status string) error
-	Reorder(ctx context.Context, id uuid.UUID, status string, position int) error
+	Transition(ctx context.Context, id uuid.UUID, status string, changedBy *uuid.UUID) error
+	Reorder(ctx context.Context, id uuid.UUID, status string, position int, changedBy *uuid.UUID) error
+	History(ctx context.Context, id uuid.UUID) (*model.TaskHistory, error)
+	FindByLaunchRunID(ctx context.Context, runID uuid.UUID) (*model.Task, error)
 }
 
 type taskService struct {
@@ -165,17 +168,30 @@ func (s *taskService) Update(ctx context.Context, id uuid.UUID, req model.Update
 	if req.StoryPoints != nil {
 		task.StoryPoints = req.StoryPoints
 	}
-	if req.AssignedAgentID != nil {
-		a, _ := uuid.Parse(*req.AssignedAgentID)
-		task.AssignedAgentID = &a
+	if req.AssignedAgentID.Set {
+		id, err := parseOptionalUUID(req.AssignedAgentID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid assigned_agent_id: %w", err)
+		}
+		task.AssignedAgentID = id
 	}
-	if req.AssignedUserID != nil {
-		u, _ := uuid.Parse(*req.AssignedUserID)
-		task.AssignedUserID = &u
+	if req.AssignedUserID.Set {
+		id, err := parseOptionalUUID(req.AssignedUserID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid assigned_user_id: %w", err)
+		}
+		task.AssignedUserID = id
 	}
-	if req.DueDate != nil {
-		t, _ := time.Parse("2006-01-02", *req.DueDate)
-		task.DueDate = &t
+	if req.DueDate.Set {
+		if req.DueDate.Value == nil || strings.TrimSpace(*req.DueDate.Value) == "" {
+			task.DueDate = nil
+		} else {
+			t, err := time.Parse("2006-01-02", strings.TrimSpace(*req.DueDate.Value))
+			if err != nil {
+				return nil, fmt.Errorf("invalid due_date: %w", err)
+			}
+			task.DueDate = &t
+		}
 	}
 	if req.Metadata != nil {
 		task.Metadata = req.Metadata
@@ -191,12 +207,41 @@ func (s *taskService) Delete(ctx context.Context, id uuid.UUID) error {
 	return s.repo.Delete(ctx, id)
 }
 
-func (s *taskService) Transition(ctx context.Context, id uuid.UUID, status string) error {
-	return s.repo.TransitionStatus(ctx, id, status)
+func (s *taskService) Transition(ctx context.Context, id uuid.UUID, status string, changedBy *uuid.UUID) error {
+	return s.repo.TransitionStatus(ctx, id, status, changedBy)
 }
 
-func (s *taskService) Reorder(ctx context.Context, id uuid.UUID, status string, position int) error {
-	return s.repo.Reorder(ctx, id, status, position)
+func (s *taskService) Reorder(ctx context.Context, id uuid.UUID, status string, position int, changedBy *uuid.UUID) error {
+	return s.repo.Reorder(ctx, id, status, position, changedBy)
+}
+
+func (s *taskService) History(ctx context.Context, id uuid.UUID) (*model.TaskHistory, error) {
+	if _, err := s.GetByID(ctx, id); err != nil {
+		return nil, err
+	}
+	hist, err := s.repo.ListHistory(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("getting task history: %w", err)
+	}
+	if hist == nil {
+		return nil, ErrTaskNotFound
+	}
+	return hist, nil
+}
+
+func (s *taskService) FindByLaunchRunID(ctx context.Context, runID uuid.UUID) (*model.Task, error) {
+	return s.repo.FindByLaunchRunID(ctx, runID)
+}
+
+func parseOptionalUUID(field model.OptionalString) (*uuid.UUID, error) {
+	if field.Value == nil || strings.TrimSpace(*field.Value) == "" {
+		return nil, nil
+	}
+	id, err := uuid.Parse(strings.TrimSpace(*field.Value))
+	if err != nil {
+		return nil, err
+	}
+	return &id, nil
 }
 
 var ErrTaskNotFound = taskError("task not found")

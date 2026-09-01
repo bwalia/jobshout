@@ -33,6 +33,26 @@ export interface ReorderTaskRequest {
   status?: TaskStatus;
 }
 
+export const TASK_PAGE_SIZE = 200;
+const TASK_FETCH_PAGE_CAP = 10;
+
+export async function fetchAllTaskPages(
+  load: (page: number, perPage: number) => Promise<PaginatedResponse<Task>>
+): Promise<PaginatedResponse<Task>> {
+  const first = await load(1, TASK_PAGE_SIZE);
+  const all = [...(first.data ?? [])];
+  const total = first.total ?? all.length;
+  const pages = Math.min(
+    first.total_pages || Math.ceil(total / TASK_PAGE_SIZE) || 1,
+    TASK_FETCH_PAGE_CAP
+  );
+  for (let page = 2; page <= pages; page++) {
+    const next = await load(page, TASK_PAGE_SIZE);
+    all.push(...(next.data ?? []));
+  }
+  return { ...first, data: all };
+}
+
 /**
  * Fetch a paginated list of tasks, optionally filtered by project or status.
  */
@@ -140,6 +160,33 @@ export async function addTaskComment(
   const { data } = await apiClient.post<TaskComment>(
     `/tasks/${taskId}/comments`,
     { body }
+  );
+  return data;
+}
+
+export interface TaskHistoryEvent {
+  id: string;
+  kind: "status" | "run" | "specialist";
+  old_status?: string | null;
+  new_status?: string | null;
+  run_id?: string | null;
+  status?: string | null;
+  agent_id?: string | null;
+  launch_kind?: string | null;
+  created_at: string;
+  completed_at?: string | null;
+  changed_at?: string | null;
+}
+
+export interface TaskHistory {
+  completed_at: string | null;
+  events: TaskHistoryEvent[];
+}
+
+/** Status timeline + runs for the Show History panel. */
+export async function getTaskHistory(taskId: string): Promise<TaskHistory> {
+  const { data } = await apiClient.get<TaskHistory>(
+    `/tasks/${taskId}/history`
   );
   return data;
 }

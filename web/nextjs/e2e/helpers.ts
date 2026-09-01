@@ -106,3 +106,33 @@ export async function createProjectViaAPI(
   }
   return (await res.json()).id;
 }
+
+/** Create a task via API and return the created task. */
+export async function createTaskViaAPI(
+  token: string,
+  projectId: string,
+  overrides: {
+    title?: string;
+    description?: string;
+    status?: string;
+  } = {}
+): Promise<{ id: string; title: string; status: string }> {
+  const payload = {
+    project_id: projectId,
+    title: overrides.title ?? "E2E Task",
+    description: overrides.description ?? "Created by E2E tests",
+    status: overrides.status ?? "todo",
+  };
+  const res = await fetch(`${API_URL}/tasks/`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    throw new Error(`Create task failed: ${res.status} ${await res.text()}`);
+  }
+  return res.json();
+}

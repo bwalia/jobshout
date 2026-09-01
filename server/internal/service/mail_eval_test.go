@@ -338,10 +338,16 @@ func (s *stubMailTasks) Update(_ context.Context, id uuid.UUID, req model.Update
 	return t, nil
 }
 func (s *stubMailTasks) Delete(context.Context, uuid.UUID) error { return nil }
-func (s *stubMailTasks) Transition(_ context.Context, id uuid.UUID, status string) error {
+func (s *stubMailTasks) Transition(_ context.Context, id uuid.UUID, status string, _ *uuid.UUID) error {
 	if t := s.tasks[id]; t != nil {
 		t.Status = status
 	}
 	return nil
 }
-func (s *stubMailTasks) Reorder(context.Context, uuid.UUID, string, int) error { return nil }
+func (s *stubMailTasks) Reorder(context.Context, uuid.UUID, string, int, *uuid.UUID) error { return nil }
+func (s *stubMailTasks) History(context.Context, uuid.UUID) (*model.TaskHistory, error) {
+	return nil, nil
+}
+func (s *stubMailTasks) FindByLaunchRunID(context.Context, uuid.UUID) (*model.Task, error) {
+	return nil, nil
+}
