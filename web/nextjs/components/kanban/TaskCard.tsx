@@ -13,6 +13,7 @@ import {
   User,
 } from "lucide-react";
 import { formatDateOnly, isDueOverdue } from "@/lib/dates";
+import { TaskProgressChip } from "@/components/task-manager/TaskProgressChip";
 import { cn } from "@/lib/utils/cn";
 import type { Priority } from "@/lib/types/common";
 import type { Task } from "@/lib/types/project";
@@ -124,6 +125,10 @@ export function TaskCardFace({
       <h4 className="line-clamp-2 text-sm font-medium text-foreground">
         {task.title}
       </h4>
+
+      <div className="mt-2">
+        <TaskProgressChip task={task} />
+      </div>
 
       <div className="mt-2 flex items-center justify-between">
         <span className="font-mono text-[11px] text-muted-foreground">

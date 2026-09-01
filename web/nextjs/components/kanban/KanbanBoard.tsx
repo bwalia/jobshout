@@ -15,7 +15,8 @@ import { arrayMove } from "@dnd-kit/sortable";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, Search, X } from "lucide-react";
 import { toast } from "sonner";
-import { getProjectTasks, reorderTask } from "@/lib/api/tasks";
+import { fetchAllTaskPages, getProjectTasks, reorderTask } from "@/lib/api/tasks";
+import { TaskCountLabel } from "@/components/task-manager/TaskProgressChip";
 import { useAgents } from "@/lib/hooks/useAgents";
 import { taskKeys } from "@/lib/hooks/useTasks";
 import { KanbanColumn } from "@/components/kanban/KanbanColumn";
@@ -63,6 +64,7 @@ interface KanbanBoardProps {
   projectId: string;
   /** Shown in the board toolbar, matching the Ops API project board. */
   projectName?: string;
+  onOpenTask?: (task: Task) => void;
 }
 
 /**
@@ -76,7 +78,7 @@ interface KanbanBoardProps {
  * - DragOverlay renders a floating copy of the dragged card for visual feedback
  * - Active drag task ID is tracked in the Zustand kanban-store
  */
-export function KanbanBoard({ projectId, projectName }: KanbanBoardProps) {
+export function KanbanBoard({ projectId, projectName, onOpenTask }: KanbanBoardProps) {
   const queryClient = useQueryClient();
   const { activeTaskId, setActiveTask, clearActiveTask } = useKanbanStore();
   const [search, setSearch] = useState("");
@@ -99,7 +101,10 @@ export function KanbanBoard({ projectId, projectName }: KanbanBoardProps) {
 
   const { data, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey,
-    queryFn: () => getProjectTasks(projectId, { per_page: 200 }),
+    queryFn: () =>
+      fetchAllTaskPages((page, perPage) =>
+        getProjectTasks(projectId, { page, per_page: perPage })
+      ),
     enabled: Boolean(projectId),
   });
 
@@ -314,7 +319,7 @@ export function KanbanBoard({ projectId, projectName }: KanbanBoardProps) {
             )}
           </div>
           <span className="hidden whitespace-nowrap rounded bg-muted px-2 py-1 text-xs text-muted-foreground sm:inline-block md:text-sm">
-            {allTasks.length} tasks
+            <TaskCountLabel loaded={allTasks.length} total={data?.total} />
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-1 md:gap-2">
@@ -395,6 +400,7 @@ export function KanbanBoard({ projectId, projectName }: KanbanBoardProps) {
                   projectId={projectId}
                   assigneeNames={assigneeNames}
                   isDragging={Boolean(activeTaskId)}
+                  onOpenTask={onOpenTask}
                 />
               ))}
             </div>

@@ -66,7 +66,7 @@ function statusMeta(status: TaskRunStatus): {
     case "completed":
       return {
         label: "Completed",
-        cls: "text-signal-live",
+        cls: "text-emerald-700 dark:text-emerald-400",
         icon: <CheckCircle2 className="h-4 w-4" />,
       };
     case "failed":
@@ -114,10 +114,14 @@ export function TaskRunView({ task, agents, focusRunId }: TaskRunViewProps) {
     setSelectedId(null);
   }, [task.id]);
 
-  // Default the selection to the freshly launched run, else the newest one.
+  // Only focus a generic task-run id. Specialist launches (article, pentest,
+  // review) reuse this field with a different id space — selecting those here
+  // 404s GET /task-runs/{id} and the pane spins forever.
   useEffect(() => {
-    if (focusRunId) setSelectedId(focusRunId);
-  }, [focusRunId]);
+    if (focusRunId && runs.some((r) => r.id === focusRunId)) {
+      setSelectedId(focusRunId);
+    }
+  }, [focusRunId, runs]);
   useEffect(() => {
     if (!selectedId && runs.length > 0) setSelectedId(runs[0].id);
   }, [runs, selectedId]);
@@ -156,7 +160,7 @@ export function TaskRunView({ task, agents, focusRunId }: TaskRunViewProps) {
     }
     return (
       <div className="rounded-lg border border-dashed border-border bg-card/50 p-6 text-center text-sm text-muted-foreground">
-        No runs yet. Use <span className="font-medium text-foreground">Run now</span> to
+        No runs yet. Use <span className="font-medium text-foreground">Run</span> to
         execute this task with an agent.
       </div>
     );
@@ -184,7 +188,7 @@ export function TaskRunView({ task, agents, focusRunId }: TaskRunViewProps) {
               <span className="min-w-0 flex-1">
                 <span className="block truncate">{agentName(run.agent_id)}</span>
                 <span className="block truncate font-mono text-xs text-muted-foreground">
-                  {relTime(run.created_at)}
+                  {relTime(run.completed_at ?? run.created_at)}
                   {run.debug ? " · debug" : ""}
                 </span>
               </span>
@@ -213,11 +217,19 @@ function RunDetail({
   runId: string;
   agentName: (id: string) => string;
 }) {
-  const { data: run } = useTaskRun(runId);
-  if (!run) {
+  const { data: run, isError, isPending } = useTaskRun(runId);
+  if (isPending && !run) {
     return (
       <div className="flex items-center gap-2 rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" /> Loading run…
+      </div>
+    );
+  }
+  if (isError || !run) {
+    return (
+      <div className="rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
+        Couldn’t load this run. It may be a specialist launch — open it from the
+        timeline above.
       </div>
     );
   }

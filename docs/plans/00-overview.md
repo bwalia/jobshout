@@ -27,6 +27,7 @@ Chat does **not** go through Task Manager. `runAgentExecute` in `server/internal
 | [03-research-agent.md](03-research-agent.md) | Research Agent | Small confirmation evals; freeze unless they fail |
 | [04-task-manager.md](04-task-manager.md) | Task Manager | Server `tasklaunch` + per-agent fields + board stay |
 | [05-chatbot.md](05-chatbot.md) | Chat | Scripted invocation evals, then route through `tasklaunch` |
+| [06-task-history-and-board-ux.md](06-task-history-and-board-ux.md) | Board + Task Manager UX | Run + history from the card; completed-at; honest progress |
 
 ## Implementation order
 

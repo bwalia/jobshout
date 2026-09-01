@@ -567,6 +567,8 @@ func main() {
 	)
 	blogSvc.BindTasks(taskSvc)
 	mailSvc.BindTasks(taskSvc)
+	pentestReconciler.BindTasks(taskSvc)
+	reviewReconciler.BindTasks(taskSvc)
 	launchSvc := &tasklaunch.Service{
 		Agents:   agentSvc,
 		Tasks:    taskSvc,
@@ -931,6 +933,7 @@ func main() {
 					r.Put("/position", taskHandler.Reorder)
 					r.Get("/comments", taskHandler.ListComments)
 					r.Post("/comments", taskHandler.AddComment)
+					r.Get("/history", taskHandler.History)
 					// On-demand agent runs of this task.
 					r.Post("/run", taskRunHandler.CreateRun)
 					r.Get("/runs", taskRunHandler.ListRuns)

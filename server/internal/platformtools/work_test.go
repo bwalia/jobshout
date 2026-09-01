@@ -100,9 +100,10 @@ func (f *fakeTasks) Update(_ context.Context, id uuid.UUID, req model.UpdateTask
 		if req.Metadata != nil {
 			f.items[i].Metadata = req.Metadata
 		}
-		if req.AssignedAgentID != nil {
-			aid, err := uuid.Parse(*req.AssignedAgentID)
-			if err == nil {
+		if req.AssignedAgentID.Set {
+			if req.AssignedAgentID.Value == nil || *req.AssignedAgentID.Value == "" {
+				f.items[i].AssignedAgentID = nil
+			} else if aid, err := uuid.Parse(*req.AssignedAgentID.Value); err == nil {
 				f.items[i].AssignedAgentID = &aid
 			}
 		}
@@ -111,7 +112,7 @@ func (f *fakeTasks) Update(_ context.Context, id uuid.UUID, req model.UpdateTask
 	return nil, service.ErrAgentNotFound
 }
 func (f *fakeTasks) Delete(context.Context, uuid.UUID) error { return nil }
-func (f *fakeTasks) Transition(_ context.Context, id uuid.UUID, status string) error {
+func (f *fakeTasks) Transition(_ context.Context, id uuid.UUID, status string, _ *uuid.UUID) error {
 	for i := range f.items {
 		if f.items[i].ID == id {
 			f.items[i].Status = status
@@ -120,7 +121,13 @@ func (f *fakeTasks) Transition(_ context.Context, id uuid.UUID, status string) e
 	}
 	return nil
 }
-func (f *fakeTasks) Reorder(context.Context, uuid.UUID, string, int) error { return nil }
+func (f *fakeTasks) Reorder(context.Context, uuid.UUID, string, int, *uuid.UUID) error { return nil }
+func (f *fakeTasks) History(context.Context, uuid.UUID) (*model.TaskHistory, error) {
+	return nil, nil
+}
+func (f *fakeTasks) FindByLaunchRunID(context.Context, uuid.UUID) (*model.Task, error) {
+	return nil, nil
+}
 
 var _ service.ProjectService = (*fakeProjects)(nil)
 var _ service.TaskService = (*fakeTasks)(nil)

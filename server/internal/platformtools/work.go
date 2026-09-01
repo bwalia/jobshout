@@ -274,7 +274,7 @@ func registerWork(reg *Registry, d Deps) {
 				return clar, err
 			}
 			status := strArg(input, "status")
-			if err := d.Tasks.Transition(ctx, t.ID, status); err != nil {
+			if err := d.Tasks.Transition(ctx, t.ID, status, nil); err != nil {
 				return nil, err
 			}
 			ref := taskRef(*t)

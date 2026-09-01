@@ -4,6 +4,7 @@ import {
   loginViaUI,
   navigateTo,
   createProjectViaAPI,
+  createTaskViaAPI,
 } from "./helpers";
 
 let creds: { email: string; password: string; token: string };
@@ -157,5 +158,73 @@ test.describe("Projects & Tasks", () => {
 
     await page.click('button:has-text("Agents")');
     await page.waitForURL("**view=agents**", { timeout: 5_000 });
+  });
+
+  test("done task shows history and hides Run in task manager", async ({
+    page,
+  }) => {
+    const title = `Done history ${Date.now()}`;
+    await createTaskViaAPI(creds.token, projectId, {
+      title,
+      status: "done",
+    });
+
+    await navigateTo(page, "/panel/task-manager");
+    await expect(page.locator("h1")).toContainText("Task Manager");
+    await page.getByRole("button", { name: title }).click();
+
+    await expect(
+      page.getByRole("button", { name: "Show History" }).first()
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Run$/ })).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Show History" }).first().click();
+    await expect(page.getByRole("heading", { name: "History" })).toBeVisible();
+    await expect(page.getByText(/Completed/i).first()).toBeVisible();
+  });
+
+  test("task board detail offers Run and Show History", async ({ page }) => {
+    const title = `Board run ${Date.now()}`;
+    await createTaskViaAPI(creds.token, projectId, {
+      title,
+      status: "todo",
+    });
+
+    await navigateTo(page, "/panel/task-board");
+    await expect(page.locator("h1")).toContainText("Task Board");
+    await page.getByRole("button", { name: new RegExp(title) }).click();
+    await expect(page.getByRole("heading", { name: "Task Detail" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Show History" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Run$/ })).toBeVisible();
+  });
+
+  test("kanban card click writes task on the board URL", async ({ page }) => {
+    const title = `Kanban url ${Date.now()}`;
+    const task = await createTaskViaAPI(creds.token, projectId, {
+      title,
+      status: "todo",
+    });
+
+    await navigateTo(page, `/panel/task-board?project=${projectId}`);
+    await expect(page.locator("h1")).toContainText("Task Board");
+    await page.getByText(title, { exact: true }).first().click();
+    await expect(page).toHaveURL(new RegExp(`task=${task.id}`));
+    await expect(page.getByRole("heading", { name: "Task Detail" })).toBeVisible();
+  });
+
+  test("task manager click writes project and task on the URL", async ({
+    page,
+  }) => {
+    const title = `TM url ${Date.now()}`;
+    const task = await createTaskViaAPI(creds.token, projectId, {
+      title,
+      status: "todo",
+    });
+
+    await navigateTo(page, "/panel/task-manager");
+    await expect(page.locator("h1")).toContainText("Task Manager");
+    await page.getByRole("button", { name: title }).click();
+    await expect(page).toHaveURL(new RegExp(`project=${projectId}`));
+    await expect(page).toHaveURL(new RegExp(`task=${task.id}`));
   });
 });

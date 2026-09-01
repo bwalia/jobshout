@@ -48,6 +48,13 @@ func TestBoardActivity(t *testing.T) {
 		{"mail sent frees the agent", ptr("mail"), ptr(model.MailThreadSent), nil, model.ActivityIdle},
 		{"mail failed", ptr("mail"), ptr(model.MailThreadFailed), nil, model.ActivityFailed},
 
+		// Generic task runs — queued/running is work; failed stays visible;
+		// completed frees the agent.
+		{"task run queued", ptr("task_run"), ptr(model.TaskRunStatusQueued), nil, model.ActivityExecuting},
+		{"task run running", ptr("task_run"), ptr(model.TaskRunStatusRunning), nil, model.ActivityExecuting},
+		{"task run failed", ptr("task_run"), ptr(model.TaskRunStatusFailed), nil, model.ActivityFailed},
+		{"task run completed frees the agent", ptr("task_run"), ptr(model.TaskRunStatusCompleted), nil, model.ActivityIdle},
+
 		// A source we do not know about must not invent a column.
 		{"unknown kind", ptr("mystery"), ptr("running"), nil, model.ActivityIdle},
 	}
@@ -74,7 +81,7 @@ func TestBoardActivityValuesAreKnownColumns(t *testing.T) {
 		model.ActivityFailed:     true,
 	}
 
-	kinds := []string{"job", "blog", "mail"}
+	kinds := []string{"job", "blog", "mail", "task_run"}
 	statuses := []string{
 		model.MultiAgentStatusPending, model.MultiAgentStatusPlanning,
 		model.MultiAgentStatusExecuting, model.MultiAgentStatusReviewing,
@@ -84,6 +91,8 @@ func TestBoardActivityValuesAreKnownColumns(t *testing.T) {
 		model.MailThreadNew, model.MailThreadClassifying, model.MailThreadResearching,
 		model.MailThreadDraftReady, model.MailThreadSent, model.MailThreadRejected,
 		model.MailThreadIgnored, model.MailThreadFailed,
+		model.TaskRunStatusQueued, model.TaskRunStatusRunning,
+		model.TaskRunStatusCompleted, model.TaskRunStatusFailed,
 	}
 	steps := []*string{
 		nil,

@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo } from "react";
+import { useRouter } from "next/navigation";
 import {
-  Bot,
   Brain,
   Hammer,
   Eye,
@@ -17,6 +17,7 @@ import type {
   AgentBoardEntry,
   AgentActivity,
 } from "@/lib/api/agent-board";
+import { agentBoardHref } from "@/lib/api/agent-board";
 import { cn } from "@/lib/utils/cn";
 
 // ---------------------------------------------------------------------------
@@ -93,8 +94,10 @@ const COLUMNS: ColumnDef[] = [
 
 export function AgentBoardView({
   hideHeader = false,
+  onOpenTask,
 }: {
   hideHeader?: boolean;
+  onOpenTask?: (taskId: string, runId?: string) => void;
 }) {
   const { data: entries, isLoading, isError } = useAgentBoard();
 
@@ -149,6 +152,7 @@ export function AgentBoardView({
             column={col}
             entries={grouped[col.key]}
             loading={isLoading}
+            onOpenTask={onOpenTask}
           />
         ))}
       </div>
@@ -183,10 +187,12 @@ function BoardColumn({
   column,
   entries,
   loading,
+  onOpenTask,
 }: {
   column: ColumnDef;
   entries: AgentBoardEntry[];
   loading: boolean;
+  onOpenTask?: (taskId: string, runId?: string) => void;
 }) {
   const Icon = column.icon;
   return (
@@ -223,7 +229,13 @@ function BoardColumn({
               No agents here.
             </div>
           )
-          : entries.map((e) => <AgentBoardCard key={e.agent_id} entry={e} />)}
+          : entries.map((e) => (
+              <AgentBoardCard
+                key={e.agent_id}
+                entry={e}
+                onOpenTask={onOpenTask}
+              />
+            ))}
       </div>
     </section>
   );
@@ -233,9 +245,47 @@ function BoardColumn({
 // Card
 // ---------------------------------------------------------------------------
 
-function AgentBoardCard({ entry }: { entry: AgentBoardEntry }) {
+function AgentBoardCard({
+  entry,
+  onOpenTask,
+}: {
+  entry: AgentBoardEntry;
+  onOpenTask?: (taskId: string, runId?: string) => void;
+}) {
+  const router = useRouter();
+  const href = agentBoardHref(entry);
+  const canOpenTask =
+    entry.activity_kind === "task_run" && Boolean(entry.task_id);
+  const clickable = Boolean(href || (canOpenTask && onOpenTask));
+
+  function activate() {
+    if (canOpenTask && onOpenTask && entry.task_id) {
+      onOpenTask(entry.task_id, entry.current_job_id);
+      return;
+    }
+    if (href) router.push(href);
+  }
+
   return (
-    <article className="group rounded-md border border-border bg-card p-3 shadow-card transition-shadow hover:shadow-card-hover">
+    <article
+      className={cn(
+        "group rounded-md border border-border bg-card p-3 shadow-card transition-shadow hover:shadow-card-hover",
+        clickable && "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      )}
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onClick={clickable ? activate : undefined}
+      onKeyDown={
+        clickable
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                activate();
+              }
+            }
+          : undefined
+      }
+    >
       <div className="flex items-start gap-2.5">
         <Avatar entry={entry} />
         <div className="min-w-0 flex-1">

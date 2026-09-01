@@ -71,6 +71,12 @@ func (s *reviewService) CreateRun(ctx context.Context, req model.CreateReviewRun
 			return nil, err
 		}
 		if existing != nil {
+			if req.TaskID != nil && (existing.TaskID == nil || *existing.TaskID != *req.TaskID) {
+				existing.TaskID = req.TaskID
+				if err := s.runRepo.Update(ctx, existing); err != nil {
+					return nil, fmt.Errorf("failed to bind review run to task: %w", err)
+				}
+			}
 			return existing, nil
 		}
 	}
@@ -80,6 +86,7 @@ func (s *reviewService) CreateRun(ctx context.Context, req model.CreateReviewRun
 		ID:          uuid.New(),
 		OrgID:       orgID,
 		AgentID:     req.AgentID,
+		TaskID:      req.TaskID,
 		RequestedBy: requestedBy,
 		Repo:        repo,
 		PRNumber:    req.PRNumber,

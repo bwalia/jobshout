@@ -648,7 +648,7 @@ func (s *mailService) notifyMailTask(ctx context.Context, taskID uuid.UUID, note
 	}
 	_, _ = s.tasks.Update(ctx, taskID, model.UpdateTaskRequest{Description: &n})
 	if status != "" {
-		_ = s.tasks.Transition(ctx, taskID, status)
+		_ = s.tasks.Transition(ctx, taskID, status, nil)
 	}
 }
 
