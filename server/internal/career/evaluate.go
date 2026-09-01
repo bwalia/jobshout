@@ -129,9 +129,6 @@ func fillEmptyBlocks(ev *model.CareerEvaluation, listing *JobListing, profile *m
 		return
 	}
 	normalizeDimensionKeys(ev)
-	if strings.TrimSpace(ev.Blocks.A) != "" && strings.TrimSpace(ev.Blocks.B) != "" && strings.TrimSpace(ev.Blocks.G) != "" {
-		return
-	}
 	heur := HeuristicEvaluate(listing, profile, mode)
 	copyIfEmpty := func(dst *string, src string) {
 		if strings.TrimSpace(*dst) == "" {

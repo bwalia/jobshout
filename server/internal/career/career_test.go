@@ -111,6 +111,26 @@ func TestLLMScoreWithoutBlocksIsFilled(t *testing.T) {
 	}
 }
 
+func TestLLMPartialBlocksStillFillF(t *testing.T) {
+	gen := func(context.Context, string) (string, error) {
+		return `{"company":"Stripe","role":"Staff SWE","overall":4.8,"dimensions":{"match":5,"level":5,"culture":4.7,"compensation":4.9,"trajectory":4.6},"a":"Role summary from the model.","b":"CV match from the model.","c":"","d":"","e":"","f":"","g":"Looks legitimate.","h":"","report_markdown":"# Staff SWE — Stripe\n"}`, nil
+	}
+	profile := &model.CareerProfile{
+		CVMarkdown: "Staff engineer. Kubernetes.",
+		Identity:   model.CareerIdentity{FullName: "Dummy"},
+	}
+	ev, err := EvaluateBlocks(t.Context(), &JobListing{Title: "Staff SWE", Company: "Stripe", Text: GoldenJD}, profile, model.CareerEvalModeFull, gen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ev.Blocks.A != "Role summary from the model." {
+		t.Fatalf("must keep model A, got %q", ev.Blocks.A)
+	}
+	if strings.TrimSpace(ev.Blocks.F) == "" {
+		t.Fatal("empty Block F should be filled from the heuristic")
+	}
+}
+
 func TestStripHTMLUnescapesEntities(t *testing.T) {
 	got := stripHTML(`&lt;h2&gt;Who we are&lt;/h2&gt;&lt;p&gt;Stripe builds APIs.&lt;/p&gt;`)
 	if strings.Contains(got, "&lt;") || strings.Contains(got, "<h2>") {
