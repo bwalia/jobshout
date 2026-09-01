@@ -454,6 +454,8 @@ function CreateTaskForm({
           ? "Research complete"
           : result.kind === "article_writer"
             ? "Article run started"
+            : result.kind === "career_ops"
+              ? "Career evaluation saved"
             : result.kind === "pentester"
               ? "Security scan queued"
               : result.kind === "pr_reviewer"

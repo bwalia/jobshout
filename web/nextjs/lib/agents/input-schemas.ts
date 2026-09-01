@@ -36,7 +36,8 @@ export type AgentBuiltin =
   | "article_writer"
   | "researcher"
   | "pentester"
-  | "pr_reviewer";
+  | "pr_reviewer"
+  | "career_ops";
 
 /**
  * How a selected agent should be launched from Task Manager.
@@ -223,6 +224,48 @@ const SCHEMAS: Record<AgentBuiltin, AgentInputSchema> = {
         v.dry_run === "true" ? " (preview only)" : ""
       }`,
   },
+  career_ops: {
+    kind: "career_ops",
+    hint: "Evaluate a job URL or pasted JD against your career profile. Nothing is submitted for you.",
+    fields: [
+      {
+        key: "job_url",
+        label: "Job URL (optional if you paste a JD)",
+        type: "text",
+        placeholder: "https://boards.greenhouse.io/…",
+      },
+      {
+        key: "jd_text",
+        label: "Job description (optional if you have a URL)",
+        type: "textarea",
+        placeholder: "Paste the posting. It is treated as untrusted data.",
+      },
+      {
+        key: "mode",
+        label: "Mode",
+        type: "select",
+        defaultValue: "full",
+        options: [
+          { value: "full", label: "Full evaluation" },
+          { value: "triage", label: "Triage (fast)" },
+        ],
+      },
+      {
+        key: "tailor_cv",
+        label: "Also tailor CV if score is high enough",
+        type: "checkbox",
+        defaultValue: false,
+      },
+    ],
+    titleFrom: (v) =>
+      `Evaluate: ${v.job_url?.trim() || v.jd_text?.trim()?.slice(0, 40) || "job"}`,
+    descriptionFrom: (v) => {
+      const parts = [];
+      if (v.job_url?.trim()) parts.push(`URL: ${v.job_url.trim()}`);
+      if (v.jd_text?.trim()) parts.push(v.jd_text.trim());
+      return parts.join("\n\n") || undefined;
+    },
+  },
 };
 
 /** True when this schema launches via a specialist API (not generic task run). */
@@ -270,6 +313,13 @@ export function validateSchemaValues(
     const raw = (values[f.key] ?? "").trim();
     const err = validateField(f, raw);
     if (err) errors[f.key] = err;
+  }
+  if (schema.kind === "career_ops") {
+    const url = (values.job_url ?? "").trim();
+    const jd = (values.jd_text ?? "").trim();
+    if (!url && !jd) {
+      errors.job_url = "Paste a job URL or a job description";
+    }
   }
   return errors;
 }

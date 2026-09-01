@@ -2,6 +2,7 @@ import { apiClient } from "@/lib/api/client";
 import { createTaskRun } from "@/lib/api/task-runs";
 import { updateTask } from "@/lib/api/tasks";
 import { generateBlog } from "@/lib/api/blog";
+import { evaluateCareer } from "@/lib/api/career";
 import type { AgentInputSchema } from "@/lib/agents/input-schemas";
 import { runInputsFromValues } from "@/lib/agents/input-schemas";
 import type { Agent } from "@/lib/types/agent";
@@ -17,7 +18,8 @@ export type LaunchResult =
   | { kind: "pentester"; run: PentestRun; task: Task }
   | { kind: "pr_reviewer"; run: ReviewRun; task: Task }
   | { kind: "article_writer"; run: BlogRun; task: Task }
-  | { kind: "researcher"; brief: ResearchBrief; task: Task };
+  | { kind: "researcher"; brief: ResearchBrief; task: Task }
+  | { kind: "career_ops"; evaluationId?: string; task: Task };
 
 interface ResearchBrief {
   topic?: string;
@@ -94,6 +96,15 @@ export async function launchAgentForTask(opts: {
         status: "done",
       }).catch(() => task);
       return { kind: "researcher", brief, task: updated };
+    }
+    case "career_ops": {
+      const res = await evaluateCareer({
+        job_url: values.job_url?.trim() || undefined,
+        jd_text: values.jd_text?.trim() || undefined,
+        mode: values.mode || "full",
+        tailor_cv: values.tailor_cv === "true",
+      });
+      return { kind: "career_ops", evaluationId: res.evaluation?.id, task };
     }
     default: {
       const inputs = runInputsFromValues(schema, values);

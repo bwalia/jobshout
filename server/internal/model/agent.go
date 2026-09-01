@@ -58,6 +58,10 @@ const (
 	// BuiltinMail is the Mail Agent: one shared org Gmail, draft-only replies,
 	// Research Agent handoff, human approve-before-send.
 	BuiltinMail = "mail"
+	// BuiltinCareerOps is the career specialist: evaluate jobs against a
+	// person-scoped profile, draft materials, track the pipeline. A human
+	// always submits, sends, or clicks Apply.
+	BuiltinCareerOps = "career_ops"
 )
 
 // EngineConfigStructuredModel is the EngineConfig key holding the Article

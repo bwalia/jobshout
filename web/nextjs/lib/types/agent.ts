@@ -25,7 +25,7 @@ export interface Agent {
 
 /**
  * Annotations the platform sets on an agent. `builtin` marks one it seeded
- * itself — "article_writer", "researcher", "mail" — which is how the UI tells a
+ * itself — "article_writer", "researcher", "mail", "career_ops" — which is how the UI tells a
  * built-in agent apart from one a user created.
  */
 export interface AgentMetadata {

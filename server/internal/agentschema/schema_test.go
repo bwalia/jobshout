@@ -47,6 +47,13 @@ func TestForBuiltin_PRReviewerSequential(t *testing.T) {
 	}
 }
 
+func TestForBuiltin_CareerOps(t *testing.T) {
+	s := ForBuiltin(model.BuiltinCareerOps)
+	if s.SpecialistTool != "career_evaluate" {
+		t.Fatalf("tool = %q", s.SpecialistTool)
+	}
+}
+
 func TestForBuiltin_GenericPrompt(t *testing.T) {
 	s := ForBuiltin("")
 	slot, _, _ := s.NextMissing(map[string]string{"name": "Custom"})

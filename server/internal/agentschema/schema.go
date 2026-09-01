@@ -81,6 +81,20 @@ func ForBuiltin(builtin string) Schema {
 			Builtin:        model.BuiltinMail,
 			SpecialistTool: "mail_list_drafts",
 		}
+	case model.BuiltinCareerOps:
+		return Schema{
+			Builtin:        model.BuiltinCareerOps,
+			SpecialistTool: "career_evaluate",
+			Fields: []Field{
+				{Key: "job_url", Label: "Job URL", Question: "Paste a job URL, or the job description text."},
+				{Key: "jd_text", Label: "Job description"},
+				{Key: "mode", Label: "Mode", Default: "full", Options: []model.ClarifyOption{
+					{Label: "Full evaluation", Value: "full"},
+					{Label: "Triage (fast)", Value: "triage"},
+				}},
+				{Key: "tailor_cv", Label: "Also tailor CV", Default: "false"},
+			},
+		}
 	default:
 		return Schema{
 			Fields: []Field{
