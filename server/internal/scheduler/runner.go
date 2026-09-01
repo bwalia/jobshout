@@ -35,6 +35,7 @@ type Runner struct {
 	workflows   service.WorkflowService
 	execs       service.ExecutionService
 	multiAgents service.MultiAgentService
+	career      service.CareerService
 	parser      cron.Parser
 	logger      *zap.Logger
 }
@@ -60,6 +61,12 @@ func NewRunner(
 		parser: cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor),
 		logger: logger,
 	}
+}
+
+// WithCareer enables scheduled portal scans (task_type career_scan).
+func (r *Runner) WithCareer(svc service.CareerService) *Runner {
+	r.career = svc
+	return r
 }
 
 // Start blocks until ctx is cancelled. Usually launched with `go runner.Start(ctx)`.
@@ -118,6 +125,8 @@ func (r *Runner) runOne(ctx context.Context, t model.ScheduledTask) {
 	switch {
 	case isBlogTask(t):
 		err = r.dispatchBlog(ctx, t, runRec)
+	case t.TaskType == "career_scan":
+		err = r.dispatchCareerScan(ctx, t)
 	case t.TaskType == "workflow" && t.WorkflowID != nil:
 		err = r.dispatchWorkflow(ctx, t, runRec)
 	case t.TaskType == "multi_agent":
@@ -277,6 +286,32 @@ func (r *Runner) dispatchMultiAgent(ctx context.Context, t model.ScheduledTask, 
 		return fmt.Errorf("multi-agent job failed: %s", *job.ErrorMsg)
 	}
 	return nil
+}
+
+func (r *Runner) dispatchCareerScan(ctx context.Context, t model.ScheduledTask) error {
+	if r.career == nil {
+		return fmt.Errorf("scheduler: career scan is not configured")
+	}
+	if t.CreatedBy == nil || *t.CreatedBy == uuid.Nil {
+		return fmt.Errorf("scheduler: career scan needs the user who created the schedule")
+	}
+	req := model.ScanCareerRequest{}
+	if t.InputJSON != nil {
+		if s, ok := t.InputJSON["board"].(string); ok {
+			req.Board = s
+		}
+		if s, ok := t.InputJSON["slug"].(string); ok {
+			req.Slug = s
+		}
+		if s, ok := t.InputJSON["company"].(string); ok {
+			req.Company = s
+		}
+		if s, ok := t.InputJSON["query"].(string); ok {
+			req.Query = s
+		}
+	}
+	_, err := r.career.Scan(ctx, t.OrgID, *t.CreatedBy, req)
+	return err
 }
 
 func isBlogTask(t model.ScheduledTask) bool {

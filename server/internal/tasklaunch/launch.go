@@ -29,13 +29,14 @@ type Request struct {
 
 // Result is returned to the HTTP handler and chat tools.
 type Result struct {
-	Task       *model.Task     `json:"task"`
-	Kind       string          `json:"kind"`
-	RunID      *uuid.UUID      `json:"run_id,omitempty"`
-	SyncQueued bool            `json:"sync_queued,omitempty"`
-	Brief      *research.Brief `json:"brief,omitempty"`
-	ImageURL   string          `json:"image_url,omitempty"`
-	Message    string          `json:"message,omitempty"`
+	Task         *model.Task     `json:"task"`
+	Kind         string          `json:"kind"`
+	RunID        *uuid.UUID      `json:"run_id,omitempty"`
+	SyncQueued   bool            `json:"sync_queued,omitempty"`
+	Brief        *research.Brief `json:"brief,omitempty"`
+	ImageURL     string          `json:"image_url,omitempty"`
+	EvaluationID *uuid.UUID      `json:"evaluation_id,omitempty"`
+	Message      string          `json:"message,omitempty"`
 }
 
 // Service dispatches launches. Fields may be nil; the matching kind then errors.
@@ -50,6 +51,7 @@ type Service struct {
 	Reviews  service.ReviewService
 	Images   *service.ImageService
 	TaskRuns service.TaskRunService
+	Career   service.CareerService
 }
 
 // LaunchFromChat resolves the project (interview if the org has 2+) then Launch.
@@ -330,6 +332,10 @@ func (s *Service) Launch(ctx context.Context, req Request) (*Result, error) {
 			out.RunID = res.RecordID
 		}
 		out.Message = "Image generated"
+	case model.BuiltinCareerOps:
+		if err := s.launchCareer(ctx, req, task, meta, out); err != nil {
+			return nil, err
+		}
 	default:
 		if s.TaskRuns == nil {
 			return nil, fmt.Errorf("task runs are not configured")
@@ -367,6 +373,78 @@ func (s *Service) Launch(ctx context.Context, req Request) (*Result, error) {
 		out.Task.Metadata = meta
 	}
 	return out, nil
+}
+
+func (s *Service) launchCareer(ctx context.Context, req Request, task *model.Task, meta map[string]any, out *Result) error {
+	if s.Career == nil {
+		return fmt.Errorf("CareerOps is not configured")
+	}
+	jobURL := strings.TrimSpace(req.Values["job_url"])
+	jd := strings.TrimSpace(req.Values["jd_text"])
+	if jobURL == "" && jd == "" {
+		return fmt.Errorf("job URL or job description is required")
+	}
+	res, err := s.Career.Evaluate(ctx, req.OrgID, req.UserID, model.EvaluateCareerRequest{
+		JobURL:           jobURL,
+		JDText:           jd,
+		Mode:             strings.TrimSpace(req.Values["mode"]),
+		TailorCV:         req.Values["tailor_cv"] == "true",
+		ConfirmBlacklist: req.Values["confirm_blacklist"] == "true",
+	})
+	if err != nil {
+		return err
+	}
+	if res.BlacklistHit != nil {
+		label := strings.TrimSpace(res.BlacklistHit.Company)
+		if label == "" {
+			label = strings.TrimSpace(res.BlacklistHit.Domain)
+		}
+		if label == "" {
+			label = "that company"
+		}
+		return fmt.Errorf("%s is on your blacklist — confirm in the Career panel to evaluate anyway", label)
+	}
+
+	note := ""
+	status := "done"
+	switch {
+	case res.Dead:
+		note = "Posting looks dead or expired."
+		if strings.TrimSpace(res.DeadReason) != "" {
+			note = res.DeadReason
+		}
+		out.Message = note
+	case res.Evaluation == nil:
+		return fmt.Errorf("evaluation produced no report")
+	default:
+		id := res.Evaluation.ID
+		out.EvaluationID = &id
+		note = strings.TrimSpace(res.Evaluation.ReportMarkdown)
+		if note == "" {
+			note = strings.TrimSpace(res.Evaluation.Score.Recommendation)
+		}
+		out.Message = res.Evaluation.Score.Recommendation
+		if out.Message == "" {
+			out.Message = "Evaluation saved. Nothing was submitted."
+		}
+	}
+	prior := ""
+	if task.Description != nil {
+		prior = strings.TrimSpace(*task.Description)
+	}
+	if prior != "" && note != "" && prior != note {
+		note = prior + "\n\n" + note
+	}
+	updated, uerr := s.Tasks.Update(ctx, task.ID, model.UpdateTaskRequest{
+		Description: &note,
+		Metadata:    mergeTaskMeta(task.Metadata, meta),
+	})
+	_ = s.Tasks.Transition(ctx, task.ID, status, nil)
+	if uerr == nil && updated != nil {
+		updated.Status = status
+		out.Task = updated
+	}
+	return nil
 }
 
 func (s *Service) launchMail(ctx context.Context, req Request, taskID uuid.UUID) (bool, error) {

@@ -876,6 +876,15 @@ export default function AgentProfilePage() {
                   </Link>
                 )}
 
+                {agent.metadata?.builtin === "career_ops" && (
+                  <Link
+                    href="/panel/task-manager?agent=career"
+                    className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary hover:underline"
+                  >
+                    Open Career panel
+                  </Link>
+                )}
+
                 {agent.model_provider && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
                     <Cpu className="h-3 w-3" />

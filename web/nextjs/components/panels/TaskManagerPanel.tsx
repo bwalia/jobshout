@@ -11,6 +11,7 @@ import {
   ShieldAlert,
   GitPullRequest,
   Mail,
+  Briefcase,
   Rocket,
   BookOpen,
 } from "lucide-react";
@@ -42,6 +43,7 @@ import { AgentStatusBadge } from "@/components/agent/AgentStatusBadge";
 import { PentestAgentClient } from "@/components/PentestAgentClient";
 import { ReviewAgentClient } from "@/components/ReviewAgentClient";
 import { MailAgentClient } from "@/components/MailAgentClient";
+import { CareerAgentClient } from "@/components/CareerAgentClient";
 import { ArticlesView } from "@/components/articles/ArticlesView";
 import { ImagesView } from "@/components/image/ImagesView";
 import type { LaunchResult } from "@/lib/agents/launch";
@@ -55,10 +57,10 @@ import { STATUS_DOT } from "@/lib/status-colors";
 type Selection =
   | { kind: "project"; id: string }
   | { kind: "agent"; id: string }
-  | { kind: "builtin"; id: "pentest" | "review" | "mail" | "articles" | "images" };
+  | { kind: "builtin"; id: "pentest" | "review" | "mail" | "articles" | "images" | "career" };
 
 const BUILTINS: {
-  id: "pentest" | "review" | "mail" | "articles" | "images";
+  id: "pentest" | "review" | "mail" | "articles" | "images" | "career";
   label: string;
   icon: React.ElementType;
   match?: string;
@@ -66,6 +68,7 @@ const BUILTINS: {
   { id: "pentest", label: "Security Tester", icon: ShieldAlert, match: "pentester" },
   { id: "review", label: "PR Reviewer", icon: GitPullRequest, match: "pr_reviewer" },
   { id: "mail", label: "Mail Agent", icon: Mail, match: "mail" },
+  { id: "career", label: "Career", icon: Briefcase, match: "career_ops" },
   { id: "articles", label: "Article Writer", icon: Newspaper, match: "article_writer" },
   { id: "images", label: "Image Generator", icon: ImageIcon, match: "images" },
 ];
@@ -74,7 +77,7 @@ function parseSelection(
   project: string | null,
   agent: string | null
 ): Selection | null {
-  if (agent === "pentest" || agent === "review" || agent === "mail" || agent === "articles" || agent === "images") {
+  if (agent === "pentest" || agent === "review" || agent === "mail" || agent === "articles" || agent === "images" || agent === "career") {
     return { kind: "builtin", id: agent };
   }
   if (agent) return { kind: "agent", id: agent };
@@ -139,6 +142,13 @@ export function TaskManagerPanel() {
     if (!result.task) return;
     void qc.invalidateQueries({ queryKey: taskKeys.all });
     void qc.invalidateQueries({ queryKey: ["metrics", "summary"] });
+    if (result.kind === "career_ops") {
+      setSelection({ kind: "builtin", id: "career" });
+      const params = new URLSearchParams({ agent: "career" });
+      if (result.evaluation_id) params.set("eval", result.evaluation_id);
+      router.replace(`/panel/task-manager?${params.toString()}`, { scroll: false });
+      return;
+    }
     const params = new URLSearchParams({
       project: result.task.project_id,
       task: result.task.id,
@@ -296,6 +306,11 @@ export function TaskManagerPanel() {
           {selection?.kind === "builtin" && selection.id === "mail" && (
             <BuiltinFrame title="Mail Agent">
               <MailAgentClient />
+            </BuiltinFrame>
+          )}
+          {selection?.kind === "builtin" && selection.id === "career" && (
+            <BuiltinFrame title="Career">
+              <CareerAgentClient />
             </BuiltinFrame>
           )}
           {selection?.kind === "builtin" && selection.id === "articles" && (

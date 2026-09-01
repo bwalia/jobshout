@@ -18,6 +18,7 @@ export interface LaunchResult {
   kind: string;
   task: Task;
   run_id?: string | null;
+  evaluation_id?: string | null;
   sync_queued?: boolean;
   brief?: ResearchBrief;
   image_url?: string;
@@ -28,6 +29,7 @@ interface LaunchAPIResponse {
   task: Task;
   kind: string;
   run_id?: string | null;
+  evaluation_id?: string | null;
   sync_queued?: boolean;
   brief?: ResearchBrief;
   image_url?: string;
@@ -96,6 +98,17 @@ function deriveLaunchValues(
       }
       return {};
     }
+    case "career_ops": {
+      const urlLine = desc.match(/^URL:\s*(.+)$/m)?.[1]?.trim();
+      const rest = afterPrefix("Evaluate: ");
+      if (urlLine || rest.startsWith("http")) {
+        return { job_url: urlLine || rest };
+      }
+      if (desc.startsWith("http")) {
+        return { job_url: desc.split("\n")[0] };
+      }
+      return { jd_text: desc || rest };
+    }
     case "task_run":
       return {
         title,
@@ -130,6 +143,7 @@ export async function launchAgent(opts: {
     kind: data.kind,
     task: data.task,
     run_id: data.run_id,
+    evaluation_id: data.evaluation_id,
     sync_queued: data.sync_queued,
     brief: data.brief,
     image_url: data.image_url,

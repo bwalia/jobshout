@@ -39,6 +39,14 @@ func runAgentExecute(ctx context.Context, d Deps, reg *Registry, input map[strin
 			if vals["target"] == "" {
 				vals["target"] = prompt
 			}
+		case model.BuiltinCareerOps:
+			if vals["job_url"] == "" && vals["jd_text"] == "" {
+				if looksLikeURL(prompt) {
+					vals["job_url"] = prompt
+				} else {
+					vals["jd_text"] = prompt
+				}
+			}
 		}
 	}
 
@@ -54,6 +62,10 @@ func runAgentExecute(ctx context.Context, d Deps, reg *Registry, input map[strin
 		return &Result{Missing: []string{slot}, Question: question, Options: opts}, nil
 	}
 	vals = schema.ApplyDefaults(vals)
+
+	if builtin == model.BuiltinCareerOps && strings.TrimSpace(vals["job_url"]) == "" && strings.TrimSpace(vals["jd_text"]) == "" {
+		return &Result{Missing: []string{"job_url"}, Question: "Paste a job URL, or the job description text."}, nil
+	}
 
 	if d.Launch != nil {
 		return launchAgent(ctx, d, agent, vals)
@@ -152,4 +164,9 @@ func lastEntityID(ctx context.Context, kind string) string {
 		return ""
 	}
 	return strings.TrimSpace(e.ID)
+}
+
+func looksLikeURL(s string) bool {
+	s = strings.TrimSpace(s)
+	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")
 }

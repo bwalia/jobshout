@@ -126,6 +126,9 @@ func launchResultToTool(res *tasklaunch.Result) *Result {
 	if res.RunID != nil {
 		data["run_id"] = res.RunID.String()
 	}
+	if res.EvaluationID != nil {
+		data["evaluation_id"] = res.EvaluationID.String()
+	}
 	var ents []model.EntityRef
 	if res.Task != nil {
 		href := "/panel/task-manager?project=" + res.Task.ProjectID.String() + "&task=" + res.Task.ID.String()

@@ -371,7 +371,7 @@ func TestClarifyFromMatch_SlotIsFieldName(t *testing.T) {
 }
 
 func TestAlwaysLoadIncludesSpecialists(t *testing.T) {
-	for _, n := range []string{"research_run", "article_generate", "pentest_start", "mail_sync", "mail_list_drafts"} {
+	for _, n := range []string{"research_run", "article_generate", "pentest_start", "mail_sync", "mail_list_drafts", "career_evaluate"} {
 		if !inAlwaysLoad(n) {
 			t.Errorf("%s must be always-load", n)
 		}

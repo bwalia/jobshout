@@ -61,6 +61,10 @@ const (
 	// BuiltinImages is the Image Generator: one prompt in, one stored image
 	// on the Task Manager board.
 	BuiltinImages = "images"
+	// BuiltinCareerOps is the career specialist: evaluate jobs against a
+	// person-scoped profile, draft materials, track the pipeline. A human
+	// always submits, sends, or clicks Apply.
+	BuiltinCareerOps = "career_ops"
 )
 
 // EngineConfigStructuredModel is the EngineConfig key holding the Article

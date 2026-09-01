@@ -540,7 +540,7 @@ func (a *Agent) executeTool(ctx context.Context, stream StreamFunc, name string,
 
 	timeout := 60 * time.Second
 	switch name {
-	case "image_generate", "research_run", "article_generate":
+	case "image_generate", "research_run", "article_generate", "career_evaluate", "career_scan", "career_deep", "career_batch", "career_cover_letter", "career_tailor_cv":
 		timeout = 3 * time.Minute
 	}
 	toolCtx, cancel := context.WithTimeout(ctx, timeout)

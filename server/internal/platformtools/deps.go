@@ -24,6 +24,7 @@ type Deps struct {
 	Images          *service.ImageService
 	Reviews         service.ReviewService
 	Mail            service.MailService
+	Career          service.CareerService
 	MultiAgent      service.MultiAgentService
 	Sprints         service.SprintService
 	Plugins         service.PluginService
@@ -64,6 +65,7 @@ func NewRegistryWithTools(d Deps) *Registry {
 		registerWorkflows(reg, d)
 	}
 	registerSpecialists(reg, d)
+	registerCareer(reg, d)
 	registerReview(reg, d)
 	registerConfig(reg, d)
 	registerInsight(reg, d)
