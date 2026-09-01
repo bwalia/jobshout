@@ -1,6 +1,7 @@
 package career
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -76,6 +77,47 @@ func TestRecommendApplyFloor(t *testing.T) {
 	}
 	if ev.Score.Overall < model.RecommendApplyMin && ev.Score.RecommendApply {
 		t.Fatalf("must not recommend below 4.0: %.2f", ev.Score.Overall)
+	}
+}
+
+func TestLLMScoreWithoutBlocksIsFilled(t *testing.T) {
+	gen := func(context.Context, string) (string, error) {
+		return `{"company":"Stripe","role":"Staff Software Engineer, API Platform","overall":4.8,"dimensions":{"a":5,"b":5,"c":4.7,"d":4.9,"e":4.6},"a":"","b":"","c":"","d":"","e":"","f":"","g":"","h":"","report_markdown":"# Staff Software Engineer, API Platform — Stripe\n\n**Score:** 4.8 / 5\n"}`, nil
+	}
+	profile := &model.CareerProfile{
+		CVMarkdown: "Staff engineer. Go, Kubernetes, Postgres. 12 years. UK citizen.",
+		Identity:   model.CareerIdentity{FullName: "Dummy"},
+		Targets:    model.CareerTargets{Titles: []string{"Staff Software Engineer"}, Seniority: "staff"},
+	}
+	listing := &JobListing{
+		Title: "Staff Software Engineer, API Platform", Company: "stripe",
+		Text: GoldenJD, URL: "https://boards.greenhouse.io/stripe/jobs/1",
+	}
+	ev, err := EvaluateBlocks(t.Context(), listing, profile, model.CareerEvalModeFull, gen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ev.Score.Overall < 4.7 || ev.Score.Overall > 4.9 {
+		t.Fatalf("must keep the model overall, got %.2f", ev.Score.Overall)
+	}
+	if ev.Blocks.A == "" || ev.Blocks.B == "" || ev.Blocks.G == "" {
+		t.Fatalf("expected heuristic prose for empty LLM blocks, got %+v", ev.Blocks)
+	}
+	if !strings.Contains(ev.ReportMarkdown, "## ") {
+		t.Fatalf("report should include A–H headings, got %q", ev.ReportMarkdown)
+	}
+	if _, ok := ev.Score.Dimensions["match"]; !ok {
+		t.Fatalf("dimensions should be remapped off a–e: %#v", ev.Score.Dimensions)
+	}
+}
+
+func TestStripHTMLUnescapesEntities(t *testing.T) {
+	got := stripHTML(`&lt;h2&gt;Who we are&lt;/h2&gt;&lt;p&gt;Stripe builds APIs.&lt;/p&gt;`)
+	if strings.Contains(got, "&lt;") || strings.Contains(got, "<h2>") {
+		t.Fatalf("still escaped or tagged: %q", got)
+	}
+	if !strings.Contains(got, "Who we are") || !strings.Contains(got, "Stripe builds APIs") {
+		t.Fatalf("lost text: %q", got)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/url"
@@ -295,6 +296,9 @@ func inferVia(text, jobURL string) (via, agency string) {
 var htmlTag = regexp.MustCompile(`(?s)<[^>]*>`)
 
 func stripHTML(s string) string {
+	// Greenhouse (and others) sometimes entity-escape the HTML, so unescape
+	// before stripping tags or the JD stays as "&lt;h2&gt;Who we are".
+	s = html.UnescapeString(s)
 	s = strings.ReplaceAll(s, "<br>", "\n")
 	s = strings.ReplaceAll(s, "<br/>", "\n")
 	s = strings.ReplaceAll(s, "<p>", "\n")
