@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { cn } from "@/lib/utils/cn";
-import { PluginsView } from "@/app/(app)/plugins/page";
-import { SkillsView } from "@/app/(app)/skills/page";
+import { PluginsView } from "@/components/plugins/PluginsView";
+import { SkillsView } from "@/components/skills/SkillsView";
 
 type Tab = "plugins" | "skills";
 
