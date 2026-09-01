@@ -47,8 +47,14 @@ export async function fetchAllTaskPages(
     TASK_FETCH_PAGE_CAP
   );
   for (let page = 2; page <= pages; page++) {
-    const next = await load(page, TASK_PAGE_SIZE);
-    all.push(...(next.data ?? []));
+    try {
+      const next = await load(page, TASK_PAGE_SIZE);
+      all.push(...(next.data ?? []));
+    } catch {
+      // Keep page 1 rather than failing the whole board because one later
+      // page timed out. TaskCountLabel still shows "Showing X of Y".
+      break;
+    }
   }
   return { ...first, data: all };
 }

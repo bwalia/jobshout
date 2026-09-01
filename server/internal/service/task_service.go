@@ -197,8 +197,26 @@ func (s *taskService) Update(ctx context.Context, id uuid.UUID, req model.Update
 		task.Metadata = req.Metadata
 	}
 
+	nextStatus := ""
+	if req.Status != nil {
+		nextStatus = strings.TrimSpace(*req.Status)
+		if nextStatus != "" {
+			switch nextStatus {
+			case "backlog", "todo", "in_progress", "review", "done":
+			default:
+				return nil, ErrInvalidTaskStatus
+			}
+		}
+	}
+
 	if err := s.repo.Update(ctx, task); err != nil {
 		return nil, fmt.Errorf("updating task: %w", err)
+	}
+	if nextStatus != "" && nextStatus != task.Status {
+		if err := s.repo.TransitionStatus(ctx, id, nextStatus, nil); err != nil {
+			return nil, fmt.Errorf("updating status: %w", err)
+		}
+		return s.GetByID(ctx, id)
 	}
 	return task, nil
 }
@@ -245,6 +263,7 @@ func parseOptionalUUID(field model.OptionalString) (*uuid.UUID, error) {
 }
 
 var ErrTaskNotFound = taskError("task not found")
+var ErrInvalidTaskStatus = taskError("invalid status")
 
 type taskError string
 

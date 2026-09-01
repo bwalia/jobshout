@@ -40,7 +40,7 @@ export function TaskBoardPanel() {
   const [projectFilter, setProjectFilter] = useState<string>(projectParam ?? "");
 
   const { data: tasksResp, isLoading } = useAllTasks();
-  const { data: deepTask } = useTask(taskParam ?? "");
+  const { data: deepTask, isError: deepTaskError } = useTask(taskParam ?? "");
   const { data: agentsResp } = useAgents({ per_page: 100 });
   const { data: projectsResp } = useProjects({ per_page: 100 });
 
@@ -68,9 +68,17 @@ export function TaskBoardPanel() {
       setSelected(null);
       return;
     }
+    if (deepTaskError) {
+      setSelected(null);
+      return;
+    }
     const t = tasks.find((x) => x.id === taskParam) ?? deepTask ?? null;
-    if (t) setSelected(t);
-  }, [taskParam, tasks, deepTask]);
+    setSelected((prev) => {
+      if (t) return t;
+      if (prev?.id === taskParam) return prev;
+      return null;
+    });
+  }, [taskParam, tasks, deepTask, deepTaskError]);
 
   const byStatus = useMemo(() => {
     const map: Record<TaskStatus, Task[]> = {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/jobshout/server/internal/model"
@@ -196,7 +197,7 @@ func (rc *ReviewReconciler) finalize(ctx context.Context, run *model.ReviewRun, 
 	if err := rc.runRepo.Update(ctx, run); err != nil {
 		return err
 	}
-	syncSpecialistBoard(ctx, rc.tasks, run.TaskID, run.Status)
+	syncSpecialistBoard(ctx, rc.tasks, rc.boardTaskID(ctx, run), run.Status)
 	return nil
 }
 
@@ -237,8 +238,24 @@ func (rc *ReviewReconciler) fail(ctx context.Context, run *model.ReviewRun, msg 
 	if err := rc.runRepo.Update(ctx, run); err != nil {
 		return err
 	}
-	syncSpecialistBoard(ctx, rc.tasks, run.TaskID, run.Status)
+	syncSpecialistBoard(ctx, rc.tasks, rc.boardTaskID(ctx, run), run.Status)
 	return nil
+}
+
+// boardTaskID prefers the in-memory pointer, then reloads from the row so a
+// board launch that bound task_id after this tick claimed the run still marks Done.
+func (rc *ReviewReconciler) boardTaskID(ctx context.Context, run *model.ReviewRun) *uuid.UUID {
+	if run != nil && run.TaskID != nil {
+		return run.TaskID
+	}
+	if rc == nil || rc.runRepo == nil || run == nil {
+		return nil
+	}
+	latest, err := rc.runRepo.GetByID(ctx, run.ID)
+	if err != nil || latest == nil {
+		return nil
+	}
+	return latest.TaskID
 }
 
 func (rc *ReviewReconciler) exceededRuntime(run *model.ReviewRun) bool {

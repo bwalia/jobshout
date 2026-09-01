@@ -51,3 +51,13 @@ func TestPaginationParams_CapIs200(t *testing.T) {
 		t.Fatalf("got page=%d per_page=%d", p.Page, p.PerPage)
 	}
 }
+
+func TestUpdateTaskRequest_StatusUnmarshals(t *testing.T) {
+	var req UpdateTaskRequest
+	if err := json.Unmarshal([]byte(`{"status":"done"}`), &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.Status == nil || *req.Status != "done" {
+		t.Fatalf("status = %v", req.Status)
+	}
+}

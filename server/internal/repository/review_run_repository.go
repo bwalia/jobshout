@@ -99,7 +99,7 @@ func (r *reviewRunRepository) Update(ctx context.Context, run *model.ReviewRun) 
 		SET status = $2, remote_job_id = $3, head_sha = $4, decision = $5, verdict = $6,
 		    summary = $7, github_url = $8, result = $9, stage_log = $10, error_message = $11,
 		    poll_attempts = $12, next_poll_at = $13, started_at = $14, completed_at = $15,
-		    updated_at = NOW()
+		    task_id = COALESCE($16, task_id), updated_at = NOW()
 		WHERE id = $1
 		RETURNING created_at, updated_at`
 	var result any
@@ -109,7 +109,7 @@ func (r *reviewRunRepository) Update(ctx context.Context, run *model.ReviewRun) 
 	return r.pool.QueryRow(ctx, query,
 		run.ID, run.Status, run.RemoteJobID, run.HeadSHA, run.Decision, run.Verdict,
 		run.Summary, run.GitHubURL, result, stageLogJSON(run.StageLog), run.ErrorMessage,
-		run.PollAttempts, run.NextPollAt, run.StartedAt, run.CompletedAt,
+		run.PollAttempts, run.NextPollAt, run.StartedAt, run.CompletedAt, run.TaskID,
 	).Scan(&run.CreatedAt, &run.UpdatedAt)
 }
 

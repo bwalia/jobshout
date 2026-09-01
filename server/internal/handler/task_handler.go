@@ -227,6 +227,10 @@ func (h *TaskHandler) Update(w http.ResponseWriter, r *http.Request) {
 			RespondError(w, http.StatusNotFound, err.Error())
 			return
 		}
+		if errors.Is(err, service.ErrInvalidTaskStatus) {
+			RespondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		RespondError(w, http.StatusInternalServerError, "failed to update task")
 		return
 	}

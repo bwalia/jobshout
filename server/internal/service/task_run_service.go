@@ -207,6 +207,19 @@ func (s *taskRunService) syncBoardStatus(ctx context.Context, taskID uuid.UUID, 
 	if !ok {
 		return
 	}
+	if status == "done" {
+		active, err := s.runRepo.CountActiveByTask(ctx, taskID)
+		if err != nil {
+			s.logger.Warn("failed to count active task runs before done sync",
+				zap.String("task_id", taskID.String()),
+				zap.Error(err),
+			)
+			return
+		}
+		if active > 0 {
+			return
+		}
+	}
 	if err := s.taskRepo.TransitionStatus(ctx, taskID, status, changedBy); err != nil {
 		s.logger.Warn("failed to sync board status from task run",
 			zap.String("task_id", taskID.String()),

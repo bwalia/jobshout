@@ -52,6 +52,7 @@ type CreateTaskRequest struct {
 type UpdateTaskRequest struct {
 	Title           *string        `json:"title"`
 	Description     *string        `json:"description"`
+	Status          *string        `json:"status" validate:"omitempty,oneof=backlog todo in_progress review done"`
 	Priority        *string        `json:"priority" validate:"omitempty,oneof=low medium high critical"`
 	AssignedAgentID OptionalString `json:"assigned_agent_id"`
 	AssignedUserID  OptionalString `json:"assigned_user_id"`

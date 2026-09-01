@@ -20,6 +20,9 @@ type TaskRunRepository interface {
 	Update(ctx context.Context, run *model.TaskRun) error
 	ListByTask(ctx context.Context, taskID uuid.UUID, pagination model.PaginationParams) (*model.PaginatedResponse[model.TaskRun], error)
 	ListByOrg(ctx context.Context, orgID uuid.UUID, pagination model.PaginationParams) (*model.PaginatedResponse[model.TaskRun], error)
+	// CountActiveByTask is queued+running runs for a board card. Used so a
+	// finished run does not mark the card Done while another run is still live.
+	CountActiveByTask(ctx context.Context, taskID uuid.UUID) (int, error)
 }
 
 type taskRunRepository struct {
@@ -118,6 +121,17 @@ func (r *taskRunRepository) Update(ctx context.Context, run *model.TaskRun) erro
 		run.CostUSD, run.LatencyMs, run.Iterations,
 		run.StartedAt, run.CompletedAt,
 	).Scan(&run.CreatedAt, &run.UpdatedAt)
+}
+
+func (r *taskRunRepository) CountActiveByTask(ctx context.Context, taskID uuid.UUID) (int, error) {
+	var n int
+	err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM task_runs
+		WHERE task_id = $1 AND status IN ('queued', 'running')`, taskID).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("counting active task runs: %w", err)
+	}
+	return n, nil
 }
 
 func (r *taskRunRepository) ListByTask(ctx context.Context, taskID uuid.UUID, pagination model.PaginationParams) (*model.PaginatedResponse[model.TaskRun], error) {
