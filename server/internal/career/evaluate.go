@@ -75,13 +75,17 @@ func EvaluateBlocks(ctx context.Context, listing *JobListing, profile *model.Car
 
 	var ev *model.CareerEvaluation
 	var err error
+	usedHeuristicFallback := false
 	if generate != nil {
 		ev, err = evaluateLLM(ctx, listing, profile, mode, generate)
 		if err != nil {
 			ev = HeuristicEvaluate(listing, profile, mode)
-			if ev.ReportMarkdown != "" {
-				ev.ReportMarkdown += "\n\n_Structured model unavailable; used the deterministic evaluator._\n"
-			}
+			usedHeuristicFallback = true
+		} else {
+			// Models often return overall + a–e numeric dimensions and leave
+			// block prose empty. Keep the score; fill A–G from the heuristic
+			// so the report is still the CareerOps A–H document.
+			fillEmptyBlocks(ev, listing, profile, mode)
 		}
 	} else {
 		ev = HeuristicEvaluate(listing, profile, mode)
@@ -111,10 +115,70 @@ func EvaluateBlocks(ctx context.Context, listing *JobListing, profile *model.Car
 	if ev.Role == "" {
 		ev.Role = listing.Title
 	}
-	if ev.ReportMarkdown == "" {
+	if ev.ReportMarkdown == "" || reportMissingHeadings(ev) {
 		ev.ReportMarkdown = RenderReport(ev)
 	}
+	if usedHeuristicFallback {
+		ev.ReportMarkdown += "\n\n_Structured model unavailable; used the deterministic evaluator._\n"
+	}
 	return ev, nil
+}
+
+func fillEmptyBlocks(ev *model.CareerEvaluation, listing *JobListing, profile *model.CareerProfile, mode string) {
+	if ev == nil {
+		return
+	}
+	normalizeDimensionKeys(ev)
+	if strings.TrimSpace(ev.Blocks.A) != "" && strings.TrimSpace(ev.Blocks.B) != "" && strings.TrimSpace(ev.Blocks.G) != "" {
+		return
+	}
+	heur := HeuristicEvaluate(listing, profile, mode)
+	copyIfEmpty := func(dst *string, src string) {
+		if strings.TrimSpace(*dst) == "" {
+			*dst = src
+		}
+	}
+	copyIfEmpty(&ev.Blocks.A, heur.Blocks.A)
+	copyIfEmpty(&ev.Blocks.B, heur.Blocks.B)
+	copyIfEmpty(&ev.Blocks.C, heur.Blocks.C)
+	copyIfEmpty(&ev.Blocks.D, heur.Blocks.D)
+	copyIfEmpty(&ev.Blocks.E, heur.Blocks.E)
+	copyIfEmpty(&ev.Blocks.F, heur.Blocks.F)
+	copyIfEmpty(&ev.Blocks.G, heur.Blocks.G)
+	copyIfEmpty(&ev.Blocks.H, heur.Blocks.H)
+	copyIfEmpty(&ev.Blocks.WorkAuth, heur.Blocks.WorkAuth)
+	if strings.TrimSpace(ev.LegitimacyTier) == "" {
+		ev.LegitimacyTier = heur.LegitimacyTier
+	}
+}
+
+func normalizeDimensionKeys(ev *model.CareerEvaluation) {
+	d := ev.Score.Dimensions
+	if len(d) == 0 {
+		return
+	}
+	if _, ok := d["match"]; ok {
+		return
+	}
+	names := []string{"match", "level", "culture", "compensation", "trajectory"}
+	letters := []string{"a", "b", "c", "d", "e"}
+	out := make(map[string]float64, len(names))
+	for i, letter := range letters {
+		if v, ok := d[letter]; ok {
+			out[names[i]] = v
+		}
+	}
+	if len(out) > 0 {
+		ev.Score.Dimensions = out
+	}
+}
+
+func reportMissingHeadings(ev *model.CareerEvaluation) bool {
+	if ev == nil {
+		return false
+	}
+	has := strings.TrimSpace(ev.Blocks.A+ev.Blocks.B+ev.Blocks.C+ev.Blocks.D+ev.Blocks.E+ev.Blocks.F+ev.Blocks.G+ev.Blocks.H) != ""
+	return has && !strings.Contains(ev.ReportMarkdown, "## ")
 }
 
 func evaluateLLM(ctx context.Context, listing *JobListing, profile *model.CareerProfile, mode string, generate Generator) (*model.CareerEvaluation, error) {
