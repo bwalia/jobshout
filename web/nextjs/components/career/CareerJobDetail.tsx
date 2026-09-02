@@ -1,6 +1,7 @@
 "use client";
 
 import { FieldHint } from "@/components/ui/field-hint";
+import { splitCareerTailorNote } from "@/lib/career/tailor-note";
 import type { CareerArtifact } from "@/types/career";
 import { postingHref, type CareerJob } from "./jobs";
 
@@ -16,6 +17,7 @@ export function CareerJobDetail({
   onEmail,
   onApplied,
   onSeeJD,
+  onBack,
 }: {
   job: CareerJob;
   artifacts: CareerArtifact[];
@@ -28,17 +30,30 @@ export function CareerJobDetail({
   onEmail: () => void;
   onApplied: () => void;
   onSeeJD: () => void;
+  onBack?: () => void;
 }) {
   const ev = job.evaluation;
   const score = ev?.score?.overall ?? job.score;
   const hardStop = !!ev?.hard_stop;
   const below = score != null && score < 4;
   const posting = postingHref(job.listing_url);
+  const cvArt = artifacts.find((a) => a.kind === "cv");
+  const tailorNote = draftNote || (cvArt ? splitCareerTailorNote(cvArt.body_markdown).note : "");
+  const drafts = artifacts.filter((a) => a.kind !== "cv");
 
   return (
-    <div className="space-y-3 text-sm">
+    <div className="space-y-4 text-sm">
+      {onBack && (
+        <button
+          type="button"
+          className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+          onClick={onBack}
+        >
+          ← Back to jobs
+        </button>
+      )}
       <div>
-        <p className="font-medium">
+        <p className="text-base font-medium">
           {job.role || "Role"} — {job.company || "Company"}
         </p>
         <p className="text-muted-foreground">
@@ -78,7 +93,7 @@ export function CareerJobDetail({
         >
           Get tailored CV
         </button>
-        <FieldHint text="Updates your saved CV for this job and downloads a PDF. Score is advice — it does not lock this button. A human submits." />
+        <FieldHint text="The PDF keeps your layout. What we changed is shown on this page, not on the file. A human submits." />
         {ev && (
           <>
             <button
@@ -99,24 +114,6 @@ export function CareerJobDetail({
             </button>
           </>
         )}
-        {posting && (
-          <a
-            href={posting}
-            target="_blank"
-            rel="noreferrer"
-            className="rounded-md border border-border px-3 py-1.5 text-sm"
-          >
-            Go to posting
-          </a>
-        )}
-        <button
-          type="button"
-          className="rounded-md border border-border px-3 py-1.5 text-sm disabled:opacity-50"
-          disabled={busy}
-          onClick={onSeeJD}
-        >
-          See JD
-        </button>
         {job.application && job.application.status !== "applied" && (
           <button
             type="button"
@@ -128,25 +125,44 @@ export function CareerJobDetail({
           </button>
         )}
       </div>
+      <p className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+        {posting && (
+          <a href={posting} target="_blank" rel="noreferrer" className="underline underline-offset-2">
+            Go to posting
+          </a>
+        )}
+        <button type="button" className="underline underline-offset-2 disabled:opacity-50" disabled={busy} onClick={onSeeJD}>
+          See JD
+        </button>
+      </p>
       {!hasCV && (
         <p className="text-xs text-muted-foreground">Upload a PDF CV on Profile before tailoring.</p>
       )}
-      {draftNote && <p className="text-xs text-muted-foreground">{draftNote}</p>}
 
-      {ev?.report_markdown && (
-        <article className="max-h-72 overflow-auto whitespace-pre-wrap rounded-md border border-border p-3 text-xs leading-relaxed">
-          {ev.report_markdown}
-        </article>
+      {tailorNote && (
+        <div className="rounded-md border border-border bg-muted/40 px-3 py-2">
+          <p className="text-xs font-medium">What changed on this CV</p>
+          <p className="mt-1 text-sm leading-relaxed">{tailorNote}</p>
+        </div>
       )}
 
-      {artifacts.length > 0 && (
-        <ul className="space-y-2 border-t border-border pt-2">
-          {artifacts.map((a) => (
-            <li key={a.id}>
-              <p className="text-xs font-medium">
-                {a.kind} — {a.title || "draft"}
+      {ev?.report_markdown && (
+        <details className="rounded-md border border-border">
+          <summary className="cursor-pointer px-3 py-2 text-xs font-medium">Score report</summary>
+          <article className="max-h-64 overflow-auto whitespace-pre-wrap border-t border-border px-3 py-2 text-xs leading-relaxed">
+            {ev.report_markdown}
+          </article>
+        </details>
+      )}
+
+      {drafts.length > 0 && (
+        <ul className="space-y-2">
+          {drafts.map((a) => (
+            <li key={a.id} className="rounded-md border border-border">
+              <p className="px-3 py-2 text-xs font-medium">
+                {a.kind === "cover" ? "Cover letter" : a.kind === "email" ? "Email draft" : a.title || a.kind}
               </p>
-              <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-muted/40 p-2 text-xs">
+              <pre className="max-h-40 overflow-auto whitespace-pre-wrap border-t border-border bg-muted/30 p-3 text-xs">
                 {a.body_markdown}
               </pre>
             </li>

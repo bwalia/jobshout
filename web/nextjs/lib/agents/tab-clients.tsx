@@ -9,11 +9,10 @@ import { ArticlesView } from "@/components/articles/ArticlesView";
 import { ImagesView } from "@/components/image/ImagesView";
 
 /**
- * Optional product UI under the generic Task Manager tab form.
+ * Optional product UI that owns the Task Manager tab (replaces the schema form).
+ * Schema fields stay on New task / Run task / chat.
  *
- * All specialists are wired this way: keyed by metadata.builtin.
- * A new agent does not need a TaskManagerPanel if — register a client here,
- * do not add a switch.
+ * Keyed by metadata.builtin. Register here; do not add a TaskManagerPanel branch.
  */
 export const AGENT_CLIENTS: Record<string, ComponentType> = {
   career_ops: CareerAgentClient,

@@ -22,9 +22,10 @@ const inputCls =
   "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 /**
- * Generic Task Manager specialist tab: schema form + Run, optional client under it.
- * All specialists are wired this way. A new agent does not need a panel branch —
- * register the module and (optionally) AGENT_CLIENTS[builtin].
+ * Generic Task Manager specialist tab.
+ *
+ * If AGENT_CLIENTS registered a client, that UI is the tab (schema still used
+ * in New task / Run task / chat). Otherwise: schema form + Run.
  */
 export function BuiltinAgentTab({
   wire,
@@ -40,6 +41,7 @@ export function BuiltinAgentTab({
   onLaunched: (result: LaunchResult) => void;
 }) {
   const schema = useMemo(() => schemaFromWire(wire), [wire]);
+  const ownsTab = Boolean(Client);
   const [values, setValues] = useState(() => defaultValuesForSchema(schema));
   const [projectId, setProjectId] = useState(projects[0]?.id ?? "");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -49,6 +51,7 @@ export function BuiltinAgentTab({
   );
 
   useEffect(() => {
+    if (ownsTab) return;
     setValues(defaultValuesForSchema(schema));
     setFieldErrors({});
     if (schema.prefill !== "mailbox") {
@@ -68,7 +71,7 @@ export function BuiltinAgentTab({
     return () => {
       cancelled = true;
     };
-  }, [schema]);
+  }, [schema, ownsTab]);
 
   useEffect(() => {
     if (!projectId && projects[0]) setProjectId(projects[0].id);
@@ -104,72 +107,83 @@ export function BuiltinAgentTab({
       <h2 className="text-lg font-semibold tracking-tight">
         {wire.label || agent?.name || "Agent"}
       </h2>
-      {schema.hint ? (
-        <p className="text-sm text-muted-foreground">{schema.hint}</p>
-      ) : null}
 
-      {!agent ? (
-        <p className="text-sm text-muted-foreground">
-          This agent is not in the organisation yet.
-        </p>
+      {ownsTab && Client ? (
+        !agent ? (
+          <p className="text-sm text-muted-foreground">
+            This agent is not in the organisation yet.
+          </p>
+        ) : (
+          <Client />
+        )
       ) : (
-        <div className="space-y-4 rounded-lg border border-border bg-card p-5">
-          {schema.prefill === "mailbox" && mailboxLoad === "loading" ? (
-            <p className="text-xs text-muted-foreground">
-              Loading saved mailbox settings…
-            </p>
+        <>
+          {schema.hint ? (
+            <p className="text-sm text-muted-foreground">{schema.hint}</p>
           ) : null}
-          <AgentInputFields
-            fields={schema.fields}
-            values={values}
-            onChange={(key, value) => {
-              const next = { ...values, [key]: value };
-              setValues(next);
-              if (fieldErrors[key]) {
-                setFieldErrors(validateSchemaValues(schema, next));
-              }
-            }}
-            errors={fieldErrors}
-            disabled={launching || !mailReady}
-            autoFocusFirst
-          />
-          <div className="flex flex-wrap items-end gap-3 border-t border-border pt-4">
-            <div className="min-w-[180px] flex-1 space-y-1.5">
-              <label className="text-sm font-medium" htmlFor="tab-project">
-                Project
-              </label>
-              <select
-                id="tab-project"
-                value={projectId}
-                onChange={(e) => setProjectId(e.target.value)}
-                className={inputCls}
-                disabled={launching}
-              >
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <button
-              type="button"
-              onClick={() => void handleRun()}
-              disabled={!ready || launching}
-              className="inline-flex h-10 items-center gap-1.5 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
-            >
-              {launching ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Rocket className="h-4 w-4" />
-              )}
-              Run
-            </button>
-          </div>
-        </div>
-      )}
 
-      {Client ? <Client /> : null}
+          {!agent ? (
+            <p className="text-sm text-muted-foreground">
+              This agent is not in the organisation yet.
+            </p>
+          ) : (
+            <div className="space-y-4 rounded-lg border border-border bg-card p-5">
+              {schema.prefill === "mailbox" && mailboxLoad === "loading" ? (
+                <p className="text-xs text-muted-foreground">
+                  Loading saved mailbox settings…
+                </p>
+              ) : null}
+              <AgentInputFields
+                fields={schema.fields}
+                values={values}
+                onChange={(key, value) => {
+                  const next = { ...values, [key]: value };
+                  setValues(next);
+                  if (fieldErrors[key]) {
+                    setFieldErrors(validateSchemaValues(schema, next));
+                  }
+                }}
+                errors={fieldErrors}
+                disabled={launching || !mailReady}
+                autoFocusFirst
+              />
+              <div className="flex flex-wrap items-end gap-3 border-t border-border pt-4">
+                <div className="min-w-[180px] flex-1 space-y-1.5">
+                  <label className="text-sm font-medium" htmlFor="tab-project">
+                    Project
+                  </label>
+                  <select
+                    id="tab-project"
+                    value={projectId}
+                    onChange={(e) => setProjectId(e.target.value)}
+                    className={inputCls}
+                    disabled={launching}
+                  >
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleRun()}
+                  disabled={!ready || launching}
+                  className="inline-flex h-10 items-center gap-1.5 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                >
+                  {launching ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Rocket className="h-4 w-4" />
+                  )}
+                  Run
+                </button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

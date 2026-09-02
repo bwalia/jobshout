@@ -55,6 +55,49 @@ func TestTailorCVKeepsOutline(t *testing.T) {
 	}
 }
 
+func TestHeadingOutlineLayoutCV(t *testing.T) {
+	src := "Sukhvir Singh\nemail@x.com\nSummary\nA line.\nEducation\nA school.\nInternship Experience\nA job.\nProjects\nA project.\nSkills and Competencies\nGo.\nAchievements\nWon.\n"
+	got := HeadingOutline(src)
+	want := []string{"summary", "education", "internship experience", "projects", "skills and competencies", "achievements"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v want %v", got, want)
+		}
+	}
+}
+
+func TestKeepLayoutRejectsExpansion(t *testing.T) {
+	grown := fixtureCV + "\n- extra bullet that was not on the source\n"
+	if KeepLayout(fixtureCV, grown) {
+		t.Fatal("extra bullets must fail the layout gate")
+	}
+}
+
+func TestTailorCVAppliesReplacements(t *testing.T) {
+	gen := func(context.Context, string) (string, error) {
+		return `{"note":"Lead with Kubernetes.","replacements":[{"from":"Go, Kubernetes.","to":"Kubernetes, Go."}]}`, nil
+	}
+	out, err := TailorCV(t.Context(), &JobListing{Title: "Head of AI", Text: "Kubernetes"}, &model.CareerProfile{CVMarkdown: fixtureCV}, &model.CareerEvaluation{Role: "Head of AI", Company: "Northwind"}, gen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "Kubernetes, Go.") {
+		t.Fatalf("replacement missing:\n%s", out)
+	}
+	if strings.Contains(out, "Go, Kubernetes.") {
+		t.Fatalf("old phrase still present:\n%s", out)
+	}
+	if !strings.Contains(out, "Tailored for Head of AI at Northwind") || !strings.Contains(out, "Lead with Kubernetes.") {
+		t.Fatalf("expected visible note, got:\n%s", out)
+	}
+	if !KeepLayout(fixtureCV, out) {
+		t.Fatalf("layout drifted:\n%s", out)
+	}
+}
+
 func TestTailorCVRejectsReformat(t *testing.T) {
 	gen := func(context.Context, string) (string, error) {
 		return `{"body":"# Summary\nI am a visionary leader.\n"}`, nil
