@@ -1,137 +1,85 @@
-package agentschema
+package agentschema_test
 
 import (
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/jobshout/server/internal/agentmodule"
+	_ "github.com/jobshout/server/internal/agentmodules"
+	"github.com/jobshout/server/internal/agentschema"
+	"github.com/jobshout/server/internal/model"
 )
 
 const tsSchemaPath = "../../../web/nextjs/lib/agents/input-schemas.ts"
 
-type tsField struct {
-	key        string
-	required   bool
-	defaultVal string
-}
-
-func TestGoAndTypeScriptSchemasAgree(t *testing.T) {
+func TestNoDuplicateTypeScriptSchemas(t *testing.T) {
 	src, err := os.ReadFile(filepath.Clean(tsSchemaPath))
 	if err != nil {
-		t.Skipf("TypeScript contract not present (%v); skipping parity check", err)
+		t.Skipf("TypeScript contract not present (%v); skipping", err)
 	}
-	ts := parseTSSchemas(t, string(src))
+	if strings.Contains(string(src), "const SCHEMAS") {
+		t.Fatal("delete the TypeScript SCHEMAS map; consume GET /api/v1/agent-schemas")
+	}
+}
 
-	for _, builtin := range Builtins {
-		builtin := builtin
-		t.Run(builtin, func(t *testing.T) {
-			tsFields, ok := ts[builtin]
-			if !ok {
-				t.Fatalf("%s is missing from %s — the Task Manager cannot render a form for it",
-					builtin, tsSchemaPath)
+func TestRegisteredSchemasHaveFields(t *testing.T) {
+	if len(agentschema.Builtins()) == 0 {
+		t.Fatal("agent registry is empty — import agentmodules")
+	}
+	for _, b := range agentschema.Builtins() {
+		s := agentschema.ForBuiltin(b)
+		if len(s.Fields) == 0 {
+			t.Errorf("%s has no fields", b)
+		}
+		if s.Builtin != b {
+			t.Errorf("%s builtin = %q", b, s.Builtin)
+		}
+	}
+}
+
+func TestRegisteredModuleContract(t *testing.T) {
+	want := []struct {
+		builtin string
+		tab     string
+		stay    bool
+		keys    []string
+	}{
+		{model.BuiltinPentester, "pentest", false, []string{"target", "scan_mode", "max_budget", "instruction"}},
+		{model.BuiltinPRReviewer, "review", false, []string{"repo", "pr_number", "dry_run"}},
+		{model.BuiltinMail, "mail", false, []string{"senders", "subject_prefixes", "labels", "knowledge_notes", "knowledge_urls", "research_focus", "reply_instructions"}},
+		{model.BuiltinCareerOps, "career", true, []string{"job_url", "jd_text", "mode", "tailor_cv"}},
+		{model.BuiltinArticleWriter, "articles", false, []string{"topic", "context", "model"}},
+		{model.BuiltinImages, "images", false, []string{"prompt"}},
+		{model.BuiltinResearcher, "", false, []string{"topic", "context"}},
+	}
+	got := agentschema.Builtins()
+	if len(got) != len(want) {
+		t.Fatalf("builtins = %v; want %d", got, len(want))
+	}
+	for i, w := range want {
+		if got[i] != w.builtin {
+			t.Errorf("order[%d] = %q; want %q", i, got[i], w.builtin)
+		}
+		m, ok := agentmodule.Lookup(w.builtin)
+		if !ok {
+			t.Fatalf("missing module %s", w.builtin)
+		}
+		if m.TabSlug != w.tab {
+			t.Errorf("%s tab_slug = %q; want %q", w.builtin, m.TabSlug, w.tab)
+		}
+		if m.StayOnTab != w.stay {
+			t.Errorf("%s stay_on_tab = %v; want %v", w.builtin, m.StayOnTab, w.stay)
+		}
+		s := agentschema.ForBuiltin(w.builtin)
+		if len(s.Fields) != len(w.keys) {
+			t.Fatalf("%s fields = %d; want %v", w.builtin, len(s.Fields), w.keys)
+		}
+		for j, k := range w.keys {
+			if s.Fields[j].Key != k {
+				t.Errorf("%s field[%d] = %q; want %q", w.builtin, j, s.Fields[j].Key, k)
 			}
-			goFields := ForBuiltin(builtin).Fields
-
-			if len(goFields) != len(tsFields) {
-				t.Fatalf("field count differs: Go has %d %v, TypeScript has %d %v",
-					len(goFields), keysOf(goFields), len(tsFields), tsKeysOf(tsFields))
-			}
-			for i := range goFields {
-				if goFields[i].Key != tsFields[i].key {
-					t.Fatalf("field %d differs: Go %q, TypeScript %q (order is the interview order)",
-						i, goFields[i].Key, tsFields[i].key)
-				}
-				if goFields[i].Required != tsFields[i].required {
-					t.Errorf("%s.required differs: Go %v, TypeScript %v",
-						goFields[i].Key, goFields[i].Required, tsFields[i].required)
-				}
-				if goFields[i].Default != "" && tsFields[i].defaultVal != "" {
-					tsNorm := strings.Trim(tsFields[i].defaultVal, `"'`)
-					if tsNorm == "true" || tsNorm == "false" {
-						// checkbox defaults are boolean in TS, string in Go
-						if goFields[i].Default != tsNorm {
-							t.Errorf("%s.default differs: Go %q, TypeScript %q",
-								goFields[i].Key, goFields[i].Default, tsNorm)
-						}
-					} else if goFields[i].Default != tsNorm {
-						t.Errorf("%s.default differs: Go %q, TypeScript %q",
-							goFields[i].Key, goFields[i].Default, tsNorm)
-					}
-				}
-			}
-		})
-	}
-}
-
-var (
-	tsBuiltinStart = regexp.MustCompile(`(?m)^  ([a-z_]+): \{$`)
-	tsKeyLine      = regexp.MustCompile(`key: "([a-z_]+)"`)
-)
-
-func parseTSSchemas(t *testing.T, src string) map[string][]tsField {
-	t.Helper()
-	start := strings.Index(src, "const SCHEMAS")
-	if start < 0 {
-		t.Fatalf("could not find `const SCHEMAS` in %s", tsSchemaPath)
-	}
-	body := src[start:]
-
-	out := map[string][]tsField{}
-	locs := tsBuiltinStart.FindAllStringSubmatchIndex(body, -1)
-	for i, loc := range locs {
-		name := body[loc[2]:loc[3]]
-		end := len(body)
-		if i+1 < len(locs) {
-			end = locs[i+1][0]
 		}
-		block := body[loc[1]:end]
-
-		fieldsAt := strings.Index(block, "fields: [")
-		if fieldsAt < 0 {
-			out[name] = nil
-			continue
-		}
-		fields := block[fieldsAt:]
-		if close := strings.Index(fields, "\n    ],"); close > 0 {
-			fields = fields[:close]
-		}
-		out[name] = parseTSFields(fields)
 	}
-	return out
-}
-
-func parseTSFields(fields string) []tsField {
-	keys := tsKeyLine.FindAllStringSubmatchIndex(fields, -1)
-	out := make([]tsField, 0, len(keys))
-	for i, k := range keys {
-		end := len(fields)
-		if i+1 < len(keys) {
-			end = keys[i+1][0]
-		}
-		span := fields[k[1]:end]
-		f := tsField{key: fields[k[2]:k[3]]}
-		f.required = strings.Contains(span, "required: true")
-		if m := regexp.MustCompile(`defaultValue: ([^,\n]+)`).FindStringSubmatch(span); m != nil {
-			f.defaultVal = strings.TrimSpace(m[1])
-		}
-		out = append(out, f)
-	}
-	return out
-}
-
-func keysOf(fs []Field) []string {
-	out := make([]string, len(fs))
-	for i, f := range fs {
-		out[i] = f.Key
-	}
-	return out
-}
-
-func tsKeysOf(fs []tsField) []string {
-	out := make([]string, len(fs))
-	for i, f := range fs {
-		out[i] = f.key
-	}
-	return out
 }

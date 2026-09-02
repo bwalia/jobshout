@@ -8,11 +8,18 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/jobshout/server/internal/agentmodule"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/tools"
 )
 
-func registerCareer(reg *Registry, d Deps) {
+func init() {
+	agentmodule.SetToolInstaller(model.BuiltinCareerOps, wrapInstall(InstallCareerTools))
+}
+
+// InstallCareerTools registers Career Agent extra chat tools.
+// Attached on Register — NewRegistryWithTools must not name this agent.
+func InstallCareerTools(reg *Registry, d Deps) {
 	if d.Career == nil {
 		return
 	}

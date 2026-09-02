@@ -242,24 +242,7 @@ func (s *blogService) EffectiveModels() map[string]string {
 // articleWriterSeed is the built-in agent definition. It must stay in step with
 // the backfill in migration 000019 — that covers organizations which already
 // existed, this covers everything created since.
-func articleWriterSeed(orgID uuid.UUID) *model.Agent {
-	desc := "Writes SEO-optimised technical articles in markdown, converts them to HTML, and files them in the CMS as drafts for review."
-	prompt := "You are a technical blog writer for a developer audience. You produce high-quality, SEO-optimised articles in pure markdown: a single H1 title, H2/H3 structure, 800-1200 words, at least one code block where it helps the reader, and a short Further Reading list."
-	return &model.Agent{
-		ID:           uuid.New(),
-		OrgID:        orgID,
-		Name:         "Article Writer",
-		Role:         "Content Writer",
-		Description:  &desc,
-		SystemPrompt: &prompt,
-		// 'active' rather than 'idle': the dashboard's Active Agents grid
-		// filters on status = 'active', and this agent is always available.
-		Status:       "active",
-		EngineType:   model.EngineGoNative,
-		EngineConfig: map[string]any{},
-		Metadata:     map[string]any{model.MetadataKeyBuiltin: model.BuiltinArticleWriter},
-	}
-}
+func articleWriterSeed(orgID uuid.UUID) *model.Agent { return blog.Seed(orgID) }
 
 // agentModels reads the model choices set on the Article Writer in the UI.
 //

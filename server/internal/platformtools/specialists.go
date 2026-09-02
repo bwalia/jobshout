@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/jobshout/server/internal/agentmodule"
 	"github.com/jobshout/server/internal/agentschema"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/repository"
@@ -17,7 +18,16 @@ import (
 	"github.com/jobshout/server/internal/tools"
 )
 
-func registerSpecialists(reg *Registry, d Deps) {
+func init() {
+	agentmodule.SetToolInstaller(model.BuiltinResearcher, wrapInstall(InstallResearchTools))
+	agentmodule.SetToolInstaller(model.BuiltinArticleWriter, wrapInstall(InstallArticleTools))
+	agentmodule.SetToolInstaller(model.BuiltinPentester, wrapInstall(InstallPentestTools))
+	agentmodule.SetToolInstaller(model.BuiltinImages, wrapInstall(InstallImageTools))
+	agentmodule.SetToolInstaller(model.BuiltinMail, wrapInstall(InstallMailTools))
+}
+
+// InstallResearchTools registers Research Agent extra chat tools.
+func InstallResearchTools(reg *Registry, d Deps) {
 	if d.Research != nil {
 		reg.Register(newTool(
 			"research_run",
@@ -66,7 +76,10 @@ func registerSpecialists(reg *Registry, d Deps) {
 			},
 		))
 	}
+}
 
+// InstallArticleTools registers Article Writer extra chat tools.
+func InstallArticleTools(reg *Registry, d Deps) {
 	if d.Blog != nil {
 		reg.Register(newTool(
 			"article_generate",
@@ -163,7 +176,10 @@ func registerSpecialists(reg *Registry, d Deps) {
 			},
 		))
 	}
+}
 
+// InstallPentestTools registers Security Tester extra chat tools.
+func InstallPentestTools(reg *Registry, d Deps) {
 	if d.Pentest != nil {
 		reg.Register(newTool(
 			"pentest_start",
@@ -269,7 +285,10 @@ func registerSpecialists(reg *Registry, d Deps) {
 			},
 		))
 	}
+}
 
+// InstallImageTools registers Image Generator extra chat tools.
+func InstallImageTools(reg *Registry, d Deps) {
 	if d.Images != nil {
 		reg.Register(newTool(
 			"image_generate",
@@ -314,7 +333,10 @@ func registerSpecialists(reg *Registry, d Deps) {
 			},
 		))
 	}
+}
 
+// InstallMailTools registers Mail Agent extra chat tools.
+func InstallMailTools(reg *Registry, d Deps) {
 	if d.Mail != nil {
 		reg.Register(newTool(
 			"mail_sync",

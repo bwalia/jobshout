@@ -144,22 +144,7 @@ func NewMailService(
 	}
 }
 
-func mailAgentSeed(orgID uuid.UUID) *model.Agent {
-	desc := "Watches the organisation Gmail inbox, drafts replies, and hands research to the Research Agent. Nothing is sent until a human approves."
-	prompt := "You are the Mail Agent. You triage the organisation inbox, draft replies, and never send until a human approves. You never claim a message was sent unless the send API succeeded after approval. Work that needs facts is handed to the Research Agent — you do not invent citations."
-	return &model.Agent{
-		ID:           uuid.New(),
-		OrgID:        orgID,
-		Name:         model.AgentNameMail,
-		Role:         "Mail",
-		Description:  &desc,
-		SystemPrompt: &prompt,
-		Status:       "active",
-		EngineType:   model.EngineGoNative,
-		EngineConfig: map[string]any{},
-		Metadata:     map[string]any{model.MetadataKeyBuiltin: model.BuiltinMail},
-	}
-}
+func mailAgentSeed(orgID uuid.UUID) *model.Agent { return mail.Seed(orgID) }
 
 func (s *mailService) EnsureMailAgent(ctx context.Context, orgID uuid.UUID) (*model.Agent, error) {
 	existing, err := s.agentRepo.FindBuiltin(ctx, orgID, model.BuiltinMail)

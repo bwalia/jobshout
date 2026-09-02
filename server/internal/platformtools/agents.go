@@ -7,6 +7,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/jobshout/server/internal/agentmodule"
+	"github.com/jobshout/server/internal/agentschema"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/repository"
 	"github.com/jobshout/server/internal/tools"
@@ -263,20 +265,9 @@ func registerAgents(reg *Registry, d Deps) {
 
 	reg.Register(newTool(
 		"agent_execute",
-		"Run a named agent. Omit unknown fields; the tool will ask. Do not invent a topic, target, repo, or PR number. Specialists (research, article, pentest, PR review) interview then launch their dedicated path.",
+		"Run a named agent. Omit unknown fields; the tool will ask. Do not invent a topic, target, repo, or PR number. Specialists interview then launch their dedicated path.",
 		"agents", model.PermAgentsExecute, false, false,
-		tools.ObjectSchema(map[string]any{
-			"name":        map[string]any{"type": "string", "description": "Agent name. Omit if unknown; the tool will ask."},
-			"prompt":      map[string]any{"type": "string", "description": "Work to do for a generic agent. Omit if unknown."},
-			"topic":       map[string]any{"type": "string", "description": "Research or article topic. Omit if unknown."},
-			"context":     map[string]any{"type": "string", "description": "Optional extra context for research or writing."},
-			"target":      map[string]any{"type": "string", "description": "Pentest target URL or path. Omit if unknown."},
-			"scan_mode":   map[string]any{"type": "string", "enum": []any{"quick", "standard", "deep"}},
-			"instruction": map[string]any{"type": "string"},
-			"repo":        map[string]any{"type": "string", "description": "GitHub owner/name for PR review."},
-			"pr_number":   map[string]any{"type": "integer", "description": "Pull request number."},
-			"reason":      map[string]any{"type": "string", "description": "Why this agent, when auto-selecting"},
-		}),
+		tools.ObjectSchema(agentExecuteProperties()),
 		func(ctx context.Context, input map[string]any) (*Result, error) {
 			return runAgentExecute(ctx, d, reg, input)
 		},
@@ -497,4 +488,48 @@ func registerAgents(reg *Registry, d Deps) {
 			return &Result{Data: map[string]any{"agent": a.Name, "manager": mgr.Name}, Entity: &ref}, nil
 		},
 	))
+}
+
+// agentExecuteProperties is every registered field plus name/prompt/reason/project.
+// All specialists are wired this way: fields come from the module schema.
+func agentExecuteProperties() map[string]any {
+	props := map[string]any{
+		"name":    map[string]any{"type": "string", "description": "Agent name. Omit if unknown; the tool will ask."},
+		"prompt":  map[string]any{"type": "string", "description": "Work to do for a generic agent. Omit if unknown."},
+		"reason":  map[string]any{"type": "string", "description": "Why this agent, when auto-selecting"},
+		"project": map[string]any{"type": "string", "description": "Project name or id when the org has more than one."},
+	}
+	for _, m := range agentmodule.All() {
+		for _, f := range m.Schema.Fields {
+			if _, exists := props[f.Key]; exists {
+				continue
+			}
+			props[f.Key] = fieldJSONSchema(f)
+		}
+	}
+	return props
+}
+
+func fieldJSONSchema(f agentschema.Field) map[string]any {
+	out := map[string]any{"type": "string", "description": f.Label}
+	if f.Help != "" {
+		out["description"] = f.Help
+	} else if f.Question != "" {
+		out["description"] = f.Question
+	}
+	switch f.Type {
+	case "number":
+		out["type"] = "integer"
+	case "checkbox":
+		out["type"] = "boolean"
+	case "select":
+		if len(f.Options) > 0 {
+			enum := make([]any, 0, len(f.Options))
+			for _, o := range f.Options {
+				enum = append(enum, o.Value)
+			}
+			out["enum"] = enum
+		}
+	}
+	return out
 }

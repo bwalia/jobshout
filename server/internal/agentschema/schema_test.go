@@ -1,13 +1,15 @@
-package agentschema
+package agentschema_test
 
 import (
 	"testing"
 
+	_ "github.com/jobshout/server/internal/agentmodules"
+	"github.com/jobshout/server/internal/agentschema"
 	"github.com/jobshout/server/internal/model"
 )
 
 func TestForBuiltin_ResearcherTopicFirst(t *testing.T) {
-	s := ForBuiltin(model.BuiltinResearcher)
+	s := agentschema.ForBuiltin(model.BuiltinResearcher)
 	if s.SpecialistTool != "research_run" {
 		t.Fatalf("tool = %q", s.SpecialistTool)
 	}
@@ -24,7 +26,7 @@ func TestForBuiltin_ResearcherTopicFirst(t *testing.T) {
 }
 
 func TestForBuiltin_PentesterTarget(t *testing.T) {
-	s := ForBuiltin(model.BuiltinPentester)
+	s := agentschema.ForBuiltin(model.BuiltinPentester)
 	slot, _, _ := s.NextMissing(nil)
 	if slot != "target" {
 		t.Fatalf("slot = %q; want target", slot)
@@ -40,7 +42,7 @@ func TestForBuiltin_PentesterTarget(t *testing.T) {
 }
 
 func TestForBuiltin_PRReviewerSequential(t *testing.T) {
-	s := ForBuiltin(model.BuiltinPRReviewer)
+	s := agentschema.ForBuiltin(model.BuiltinPRReviewer)
 	slot, _, _ := s.NextMissing(map[string]string{"repo": "acme/api"})
 	if slot != "pr_number" {
 		t.Fatalf("slot = %q; want pr_number", slot)
@@ -48,14 +50,14 @@ func TestForBuiltin_PRReviewerSequential(t *testing.T) {
 }
 
 func TestForBuiltin_CareerOps(t *testing.T) {
-	s := ForBuiltin(model.BuiltinCareerOps)
+	s := agentschema.ForBuiltin(model.BuiltinCareerOps)
 	if s.SpecialistTool != "career_evaluate" {
 		t.Fatalf("tool = %q", s.SpecialistTool)
 	}
 }
 
 func TestForBuiltin_GenericPrompt(t *testing.T) {
-	s := ForBuiltin("")
+	s := agentschema.ForBuiltin("")
 	slot, _, _ := s.NextMissing(map[string]string{"name": "Custom"})
 	if slot != "prompt" {
 		t.Fatalf("slot = %q; want prompt", slot)
@@ -77,7 +79,7 @@ func TestIsThinPrompt(t *testing.T) {
 		{"fix the login timeout", "Custom", false},
 	}
 	for _, c := range cases {
-		if got := IsThinPrompt(c.prompt, c.name); got != c.thin {
+		if got := agentschema.IsThinPrompt(c.prompt, c.name); got != c.thin {
 			t.Errorf("IsThinPrompt(%q, %q) = %v; want %v", c.prompt, c.name, got, c.thin)
 		}
 	}

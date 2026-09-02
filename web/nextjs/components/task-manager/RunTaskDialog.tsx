@@ -4,8 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import { Bug, Loader2, Plus, Rocket, X } from "lucide-react";
 
 import { AgentInputFields } from "@/components/task-manager/AgentInputFields";
+import { AgentCatalogNotice } from "@/components/task-manager/AgentCatalogNotice";
 import {
+  agentBuiltin,
+  catalogHasBuiltin,
   defaultValuesForSchema,
+  EMPTY_AGENT_CATALOG,
   getAgentInputSchema,
   isSpecialistSchema,
   schemaValuesValid,
@@ -18,6 +22,7 @@ import {
 } from "@/lib/agents/launch";
 import { fetchMailFormValues, mailFormIsBlank } from "@/lib/agents/mail-playbook";
 import { apiErrorMessage } from "@/lib/api/client";
+import { useAgentSchemas } from "@/lib/hooks/useAgentSchemas";
 import { useSkills } from "@/lib/hooks/useSkills";
 import { useCreateTaskRun } from "@/lib/hooks/useTaskRuns";
 import type { Agent } from "@/lib/types/agent";
@@ -67,9 +72,17 @@ export function RunTaskDialog({
     () => agents.find((a) => a.id === agentId) ?? null,
     [agents, agentId]
   );
+  const {
+    data: catalogData,
+    isError: catalogError,
+    refetch: refetchCatalog,
+  } = useAgentSchemas();
+  const catalog = catalogData ?? EMPTY_AGENT_CATALOG;
+  const builtin = agentBuiltin(selectedAgent);
+  const schemaReady = !builtin || catalogHasBuiltin(catalog, builtin);
   const schema = useMemo(
-    () => getAgentInputSchema(selectedAgent),
-    [selectedAgent]
+    () => getAgentInputSchema(selectedAgent, catalog),
+    [selectedAgent, catalog]
   );
   const isSpecialist = isSpecialistSchema(schema);
 
@@ -108,7 +121,7 @@ export function RunTaskDialog({
     setSelectedSlugs([]);
     setExtraSlug("");
     setDebug(false);
-    if (schema.kind !== "mail") {
+    if (schema.prefill !== "mailbox") {
       setMailboxLoad("idle");
       return;
     }
@@ -158,11 +171,12 @@ export function RunTaskDialog({
   }
 
   const busy = launching || createRun.isPending;
-  const mailReady = schema.kind !== "mail" || mailboxLoad === "ready";
+  const mailReady = schema.prefill !== "mailbox" || mailboxLoad === "ready";
   const canRun =
     Boolean(selectedAgent) &&
     !busy &&
     mailReady &&
+    schemaReady &&
     (!isSpecialist || schemaValuesValid(schema, values));
 
   async function handleRun() {
@@ -176,6 +190,14 @@ export function RunTaskDialog({
 
     // Specialist path: schema fields only — never mix with generic overrides.
     if (isSpecialist) {
+      if (!schemaReady) {
+        setLaunchError(
+          catalogError
+            ? "Could not load this agent's form. Retry."
+            : "Loading agent form…"
+        );
+        return;
+      }
       if (!mailReady) {
         setLaunchError("Loading saved mailbox settings…");
         return;
@@ -195,17 +217,7 @@ export function RunTaskDialog({
           task,
           values,
         });
-        toast.success(
-          result.kind === "researcher"
-            ? "Research complete"
-            : result.kind === "mail"
-              ? result.sync_queued
-                ? "Mailbox sync queued"
-                : "Playbook saved. Connect Gmail on Mail Agent to sync."
-              : result.kind === "images"
-                ? "Image generated"
-                : "Agent run started"
-        );
+        toast.success(result.message || "Agent run started");
         onSpecialistLaunched?.(result);
         onClose();
       } catch (err) {
@@ -303,13 +315,21 @@ export function RunTaskDialog({
             )}
           </div>
 
-          {selectedAgent && schema.kind === "mail" && mailboxLoad === "loading" ? (
+          {selectedAgent && (
+            <AgentCatalogNotice
+              missing={!schemaReady}
+              isError={catalogError}
+              onRetry={() => void refetchCatalog()}
+            />
+          )}
+
+          {selectedAgent && schema.prefill === "mailbox" && mailboxLoad === "loading" ? (
             <p className="text-xs text-muted-foreground">
               Loading saved mailbox settings…
             </p>
           ) : null}
 
-          {selectedAgent && isSpecialist ? (
+          {selectedAgent && isSpecialist && schemaReady ? (
             <AgentInputFields
               fields={schema.fields}
               values={values}

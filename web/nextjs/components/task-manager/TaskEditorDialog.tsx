@@ -4,10 +4,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Rocket, X } from "lucide-react";
 import { toast } from "sonner";
 
+import { AgentCatalogNotice } from "@/components/task-manager/AgentCatalogNotice";
 import { AgentInputFields } from "@/components/task-manager/AgentInputFields";
 import {
   TASK_TITLE_MIN_LENGTH,
+  agentBuiltin,
+  catalogHasBuiltin,
   defaultValuesForSchema,
+  EMPTY_AGENT_CATALOG,
   getAgentInputSchema,
   schemaValuesValid,
   taskFieldsFromValues,
@@ -17,6 +21,7 @@ import {
 import { launchAgentForTask, type LaunchResult } from "@/lib/agents/launch";
 import { fetchMailFormValues, mailFormIsBlank } from "@/lib/agents/mail-playbook";
 import { apiErrorMessage } from "@/lib/api/client";
+import { useAgentSchemas } from "@/lib/hooks/useAgentSchemas";
 import { useCreateTask, useUpdateTask } from "@/lib/hooks/useTasks";
 import { PRIORITY_OPTIONS, STATUS_OPTIONS } from "@/lib/task-labels";
 import type { Agent } from "@/lib/types/agent";
@@ -360,9 +365,17 @@ function CreateTaskForm({
     () => agents.find((a) => a.id === agentId) ?? null,
     [agents, agentId]
   );
+  const {
+    data: catalogData,
+    isError: catalogError,
+    refetch: refetchCatalog,
+  } = useAgentSchemas();
+  const catalog = catalogData ?? EMPTY_AGENT_CATALOG;
+  const builtin = agentBuiltin(selectedAgent);
+  const schemaReady = !builtin || catalogHasBuiltin(catalog, builtin);
   const schema = useMemo(
-    () => getAgentInputSchema(selectedAgent),
-    [selectedAgent]
+    () => getAgentInputSchema(selectedAgent, catalog),
+    [selectedAgent, catalog]
   );
   const [values, setValues] = useState<Record<string, string>>(() =>
     defaultValuesForSchema(getAgentInputSchema(null))
@@ -385,7 +398,7 @@ function CreateTaskForm({
     // A different agent means a different task shape — stop reusing the one
     // created for the previous agent.
     createdTaskRef.current = null;
-    if (schema.kind !== "mail") {
+    if (schema.prefill !== "mailbox") {
       setMailboxLoad("idle");
       return;
     }
@@ -416,10 +429,11 @@ function CreateTaskForm({
   useEffect(() => {
     createdTaskRef.current = null;
   }, [resolvedProjectId]);
-  const mailReady = schema.kind !== "mail" || mailboxLoad === "ready";
+  const mailReady = schema.prefill !== "mailbox" || mailboxLoad === "ready";
   const schemaOk =
     Boolean(selectedAgent) && schemaValuesValid(schema, values);
-  const createReady = schemaOk && Boolean(resolvedProjectId) && mailReady;
+  const createReady =
+    schemaOk && Boolean(resolvedProjectId) && mailReady && schemaReady;
 
   function setValue(key: string, value: string) {
     const next = { ...values, [key]: value };
@@ -445,6 +459,14 @@ function CreateTaskForm({
     }
     if (!mailReady) {
       setFormError("Loading saved mailbox settings…");
+      return false;
+    }
+    if (!schemaReady) {
+      setFormError(
+        catalogError
+          ? "Could not load this agent's form. Retry."
+          : "Loading agent form…"
+      );
       return false;
     }
     setTouchedSubmit(true);
@@ -514,25 +536,7 @@ function CreateTaskForm({
         task: created,
         values,
       });
-      toast.success(
-        result.kind === "researcher"
-          ? "Research complete"
-          : result.kind === "article_writer"
-            ? "Article run started"
-            : result.kind === "career_ops"
-              ? "Career evaluation saved"
-            : result.kind === "pentester"
-              ? "Security scan queued"
-              : result.kind === "pr_reviewer"
-                ? "PR review queued"
-                : result.kind === "mail"
-                  ? result.sync_queued
-                    ? "Mailbox sync queued"
-                    : "Playbook saved. Connect Gmail on Mail Agent to sync."
-                  : result.kind === "images"
-                    ? "Image generated"
-                    : "Agent run started"
-      );
+      toast.success(result.message || "Agent run started");
       onLaunched?.(result);
       onClose();
     } catch (err) {
@@ -584,13 +588,21 @@ function CreateTaskForm({
           )}
         </div>
 
-        {selectedAgent && schema.kind === "mail" && mailboxLoad === "loading" && (
+        {selectedAgent && (
+          <AgentCatalogNotice
+            missing={!schemaReady}
+            isError={catalogError}
+            onRetry={() => void refetchCatalog()}
+          />
+        )}
+
+        {selectedAgent && schema.prefill === "mailbox" && mailboxLoad === "loading" && (
           <p className="text-xs text-muted-foreground">
             Loading saved mailbox settings…
           </p>
         )}
 
-        {selectedAgent && (
+        {selectedAgent && schemaReady && (
           <AgentInputFields
             fields={schema.fields}
             values={values}

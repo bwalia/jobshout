@@ -9,12 +9,19 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/jobshout/server/internal/agentmodule"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/service"
 	"github.com/jobshout/server/internal/tools"
 )
 
-func registerReview(reg *Registry, d Deps) {
+func init() {
+	agentmodule.SetToolInstaller(model.BuiltinPRReviewer, wrapInstall(InstallReviewTools))
+}
+
+// InstallReviewTools registers PR Reviewer extra chat tools.
+// Attached on Register — NewRegistryWithTools must not name this agent.
+func InstallReviewTools(reg *Registry, d Deps) {
 	if d.Reviews == nil {
 		return
 	}

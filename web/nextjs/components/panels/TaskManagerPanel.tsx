@@ -5,19 +5,22 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   Bot,
   FolderKanban,
-  Newspaper,
-  Image as ImageIcon,
   Plus,
+  Rocket,
+  BookOpen,
   ShieldAlert,
   GitPullRequest,
   Mail,
   Briefcase,
-  Rocket,
-  BookOpen,
+  Newspaper,
+  Image as ImageIcon,
+  Search,
+  type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAgents } from "@/lib/hooks/useAgents";
+import { useAgentSchemas } from "@/lib/hooks/useAgentSchemas";
 import { useProjects } from "@/lib/hooks/useProjects";
 import {
   useAllTasks,
@@ -40,12 +43,10 @@ import {
 import { NewProjectDialog } from "@/components/task-manager/NewProjectDialog";
 import { CreateAgentDialog } from "@/components/agent/CreateAgentDialog";
 import { AgentStatusBadge } from "@/components/agent/AgentStatusBadge";
-import { PentestAgentClient } from "@/components/PentestAgentClient";
-import { ReviewAgentClient } from "@/components/ReviewAgentClient";
-import { MailAgentClient } from "@/components/MailAgentClient";
-import { CareerAgentClient } from "@/components/CareerAgentClient";
-import { ArticlesView } from "@/components/articles/ArticlesView";
-import { ImagesView } from "@/components/image/ImagesView";
+import { AgentCatalogNotice } from "@/components/task-manager/AgentCatalogNotice";
+import { BuiltinAgentTab } from "@/components/task-manager/BuiltinAgentTab";
+import { AGENT_CLIENTS } from "@/lib/agents/tab-clients";
+import { EMPTY_AGENT_CATALOG } from "@/lib/agents/input-schemas";
 import type { LaunchResult } from "@/lib/agents/launch";
 import type { Agent } from "@/lib/types/agent";
 import type { Project, Task } from "@/lib/types/project";
@@ -57,30 +58,34 @@ import { STATUS_DOT } from "@/lib/status-colors";
 type Selection =
   | { kind: "project"; id: string }
   | { kind: "agent"; id: string }
-  | { kind: "builtin"; id: "pentest" | "review" | "mail" | "articles" | "images" | "career" };
+  | { kind: "builtin"; id: string };
 
-const BUILTINS: {
-  id: "pentest" | "review" | "mail" | "articles" | "images" | "career";
-  label: string;
-  icon: React.ElementType;
-  match?: string;
-}[] = [
-  { id: "pentest", label: "Security Tester", icon: ShieldAlert, match: "pentester" },
-  { id: "review", label: "PR Reviewer", icon: GitPullRequest, match: "pr_reviewer" },
-  { id: "mail", label: "Mail Agent", icon: Mail, match: "mail" },
-  { id: "career", label: "Career Agent", icon: Briefcase, match: "career_ops" },
-  { id: "articles", label: "Article Writer", icon: Newspaper, match: "article_writer" },
-  { id: "images", label: "Image Generator", icon: ImageIcon, match: "images" },
-];
+const RAIL_ICONS: Record<string, LucideIcon> = {
+  "shield-alert": ShieldAlert,
+  "git-pull-request": GitPullRequest,
+  mail: Mail,
+  briefcase: Briefcase,
+  newspaper: Newspaper,
+  image: ImageIcon,
+  search: Search,
+};
+
+const AGENT_UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function parseSelection(
   project: string | null,
-  agent: string | null
+  agent: string | null,
+  tabSlugs: Set<string>
 ): Selection | null {
-  if (agent === "pentest" || agent === "review" || agent === "mail" || agent === "articles" || agent === "images" || agent === "career") {
-    return { kind: "builtin", id: agent };
+  if (agent) {
+    // Rail tabs use slugs (career, mail, …). Do not wait on GET /agent-schemas
+    // or ?agent=career is parsed as an agent id and the pane stays blank.
+    if (tabSlugs.has(agent) || !AGENT_UUID.test(agent)) {
+      return { kind: "builtin", id: agent };
+    }
+    return { kind: "agent", id: agent };
   }
-  if (agent) return { kind: "agent", id: agent };
   if (project) return { kind: "project", id: project };
   return null;
 }
@@ -96,7 +101,27 @@ export function TaskManagerPanel() {
   const projects = useMemo(() => projectsResp?.data ?? [], [projectsResp]);
   const { data: agentsResp } = useAgents({ per_page: 100 });
   const agents = useMemo(() => agentsResp?.data ?? [], [agentsResp]);
+  const {
+    data: catalogData,
+    isError: catalogError,
+    refetch: refetchCatalog,
+  } = useAgentSchemas();
+  const catalog = catalogData ?? EMPTY_AGENT_CATALOG;
+  const catalogKnown = catalogData !== undefined;
   const { data: allTasksResp } = useAllTasks();
+
+  const railTabs = useMemo(
+    () => catalog.filter((s) => s.tab_slug),
+    [catalog]
+  );
+  const tabSlugs = useMemo(
+    () => new Set(railTabs.map((s) => s.tab_slug as string)),
+    [railTabs]
+  );
+  const tabBuiltins = useMemo(
+    () => new Set(railTabs.map((s) => s.builtin)),
+    [railTabs]
+  );
 
   const taskCounts = useMemo(() => {
     const m = new Map<string, number>();
@@ -107,13 +132,13 @@ export function TaskManagerPanel() {
   }, [allTasksResp]);
 
   const [selection, setSelection] = useState<Selection | null>(() =>
-    parseSelection(projectParam, agentParam)
+    parseSelection(projectParam, agentParam, new Set())
   );
   const [createAgentOpen, setCreateAgentOpen] = useState(false);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
 
   useEffect(() => {
-    const parsed = parseSelection(projectParam, agentParam);
+    const parsed = parseSelection(projectParam, agentParam, tabSlugs);
     if (parsed) {
       setSelection(parsed);
       return;
@@ -122,7 +147,7 @@ export function TaskManagerPanel() {
       select({ kind: "project", id: projects[0].id });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectParam, agentParam, projects]);
+  }, [projectParam, agentParam, projects, tabSlugs]);
 
   function select(next: Selection) {
     setSelection(next);
@@ -137,14 +162,19 @@ export function TaskManagerPanel() {
     selection?.kind === "agent"
       ? agents.find((a) => a.id === selection.id)
       : null;
+  const selectedWire =
+    selection?.kind === "builtin"
+      ? railTabs.find((s) => s.tab_slug === selection.id)
+      : undefined;
 
   function handleLaunchResult(result: LaunchResult) {
     if (!result.task) return;
     void qc.invalidateQueries({ queryKey: taskKeys.all });
     void qc.invalidateQueries({ queryKey: ["metrics", "summary"] });
-    if (result.kind === "career_ops") {
-      setSelection({ kind: "builtin", id: "career" });
-      const params = new URLSearchParams({ agent: "career" });
+    const wire = catalog.find((s) => s.builtin === result.kind);
+    if (wire?.stay_on_tab && wire.tab_slug) {
+      setSelection({ kind: "builtin", id: wire.tab_slug });
+      const params = new URLSearchParams({ agent: wire.tab_slug });
       if (result.evaluation_id) params.set("eval", result.evaluation_id);
       router.replace(`/panel/task-manager?${params.toString()}`, { scroll: false });
       return;
@@ -229,32 +259,57 @@ export function TaskManagerPanel() {
               Agents
             </p>
             <ul className="space-y-0.5">
-              {BUILTINS.map((b) => {
-                const Icon = b.icon;
-                const active =
-                  selection?.kind === "builtin" && selection.id === b.id;
-                return (
-                  <li key={b.id}>
-                    <button
-                      type="button"
-                      onClick={() => select({ kind: "builtin", id: b.id })}
-                      className={cn(
-                        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm",
-                        active
-                          ? "bg-accent text-accent-foreground"
-                          : "text-foreground hover:bg-secondary"
-                      )}
-                    >
-                      <Icon className="h-3.5 w-3.5 shrink-0 opacity-60" />
-                      <span className="truncate">{b.label}</span>
-                    </button>
-                  </li>
-                );
-              })}
+              {/* Rail tabs come from the specialist registry. All specialists
+                  are wired this way; a new agent does not need a BUILTINS row
+                  or selection.id === "…" — register it. */}
+              {!catalogKnown && catalogError ? (
+                <li className="px-2 py-2">
+                  <AgentCatalogNotice
+                    missing
+                    isError
+                    onRetry={() => void refetchCatalog()}
+                  />
+                </li>
+              ) : !catalogKnown ? (
+                Array.from({ length: 6 }, (_, i) => (
+                  <li
+                    key={i}
+                    className="mx-2 mb-1 h-7 animate-pulse rounded-md bg-secondary/80"
+                  />
+                ))
+              ) : (
+                railTabs.map((b) => {
+                  const Icon = RAIL_ICONS[b.icon ?? ""] ?? Bot;
+                  const slug = b.tab_slug as string;
+                  const active =
+                    selection?.kind === "builtin" && selection.id === slug;
+                  return (
+                    <li key={b.builtin}>
+                      <button
+                        type="button"
+                        onClick={() => select({ kind: "builtin", id: slug })}
+                        className={cn(
+                          "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm",
+                          active
+                            ? "bg-accent text-accent-foreground"
+                            : "text-foreground hover:bg-secondary"
+                        )}
+                      >
+                        <Icon className="h-3.5 w-3.5 shrink-0 opacity-60" />
+                        <span className="truncate">{b.label || b.builtin}</span>
+                      </button>
+                    </li>
+                  );
+                })
+              )}
               {agents
                 .filter((a) => {
                   const builtin = a.metadata?.builtin;
-                  return !BUILTINS.some((b) => b.match && b.match === builtin);
+                  if (typeof builtin !== "string" || !builtin) return true;
+                  // Until the catalog is known, keep specialists off the generic
+                  // list so a click cannot stick on AgentDetailView (no hunt UI).
+                  if (!catalogKnown) return false;
+                  return !tabBuiltins.has(builtin);
                 })
                 .map((a) => {
                   const active =
@@ -293,36 +348,28 @@ export function TaskManagerPanel() {
               onLaunched={handleLaunchResult}
             />
           )}
-          {selection?.kind === "builtin" && selection.id === "pentest" && (
-            <BuiltinFrame title="Security Tester">
-              <PentestAgentClient />
-            </BuiltinFrame>
-          )}
-          {selection?.kind === "builtin" && selection.id === "review" && (
-            <BuiltinFrame title="PR Reviewer">
-              <ReviewAgentClient />
-            </BuiltinFrame>
-          )}
-          {selection?.kind === "builtin" && selection.id === "mail" && (
-            <BuiltinFrame title="Mail Agent">
-              <MailAgentClient />
-            </BuiltinFrame>
-          )}
-          {selection?.kind === "builtin" && selection.id === "career" && (
-            <BuiltinFrame title="Career Agent">
-              <CareerAgentClient />
-            </BuiltinFrame>
-          )}
-          {selection?.kind === "builtin" && selection.id === "articles" && (
-            <BuiltinFrame title="Article Writer">
-              <ArticlesView hideHeader />
-            </BuiltinFrame>
-          )}
-          {selection?.kind === "builtin" && selection.id === "images" && (
-            <BuiltinFrame title="Image Generator">
-              <ImagesView hideHeader />
-            </BuiltinFrame>
-          )}
+          {selection?.kind === "builtin" &&
+            (!catalogKnown ? (
+              <AgentCatalogNotice
+                missing
+                isError={catalogError}
+                onRetry={() => void refetchCatalog()}
+              />
+            ) : selectedWire ? (
+              <BuiltinAgentTab
+                wire={selectedWire}
+                agent={agents.find(
+                  (a) => a.metadata?.builtin === selectedWire.builtin
+                )}
+                projects={projects}
+                Client={AGENT_CLIENTS[selectedWire.builtin]}
+                onLaunched={handleLaunchResult}
+              />
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                This agent is not available.
+              </p>
+            ))}
           {selection?.kind === "agent" && selectedAgent && (
             <AgentDetailView
               agent={selectedAgent}
@@ -352,21 +399,6 @@ export function TaskManagerPanel() {
           }}
         />
       )}
-    </div>
-  );
-}
-
-function BuiltinFrame({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="space-y-4">
-      <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
-      {children}
     </div>
   );
 }
