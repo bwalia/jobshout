@@ -19,6 +19,7 @@ import { useTasks } from "@/lib/hooks/useTasks";
 import { useAuthStore } from "@/lib/store/auth-store";
 import { ThroughputChart } from "@/components/dashboard/ThroughputChart";
 import { StatusDonut } from "@/components/dashboard/StatusDonut";
+import { SecurityTesterCard } from "@/components/dashboard/SecurityTesterCard";
 import type { StatusSlice } from "@/components/dashboard/StatusDonut";
 import type { Agent } from "@/lib/types/agent";
 import type { Task } from "@/lib/types/project";
@@ -508,6 +509,11 @@ export function DashboardPanel() {
             </ul>
           )}
         </Card>
+      </div>
+
+      {/* Security posture */}
+      <div className="grid gap-4 lg:grid-cols-3">
+        <SecurityTesterCard />
       </div>
     </div>
   );

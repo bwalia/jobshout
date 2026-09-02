@@ -1038,6 +1038,10 @@ func main() {
 			})
 
 			// Penetration Testing (Strix)
+			r.Route("/pentest", func(r chi.Router) {
+				// Pre-flight: is the workstation ready to scan? Gates the Start button.
+				r.Get("/capabilities", pentestHandler.GetCapabilities)
+			})
 			r.Route("/pentest-runs", func(r chi.Router) {
 				r.Get("/", pentestHandler.ListRuns)
 				r.Post("/", pentestHandler.CreateRun)
