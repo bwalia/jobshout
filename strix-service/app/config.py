@@ -45,6 +45,15 @@ LLM_API_BASE = os.getenv("STRIX_LLM_API_BASE", "http://localhost:11434")
 # Only needed for a hosted provider. Local Ollama needs no key.
 LLM_API_KEY = os.getenv("STRIX_LLM_API_KEY", "")
 
+# Keep the model resident between scans so the first scan of the day does not pay
+# the 30–60 s cold-load of a 30B model. Passed to Ollama as keep_alive; "-1" holds
+# it indefinitely, a duration like "30m" releases the GPU after a quiet spell.
+MODEL_KEEP_ALIVE = os.getenv("STRIX_MODEL_KEEP_ALIVE", "30m")
+
+# Warm the model on service start. A no-op for a hosted provider (nothing local to
+# warm); can be turned off for a fast boot in development.
+WARM_MODEL_ON_START = os.getenv("STRIX_WARM_MODEL", "true").lower() in ("1", "true", "yes")
+
 # ─── Scope ──────────────────────────────────────────────────────────────────
 
 # Comma-separated hosts, wildcards, CIDRs or URL prefixes that may be scanned.
@@ -75,7 +84,31 @@ QUEUE_MAX = max(1, int(os.getenv("STRIX_QUEUE_MAX", "8")))
 
 # Wall-clock ceiling on one scan. With a local model the money budget is
 # effectively zero, which makes time the budget that actually bounds a run.
+#
+# This is the fallback ceiling; the per-mode caps below are what a scan actually
+# runs under. A single flat ceiling meant a wedged "quick" scan hung for the full
+# deep-scan budget before failing — two hours to learn a five-minute scan was
+# stuck. Each mode now fails fast at a bound that fits how long it should take.
 MAX_RUNTIME_SECONDS = int(os.getenv("STRIX_MAX_RUNTIME_SECONDS", "7200"))
+
+# Per-mode wall-clock ceilings. Quick should be minutes; deep may be a couple of
+# hours. A scan that blows past its mode's bound is wedged, not thorough.
+MAX_RUNTIME_QUICK = int(os.getenv("STRIX_MAX_RUNTIME_QUICK", "900"))  # 15 min
+MAX_RUNTIME_STANDARD = int(os.getenv("STRIX_MAX_RUNTIME_STANDARD", "2700"))  # 45 min
+MAX_RUNTIME_DEEP = int(os.getenv("STRIX_MAX_RUNTIME_DEEP", "7200"))  # 2 h
+
+# The cap the runner actually enforces, chosen by scan_mode. An unknown mode
+# falls back to MAX_RUNTIME_SECONDS rather than guessing a bound for it.
+RUNTIME_BY_MODE = {
+    "quick": MAX_RUNTIME_QUICK,
+    "standard": MAX_RUNTIME_STANDARD,
+    "deep": MAX_RUNTIME_DEEP,
+}
+
+
+def runtime_for(scan_mode: str) -> int:
+    """The wall-clock ceiling for a scan mode, falling back to the flat ceiling."""
+    return RUNTIME_BY_MODE.get(scan_mode, MAX_RUNTIME_SECONDS)
 
 # How long the process gets to exit after SIGTERM before it is killed outright.
 TERM_GRACE_SECONDS = float(os.getenv("STRIX_TERM_GRACE_SECONDS", "20"))

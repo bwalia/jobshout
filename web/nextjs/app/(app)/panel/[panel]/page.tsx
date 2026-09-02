@@ -7,6 +7,7 @@ import { TaskBoardPanel } from "@/components/panels/TaskBoardPanel";
 import { TaskManagerPanel } from "@/components/panels/TaskManagerPanel";
 import { ArtifactsPanel } from "@/components/panels/ArtifactsPanel";
 import { PluginsSkillsPanel } from "@/components/panels/PluginsSkillsPanel";
+import { SecurityTesterPanel } from "@/components/panels/SecurityTesterPanel";
 import { PANELS, type PanelId } from "@/lib/panels";
 
 import SchedulerPage from "@/app/(app)/scheduler/page";
@@ -58,6 +59,12 @@ function PanelBody({ panel }: { panel: Exclude<PanelId, "chat"> }) {
       return <TaskBoardPanel />;
     case "task-manager":
       return <TaskManagerPanel />;
+    case "security-tester":
+      return (
+        <div className="p-6">
+          <SecurityTesterPanel />
+        </div>
+      );
     case "artifacts":
       return <ArtifactsPanel />;
     case "scheduler":

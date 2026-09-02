@@ -121,6 +121,9 @@ class Runner:
         self._tasks: set[asyncio.Task] = set()
         self._processes: dict[str, asyncio.subprocess.Process] = {}
         self._cancelled: set[str] = set()
+        # Logged once, on the first scan: whether the tool-call patch directory
+        # actually reached the subprocess env (the launchd PATH/PYTHONPATH trap).
+        self._logged_scan_env = False
 
     # ─── admission ──────────────────────────────────────────────────────────
 
@@ -192,20 +195,39 @@ class Runner:
         env["PYTHONPATH"] = patch_dir if not existing else patch_dir + os.pathsep + existing
         return env
 
+    def _runtime_for(self, run: Run) -> int:
+        """The wall-clock ceiling for this run, by scan mode.
+
+        The per-mode cap applies within this runner's absolute ceiling: a mode
+        never runs longer than its own bound, and never longer than
+        self.max_runtime — so lowering the overall ceiling (or a test setting it)
+        still clamps every mode. An unknown mode falls back to the ceiling.
+        """
+        mode_cap = config.RUNTIME_BY_MODE.get(run.scan_mode, self.max_runtime)
+        return min(mode_cap, self.max_runtime)
+
     async def _execute(self, run: Run) -> None:
         run_dir = self.store.run_dir(run.run_id)
         run_dir.mkdir(parents=True, exist_ok=True)
         log_path = run_dir / "strix.log"
 
+        runtime = self._runtime_for(run)
         args = self.build_args(run)
+        env = self.build_env()
+        # Confirm, once, that the tool-call patch directory made it onto the
+        # subprocess PYTHONPATH. Under launchd this is the value most likely to be
+        # silently wrong, and without it every qwen3-coder scan dies mid-run.
+        if not self._logged_scan_env:
+            logger.info("scan subprocess PYTHONPATH=%s", env.get("PYTHONPATH", ""))
+            self._logged_scan_env = True
         self.store.update(run, status=RUNNING, started_at=store_module.now())
-        logger.info("scan %s starting: %s", run.run_id, " ".join(args))
+        logger.info("scan %s starting (%s, cap %ss): %s", run.run_id, run.scan_mode, runtime, " ".join(args))
 
         try:
             proc = await asyncio.create_subprocess_exec(
                 *args,
                 cwd=run_dir,
-                env=self.build_env(),
+                env=env,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 # Its own process group, so a timeout can take down Strix and
@@ -230,10 +252,10 @@ class Runner:
 
         timed_out = False
         try:
-            await asyncio.wait_for(proc.wait(), timeout=self.max_runtime)
+            await asyncio.wait_for(proc.wait(), timeout=runtime)
         except asyncio.TimeoutError:
             timed_out = True
-            logger.warning("scan %s exceeded %ss — terminating", run.run_id, self.max_runtime)
+            logger.warning("scan %s exceeded %ss (%s) — terminating", run.run_id, runtime, run.scan_mode)
             await self._terminate(proc)
 
         tail = await pump
@@ -248,8 +270,8 @@ class Runner:
             self.store.finish(
                 run, FAILED, exit_code=exit_code, log_tail=tail,
                 error=(
-                    f"scan exceeded the {self.max_runtime}s runtime limit and was "
-                    f"terminated; any containers Strix left behind may need "
+                    f"scan exceeded the {runtime}s runtime limit for {run.scan_mode} mode "
+                    f"and was terminated; any containers Strix left behind may need "
                     f"clearing with `docker ps`"
                 ),
             )

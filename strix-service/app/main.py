@@ -12,10 +12,13 @@ immediately and the caller polls GET until the status is terminal.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import os
 import shutil
 import subprocess
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Response, status
 from pydantic import BaseModel, Field
@@ -53,8 +56,77 @@ async def lifespan(app: FastAPI):
         config.LLM, config.LLM_API_BASE, config.MAX_CONCURRENT,
         len(scope.RULES), "on" if config.JWT_SECRET else "OFF",
     )
+    _assert_toolcall_patch()
+    # Warm the model in the background so startup is not blocked on a 30–60 s cold
+    # load while a first scan is already being submitted.
+    warm_task = asyncio.create_task(_warm_model())
     yield
+    if not warm_task.done():
+        warm_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await warm_task
     await runner.drain()
+
+
+def _assert_toolcall_patch() -> None:
+    """Log whether the LiteLLM tool-call patch is wired onto the scan subprocess.
+
+    The patch (patches/sitecustomize.py) runs inside the *Strix* process, not
+    this one — runner.build_env puts its directory on PYTHONPATH so Python
+    auto-imports it there. We cannot import litellm here to confirm the live
+    monkeypatch (litellm lives in Strix's environment, not the service's), so we
+    assert the load path instead: the file exists, still defines the tolerant
+    loader, and its directory is on the env every scan inherits. A missing or
+    unwired patch is the failure that silently kills every qwen3-coder scan
+    mid-run, so it is a warning, not a debug line.
+    """
+    patch_dir = Path(__file__).resolve().parent.parent / "patches"
+    patch_file = patch_dir / "sitecustomize.py"
+    env_pythonpath = runner.build_env().get("PYTHONPATH", "")
+    on_path = str(patch_dir) in env_pythonpath.split(os.pathsep)
+    defines_loader = patch_file.exists() and "_tolerant_loads" in patch_file.read_text()
+    if defines_loader and on_path:
+        logger.info("tool-call patch wired: %s on scan PYTHONPATH", patch_file)
+    else:
+        logger.warning(
+            "tool-call patch NOT wired (file_ok=%s on_pythonpath=%s) — qwen3-coder "
+            "tool calls may crash the scanner mid-run; see patches/sitecustomize.py",
+            defines_loader, on_path,
+        )
+
+
+async def _warm_model() -> None:
+    """Load the model into Ollama and hold it, so the first scan starts promptly.
+
+    Best-effort and off the request path: a failure here only means the first
+    scan pays the cold-load it would have paid anyway. A no-op for a hosted
+    provider, which has no local endpoint to warm.
+    """
+    if not (config.WARM_MODEL_ON_START and config.LLM_API_BASE):
+        return
+    model = config.LLM.split("/", 1)[-1]
+
+    def _post() -> None:
+        import json as _json
+        import urllib.request
+
+        body = _json.dumps({"model": model, "keep_alive": config.MODEL_KEEP_ALIVE}).encode()
+        req = urllib.request.Request(
+            f"{config.LLM_API_BASE.rstrip('/')}/api/generate",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        # An empty-prompt generate loads (or keeps) the model and returns quickly;
+        # the timeout covers a genuine cold load of a 30B model.
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            resp.read()
+
+    try:
+        await asyncio.to_thread(_post)
+        logger.info("model %s warmed and held (keep_alive=%s)", model, config.MODEL_KEEP_ALIVE)
+    except Exception as exc:  # noqa: BLE001 — warming is best-effort, never fatal
+        logger.warning("model warm-up failed; first scan pays the cold-load cost: %s", exc)
 
 
 app = FastAPI(
@@ -162,6 +234,7 @@ async def capabilities(caller: str = Depends(require_auth)):
             "queue_max": runner.queue_max,
             "queue_depth": runner.queue_depth,
             "max_runtime_seconds": runner.max_runtime,
+            "max_runtime_by_mode": config.RUNTIME_BY_MODE,
         },
     }
 

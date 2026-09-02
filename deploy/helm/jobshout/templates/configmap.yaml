@@ -59,6 +59,7 @@ data:
   STRIX_TIMEOUT: {{ .Values.pentest.timeout | default "60s" | quote }}
   STRIX_POLL_INTERVAL: {{ .Values.pentest.pollInterval | default "15s" | quote }}
   STRIX_MAX_RUNTIME: {{ .Values.pentest.maxRuntime | default "2h" | quote }}
+  STRIX_ENGAGEMENT_RETRIES: {{ .Values.pentest.engagementRetries | default 1 | quote }}
   STRIX_TARGET_ALLOWLIST: {{ .Values.pentest.targetAllowlist | default "" | quote }}
   # In-cluster PR reviewer sidecar. Empty base URL disables the feature (same
   # pattern as STRIX_BASE_URL). The sidecar is ClusterIP-only; the API talks

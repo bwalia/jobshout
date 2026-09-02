@@ -15,6 +15,7 @@ import {
   Settings,
   History,
   Archive,
+  ShieldAlert,
 } from "lucide-react";
 
 export type PanelId =
@@ -22,6 +23,7 @@ export type PanelId =
   | "dashboard"
   | "task-board"
   | "task-manager"
+  | "security-tester"
   | "artifacts"
   | "scheduler"
   | "sprints"
@@ -46,6 +48,7 @@ export const PANELS: PanelDef[] = [
   { id: "dashboard", label: "Dashboard", href: "/panel/dashboard", icon: LayoutDashboard },
   { id: "task-board", label: "Task Board", href: "/panel/task-board", icon: Kanban },
   { id: "task-manager", label: "Task Manager", href: "/panel/task-manager", icon: ListTree },
+  { id: "security-tester", label: "Security Tester", href: "/panel/security-tester", icon: ShieldAlert },
   { id: "artifacts", label: "Artifacts", href: "/panel/artifacts", icon: Archive },
   { id: "scheduler", label: "Scheduler", href: "/panel/scheduler", icon: Clock },
   { id: "sprints", label: "Sprints", href: "/panel/sprints", icon: Goal },

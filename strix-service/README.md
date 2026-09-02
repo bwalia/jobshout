@@ -171,9 +171,14 @@ cannot find `strix` or `docker` once it is an agent.
 | `STRIX_LLM` | `ollama_chat/qwen3-coder:30b` | LiteLLM model id. |
 | `STRIX_LLM_API_BASE` | `http://localhost:11434` | Local model endpoint. |
 | `STRIX_LLM_API_KEY` | *(empty)* | Only for a hosted provider. |
+| `STRIX_MODEL_KEEP_ALIVE` | `30m` | How long Ollama holds the model resident. |
+| `STRIX_WARM_MODEL` | `true` | Warm the model on start so the first scan is prompt. |
 | `STRIX_MAX_CONCURRENT` | `1` | Simultaneous scans. |
 | `STRIX_QUEUE_MAX` | `8` | Waiting scans before 503. |
-| `STRIX_MAX_RUNTIME_SECONDS` | `7200` | Wall-clock ceiling on one scan. |
+| `STRIX_MAX_RUNTIME_SECONDS` | `7200` | Fallback wall-clock ceiling (unknown modes). |
+| `STRIX_MAX_RUNTIME_QUICK` | `900` | Quick-mode ceiling (15 min). |
+| `STRIX_MAX_RUNTIME_STANDARD` | `2700` | Standard-mode ceiling (45 min). |
+| `STRIX_MAX_RUNTIME_DEEP` | `7200` | Deep-mode ceiling (2 h). |
 | `STRIX_RETENTION_DAYS` | `14` | How long artifacts are kept. |
 | `STRIX_PORT` | `11436` | Listen port. |
 
@@ -188,9 +193,20 @@ answers `503` with a `Retry-After` — the request was valid and trying later is
 the right response to it, so it is not a 500.
 
 With a local model the money budget is effectively zero, which makes **time** the
-budget that actually bounds a run. `STRIX_MAX_RUNTIME_SECONDS` terminates the
-process group at the ceiling. Containers Strix left behind may need clearing with
-`docker ps`; the run's error message says so.
+budget that actually bounds a run. Each mode has its own ceiling —
+`STRIX_MAX_RUNTIME_QUICK` (15 min), `STRIX_MAX_RUNTIME_STANDARD` (45 min),
+`STRIX_MAX_RUNTIME_DEEP` (2 h) — so a wedged *quick* scan fails in minutes rather
+than hanging for the full deep-scan budget; `STRIX_MAX_RUNTIME_SECONDS` is the
+fallback for an unrecognised mode. The ceiling terminates the process group;
+containers Strix left behind may need clearing with `docker ps`, and the run's
+error message says so.
+
+The model is warmed on start (`STRIX_WARM_MODEL`) and held resident between scans
+(`STRIX_MODEL_KEEP_ALIVE`), so the first scan of the day does not pay the 30–60 s
+cold-load of a 30B model. On start the service also logs whether the tool-call
+monkeypatch (`patches/sitecustomize.py`) is wired onto the scan subprocess's
+`PYTHONPATH` — the launchd trap that otherwise kills every qwen3-coder scan
+mid-run — and the effective `PYTHONPATH` is logged again on the first scan.
 
 ## Retention
 

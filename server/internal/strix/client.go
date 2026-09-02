@@ -138,6 +138,10 @@ type Capabilities struct {
 		Model     string `json:"model"`
 		APIBase   string `json:"api_base"`
 		Reachable *bool  `json:"reachable"`
+		// ModelPresent is nil for a hosted provider (no local /api/tags to check);
+		// for local Ollama it says whether the wanted model is actually pulled, the
+		// difference between "Ollama is up" and "the scan can start".
+		ModelPresent *bool `json:"model_present"`
 	} `json:"llm"`
 	Scope struct {
 		RuleCount     int  `json:"rule_count"`
