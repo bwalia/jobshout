@@ -83,7 +83,7 @@ export function CareerProfilePanel({
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Upload a PDF CV. We save it and use the extracted text to score jobs and tailor a new PDF.
+        Upload a PDF CV. We save it and use the extracted text to score jobs. A tailored CV keeps your sections and page count — only keywords change. What we changed is shown in Prepare, not on the PDF.
       </p>
       <div>
         <FieldLabel
@@ -154,7 +154,7 @@ export function CareerProfilePanel({
         <FieldLabel
           htmlFor="career-cv-upload"
           label="CV"
-          hint="PDF only. Upload saves it immediately. Get tailored CV downloads a new PDF for that job."
+          hint="PDF only. Upload saves it immediately. Tailored CVs keep this layout; what changed is shown in Prepare, not on the PDF."
         />
         <div className="flex flex-wrap items-center gap-2">
           <input

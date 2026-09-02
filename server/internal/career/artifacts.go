@@ -18,6 +18,17 @@ type draftBody struct {
 	Subject string `json:"subject"`
 }
 
+type tailorDraft struct {
+	Body         string       `json:"body"`
+	Note         string       `json:"note"`
+	Replacements []tailorSwap `json:"replacements"`
+}
+
+type tailorSwap struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
 // DraftCoverLetter writes a cover from profile + evaluation. Empty generate → template.
 func DraftCoverLetter(ctx context.Context, listing *JobListing, profile *model.CareerProfile, ev *model.CareerEvaluation, generate Generator) (string, error) {
 	if generate != nil {
@@ -29,8 +40,9 @@ func DraftCoverLetter(ctx context.Context, listing *JobListing, profile *model.C
 	return templateCover(profile, ev), nil
 }
 
-// TailorCV personalises CV markdown without changing layout. Empty generate,
-// or a draft that moves headings, falls back to the original plus a note.
+// TailorCV personalises CV text without changing layout. Empty generate, or a
+// draft that grows the document or moves headings, falls back to the original
+// plus a short note naming the role.
 func TailorCV(ctx context.Context, listing *JobListing, profile *model.CareerProfile, ev *model.CareerEvaluation, generate Generator) (string, error) {
 	src := strings.TrimSpace(profile.CVMarkdown)
 	if src == "" {
@@ -44,21 +56,56 @@ func TailorCV(ctx context.Context, listing *JobListing, profile *model.CareerPro
 	if generate == nil {
 		return fallback, nil
 	}
-	if body := generateTailored(ctx, tailorPrompt(listing, profile, ev), generate); body != "" && SameOutline(src, body) {
-		return body, nil
+	if body, note, ok := tryTailor(ctx, tailorPrompt(listing, profile, ev), src, generate); ok {
+		return withNote(body, role, company, note), nil
 	}
-	if body := generateTailored(ctx, tailorRetryPrompt(listing, profile, ev), generate); body != "" && SameOutline(src, body) {
-		return body, nil
+	if body, note, ok := tryTailor(ctx, tailorRetryPrompt(listing, profile, ev), src, generate); ok {
+		return withNote(body, role, company, note), nil
 	}
 	return fallback, nil
 }
 
-func generateTailored(ctx context.Context, prompt string, generate Generator) string {
-	var out draftBody
+func tryTailor(ctx context.Context, prompt, src string, generate Generator) (string, string, bool) {
+	var out tailorDraft
 	if err := llm.GenerateJSON(ctx, "career-cv", prompt, &out, generate, nil); err != nil {
-		return ""
+		return "", "", false
 	}
-	return strings.TrimSpace(out.Body)
+	body, n := applyReplacements(src, out.Replacements)
+	if n == 0 && strings.TrimSpace(out.Body) != "" {
+		body = strings.TrimSpace(out.Body)
+	}
+	body = stripTailorChrome(body)
+	if !KeepLayout(src, body) {
+		return "", strings.TrimSpace(out.Note), false
+	}
+	return body, strings.TrimSpace(out.Note), true
+}
+
+func applyReplacements(src string, swaps []tailorSwap) (string, int) {
+	body := src
+	n := 0
+	for _, sw := range swaps {
+		from, to := strings.TrimSpace(sw.From), strings.TrimSpace(sw.To)
+		if from == "" || to == "" || from == to {
+			continue
+		}
+		if !strings.Contains(body, from) {
+			continue
+		}
+		if utf8Len(to) > utf8Len(from)*130/100+12 {
+			continue
+		}
+		body = strings.Replace(body, from, to, 1)
+		n++
+		if n >= 8 {
+			break
+		}
+	}
+	return body, n
+}
+
+func withNote(body, role, company, detail string) string {
+	return strings.TrimSpace(body) + visibleTailorNote(role, company, detail)
 }
 
 // DraftEmail is draft-only. Sending is Mail Agent + human approve.

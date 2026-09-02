@@ -7,7 +7,10 @@ import { CareerJDDialog, type CareerJDPreview } from "./CareerJDDialog";
 import { CareerJobDetail } from "./CareerJobDetail";
 import { postingHref, type CareerJob } from "./jobs";
 
+export type CareerJobsPane = "find" | "jobs" | "prepare";
+
 export function CareerJobsPanel({
+  pane,
   doctor,
   jobs,
   selected,
@@ -39,7 +42,9 @@ export function CareerJobsPanel({
   onSeeJD,
   jdPreview,
   onCloseJD,
+  onBackToJobs,
 }: {
+  pane: CareerJobsPane;
   doctor: CareerDoctorReport | null;
   jobs: CareerJob[];
   selected: CareerJob | null;
@@ -71,6 +76,7 @@ export function CareerJobsPanel({
   onSeeJD: (job: CareerJob) => void;
   jdPreview: CareerJDPreview | null;
   onCloseJD: () => void;
+  onBackToJobs: () => void;
 }) {
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const selectedJobs = useMemo(() => jobs.filter((j) => checked[j.key]), [jobs, checked]);
@@ -95,15 +101,110 @@ export function CareerJobsPanel({
           Finish Profile first (name and CV) so scores and tailored CVs are about you, not a blank page.
         </p>
       )}
-      {doctor?.ok && doctor.warnings.length + doctor.info.length > 0 && (
-        <p className="text-xs text-muted-foreground">{[...doctor.warnings, ...doctor.info].join(" · ")}</p>
+
+      {pane === "find" && (
+        <FindPane
+          busy={busy}
+          portals={portals}
+          jobUrl={jobUrl}
+          setJobUrl={setJobUrl}
+          jdText={jdText}
+          setJdText={setJdText}
+          scanBoard={scanBoard}
+          setScanBoard={setScanBoard}
+          scanSlug={scanSlug}
+          setScanSlug={setScanSlug}
+          onScanAll={onScanAll}
+          onScanOne={onScanOne}
+          onSavePortal={onSavePortal}
+          onAddJob={onAddJob}
+        />
       )}
 
-      <section className="space-y-3">
-        <h3 className="text-sm font-medium">Find jobs</h3>
+      {pane === "jobs" && (
+        <JobsListPane
+          jobs={jobs}
+          selected={selected}
+          checked={checked}
+          allChecked={allChecked}
+          selectedJobs={selectedJobs}
+          busy={busy}
+          patterns={patterns}
+          onToggle={toggle}
+          onToggleAll={toggleAll}
+          onSelect={onSelect}
+          onScoreSelected={onScoreSelected}
+          onSeeJD={onSeeJD}
+        />
+      )}
+
+      {pane === "prepare" && (
+        <div className="rounded-md border border-border p-4">
+          {selected ? (
+            <CareerJobDetail
+              job={selected}
+              artifacts={artifacts}
+              draftNote={draftNote}
+              busy={busy}
+              hasCV={hasCV}
+              onScore={onScore}
+              onTailor={onTailor}
+              onCover={onCover}
+              onEmail={onEmail}
+              onApplied={onApplied}
+              onSeeJD={() => onSeeJD(selected)}
+              onBack={onBackToJobs}
+            />
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Pick a job in <span className="font-medium text-foreground">Jobs</span> to score it, tailor a CV, or draft a cover letter.
+            </p>
+          )}
+        </div>
+      )}
+
+      {jdPreview && <CareerJDDialog preview={jdPreview} onClose={onCloseJD} />}
+    </div>
+  );
+}
+
+function FindPane({
+  busy,
+  portals,
+  jobUrl,
+  setJobUrl,
+  jdText,
+  setJdText,
+  scanBoard,
+  setScanBoard,
+  scanSlug,
+  setScanSlug,
+  onScanAll,
+  onScanOne,
+  onSavePortal,
+  onAddJob,
+}: {
+  busy: boolean;
+  portals: CareerPortal[];
+  jobUrl: string;
+  setJobUrl: (v: string) => void;
+  jdText: string;
+  setJdText: (v: string) => void;
+  scanBoard: string;
+  setScanBoard: (v: string) => void;
+  scanSlug: string;
+  setScanSlug: (v: string) => void;
+  onScanAll: () => void;
+  onScanOne: () => void;
+  onSavePortal: () => void;
+  onAddJob: () => void;
+}) {
+  return (
+    <div className="grid gap-4 lg:grid-cols-2">
+      <section className="space-y-3 rounded-md border border-border p-4">
+        <h3 className="text-sm font-medium">Scan companies</h3>
         <p className="text-sm text-muted-foreground">
-          Scan the CareerOps company list on Greenhouse, Ashby, and Lever, or paste one posting.
-          This is not LinkedIn or Indeed.
+          Greenhouse, Ashby, and Lever — not LinkedIn or Indeed. Title filter comes from Profile.
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <button
@@ -114,7 +215,7 @@ export function CareerJobsPanel({
           >
             {busy ? "Scanning…" : "Scan all companies"}
           </button>
-          <FieldHint text="Hits every saved company on Greenhouse, Ashby, and Lever. Title filter comes from Profile. A minute or two." />
+          <FieldHint text="Hits every saved company on those three boards. A minute or two." />
         </div>
         {portals.length > 0 && (
           <p className="text-xs text-muted-foreground">
@@ -131,7 +232,7 @@ export function CareerJobsPanel({
         >
           <label className="flex items-center gap-1.5 text-sm" htmlFor="career-board">
             Board
-            <FieldHint text="All boards tries Greenhouse, Ashby, and Lever for this slug. Pick one if you already know the ATS." />
+            <FieldHint text="All boards tries Greenhouse, Ashby, and Lever for this slug." />
             <select
               id="career-board"
               value={scanBoard}
@@ -171,162 +272,163 @@ export function CareerJobsPanel({
             Save board
           </button>
         </form>
+      </section>
 
-        <div className="grid gap-3 lg:grid-cols-2">
-          <div>
-            <FieldLabel
-              htmlFor="career-job-url"
-              label="Or add one job URL"
-              hint="Public posting URL. We fetch the JD, score it, and add a row. Tailor is a separate click."
-            />
-            <input
-              id="career-job-url"
-              value={jobUrl}
-              onChange={(e) => setJobUrl(e.target.value)}
-              placeholder="https://boards.greenhouse.io/…"
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-            />
-          </div>
-          <div>
-            <FieldLabel
-              htmlFor="career-jd"
-              label="Or paste a job description"
-              hint="Full job text. Treated as untrusted data. Use a URL or this paste — you do not need both."
-            />
-            <textarea
-              id="career-jd"
-              value={jdText}
-              onChange={(e) => setJdText(e.target.value)}
-              rows={4}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              placeholder="Paste the JD."
-            />
-          </div>
+      <section className="space-y-3 rounded-md border border-border p-4">
+        <h3 className="text-sm font-medium">Add one posting</h3>
+        <p className="text-sm text-muted-foreground">A public URL or a pasted JD. You do not need both.</p>
+        <div>
+          <FieldLabel
+            htmlFor="career-job-url"
+            label="Job URL"
+            hint="We fetch the JD, score it, and add a row. Tailor is on Prepare."
+          />
+          <input
+            id="career-job-url"
+            value={jobUrl}
+            onChange={(e) => setJobUrl(e.target.value)}
+            placeholder="https://boards.greenhouse.io/…"
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          />
+        </div>
+        <div>
+          <FieldLabel
+            htmlFor="career-jd"
+            label="Or paste the job description"
+            hint="Treated as untrusted data."
+          />
+          <textarea
+            id="career-jd"
+            value={jdText}
+            onChange={(e) => setJdText(e.target.value)}
+            rows={5}
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            placeholder="Paste the JD."
+          />
         </div>
         <button
           type="button"
           disabled={busy || (!jobUrl.trim() && !jdText.trim())}
           onClick={onAddJob}
-          className="rounded-md border border-border px-3 py-2 text-sm disabled:opacity-50"
+          className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
         >
           {busy ? "Adding…" : "Add and score"}
         </button>
       </section>
+    </div>
+  );
+}
 
-      <section className="grid gap-4 lg:grid-cols-2">
+function JobsListPane({
+  jobs,
+  selected,
+  checked,
+  allChecked,
+  selectedJobs,
+  busy,
+  patterns,
+  onToggle,
+  onToggleAll,
+  onSelect,
+  onScoreSelected,
+  onSeeJD,
+}: {
+  jobs: CareerJob[];
+  selected: CareerJob | null;
+  checked: Record<string, boolean>;
+  allChecked: boolean;
+  selectedJobs: CareerJob[];
+  busy: boolean;
+  patterns: CareerPatterns | null;
+  onToggle: (key: string, value: boolean) => void;
+  onToggleAll: (value: boolean) => void;
+  onSelect: (job: CareerJob) => void;
+  onScoreSelected: (jobs: CareerJob[]) => void;
+  onSeeJD: (job: CareerJob) => void;
+}) {
+  return (
+    <section className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-sm font-medium">Your jobs</h3>
-            {jobs.length > 0 && (
-              <div className="flex flex-wrap items-center gap-2">
-                <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    checked={allChecked}
-                    onChange={(e) => toggleAll(e.target.checked)}
-                    aria-label="Select all jobs"
-                  />
-                  Select all
-                </label>
-                <button
-                  type="button"
-                  disabled={busy || selectedJobs.length === 0}
-                  onClick={() => onScoreSelected(selectedJobs)}
-                  className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
-                >
-                  {busy
-                    ? "Scoring…"
-                    : selectedJobs.length > 0
-                      ? `Score selected (${selectedJobs.length})`
-                      : "Score selected"}
-                </button>
-                <FieldHint text="Tick jobs, then score them against your profile. Up to 8 at a time. Score is advice — it does not apply for you." />
-              </div>
-            )}
+          <h3 className="text-sm font-medium">Your jobs</h3>
+          <p className="text-xs text-muted-foreground">Open a row to tailor a CV or draft materials.</p>
+        </div>
+        {jobs.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={allChecked}
+                onChange={(e) => onToggleAll(e.target.checked)}
+                aria-label="Select all jobs"
+              />
+              Select all
+            </label>
+            <button
+              type="button"
+              disabled={busy || selectedJobs.length === 0}
+              onClick={() => onScoreSelected(selectedJobs)}
+              className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
+            >
+              {busy
+                ? "Scoring…"
+                : selectedJobs.length > 0
+                  ? `Score selected (${selectedJobs.length})`
+                  : "Score selected"}
+            </button>
+            <FieldHint text="Tick jobs, then score them against your profile. Up to 8 at a time. Score is advice." />
           </div>
-          {jobs.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Scan all companies, or paste a job URL.
-            </p>
-          ) : (
-            <ul className="divide-y divide-border rounded-md border border-border text-sm">
-              {jobs.map((job) => {
-                const href = postingHref(job.listing_url);
-                return (
-                  <li key={job.key} className="flex items-start gap-2 px-2 py-2">
-                    <input
-                      type="checkbox"
-                      className="mt-1"
-                      checked={!!checked[job.key]}
-                      onChange={(e) => toggle(job.key, e.target.checked)}
-                      aria-label={`Select ${job.role || job.company || "job"}`}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <button
-                        type="button"
-                        onClick={() => onSelect(job)}
-                        className={`flex w-full flex-col items-start gap-0.5 rounded-md px-2 py-1 text-left hover:bg-muted/40 ${
-                          selected?.key === job.key ? "bg-muted/60" : ""
-                        }`}
-                      >
-                        <span className="font-medium">
-                          {job.role || job.listing_url || "Job"}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          {job.company || "Company"}
-                          {job.score != null ? ` · ${job.score.toFixed(1)} / 5` : " · not scored"}
-                          {job.status ? ` · ${job.status}` : ""}
-                        </span>
-                      </button>
-                      <div className="mt-1 flex flex-wrap gap-2 px-2">
-                        {href && (
-                          <a
-                            href={href}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-xs underline underline-offset-2"
-                          >
-                            Go to posting
-                          </a>
-                        )}
-                        <button
-                          type="button"
-                          className="text-xs underline underline-offset-2"
-                          onClick={() => onSeeJD(job)}
-                        >
-                          See JD
-                        </button>
-                      </div>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-        <div className="min-h-[12rem] rounded-md border border-border p-4">
-          {selected ? (
-            <CareerJobDetail
-              job={selected}
-              artifacts={artifacts}
-              draftNote={draftNote}
-              busy={busy}
-              hasCV={hasCV}
-              onScore={onScore}
-              onTailor={onTailor}
-              onCover={onCover}
-              onEmail={onEmail}
-              onApplied={onApplied}
-              onSeeJD={() => onSeeJD(selected)}
-            />
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              Tick jobs to score several at once, or open a row for the JD and posting.
-            </p>
-          )}
-        </div>
-      </section>
-
+        )}
+      </div>
+      {jobs.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Nothing here yet. Use Find to scan companies or paste a posting.</p>
+      ) : (
+        <ul className="divide-y divide-border rounded-md border border-border text-sm">
+          {jobs.map((job) => {
+            const href = postingHref(job.listing_url);
+            return (
+              <li key={job.key} className="flex items-start gap-2 px-2 py-2">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={!!checked[job.key]}
+                  onChange={(e) => onToggle(job.key, e.target.checked)}
+                  aria-label={`Select ${job.role || job.company || "job"}`}
+                />
+                <div className="min-w-0 flex-1">
+                  <button
+                    type="button"
+                    onClick={() => onSelect(job)}
+                    className={`flex w-full flex-col items-start gap-0.5 rounded-md px-2 py-1 text-left hover:bg-muted/40 ${
+                      selected?.key === job.key ? "bg-muted/60" : ""
+                    }`}
+                  >
+                    <span className="font-medium">{job.role || job.listing_url || "Job"}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {job.company || "Company"}
+                      {job.score != null ? ` · ${job.score.toFixed(1)} / 5` : " · not scored"}
+                      {job.status ? ` · ${job.status}` : ""}
+                    </span>
+                  </button>
+                  <div className="mt-1 flex flex-wrap gap-3 px-2 text-xs">
+                    {href && (
+                      <a href={href} target="_blank" rel="noreferrer" className="underline underline-offset-2">
+                        Go to posting
+                      </a>
+                    )}
+                    <button type="button" className="underline underline-offset-2" onClick={() => onSeeJD(job)}>
+                      See JD
+                    </button>
+                    <button type="button" className="underline underline-offset-2" onClick={() => onSelect(job)}>
+                      Prepare
+                    </button>
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
       {patterns && patterns.applications > 0 && (
         <p className="text-xs text-muted-foreground">
           {patterns.applications} scored
@@ -336,8 +438,7 @@ export function CareerJobsPanel({
             : ""}
         </p>
       )}
-      {jdPreview && <CareerJDDialog preview={jdPreview} onClose={onCloseJD} />}
-    </div>
+    </section>
   );
 }
 

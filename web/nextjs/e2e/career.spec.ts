@@ -107,13 +107,40 @@ test.describe("Career Agent", () => {
     await expect(page.getByRole("heading", { name: "Career Agent" })).toBeVisible({
       timeout: 8_000,
     });
+    // Tab client owns the surface — no stacked schema form + Run.
+    await expect(page.getByText("Also tailor CV")).toHaveCount(0);
+    await expect(
+      page.getByText("Evaluate a job URL or pasted JD against your career profile")
+    ).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^Run$/ })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /1\. Profile/ })).toBeVisible();
-    await expect(page.getByRole("button", { name: /2\. Jobs/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /2\. Find/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /3\. Jobs/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /4\. Prepare/ })).toBeVisible();
     await expect(page.getByRole("button", { name: /Upload CV|Replace CV PDF/ })).toBeVisible();
-    await page.getByRole("button", { name: /2\. Jobs/ }).click();
+    if (!process.env.CI) {
+      await page.screenshot({ path: "/tmp/career-1-profile.png", fullPage: true });
+    }
+    await page.getByRole("button", { name: /2\. Find/ }).click();
     await expect(page.getByRole("button", { name: /Scan all companies/ })).toBeVisible();
-    await expect(page.getByLabel("Board")).toBeVisible();
-    await expect(page.getByRole("button", { name: /Score selected/ })).toBeVisible();
-    await expect(page.getByRole("button", { name: "See JD" }).first()).toBeVisible();
+    await expect(page.locator("#career-board")).toBeVisible();
+    if (!process.env.CI) {
+      await page.screenshot({ path: "/tmp/career-2-find.png", fullPage: true });
+    }
+    await page.getByRole("button", { name: /3\. Jobs/ }).click();
+    await expect(page.getByText("Your jobs")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /Score selected/ }).or(page.getByText(/Nothing here yet/))
+    ).toBeVisible();
+    if (!process.env.CI) {
+      await page.screenshot({ path: "/tmp/career-3-jobs.png", fullPage: true });
+    }
+    await page.getByRole("button", { name: /4\. Prepare/ }).click();
+    await expect(
+      page.getByRole("button", { name: /Get tailored CV/ }).or(page.getByText(/Pick a job in/))
+    ).toBeVisible();
+    if (!process.env.CI) {
+      await page.screenshot({ path: "/tmp/career-4-prepare.png", fullPage: true });
+    }
   });
 });

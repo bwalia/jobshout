@@ -8,6 +8,7 @@ import type { CareerJDPreview } from "@/components/career/CareerJDDialog";
 import { mergeJobs, type CareerJob } from "@/components/career/jobs";
 import { FieldHintProvider } from "@/components/ui/field-hint";
 import { apiErrorMessage } from "@/lib/api/client";
+import { splitCareerTailorNote } from "@/lib/career/tailor-note";
 import {
   addCareerPortal,
   careerBatchEvaluate,
@@ -47,7 +48,7 @@ import type {
 } from "@/types/career";
 import { toast } from "sonner";
 
-type Screen = "profile" | "jobs";
+type Screen = "profile" | "find" | "jobs" | "prepare";
 
 export function CareerAgentClient() {
   const search = useSearchParams();
@@ -129,7 +130,7 @@ export function CareerAgentClient() {
 
   useEffect(() => {
     if (!doctor || landed) return;
-    setScreen(doctor.ok ? "jobs" : "profile");
+    setScreen(doctor.ok ? "find" : "profile");
     setLanded(true);
   }, [doctor, landed]);
 
@@ -139,7 +140,7 @@ export function CareerAgentClient() {
     void getCareerEvaluation(evalId)
       .then((ev) => {
         setSelectedKey(ev.listing_url || `eval:${ev.id}`);
-        setScreen("jobs");
+        setScreen("prepare");
       })
       .catch(() => undefined);
   }, [search]);
@@ -181,7 +182,7 @@ export function CareerAgentClient() {
       toast.success("Profile saved.");
       window.setTimeout(() => setSavedFlash(false), 2500);
       if (d.ok) {
-        toast.message("Profile is ready. Open Jobs to scan or paste a posting.");
+        toast.message("Profile is ready. Find jobs next, or open Jobs if you already have some.");
       }
     } catch (e: unknown) {
       const msg = apiErrorMessage(e, "Could not save profile.");
@@ -267,6 +268,7 @@ export function CareerAgentClient() {
         setSelectedKey(key);
         if (res.artifacts) setArtifacts(res.artifacts);
         await loadAll();
+        setScreen("prepare");
       }
       return res;
     } catch (e: unknown) {
@@ -319,7 +321,7 @@ export function CareerAgentClient() {
       await loadAll();
       toast.success(
         evaluated > 0
-          ? `Scored ${evaluated} job${evaluated === 1 ? "" : "s"}. Open a row for the report.`
+          ? `Scored ${evaluated} job${evaluated === 1 ? "" : "s"}. Open a row to prepare.`
           : "No jobs could be scored (closed, blacklist, or fetch failed)."
       );
     } catch (e: unknown) {
@@ -392,11 +394,9 @@ export function CareerAgentClient() {
       const art = res?.artifacts?.find((a) => a.kind === "cv");
       if (art) {
         const downloaded = downloadCareerPDF(art);
-        setDraftNote(
-          downloaded
-            ? "Tailored CV PDF downloaded. A human submits it."
-            : "Tailored CV ready. Layout kept. A human submits."
-        );
+        const { note } = splitCareerTailorNote(art.body_markdown);
+        setDraftNote(note || (downloaded ? "Tailored CV downloaded. A human submits it." : "Tailored CV ready. A human submits."));
+        setScreen("prepare");
         toast.success(downloaded ? "Tailored CV downloaded." : "Tailored CV ready.");
       }
       return;
@@ -406,11 +406,9 @@ export function CareerAgentClient() {
       const art = await tailorCareerCV(selected.evaluation.id);
       setArtifacts((prev) => [art, ...prev.filter((a) => a.id !== art.id)]);
       const downloaded = downloadCareerPDF(art);
-      setDraftNote(
-        downloaded
-          ? "Tailored CV PDF downloaded. A human submits it."
-          : "Tailored CV ready. Layout kept. A human submits."
-      );
+      const { note } = splitCareerTailorNote(art.body_markdown);
+      setDraftNote(note || (downloaded ? "Tailored CV downloaded. A human submits it." : "Tailored CV ready. A human submits."));
+      setScreen("prepare");
       toast.success(downloaded ? "Tailored CV downloaded." : "Tailored CV ready.");
     } catch (e: unknown) {
       const msg = apiErrorMessage(e, "Could not tailor the CV.");
@@ -477,9 +475,10 @@ export function CareerAgentClient() {
       )) as { run?: { added?: number } };
       await loadAll();
       const added = out.run?.added ?? 0;
+      setScreen("jobs");
       toast.success(
         added > 0
-          ? `Scan finished. ${added} new job${added === 1 ? "" : "s"}. Open a row to score or tailor.`
+          ? `Scan finished. ${added} new job${added === 1 ? "" : "s"}. Open a row to prepare.`
           : "Scan finished. No new jobs (already seen, title filter, or empty boards)."
       );
     } catch (e: unknown) {
@@ -495,36 +494,34 @@ export function CareerAgentClient() {
     <FieldHintProvider>
       <div className="space-y-4">
         <div className="flex flex-wrap items-center gap-2">
-          <ol className="flex items-center gap-1 text-sm" aria-label="Career steps">
-            <li>
-              <button
-                type="button"
-                onClick={() => setScreen("profile")}
-                className={`rounded-md px-3 py-1.5 ${
-                  screen === "profile"
-                    ? "bg-primary text-primary-foreground"
-                    : "border border-border text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                1. Profile
-              </button>
-            </li>
-            <li className="text-muted-foreground" aria-hidden>
-              →
-            </li>
-            <li>
-              <button
-                type="button"
-                onClick={() => setScreen("jobs")}
-                className={`rounded-md px-3 py-1.5 ${
-                  screen === "jobs"
-                    ? "bg-primary text-primary-foreground"
-                    : "border border-border text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                2. Jobs
-              </button>
-            </li>
+          <ol className="flex flex-wrap items-center gap-1 text-sm" aria-label="Career steps">
+            {(
+              [
+                ["profile", "1. Profile"],
+                ["find", "2. Find"],
+                ["jobs", "3. Jobs"],
+                ["prepare", "4. Prepare"],
+              ] as const
+            ).map(([id, label], i) => (
+              <li key={id} className="flex items-center gap-1">
+                {i > 0 && (
+                  <span className="text-muted-foreground" aria-hidden>
+                    →
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setScreen(id)}
+                  className={`rounded-md px-3 py-1.5 ${
+                    screen === id
+                      ? "bg-primary text-primary-foreground"
+                      : "border border-border text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {label}
+                </button>
+              </li>
+            ))}
           </ol>
         </div>
 
@@ -562,14 +559,16 @@ export function CareerAgentClient() {
           />
         )}
 
-        {screen === "jobs" && (
+        {screen !== "profile" && (
           <CareerJobsPanel
+            pane={screen}
             doctor={doctor}
             jobs={jobs}
             selected={selected}
             onSelect={(job) => {
               setSelectedKey(job.key);
               setDraftNote("");
+              setScreen("prepare");
             }}
             artifacts={artifacts}
             draftNote={draftNote}
@@ -612,6 +611,7 @@ export function CareerAgentClient() {
             onSeeJD={(job) => void seeJD(job)}
             jdPreview={jdPreview}
             onCloseJD={() => setJdPreview(null)}
+            onBackToJobs={() => setScreen("jobs")}
           />
         )}
       </div>

@@ -386,7 +386,7 @@ func attachCVPDF(a *model.CareerArtifact, profile *model.CareerProfile, ev *mode
 	if ev != nil {
 		company, role = ev.Company, ev.Role
 	}
-	pdf, err := career.MarkdownToPDF(name, a.BodyMarkdown)
+	pdf, err := career.MarkdownToPDF(name, career.CVForPDF(a.BodyMarkdown))
 	if err != nil || len(pdf) == 0 {
 		return
 	}
@@ -410,7 +410,7 @@ func (s *careerService) ArtifactPDF(ctx context.Context, orgID, userID, artifact
 	}
 	pdf := a.FileBytes
 	if len(pdf) == 0 && a.Kind == model.CareerArtifactCV && strings.TrimSpace(a.BodyMarkdown) != "" {
-		if built, err := career.MarkdownToPDF(p.Identity.FullName, a.BodyMarkdown); err == nil {
+		if built, err := career.MarkdownToPDF(p.Identity.FullName, career.CVForPDF(a.BodyMarkdown)); err == nil {
 			pdf = built
 		}
 	}
