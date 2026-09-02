@@ -236,21 +236,52 @@ export function isSpecialistSchema(schema: AgentInputSchema): boolean {
   return schema.kind !== "task_run";
 }
 
+export const EMPTY_AGENT_CATALOG: WireSchema[] = [];
+
+/** metadata.builtin when the agent is a platform specialist. */
+export function agentBuiltin(
+  agent: Agent | null | undefined
+): string | undefined {
+  const builtin = agent?.metadata?.builtin;
+  return typeof builtin === "string" && builtin ? builtin : undefined;
+}
+
+/** True when GET /agent-schemas has returned this specialist's form. */
+export function catalogHasBuiltin(
+  catalog: WireSchema[],
+  builtin: string | undefined
+): boolean {
+  return Boolean(builtin && catalog.some((s) => s.builtin === builtin));
+}
+
+function pendingSpecialistSchema(builtin: string): AgentInputSchema {
+  return {
+    kind: builtin,
+    hint: "Loading agent form…",
+    fields: [],
+  };
+}
+
 /**
  * Resolve the input schema for an agent.
  *
  * All specialists are wired this way: schema from GET /api/v1/agent-schemas.
  * A new agent does not need a TypeScript SCHEMAS map — register it.
+ *
+ * A builtin whose wire is not in the catalog stays a specialist (empty fields),
+ * never the generic title/description form — that path would start a normal
+ * executor run instead of Evaluate / pentest / mail sync.
  */
 export function getAgentInputSchema(
   agent: Agent | null | undefined,
   catalog: WireSchema[] = []
 ): AgentInputSchema {
   if (!agent) return GENERIC;
-  const builtin = agent.metadata?.builtin;
-  if (typeof builtin === "string") {
+  const builtin = agentBuiltin(agent);
+  if (builtin) {
     const wire = catalog.find((s) => s.builtin === builtin);
     if (wire) return schemaFromWire(wire);
+    return pendingSpecialistSchema(builtin);
   }
   return GENERIC;
 }

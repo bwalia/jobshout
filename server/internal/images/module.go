@@ -80,11 +80,10 @@ func launch(gen Generator) agentmodule.LaunchFunc {
 		if gen == nil || !gen.Enabled() {
 			return nil, fmt.Errorf("image generation is not configured")
 		}
-		src := in.Source
-		if src == "" {
-			src = "task_manager"
-		}
-		url, rec, err := gen.Generate(ctx, in.OrgID, in.UserID, strings.TrimSpace(in.Values["prompt"]), src)
+		// Always task_manager — the Image Generator tab and chat agent_execute
+		// share this launch. Do not pass in.Source ("chat"); history used to
+		// record every specialist image as task_manager.
+		url, rec, err := gen.Generate(ctx, in.OrgID, in.UserID, strings.TrimSpace(in.Values["prompt"]), "task_manager")
 		if err != nil {
 			return nil, err
 		}

@@ -4,8 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import { Bug, Loader2, Plus, Rocket, X } from "lucide-react";
 
 import { AgentInputFields } from "@/components/task-manager/AgentInputFields";
+import { AgentCatalogNotice } from "@/components/task-manager/AgentCatalogNotice";
 import {
+  agentBuiltin,
+  catalogHasBuiltin,
   defaultValuesForSchema,
+  EMPTY_AGENT_CATALOG,
   getAgentInputSchema,
   isSpecialistSchema,
   schemaValuesValid,
@@ -68,18 +72,18 @@ export function RunTaskDialog({
     () => agents.find((a) => a.id === agentId) ?? null,
     [agents, agentId]
   );
-  const { data: catalog = [], isFetched: catalogReady } = useAgentSchemas();
-  const schema = useMemo(() => {
-    const builtin = selectedAgent?.metadata?.builtin;
-    if (typeof builtin === "string" && builtin && !catalogReady) {
-      return {
-        kind: builtin,
-        hint: "Loading agent form…",
-        fields: [],
-      };
-    }
-    return getAgentInputSchema(selectedAgent, catalog);
-  }, [selectedAgent, catalog, catalogReady]);
+  const {
+    data: catalogData,
+    isError: catalogError,
+    refetch: refetchCatalog,
+  } = useAgentSchemas();
+  const catalog = catalogData ?? EMPTY_AGENT_CATALOG;
+  const builtin = agentBuiltin(selectedAgent);
+  const schemaReady = !builtin || catalogHasBuiltin(catalog, builtin);
+  const schema = useMemo(
+    () => getAgentInputSchema(selectedAgent, catalog),
+    [selectedAgent, catalog]
+  );
   const isSpecialist = isSpecialistSchema(schema);
 
   const [values, setValues] = useState<Record<string, string>>(() =>
@@ -172,8 +176,8 @@ export function RunTaskDialog({
     Boolean(selectedAgent) &&
     !busy &&
     mailReady &&
-    (!isSpecialist || schemaValuesValid(schema, values)) &&
-    catalogReady;
+    schemaReady &&
+    (!isSpecialist || schemaValuesValid(schema, values));
 
   async function handleRun() {
     if (busy) return;
@@ -186,6 +190,14 @@ export function RunTaskDialog({
 
     // Specialist path: schema fields only — never mix with generic overrides.
     if (isSpecialist) {
+      if (!schemaReady) {
+        setLaunchError(
+          catalogError
+            ? "Could not load this agent's form. Retry."
+            : "Loading agent form…"
+        );
+        return;
+      }
       if (!mailReady) {
         setLaunchError("Loading saved mailbox settings…");
         return;
@@ -303,13 +315,21 @@ export function RunTaskDialog({
             )}
           </div>
 
+          {selectedAgent && (
+            <AgentCatalogNotice
+              missing={!schemaReady}
+              isError={catalogError}
+              onRetry={() => void refetchCatalog()}
+            />
+          )}
+
           {selectedAgent && schema.prefill === "mailbox" && mailboxLoad === "loading" ? (
             <p className="text-xs text-muted-foreground">
               Loading saved mailbox settings…
             </p>
           ) : null}
 
-          {selectedAgent && isSpecialist ? (
+          {selectedAgent && isSpecialist && schemaReady ? (
             <AgentInputFields
               fields={schema.fields}
               values={values}

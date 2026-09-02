@@ -4,10 +4,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Rocket, X } from "lucide-react";
 import { toast } from "sonner";
 
+import { AgentCatalogNotice } from "@/components/task-manager/AgentCatalogNotice";
 import { AgentInputFields } from "@/components/task-manager/AgentInputFields";
 import {
   TASK_TITLE_MIN_LENGTH,
+  agentBuiltin,
+  catalogHasBuiltin,
   defaultValuesForSchema,
+  EMPTY_AGENT_CATALOG,
   getAgentInputSchema,
   schemaValuesValid,
   taskFieldsFromValues,
@@ -361,18 +365,18 @@ function CreateTaskForm({
     () => agents.find((a) => a.id === agentId) ?? null,
     [agents, agentId]
   );
-  const { data: catalog = [], isFetched: catalogReady } = useAgentSchemas();
-  const schema = useMemo(() => {
-    const builtin = selectedAgent?.metadata?.builtin;
-    if (typeof builtin === "string" && builtin && !catalogReady) {
-      return {
-        kind: builtin,
-        hint: "Loading agent form…",
-        fields: [],
-      };
-    }
-    return getAgentInputSchema(selectedAgent, catalog);
-  }, [selectedAgent, catalog, catalogReady]);
+  const {
+    data: catalogData,
+    isError: catalogError,
+    refetch: refetchCatalog,
+  } = useAgentSchemas();
+  const catalog = catalogData ?? EMPTY_AGENT_CATALOG;
+  const builtin = agentBuiltin(selectedAgent);
+  const schemaReady = !builtin || catalogHasBuiltin(catalog, builtin);
+  const schema = useMemo(
+    () => getAgentInputSchema(selectedAgent, catalog),
+    [selectedAgent, catalog]
+  );
   const [values, setValues] = useState<Record<string, string>>(() =>
     defaultValuesForSchema(getAgentInputSchema(null))
   );
@@ -428,7 +432,8 @@ function CreateTaskForm({
   const mailReady = schema.prefill !== "mailbox" || mailboxLoad === "ready";
   const schemaOk =
     Boolean(selectedAgent) && schemaValuesValid(schema, values);
-  const createReady = schemaOk && Boolean(resolvedProjectId) && mailReady && catalogReady;
+  const createReady =
+    schemaOk && Boolean(resolvedProjectId) && mailReady && schemaReady;
 
   function setValue(key: string, value: string) {
     const next = { ...values, [key]: value };
@@ -454,6 +459,14 @@ function CreateTaskForm({
     }
     if (!mailReady) {
       setFormError("Loading saved mailbox settings…");
+      return false;
+    }
+    if (!schemaReady) {
+      setFormError(
+        catalogError
+          ? "Could not load this agent's form. Retry."
+          : "Loading agent form…"
+      );
       return false;
     }
     setTouchedSubmit(true);
@@ -575,13 +588,21 @@ function CreateTaskForm({
           )}
         </div>
 
+        {selectedAgent && (
+          <AgentCatalogNotice
+            missing={!schemaReady}
+            isError={catalogError}
+            onRetry={() => void refetchCatalog()}
+          />
+        )}
+
         {selectedAgent && schema.prefill === "mailbox" && mailboxLoad === "loading" && (
           <p className="text-xs text-muted-foreground">
             Loading saved mailbox settings…
           </p>
         )}
 
-        {selectedAgent && (
+        {selectedAgent && schemaReady && (
           <AgentInputFields
             fields={schema.fields}
             values={values}

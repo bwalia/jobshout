@@ -39,7 +39,13 @@ func (s *launchResearch) EnsureResearcher(context.Context, uuid.UUID) (*model.Ag
 }
 func (s *launchResearch) Available() bool { return true }
 
+func restoreModules(t *testing.T) {
+	t.Helper()
+	t.Cleanup(func() { agentmodules.Register(agentmodules.Deps{}) })
+}
+
 func TestEval_ResearchTwoProjectsAsksThenLaunches(t *testing.T) {
+	restoreModules(t)
 	org := uuid.New()
 	researcher := builtinAgent("Research Agent", model.BuiltinResearcher)
 	researcher.OrgID = org
@@ -91,6 +97,7 @@ func TestEval_ResearchTwoProjectsAsksThenLaunches(t *testing.T) {
 }
 
 func TestEval_LaunchInjectsMemoryIntoContext(t *testing.T) {
+	restoreModules(t)
 	org := uuid.New()
 	researcher := builtinAgent("Research Agent", model.BuiltinResearcher)
 	researcher.OrgID = org

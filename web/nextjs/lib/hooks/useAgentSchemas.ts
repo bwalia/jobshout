@@ -11,5 +11,8 @@ export function useAgentSchemas(): UseQueryResult<WireSchema[]> {
     queryKey: agentSchemaKeys.all,
     queryFn: getAgentSchemas,
     staleTime: 5 * 60_000,
+    // Task Manager rail and specialist Run/New-task forms cannot proceed
+    // without this list. Retry more than the app default of 1.
+    retry: 2,
   });
 }
