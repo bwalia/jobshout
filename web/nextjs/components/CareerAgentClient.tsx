@@ -1,117 +1,94 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { CareerJobsPanel } from "@/components/career/CareerJobsPanel";
+import { CareerProfilePanel } from "@/components/career/CareerProfilePanel";
+import type { CareerJDPreview } from "@/components/career/CareerJDDialog";
+import { mergeJobs, type CareerJob } from "@/components/career/jobs";
+import { FieldHintProvider } from "@/components/ui/field-hint";
+import { apiErrorMessage } from "@/lib/api/client";
 import {
-  addCareerBlacklist,
   addCareerPortal,
   careerBatchEvaluate,
   careerCoverLetter,
   careerDoctor,
   careerEmailDraft,
-  careerFollowup,
   careerIntake,
-  careerInterviewPrep,
-  careerOfferPrep,
   careerPatterns,
   careerScan,
-  careerSalaryGap,
   evaluateCareer,
   getCareerEvaluation,
   getCareerProfile,
   listCareerArtifacts,
   listCareerBlacklist,
   listCareerEvaluations,
-  listCareerFollowups,
   listCareerPipeline,
   listCareerPortals,
   listCareerStories,
   listCareerTracker,
   patchCareerProfile,
+  previewCareerListing,
   setCareerStatus,
   tailorCareerCV,
-  upsertCareerStory,
+  downloadCareerPDF,
 } from "@/lib/api/career";
 import type {
-  CareerApplication,
   CareerArtifact,
   CareerBlacklistEntry,
   CareerDoctorReport,
   CareerEvaluation,
-  CareerEvaluateResult,
-  CareerFollowup,
   CareerPatterns,
   CareerPipelineItem,
   CareerPortal,
   CareerProfile,
-  CareerStatus,
   CareerStory,
+  CareerApplication,
 } from "@/types/career";
+import { toast } from "sonner";
 
-type Tab = "today" | "evaluate" | "pipeline" | "tracker" | "profile" | "analytics";
-
-const TABS: { id: Tab; label: string }[] = [
-  { id: "today", label: "Today" },
-  { id: "evaluate", label: "Evaluate" },
-  { id: "pipeline", label: "Pipeline" },
-  { id: "tracker", label: "Tracker" },
-  { id: "profile", label: "Profile" },
-  { id: "analytics", label: "Analytics" },
-];
-
-const STATUSES: CareerStatus[] = [
-  "evaluated",
-  "applied",
-  "responded",
-  "interview",
-  "offer",
-  "rejected",
-  "discarded",
-  "skip",
-  "hired",
-];
+type Screen = "profile" | "jobs";
 
 export function CareerAgentClient() {
   const search = useSearchParams();
-  const [tab, setTab] = useState<Tab>("today");
+  const [screen, setScreen] = useState<Screen>("profile");
+  const [landed, setLanded] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [savedFlash, setSavedFlash] = useState(false);
 
   const [profile, setProfile] = useState<CareerProfile | null>(null);
   const [doctor, setDoctor] = useState<CareerDoctorReport | null>(null);
   const [evals, setEvals] = useState<CareerEvaluation[]>([]);
-  const [selected, setSelected] = useState<CareerEvaluation | null>(null);
   const [pipeline, setPipeline] = useState<CareerPipelineItem[]>([]);
   const [tracker, setTracker] = useState<CareerApplication[]>([]);
   const [portals, setPortals] = useState<CareerPortal[]>([]);
   const [blacklist, setBlacklist] = useState<CareerBlacklistEntry[]>([]);
   const [stories, setStories] = useState<CareerStory[]>([]);
-  const [followups, setFollowups] = useState<CareerFollowup[]>([]);
   const [patterns, setPatterns] = useState<CareerPatterns | null>(null);
   const [artifacts, setArtifacts] = useState<CareerArtifact[]>([]);
   const [draftNote, setDraftNote] = useState("");
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
   const [jobUrl, setJobUrl] = useState("");
   const [jdText, setJdText] = useState("");
-  const [mode, setMode] = useState("full");
-  const [tailor, setTailor] = useState(false);
-  const [lastResult, setLastResult] = useState<CareerEvaluateResult | null>(null);
-
   const [cvDraft, setCvDraft] = useState("");
   const [fullName, setFullName] = useState("");
   const [sponsorship, setSponsorship] = useState(false);
-  const [intakeText, setIntakeText] = useState("");
   const [titles, setTitles] = useState("");
   const [minComp, setMinComp] = useState("");
   const [houseRules, setHouseRules] = useState("");
-  const [storyTitle, setStoryTitle] = useState("");
-  const [storySit, setStorySit] = useState("");
-
-  const [scanBoard, setScanBoard] = useState("greenhouse");
+  const [scanBoard, setScanBoard] = useState("all");
   const [scanSlug, setScanSlug] = useState("");
+  const [jdPreview, setJdPreview] = useState<CareerJDPreview | null>(null);
+
+  const jobs = useMemo(() => mergeJobs(pipeline, tracker, evals), [pipeline, tracker, evals]);
+  const selected = jobs.find((j) => j.key === selectedKey) ?? null;
+  const hasCV = Boolean(profile?.cv_markdown?.trim() || cvDraft.trim());
 
   const loadAll = useCallback(async () => {
-    const [p, d, e, pipe, apps, ports, bl, st, fu, pat] = await Promise.all([
+    const [p, d, e, pipe, apps, ports, bl, st, pat] = await Promise.all([
       getCareerProfile(),
       careerDoctor(),
       listCareerEvaluations(),
@@ -120,7 +97,6 @@ export function CareerAgentClient() {
       listCareerPortals(),
       listCareerBlacklist(),
       listCareerStories(),
-      listCareerFollowups(),
       careerPatterns(),
     ]);
     setProfile(p);
@@ -137,8 +113,8 @@ export function CareerAgentClient() {
     setPortals(ports ?? []);
     setBlacklist(bl ?? []);
     setStories(st ?? []);
-    setFollowups(fu ?? []);
     setPatterns(pat);
+    return d;
   }, []);
 
   useEffect(() => {
@@ -152,88 +128,41 @@ export function CareerAgentClient() {
   }, [loadAll]);
 
   useEffect(() => {
+    if (!doctor || landed) return;
+    setScreen(doctor.ok ? "jobs" : "profile");
+    setLanded(true);
+  }, [doctor, landed]);
+
+  useEffect(() => {
     const evalId = search.get("eval");
     if (!evalId) return;
     void getCareerEvaluation(evalId)
       .then((ev) => {
-        setSelected(ev);
-        setTab("evaluate");
+        setSelectedKey(ev.listing_url || `eval:${ev.id}`);
+        setScreen("jobs");
       })
       .catch(() => undefined);
   }, [search]);
 
-  async function runEvaluate(confirmBlacklist = false) {
-    setBusy(true);
-    setError("");
-    try {
-      const res = await evaluateCareer({
-        job_url: jobUrl.trim() || undefined,
-        jd_text: jdText.trim() || undefined,
-        mode,
-        tailor_cv: tailor,
-        confirm_blacklist: confirmBlacklist,
-      });
-      setLastResult(res);
-      if (res.dead) {
-        setError(res.dead_reason || "That posting looks closed.");
-        return;
-      }
-      if (res.blacklist_hit && !confirmBlacklist) {
-        return;
-      }
-      if (res.evaluation) {
-        setSelected(res.evaluation);
-        if (res.artifacts) setArtifacts(res.artifacts);
-        await loadAll();
-      }
-    } catch (e: unknown) {
-      setError(apiErr(e, "Evaluation failed."));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function loadArtifacts(applicationId?: string | null) {
+  useEffect(() => {
+    const applicationId = selected?.application?.id || selected?.evaluation?.application_id;
     if (!applicationId) {
       setArtifacts([]);
       return;
     }
-    try {
-      setArtifacts(await listCareerArtifacts(applicationId));
-    } catch {
-      setArtifacts([]);
-    }
-  }
-
-  useEffect(() => {
-    void loadArtifacts(selected?.application_id);
-  }, [selected?.application_id]);
-
-  async function runDraft(
-    fn: () => Promise<CareerArtifact>,
-    ok = "Draft saved. A human submits or sends."
-  ) {
-    if (!selected) return;
-    setBusy(true);
-    setError("");
-    setDraftNote("");
-    try {
-      await fn();
-      await loadArtifacts(selected.application_id);
-      setDraftNote(ok);
-    } catch (e: unknown) {
-      setError(apiErr(e, "Could not draft."));
-    } finally {
-      setBusy(false);
-    }
-  }
+    void listCareerArtifacts(applicationId)
+      .then(setArtifacts)
+      .catch(() => setArtifacts([]));
+  }, [selected?.application?.id, selected?.evaluation?.application_id]);
 
   async function saveProfile() {
     setBusy(true);
+    setSaving(true);
+    setSavedFlash(false);
     setError("");
     try {
       const p = await patchCareerProfile({
-        cv_markdown: cvDraft,
+        ...(cvDraft.trim() ? { cv_markdown: cvDraft } : {}),
         identity: { ...(profile?.identity ?? {}), full_name: fullName },
         work_auth: { ...(profile?.work_auth ?? {}), needs_sponsorship: sponsorship },
         targets: {
@@ -247,712 +176,445 @@ export function CareerAgentClient() {
         house_rules: houseRules,
       });
       setProfile(p);
-      await loadAll();
+      const d = await loadAll();
+      setSavedFlash(true);
+      toast.success("Profile saved.");
+      window.setTimeout(() => setSavedFlash(false), 2500);
+      if (d.ok) {
+        toast.message("Profile is ready. Open Jobs to scan or paste a posting.");
+      }
     } catch (e: unknown) {
-      setError(apiErr(e, "Could not save profile."));
+      const msg = apiErrorMessage(e, "Could not save profile.");
+      setError(msg);
+      toast.error(msg);
     } finally {
       setBusy(false);
+      setSaving(false);
     }
   }
 
-  async function runIntake() {
+  async function fillFromCV() {
+    if (!cvDraft.trim()) {
+      toast.error("Upload a PDF CV first.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
-      const prop = await careerIntake(intakeText);
-      if (prop.patch.cv_markdown) setCvDraft(prop.patch.cv_markdown);
-      if (prop.patch.identity?.full_name) setFullName(prop.patch.identity.full_name);
-      setTab("profile");
+      const prop = await careerIntake(cvDraft);
+      const name = prop.patch?.identity?.full_name?.trim() ?? "";
+      const email = prop.patch?.identity?.email?.trim() ?? "";
+      if (name) setFullName(name);
+      if (email) {
+        setProfile((prev) =>
+          prev ? { ...prev, identity: { ...prev.identity, email } } : prev
+        );
+      }
+      if (name || email) {
+        toast.success(
+          `Filled ${[name && "name", email && "email"].filter(Boolean).join(" and ")} from the CV. Click Save profile to keep it.`
+        );
+      } else {
+        toast.message("Couldn't pick a name from the top of the CV. Type it in Name, then Save profile.");
+      }
     } catch (e: unknown) {
-      setError(apiErr(e, "Intake failed."));
+      const msg = apiErrorMessage(e, "Could not read the CV.");
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runEvaluate(opts: {
+    job_url?: string;
+    jd_text?: string;
+    tailor_cv?: boolean;
+    confirm_blacklist?: boolean;
+  }) {
+    setBusy(true);
+    setError("");
+    try {
+      const res = await evaluateCareer({
+        job_url: opts.job_url?.trim() || undefined,
+        jd_text: opts.jd_text?.trim() || undefined,
+        mode: "full",
+        tailor_cv: !!opts.tailor_cv,
+        confirm_blacklist: !!opts.confirm_blacklist,
+      });
+      if (res.dead) {
+        const msg = res.dead_reason || "That posting looks closed.";
+        setError(msg);
+        toast.error(msg);
+        return res;
+      }
+      if (res.blacklist_hit && !opts.confirm_blacklist) {
+        const label = res.blacklist_hit.company || res.blacklist_hit.domain;
+        toast.message(`${label} is on your blacklist. Confirm to score it anyway.`);
+        const ok = window.confirm(`Score ${label} anyway?`);
+        if (ok) {
+          return runEvaluate({ ...opts, confirm_blacklist: true });
+        }
+        return res;
+      }
+      if (res.evaluation) {
+        const url = res.evaluation.listing_url?.trim();
+        const key = url
+          ? url
+          : res.evaluation.application_id
+            ? `app:${res.evaluation.application_id}`
+            : `eval:${res.evaluation.id}`;
+        setSelectedKey(key);
+        if (res.artifacts) setArtifacts(res.artifacts);
+        await loadAll();
+      }
+      return res;
+    } catch (e: unknown) {
+      const msg = apiErrorMessage(e, "Could not score that job.");
+      setError(msg);
+      toast.error(msg);
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function addJob() {
+    await runEvaluate({ job_url: jobUrl, jd_text: jdText });
+  }
+
+  async function scoreSelected() {
+    if (!selected) return;
+    await runEvaluate({
+      job_url: selected.listing_url,
+      jd_text: selected.evaluation?.jd_text,
+    });
+  }
+
+  async function scoreJobs(picked: CareerJob[]) {
+    const urls = [...new Set(picked.map((j) => j.listing_url.trim()).filter(Boolean))];
+    const pasteOnly = picked.filter((j) => !j.listing_url.trim() && j.evaluation?.jd_text?.trim());
+    if (urls.length === 0 && pasteOnly.length === 0) {
+      toast.message("Tick jobs that have a posting URL, then Score selected.");
+      return;
+    }
+    if (urls.length > 8) {
+      toast.message("Scoring the first 8 selected jobs. Tick fewer to choose which.");
+    }
+    setBusy(true);
+    setError("");
+    try {
+      let evaluated = 0;
+      if (urls.length > 0) {
+        const out = await careerBatchEvaluate({ limit: Math.min(urls.length, 8), urls: urls.slice(0, 8) });
+        evaluated += out.evaluated ?? 0;
+      }
+      for (const job of pasteOnly) {
+        const res = await evaluateCareer({
+          jd_text: job.evaluation?.jd_text,
+          mode: "full",
+        });
+        if (res.evaluation) evaluated += 1;
+      }
+      await loadAll();
+      toast.success(
+        evaluated > 0
+          ? `Scored ${evaluated} job${evaluated === 1 ? "" : "s"}. Open a row for the report.`
+          : "No jobs could be scored (closed, blacklist, or fetch failed)."
+      );
+    } catch (e: unknown) {
+      const msg = apiErrorMessage(e, "Could not score the selected jobs.");
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function seeJD(job: CareerJob) {
+    setSelectedKey(job.key);
+    const cached = job.evaluation?.jd_text?.trim() ?? "";
+    setJdPreview({
+      title: job.role || "Job description",
+      company: job.company || "",
+      url: job.listing_url,
+      text: cached,
+      loading: !cached && !!job.listing_url.trim(),
+      error: "",
+    });
+    if (cached || !job.listing_url.trim()) {
+      if (!cached) {
+        setJdPreview({
+          title: job.role || "Job description",
+          company: job.company || "",
+          url: job.listing_url,
+          text: "",
+          loading: false,
+          error: "No job description stored for this row yet.",
+        });
+      }
+      return;
+    }
+    try {
+      const listing = await previewCareerListing(job.listing_url);
+      setJdPreview({
+        title: listing.title || job.role || "Job description",
+        company: listing.company || job.company || "",
+        url: listing.url || job.listing_url,
+        text: listing.jd_text,
+        loading: false,
+        error: listing.jd_text
+          ? ""
+          : listing.dead_reason || "Could not load the JD. Use Go to posting to read it on the site.",
+      });
+    } catch (e: unknown) {
+      setJdPreview({
+        title: job.role || "Job description",
+        company: job.company || "",
+        url: job.listing_url,
+        text: "",
+        loading: false,
+        error: apiErrorMessage(e, "Could not load the JD. Use Go to posting to read it on the site."),
+      });
+    }
+  }
+
+  async function tailorSelected() {
+    if (!selected) return;
+    setError("");
+    setDraftNote("");
+    if (!selected.evaluation) {
+      const res = await runEvaluate({
+        job_url: selected.listing_url,
+        jd_text: undefined,
+        tailor_cv: true,
+      });
+      const art = res?.artifacts?.find((a) => a.kind === "cv");
+      if (art) {
+        const downloaded = downloadCareerPDF(art);
+        setDraftNote(
+          downloaded
+            ? "Tailored CV PDF downloaded. A human submits it."
+            : "Tailored CV ready. Layout kept. A human submits."
+        );
+        toast.success(downloaded ? "Tailored CV downloaded." : "Tailored CV ready.");
+      }
+      return;
+    }
+    setBusy(true);
+    try {
+      const art = await tailorCareerCV(selected.evaluation.id);
+      setArtifacts((prev) => [art, ...prev.filter((a) => a.id !== art.id)]);
+      const downloaded = downloadCareerPDF(art);
+      setDraftNote(
+        downloaded
+          ? "Tailored CV PDF downloaded. A human submits it."
+          : "Tailored CV ready. Layout kept. A human submits."
+      );
+      toast.success(downloaded ? "Tailored CV downloaded." : "Tailored CV ready.");
+    } catch (e: unknown) {
+      const msg = apiErrorMessage(e, "Could not tailor the CV.");
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function draftFromEval(
+    fn: (id: string) => Promise<CareerArtifact>,
+    ok: string
+  ) {
+    const id = selected?.evaluation?.id;
+    if (!id) {
+      toast.message("Score this job first.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const art = await fn(id);
+      setArtifacts((prev) => [art, ...prev.filter((a) => a.id !== art.id)]);
+      setDraftNote(ok);
+      toast.success(ok);
+    } catch (e: unknown) {
+      const msg = apiErrorMessage(e, "Could not draft.");
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function markApplied() {
+    const id = selected?.application?.id;
+    if (!id) {
+      toast.message("Score this job first so it is on your tracker.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await setCareerStatus(id, "applied", "marked applied by hand");
+      await loadAll();
+      toast.success("Marked as applied. Nothing was submitted for you.");
+    } catch (e: unknown) {
+      const msg = apiErrorMessage(e, "Could not update status.");
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function scan(allCompanies: boolean) {
+    setBusy(true);
+    setError("");
+    try {
+      const out = (await careerScan(
+        allCompanies
+          ? { board: "all" }
+          : { board: scanBoard || "all", slug: scanSlug.trim() }
+      )) as { run?: { added?: number } };
+      await loadAll();
+      const added = out.run?.added ?? 0;
+      toast.success(
+        added > 0
+          ? `Scan finished. ${added} new job${added === 1 ? "" : "s"}. Open a row to score or tailor.`
+          : "Scan finished. No new jobs (already seen, title filter, or empty boards)."
+      );
+    } catch (e: unknown) {
+      const msg = apiErrorMessage(e, "Scan failed.");
+      setError(msg);
+      toast.error(msg);
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap gap-1 border-b border-border">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => setTab(t.id)}
-            className={`px-3 py-2 text-sm font-medium ${
-              tab === t.id
-                ? "border-b-2 border-primary text-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {error && (
-        <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {error}
-        </p>
-      )}
-
-      {tab === "today" && (
-        <div className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            Career Agent evaluates roles against your profile, drafts materials, and
-            tracks the pipeline. A person always submits, sends, or clicks Apply.
-          </p>
-          {doctor && (
-            <div className="rounded-md border border-border p-3 text-sm">
-              <p className="font-medium">{doctor.ok ? "Profile looks healthy" : "Profile needs attention"}</p>
-              <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
-                {doctor.warnings.map((w) => (
-                  <li key={w}>{w}</li>
-                ))}
-                {doctor.info.map((w) => (
-                  <li key={w}>{w}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-          <div>
-            <h3 className="mb-2 text-sm font-medium">Recent evaluations</h3>
-            {evals.length === 0 ? (
-              <p className="text-sm text-muted-foreground">None yet. Paste a JD on Evaluate.</p>
-            ) : (
-              <ul className="space-y-1">
-                {evals.slice(0, 8).map((e) => (
-                  <li key={e.id}>
-                    <button
-                      type="button"
-                      className="text-left text-sm hover:underline"
-                      onClick={() => {
-                        setSelected(e);
-                        setTab("evaluate");
-                      }}
-                    >
-                      {e.role || "Role"} — {e.company || "Company"}{" "}
-                      <span className="text-muted-foreground">
-                        {e.score?.overall?.toFixed(1)} / 5
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </div>
-      )}
-
-      {tab === "evaluate" && (
-        <div className="grid gap-6 lg:grid-cols-2">
-          <form
-            className="space-y-3"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void runEvaluate(false);
-            }}
-          >
-            <label className="block text-sm font-medium">
-              Job URL
-              <input
-                value={jobUrl}
-                onChange={(e) => setJobUrl(e.target.value)}
-                placeholder="https://boards.greenhouse.io/…"
-                className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              />
-            </label>
-            <label className="block text-sm font-medium">
-              Or paste the job description
-              <textarea
-                value={jdText}
-                onChange={(e) => setJdText(e.target.value)}
-                rows={10}
-                className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                placeholder="Paste the JD. It is treated as untrusted data."
-              />
-            </label>
-            <div className="flex flex-wrap items-center gap-3 text-sm">
-              <label className="flex items-center gap-2">
-                Mode
-                <select
-                  value={mode}
-                  onChange={(e) => setMode(e.target.value)}
-                  className="rounded-md border border-input bg-background px-2 py-1"
-                >
-                  <option value="full">Full</option>
-                  <option value="triage">Triage</option>
-                </select>
-              </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={tailor}
-                  onChange={(e) => setTailor(e.target.checked)}
-                />
-                Tailor CV if score ≥ 4.0
-              </label>
-            </div>
-            <button
-              type="submit"
-              disabled={busy || (!jobUrl.trim() && !jdText.trim())}
-              className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-            >
-              {busy ? "Evaluating…" : "Evaluate"}
-            </button>
-            {lastResult?.blacklist_hit && (
-              <div className="rounded-md border border-signal-warn/40 p-3 text-sm">
-                <p>
-                  {lastResult.blacklist_hit.company || lastResult.blacklist_hit.domain}{" "}
-                  is on your blacklist
-                  {lastResult.blacklist_hit.reason
-                    ? ` (${lastResult.blacklist_hit.reason})`
-                    : ""}
-                  . Evaluate anyway?
-                </p>
-                <button
-                  type="button"
-                  className="mt-2 rounded-md border border-border px-3 py-1"
-                  onClick={() => void runEvaluate(true)}
-                >
-                  Yes, evaluate
-                </button>
-              </div>
-            )}
-          </form>
-          <div className="min-h-0 overflow-y-auto rounded-md border border-border p-4 text-sm">
-            {selected ? (
-              <div className="space-y-3">
-                <article className="prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap">
-                  {selected.report_markdown || `${selected.role} — ${selected.score?.overall} / 5`}
-                </article>
-                <p className="text-xs text-muted-foreground">
-                  Drafts only. A person always submits, sends, or clicks Apply.
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    className="rounded-md border border-border px-2 py-1 text-xs"
-                    disabled={busy}
-                    onClick={() => void runDraft(() => careerCoverLetter(selected.id))}
-                  >
-                    Cover letter
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-md border border-border px-2 py-1 text-xs"
-                    disabled={busy}
-                    onClick={() => void runDraft(() => tailorCareerCV(selected.id))}
-                  >
-                    Tailor CV
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-md border border-border px-2 py-1 text-xs"
-                    disabled={busy}
-                    onClick={() => void runDraft(() => careerEmailDraft(selected.id))}
-                  >
-                    Email draft
-                  </button>
-                </div>
-                {draftNote && <p className="text-xs text-muted-foreground">{draftNote}</p>}
-                {artifacts.length > 0 && (
-                  <ul className="space-y-2 border-t border-border pt-2">
-                    {artifacts.map((a) => (
-                      <li key={a.id}>
-                        <p className="text-xs font-medium">
-                          {a.kind} — {a.title || "draft"}
-                        </p>
-                        <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-muted/40 p-2 text-xs">
-                          {a.body_markdown}
-                        </pre>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            ) : (
-              <p className="text-muted-foreground">
-                The A–H report appears here. Score below 4.0 means do not apply.
-                Block G never changes the score. Nothing is submitted for you.
-              </p>
-            )}
-          </div>
-        </div>
-      )}
-
-      {tab === "pipeline" && (
-        <div className="space-y-4">
-          <form
-            className="flex flex-wrap items-end gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void (async () => {
-                setBusy(true);
-                setError("");
-                try {
-                  await careerScan({ board: scanBoard, slug: scanSlug });
-                  await loadAll();
-                } catch (err: unknown) {
-                  setError(apiErr(err, "Scan failed."));
-                } finally {
-                  setBusy(false);
-                }
-              })();
-            }}
-          >
-            <label className="text-sm">
-              Board
-              <select
-                value={scanBoard}
-                onChange={(e) => setScanBoard(e.target.value)}
-                className="ml-2 rounded-md border border-input bg-background px-2 py-1"
+    <FieldHintProvider>
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <ol className="flex items-center gap-1 text-sm" aria-label="Career steps">
+            <li>
+              <button
+                type="button"
+                onClick={() => setScreen("profile")}
+                className={`rounded-md px-3 py-1.5 ${
+                  screen === "profile"
+                    ? "bg-primary text-primary-foreground"
+                    : "border border-border text-muted-foreground hover:text-foreground"
+                }`}
               >
-                <option value="greenhouse">Greenhouse</option>
-                <option value="ashby">Ashby</option>
-                <option value="lever">Lever</option>
-              </select>
-            </label>
-            <label className="text-sm">
-              Slug
-              <input
-                value={scanSlug}
-                onChange={(e) => setScanSlug(e.target.value)}
-                className="ml-2 rounded-md border border-input bg-background px-2 py-1"
-                placeholder="company-board"
-              />
-            </label>
-            <button
-              type="submit"
-              disabled={busy || !scanSlug.trim()}
-              className="rounded-md border border-border px-3 py-1.5 text-sm"
-            >
-              Scan into pipeline
-            </button>
-            <button
-              type="button"
-              className="rounded-md border border-border px-3 py-1.5 text-sm"
-              onClick={() => {
-                if (!scanSlug.trim()) return;
-                void addCareerPortal({ board: scanBoard, slug: scanSlug }).then(loadAll);
-              }}
-            >
-              Save portal
-            </button>
-            <button
-              type="button"
-              className="rounded-md border border-border px-3 py-1.5 text-sm"
-              disabled={busy}
-              onClick={() => {
-                void (async () => {
-                  setBusy(true);
-                  setError("");
-                  try {
-                    await careerBatchEvaluate();
-                    await loadAll();
-                  } catch (err: unknown) {
-                    setError(apiErr(err, "Batch evaluate failed."));
-                  } finally {
-                    setBusy(false);
-                  }
-                })();
-              }}
-            >
-              Triage open pipeline
-            </button>
-          </form>
-          {portals.length > 0 && (
-            <p className="text-xs text-muted-foreground">
-              Saved portals: {portals.map((p) => `${p.board}:${p.slug}`).join(", ")}
-            </p>
-          )}
-          {pipeline.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Pipeline is empty.</p>
-          ) : (
-            <ul className="divide-y divide-border rounded-md border border-border text-sm">
-              {pipeline.map((it) => (
-                <li key={it.id} className="flex items-center justify-between gap-2 px-3 py-2">
-                  <div className="min-w-0">
-                    <p className="truncate font-medium">{it.title || it.listing_url}</p>
-                    <p className="text-muted-foreground">
-                      {it.company} · {it.source} · {it.liveness}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    className="shrink-0 text-xs underline"
-                    onClick={() => {
-                      setJobUrl(it.listing_url);
-                      setTab("evaluate");
-                    }}
-                  >
-                    Evaluate
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-
-      {tab === "tracker" && (
-        <div className="space-y-3">
-          {tracker.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No applications yet.</p>
-          ) : (
-            <ul className="divide-y divide-border rounded-md border border-border text-sm">
-              {tracker.map((a) => (
-                <li key={a.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
-                  <div>
-                    <p className="font-medium">
-                      {a.role} — {a.company}
-                    </p>
-                    <p className="text-muted-foreground">
-                      {a.score != null ? `${a.score.toFixed(1)} / 5` : "unscored"} · {a.status}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <select
-                      value={a.status}
-                      onChange={(e) => {
-                        void setCareerStatus(a.id, e.target.value)
-                          .then(loadAll)
-                          .catch((err) => {
-                            setError(apiErr(err, "Could not change status."));
-                          });
-                      }}
-                      className="rounded-md border border-input bg-background px-2 py-1 text-xs"
-                    >
-                      {STATUSES.map((s) => (
-                        <option key={s} value={s}>
-                          {s}
-                        </option>
-                      ))}
-                    </select>
-                    <TrackerActions
-                      app={a}
-                      busy={busy}
-                      onNote={setDraftNote}
-                      onError={(msg) => setError(msg)}
-                      onBusy={setBusy}
-                    />
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-          {draftNote && tab === "tracker" && (
-            <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-md border border-border p-3 text-xs">
-              {draftNote}
-            </pre>
-          )}
-          {followups.length > 0 && (
-            <div>
-              <h3 className="mb-1 text-sm font-medium">Follow-ups (draft, not sent)</h3>
-              <ul className="text-sm text-muted-foreground">
-                {followups.map((f) => (
-                  <li key={f.id}>
-                    {new Date(f.due_at).toLocaleDateString()} — {f.draft}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-      )}
-
-      {tab === "profile" && (
-        <div className="space-y-4">
-          <label className="block text-sm font-medium">
-            Name
-            <input
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              className="mt-1 w-full max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm"
-            />
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={sponsorship}
-              onChange={(e) => setSponsorship(e.target.checked)}
-            />
-            I need visa sponsorship
-          </label>
-          <label className="block text-sm font-medium">
-            Target titles (comma-separated)
-            <input
-              value={titles}
-              onChange={(e) => setTitles(e.target.value)}
-              className="mt-1 w-full max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm"
-              placeholder="Head of AI, Staff engineer"
-            />
-          </label>
-          <label className="block text-sm font-medium">
-            Target compensation
-            <input
-              value={minComp}
-              onChange={(e) => setMinComp(e.target.value)}
-              className="mt-1 w-full max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm"
-              placeholder="£180k+"
-            />
-          </label>
-          <label className="block text-sm font-medium">
-            House rules
-            <textarea
-              value={houseRules}
-              onChange={(e) => setHouseRules(e.target.value)}
-              rows={3}
-              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              placeholder="Scoring overrides. Floors cannot drop below 4.0 / 4.5."
-            />
-          </label>
-          <label className="block text-sm font-medium">
-            CV (markdown — source of truth)
-            <textarea
-              value={cvDraft}
-              onChange={(e) => setCvDraft(e.target.value)}
-              rows={14}
-              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm"
-            />
-          </label>
-          <button
-            type="button"
-            onClick={() => void saveProfile()}
-            disabled={busy}
-            className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground"
-          >
-            Save profile
-          </button>
-          <div className="border-t border-border pt-4">
-            <p className="mb-2 text-sm font-medium">Intake (propose, then save)</p>
-            <textarea
-              value={intakeText}
-              onChange={(e) => setIntakeText(e.target.value)}
-              rows={6}
-              placeholder="Paste a CV or LinkedIn export. Nothing is written until you Save profile."
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-            />
-            <button
-              type="button"
-              className="mt-2 rounded-md border border-border px-3 py-1.5 text-sm"
-              onClick={() => void runIntake()}
-              disabled={busy || !intakeText.trim()}
-            >
-              Propose from document
-            </button>
-          </div>
-          <div className="border-t border-border pt-4">
-            <p className="mb-2 text-sm font-medium">Blacklist</p>
-            <ul className="mb-2 text-sm text-muted-foreground">
-              {blacklist.length === 0 ? (
-                <li>Empty — evaluate will never skip a company silently.</li>
-              ) : (
-                blacklist.map((b) => (
-                  <li key={b.id}>
-                    {b.company || b.domain}
-                    {b.reason ? ` — ${b.reason}` : ""}
-                  </li>
-                ))
-              )}
-            </ul>
-            <BlacklistForm
-              onAdd={async (company, reason) => {
-                await addCareerBlacklist({ company, reason });
-                await loadAll();
-              }}
-            />
-          </div>
-          <div className="border-t border-border pt-4">
-            <p className="mb-2 text-sm font-medium">Story bank (STAR+R)</p>
-            {stories.length === 0 ? (
-              <p className="mb-2 text-sm text-muted-foreground">
-                Empty. High-score evaluations add derived-unverified plans you should confirm.
-              </p>
-            ) : (
-              <ul className="mb-2 space-y-1 text-sm text-muted-foreground">
-                {stories.map((s) => (
-                  <li key={s.id}>
-                    {s.title} <span className="text-xs">({s.provenance})</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <form
-              className="flex flex-wrap gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (!storyTitle.trim()) return;
-                void upsertCareerStory({
-                  title: storyTitle,
-                  situation: storySit,
-                  provenance: "user_stated",
-                })
-                  .then(() => {
-                    setStoryTitle("");
-                    setStorySit("");
-                    return loadAll();
-                  })
-                  .catch((err) => setError(apiErr(err, "Could not save story.")));
-              }}
-            >
-              <input
-                value={storyTitle}
-                onChange={(e) => setStoryTitle(e.target.value)}
-                placeholder="Story title"
-                className="rounded-md border border-input bg-background px-2 py-1 text-sm"
-              />
-              <input
-                value={storySit}
-                onChange={(e) => setStorySit(e.target.value)}
-                placeholder="Situation"
-                className="min-w-[12rem] flex-1 rounded-md border border-input bg-background px-2 py-1 text-sm"
-              />
-              <button type="submit" className="rounded-md border border-border px-2 py-1 text-sm">
-                Add story
+                1. Profile
               </button>
-            </form>
-          </div>
+            </li>
+            <li className="text-muted-foreground" aria-hidden>
+              →
+            </li>
+            <li>
+              <button
+                type="button"
+                onClick={() => setScreen("jobs")}
+                className={`rounded-md px-3 py-1.5 ${
+                  screen === "jobs"
+                    ? "bg-primary text-primary-foreground"
+                    : "border border-border text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                2. Jobs
+              </button>
+            </li>
+          </ol>
         </div>
-      )}
 
-      {tab === "analytics" && (
-        <div className="space-y-3 text-sm">
-          {!patterns ? (
-            <p className="text-muted-foreground">No tracker data yet.</p>
-          ) : (
-            <>
-              <p>
-                {patterns.applications} applications
-                {patterns.avg_score
-                  ? ` · average score ${patterns.avg_score.toFixed(1)} / 5`
-                  : ""}
-              </p>
-              <ul className="text-muted-foreground">
-                {Object.entries(patterns.by_status ?? {}).map(([k, v]) => (
-                  <li key={k}>
-                    {k}: {v}
-                  </li>
-                ))}
-              </ul>
-              {patterns.skill_gaps && patterns.skill_gaps.length > 0 && (
-                <div>
-                  <p className="font-medium">Skill-gap tokens from sub-4.0 JDs</p>
-                  <p className="text-muted-foreground">{patterns.skill_gaps.join(", ")}</p>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
+        {error && (
+          <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {error}
+          </p>
+        )}
 
-function TrackerActions({
-  app,
-  busy,
-  onNote,
-  onError,
-  onBusy,
-}: {
-  app: CareerApplication;
-  busy: boolean;
-  onNote: (s: string) => void;
-  onError: (s: string) => void;
-  onBusy: (b: boolean) => void;
-}) {
-  async function run(label: string, fn: () => Promise<{ prep_markdown?: string; draft?: string; note?: string }>) {
-    onBusy(true);
-    try {
-      const out = await fn();
-      onNote(out.prep_markdown || out.draft || out.note || `${label} ready. Draft only.`);
-    } catch (e: unknown) {
-      onError(apiErr(e, `${label} failed.`));
-    } finally {
-      onBusy(false);
-    }
-  }
-  return (
-    <>
-      <button
-        type="button"
-        className="text-xs underline"
-        disabled={busy}
-        onClick={() => void run("Follow-up", () => careerFollowup(app.id))}
-      >
-        Follow-up
-      </button>
-      <button
-        type="button"
-        className="text-xs underline"
-        disabled={busy}
-        onClick={() => void run("Interview prep", () => careerInterviewPrep(app.id))}
-      >
-        Prep
-      </button>
-      {app.status === "offer" && (
-        <>
-          <button
-            type="button"
-            className="text-xs underline"
-            disabled={busy}
-            onClick={() => void run("Offer prep", () => careerOfferPrep(app.id))}
-          >
-            Offer walk
-          </button>
-          <button
-            type="button"
-            className="text-xs underline"
-            disabled={busy}
-            onClick={() => void run("Salary gap", () => careerSalaryGap(app.id))}
-          >
-            Salary gap
-          </button>
-        </>
-      )}
-    </>
-  );
-}
+        {screen === "profile" && (
+          <CareerProfilePanel
+            cvDraft={cvDraft}
+            setCvDraft={setCvDraft}
+            fullName={fullName}
+            setFullName={setFullName}
+            sponsorship={sponsorship}
+            setSponsorship={setSponsorship}
+            titles={titles}
+            setTitles={setTitles}
+            minComp={minComp}
+            setMinComp={setMinComp}
+            houseRules={houseRules}
+            setHouseRules={setHouseRules}
+            blacklist={blacklist}
+            stories={stories}
+            busy={busy}
+            saving={saving}
+            savedFlash={savedFlash}
+            onSave={() => void saveProfile()}
+            onFillFromCV={() => void fillFromCV()}
+            onReload={async () => {
+              await loadAll();
+            }}
+            onError={setError}
+          />
+        )}
 
-function BlacklistForm({
-  onAdd,
-}: {
-  onAdd: (company: string, reason: string) => Promise<void>;
-}) {
-  const [company, setCompany] = useState("");
-  const [reason, setReason] = useState("");
-  return (
-    <form
-      className="flex flex-wrap gap-2"
-      onSubmit={(e) => {
-        e.preventDefault();
-        void onAdd(company, reason).then(() => {
-          setCompany("");
-          setReason("");
-        });
-      }}
-    >
-      <input
-        value={company}
-        onChange={(e) => setCompany(e.target.value)}
-        placeholder="Company"
-        className="rounded-md border border-input bg-background px-2 py-1 text-sm"
-      />
-      <input
-        value={reason}
-        onChange={(e) => setReason(e.target.value)}
-        placeholder="Reason"
-        className="rounded-md border border-input bg-background px-2 py-1 text-sm"
-      />
-      <button type="submit" className="rounded-md border border-border px-2 py-1 text-sm">
-        Add
-      </button>
-    </form>
-  );
-}
-
-function apiErr(e: unknown, fallback: string): string {
-  return (
-    (e as { response?: { data?: { error?: string } } })?.response?.data?.error ?? fallback
+        {screen === "jobs" && (
+          <CareerJobsPanel
+            doctor={doctor}
+            jobs={jobs}
+            selected={selected}
+            onSelect={(job) => {
+              setSelectedKey(job.key);
+              setDraftNote("");
+            }}
+            artifacts={artifacts}
+            draftNote={draftNote}
+            busy={busy}
+            hasCV={hasCV}
+            jobUrl={jobUrl}
+            setJobUrl={setJobUrl}
+            jdText={jdText}
+            setJdText={setJdText}
+            onAddJob={() => void addJob()}
+            scanBoard={scanBoard}
+            setScanBoard={setScanBoard}
+            scanSlug={scanSlug}
+            setScanSlug={setScanSlug}
+            portals={portals}
+            onScanAll={() => void scan(true)}
+            onScanOne={() => void scan(false)}
+            onSavePortal={() => {
+              if (!scanSlug.trim() || scanBoard === "all") return;
+              void addCareerPortal({ board: scanBoard, slug: scanSlug })
+                .then(loadAll)
+                .then(() => toast.success("Board saved."))
+                .catch((e) => {
+                  const msg = apiErrorMessage(e, "Could not save board.");
+                  setError(msg);
+                  toast.error(msg);
+                });
+            }}
+            patterns={patterns}
+            onScore={() => void scoreSelected()}
+            onScoreSelected={(picked) => void scoreJobs(picked)}
+            onTailor={() => void tailorSelected()}
+            onCover={() =>
+              void draftFromEval(careerCoverLetter, "Cover letter draft ready. A human sends it.")
+            }
+            onEmail={() =>
+              void draftFromEval(careerEmailDraft, "Email draft ready. A human sends it.")
+            }
+            onApplied={() => void markApplied()}
+            onSeeJD={(job) => void seeJD(job)}
+            jdPreview={jdPreview}
+            onCloseJD={() => setJdPreview(null)}
+          />
+        )}
+      </div>
+    </FieldHintProvider>
   );
 }

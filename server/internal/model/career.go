@@ -202,6 +202,9 @@ type CareerArtifact struct {
 	BodyMarkdown  string     `json:"body_markdown"`
 	FileID        string     `json:"file_id,omitempty"`
 	HasPDF        bool       `json:"has_pdf"`
+	PDFBase64     string     `json:"pdf_base64,omitempty"`
+	PDFFilename   string     `json:"pdf_filename,omitempty"`
+	FileBytes     []byte     `json:"-"`
 	CreatedAt     time.Time  `json:"created_at"`
 }
 
@@ -268,6 +271,17 @@ type CareerIntakeProposal struct {
 	Patch   UpdateCareerProfileRequest `json:"patch"`
 }
 
+// CareerDocument is a CV upload (PII). Never log Body.
+type CareerDocument struct {
+	ID          uuid.UUID `json:"id"`
+	OrgID       uuid.UUID `json:"org_id"`
+	ProfileID   uuid.UUID `json:"profile_id"`
+	Filename    string    `json:"filename"`
+	ContentType string    `json:"content_type"`
+	Body        string    `json:"body"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
 type EvaluateCareerRequest struct {
 	JobURL           string `json:"job_url,omitempty"`
 	JDText           string `json:"jd_text,omitempty"`
@@ -286,8 +300,8 @@ type CareerEvaluateResult struct {
 }
 
 type ScanCareerRequest struct {
-	Board   string `json:"board,omitempty"` // greenhouse | ashby | lever
-	Slug    string `json:"slug,omitempty"`
+	Board   string `json:"board,omitempty"` // greenhouse | ashby | lever | all (empty = all)
+	Slug    string `json:"slug,omitempty"`  // empty = every saved/seeded company
 	Company string `json:"company,omitempty"`
 	Query   string `json:"query,omitempty"` // extra title include
 }
@@ -412,4 +426,14 @@ type CareerBatchResult struct {
 	Evaluated int                    `json:"evaluated"`
 	Skipped   int                    `json:"skipped"`
 	Results   []CareerEvaluateResult `json:"results"`
+}
+
+// CareerListingPreview is a fetched JD with no score and no tracker write.
+type CareerListingPreview struct {
+	URL        string `json:"url"`
+	Company    string `json:"company"`
+	Title      string `json:"title"`
+	JDText     string `json:"jd_text"`
+	Live       bool   `json:"live"`
+	DeadReason string `json:"dead_reason,omitempty"`
 }

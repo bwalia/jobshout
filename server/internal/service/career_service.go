@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,6 +25,7 @@ var (
 	ErrCareerBadStatus      = errors.New("career: illegal status change")
 	ErrCareerMissingInput   = errors.New("career: job URL or JD text is required")
 	ErrCareerEmptyBlacklist = errors.New("career: company or domain is required")
+	ErrCareerBadUpload      = errors.New("career: unsupported or unreadable CV file")
 )
 
 // CareerService is the person-scoped career specialist.
@@ -32,6 +35,7 @@ type CareerService interface {
 	GetOrCreateProfile(ctx context.Context, orgID, userID uuid.UUID) (*model.CareerProfile, error)
 	UpdateProfile(ctx context.Context, orgID, userID uuid.UUID, req model.UpdateCareerProfileRequest) (*model.CareerProfile, error)
 	Intake(ctx context.Context, orgID, userID uuid.UUID, document string) (model.CareerIntakeProposal, error)
+	UploadCV(ctx context.Context, orgID, userID uuid.UUID, filename, contentType string, data []byte) (model.CareerIntakeProposal, error)
 
 	Evaluate(ctx context.Context, orgID, userID uuid.UUID, req model.EvaluateCareerRequest) (*model.CareerEvaluateResult, error)
 	GetEvaluation(ctx context.Context, orgID, userID, id uuid.UUID) (*model.CareerEvaluation, error)
@@ -45,6 +49,7 @@ type CareerService interface {
 	Scan(ctx context.Context, orgID, userID uuid.UUID, req model.ScanCareerRequest) (*model.CareerScanResult, error)
 	ListPortals(ctx context.Context, orgID, userID uuid.UUID) ([]model.CareerPortal, error)
 	AddPortal(ctx context.Context, orgID, userID uuid.UUID, req model.AddCareerPortalRequest) (*model.CareerPortal, error)
+	PreviewListing(ctx context.Context, orgID, userID uuid.UUID, jobURL string) (*model.CareerListingPreview, error)
 
 	AddBlacklist(ctx context.Context, orgID, userID uuid.UUID, req model.AddCareerBlacklistRequest) (*model.CareerBlacklistEntry, error)
 	ListBlacklist(ctx context.Context, orgID, userID uuid.UUID) ([]model.CareerBlacklistEntry, error)
@@ -53,6 +58,7 @@ type CareerService interface {
 	CoverLetter(ctx context.Context, orgID, userID, evaluationID uuid.UUID) (*model.CareerArtifact, error)
 	EmailDraft(ctx context.Context, orgID, userID, evaluationID uuid.UUID) (*model.CareerArtifact, error)
 	ListArtifacts(ctx context.Context, orgID, userID, applicationID uuid.UUID) ([]model.CareerArtifact, error)
+	ArtifactPDF(ctx context.Context, orgID, userID, artifactID uuid.UUID) (*model.CareerArtifact, []byte, error)
 
 	Doctor(ctx context.Context, orgID, userID uuid.UUID) (model.CareerDoctorReport, error)
 	Patterns(ctx context.Context, orgID, userID uuid.UUID) (model.CareerPatterns, error)
@@ -68,7 +74,7 @@ type CareerService interface {
 	UpsertStory(ctx context.Context, orgID, userID uuid.UUID, s model.CareerStory) (*model.CareerStory, error)
 	AddContact(ctx context.Context, orgID, userID uuid.UUID, req model.AddCareerContactRequest) (*model.CareerContact, error)
 	ListContacts(ctx context.Context, orgID, userID uuid.UUID) ([]model.CareerContact, error)
-	BatchEvaluate(ctx context.Context, orgID, userID uuid.UUID, limit int) (*model.CareerBatchResult, error)
+	BatchEvaluate(ctx context.Context, orgID, userID uuid.UUID, limit int, urls []string) (*model.CareerBatchResult, error)
 }
 
 type careerService struct {
@@ -79,6 +85,7 @@ type careerService struct {
 	llm       llm.Client
 	research  ResearchService
 	logger    *zap.Logger
+	scanBoard func(ctx context.Context, httpc *http.Client, board, slug, company string) ([]career.PostedJob, error)
 }
 
 func NewCareerService(
@@ -208,6 +215,38 @@ func (s *careerService) Intake(ctx context.Context, orgID, userID uuid.UUID, doc
 	return career.ProposeIntake(document), nil
 }
 
+func (s *careerService) UploadCV(ctx context.Context, orgID, userID uuid.UUID, filename, contentType string, data []byte) (model.CareerIntakeProposal, error) {
+	p, err := s.GetOrCreateProfile(ctx, orgID, userID)
+	if err != nil {
+		return model.CareerIntakeProposal{}, err
+	}
+	text, err := career.ExtractCVMarkdown(filename, contentType, data)
+	if err != nil {
+		return model.CareerIntakeProposal{}, fmt.Errorf("%w: %s", ErrCareerBadUpload, err.Error())
+	}
+	doc := &model.CareerDocument{
+		OrgID: orgID, ProfileID: p.ID,
+		Filename: filename, ContentType: "application/pdf", Body: text,
+	}
+	if err := s.repo.InsertDocument(ctx, doc); err != nil {
+		return model.CareerIntakeProposal{}, err
+	}
+	oldCV := p.CVMarkdown
+	p.CVMarkdown = text
+	prop := career.ProposeIntake(text)
+	if prop.Patch.Identity != nil && p.Identity.FullName == "" && strings.TrimSpace(prop.Patch.Identity.FullName) != "" {
+		p.Identity.FullName = strings.TrimSpace(prop.Patch.Identity.FullName)
+	}
+	if err := s.repo.UpsertProfile(ctx, p); err != nil {
+		return model.CareerIntakeProposal{}, err
+	}
+	if text != oldCV {
+		_ = s.repo.InsertProfileVersion(ctx, orgID, p.ID, p.CVMarkdown, "pdf upload")
+	}
+	prop.Patch.CVMarkdown = &text
+	return prop, nil
+}
+
 func (s *careerService) Evaluate(ctx context.Context, orgID, userID uuid.UUID, req model.EvaluateCareerRequest) (*model.CareerEvaluateResult, error) {
 	if strings.TrimSpace(req.JobURL) == "" && strings.TrimSpace(req.JDText) == "" {
 		return nil, ErrCareerMissingInput
@@ -299,7 +338,7 @@ func (s *careerService) Evaluate(ctx context.Context, orgID, userID uuid.UUID, r
 			out.Artifacts = append(out.Artifacts, *art)
 		}
 	}
-	if req.TailorCV && ev.Score.RecommendApply && strings.TrimSpace(profile.CVMarkdown) != "" {
+	if req.TailorCV && strings.TrimSpace(profile.CVMarkdown) != "" {
 		if art, err := s.persistArtifact(ctx, profile, app, ev, model.CareerArtifactCV, "Tailored CV", func() (string, error) {
 			return career.TailorCV(ctx, listing, profile, ev, s.gen())
 		}); err == nil {
@@ -344,10 +383,59 @@ func (s *careerService) persistArtifact(
 		ApplicationID: &app.ID, EvaluationID: &ev.ID,
 		Kind: kind, Title: title, BodyMarkdown: body,
 	}
+	if kind == model.CareerArtifactCV {
+		attachCVPDF(a, profile, ev)
+	}
 	if err := s.repo.InsertArtifact(ctx, a); err != nil {
 		return nil, err
 	}
 	return a, nil
+}
+
+func attachCVPDF(a *model.CareerArtifact, profile *model.CareerProfile, ev *model.CareerEvaluation) {
+	name := ""
+	if profile != nil {
+		name = profile.Identity.FullName
+	}
+	company, role := "", ""
+	if ev != nil {
+		company, role = ev.Company, ev.Role
+	}
+	pdf, err := career.MarkdownToPDF(name, a.BodyMarkdown)
+	if err != nil || len(pdf) == 0 {
+		return
+	}
+	a.FileBytes = pdf
+	a.HasPDF = true
+	a.PDFBase64 = base64.StdEncoding.EncodeToString(pdf)
+	a.PDFFilename = career.PDFFilename(name, company, role)
+}
+
+func (s *careerService) ArtifactPDF(ctx context.Context, orgID, userID, artifactID uuid.UUID) (*model.CareerArtifact, []byte, error) {
+	p, err := s.GetOrCreateProfile(ctx, orgID, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+	a, err := s.repo.GetArtifact(ctx, orgID, artifactID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if a == nil || a.ProfileID != p.ID {
+		return nil, nil, ErrCareerNotFound
+	}
+	pdf := a.FileBytes
+	if len(pdf) == 0 && a.Kind == model.CareerArtifactCV && strings.TrimSpace(a.BodyMarkdown) != "" {
+		if built, err := career.MarkdownToPDF(p.Identity.FullName, a.BodyMarkdown); err == nil {
+			pdf = built
+		}
+	}
+	if len(pdf) == 0 {
+		return nil, nil, ErrCareerNotFound
+	}
+	if a.PDFFilename == "" {
+		a.PDFFilename = career.PDFFilename(p.Identity.FullName, "", a.Title)
+	}
+	return a, pdf, nil
 }
 
 func nzURL(l *career.JobListing) string {
@@ -449,23 +537,31 @@ func (s *careerService) Scan(ctx context.Context, orgID, userID uuid.UUID, req m
 	if err != nil {
 		return nil, err
 	}
+	if err := s.ensureSeedPortals(ctx, orgID, profile.ID); err != nil {
+		s.logger.Warn("career: seed portals", zap.Error(err))
+	}
 	run := &model.CareerScanRun{OrgID: orgID, ProfileID: profile.ID, Status: "running"}
 	if err := s.repo.InsertScanRun(ctx, run); err != nil {
 		return nil, err
 	}
 
 	portals := []model.CareerPortal{}
-	if req.Slug != "" {
-		board := req.Board
-		if board == "" {
-			board = "greenhouse"
+	slug := strings.TrimSpace(req.Slug)
+	board := strings.ToLower(strings.TrimSpace(req.Board))
+	if slug != "" {
+		boards := []string{board}
+		if board == "" || board == "all" {
+			boards = []string{"greenhouse", "ashby", "lever"}
 		}
-		portals = append(portals, model.CareerPortal{
-			Board: board, Slug: req.Slug, Company: req.Company, Enabled: true,
-			TitleInclude: profile.Targets.Titles,
-		})
+		include := append([]string{}, profile.Targets.Titles...)
 		if q := strings.TrimSpace(req.Query); q != "" {
-			portals[0].TitleInclude = append(portals[0].TitleInclude, q)
+			include = append(include, q)
+		}
+		for _, b := range boards {
+			portals = append(portals, model.CareerPortal{
+				Board: b, Slug: slug, Company: req.Company, Enabled: true,
+				TitleInclude: include,
+			})
 		}
 	} else {
 		stored, err := s.repo.ListPortals(ctx, orgID, profile.ID)
@@ -473,47 +569,86 @@ func (s *careerService) Scan(ctx context.Context, orgID, userID uuid.UUID, req m
 			return nil, err
 		}
 		for _, p := range stored {
-			if p.Enabled {
-				if len(p.TitleInclude) == 0 {
-					p.TitleInclude = profile.Targets.Titles
-				}
-				portals = append(portals, p)
+			if !p.Enabled {
+				continue
 			}
+			if board != "" && board != "all" && p.Board != board {
+				continue
+			}
+			if len(p.TitleInclude) == 0 {
+				p.TitleInclude = profile.Targets.Titles
+			}
+			portals = append(portals, p)
 		}
 	}
 
-	added := []model.CareerPipelineItem{}
-	for _, portal := range portals {
-		jobs, err := career.ScanBoard(ctx, s.httpc, portal.Board, portal.Slug, portal.Company)
-		if err != nil {
-			s.logger.Warn("career: scan board failed", zap.String("slug", portal.Slug), zap.Error(err))
-			run.Skipped++
-			continue
-		}
-		for _, job := range jobs {
-			if !career.TitleAllowed(job.Title, portal.TitleInclude, portal.TitleExclude) {
-				run.Skipped++
-				continue
-			}
-			seen, _ := s.repo.HasScanEvent(ctx, profile.ID, job.URL)
-			if seen {
-				run.Skipped++
-				continue
-			}
-			item := &model.CareerPipelineItem{
-				OrgID: orgID, ProfileID: profile.ID,
-				ListingURL: job.URL, Company: job.Company, Title: job.Title,
-				Source: job.Board, Status: model.CareerPipelineOpen, Liveness: "unknown",
-			}
-			if err := s.repo.UpsertPipelineItem(ctx, item); err != nil {
-				run.Skipped++
-				continue
-			}
-			_ = s.repo.InsertScanEvent(ctx, orgID, profile.ID, job.URL, job.Company, job.Title)
-			run.Added++
-			added = append(added, *item)
-		}
+	scanFn := s.scanBoard
+	if scanFn == nil {
+		scanFn = career.ScanBoard
 	}
+	scanClient := &http.Client{Timeout: 12 * time.Second}
+
+	added := []model.CareerPipelineItem{}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 8)
+	for _, portal := range portals {
+		portal := portal
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case <-ctx.Done():
+				mu.Lock()
+				run.Skipped++
+				mu.Unlock()
+				return
+			case sem <- struct{}{}:
+			}
+			defer func() { <-sem }()
+
+			jobs, err := scanFn(ctx, scanClient, portal.Board, portal.Slug, portal.Company)
+			if err != nil {
+				s.logger.Warn("career: scan board failed", zap.String("board", portal.Board), zap.String("slug", portal.Slug), zap.Error(err))
+				mu.Lock()
+				run.Skipped++
+				mu.Unlock()
+				return
+			}
+			for _, job := range jobs {
+				if !career.TitleAllowed(job.Title, portal.TitleInclude, portal.TitleExclude) {
+					mu.Lock()
+					run.Skipped++
+					mu.Unlock()
+					continue
+				}
+				seen, _ := s.repo.HasScanEvent(ctx, profile.ID, job.URL)
+				if seen {
+					mu.Lock()
+					run.Skipped++
+					mu.Unlock()
+					continue
+				}
+				item := &model.CareerPipelineItem{
+					OrgID: orgID, ProfileID: profile.ID,
+					ListingURL: job.URL, Company: job.Company, Title: job.Title,
+					Source: job.Board, Status: model.CareerPipelineOpen, Liveness: "unknown",
+				}
+				if err := s.repo.UpsertPipelineItem(ctx, item); err != nil {
+					mu.Lock()
+					run.Skipped++
+					mu.Unlock()
+					continue
+				}
+				_ = s.repo.InsertScanEvent(ctx, orgID, profile.ID, job.URL, job.Company, job.Title)
+				mu.Lock()
+				run.Added++
+				added = append(added, *item)
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
 	now := time.Now()
 	run.Status = "completed"
 	run.CompletedAt = &now
@@ -526,7 +661,36 @@ func (s *careerService) ListPortals(ctx context.Context, orgID, userID uuid.UUID
 	if err != nil {
 		return nil, err
 	}
+	if err := s.ensureSeedPortals(ctx, orgID, p.ID); err != nil {
+		return nil, err
+	}
 	return s.repo.ListPortals(ctx, orgID, p.ID)
+}
+
+func (s *careerService) ensureSeedPortals(ctx context.Context, orgID, profileID uuid.UUID) error {
+	existing, err := s.repo.ListPortals(ctx, orgID, profileID)
+	if err != nil {
+		return err
+	}
+	have := make(map[string]bool, len(existing))
+	for _, p := range existing {
+		have[p.Board+":"+strings.ToLower(p.Slug)] = true
+	}
+	for _, seed := range career.BuiltinPortals() {
+		key := seed.Board + ":" + strings.ToLower(seed.Slug)
+		if have[key] {
+			continue
+		}
+		portal := &model.CareerPortal{
+			OrgID: orgID, ProfileID: profileID,
+			Board: seed.Board, Slug: seed.Slug, Company: seed.Company, Enabled: true,
+		}
+		if err := s.repo.UpsertPortal(ctx, portal); err != nil {
+			return err
+		}
+		have[key] = true
+	}
+	return nil
 }
 
 func (s *careerService) AddPortal(ctx context.Context, orgID, userID uuid.UUID, req model.AddCareerPortalRequest) (*model.CareerPortal, error) {
@@ -542,6 +706,9 @@ func (s *careerService) AddPortal(ctx context.Context, orgID, userID uuid.UUID, 
 	}
 	if portal.Board == "" {
 		portal.Board = "greenhouse"
+	}
+	if portal.Board == "all" || (portal.Board != "greenhouse" && portal.Board != "ashby" && portal.Board != "lever") {
+		return nil, fmt.Errorf("career: board must be greenhouse, ashby, or lever")
 	}
 	if portal.Slug == "" {
 		return nil, fmt.Errorf("career: portal slug is required")
@@ -881,27 +1048,74 @@ func (s *careerService) ListContacts(ctx context.Context, orgID, userID uuid.UUI
 	return s.repo.ListContacts(ctx, orgID, p.ID)
 }
 
-func (s *careerService) BatchEvaluate(ctx context.Context, orgID, userID uuid.UUID, limit int) (*model.CareerBatchResult, error) {
-	if limit <= 0 || limit > 10 {
-		limit = 8
+func (s *careerService) PreviewListing(ctx context.Context, orgID, userID uuid.UUID, jobURL string) (*model.CareerListingPreview, error) {
+	jobURL = strings.TrimSpace(jobURL)
+	if jobURL == "" {
+		return nil, ErrCareerMissingInput
 	}
-	pipe, err := s.ListPipeline(ctx, orgID, userID, model.PaginationParams{Page: 1, PerPage: 50})
+	if _, err := s.GetOrCreateProfile(ctx, orgID, userID); err != nil {
+		return nil, err
+	}
+	listing, err := career.Extract(ctx, s.fetcher, s.httpc, jobURL, "")
 	if err != nil {
 		return nil, err
 	}
-	out := &model.CareerBatchResult{Results: []model.CareerEvaluateResult{}}
-	for _, it := range pipe.Data {
-		if out.Evaluated >= limit {
+	return &model.CareerListingPreview{
+		URL:        listing.URL,
+		Company:    listing.Company,
+		Title:      listing.Title,
+		JDText:     listing.Text,
+		Live:       listing.Live,
+		DeadReason: listing.DeadReason,
+	}, nil
+}
+
+func (s *careerService) BatchEvaluate(ctx context.Context, orgID, userID uuid.UUID, limit int, urls []string) (*model.CareerBatchResult, error) {
+	if limit <= 0 || limit > 10 {
+		limit = 8
+	}
+	toScore := []string{}
+	mode := model.CareerEvalModeTriage
+	for _, u := range urls {
+		u = strings.TrimSpace(u)
+		if u == "" {
+			continue
+		}
+		toScore = append(toScore, u)
+		if len(toScore) >= limit {
 			break
 		}
-		if it.Status != model.CareerPipelineOpen || strings.TrimSpace(it.ListingURL) == "" {
+	}
+	if len(toScore) > 0 {
+		mode = model.CareerEvalModeFull
+	} else {
+		pipe, err := s.ListPipeline(ctx, orgID, userID, model.PaginationParams{Page: 1, PerPage: 50})
+		if err != nil {
+			return nil, err
+		}
+		for _, it := range pipe.Data {
+			if len(toScore) >= limit {
+				break
+			}
+			if it.Status != model.CareerPipelineOpen || strings.TrimSpace(it.ListingURL) == "" {
+				continue
+			}
+			toScore = append(toScore, it.ListingURL)
+		}
+	}
+
+	out := &model.CareerBatchResult{Results: []model.CareerEvaluateResult{}}
+	seen := map[string]bool{}
+	for _, listingURL := range toScore {
+		if seen[listingURL] {
 			out.Skipped++
 			continue
 		}
-		res, err := s.Evaluate(ctx, orgID, userID, model.EvaluateCareerRequest{JobURL: it.ListingURL, Mode: model.CareerEvalModeTriage})
+		seen[listingURL] = true
+		res, err := s.Evaluate(ctx, orgID, userID, model.EvaluateCareerRequest{JobURL: listingURL, Mode: mode})
 		if err != nil {
 			out.Skipped++
-			s.logger.Warn("career: batch evaluate skipped", zap.String("url", it.ListingURL), zap.Error(err))
+			s.logger.Warn("career: batch evaluate skipped", zap.String("url", listingURL), zap.Error(err))
 			continue
 		}
 		if res.BlacklistHit != nil || res.Dead || res.Evaluation == nil {

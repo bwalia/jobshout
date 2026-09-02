@@ -355,7 +355,7 @@ const SCHEMAS: Record<AgentBuiltin, AgentInputSchema> = {
       },
       {
         key: "tailor_cv",
-        label: "Also tailor CV if score is high enough",
+        label: "Also tailor CV",
         type: "checkbox",
         defaultValue: false,
       },

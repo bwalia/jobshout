@@ -19,6 +19,7 @@ type CareerRepository interface {
 	GetProfileByUser(ctx context.Context, orgID, userID uuid.UUID) (*model.CareerProfile, error)
 	GetProfileByID(ctx context.Context, orgID, id uuid.UUID) (*model.CareerProfile, error)
 	InsertProfileVersion(ctx context.Context, orgID, profileID uuid.UUID, cv, note string) error
+	InsertDocument(ctx context.Context, d *model.CareerDocument) error
 
 	ListBlacklist(ctx context.Context, orgID, profileID uuid.UUID) ([]model.CareerBlacklistEntry, error)
 	InsertBlacklist(ctx context.Context, e *model.CareerBlacklistEntry) error
@@ -44,6 +45,7 @@ type CareerRepository interface {
 	ListEvaluations(ctx context.Context, orgID, profileID uuid.UUID, pagination model.PaginationParams) (*model.PaginatedResponse[model.CareerEvaluation], error)
 
 	InsertArtifact(ctx context.Context, a *model.CareerArtifact) error
+	GetArtifact(ctx context.Context, orgID, id uuid.UUID) (*model.CareerArtifact, error)
 	ListArtifacts(ctx context.Context, applicationID uuid.UUID) ([]model.CareerArtifact, error)
 
 	ListStories(ctx context.Context, orgID, profileID uuid.UUID) ([]model.CareerStory, error)
@@ -169,6 +171,21 @@ func (r *careerRepository) InsertProfileVersion(ctx context.Context, orgID, prof
 		VALUES ($1,$2,$3,$4)`, orgID, profileID, cv, note)
 	if err != nil {
 		return fmt.Errorf("career_repo: profile version: %w", err)
+	}
+	return nil
+}
+
+func (r *careerRepository) InsertDocument(ctx context.Context, d *model.CareerDocument) error {
+	if d.ID == uuid.Nil {
+		d.ID = uuid.New()
+	}
+	err := r.pool.QueryRow(ctx, `
+		INSERT INTO career_documents (id, org_id, profile_id, filename, content_type, body)
+		VALUES ($1,$2,$3,$4,$5,$6) RETURNING created_at`,
+		d.ID, d.OrgID, d.ProfileID, d.Filename, d.ContentType, d.Body,
+	).Scan(&d.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("career_repo: insert document: %w", err)
 	}
 	return nil
 }
@@ -537,11 +554,34 @@ func (r *careerRepository) InsertArtifact(ctx context.Context, a *model.CareerAr
 	if a.ID == uuid.Nil {
 		a.ID = uuid.New()
 	}
-	return r.pool.QueryRow(ctx, `
-		INSERT INTO career_artifacts (id, org_id, profile_id, application_id, evaluation_id, kind, title, body_markdown, file_id)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING created_at`,
-		a.ID, a.OrgID, a.ProfileID, a.ApplicationID, a.EvaluationID, a.Kind, a.Title, a.BodyMarkdown, a.FileID,
+	err := r.pool.QueryRow(ctx, `
+		INSERT INTO career_artifacts (id, org_id, profile_id, application_id, evaluation_id, kind, title, body_markdown, file_id, file_bytes)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING created_at`,
+		a.ID, a.OrgID, a.ProfileID, a.ApplicationID, a.EvaluationID, a.Kind, a.Title, a.BodyMarkdown, a.FileID, a.FileBytes,
 	).Scan(&a.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("career_repo: insert artifact: %w", err)
+	}
+	if len(a.FileBytes) > 0 {
+		a.HasPDF = true
+	}
+	return nil
+}
+
+func (r *careerRepository) GetArtifact(ctx context.Context, orgID, id uuid.UUID) (*model.CareerArtifact, error) {
+	var a model.CareerArtifact
+	err := r.pool.QueryRow(ctx, `
+		SELECT id, org_id, profile_id, application_id, evaluation_id, kind, title, body_markdown, file_id, file_bytes, created_at
+		FROM career_artifacts WHERE org_id=$1 AND id=$2`, orgID, id,
+	).Scan(&a.ID, &a.OrgID, &a.ProfileID, &a.ApplicationID, &a.EvaluationID, &a.Kind, &a.Title, &a.BodyMarkdown, &a.FileID, &a.FileBytes, &a.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("career_repo: get artifact: %w", err)
+	}
+	a.HasPDF = len(a.FileBytes) > 0
+	return &a, nil
 }
 
 func (r *careerRepository) ListArtifacts(ctx context.Context, applicationID uuid.UUID) ([]model.CareerArtifact, error) {

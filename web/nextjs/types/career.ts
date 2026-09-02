@@ -119,7 +119,18 @@ export interface CareerArtifact {
   title: string;
   body_markdown: string;
   has_pdf: boolean;
+  pdf_base64?: string;
+  pdf_filename?: string;
   created_at: string;
+}
+
+export interface CareerListingPreview {
+  url: string;
+  company: string;
+  title: string;
+  jd_text: string;
+  live: boolean;
+  dead_reason?: string;
 }
 
 export interface CareerEvaluateResult {

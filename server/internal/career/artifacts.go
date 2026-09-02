@@ -29,19 +29,36 @@ func DraftCoverLetter(ctx context.Context, listing *JobListing, profile *model.C
 	return templateCover(profile, ev), nil
 }
 
-// TailorCV rewrites CV markdown without inventing claims. Empty generate → lightly annotated original.
+// TailorCV personalises CV markdown without changing layout. Empty generate,
+// or a draft that moves headings, falls back to the original plus a note.
 func TailorCV(ctx context.Context, listing *JobListing, profile *model.CareerProfile, ev *model.CareerEvaluation, generate Generator) (string, error) {
 	src := strings.TrimSpace(profile.CVMarkdown)
 	if src == "" {
 		return "", fmt.Errorf("career: cannot tailor an empty CV")
 	}
-	if generate != nil {
-		var out draftBody
-		if err := llm.GenerateJSON(ctx, "career-cv", tailorPrompt(listing, profile, ev), &out, generate, nil); err == nil && strings.TrimSpace(out.Body) != "" {
-			return out.Body, nil
-		}
+	role, company := "", ""
+	if ev != nil {
+		role, company = ev.Role, ev.Company
 	}
-	return src + "\n\n<!-- tailored for " + ev.Role + " at " + ev.Company + " — claims unchanged -->\n", nil
+	fallback := src + unchangedLayoutNote(role, company)
+	if generate == nil {
+		return fallback, nil
+	}
+	if body := generateTailored(ctx, tailorPrompt(listing, profile, ev), generate); body != "" && SameOutline(src, body) {
+		return body, nil
+	}
+	if body := generateTailored(ctx, tailorRetryPrompt(listing, profile, ev), generate); body != "" && SameOutline(src, body) {
+		return body, nil
+	}
+	return fallback, nil
+}
+
+func generateTailored(ctx context.Context, prompt string, generate Generator) string {
+	var out draftBody
+	if err := llm.GenerateJSON(ctx, "career-cv", prompt, &out, generate, nil); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out.Body)
 }
 
 // DraftEmail is draft-only. Sending is Mail Agent + human approve.

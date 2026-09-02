@@ -9,6 +9,7 @@ import type {
   CareerFollowup,
   CareerIntakeProposal,
   CareerInterviewPrep,
+  CareerListingPreview,
   CareerOfferPrep,
   CareerPatterns,
   CareerPipelineItem,
@@ -36,6 +37,16 @@ export async function careerIntake(document: string) {
   return data;
 }
 
+export async function uploadCareerCV(file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  const { data } = await apiClient.post<CareerIntakeProposal>("/career/profile/cv", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+    timeout: 60_000,
+  });
+  return data;
+}
+
 export async function evaluateCareer(payload: {
   job_url?: string;
   jd_text?: string;
@@ -51,7 +62,7 @@ export async function evaluateCareer(payload: {
 
 export async function listCareerEvaluations() {
   const { data } = await apiClient.get<Paginated<CareerEvaluation>>("/career/evaluations", {
-    params: { per_page: 50 },
+    params: { per_page: 100 },
   });
   return data;
 }
@@ -63,14 +74,14 @@ export async function getCareerEvaluation(id: string) {
 
 export async function listCareerPipeline() {
   const { data } = await apiClient.get<Paginated<CareerPipelineItem>>("/career/pipeline", {
-    params: { per_page: 50 },
+    params: { per_page: 100 },
   });
   return data;
 }
 
 export async function listCareerTracker(status?: string) {
   const { data } = await apiClient.get<Paginated<CareerApplication>>("/career/applications", {
-    params: { per_page: 50, status: status || undefined },
+    params: { per_page: 100, status: status || undefined },
   });
   return data;
 }
@@ -99,7 +110,7 @@ export async function careerScan(payload: {
   company?: string;
   query?: string;
 }) {
-  const { data } = await apiClient.post("/career/scan", payload, { timeout: 120_000 });
+  const { data } = await apiClient.post("/career/scan", payload, { timeout: 180_000 });
   return data;
 }
 
@@ -136,6 +147,23 @@ export async function tailorCareerCV(evaluationId: string) {
     timeout: 120_000,
   });
   return data;
+}
+
+export function downloadCareerPDF(art: Pick<CareerArtifact, "pdf_base64" | "pdf_filename" | "has_pdf">) {
+  if (!art.pdf_base64) return false;
+  const binary = atob(art.pdf_base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  const blob = new Blob([bytes], { type: "application/pdf" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = art.pdf_filename || "tailored-cv.pdf";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  return true;
 }
 
 export async function careerCoverLetter(evaluationId: string) {
@@ -211,7 +239,20 @@ export async function careerSalaryGap(
   return data;
 }
 
-export async function careerBatchEvaluate() {
-  const { data } = await apiClient.post("/career/pipeline/batch", { limit: 8 }, { timeout: 180_000 });
+export async function previewCareerListing(jobUrl: string) {
+  const { data } = await apiClient.post<CareerListingPreview>(
+    "/career/listing",
+    { job_url: jobUrl },
+    { timeout: 30_000 }
+  );
   return data;
+}
+
+export async function careerBatchEvaluate(payload?: { limit?: number; urls?: string[] }) {
+  const { data } = await apiClient.post(
+    "/career/pipeline/batch",
+    { limit: payload?.limit ?? 8, urls: payload?.urls },
+    { timeout: 360_000 }
+  );
+  return data as { evaluated?: number; skipped?: number };
 }

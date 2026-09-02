@@ -175,10 +175,10 @@ func registerCareer(reg *Registry, d Deps) {
 
 	reg.Register(newTool(
 		"career_scan",
-		"Scan a public Greenhouse, Ashby, or Lever board and add matching jobs to the pipeline. Zero-LLM. Does not evaluate.",
+		"Scan public Greenhouse, Ashby, and/or Lever boards and add matching jobs to the pipeline. Omit slug to scan the CareerOps company list on all boards. Zero-LLM. Does not evaluate.",
 		"insight", model.PermAgentsExecute, false, false,
 		tools.ObjectSchema(map[string]any{
-			"board":   map[string]any{"type": "string", "enum": []any{"greenhouse", "ashby", "lever"}},
+			"board":   map[string]any{"type": "string", "enum": []any{"greenhouse", "ashby", "lever", "all"}},
 			"slug":    map[string]any{"type": "string"},
 			"company": map[string]any{"type": "string"},
 			"query":   map[string]any{"type": "string"},
@@ -331,7 +331,7 @@ func registerCareer(reg *Registry, d Deps) {
 
 	reg.Register(newTool(
 		"career_tailor_cv",
-		"Rewrite the CV markdown for an evaluation. Keywords are reformatted, never invented. Draft only.",
+		"Personalise the CV for an evaluation without changing its layout. Keywords are reformatted, never invented. Draft only. Score does not block this.",
 		"insight", model.PermAgentsExecute, false, false,
 		tools.ObjectSchema(map[string]any{
 			"evaluation_id": map[string]any{"type": "string"},
@@ -547,7 +547,7 @@ func registerCareer(reg *Registry, d Deps) {
 			if v, ok := input["limit"].(float64); ok {
 				limit = int(v)
 			}
-			out, err := d.Career.BatchEvaluate(ctx, ident.OrgID, ident.UserID, limit)
+			out, err := d.Career.BatchEvaluate(ctx, ident.OrgID, ident.UserID, limit, nil)
 			if err != nil {
 				return nil, err
 			}
