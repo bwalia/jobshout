@@ -40,6 +40,11 @@ export interface PanelDef {
   label: string;
   href: string;
   icon: LucideIcon;
+  /**
+   * Hidden from the left nav, but still a valid /panel route. Reached via the
+   * dashboard card, command palette, or a direct link rather than a nav tab.
+   */
+  hidden?: boolean;
 }
 
 /** Menu order — Chat first, then Dashboard, then the rest. */
@@ -48,7 +53,7 @@ export const PANELS: PanelDef[] = [
   { id: "dashboard", label: "Dashboard", href: "/panel/dashboard", icon: LayoutDashboard },
   { id: "task-board", label: "Task Board", href: "/panel/task-board", icon: Kanban },
   { id: "task-manager", label: "Task Manager", href: "/panel/task-manager", icon: ListTree },
-  { id: "security-tester", label: "Security Tester", href: "/panel/security-tester", icon: ShieldAlert },
+  { id: "security-tester", label: "Security Tester", href: "/panel/security-tester", icon: ShieldAlert, hidden: true },
   { id: "artifacts", label: "Artifacts", href: "/panel/artifacts", icon: Archive },
   { id: "scheduler", label: "Scheduler", href: "/panel/scheduler", icon: Clock },
   { id: "sprints", label: "Sprints", href: "/panel/sprints", icon: Goal },
@@ -89,7 +94,7 @@ export const SIDEBAR_PRIMARY: { id: string; label: string; href: string; icon: L
 
 /** Extra menus shown once Dashboard (or any panel) is open. Dashboard stays in primary. */
 export const APP_NAV_PANELS: PanelDef[] = PANELS.filter(
-  (p) => p.id !== "chat" && p.id !== "dashboard" && p.id !== "workflows"
+  (p) => p.id !== "chat" && p.id !== "dashboard" && p.id !== "workflows" && !p.hidden
 );
 
 export function isAppNavPath(pathname: string): boolean {
