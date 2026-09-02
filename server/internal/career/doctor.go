@@ -17,7 +17,7 @@ func Doctor(profile *model.CareerProfile, apps []model.CareerApplication, pipeli
 	}
 	if strings.TrimSpace(profile.CVMarkdown) == "" {
 		rep.OK = false
-		rep.Warnings = append(rep.Warnings, "CV is empty — evaluations will be generic until you paste or intake a CV.")
+		rep.Warnings = append(rep.Warnings, "CV is empty — upload a PDF CV on Profile.")
 	}
 	if profile.Identity.FullName == "" {
 		rep.Warnings = append(rep.Warnings, "Identity name is empty.")

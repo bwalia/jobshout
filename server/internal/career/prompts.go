@@ -93,13 +93,43 @@ func coverPrompt(listing *JobListing, profile *model.CareerProfile, eval *model.
 
 func tailorPrompt(listing *JobListing, profile *model.CareerProfile, eval *model.CareerEvaluation) string {
 	var b strings.Builder
-	b.WriteString("Rewrite the CV markdown for this role. JSON: {\"body\":\"markdown\"}.\n")
-	b.WriteString("Keywords get reformatted, never invented. Do not add employers, dates, or skills absent from the source CV.\n\nSource CV:\n")
+	b.WriteString("Personalise the source CV for this role without changing its layout. JSON: {\"body\":\"markdown\"}.\n")
+	b.WriteString("The source structure is sacred: keep the same section headings (wording and order), the same heading levels, the same number of bullets per section, and the same employers, dates, and job titles.\n")
+	b.WriteString("You may only reorder or lightly rephrase existing lines so keywords that already appear in the source sit closer to the top of a bullet. Do not add sections, jobs, skills, or metrics.\n")
+	b.WriteString("Keywords get reformatted, never invented.\n\nSource CV:\n")
 	b.WriteString(clip(profile.CVMarkdown, 12000))
-	b.WriteString("\n\nPersonalisation plan (Block E):\n")
-	b.WriteString(eval.Blocks.E)
-	b.WriteString("\n\nRole: ")
-	b.WriteString(eval.Role)
+	if heads := HeadingOutline(profile.CVMarkdown); len(heads) > 0 {
+		b.WriteString("\n\nRequired headings in this exact order:\n")
+		for _, h := range heads {
+			b.WriteString("- ")
+			b.WriteString(h)
+			b.WriteString("\n")
+		}
+	}
+	if eval != nil && eval.Blocks.E != "" {
+		b.WriteString("\nPersonalisation plan (Block E) — apply only if it does not change layout:\n")
+		b.WriteString(eval.Blocks.E)
+	}
+	if eval != nil {
+		b.WriteString("\n\nRole: ")
+		b.WriteString(eval.Role)
+	}
+	if listing != nil && listing.Title != "" && (eval == nil || eval.Role == "") {
+		b.WriteString("\n\nRole: ")
+		b.WriteString(listing.Title)
+	}
+	return b.String()
+}
+
+func tailorRetryPrompt(listing *JobListing, profile *model.CareerProfile, eval *model.CareerEvaluation) string {
+	var b strings.Builder
+	b.WriteString(tailorPrompt(listing, profile, eval))
+	b.WriteString("\n\nYour previous draft changed the heading outline. Restore these exact headings, in order, and do not add or drop sections:\n")
+	for _, h := range HeadingOutline(profile.CVMarkdown) {
+		b.WriteString("- ")
+		b.WriteString(h)
+		b.WriteString("\n")
+	}
 	return b.String()
 }
 

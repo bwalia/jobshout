@@ -1,7 +1,9 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -13,6 +15,7 @@ import (
 	"github.com/jobshout/server/internal/career"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/repository"
+	"github.com/jobshout/server/internal/research"
 )
 
 type careerMem struct {
@@ -32,6 +35,7 @@ type careerMem struct {
 	contacts   []model.CareerContact
 	offers     []model.CareerOffer
 	salaries   []model.CareerSalaryObservation
+	documents  []model.CareerDocument
 }
 
 func newCareerMem() *careerMem {
@@ -85,6 +89,16 @@ func (m *careerMem) GetProfileByID(_ context.Context, orgID, id uuid.UUID) (*mod
 func (m *careerMem) InsertProfileVersion(context.Context, uuid.UUID, uuid.UUID, string, string) error {
 	return nil
 }
+func (m *careerMem) InsertDocument(_ context.Context, d *model.CareerDocument) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if d.ID == uuid.Nil {
+		d.ID = uuid.New()
+	}
+	d.CreatedAt = time.Now()
+	m.documents = append(m.documents, *d)
+	return nil
+}
 func (m *careerMem) ListBlacklist(_ context.Context, _, profileID uuid.UUID) ([]model.CareerBlacklistEntry, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -125,6 +139,13 @@ func (m *careerMem) UpsertPortal(_ context.Context, p *model.CareerPortal) error
 		p.ID = uuid.New()
 	}
 	p.UpdatedAt = time.Now()
+	key := p.Board + ":" + strings.ToLower(p.Slug)
+	for i, existing := range m.portals {
+		if existing.ProfileID == p.ProfileID && existing.Board+":"+strings.ToLower(existing.Slug) == key {
+			m.portals[i] = *p
+			return nil
+		}
+	}
 	m.portals = append(m.portals, *p)
 	return nil
 }
@@ -312,8 +333,22 @@ func (m *careerMem) InsertArtifact(_ context.Context, a *model.CareerArtifact) e
 		a.ID = uuid.New()
 	}
 	a.CreatedAt = time.Now()
+	if len(a.FileBytes) > 0 {
+		a.HasPDF = true
+	}
 	m.artifacts = append(m.artifacts, *a)
 	return nil
+}
+func (m *careerMem) GetArtifact(_ context.Context, orgID, id uuid.UUID) (*model.CareerArtifact, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, a := range m.artifacts {
+		if a.OrgID == orgID && a.ID == id {
+			cp := a
+			return &cp, nil
+		}
+	}
+	return nil, nil
 }
 func (m *careerMem) ListArtifacts(_ context.Context, applicationID uuid.UUID) ([]model.CareerArtifact, error) {
 	m.mu.Lock()
@@ -380,9 +415,13 @@ func (m *careerMem) InsertScanRun(_ context.Context, r *model.CareerScanRun) err
 }
 func (m *careerMem) UpdateScanRun(_ context.Context, r *model.CareerScanRun) error { return nil }
 func (m *careerMem) HasScanEvent(_ context.Context, profileID uuid.UUID, listingURL string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.scanEvents[profileID.String()+listingURL], nil
 }
 func (m *careerMem) InsertScanEvent(_ context.Context, _, profileID uuid.UUID, listingURL, _, _ string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.scanEvents[profileID.String()+listingURL] = true
 	return nil
 }
@@ -552,6 +591,86 @@ func TestEnsureCareerOpsRenamesLegacy(t *testing.T) {
 	}
 	if got.Name != model.AgentNameCareerOps || got.Role != "Career Agent" {
 		t.Fatalf("got name=%q role=%q", got.Name, got.Role)
+	}
+}
+
+func TestEvaluateTailorsBelowApplyFloor(t *testing.T) {
+	svc, _, orgID, userID := setupCareer(t)
+	_, _ = svc.UpdateProfile(context.Background(), orgID, userID, model.UpdateCareerProfileRequest{
+		CVMarkdown: ptr("# Ada\n\n## Experience\n- baker\n"),
+		Identity:   &model.CareerIdentity{FullName: "Ada"},
+	})
+	res, err := svc.Evaluate(context.Background(), orgID, userID, model.EvaluateCareerRequest{
+		JDText:   career.GoldenJDForTest(),
+		TailorCV: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Evaluation == nil {
+		t.Fatal("expected evaluation")
+	}
+	if res.Evaluation.Score.RecommendApply {
+		t.Fatal("weak CV should sit below the apply floor — tailor must still run")
+	}
+	found := false
+	for _, a := range res.Artifacts {
+		if a.Kind == model.CareerArtifactCV && a.BodyMarkdown != "" {
+			found = true
+			if !career.SameOutline("# Ada\n\n## Experience\n- baker\n", a.BodyMarkdown) &&
+				!strings.Contains(a.BodyMarkdown, "layout unchanged") {
+				t.Fatalf("tailored CV must keep outline or fall back: %s", a.BodyMarkdown)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected a tailored CV artifact below 4.0")
+	}
+}
+
+func TestUploadCVSavesPDFAndRejectsOtherTypes(t *testing.T) {
+	svc, repo, orgID, userID := setupCareer(t)
+	_, err := svc.UploadCV(context.Background(), orgID, userID, "cv.md", "text/markdown", []byte("# Jane Doe\nStaff engineer"))
+	if err == nil {
+		t.Fatal("markdown upload must fail")
+	}
+	pdf := []byte("%PDF-1.1\n<< /Length 48 >>\nstream\nBT\n(Jane Doe) Tj\n(jane@example.com) Tj\n(Staff engineer) Tj\nET\nendstream\n")
+	prop, err := svc.UploadCV(context.Background(), orgID, userID, "cv.pdf", "application/pdf", pdf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prop.Patch.CVMarkdown == nil || !strings.Contains(*prop.Patch.CVMarkdown, "Jane") {
+		t.Fatalf("expected extracted CV: %+v", prop)
+	}
+	p, _ := svc.GetOrCreateProfile(context.Background(), orgID, userID)
+	if !strings.Contains(p.CVMarkdown, "Jane") {
+		t.Fatal("PDF upload must save the profile CV")
+	}
+	if len(repo.documents) != 1 {
+		t.Fatalf("expected stored document, got %d", len(repo.documents))
+	}
+}
+
+func TestTailorCVAttachesPDF(t *testing.T) {
+	svc, _, orgID, userID := setupCareer(t)
+	_, _ = svc.UpdateProfile(context.Background(), orgID, userID, model.UpdateCareerProfileRequest{
+		CVMarkdown: ptr("# Ada Lovelace\n\nStaff engineer. Kubernetes GPU scheduling."),
+		Identity:   &model.CareerIdentity{FullName: "Ada Lovelace"},
+	})
+	res, err := svc.Evaluate(context.Background(), orgID, userID, model.EvaluateCareerRequest{JDText: career.GoldenJDForTest()})
+	if err != nil || res.Evaluation == nil {
+		t.Fatalf("evaluate: %v %+v", err, res)
+	}
+	art, err := svc.TailorCV(context.Background(), orgID, userID, res.Evaluation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !art.HasPDF || art.PDFBase64 == "" || !strings.HasSuffix(art.PDFFilename, ".pdf") {
+		t.Fatalf("expected downloadable PDF: %+v", art)
+	}
+	got, pdf, err := svc.ArtifactPDF(context.Background(), orgID, userID, art.ID)
+	if err != nil || got == nil || !bytes.HasPrefix(pdf, []byte("%PDF")) {
+		t.Fatalf("artifact pdf: %v %d", err, len(pdf))
 	}
 }
 
@@ -785,7 +904,7 @@ func TestBatchEvaluateSkipsBlacklist(t *testing.T) {
 		OrgID: orgID, ProfileID: p.ID, ListingURL: "https://jobs.ok.example/2",
 		Company: "Ok Co", Status: model.CareerPipelineOpen,
 	})
-	out, err := svc.BatchEvaluate(context.Background(), orgID, userID, 8)
+	out, err := svc.BatchEvaluate(context.Background(), orgID, userID, 8, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -799,6 +918,192 @@ func TestBatchEvaluateSkipsBlacklist(t *testing.T) {
 		if r.BlacklistHit != nil || r.Evaluation == nil {
 			t.Fatal("batch must not return unconfirmed blacklist hits as evaluations")
 		}
+	}
+}
+
+func TestBatchEvaluateHonoursSelectedURLs(t *testing.T) {
+	svc, mem, orgID, userID := setupCareer(t)
+	p, err := svc.GetOrCreateProfile(context.Background(), orgID, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = mem.UpsertPipelineItem(context.Background(), &model.CareerPipelineItem{
+		OrgID: orgID, ProfileID: p.ID, ListingURL: "https://jobs.one.example/1",
+		Company: "One", Status: model.CareerPipelineOpen,
+	})
+	_ = mem.UpsertPipelineItem(context.Background(), &model.CareerPipelineItem{
+		OrgID: orgID, ProfileID: p.ID, ListingURL: "https://jobs.two.example/2",
+		Company: "Two", Status: model.CareerPipelineOpen,
+	})
+	out, err := svc.BatchEvaluate(context.Background(), orgID, userID, 8, []string{"https://jobs.one.example/1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Evaluated+out.Skipped != 1 {
+		t.Fatalf("selected URLs should score only those URLs, got evaluated=%d skipped=%d", out.Evaluated, out.Skipped)
+	}
+}
+
+func TestPreviewListingRequiresURL(t *testing.T) {
+	svc, _, orgID, userID := setupCareer(t)
+	_, err := svc.PreviewListing(context.Background(), orgID, userID, "  ")
+	if err != ErrCareerMissingInput {
+		t.Fatalf("empty URL: %v", err)
+	}
+}
+
+type previewFetch struct{}
+
+func (previewFetch) Fetch(_ context.Context, rawURL string) (*research.Document, error) {
+	return &research.Document{
+		Source: research.Source{URL: rawURL, Title: "Staff Engineer"},
+		Text:   "Company: Northwind Labs\n\nWe are hiring a Staff Engineer to lead inference.",
+	}, nil
+}
+
+func TestPreviewListingReturnsJD(t *testing.T) {
+	repo := newCareerMem()
+	agents := &careerTestAgents{byBuiltin: map[string]*model.Agent{}}
+	svc := NewCareerService(repo, agents, previewFetch{}, nil, nil, zap.NewNop()).(*careerService)
+	orgID, userID := uuid.New(), uuid.New()
+	out, err := svc.PreviewListing(context.Background(), orgID, userID, "https://jobs.example/staff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Title != "Staff Engineer" || !strings.Contains(out.JDText, "inference") {
+		t.Fatalf("preview: %+v", out)
+	}
+	if !out.Live {
+		t.Fatal("fixture listing should be live")
+	}
+}
+
+func TestBuiltinPortalsCoverAllBoards(t *testing.T) {
+	list := career.BuiltinPortals()
+	if len(list) < 80 {
+		t.Fatalf("builtin portals=%d, want the CareerOps ATS list", len(list))
+	}
+	seen := map[string]bool{}
+	boards := map[string]int{}
+	for _, p := range list {
+		if p.Board == "" || p.Slug == "" || p.Company == "" {
+			t.Fatalf("incomplete seed: %+v", p)
+		}
+		key := p.Board + ":" + strings.ToLower(p.Slug)
+		if seen[key] {
+			t.Fatalf("duplicate seed %s", key)
+		}
+		seen[key] = true
+		boards[p.Board]++
+	}
+	for _, want := range []string{"greenhouse", "ashby", "lever"} {
+		if boards[want] == 0 {
+			t.Fatalf("seed missing board %s", want)
+		}
+	}
+}
+
+func TestListPortalsSeedsBuiltinOnce(t *testing.T) {
+	svc, _, orgID, userID := setupCareer(t)
+	first, err := svc.ListPortals(context.Background(), orgID, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := len(career.BuiltinPortals())
+	if len(first) != want {
+		t.Fatalf("portals=%d want %d", len(first), want)
+	}
+	second, err := svc.ListPortals(context.Background(), orgID, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second) != want {
+		t.Fatalf("re-list duplicated seeds: %d", len(second))
+	}
+}
+
+func TestEnsureSeedDoesNotOverwriteUserPortal(t *testing.T) {
+	svc, _, orgID, userID := setupCareer(t)
+	_, err := svc.AddPortal(context.Background(), orgID, userID, model.AddCareerPortalRequest{
+		Board: "greenhouse", Slug: "anthropic", Company: "My Anthropic",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ports, err := svc.ListPortals(context.Background(), orgID, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, p := range ports {
+		if p.Board == "greenhouse" && p.Slug == "anthropic" {
+			found = true
+			if p.Company != "My Anthropic" {
+				t.Fatalf("seed overwrote user company: %s", p.Company)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("user portal missing after seed")
+	}
+}
+
+func TestScanAllUsesSeededPortalsAndAllBoards(t *testing.T) {
+	svc, _, orgID, userID := setupCareer(t)
+	var mu sync.Mutex
+	calls := 0
+	boards := map[string]int{}
+	svc.scanBoard = func(_ context.Context, _ *http.Client, board, slug, company string) ([]career.PostedJob, error) {
+		mu.Lock()
+		calls++
+		boards[board]++
+		mu.Unlock()
+		return []career.PostedJob{{
+			URL: "https://jobs.example/" + board + "/" + slug, Company: company,
+			Title: "Staff engineer", Board: board,
+		}}, nil
+	}
+	out, err := svc.Scan(context.Background(), orgID, userID, model.ScanCareerRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := len(career.BuiltinPortals())
+	if calls != want {
+		t.Fatalf("scanned %d portals, want %d", calls, want)
+	}
+	if boards["greenhouse"] == 0 || boards["ashby"] == 0 || boards["lever"] == 0 {
+		t.Fatalf("scan-all missed a board: %+v", boards)
+	}
+	if out.Run == nil || out.Run.Added != want {
+		t.Fatalf("added=%v want %d", out.Run, want)
+	}
+}
+
+func TestScanOneSlugTriesAllBoards(t *testing.T) {
+	svc, _, orgID, userID := setupCareer(t)
+	var mu sync.Mutex
+	seen := []string{}
+	svc.scanBoard = func(_ context.Context, _ *http.Client, board, slug, _ string) ([]career.PostedJob, error) {
+		mu.Lock()
+		seen = append(seen, board)
+		mu.Unlock()
+		if slug != "acme" {
+			t.Errorf("slug=%s", slug)
+		}
+		return []career.PostedJob{{
+			URL: "https://jobs.example/" + board + "/acme", Company: "Acme",
+			Title: "Engineer", Board: board,
+		}}, nil
+	}
+	out, err := svc.Scan(context.Background(), orgID, userID, model.ScanCareerRequest{Board: "all", Slug: "acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != 3 {
+		t.Fatalf("boards tried=%v want greenhouse, ashby, lever", seen)
+	}
+	if out.Run == nil || out.Run.Added != 3 {
+		t.Fatalf("added=%v want 3", out.Run)
 	}
 }
 

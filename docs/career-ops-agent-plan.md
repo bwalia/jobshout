@@ -298,11 +298,21 @@ optional “also tailor CV”.
 ## UI
 
 - Task Manager builtin **Career** (next to Articles / Mail).
-- Pages: Today, Pipeline, Tracker, Evaluation report, CV editor + preview,
-  Config/profile, Analytics.
+- Two screens, in order: **Profile** then **Jobs**. Land on Profile until
+  name + CV are saved; otherwise Jobs.
+- Profile: **upload a PDF CV** (saved immediately; extracted text is the
+  source for scoring). Get tailored CV downloads a new PDF for that job.
+- Jobs: **Scan all companies** (CareerOps Greenhouse + Ashby + Lever list),
+  scan one slug across all boards, or paste a URL / JD. Merged
+  list (pipeline + tracker). Tick several jobs and **Score selected**. Each
+  row has **Go to posting** and **See JD**. Job detail: advisory score,
+  **Get tailored CV** at any score, cover/email drafts, I applied.
+- Score is advice. Below 4.0 does not block a tailored CV. Block H still
+  only at ≥ 4.5. Apply is always the human.
+- Tailored CV must keep the source heading outline; otherwise we return the
+  original plus a layout-unchanged note.
 - Agent detail: same “open specialist panel” behaviour as Article Writer.
-- Chat remains the primary “paste a URL” path.
-- **Do not** clone CareerOps web pixel-for-pixel.
+- Chat can still paste a URL. **Do not** clone CareerOps web pixel-for-pixel.
 
 ---
 

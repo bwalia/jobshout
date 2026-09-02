@@ -107,6 +107,13 @@ test.describe("Career Agent", () => {
     await expect(page.getByRole("heading", { name: "Career Agent" })).toBeVisible({
       timeout: 8_000,
     });
-    await expect(page.getByText("Paste the JD").or(page.getByText("Evaluate"))).toBeVisible();
+    await expect(page.getByRole("button", { name: /1\. Profile/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /2\. Jobs/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Upload CV|Replace CV PDF/ })).toBeVisible();
+    await page.getByRole("button", { name: /2\. Jobs/ }).click();
+    await expect(page.getByRole("button", { name: /Scan all companies/ })).toBeVisible();
+    await expect(page.getByLabel("Board")).toBeVisible();
+    await expect(page.getByRole("button", { name: /Score selected/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: "See JD" }).first()).toBeVisible();
   });
 });

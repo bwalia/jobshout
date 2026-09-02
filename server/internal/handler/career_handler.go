@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -45,7 +46,7 @@ func (h *CareerHandler) writeErr(w http.ResponseWriter, err error) {
 		RespondError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, service.ErrCareerBadStatus):
 		RespondError(w, http.StatusConflict, err.Error())
-	case errors.Is(err, service.ErrCareerMissingInput), errors.Is(err, service.ErrCareerEmptyBlacklist):
+	case errors.Is(err, service.ErrCareerMissingInput), errors.Is(err, service.ErrCareerEmptyBlacklist), errors.Is(err, service.ErrCareerBadUpload):
 		RespondError(w, http.StatusBadRequest, err.Error())
 	default:
 		RespondError(w, http.StatusInternalServerError, err.Error())
@@ -80,6 +81,39 @@ func (h *CareerHandler) PatchProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	RespondJSON(w, http.StatusOK, p)
+}
+
+func (h *CareerHandler) UploadCV(w http.ResponseWriter, r *http.Request) {
+	orgID, userID, ok := h.ids(w, r)
+	if !ok {
+		return
+	}
+	if err := r.ParseMultipartForm(5 << 20); err != nil {
+		RespondError(w, http.StatusBadRequest, "expected a multipart file field named file")
+		return
+	}
+	f, hdr, err := r.FormFile("file")
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "file is required")
+		return
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, (5<<20)+1))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "could not read file")
+		return
+	}
+	if len(data) > 5<<20 {
+		RespondError(w, http.StatusBadRequest, "file is larger than 5MB")
+		return
+	}
+	ct := hdr.Header.Get("Content-Type")
+	out, err := h.svc.UploadCV(r.Context(), orgID, userID, hdr.Filename, ct, data)
+	if err != nil {
+		h.writeErr(w, err)
+		return
+	}
+	RespondJSON(w, http.StatusOK, out)
 }
 
 func (h *CareerHandler) Intake(w http.ResponseWriter, r *http.Request) {
@@ -487,16 +521,36 @@ func (h *CareerHandler) Upskill(w http.ResponseWriter, r *http.Request) {
 	h.Patterns(w, r)
 }
 
+func (h *CareerHandler) PreviewListing(w http.ResponseWriter, r *http.Request) {
+	orgID, userID, ok := h.ids(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		JobURL string `json:"job_url"`
+	}
+	if !DecodeJSON(w, r, &req) {
+		return
+	}
+	out, err := h.svc.PreviewListing(r.Context(), orgID, userID, req.JobURL)
+	if err != nil {
+		h.writeErr(w, err)
+		return
+	}
+	RespondJSON(w, http.StatusOK, out)
+}
+
 func (h *CareerHandler) BatchEvaluate(w http.ResponseWriter, r *http.Request) {
 	orgID, userID, ok := h.ids(w, r)
 	if !ok {
 		return
 	}
 	var req struct {
-		Limit int `json:"limit"`
+		Limit int      `json:"limit"`
+		URLs  []string `json:"urls"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
-	out, err := h.svc.BatchEvaluate(r.Context(), orgID, userID, req.Limit)
+	out, err := h.svc.BatchEvaluate(r.Context(), orgID, userID, req.Limit, req.URLs)
 	if err != nil {
 		h.writeErr(w, err)
 		return
@@ -520,6 +574,31 @@ func (h *CareerHandler) runArtifact(w http.ResponseWriter, r *http.Request, fn f
 		return
 	}
 	RespondJSON(w, http.StatusOK, out)
+}
+
+func (h *CareerHandler) ArtifactPDF(w http.ResponseWriter, r *http.Request) {
+	orgID, userID, ok := h.ids(w, r)
+	if !ok {
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	a, pdf, err := h.svc.ArtifactPDF(r.Context(), orgID, userID, id)
+	if err != nil {
+		h.writeErr(w, err)
+		return
+	}
+	name := "tailored-cv.pdf"
+	if a != nil && a.PDFFilename != "" {
+		name = a.PDFFilename
+	}
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(pdf)
 }
 
 func pagePer(r *http.Request) (int, int) {
