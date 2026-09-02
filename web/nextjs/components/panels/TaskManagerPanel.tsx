@@ -59,6 +59,7 @@ type Selection =
   | { kind: "agent"; id: string }
   | { kind: "builtin"; id: "pentest" | "review" | "mail" | "articles" | "images" | "career" };
 
+/** Rail tabs for specialists. All agents wire the same way: own package, then register for Task Manager, chat, and the per-agent tab. Do not add a row here for a new agent — register the module. See .cursor/rules/agent-modules.mdc */
 const BUILTINS: {
   id: "pentest" | "review" | "mail" | "articles" | "images" | "career";
   label: string;
@@ -293,6 +294,7 @@ export function TaskManagerPanel() {
               onLaunched={handleLaunchResult}
             />
           )}
+          {/* Per-agent tab: mount from the registry. Do not add another selection.id branch for a new specialist. */}
           {selection?.kind === "builtin" && selection.id === "pentest" && (
             <BuiltinFrame title="Security Tester">
               <PentestAgentClient />

@@ -41,6 +41,10 @@ type Agent struct {
 // and the Builtin* values name each one. Kept as constants because migration
 // 000019 and auth_service.Register both write these exact markers and the
 // board/UI read them.
+//
+// Every specialist is wired the same way: its own package, then register for
+// Task Manager, chat (agent_execute), and the per-agent tab. Adding an agent
+// must not mean new switches across the platform. See .claude/rules/agent-modules.md.
 const (
 	MetadataKeyBuiltin   = "builtin"
 	BuiltinArticleWriter = "article_writer"

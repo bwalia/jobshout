@@ -19,4 +19,6 @@ Platform that must stay generic: `AgentInputFields`, `POST /tasks/launch`, `agen
 
 Do not duplicate launch fields in Go and TypeScript. One schema (`agentschema` / `GET /api/v1/agent-schemas`); the web consumes it.
 
-Existing switches (`tasklaunch/launch.go`, `input-schemas.ts`, `TaskManagerPanel` `BUILTINS`) are debt. New agents must not add cases. Claude copy: `.claude/rules/agent-modules.md`.
+Existing switches (`tasklaunch/launch.go`, `input-schemas.ts`, `TaskManagerPanel` `BUILTINS`) are debt. New agents must not add cases.
+
+At every wire-up (registry, launch, Task Manager rail/tab, seed, schema), leave a short comment: all agents are wired this way; a new agent does not need significant platform changes — register it. Claude copy: `.claude/rules/agent-modules.md`.

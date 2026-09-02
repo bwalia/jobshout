@@ -8,6 +8,9 @@ import (
 	"github.com/jobshout/server/internal/model"
 )
 
+// systemPrompt is the chat control-surface prompt. Specialist "when to call"
+// bullets below are debt: a new agent registers a one-line hint on its module
+// instead of editing this string. All agents launch via agent_execute + schema.
 func systemPrompt(now time.Time, summary string, entities map[string]model.SessionEntity, memories []string, pending *model.PendingAction, extra string) string {
 	var b strings.Builder
 	b.WriteString(`You are JobShout AI, the conversational control surface for this organisation.

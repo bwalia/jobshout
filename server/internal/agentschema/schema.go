@@ -1,6 +1,10 @@
-// Package agentschema is the server copy of Task Manager's agent input
-// contract (web/nextjs/lib/agents/input-schemas.ts). Keep the required field
-// keys and order in sync with that file.
+// Package agentschema is the launch-field contract for every specialist
+// (Task Manager forms, chat interview, GET /api/v1/agent-schemas).
+//
+// All agents are wired this way: schema lives with the agent and is registered
+// here (or on the forthcoming module registry). Do not add a new ForBuiltin
+// case plus a duplicate TypeScript SCHEMAS entry for agent N+1 — register the
+// agent. See .claude/rules/agent-modules.md.
 package agentschema
 
 import (

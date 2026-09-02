@@ -30,6 +30,8 @@ func runAgentExecute(ctx context.Context, d Deps, reg *Registry, input map[strin
 	prompt := strArg(input, "prompt")
 
 	if !agentschema.IsThinPrompt(prompt, agent.Name) {
+		// Prompt→field mapping belongs on the agent module. Do not add a case
+		// here for a new specialist — register it with the schema.
 		switch builtin {
 		case model.BuiltinResearcher, model.BuiltinArticleWriter:
 			if vals["topic"] == "" {

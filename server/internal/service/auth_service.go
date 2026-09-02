@@ -144,7 +144,9 @@ func (s *authService) seedBuiltinAgents(ctx context.Context, orgID, createdBy uu
 	}
 
 	// Each built-in is seeded independently so one failing does not deprive the
-	// organization of the others.
+	// organization of the others. Do not add a new agent to this map as a
+	// platform special-case — seed lives on the agent and the registry iterates
+	// it. See .claude/rules/agent-modules.md.
 	seeds := map[string]*model.Agent{
 		"Article Writer":  articleWriterSeed(orgID),
 		"Research Agent":  researcherSeed(orgID),

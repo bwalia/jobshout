@@ -16,4 +16,6 @@ Do not duplicate launch fields in Go and TypeScript. One schema (`agentschema` /
 
 Existing switches (`tasklaunch/launch.go`, `input-schemas.ts`, `TaskManagerPanel` `BUILTINS`) are debt. New agents must not add cases.
 
+At every wire-up (registry, launch, Task Manager rail/tab, seed, schema), leave a short comment: all agents are wired this way; a new agent does not need significant platform changes — register it.
+
 Cursor copy of this rule: `.cursor/rules/agent-modules.mdc`.

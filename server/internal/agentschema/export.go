@@ -4,6 +4,8 @@ import "github.com/jobshout/server/internal/model"
 
 // Builtins is every builtin this package has an interview for, in the order
 // the Task Manager lists them. The generic fallback is not included.
+// Do not append a new agent here as a one-off — register the specialist so
+// Task Manager, chat, and the per-agent tab pick it up together.
 var Builtins = []string{
 	model.BuiltinArticleWriter,
 	model.BuiltinResearcher,

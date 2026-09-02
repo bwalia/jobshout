@@ -47,7 +47,13 @@ export type AgentBuiltin =
  * How a selected agent should be launched from Task Manager.
  * Specialists hit their dedicated APIs; everything else uses task runs.
  *
- * Keep required field keys and order in sync with server/internal/agentschema.
+ * All specialists wire the same way: schema on the agent, one register, then
+ * Task Manager / chat / the per-agent tab consume it. Do not add a new
+ * AgentBuiltin + SCHEMAS entry for agent N+1 — register the module (server
+ * agentschema / GET /api/v1/agent-schemas). See .cursor/rules/agent-modules.mdc.
+ *
+ * Keep required field keys and order in sync with server/internal/agentschema
+ * until the web reads that API.
  */
 export type AgentLaunchKind = "task_run" | AgentBuiltin | "images";
 
@@ -88,6 +94,7 @@ const GENERIC: AgentInputSchema = {
   descriptionFrom: (v) => v.description?.trim() || undefined,
 };
 
+/** Duplicate of server agentschema. Do not grow this map for a new agent — register the specialist and load fields from GET /api/v1/agent-schemas. */
 const SCHEMAS: Record<AgentBuiltin, AgentInputSchema> = {
   article_writer: {
     kind: "article_writer",

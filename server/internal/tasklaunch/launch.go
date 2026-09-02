@@ -1,5 +1,9 @@
 // Package tasklaunch is the single place Task Manager and chat start an agent.
 // It always creates or updates a board task, then dispatches the specialist.
+//
+// All specialists wire the same way: own package, register Launch, Task Manager
+// tab, and chat. Do not add a Service field and switch case for a new agent —
+// register it. See .claude/rules/agent-modules.md.
 package tasklaunch
 
 import (
@@ -153,6 +157,8 @@ func (s *Service) Launch(ctx context.Context, req Request) (*Result, error) {
 	task.Status = "in_progress"
 
 	out := &Result{Task: task, Kind: kind}
+	// Dispatch by metadata.builtin. This switch is debt: a new agent should
+	// register Launch on the module, not add a case here.
 	switch kind {
 	case model.BuiltinResearcher:
 		if s.Research == nil || !s.Research.Available() {
