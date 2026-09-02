@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/jobshout/server/internal/agentmodules"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/research"
 	"github.com/jobshout/server/internal/tasklaunch"
@@ -50,8 +51,9 @@ func TestEval_ResearchTwoProjectsAsksThenLaunches(t *testing.T) {
 	}}
 	tasks := &fakeTasks{}
 	rs := &launchResearch{}
+	agentmodules.Register(agentmodules.Deps{Research: rs})
 	launch := &tasklaunch.Service{
-		Agents: agents, Tasks: tasks, Projects: projects, Research: rs,
+		Agents: agents, Tasks: tasks, Projects: projects,
 	}
 	reg := NewRegistryWithTools(Deps{Launch: launch, Agents: agents, Research: rs})
 	tool, ok := reg.Get("research_run")
@@ -97,8 +99,9 @@ func TestEval_LaunchInjectsMemoryIntoContext(t *testing.T) {
 	projects := &fakeProjects{items: []model.Project{proj}}
 	tasks := &fakeTasks{}
 	rs := &launchResearch{}
+	agentmodules.Register(agentmodules.Deps{Research: rs})
 	launch := &tasklaunch.Service{
-		Agents: agents, Tasks: tasks, Projects: projects, Research: rs,
+		Agents: agents, Tasks: tasks, Projects: projects,
 	}
 	reg := NewRegistryWithTools(Deps{Launch: launch, Agents: agents, Research: rs})
 	tool, _ := reg.Get("research_run")

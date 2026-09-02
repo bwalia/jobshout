@@ -1,124 +1,127 @@
-// Package agentschema is the server copy of Task Manager's agent input
-// contract (web/nextjs/lib/agents/input-schemas.ts). Keep the required field
-// keys and order in sync with that file.
+// Package agentschema is the launch-field contract for every specialist
+// (Task Manager forms, chat interview, GET /api/v1/agent-schemas).
+//
+// All agents are wired this way: schema lives on the module and is registered
+// with agentmodule. Do not add a ForBuiltin case or a TypeScript SCHEMAS entry
+// for agent N+1 — register the agent. See .claude/rules/agent-modules.md.
 package agentschema
 
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/jobshout/server/internal/model"
 )
 
-// Field is one interview slot. Key must match Task Manager / tool JSON names.
+// Field is one interview / form slot. Key must match Task Manager / tool JSON names.
 type Field struct {
-	Key       string
-	Label     string
-	Question  string
-	Required  bool
-	MinLength int
-	Default   string
-	Options   []model.ClarifyOption
+	Key         string
+	Label       string
+	Question    string
+	Type        string // text, textarea, number, select, checkbox, repo
+	Required    bool
+	MinLength   int
+	Min         int
+	Default     string
+	Placeholder string
+	Help        string
+	Group       string
+	Options     []model.ClarifyOption
+}
+
+// TitleRule builds a board-task title from filled values. First match wins.
+type TitleRule struct {
+	IfKey    string   `json:"if_key,omitempty"`
+	Prefix   string   `json:"prefix,omitempty"`
+	FromKey  string   `json:"from_key,omitempty"`
+	FromKeys []string `json:"from_keys,omitempty"`
+	Format   string   `json:"format,omitempty"` // {key} substitution
+	Literal  string   `json:"literal,omitempty"`
+	Truncate int      `json:"truncate,omitempty"`
+	Fallback string   `json:"fallback,omitempty"`
+	SuffixIf string   `json:"suffix_if,omitempty"`
+	Suffix   string   `json:"suffix,omitempty"`
+}
+
+// DescRule appends a description line when the key is non-empty.
+type DescRule struct {
+	Prefix   string `json:"prefix,omitempty"`
+	Key      string `json:"key,omitempty"`
+	Truncate int    `json:"truncate,omitempty"`
+	Literal  string `json:"literal,omitempty"`
+	Format   string `json:"format,omitempty"`
+	SuffixIf string `json:"suffix_if,omitempty"`
+	Suffix   string `json:"suffix,omitempty"`
+}
+
+// RequireGroup is an OR of keys: at least one must be filled.
+type RequireGroup struct {
+	Keys     []string `json:"keys"`
+	Slot     string   `json:"slot,omitempty"`
+	Question string   `json:"question,omitempty"`
 }
 
 // Schema is the ordered interview for one builtin (or the generic fallback).
 type Schema struct {
 	Builtin        string
-	SpecialistTool string // platform tool to dispatch into; empty = generic execute
+	SpecialistTool string
+	Hint           string
 	Fields         []Field
+	TitleRules     []TitleRule
+	DescRules      []DescRule
+	RequireAny     []RequireGroup
+	Prefill        string // "mailbox"
+}
+
+var (
+	regMu   sync.RWMutex
+	schemas = map[string]Schema{}
+	order   []string
+)
+
+// SetRegistry is called by agentmodule.Register. All specialists are wired this
+// way: schema lives on the module. A new agent does not need significant
+// platform changes — register it, do not add a switch here.
+func SetRegistry(lookup map[string]Schema, builtins []string) {
+	regMu.Lock()
+	defer regMu.Unlock()
+	schemas = lookup
+	order = builtins
+}
+
+// Builtins is every registered specialist, in register order.
+func Builtins() []string {
+	regMu.RLock()
+	defer regMu.RUnlock()
+	out := make([]string, len(order))
+	copy(out, order)
+	return out
+}
+
+// Generic is the chat interview for a custom (non-builtin) agent.
+func Generic() Schema {
+	return Schema{
+		Hint: "Describe the work. Title and description become the agent's prompt when you run.",
+		Fields: []Field{
+			{Key: "prompt", Label: "Prompt", Question: "What should the agent do?", Type: "textarea", Required: true, MinLength: 3},
+		},
+	}
 }
 
 // ForBuiltin returns the interview schema for a platform builtin marker.
 // Unknown / empty builtin uses the generic prompt contract.
 func ForBuiltin(builtin string) Schema {
-	switch builtin {
-	case model.BuiltinArticleWriter:
-		return Schema{
-			Builtin:        model.BuiltinArticleWriter,
-			SpecialistTool: "article_generate",
-			Fields: []Field{
-				{Key: "topic", Label: "Topic", Question: "What should I write about?", Required: true, MinLength: 3},
-				{Key: "context", Label: "Context"},
-				{Key: "model", Label: "Model"},
-			},
-		}
-	case model.BuiltinResearcher:
-		return Schema{
-			Builtin:        model.BuiltinResearcher,
-			SpecialistTool: "research_run",
-			Fields: []Field{
-				{Key: "topic", Label: "Topic", Question: "What should I research?", Required: true, MinLength: 3},
-				{Key: "context", Label: "Context"},
-			},
-		}
-	case model.BuiltinPentester:
-		return Schema{
-			Builtin:        model.BuiltinPentester,
-			SpecialistTool: "pentest_start",
-			Fields: []Field{
-				{Key: "target", Label: "Target", Question: "What URL or path should I test?", Required: true, MinLength: 3},
-				{Key: "scan_mode", Label: "Scan mode", Required: true, Default: "quick", Options: []model.ClarifyOption{
-					{Label: "Quick (5–15 min)", Value: "quick"},
-					{Label: "Standard (30–60 min)", Value: "standard"},
-					{Label: "Deep (1–2+ hours)", Value: "deep"},
-				}},
-				{Key: "max_budget", Label: "Max budget"},
-				{Key: "instruction", Label: "Instruction"},
-			},
-		}
-	case model.BuiltinPRReviewer:
-		return Schema{
-			Builtin:        model.BuiltinPRReviewer,
-			SpecialistTool: "review_pull_request",
-			Fields: []Field{
-				{Key: "repo", Label: "Repository", Question: "Which GitHub repo should I review? Use owner/name.", Required: true, MinLength: 3},
-				{Key: "pr_number", Label: "Pull request number", Question: "Which pull request number?", Required: true},
-				{Key: "dry_run", Label: "Preview only", Default: "true"},
-			},
-		}
-	case model.BuiltinMail:
-		return Schema{
-			Builtin:        model.BuiltinMail,
-			SpecialistTool: "mail_sync",
-			Fields: []Field{
-				{Key: "senders", Label: "Watch senders", Question: "Any sender addresses to watch? Leave blank for all unread mail."},
-				{Key: "subject_prefixes", Label: "Subject prefixes"},
-				{Key: "labels", Label: "Gmail labels"},
-				{Key: "knowledge_notes", Label: "What the agent should know", Question: "What should replies be based on? Prices, products, policies — write it here."},
-				{Key: "knowledge_urls", Label: "Knowledge links", Question: "Any pricing or product pages I should read on top of that? One URL per line."},
-				{Key: "research_focus", Label: "What to look for"},
-				{Key: "reply_instructions", Label: "How the reply should read"},
-			},
-		}
-	case model.BuiltinImages:
-		return Schema{
-			Builtin:        model.BuiltinImages,
-			SpecialistTool: "image_generate",
-			Fields: []Field{
-				{Key: "prompt", Label: "Image prompt", Question: "What should I generate?", Required: true, MinLength: 3},
-			},
-		}
-	case model.BuiltinCareerOps:
-		return Schema{
-			Builtin:        model.BuiltinCareerOps,
-			SpecialistTool: "career_evaluate",
-			Fields: []Field{
-				{Key: "job_url", Label: "Job URL", Question: "Paste a job URL, or the job description text."},
-				{Key: "jd_text", Label: "Job description"},
-				{Key: "mode", Label: "Mode", Default: "full", Options: []model.ClarifyOption{
-					{Label: "Full evaluation", Value: "full"},
-					{Label: "Triage (fast)", Value: "triage"},
-				}},
-				{Key: "tailor_cv", Label: "Also tailor CV", Default: "false"},
-			},
-		}
-	default:
-		return Schema{
-			Fields: []Field{
-				{Key: "prompt", Label: "Prompt", Question: "What should the agent do?", Required: true, MinLength: 3},
-			},
-		}
+	if builtin == "" {
+		return Generic()
 	}
+	regMu.RLock()
+	s, ok := schemas[builtin]
+	regMu.RUnlock()
+	if ok {
+		return s
+	}
+	return Generic()
 }
 
 // BuiltinOf reads metadata.builtin off an agent.
@@ -146,7 +149,6 @@ func ValuesFromArgs(input map[string]any) map[string]string {
 }
 
 // NextMissing returns the first required slot that is still empty.
-// Closed sets include Options (chips); free-text slots do not.
 func (s Schema) NextMissing(vals map[string]string) (slot, question string, options []model.ClarifyOption) {
 	for _, f := range s.Fields {
 		if !f.Required {
@@ -164,6 +166,31 @@ func (s Schema) NextMissing(vals map[string]string) (slot, question string, opti
 			return f.Key, q, f.Options
 		}
 	}
+	return s.RequireAnyMissing(vals)
+}
+
+// RequireAnyMissing reports a group where every key is empty.
+func (s Schema) RequireAnyMissing(vals map[string]string) (slot, question string, options []model.ClarifyOption) {
+	for _, g := range s.RequireAny {
+		anyFilled := false
+		for _, k := range g.Keys {
+			if strings.TrimSpace(vals[k]) != "" {
+				anyFilled = true
+				break
+			}
+		}
+		if !anyFilled {
+			slot = g.Slot
+			if slot == "" && len(g.Keys) > 0 {
+				slot = g.Keys[0]
+			}
+			q := g.Question
+			if q == "" {
+				q = "I need more detail to continue."
+			}
+			return slot, q, nil
+		}
+	}
 	return "", "", nil
 }
 
@@ -178,6 +205,12 @@ func (s Schema) ApplyDefaults(vals map[string]string) map[string]string {
 		}
 	}
 	return vals
+}
+
+// LooksLikeURL reports an http(s) string. Used by AbsorbPrompt on modules.
+func LooksLikeURL(s string) bool {
+	s = strings.TrimSpace(s)
+	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")
 }
 
 // IsThinPrompt reports a tautology of "run the X agent" with no extra substance.

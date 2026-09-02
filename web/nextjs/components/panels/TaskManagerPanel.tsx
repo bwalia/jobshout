@@ -5,19 +5,22 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   Bot,
   FolderKanban,
-  Newspaper,
-  Image as ImageIcon,
   Plus,
+  Rocket,
+  BookOpen,
   ShieldAlert,
   GitPullRequest,
   Mail,
   Briefcase,
-  Rocket,
-  BookOpen,
+  Newspaper,
+  Image as ImageIcon,
+  Search,
+  type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAgents } from "@/lib/hooks/useAgents";
+import { useAgentSchemas } from "@/lib/hooks/useAgentSchemas";
 import { useProjects } from "@/lib/hooks/useProjects";
 import {
   useAllTasks,
@@ -40,12 +43,8 @@ import {
 import { NewProjectDialog } from "@/components/task-manager/NewProjectDialog";
 import { CreateAgentDialog } from "@/components/agent/CreateAgentDialog";
 import { AgentStatusBadge } from "@/components/agent/AgentStatusBadge";
-import { PentestAgentClient } from "@/components/PentestAgentClient";
-import { ReviewAgentClient } from "@/components/ReviewAgentClient";
-import { MailAgentClient } from "@/components/MailAgentClient";
-import { CareerAgentClient } from "@/components/CareerAgentClient";
-import { ArticlesView } from "@/components/articles/ArticlesView";
-import { ImagesView } from "@/components/image/ImagesView";
+import { BuiltinAgentTab } from "@/components/task-manager/BuiltinAgentTab";
+import { AGENT_CLIENTS } from "@/lib/agents/tab-clients";
 import type { LaunchResult } from "@/lib/agents/launch";
 import type { Agent } from "@/lib/types/agent";
 import type { Project, Task } from "@/lib/types/project";
@@ -57,27 +56,24 @@ import { STATUS_DOT } from "@/lib/status-colors";
 type Selection =
   | { kind: "project"; id: string }
   | { kind: "agent"; id: string }
-  | { kind: "builtin"; id: "pentest" | "review" | "mail" | "articles" | "images" | "career" };
+  | { kind: "builtin"; id: string };
 
-const BUILTINS: {
-  id: "pentest" | "review" | "mail" | "articles" | "images" | "career";
-  label: string;
-  icon: React.ElementType;
-  match?: string;
-}[] = [
-  { id: "pentest", label: "Security Tester", icon: ShieldAlert, match: "pentester" },
-  { id: "review", label: "PR Reviewer", icon: GitPullRequest, match: "pr_reviewer" },
-  { id: "mail", label: "Mail Agent", icon: Mail, match: "mail" },
-  { id: "career", label: "Career Agent", icon: Briefcase, match: "career_ops" },
-  { id: "articles", label: "Article Writer", icon: Newspaper, match: "article_writer" },
-  { id: "images", label: "Image Generator", icon: ImageIcon, match: "images" },
-];
+const RAIL_ICONS: Record<string, LucideIcon> = {
+  "shield-alert": ShieldAlert,
+  "git-pull-request": GitPullRequest,
+  mail: Mail,
+  briefcase: Briefcase,
+  newspaper: Newspaper,
+  image: ImageIcon,
+  search: Search,
+};
 
 function parseSelection(
   project: string | null,
-  agent: string | null
+  agent: string | null,
+  tabSlugs: Set<string>
 ): Selection | null {
-  if (agent === "pentest" || agent === "review" || agent === "mail" || agent === "articles" || agent === "images" || agent === "career") {
+  if (agent && tabSlugs.has(agent)) {
     return { kind: "builtin", id: agent };
   }
   if (agent) return { kind: "agent", id: agent };
@@ -96,7 +92,21 @@ export function TaskManagerPanel() {
   const projects = useMemo(() => projectsResp?.data ?? [], [projectsResp]);
   const { data: agentsResp } = useAgents({ per_page: 100 });
   const agents = useMemo(() => agentsResp?.data ?? [], [agentsResp]);
+  const { data: catalog = [] } = useAgentSchemas();
   const { data: allTasksResp } = useAllTasks();
+
+  const railTabs = useMemo(
+    () => catalog.filter((s) => s.tab_slug),
+    [catalog]
+  );
+  const tabSlugs = useMemo(
+    () => new Set(railTabs.map((s) => s.tab_slug as string)),
+    [railTabs]
+  );
+  const tabBuiltins = useMemo(
+    () => new Set(railTabs.map((s) => s.builtin)),
+    [railTabs]
+  );
 
   const taskCounts = useMemo(() => {
     const m = new Map<string, number>();
@@ -107,13 +117,13 @@ export function TaskManagerPanel() {
   }, [allTasksResp]);
 
   const [selection, setSelection] = useState<Selection | null>(() =>
-    parseSelection(projectParam, agentParam)
+    parseSelection(projectParam, agentParam, new Set())
   );
   const [createAgentOpen, setCreateAgentOpen] = useState(false);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
 
   useEffect(() => {
-    const parsed = parseSelection(projectParam, agentParam);
+    const parsed = parseSelection(projectParam, agentParam, tabSlugs);
     if (parsed) {
       setSelection(parsed);
       return;
@@ -122,7 +132,7 @@ export function TaskManagerPanel() {
       select({ kind: "project", id: projects[0].id });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectParam, agentParam, projects]);
+  }, [projectParam, agentParam, projects, tabSlugs]);
 
   function select(next: Selection) {
     setSelection(next);
@@ -142,9 +152,10 @@ export function TaskManagerPanel() {
     if (!result.task) return;
     void qc.invalidateQueries({ queryKey: taskKeys.all });
     void qc.invalidateQueries({ queryKey: ["metrics", "summary"] });
-    if (result.kind === "career_ops") {
-      setSelection({ kind: "builtin", id: "career" });
-      const params = new URLSearchParams({ agent: "career" });
+    const wire = catalog.find((s) => s.builtin === result.kind);
+    if (wire?.stay_on_tab && wire.tab_slug) {
+      setSelection({ kind: "builtin", id: wire.tab_slug });
+      const params = new URLSearchParams({ agent: wire.tab_slug });
       if (result.evaluation_id) params.set("eval", result.evaluation_id);
       router.replace(`/panel/task-manager?${params.toString()}`, { scroll: false });
       return;
@@ -229,15 +240,19 @@ export function TaskManagerPanel() {
               Agents
             </p>
             <ul className="space-y-0.5">
-              {BUILTINS.map((b) => {
-                const Icon = b.icon;
+              {/* Rail tabs come from the specialist registry. All specialists
+                  are wired this way; a new agent does not need a BUILTINS row
+                  or selection.id === "…" — register it. */}
+              {railTabs.map((b) => {
+                const Icon = RAIL_ICONS[b.icon ?? ""] ?? Bot;
+                const slug = b.tab_slug as string;
                 const active =
-                  selection?.kind === "builtin" && selection.id === b.id;
+                  selection?.kind === "builtin" && selection.id === slug;
                 return (
-                  <li key={b.id}>
+                  <li key={b.builtin}>
                     <button
                       type="button"
-                      onClick={() => select({ kind: "builtin", id: b.id })}
+                      onClick={() => select({ kind: "builtin", id: slug })}
                       className={cn(
                         "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm",
                         active
@@ -246,7 +261,7 @@ export function TaskManagerPanel() {
                       )}
                     >
                       <Icon className="h-3.5 w-3.5 shrink-0 opacity-60" />
-                      <span className="truncate">{b.label}</span>
+                      <span className="truncate">{b.label || b.builtin}</span>
                     </button>
                   </li>
                 );
@@ -254,7 +269,7 @@ export function TaskManagerPanel() {
               {agents
                 .filter((a) => {
                   const builtin = a.metadata?.builtin;
-                  return !BUILTINS.some((b) => b.match && b.match === builtin);
+                  return !(typeof builtin === "string" && tabBuiltins.has(builtin));
                 })
                 .map((a) => {
                   const active =
@@ -293,35 +308,27 @@ export function TaskManagerPanel() {
               onLaunched={handleLaunchResult}
             />
           )}
-          {selection?.kind === "builtin" && selection.id === "pentest" && (
-            <BuiltinFrame title="Security Tester">
-              <PentestAgentClient />
-            </BuiltinFrame>
-          )}
-          {selection?.kind === "builtin" && selection.id === "review" && (
-            <BuiltinFrame title="PR Reviewer">
-              <ReviewAgentClient />
-            </BuiltinFrame>
-          )}
-          {selection?.kind === "builtin" && selection.id === "mail" && (
-            <BuiltinFrame title="Mail Agent">
-              <MailAgentClient />
-            </BuiltinFrame>
-          )}
-          {selection?.kind === "builtin" && selection.id === "career" && (
-            <BuiltinFrame title="Career Agent">
-              <CareerAgentClient />
-            </BuiltinFrame>
-          )}
-          {selection?.kind === "builtin" && selection.id === "articles" && (
-            <BuiltinFrame title="Article Writer">
-              <ArticlesView hideHeader />
-            </BuiltinFrame>
-          )}
-          {selection?.kind === "builtin" && selection.id === "images" && (
-            <BuiltinFrame title="Image Generator">
-              <ImagesView hideHeader />
-            </BuiltinFrame>
+          {selection?.kind === "builtin" && (
+            <BuiltinAgentTab
+              wire={
+                railTabs.find((s) => s.tab_slug === selection.id) ?? {
+                  builtin: "",
+                  fields: [],
+                  label: selection.id,
+                }
+              }
+              agent={agents.find((a) => {
+                const w = railTabs.find((s) => s.tab_slug === selection.id);
+                return w && a.metadata?.builtin === w.builtin;
+              })}
+              projects={projects}
+              Client={
+                AGENT_CLIENTS[
+                  railTabs.find((s) => s.tab_slug === selection.id)?.builtin ?? ""
+                ]
+              }
+              onLaunched={handleLaunchResult}
+            />
           )}
           {selection?.kind === "agent" && selectedAgent && (
             <AgentDetailView
@@ -352,21 +359,6 @@ export function TaskManagerPanel() {
           }}
         />
       )}
-    </div>
-  );
-}
-
-function BuiltinFrame({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="space-y-4">
-      <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
-      {children}
     </div>
   );
 }

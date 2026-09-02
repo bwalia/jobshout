@@ -7,7 +7,7 @@ export type AgentFieldType =
   | "number"
   | "select"
   | "checkbox"
-  | "repo"; // review-bot allowlisted repo picker (falls back to text)
+  | "repo";
 
 export interface AgentFieldOption {
   value: string;
@@ -19,19 +19,15 @@ export interface AgentField {
   label: string;
   type: AgentFieldType;
   required?: boolean;
-  /** Minimum trimmed length for text/textarea/repo (default 1 when required). */
   minLength?: number;
-  /** Minimum numeric value for number fields (default 1 when required). */
   min?: number;
   placeholder?: string;
   help?: string;
-  /** Optional section heading shown above this field in Task Manager. */
   group?: string;
   options?: AgentFieldOption[];
   defaultValue?: string | boolean;
 }
 
-/** Minimum length for board task titles (create + edit). */
 export const TASK_TITLE_MIN_LENGTH = 3;
 
 export type AgentBuiltin =
@@ -41,28 +37,77 @@ export type AgentBuiltin =
   | "pr_reviewer"
   | "mail"
   | "images"
-  | "career_ops";
+  | "career_ops"
+  | string;
 
-/**
- * How a selected agent should be launched from Task Manager.
- * Specialists hit their dedicated APIs; everything else uses task runs.
- *
- * Keep required field keys and order in sync with server/internal/agentschema.
- */
-export type AgentLaunchKind = "task_run" | AgentBuiltin | "images";
+export type AgentLaunchKind = "task_run" | AgentBuiltin;
+
+export interface TitleRule {
+  if_key?: string;
+  prefix?: string;
+  from_key?: string;
+  from_keys?: string[];
+  format?: string;
+  literal?: string;
+  truncate?: number;
+  fallback?: string;
+  suffix_if?: string;
+  suffix?: string;
+}
+
+export interface DescRule {
+  prefix?: string;
+  key?: string;
+  truncate?: number;
+  literal?: string;
+  format?: string;
+  suffix_if?: string;
+  suffix?: string;
+}
+
+export interface RequireGroup {
+  keys: string[];
+  slot?: string;
+  question?: string;
+}
+
+/** One builtin as GET /api/v1/agent-schemas returns it. */
+export interface WireSchema {
+  builtin: string;
+  specialist_tool?: string;
+  hint?: string;
+  label?: string;
+  icon?: string;
+  tab_slug?: string;
+  stay_on_tab?: boolean;
+  prefill?: string;
+  fields: {
+    key: string;
+    label: string;
+    question?: string;
+    type?: string;
+    required: boolean;
+    min_length?: number;
+    min?: number;
+    default?: string;
+    placeholder?: string;
+    help?: string;
+    group?: string;
+    options?: { label: string; value: string }[];
+  }[];
+  title_rules?: TitleRule[];
+  desc_rules?: DescRule[];
+  require_any?: RequireGroup[];
+}
 
 export interface AgentInputSchema {
   kind: AgentLaunchKind;
-  /** Short blurb under the agent picker. */
   hint: string;
+  prefill?: string;
   fields: AgentField[];
-  /**
-   * Build a board-task title from the filled values. Specialists don't ask for
-   * a separate title — the primary input becomes the title.
-   */
   titleFrom?: (values: Record<string, string>) => string;
-  /** Optional description derived from the form (stored on the board task). */
   descriptionFrom?: (values: Record<string, string>) => string | undefined;
+  requireAny?: RequireGroup[];
 }
 
 const GENERIC: AgentInputSchema = {
@@ -88,312 +133,135 @@ const GENERIC: AgentInputSchema = {
   descriptionFrom: (v) => v.description?.trim() || undefined,
 };
 
-const SCHEMAS: Record<AgentBuiltin, AgentInputSchema> = {
-  article_writer: {
-    kind: "article_writer",
-    hint: "Give a topic to research. The writer picks its own title from sources.",
-    fields: [
-      {
-        key: "topic",
-        label: "Topic",
-        type: "text",
-        required: true,
-        minLength: 3,
-        placeholder: "e.g. Edge AI inference in 2026",
-      },
-      {
-        key: "context",
-        label: "Context (optional)",
-        type: "textarea",
-        placeholder: "Audience, angle, points to cover or avoid",
-      },
-      {
-        key: "model",
-        label: "Model override (optional)",
-        type: "text",
-        placeholder: "agent default",
-      },
-    ],
-    titleFrom: (v) => `Write: ${v.topic?.trim() || "article"}`,
-    descriptionFrom: (v) => {
-      const parts = [`Topic: ${v.topic?.trim()}`];
-      if (v.context?.trim()) parts.push(v.context.trim());
-      return parts.join("\n\n");
-    },
-  },
-  researcher: {
-    kind: "researcher",
-    hint: "Research a subject and return cited findings.",
-    fields: [
-      {
-        key: "topic",
-        label: "Topic",
-        type: "text",
-        required: true,
-        minLength: 3,
-        placeholder: "e.g. Kubernetes cost optimisation patterns",
-      },
-      {
-        key: "context",
-        label: "Context (optional)",
-        type: "textarea",
-        placeholder: "Angle, constraints, what to emphasise",
-      },
-    ],
-    titleFrom: (v) => `Research: ${v.topic?.trim() || "topic"}`,
-    descriptionFrom: (v) => {
-      const parts = [`Topic: ${v.topic?.trim()}`];
-      if (v.context?.trim()) parts.push(v.context.trim());
-      return parts.join("\n\n");
-    },
-  },
-  pentester: {
-    kind: "pentester",
-    hint: "Start a security scan against an authorised target.",
-    fields: [
-      {
-        key: "target",
-        label: "Target URL or path",
-        type: "text",
-        required: true,
-        minLength: 3,
-        placeholder: "https://int.example.com",
-        help: "Live API or app URL you are authorised to test",
-      },
-      {
-        key: "scan_mode",
-        label: "Scan mode",
-        type: "select",
-        required: true,
-        defaultValue: "quick",
-        options: [
-          { value: "quick", label: "Quick (5–15 min)" },
-          { value: "standard", label: "Standard (30–60 min)" },
-          { value: "deep", label: "Deep (1–2+ hours)" },
-        ],
-      },
-      {
-        key: "max_budget",
-        label: "Max budget (USD cents, optional)",
-        type: "number",
-        min: 1,
-        placeholder: "1000",
-        help: "e.g. 1000 = $10",
-      },
-      {
-        key: "instruction",
-        label: "Engagement note (optional)",
-        type: "textarea",
-        placeholder: "Focus on /api; ignore marketing pages",
-      },
-    ],
-    titleFrom: (v) => `Pentest: ${v.target?.trim() || "target"}`,
-    descriptionFrom: (v) => {
-      const parts = [`Target: ${v.target?.trim()}`, `Mode: ${v.scan_mode || "quick"}`];
-      if (v.instruction?.trim()) parts.push(v.instruction.trim());
-      return parts.join("\n");
-    },
-  },
-  pr_reviewer: {
-    kind: "pr_reviewer",
-    hint: "Queue an AI review of a GitHub pull request.",
-    fields: [
-      {
-        key: "repo",
-        label: "Repository",
-        type: "repo",
-        required: true,
-        minLength: 3,
-        placeholder: "owner/name",
-      },
-      {
-        key: "pr_number",
-        label: "Pull request number",
-        type: "number",
-        required: true,
-        min: 1,
-        placeholder: "e.g. 128",
-      },
-      {
-        key: "dry_run",
-        label: "Preview only — do not post comments on GitHub",
-        type: "checkbox",
-        defaultValue: true,
-      },
-    ],
-    titleFrom: (v) =>
-      `Review: ${v.repo?.trim() || "repo"}#${v.pr_number?.trim() || "?"}`,
-    descriptionFrom: (v) =>
-      `Review ${v.repo?.trim()}#${v.pr_number?.trim()}${
-        v.dry_run === "true" ? " (preview only)" : ""
-      }`,
-  },
-  mail: {
-    kind: "mail",
-    hint: "Saves who to watch and how to answer, then syncs Gmail. Connect Gmail on Mail Agent first if you have not. Nothing is sent until you Approve a draft. Links inside incoming mail are researched automatically.",
-    fields: [
-      {
-        key: "senders",
-        label: "Watch senders",
-        type: "text",
-        group: "Who to watch",
-        placeholder: "ops@example.com, support@client.com",
-        help: "Comma-separated. Empty = all unread mail from the last 7 days.",
-      },
-      {
-        key: "subject_prefixes",
-        label: "Subject prefixes",
-        type: "text",
-        group: "Who to watch",
-        placeholder: "[support], [billing]",
-      },
-      {
-        key: "labels",
-        label: "Gmail labels",
-        type: "text",
-        group: "Who to watch",
-        placeholder: "INBOX, Support",
-      },
-      {
-        key: "knowledge_notes",
-        label: "What the agent should know",
-        type: "textarea",
-        group: "How to answer",
-        placeholder:
-          "Mac Studio M5 Max: $2,499\nMac Studio M5 Ultra: $5,499\nRefunds within 30 days, shipping 3–5 working days…",
-        help: "Prices, products, policies — plain text or markdown. Replies quote only what is written here.",
-      },
-      {
-        key: "knowledge_urls",
-        label: "Knowledge links (optional)",
-        type: "textarea",
-        group: "How to answer",
-        placeholder: "https://example.com/pricing",
-        help: "Optional pages to research on top of your notes (one URL per line). Incoming mail links are researched too.",
-      },
-      {
-        key: "research_focus",
-        label: "What to look for",
-        type: "textarea",
-        group: "How to answer",
-        placeholder: "Prices, SLA, refund window…",
-      },
-      {
-        key: "reply_instructions",
-        label: "How the reply should read",
-        type: "textarea",
-        group: "How to answer",
-        placeholder: "Tone, length, must-include, must-avoid",
-      },
-    ],
-    titleFrom: (v) => {
-      const focus = v.research_focus?.trim();
-      if (focus) return `Mail: ${focus.slice(0, 80)}`;
-      if (v.knowledge_notes?.trim()) return "Mail: draft from operator knowledge";
-      const urls = v.knowledge_urls?.trim();
-      if (urls) return "Mail: research pinned pages and draft";
-      return "Mail: sync inbox and draft";
-    },
-    descriptionFrom: (v) => {
-      const parts: string[] = [];
-      if (v.senders?.trim()) parts.push(`Senders: ${v.senders.trim()}`);
-      if (v.knowledge_notes?.trim()) {
-        parts.push(`Knowledge: ${v.knowledge_notes.trim().slice(0, 200)}`);
-      }
-      if (v.knowledge_urls?.trim()) parts.push(v.knowledge_urls.trim());
-      if (v.research_focus?.trim()) parts.push(`Look for: ${v.research_focus.trim()}`);
-      if (v.reply_instructions?.trim()) {
-        parts.push(`Reply style: ${v.reply_instructions.trim()}`);
-      }
-      return parts.length ? parts.join("\n\n") : undefined;
-    },
-  },
-  images: {
-    kind: "images",
-    hint: "Generate one image from a prompt. The board task stores the result.",
-    fields: [
-      {
-        key: "prompt",
-        label: "Image prompt",
-        type: "textarea",
-        required: true,
-        minLength: 3,
-        placeholder: "A dark editorial cover of a harbour at night…",
-      },
-    ],
-    titleFrom: (v) => {
-      const p = v.prompt?.trim() || "image";
-      return `Image: ${p.slice(0, 80)}`;
-    },
-    descriptionFrom: (v) => v.prompt?.trim() || undefined,
-  },
-  career_ops: {
-    kind: "career_ops",
-    hint: "Evaluate a job URL or pasted JD against your career profile. Nothing is submitted for you.",
-    fields: [
-      {
-        key: "job_url",
-        label: "Job URL (optional if you paste a JD)",
-        type: "text",
-        placeholder: "https://boards.greenhouse.io/…",
-      },
-      {
-        key: "jd_text",
-        label: "Job description (optional if you have a URL)",
-        type: "textarea",
-        placeholder: "Paste the posting. It is treated as untrusted data.",
-      },
-      {
-        key: "mode",
-        label: "Mode",
-        type: "select",
-        defaultValue: "full",
-        options: [
-          { value: "full", label: "Full evaluation" },
-          { value: "triage", label: "Triage (fast)" },
-        ],
-      },
-      {
-        key: "tailor_cv",
-        label: "Also tailor CV",
-        type: "checkbox",
-        defaultValue: false,
-      },
-    ],
-    titleFrom: (v) =>
-      `Evaluate: ${v.job_url?.trim() || v.jd_text?.trim()?.slice(0, 40) || "job"}`,
-    descriptionFrom: (v) => {
-      const parts = [];
-      if (v.job_url?.trim()) parts.push(`URL: ${v.job_url.trim()}`);
-      if (v.jd_text?.trim()) parts.push(v.jd_text.trim());
-      return parts.join("\n\n") || undefined;
-    },
-  },
-};
+function expand(format: string, v: Record<string, string>): string {
+  return format.replace(/\{([a-z_]+)\}/g, (_, key: string) =>
+    (v[key] ?? "").trim()
+  );
+}
 
-/** True when this schema launches via the specialist launcher (not generic task run). */
+function applyTitleRules(
+  rules: TitleRule[] | undefined,
+  v: Record<string, string>
+): string {
+  if (!rules?.length) {
+    return (v.title?.trim() || v.prompt?.trim() || "Untitled task");
+  }
+  for (const r of rules) {
+    if (r.if_key && !(v[r.if_key] ?? "").trim()) continue;
+    if (r.literal) return r.literal;
+    let part = "";
+    if (r.from_key) part = (v[r.from_key] ?? "").trim();
+    if (!part && r.from_keys) {
+      for (const k of r.from_keys) {
+        const s = (v[k] ?? "").trim();
+        if (s) {
+          part = s;
+          break;
+        }
+      }
+    }
+    if (!part && r.fallback) part = r.fallback;
+    if (r.truncate && part.length > r.truncate) part = part.slice(0, r.truncate);
+    let out = r.prefix ?? "";
+    out += r.format ? expand(r.format, v) : part;
+    if (
+      r.suffix_if &&
+      (v[r.suffix_if] === "true" ||
+        (v[r.suffix_if] === "" && r.suffix_if === "dry_run"))
+    ) {
+      out += r.suffix ?? "";
+    }
+    if (out.trim() !== (r.prefix ?? "") || part || r.format) return out;
+  }
+  return "Untitled task";
+}
+
+function applyDescRules(
+  rules: DescRule[] | undefined,
+  v: Record<string, string>
+): string {
+  if (!rules?.length) return "";
+  const parts: string[] = [];
+  for (const r of rules) {
+    if (r.literal) {
+      parts.push(r.literal);
+      continue;
+    }
+    if (r.format) {
+      let line = expand(r.format, v);
+      if (
+        r.suffix_if &&
+        (v[r.suffix_if] === "true" ||
+          (v[r.suffix_if] === "" && r.suffix_if === "dry_run"))
+      ) {
+        line += r.suffix ?? "";
+      }
+      parts.push(line);
+      continue;
+    }
+    let raw = (v[r.key ?? ""] ?? "").trim();
+    if (!raw) continue;
+    if (r.truncate && raw.length > r.truncate) raw = raw.slice(0, r.truncate);
+    parts.push(r.prefix ? r.prefix + raw : raw);
+  }
+  return parts.join("\n\n");
+}
+
+export function schemaFromWire(w: WireSchema): AgentInputSchema {
+  return {
+    kind: w.builtin,
+    hint: w.hint ?? "",
+    prefill: w.prefill,
+    requireAny: w.require_any,
+    fields: w.fields.map((f) => ({
+      key: f.key,
+      label: f.label,
+      type: (f.type as AgentFieldType) || "text",
+      required: f.required,
+      minLength: f.min_length,
+      min: f.min,
+      placeholder: f.placeholder,
+      help: f.help,
+      group: f.group,
+      options: f.options?.map((o) => ({ label: o.label, value: o.value })),
+      defaultValue:
+        f.type === "checkbox" ? f.default === "true" : f.default || undefined,
+    })),
+    titleFrom: (v) => applyTitleRules(w.title_rules, v),
+    descriptionFrom: (v) => applyDescRules(w.desc_rules, v) || undefined,
+  };
+}
+
 export function isSpecialistSchema(schema: AgentInputSchema): boolean {
   return schema.kind !== "task_run";
 }
 
-/** Resolve the input schema for an agent (builtin specialist or generic). */
-export function getAgentInputSchema(agent: Agent | null | undefined): AgentInputSchema {
+/**
+ * Resolve the input schema for an agent.
+ *
+ * All specialists are wired this way: schema from GET /api/v1/agent-schemas.
+ * A new agent does not need a TypeScript SCHEMAS map — register it.
+ */
+export function getAgentInputSchema(
+  agent: Agent | null | undefined,
+  catalog: WireSchema[] = []
+): AgentInputSchema {
   if (!agent) return GENERIC;
   const builtin = agent.metadata?.builtin;
-  if (typeof builtin === "string" && builtin in SCHEMAS) {
-    return SCHEMAS[builtin as AgentBuiltin];
+  if (typeof builtin === "string") {
+    const wire = catalog.find((s) => s.builtin === builtin);
+    if (wire) return schemaFromWire(wire);
   }
   return GENERIC;
 }
 
-/** Defaults for every field in a schema (stringified for form state). */
 export function defaultValuesForSchema(
   schema: AgentInputSchema
 ): Record<string, string> {
   const out: Record<string, string> = {};
   for (const f of schema.fields) {
     if (f.type === "checkbox") {
-      out[f.key] = f.defaultValue === true ? "true" : "false";
+      out[f.key] = f.defaultValue === true || f.defaultValue === "true" ? "true" : "false";
     } else if (f.defaultValue != null) {
       out[f.key] = String(f.defaultValue);
     } else {
@@ -403,10 +271,6 @@ export function defaultValuesForSchema(
   return out;
 }
 
-/**
- * Validate every field against the schema. Returns per-field error messages
- * (empty object means the form is ready to submit / launch).
- */
 export function validateSchemaValues(
   schema: AgentInputSchema,
   values: Record<string, string>
@@ -417,11 +281,11 @@ export function validateSchemaValues(
     const err = validateField(f, raw);
     if (err) errors[f.key] = err;
   }
-  if (schema.kind === "career_ops") {
-    const url = (values.job_url ?? "").trim();
-    const jd = (values.jd_text ?? "").trim();
-    if (!url && !jd) {
-      errors.job_url = "Paste a job URL or a job description";
+  for (const g of schema.requireAny ?? []) {
+    const anyFilled = g.keys.some((k) => (values[k] ?? "").trim());
+    if (!anyFilled) {
+      const slot = g.slot || g.keys[0];
+      errors[slot] = g.question || "Paste a job URL or a job description";
     }
   }
   return errors;
@@ -455,7 +319,6 @@ function validateField(f: AgentField, raw: string): string | null {
   }
 
   if (f.type === "repo") {
-    // owner/name — allow github.com URLs too; launch/API normalises.
     if (!raw.includes("/") || raw.startsWith("/") || raw.endsWith("/")) {
       return "Use owner/name (e.g. acme/api)";
     }
@@ -468,7 +331,6 @@ function validateField(f: AgentField, raw: string): string | null {
   return null;
 }
 
-/** Whether required fields are filled and type-valid. */
 export function schemaValuesValid(
   schema: AgentInputSchema,
   values: Record<string, string>
@@ -476,7 +338,6 @@ export function schemaValuesValid(
   return Object.keys(validateSchemaValues(schema, values)).length === 0;
 }
 
-/** Board title used in edit mode. */
 export function validateTaskTitle(title: string): string | null {
   const t = title.trim();
   if (!t) return "Title is required";
@@ -486,7 +347,6 @@ export function validateTaskTitle(title: string): string | null {
   return null;
 }
 
-/** Derive board title/description from schema + values. */
 export function taskFieldsFromValues(
   schema: AgentInputSchema,
   values: Record<string, string>
@@ -497,10 +357,6 @@ export function taskFieldsFromValues(
   };
 }
 
-/**
- * Structured inputs for POST /tasks/{id}/run (generic agents).
- * Skips title/description which already form the prompt.
- */
 export function runInputsFromValues(
   schema: AgentInputSchema,
   values: Record<string, string>
@@ -521,7 +377,6 @@ export function runInputsFromValues(
     }
     return out;
   }
-  // Generic: only pass extra keys beyond title/description
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(values)) {
     if (k === "title" || k === "description") continue;

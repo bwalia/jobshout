@@ -17,6 +17,7 @@ import (
 	"github.com/rs/cors"
 	"go.uber.org/zap"
 
+	"github.com/jobshout/server/internal/agentmodules"
 	"github.com/jobshout/server/internal/blog"
 	"github.com/jobshout/server/internal/bridge"
 	"github.com/jobshout/server/internal/chatagent"
@@ -575,12 +576,6 @@ func main() {
 		Agents:   agentSvc,
 		Tasks:    taskSvc,
 		Projects: projectSvc,
-		Research: researchSvc,
-		Blog:     blogSvc,
-		Mail:     mailSvc,
-		Pentest:  pentestSvc,
-		Reviews:  reviewSvc,
-		Images:   imageSvc,
 		TaskRuns: taskRunSvc,
 	}
 	mailReconciler := service.NewMailReconciler(mailSvc, mailCfg.ReconcileInterval, logger)
@@ -600,8 +595,19 @@ func main() {
 		careerLLM = c
 	}
 	careerSvc := service.NewCareerService(careerRepo, agentRepo, researchClient, careerLLM, researchSvc, logger)
-	launchSvc.Career = careerSvc
 	logger.Info("career ops agent initialised")
+
+	// All specialists are wired this way: own package, then one Register call.
+	// A new agent does not need significant platform changes — register it.
+	agentmodules.Register(agentmodules.Deps{
+		Career:   careerSvc,
+		Research: researchSvc,
+		Blog:     blogSvc,
+		Mail:     mailSvc,
+		Pentest:  pentestSvc,
+		Reviews:  reviewSvc,
+		Images:   imageSvc,
+	})
 
 	// ─── Autonomous agent engine ────────────────────────────────────────────
 	autonomousExec := executor.NewAutonomousExecutor(goNativeExec, llmRouter, memoryRepo, goalRepo, logger).WithAutoSelect(autoSelector)

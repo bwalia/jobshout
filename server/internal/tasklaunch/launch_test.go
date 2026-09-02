@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	_ "github.com/jobshout/server/internal/agentmodules"
 	"github.com/jobshout/server/internal/model"
 )
 

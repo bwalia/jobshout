@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jobshout/server/internal/agentmodule"
 	"github.com/jobshout/server/internal/agentschema"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/repository"
 )
 
 func runAgentExecute(ctx context.Context, d Deps, reg *Registry, input map[string]any) (*Result, error) {
+	// Interview from the registered schema, then Launch. AbsorbPrompt / PromptRoute
+	// live on the module. A new agent does not need an if here — register it.
 	ident := MustIdentity(ctx)
 	page := model.PaginationParams{Page: 1, PerPage: 100}
 	agentsPage, err := d.Agents.List(ctx, ident.OrgID, page, repository.AgentListFilter{})
@@ -29,30 +32,19 @@ func runAgentExecute(ctx context.Context, d Deps, reg *Registry, input map[strin
 	vals := agentschema.ValuesFromArgs(input)
 	prompt := strArg(input, "prompt")
 
-	if !agentschema.IsThinPrompt(prompt, agent.Name) {
-		switch builtin {
-		case model.BuiltinResearcher, model.BuiltinArticleWriter:
-			if vals["topic"] == "" {
-				vals["topic"] = prompt
-			}
-		case model.BuiltinPentester:
-			if vals["target"] == "" {
-				vals["target"] = prompt
-			}
-		case model.BuiltinCareerOps:
-			if vals["job_url"] == "" && vals["jd_text"] == "" {
-				if looksLikeURL(prompt) {
-					vals["job_url"] = prompt
-				} else {
-					vals["jd_text"] = prompt
-				}
-			}
-		}
+	mod, hasMod := agentmodule.Lookup(builtin)
+	if !agentschema.IsThinPrompt(prompt, agent.Name) && hasMod && mod.AbsorbPrompt != nil {
+		mod.AbsorbPrompt(prompt, vals)
 	}
 
-	if builtin == model.BuiltinMail && strings.Contains(strings.ToLower(prompt), "draft") &&
-		!strings.Contains(strings.ToLower(prompt), "sync") && d.Launch == nil {
-		return dispatchTool(ctx, reg, "mail_list_drafts", input)
+	if hasMod && mod.PromptRoute != nil {
+		pr := mod.PromptRoute
+		low := strings.ToLower(prompt)
+		if pr.IfContains != "" && strings.Contains(low, strings.ToLower(pr.IfContains)) &&
+			(pr.UnlessContains == "" || !strings.Contains(low, strings.ToLower(pr.UnlessContains))) &&
+			(!pr.OnlyIfNoLaunch || d.Launch == nil) {
+			return dispatchTool(ctx, reg, pr.Tool, input)
+		}
 	}
 
 	if slot, question, opts := schema.NextMissing(vals); slot != "" {
@@ -62,10 +54,6 @@ func runAgentExecute(ctx context.Context, d Deps, reg *Registry, input map[strin
 		return &Result{Missing: []string{slot}, Question: question, Options: opts}, nil
 	}
 	vals = schema.ApplyDefaults(vals)
-
-	if builtin == model.BuiltinCareerOps && strings.TrimSpace(vals["job_url"]) == "" && strings.TrimSpace(vals["jd_text"]) == "" {
-		return &Result{Missing: []string{"job_url"}, Question: "Paste a job URL, or the job description text."}, nil
-	}
 
 	if d.Launch != nil {
 		return launchAgent(ctx, d, agent, vals)
@@ -166,7 +154,7 @@ func lastEntityID(ctx context.Context, kind string) string {
 	return strings.TrimSpace(e.ID)
 }
 
+// looksLikeURL is kept for tests that still call it; AbsorbPrompt lives on the module.
 func looksLikeURL(s string) bool {
-	s = strings.TrimSpace(s)
-	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")
+	return agentschema.LooksLikeURL(s)
 }

@@ -18,6 +18,7 @@ import {
 } from "@/lib/agents/launch";
 import { fetchMailFormValues, mailFormIsBlank } from "@/lib/agents/mail-playbook";
 import { apiErrorMessage } from "@/lib/api/client";
+import { useAgentSchemas } from "@/lib/hooks/useAgentSchemas";
 import { useSkills } from "@/lib/hooks/useSkills";
 import { useCreateTaskRun } from "@/lib/hooks/useTaskRuns";
 import type { Agent } from "@/lib/types/agent";
@@ -67,10 +68,18 @@ export function RunTaskDialog({
     () => agents.find((a) => a.id === agentId) ?? null,
     [agents, agentId]
   );
-  const schema = useMemo(
-    () => getAgentInputSchema(selectedAgent),
-    [selectedAgent]
-  );
+  const { data: catalog = [], isFetched: catalogReady } = useAgentSchemas();
+  const schema = useMemo(() => {
+    const builtin = selectedAgent?.metadata?.builtin;
+    if (typeof builtin === "string" && builtin && !catalogReady) {
+      return {
+        kind: builtin,
+        hint: "Loading agent form…",
+        fields: [],
+      };
+    }
+    return getAgentInputSchema(selectedAgent, catalog);
+  }, [selectedAgent, catalog, catalogReady]);
   const isSpecialist = isSpecialistSchema(schema);
 
   const [values, setValues] = useState<Record<string, string>>(() =>
@@ -108,7 +117,7 @@ export function RunTaskDialog({
     setSelectedSlugs([]);
     setExtraSlug("");
     setDebug(false);
-    if (schema.kind !== "mail") {
+    if (schema.prefill !== "mailbox") {
       setMailboxLoad("idle");
       return;
     }
@@ -158,12 +167,13 @@ export function RunTaskDialog({
   }
 
   const busy = launching || createRun.isPending;
-  const mailReady = schema.kind !== "mail" || mailboxLoad === "ready";
+  const mailReady = schema.prefill !== "mailbox" || mailboxLoad === "ready";
   const canRun =
     Boolean(selectedAgent) &&
     !busy &&
     mailReady &&
-    (!isSpecialist || schemaValuesValid(schema, values));
+    (!isSpecialist || schemaValuesValid(schema, values)) &&
+    catalogReady;
 
   async function handleRun() {
     if (busy) return;
@@ -195,17 +205,7 @@ export function RunTaskDialog({
           task,
           values,
         });
-        toast.success(
-          result.kind === "researcher"
-            ? "Research complete"
-            : result.kind === "mail"
-              ? result.sync_queued
-                ? "Mailbox sync queued"
-                : "Playbook saved. Connect Gmail on Mail Agent to sync."
-              : result.kind === "images"
-                ? "Image generated"
-                : "Agent run started"
-        );
+        toast.success(result.message || "Agent run started");
         onSpecialistLaunched?.(result);
         onClose();
       } catch (err) {
@@ -303,7 +303,7 @@ export function RunTaskDialog({
             )}
           </div>
 
-          {selectedAgent && schema.kind === "mail" && mailboxLoad === "loading" ? (
+          {selectedAgent && schema.prefill === "mailbox" && mailboxLoad === "loading" ? (
             <p className="text-xs text-muted-foreground">
               Loading saved mailbox settings…
             </p>

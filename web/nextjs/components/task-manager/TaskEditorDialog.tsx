@@ -17,6 +17,7 @@ import {
 import { launchAgentForTask, type LaunchResult } from "@/lib/agents/launch";
 import { fetchMailFormValues, mailFormIsBlank } from "@/lib/agents/mail-playbook";
 import { apiErrorMessage } from "@/lib/api/client";
+import { useAgentSchemas } from "@/lib/hooks/useAgentSchemas";
 import { useCreateTask, useUpdateTask } from "@/lib/hooks/useTasks";
 import { PRIORITY_OPTIONS, STATUS_OPTIONS } from "@/lib/task-labels";
 import type { Agent } from "@/lib/types/agent";
@@ -360,10 +361,18 @@ function CreateTaskForm({
     () => agents.find((a) => a.id === agentId) ?? null,
     [agents, agentId]
   );
-  const schema = useMemo(
-    () => getAgentInputSchema(selectedAgent),
-    [selectedAgent]
-  );
+  const { data: catalog = [], isFetched: catalogReady } = useAgentSchemas();
+  const schema = useMemo(() => {
+    const builtin = selectedAgent?.metadata?.builtin;
+    if (typeof builtin === "string" && builtin && !catalogReady) {
+      return {
+        kind: builtin,
+        hint: "Loading agent form…",
+        fields: [],
+      };
+    }
+    return getAgentInputSchema(selectedAgent, catalog);
+  }, [selectedAgent, catalog, catalogReady]);
   const [values, setValues] = useState<Record<string, string>>(() =>
     defaultValuesForSchema(getAgentInputSchema(null))
   );
@@ -385,7 +394,7 @@ function CreateTaskForm({
     // A different agent means a different task shape — stop reusing the one
     // created for the previous agent.
     createdTaskRef.current = null;
-    if (schema.kind !== "mail") {
+    if (schema.prefill !== "mailbox") {
       setMailboxLoad("idle");
       return;
     }
@@ -416,10 +425,10 @@ function CreateTaskForm({
   useEffect(() => {
     createdTaskRef.current = null;
   }, [resolvedProjectId]);
-  const mailReady = schema.kind !== "mail" || mailboxLoad === "ready";
+  const mailReady = schema.prefill !== "mailbox" || mailboxLoad === "ready";
   const schemaOk =
     Boolean(selectedAgent) && schemaValuesValid(schema, values);
-  const createReady = schemaOk && Boolean(resolvedProjectId) && mailReady;
+  const createReady = schemaOk && Boolean(resolvedProjectId) && mailReady && catalogReady;
 
   function setValue(key: string, value: string) {
     const next = { ...values, [key]: value };
@@ -514,25 +523,7 @@ function CreateTaskForm({
         task: created,
         values,
       });
-      toast.success(
-        result.kind === "researcher"
-          ? "Research complete"
-          : result.kind === "article_writer"
-            ? "Article run started"
-            : result.kind === "career_ops"
-              ? "Career evaluation saved"
-            : result.kind === "pentester"
-              ? "Security scan queued"
-              : result.kind === "pr_reviewer"
-                ? "PR review queued"
-                : result.kind === "mail"
-                  ? result.sync_queued
-                    ? "Mailbox sync queued"
-                    : "Playbook saved. Connect Gmail on Mail Agent to sync."
-                  : result.kind === "images"
-                    ? "Image generated"
-                    : "Agent run started"
-      );
+      toast.success(result.message || "Agent run started");
       onLaunched?.(result);
       onClose();
     } catch (err) {
@@ -584,7 +575,7 @@ function CreateTaskForm({
           )}
         </div>
 
-        {selectedAgent && schema.kind === "mail" && mailboxLoad === "loading" && (
+        {selectedAgent && schema.prefill === "mailbox" && mailboxLoad === "loading" && (
           <p className="text-xs text-muted-foreground">
             Loading saved mailbox settings…
           </p>

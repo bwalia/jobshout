@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/jobshout/server/internal/agentmodule"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/repository"
 )
@@ -134,7 +135,9 @@ func (s *authService) seedOwnerRole(ctx context.Context, orgID, userID uuid.UUID
 // seedBuiltinAgents gives a brand-new organization the platform's built-in
 // agents, so the dashboard is not empty on first login.
 //
-// Migration 000019 seeds the same agents for organizations that already
+// All specialists are wired this way: Seed lives on the module. Iterate the
+// registry. A new agent does not need a row here — register it, do not add a
+// switch. Migration 000019 seeds the same agents for organizations that already
 // existed; this covers everything created since the last boot. Failures are
 // logged and swallowed — a missing built-in is a degraded experience, not a
 // reason to fail a registration that has already created the org and user.
@@ -143,23 +146,19 @@ func (s *authService) seedBuiltinAgents(ctx context.Context, orgID, createdBy uu
 		return
 	}
 
-	// Each built-in is seeded independently so one failing does not deprive the
-	// organization of the others.
-	seeds := map[string]*model.Agent{
-		"Article Writer":  articleWriterSeed(orgID),
-		"Research Agent":  researcherSeed(orgID),
-		"Security Tester": pentestSeed(orgID),
-		"PR Reviewer":     prReviewerSeed(orgID),
-		"Mail Agent":      mailAgentSeed(orgID),
-		"Image Generator": imagesAgentSeed(orgID),
-		"Career Agent":    careerOpsSeed(orgID),
-	}
 	seeded := 0
-	for name, agent := range seeds {
+	for _, m := range agentmodule.All() {
+		if m.Seed == nil {
+			continue
+		}
+		agent := m.Seed(orgID)
+		if agent == nil {
+			continue
+		}
 		agent.CreatedBy = &createdBy
 		if err := s.agentRepo.Create(ctx, agent); err != nil {
 			s.logger.Warn("auth: failed to seed built-in agent",
-				zap.String("agent", name),
+				zap.String("agent", agent.Name),
 				zap.String("org_id", orgID.String()), zap.Error(err))
 			continue
 		}
@@ -284,40 +283,6 @@ func slugify(name string) string {
 	slug = nonAlphaRegex.ReplaceAllString(slug, "-")
 	slug = strings.Trim(slug, "-")
 	return slug
-}
-
-func pentestSeed(orgID uuid.UUID) *model.Agent {
-	desc := "Autonomous security testing agent powered by Strix. Tests live APIs, applications, and codebases for vulnerabilities including OWASP Top 10 and beyond."
-	prompt := "You are a security expert assisting with penetration testing. Use the Strix tool to run security scans against applications and APIs. Report findings clearly with severity levels and proof-of-concepts."
-	return &model.Agent{
-		ID:           uuid.New(),
-		OrgID:        orgID,
-		Name:         "Security Tester",
-		Role:         "Penetration Testing Agent",
-		Description:  &desc,
-		SystemPrompt: &prompt,
-		Status:       "active",
-		EngineType:   model.EngineGoNative,
-		EngineConfig: map[string]any{},
-		Metadata:     map[string]any{model.MetadataKeyBuiltin: model.BuiltinPentester},
-	}
-}
-
-func prReviewerSeed(orgID uuid.UUID) *model.Agent {
-	desc := "Reviews GitHub pull requests with a local coder model via OpenCode: explores the repo around the diff, then posts MERGE or FIX."
-	prompt := "You are a senior engineer reviewing pull requests. Use the review_pull_request tool with a repo slug (owner/name) and PR number. It posts the review to the PR by default; pass dry_run=true only if the user explicitly asks for a preview that posts nothing. Summarise the verdict and blocking findings first."
-	return &model.Agent{
-		ID:           uuid.New(),
-		OrgID:        orgID,
-		Name:         "PR Reviewer",
-		Role:         "Pull Request Review Agent",
-		Description:  &desc,
-		SystemPrompt: &prompt,
-		Status:       "active",
-		EngineType:   model.EngineGoNative,
-		EngineConfig: map[string]any{},
-		Metadata:     map[string]any{model.MetadataKeyBuiltin: model.BuiltinPRReviewer},
-	}
 }
 
 // Sentinel errors for auth operations.

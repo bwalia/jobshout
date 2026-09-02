@@ -3,6 +3,7 @@ package platformtools
 import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/jobshout/server/internal/agentmodule"
 	"github.com/jobshout/server/internal/repository"
 	"github.com/jobshout/server/internal/service"
 	"github.com/jobshout/server/internal/tasklaunch"
@@ -64,12 +65,32 @@ func NewRegistryWithTools(d Deps) *Registry {
 	if d.Workflows != nil {
 		registerWorkflows(reg, d)
 	}
-	registerSpecialists(reg, d)
-	registerCareer(reg, d)
-	registerReview(reg, d)
+	// Extra chat tools attach from the specialist registry (InstallTools on the
+	// module, or SetToolInstaller from the agent's tools file).
+	// All specialists are wired this way; a new agent does not need a line here —
+	// register it, do not add a switch.
+	for _, m := range agentmodule.All() {
+		fn := m.InstallTools
+		if fn == nil {
+			fn = agentmodule.ToolInstaller(m.Builtin)
+		}
+		if fn != nil {
+			fn(reg, d)
+		}
+	}
 	registerConfig(reg, d)
 	registerInsight(reg, d)
 	registerSecurity(reg, d)
 	registerCatalog(reg)
 	return reg
+}
+
+func wrapInstall(fn func(*Registry, Deps)) func(reg, deps any) {
+	return func(reg, deps any) {
+		r, ok1 := reg.(*Registry)
+		d, ok2 := deps.(Deps)
+		if ok1 && ok2 {
+			fn(r, d)
+		}
+	}
 }
