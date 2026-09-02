@@ -549,10 +549,15 @@ func paginateResume(lines []drawLine, single bool) [][]drawLine {
 	const margin = 32.0
 	usable := pdfPageH - 2*margin
 	if single {
-		return [][]drawLine{fitOnePage(lines, usable)}
+		if fitted, ok := fitOnePage(lines, usable); ok {
+			return [][]drawLine{fitted}
+		}
 	}
-	height := resumeHeight(lines)
-	if height <= usable {
+	return splitPages(lines, usable)
+}
+
+func splitPages(lines []drawLine, usable float64) [][]drawLine {
+	if resumeHeight(lines) <= usable {
 		return [][]drawLine{lines}
 	}
 	var pages [][]drawLine
@@ -577,11 +582,12 @@ func paginateResume(lines []drawLine, single bool) [][]drawLine {
 	return pages
 }
 
-func fitOnePage(lines []drawLine, usable float64) []drawLine {
+// fitOnePage shrinks leading to keep a typical resume on A4. ok is false when
+// even 72% still overflows — caller must split pages instead of clipping.
+func fitOnePage(lines []drawLine, usable float64) ([]drawLine, bool) {
 	if resumeHeight(lines) <= usable {
-		return lines
+		return lines, true
 	}
-	best := lines
 	for scale := 0.98; scale >= 0.72; scale -= 0.02 {
 		cand := make([]drawLine, len(lines))
 		copy(cand, lines)
@@ -591,12 +597,11 @@ func fitOnePage(lines []drawLine, usable float64) []drawLine {
 			cand[i].gapBefore *= scale
 			cand[i].rulePad *= scale
 		}
-		best = cand
 		if resumeHeight(cand) <= usable {
-			return cand
+			return cand, true
 		}
 	}
-	return best
+	return lines, false
 }
 
 func resumeHeight(lines []drawLine) float64 {

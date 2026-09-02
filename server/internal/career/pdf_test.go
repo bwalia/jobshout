@@ -3,6 +3,7 @@ package career
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -63,6 +64,48 @@ func TestMarkdownToPDFOnePageResume(t *testing.T) {
 	}
 	if bytes.Contains(pdf, []byte("Tailored for")) {
 		t.Fatal("tailor note belongs on the web, not the PDF")
+	}
+}
+
+func TestPaginateResumeDoesNotClipWhenScaleFails(t *testing.T) {
+	lines := make([]drawLine, 0, 200)
+	for i := 0; i < 200; i++ {
+		lines = append(lines, drawLine{
+			text:    "overflow-line",
+			font:    fontRoman,
+			size:    11,
+			leading: 14,
+		})
+	}
+	pages := paginateResume(lines, true)
+	if len(pages) < 2 {
+		t.Fatalf("pages = %d, want 2+ so overflow is not clipped", len(pages))
+	}
+	kept := 0
+	for _, p := range pages {
+		kept += len(p)
+	}
+	if kept != len(lines) {
+		t.Fatalf("kept %d of %d lines", kept, len(lines))
+	}
+}
+
+func TestMarkdownToPDFOverflowKeepsLastBullet(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("Jane Doe\nemail@example.com\nExperience\n")
+	long := "Built production RAG and agent workflows with evaluation, tracing, fallbacks, Kubernetes, and GPU scheduling for inference at scale."
+	for i := 0; i < 70; i++ {
+		fmt.Fprintf(&b, "• %s unique-token-%d\n", long, i)
+	}
+	pdf, err := MarkdownToPDF("Jane Doe", b.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := pdfPageCount(pdf); n < 2 {
+		t.Fatalf("pages = %d, want 2+ (content must not clip)", n)
+	}
+	if !bytes.Contains(pdf, []byte("unique-token-69")) {
+		t.Fatal("last bullet was clipped")
 	}
 }
 
