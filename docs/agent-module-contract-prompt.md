@@ -2,7 +2,8 @@
 
 > Paste everything below the line into a fresh agent. New branch
 > `feat/agent-module-contract`. Do not mix Career product work into this PR.
-> Rule to keep afterwards: `.cursor/rules/agent-modules.mdc`.
+> Rules to keep afterwards: `.claude/rules/agent-modules.md` (Claude Code)
+> and `.cursor/rules/agent-modules.mdc` (Cursor).
 
 ---
 
@@ -57,4 +58,4 @@ Web: a module with `builtin`, `label`, `icon`, optional `Tab` component. Rail an
 - A new specialist can be added by writing its package + one register call
 - `TaskManagerPanel.tsx` has no per-agent `if`
 - Launch fields are not copied in TypeScript
-- `.cursor/rules/agent-modules.mdc` still matches the code
+- `.claude/rules/agent-modules.md` and `.cursor/rules/agent-modules.mdc` still match the code

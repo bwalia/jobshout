@@ -1,8 +1,3 @@
----
-description: New JobShout specialists are their own code plus a registry wire-up — do not grow platform switches.
-alwaysApply: true
----
-
 # Agent modules
 
 A new builtin agent is **its own package**. Do not edit the platform to special-case it.
@@ -19,4 +14,6 @@ Platform that must stay generic: `AgentInputFields`, `POST /tasks/launch`, `agen
 
 Do not duplicate launch fields in Go and TypeScript. One schema (`agentschema` / `GET /api/v1/agent-schemas`); the web consumes it.
 
-Existing switches (`tasklaunch/launch.go`, `input-schemas.ts`, `TaskManagerPanel` `BUILTINS`) are debt. New agents must not add cases. Next implementation: `docs/agent-module-contract-prompt.md`. Claude copy: `.claude/rules/agent-modules.md`.
+Existing switches (`tasklaunch/launch.go`, `input-schemas.ts`, `TaskManagerPanel` `BUILTINS`) are debt. New agents must not add cases. Next implementation: `docs/agent-module-contract-prompt.md`.
+
+Cursor copy of this rule: `.cursor/rules/agent-modules.mdc`.
