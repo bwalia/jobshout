@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const AgentNameCareerOps = "CareerOps"
+const AgentNameCareerOps = "Career Agent"
 
 // Application tracker states. Transitions are enforced in package career.
 const (

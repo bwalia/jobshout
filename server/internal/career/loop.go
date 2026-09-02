@@ -48,7 +48,7 @@ func OfferPrep(app *model.CareerApplication, profile *model.CareerProfile) model
 		b.WriteString(clip(profile.Narrative, 1200))
 		b.WriteString("\n")
 	}
-	b.WriteString("\nA human signs. CareerOps drafts the walkthrough.\n")
+	b.WriteString("\nA human signs. Career Agent drafts the walkthrough.\n")
 	return model.CareerOfferPrep{
 		Company:        app.Company,
 		Role:           app.Role,

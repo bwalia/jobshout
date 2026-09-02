@@ -40,7 +40,7 @@ export function CommandPalette() {
       ...PANELS.filter((p) => p.id !== "chat").map((p) => ({
         kind: "panel" as const,
         id: p.id,
-        label: p.id === "workflows" ? "Automations" : p.label,
+        label: p.label,
         href: p.href,
       })),
       ...(sessionsQuery.data?.data ?? []).slice(0, 20).map((s) => ({

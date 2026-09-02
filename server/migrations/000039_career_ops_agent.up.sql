@@ -347,8 +347,8 @@ CREATE INDEX IF NOT EXISTS idx_career_runs_profile
 INSERT INTO agents (org_id, name, role, description, status, engine_type, system_prompt, metadata)
 SELECT
     o.id,
-    'CareerOps',
-    'Career',
+    'Career Agent',
+    'Career Agent',
     'Evaluates roles against your career profile, drafts application materials, and tracks the pipeline. A person always submits, sends, or clicks Apply.',
     'active',
     'go_native',
@@ -360,3 +360,10 @@ WHERE NOT EXISTS (
     WHERE a.org_id = o.id
       AND a.metadata->>'builtin' = 'career_ops'
 );
+
+-- Existing orgs were seeded as CareerOps / Career. Replay-safe: only rows that still need it.
+UPDATE agents
+SET name = 'Career Agent',
+    role = 'Career Agent'
+WHERE metadata->>'builtin' = 'career_ops'
+  AND (name IS DISTINCT FROM 'Career Agent' OR role IS DISTINCT FROM 'Career Agent');

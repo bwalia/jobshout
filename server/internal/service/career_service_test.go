@@ -488,7 +488,15 @@ func (a *careerTestAgents) FindByID(context.Context, uuid.UUID) (*model.Agent, e
 func (a *careerTestAgents) ListByOrg(context.Context, uuid.UUID, model.PaginationParams, repository.AgentListFilter) (*model.PaginatedResponse[model.Agent], error) {
 	return nil, nil
 }
-func (a *careerTestAgents) Update(context.Context, *model.Agent) error            { return nil }
+func (a *careerTestAgents) Update(_ context.Context, agent *model.Agent) error {
+	if agent.Metadata != nil {
+		if b, ok := agent.Metadata[model.MetadataKeyBuiltin].(string); ok {
+			cp := *agent
+			a.byBuiltin[agent.OrgID.String()+":"+b] = &cp
+		}
+	}
+	return nil
+}
 func (a *careerTestAgents) Delete(context.Context, uuid.UUID) error               { return nil }
 func (a *careerTestAgents) UpdateStatus(context.Context, uuid.UUID, string) error { return nil }
 
@@ -515,6 +523,35 @@ func TestEnsureCareerOpsCreatesOnce(t *testing.T) {
 	}
 	if !a1.IsBuiltin(model.BuiltinCareerOps) {
 		t.Fatal("missing builtin marker")
+	}
+	if a1.Name != model.AgentNameCareerOps {
+		t.Fatalf("name = %q", a1.Name)
+	}
+	if a1.Role != "Career Agent" {
+		t.Fatalf("role = %q", a1.Role)
+	}
+}
+
+func TestEnsureCareerOpsRenamesLegacy(t *testing.T) {
+	repo := newCareerMem()
+	agents := &careerTestAgents{byBuiltin: map[string]*model.Agent{}}
+	orgID := uuid.New()
+	legacy := careerOpsSeed(orgID)
+	legacy.Name = "CareerOps"
+	legacy.Role = "Career"
+	if err := agents.Create(context.Background(), legacy); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewCareerService(repo, agents, nil, nil, nil, zap.NewNop()).(*careerService)
+	got, err := svc.EnsureCareerOps(context.Background(), orgID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != legacy.ID {
+		t.Fatal("must keep the existing agent")
+	}
+	if got.Name != model.AgentNameCareerOps || got.Role != "Career Agent" {
+		t.Fatalf("got name=%q role=%q", got.Name, got.Role)
 	}
 }
 

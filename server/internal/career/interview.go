@@ -73,7 +73,7 @@ func InterviewPrep(app *model.CareerApplication, ev *model.CareerEvaluation, sto
 	if !out.ScoreFloorMet {
 		b.WriteString("Score is below 4.0 and status is not Interview. Prep is still drafted; product default is to invest here at ≥ 4.0.\n\n")
 	}
-	b.WriteString("A human attends. CareerOps drafts.\n\n")
+	b.WriteString("A human attends. Career Agent drafts.\n\n")
 	if ev != nil && strings.TrimSpace(ev.Blocks.F) != "" {
 		b.WriteString("## Block F (STAR+R plan)\n\n")
 		b.WriteString(strings.TrimSpace(ev.Blocks.F))

@@ -68,7 +68,7 @@ const BUILTINS: {
   { id: "pentest", label: "Security Tester", icon: ShieldAlert, match: "pentester" },
   { id: "review", label: "PR Reviewer", icon: GitPullRequest, match: "pr_reviewer" },
   { id: "mail", label: "Mail Agent", icon: Mail, match: "mail" },
-  { id: "career", label: "Career", icon: Briefcase, match: "career_ops" },
+  { id: "career", label: "Career Agent", icon: Briefcase, match: "career_ops" },
   { id: "articles", label: "Article Writer", icon: Newspaper, match: "article_writer" },
   { id: "images", label: "Image Generator", icon: ImageIcon, match: "images" },
 ];
@@ -309,7 +309,7 @@ export function TaskManagerPanel() {
             </BuiltinFrame>
           )}
           {selection?.kind === "builtin" && selection.id === "career" && (
-            <BuiltinFrame title="Career">
+            <BuiltinFrame title="Career Agent">
               <CareerAgentClient />
             </BuiltinFrame>
           )}

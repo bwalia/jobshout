@@ -1,6 +1,5 @@
 import type { LucideIcon } from "lucide-react";
 import {
-  Bot,
   LayoutDashboard,
   MessageSquare,
   FolderKanban,
@@ -105,7 +104,7 @@ function legacyPanelFromPath(pathname: string): PanelId | null {
   return null;
 }
 
-/** Workflows — top-level Automations item (Cursor "Codebase" analogue). */
+/** Workflows — always-visible sidebar item (same destination as the Workflows panel). */
 export const AUTOMATIONS_HREF = "/panel/workflows";
 
 /**
@@ -113,7 +112,7 @@ export const AUTOMATIONS_HREF = "/panel/workflows";
  * again while you are on Dashboard tucks APP_NAV_PANELS away underneath it.
  */
 export const SIDEBAR_PRIMARY: { id: string; label: string; href: string; icon: LucideIcon }[] = [
-  { id: "automations", label: "Automations", href: AUTOMATIONS_HREF, icon: Bot },
+  { id: "workflows", label: "Workflows", href: AUTOMATIONS_HREF, icon: Workflow },
   { id: "dashboard", label: "Dashboard", href: "/panel/dashboard", icon: LayoutDashboard },
 ];
 
