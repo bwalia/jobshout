@@ -881,7 +881,7 @@ export default function AgentProfilePage() {
                     href="/panel/task-manager?agent=career"
                     className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary hover:underline"
                   >
-                    Open Career panel
+                    Open Career Agent
                   </Link>
                 )}
 

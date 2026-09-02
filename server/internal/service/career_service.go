@@ -106,7 +106,7 @@ func careerOpsSeed(orgID uuid.UUID) *model.Agent {
 		ID:           uuid.New(),
 		OrgID:        orgID,
 		Name:         model.AgentNameCareerOps,
-		Role:         "Career",
+		Role:         "Career Agent",
 		Description:  &desc,
 		SystemPrompt: &prompt,
 		Status:       "active",
@@ -122,13 +122,20 @@ func (s *careerService) EnsureCareerOps(ctx context.Context, orgID uuid.UUID) (*
 		return nil, err
 	}
 	if existing != nil {
+		if existing.Name != model.AgentNameCareerOps || existing.Role != "Career Agent" {
+			existing.Name = model.AgentNameCareerOps
+			existing.Role = "Career Agent"
+			if err := s.agentRepo.Update(ctx, existing); err != nil {
+				return nil, fmt.Errorf("career_svc: rename: %w", err)
+			}
+		}
 		return existing, nil
 	}
 	agent := careerOpsSeed(orgID)
 	if err := s.agentRepo.Create(ctx, agent); err != nil {
 		return nil, fmt.Errorf("career_svc: seed: %w", err)
 	}
-	s.logger.Info("career: seeded CareerOps",
+	s.logger.Info("career: seeded Career Agent",
 		zap.String("org_id", orgID.String()), zap.String("agent_id", agent.ID.String()))
 	return agent, nil
 }

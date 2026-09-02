@@ -49,7 +49,7 @@ test.describe("Navigation & Layout", () => {
     await expect(aside.getByRole("link", { name: "Task Board" })).toBeVisible();
     await expect(aside.getByRole("link", { name: "Task Manager" })).toBeVisible();
     await expect(aside.getByRole("link", { name: "Artifacts" })).toBeVisible();
-    await expect(aside.getByRole("link", { name: "Automations" })).toBeVisible();
+    await expect(aside.getByRole("link", { name: "Workflows" })).toBeVisible();
 
     await aside.getByRole("link", { name: "Dashboard" }).click();
     await expect(aside.getByRole("link", { name: "Task Board" })).toHaveCount(0);

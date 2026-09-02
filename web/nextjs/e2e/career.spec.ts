@@ -39,12 +39,12 @@ async function authJSON(path: string, init: RequestInit = {}) {
   return { res, body };
 }
 
-test.describe("CareerOps", () => {
+test.describe("Career Agent", () => {
   test.beforeAll(async () => {
     creds = await registerViaAPI("career");
   });
 
-  test("a new org gets the built-in CareerOps agent", async () => {
+  test("a new org gets the built-in Career Agent", async () => {
     const { res, body } = await authJSON("/agents?per_page=100");
     expect(res.status).toBe(200);
     const data = (
@@ -52,7 +52,7 @@ test.describe("CareerOps", () => {
     ).data;
     const agent = data.find((a) => a.metadata?.builtin === "career_ops");
     expect(agent).toBeTruthy();
-    expect(agent!.name).toBe("CareerOps");
+    expect(agent!.name).toBe("Career Agent");
     expect(agent!.status).toBe("active");
   });
 
@@ -101,10 +101,10 @@ test.describe("CareerOps", () => {
     expect(art.body_markdown.length).toBeGreaterThan(0);
   });
 
-  test("Career panel opens in Task Manager", async ({ page }) => {
+  test("Career Agent panel opens in Task Manager", async ({ page }) => {
     await loginViaUI(page, creds.email, creds.password);
     await navigateTo(page, "/panel/task-manager?agent=career");
-    await expect(page.getByRole("heading", { name: "Career" })).toBeVisible({
+    await expect(page.getByRole("heading", { name: "Career Agent" })).toBeVisible({
       timeout: 8_000,
     });
     await expect(page.getByText("Paste the JD").or(page.getByText("Evaluate"))).toBeVisible();

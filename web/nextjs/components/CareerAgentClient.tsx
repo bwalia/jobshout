@@ -146,7 +146,7 @@ export function CareerAgentClient() {
       try {
         await loadAll();
       } catch {
-        setError("Failed to load CareerOps.");
+        setError("Failed to load Career Agent.");
       }
     })();
   }, [loadAll]);
@@ -298,7 +298,7 @@ export function CareerAgentClient() {
       {tab === "today" && (
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            CareerOps evaluates roles against your profile, drafts materials, and
+            Career Agent evaluates roles against your profile, drafts materials, and
             tracks the pipeline. A person always submits, sends, or clicks Apply.
           </p>
           {doctor && (

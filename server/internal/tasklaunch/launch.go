@@ -377,7 +377,7 @@ func (s *Service) Launch(ctx context.Context, req Request) (*Result, error) {
 
 func (s *Service) launchCareer(ctx context.Context, req Request, task *model.Task, meta map[string]any, out *Result) error {
 	if s.Career == nil {
-		return fmt.Errorf("CareerOps is not configured")
+		return fmt.Errorf("Career Agent is not configured")
 	}
 	jobURL := strings.TrimSpace(req.Values["job_url"])
 	jd := strings.TrimSpace(req.Values["jd_text"])

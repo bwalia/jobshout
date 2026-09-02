@@ -72,7 +72,7 @@ func main() {
 		if st != 200 {
 			return fmt.Errorf("status %d: %s", st, body)
 		}
-		for _, name := range []string{"Article Writer", "Research Agent", "Mail Agent"} {
+		for _, name := range []string{"Article Writer", "Research Agent", "Mail Agent", "Career Agent"} {
 			id := agentIDByName(body, name)
 			if id == "" {
 				return fmt.Errorf("missing agent %q", name)

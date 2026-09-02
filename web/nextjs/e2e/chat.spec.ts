@@ -18,7 +18,7 @@ test.describe("Chat", () => {
       page.getByRole("button", { name: "List my agents" })
     ).toBeVisible();
     await expect(page.getByRole("link", { name: "Dashboard" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Automations" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Workflows" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Task Board" })).toHaveCount(0);
     await expect(page.locator("[data-chat-layout=hero]")).toBeVisible();
   });
