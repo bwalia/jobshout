@@ -520,7 +520,7 @@ func main() {
 	// scan survives any deploy and multiple replicas share the work safely.
 	strixConfig := strix.LoadConfig(logger)
 	strixClient := strix.NewClient(strixConfig.BaseURL, strixConfig.JWTSecret, strixConfig.Timeout, logger)
-	pentestSvc := service.NewPentestService(pentestRunRepo, pentestFindingRepo, agentRepo, strixClient, logger)
+	pentestSvc := service.NewPentestService(pentestRunRepo, pentestFindingRepo, agentRepo, strixClient, llmRouter, logger)
 	pentestReconciler := service.NewPentestReconciler(pentestRunRepo, strixClient, strixConfig, logger)
 	if strixConfig.Configured() {
 		logger.Info("penetration testing enabled",
@@ -1041,6 +1041,8 @@ func main() {
 			r.Route("/pentest", func(r chi.Router) {
 				// Pre-flight: is the workstation ready to scan? Gates the Start button.
 				r.Get("/capabilities", pentestHandler.GetCapabilities)
+				// AI drafting aid for the optional engagement note. Creates no run.
+				r.Post("/engagement-note", pentestHandler.GenerateEngagementNote)
 			})
 			r.Route("/pentest-runs", func(r chi.Router) {
 				r.Get("/", pentestHandler.ListRuns)
