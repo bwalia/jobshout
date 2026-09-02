@@ -3,6 +3,7 @@
 import { Suspense } from "react";
 import { notFound, useParams } from "next/navigation";
 import { DashboardPanel } from "@/components/panels/DashboardPanel";
+import { ProjectsPanel } from "@/components/panels/ProjectsPanel";
 import { TaskBoardPanel } from "@/components/panels/TaskBoardPanel";
 import { TaskManagerPanel } from "@/components/panels/TaskManagerPanel";
 import { ArtifactsPanel } from "@/components/panels/ArtifactsPanel";
@@ -55,6 +56,8 @@ function PanelBody({ panel }: { panel: Exclude<PanelId, "chat"> }) {
   switch (panel) {
     case "dashboard":
       return <DashboardPanel />;
+    case "projects":
+      return <ProjectsPanel />;
     case "task-board":
       return <TaskBoardPanel />;
     case "task-manager":
@@ -93,7 +96,7 @@ function PanelBody({ panel }: { panel: Exclude<PanelId, "chat"> }) {
       );
     case "org-builder":
       return (
-        <div className="p-6">
+        <div className="h-full min-h-0 p-6">
           <OrgBuilderPage />
         </div>
       );

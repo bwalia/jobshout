@@ -11,6 +11,7 @@ var Builtins = []string{
 	model.BuiltinPRReviewer,
 	model.BuiltinMail,
 	model.BuiltinImages,
+	model.BuiltinCareerOps,
 }
 
 // WireField is one field as the API exposes it. It carries the properties

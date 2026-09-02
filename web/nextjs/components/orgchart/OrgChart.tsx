@@ -183,7 +183,7 @@ export function OrgChart({ agents: _agents }: OrgChartProps) {
         {/* Mini-map overview */}
         <MiniMap
           nodeColor="hsl(var(--primary))"
-          maskColor="hsl(var(--background)/80)"
+          maskColor="hsl(var(--background) / 0.8)"
           className="!rounded-lg !border !border-border"
         />
       </ReactFlow>

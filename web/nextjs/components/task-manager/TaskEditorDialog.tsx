@@ -201,7 +201,7 @@ function EditTaskForm({
           <option value="">— Unassigned —</option>
           {agents.map((a) => (
             <option key={a.id} value={a.id}>
-              {a.name} · {a.role}
+              {a.name}
             </option>
           ))}
         </select>
@@ -519,6 +519,8 @@ function CreateTaskForm({
           ? "Research complete"
           : result.kind === "article_writer"
             ? "Article run started"
+            : result.kind === "career_ops"
+              ? "Career evaluation saved"
             : result.kind === "pentester"
               ? "Security scan queued"
               : result.kind === "pr_reviewer"
@@ -574,9 +576,6 @@ function CreateTaskForm({
             {agents.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.name}
-                {a.metadata?.builtin
-                  ? ` · ${a.metadata.builtin}`
-                  : ` · ${a.role}`}
               </option>
             ))}
           </select>

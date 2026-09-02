@@ -57,6 +57,7 @@ const (
 	EntityPentest     = "pentest_run"
 	EntityReviewRun   = "review_run"
 	EntityMailThread  = "mail_thread"
+	EntityCareer      = "career_evaluation"
 	EntityImage       = "image"
 	EntitySprint      = "sprint"
 	EntitySkill       = "skill"

@@ -248,7 +248,8 @@ export function RunTaskDialog({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onClick={() => {
+      onClick={(e) => {
+        e.stopPropagation();
         if (!busy) onClose();
       }}
     >
@@ -294,9 +295,6 @@ export function RunTaskDialog({
               {agents.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.name}
-                  {a.metadata?.builtin
-                    ? ` · ${a.metadata.builtin}`
-                    : ` · ${a.role}`}
                 </option>
               ))}
             </select>

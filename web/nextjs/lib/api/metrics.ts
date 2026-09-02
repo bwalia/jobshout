@@ -7,6 +7,7 @@ export interface DashboardSummary {
   total_tasks: number;
   tasks_completed: number;
   tasks_in_progress: number;
+  tasks_by_status?: Record<string, number>;
 }
 
 export interface AgentMetric {

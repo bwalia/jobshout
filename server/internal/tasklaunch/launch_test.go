@@ -2,6 +2,7 @@ package tasklaunch
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -28,6 +29,16 @@ func TestTitleFrom_Specialists(t *testing.T) {
 	title, _ = TitleFrom(model.BuiltinMail, map[string]string{})
 	if title != "Mail: sync inbox and draft" {
 		t.Fatalf("mail title %q", title)
+	}
+
+	title, desc = TitleFrom(model.BuiltinCareerOps, map[string]string{
+		"job_url": "https://boards.greenhouse.io/acme/jobs/1",
+	})
+	if title != "Evaluate: https://boards.greenhouse.io/acme/jobs/1" {
+		t.Fatalf("career title %q", title)
+	}
+	if !strings.Contains(desc, "URL:") {
+		t.Fatalf("career desc %q", desc)
 	}
 }
 

@@ -13,9 +13,9 @@ import {
   Plus,
 } from "lucide-react";
 import { getDashboardSummary, getTaskCompletion } from "@/lib/api/metrics";
+import { getProject } from "@/lib/api/projects";
 import { useAgents } from "@/lib/hooks/useAgents";
 import { useTasks } from "@/lib/hooks/useTasks";
-import { useProjects } from "@/lib/hooks/useProjects";
 import { useAuthStore } from "@/lib/store/auth-store";
 import { ThroughputChart } from "@/components/dashboard/ThroughputChart";
 import { StatusDonut } from "@/components/dashboard/StatusDonut";
@@ -23,6 +23,8 @@ import { SecurityTesterCard } from "@/components/dashboard/SecurityTesterCard";
 import type { StatusSlice } from "@/components/dashboard/StatusDonut";
 import type { Agent } from "@/lib/types/agent";
 import type { Task } from "@/lib/types/project";
+import { formatDateOnly } from "@/lib/dates";
+import { STATUS_DOT, STATUS_DOT_HSL } from "@/lib/status-colors";
 import { cn } from "@/lib/utils/cn";
 
 type DateRange = "7d" | "30d" | "90d";
@@ -31,15 +33,6 @@ const RANGES: { label: string; value: DateRange; days: number }[] = [
   { label: "30d", value: "30d", days: 30 },
   { label: "90d", value: "90d", days: 90 },
 ];
-
-const STATUS_DOT: Record<string, string> = {
-  backlog: "bg-status-idle",
-  todo: "bg-status-todo",
-  in_progress: "bg-status-progress",
-  review: "bg-status-review",
-  done: "bg-status-done",
-  blocked: "bg-status-blocked",
-};
 
 const PRIORITY_PILL: Record<string, string> = {
   critical: "bg-red-500/10 text-red-600 dark:text-red-400",
@@ -175,43 +168,12 @@ export function DashboardPanel() {
     per_page: 100,
   });
   const { data: tasksResp, isLoading: tasksLoading } = useTasks({
-    per_page: 200,
+    per_page: 20,
   });
-  const { data: projectsResp } = useProjects({ per_page: 100 });
 
   const summary = summaryQuery.data;
   const tasks = useMemo(() => tasksResp?.data ?? [], [tasksResp]);
   const agents = useMemo(() => agentsResp?.data ?? [], [agentsResp]);
-
-  const projectNames = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const p of projectsResp?.data ?? []) m.set(p.id, p.name);
-    return m;
-  }, [projectsResp]);
-
-  const throughput = useMemo(
-    () =>
-      (completionQuery.data ?? []).map((p) => ({
-        day: new Date(p.date).toLocaleDateString("en-US", {
-          month: "short",
-          day: "numeric",
-        }),
-        tasks: p.completed,
-      })),
-    [completionQuery.data]
-  );
-
-  const statusSlices: StatusSlice[] = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const t of tasks) counts[t.status] = (counts[t.status] ?? 0) + 1;
-    return [
-      { name: "Backlog", value: counts.backlog ?? 0, color: "hsl(var(--status-idle))" },
-      { name: "To Do", value: counts.todo ?? 0, color: "hsl(var(--status-todo))" },
-      { name: "In Progress", value: counts.in_progress ?? 0, color: "hsl(var(--status-progress))" },
-      { name: "Review", value: counts.review ?? 0, color: "hsl(var(--status-progress) / 0.5)" },
-      { name: "Done", value: counts.done ?? 0, color: "hsl(var(--status-done))" },
-    ];
-  }, [tasks]);
 
   const recentTasks: Task[] = useMemo(
     () =>
@@ -223,6 +185,51 @@ export function DashboardPanel() {
         .slice(0, 7),
     [tasks]
   );
+
+  const visibleProjectIds = useMemo(
+    () => Array.from(new Set(recentTasks.map((t) => t.project_id))),
+    [recentTasks]
+  );
+
+  const { data: namedProjects } = useQuery({
+    queryKey: ["projects", "named", visibleProjectIds],
+    queryFn: async () => {
+      const pairs = await Promise.all(
+        visibleProjectIds.map(async (id) => {
+          try {
+            const p = await getProject(id);
+            return [id, p.name] as const;
+          } catch {
+            return [id, "Unknown project"] as const;
+          }
+        })
+      );
+      return Object.fromEntries(pairs) as Record<string, string>;
+    },
+    enabled: visibleProjectIds.length > 0,
+  });
+
+  const projectNames = namedProjects ?? {};
+
+  const throughput = useMemo(
+    () =>
+      (completionQuery.data ?? []).map((p) => ({
+        day: formatDateOnly(p.date, { month: "short", day: "numeric" }),
+        tasks: p.completed,
+      })),
+    [completionQuery.data]
+  );
+
+  const statusSlices: StatusSlice[] = useMemo(() => {
+    const counts = summary?.tasks_by_status ?? {};
+    return [
+      { name: "Backlog", value: counts.backlog ?? 0, color: STATUS_DOT_HSL.backlog },
+      { name: "To Do", value: counts.todo ?? 0, color: STATUS_DOT_HSL.todo },
+      { name: "In Progress", value: counts.in_progress ?? 0, color: STATUS_DOT_HSL.in_progress },
+      { name: "Review", value: counts.review ?? 0, color: STATUS_DOT_HSL.review },
+      { name: "Done", value: counts.done ?? 0, color: STATUS_DOT_HSL.done },
+    ];
+  }, [summary?.tasks_by_status]);
 
   const topAgents: Agent[] = useMemo(
     () =>
@@ -354,10 +361,13 @@ export function DashboardPanel() {
         </Card>
 
         <Card title="Tasks by status">
-          {tasksLoading ? (
+          {summaryQuery.isLoading ? (
             <Skeleton className="h-[280px]" />
           ) : (
-            <StatusDonut slices={statusSlices} total={tasks.length} />
+            <StatusDonut
+              slices={statusSlices}
+              total={summary?.total_tasks ?? 0}
+            />
           )}
         </Card>
       </div>
@@ -386,7 +396,7 @@ export function DashboardPanel() {
             <div className="flex h-40 flex-col items-center justify-center gap-2 text-center">
               <p className="text-sm text-muted-foreground">No tasks yet.</p>
               <Link
-                href="/panel/task-manager"
+                href="/panel/projects"
                 className="text-sm font-medium text-primary hover:underline"
               >
                 Create a project to get started
@@ -403,13 +413,14 @@ export function DashboardPanel() {
                     <span
                       className={cn(
                         "h-2 w-2 shrink-0 rounded-full",
-                        STATUS_DOT[task.status] ?? "bg-muted-foreground"
+                        STATUS_DOT[task.status as keyof typeof STATUS_DOT] ??
+                          "bg-muted-foreground"
                       )}
                     />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium">{task.title}</p>
                       <p className="truncate text-xs text-muted-foreground">
-                        {projectNames.get(task.project_id) ?? "Project"}
+                        {projectNames[task.project_id] ?? "Unknown project"}
                       </p>
                     </div>
                     <span

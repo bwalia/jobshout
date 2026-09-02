@@ -10,6 +10,7 @@ import { MetricCard } from "@/components/dashboard/MetricCard";
 import { getDashboardSummary, getTaskCompletion } from "@/lib/api/metrics";
 import { getAgents } from "@/lib/api/agents";
 import type { Agent } from "@/lib/types/agent";
+import { formatDateOnly } from "@/lib/dates";
 
 type DateRange = "7d" | "30d" | "90d";
 
@@ -99,7 +100,7 @@ export default function MetricsPage() {
   const taskCompletionData: TaskCompletionDataPoint[] =
     taskCompletionRaw?.map((point) => ({
       // Use a short date label (MM/DD) for readability on the chart axis.
-      day: new Date(point.date).toLocaleDateString("en-US", {
+      day: formatDateOnly(point.date, {
         month: "numeric",
         day: "numeric",
       }),
@@ -147,7 +148,7 @@ export default function MetricsPage() {
             <MetricCardSkeleton />
           </>
         ) : summaryError || !summary ? (
-          <p className="col-span-4 text-sm text-muted-foreground">
+          <p className="col-span-full text-sm text-muted-foreground">
             Unable to load summary metrics.
           </p>
         ) : (
@@ -155,27 +156,21 @@ export default function MetricsPage() {
             <MetricCard
               title="Tasks Completed"
               value={summary.tasks_completed.toLocaleString()}
-              // Delta is not available from this endpoint; display 0 as a
-              // neutral placeholder until a time-series summary endpoint exists.
-              delta={0}
               description={`Over the last ${dateRange}`}
             />
             <MetricCard
               title="Active Agents"
               value={String(summary.active_agents)}
-              delta={0}
               description="Currently deployed agents"
             />
             <MetricCard
               title="Total Tasks"
               value={summary.total_tasks.toLocaleString()}
-              delta={0}
               description="All tasks across projects"
             />
             <MetricCard
               title="Tasks In Progress"
               value={summary.tasks_in_progress.toLocaleString()}
-              delta={0}
               description="Currently being worked on"
             />
           </>

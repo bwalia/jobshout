@@ -40,8 +40,8 @@ export function GenerateArticleDialog({
   const [model, setModel] = useState("");
 
   const filled = rows.filter((r) => r.topic.trim() !== "");
-  const tooMany = filled.length > HARD_MAX_ARTICLES;
-  const canSubmit = filled.length > 0 && !tooMany && !generate.isPending;
+  const atCap = rows.length >= HARD_MAX_ARTICLES;
+  const canSubmit = filled.length > 0 && !generate.isPending;
 
   if (!open) return null;
 
@@ -160,7 +160,7 @@ export function GenerateArticleDialog({
           <button
             type="button"
             onClick={addRow}
-            disabled={rows.length >= HARD_MAX_ARTICLES}
+            disabled={atCap}
             className="w-full rounded-md border border-dashed border-border py-2 text-sm text-muted-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
           >
             + Add another article
@@ -183,8 +183,8 @@ export function GenerateArticleDialog({
         <div className="flex items-center justify-between gap-2 border-t border-border p-6 pt-4">
           <p className="text-2xs text-muted-foreground">
             {filled.length} article{filled.length === 1 ? "" : "s"}
-            {tooMany && (
-              <span className="text-destructive">
+            {atCap && (
+              <span>
                 {" "}
                 — maximum is {HARD_MAX_ARTICLES}
               </span>

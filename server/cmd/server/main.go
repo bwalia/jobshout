@@ -132,7 +132,8 @@ func requestTimeout(next http.Handler) http.Handler {
 		// stuck request. Trending under the same prefix is only HTTP calls, so
 		// it keeps the default.
 		if r.Method == http.MethodPost && (strings.HasSuffix(r.URL.Path, "/research") ||
-			strings.HasSuffix(r.URL.Path, "/tasks/launch")) {
+			strings.HasSuffix(r.URL.Path, "/tasks/launch") ||
+			strings.Contains(r.URL.Path, "/career/")) {
 			timeout = researchRequestTimeout
 		}
 		// One call to a single GPU, which draws for tens of seconds and may
@@ -209,6 +210,7 @@ func main() {
 	reviewRunRepo := repository.NewReviewRunRepository(pool)
 	taskRunRepo := repository.NewTaskRunRepository(pool)
 	mailRepo := repository.NewMailRepository(pool)
+	careerRepo := repository.NewCareerRepository(pool)
 
 	// Autonomous agents + chat + Telegram repositories
 	memoryRepo := repository.NewMemoryRepository(pool)
@@ -567,6 +569,8 @@ func main() {
 	)
 	blogSvc.BindTasks(taskSvc)
 	mailSvc.BindTasks(taskSvc)
+	pentestReconciler.BindTasks(taskSvc)
+	reviewReconciler.BindTasks(taskSvc)
 	launchSvc := &tasklaunch.Service{
 		Agents:   agentSvc,
 		Tasks:    taskSvc,
@@ -588,6 +592,16 @@ func main() {
 	} else {
 		logger.Info("mail agent oauth not configured (set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_TOKEN_KEY)")
 	}
+
+	var careerLLM llm.Client
+	if c, err := llmRouter.For(cfg.LLMProvider); err != nil {
+		logger.Warn("career: llm router returned error — evaluations use the deterministic scorer", zap.Error(err))
+	} else {
+		careerLLM = c
+	}
+	careerSvc := service.NewCareerService(careerRepo, agentRepo, researchClient, careerLLM, researchSvc, logger)
+	launchSvc.Career = careerSvc
+	logger.Info("career ops agent initialised")
 
 	// ─── Autonomous agent engine ────────────────────────────────────────────
 	autonomousExec := executor.NewAutonomousExecutor(goNativeExec, llmRouter, memoryRepo, goalRepo, logger).WithAutoSelect(autoSelector)
@@ -667,6 +681,7 @@ func main() {
 		Images:          imageSvc,
 		Reviews:         reviewSvc,
 		Mail:            mailSvc,
+		Career:          careerSvc,
 		MultiAgent:      multiAgentSvc,
 		Sprints:         sprintSvc,
 		Plugins:         pluginSvc,
@@ -784,6 +799,7 @@ func main() {
 	pentestHandler := handler.NewPentestHandler(pentestSvc)
 	reviewHandler := handler.NewReviewHandler(reviewSvc)
 	mailHandler := handler.NewMailHandler(mailSvc, mailCfg.FrontendBaseURL)
+	careerHandler := handler.NewCareerHandler(careerSvc)
 
 	// Chat, goal, multi-agent, and Telegram handlers
 	chatHandler := handler.NewChatHandler(chatSvc)
@@ -931,6 +947,7 @@ func main() {
 					r.Put("/position", taskHandler.Reorder)
 					r.Get("/comments", taskHandler.ListComments)
 					r.Post("/comments", taskHandler.AddComment)
+					r.Get("/history", taskHandler.History)
 					// On-demand agent runs of this task.
 					r.Post("/run", taskRunHandler.CreateRun)
 					r.Get("/runs", taskRunHandler.ListRuns)
@@ -1059,6 +1076,40 @@ func main() {
 					r.Post("/simulate/inbox", mailHandler.SimulateInbox)
 					r.Post("/simulate/sync", mailHandler.SimulateSync)
 				}
+			})
+
+			r.Route("/career", func(r chi.Router) {
+				r.Get("/profile", careerHandler.GetProfile)
+				r.Patch("/profile", careerHandler.PatchProfile)
+				r.Post("/intake", careerHandler.Intake)
+				r.Post("/evaluate", careerHandler.Evaluate)
+				r.Get("/evaluations", careerHandler.ListEvaluations)
+				r.Get("/evaluations/{id}", careerHandler.GetEvaluation)
+				r.Post("/evaluations/{id}/cover", careerHandler.CoverLetter)
+				r.Post("/evaluations/{id}/cv", careerHandler.TailorCV)
+				r.Post("/evaluations/{id}/email", careerHandler.EmailDraft)
+				r.Get("/pipeline", careerHandler.ListPipeline)
+				r.Post("/pipeline/batch", careerHandler.BatchEvaluate)
+				r.Get("/applications", careerHandler.ListTracker)
+				r.Post("/applications/{id}/status", careerHandler.SetStatus)
+				r.Get("/applications/{id}/artifacts", careerHandler.ListArtifacts)
+				r.Post("/applications/{id}/followup", careerHandler.Followup)
+				r.Post("/applications/{id}/interview-prep", careerHandler.InterviewPrep)
+				r.Post("/applications/{id}/offer-prep", careerHandler.OfferPrep)
+				r.Post("/applications/{id}/salary-gap", careerHandler.SalaryGap)
+				r.Get("/followups", careerHandler.ListFollowups)
+				r.Get("/stories", careerHandler.ListStories)
+				r.Post("/stories", careerHandler.UpsertStory)
+				r.Get("/contacts", careerHandler.ListContacts)
+				r.Post("/contacts", careerHandler.AddContact)
+				r.Post("/scan", careerHandler.Scan)
+				r.Get("/portals", careerHandler.ListPortals)
+				r.Post("/portals", careerHandler.AddPortal)
+				r.Get("/blacklist", careerHandler.ListBlacklist)
+				r.Post("/blacklist", careerHandler.AddBlacklist)
+				r.Get("/doctor", careerHandler.Doctor)
+				r.Get("/patterns", careerHandler.Patterns)
+				r.Get("/upskill", careerHandler.Upskill)
 			})
 
 			// Plugins (user-defined LangGraph/LangChain workflows)
@@ -1319,7 +1370,7 @@ func main() {
 	// ─── Scheduler dispatcher ───────────────────────────────────────────────
 	// Ticks every 30s, picks up due scheduled_tasks, and dispatches them to
 	// the appropriate path (blog pipeline / workflow / agent).
-	schedulerRunner := scheduler.NewRunner(schedulerRepo, blogSvc, workflowSvc, execSvc, multiAgentSvc, logger)
+	schedulerRunner := scheduler.NewRunner(schedulerRepo, blogSvc, workflowSvc, execSvc, multiAgentSvc, logger).WithCareer(careerSvc)
 	go schedulerRunner.Start(ctx)
 
 	// ─── Pentest reconciler ─────────────────────────────────────────────────

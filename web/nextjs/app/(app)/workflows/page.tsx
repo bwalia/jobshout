@@ -9,12 +9,13 @@ import {
   useExecuteWorkflow,
 } from "@/lib/hooks/useWorkflows";
 import type { Workflow } from "@/lib/types/workflow";
+import { THEME_BADGE } from "@/lib/status-colors";
 
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
-    active: "bg-green-500/20 text-green-400",
-    draft: "bg-yellow-500/20 text-yellow-400",
-    archived: "bg-gray-500/20 text-gray-400",
+    active: THEME_BADGE.success,
+    draft: THEME_BADGE.warning,
+    archived: THEME_BADGE.muted,
   };
   return (
     <span

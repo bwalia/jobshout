@@ -4,20 +4,26 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAgents } from "@/lib/hooks/useAgents";
 import { useProjects } from "@/lib/hooks/useProjects";
-import { useTasks } from "@/lib/hooks/useTasks";
+import { useAllTasks, useTask } from "@/lib/hooks/useTasks";
 import { TaskDetailModal } from "@/components/kanban/TaskDetailModal";
 import { KanbanBoard } from "@/components/kanban/KanbanBoard";
-import AgentBoardPage from "@/app/(app)/agent-board/page";
+import { AgentBoardView } from "@/components/agent-board/AgentBoardView";
 import type { Task } from "@/lib/types/project";
 import type { TaskStatus } from "@/lib/types/common";
 import { cn } from "@/lib/utils/cn";
+import { STATUS_DOT } from "@/lib/status-colors";
+import {
+  TaskProgressChip,
+  TaskCountLabel,
+  formatCompletedAt,
+} from "@/components/task-manager/TaskProgressChip";
 
 const COLUMNS: { status: TaskStatus; label: string; dot: string }[] = [
-  { status: "backlog", label: "Backlog", dot: "bg-status-todo" },
-  { status: "todo", label: "To Do", dot: "bg-status-idle" },
-  { status: "in_progress", label: "In Progress", dot: "bg-status-progress" },
-  { status: "review", label: "Review", dot: "bg-status-review" },
-  { status: "done", label: "Done", dot: "bg-status-done" },
+  { status: "backlog", label: "Backlog", dot: STATUS_DOT.backlog },
+  { status: "todo", label: "To Do", dot: STATUS_DOT.todo },
+  { status: "in_progress", label: "In Progress", dot: STATUS_DOT.in_progress },
+  { status: "review", label: "Review", dot: STATUS_DOT.review },
+  { status: "done", label: "Done", dot: STATUS_DOT.done },
 ];
 
 type View = "tasks" | "agents";
@@ -26,13 +32,15 @@ export function TaskBoardPanel() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const taskParam = searchParams.get("task");
+  const runParam = searchParams.get("run");
   const projectParam = searchParams.get("project");
   const viewParam = searchParams.get("view");
 
   const view: View = viewParam === "agents" ? "agents" : "tasks";
   const [projectFilter, setProjectFilter] = useState<string>(projectParam ?? "");
 
-  const { data: tasksResp, isLoading } = useTasks({ per_page: 200 });
+  const { data: tasksResp, isLoading } = useAllTasks();
+  const { data: deepTask, isError: deepTaskError } = useTask(taskParam ?? "");
   const { data: agentsResp } = useAgents({ per_page: 100 });
   const { data: projectsResp } = useProjects({ per_page: 100 });
 
@@ -56,10 +64,21 @@ export function TaskBoardPanel() {
   }, [projectParam]);
 
   useEffect(() => {
-    if (!taskParam) return;
-    const t = tasks.find((x) => x.id === taskParam);
-    if (t) setSelected(t);
-  }, [taskParam, tasks]);
+    if (!taskParam) {
+      setSelected(null);
+      return;
+    }
+    if (deepTaskError) {
+      setSelected(null);
+      return;
+    }
+    const t = tasks.find((x) => x.id === taskParam) ?? deepTask ?? null;
+    setSelected((prev) => {
+      if (t) return t;
+      if (prev?.id === taskParam) return prev;
+      return null;
+    });
+  }, [taskParam, tasks, deepTask, deepTaskError]);
 
   const byStatus = useMemo(() => {
     const map: Record<TaskStatus, Task[]> = {
@@ -89,6 +108,7 @@ export function TaskBoardPanel() {
 
   function changeProject(id: string) {
     setProjectFilter(id);
+    setSelected(null);
     const params = new URLSearchParams();
     if (id) params.set("project", id);
     setUrl(params);
@@ -98,6 +118,15 @@ export function TaskBoardPanel() {
     setSelected(task);
     const params = new URLSearchParams(searchParams.toString());
     params.set("task", task.id);
+    params.delete("run");
+    setUrl(params);
+  }
+
+  function openTaskById(taskId: string, runId?: string) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("task", taskId);
+    if (runId) params.set("run", runId);
+    else params.delete("run");
     setUrl(params);
   }
 
@@ -105,11 +134,12 @@ export function TaskBoardPanel() {
     setSelected(null);
     const params = new URLSearchParams(searchParams.toString());
     params.delete("task");
+    params.delete("run");
     setUrl(params);
   }
 
   return (
-    <div className="flex h-[calc(100dvh-3rem)] flex-col lg:h-screen">
+    <div className="flex h-full min-h-0 flex-col">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-6 py-4">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Task Board</h1>
@@ -118,7 +148,22 @@ export function TaskBoardPanel() {
               ? "Live agent activity"
               : projectFilter
                 ? `Board for ${projectNames.get(projectFilter) ?? "project"} — drag to move tasks`
-                : "All tasks across projects"}
+                : (
+                  <>
+                    All tasks across projects
+                    {tasksResp ? (
+                      <>
+                        {" "}
+                        (
+                        <TaskCountLabel
+                          loaded={tasks.length}
+                          total={tasksResp.total}
+                        />
+                        )
+                      </>
+                    ) : null}
+                  </>
+                )}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -162,14 +207,22 @@ export function TaskBoardPanel() {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto scrollbar-thin p-4">
+      <div
+        className={cn(
+          "min-h-0 flex-1",
+          view === "tasks" && projectFilter
+            ? "overflow-hidden"
+            : "overflow-auto scrollbar-thin p-4"
+        )}
+      >
         {view === "agents" ? (
-          <AgentBoardPage />
+          <AgentBoardView hideHeader onOpenTask={openTaskById} />
         ) : projectFilter ? (
-          // Single project: full drag-and-drop board with inline task creation.
-          <div className="h-full min-h-[420px]">
-            <KanbanBoard projectId={projectFilter} />
-          </div>
+          <KanbanBoard
+            projectId={projectFilter}
+            projectName={projectNames.get(projectFilter)}
+            onOpenTask={openTask}
+          />
         ) : isLoading ? (
           <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
             Loading tasks…
@@ -216,7 +269,14 @@ export function TaskBoardPanel() {
                                 : "Unassigned"}
                               {" · "}
                               {projectNames.get(task.project_id) ?? "Project"}
+                              {task.status === "done" &&
+                              formatCompletedAt(task.completed_at)
+                                ? ` · Completed ${formatCompletedAt(task.completed_at)}`
+                                : ""}
                             </p>
+                            <div className="mt-1.5">
+                              <TaskProgressChip task={task} />
+                            </div>
                           </button>
                         </li>
                       ))
@@ -234,6 +294,7 @@ export function TaskBoardPanel() {
           task={selected}
           onClose={closeTask}
           onUpdated={(t) => setSelected(t)}
+          initialFocusRunId={runParam}
         />
       )}
     </div>

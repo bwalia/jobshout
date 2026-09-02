@@ -42,10 +42,10 @@ const nextConfig = {
       { source: "/agent-board", destination: "/panel/task-board", permanent: false },
       { source: "/tasks", destination: "/panel/task-board", permanent: false },
       { source: "/task-manager", destination: "/panel/task-manager", permanent: false },
-      { source: "/projects", destination: "/panel/task-manager", permanent: false },
+      { source: "/projects", destination: "/panel/projects", permanent: false },
       {
         source: "/projects/:id",
-        destination: "/panel/task-board?project=:id",
+        destination: "/panel/projects?project=:id",
         permanent: false,
       },
       { source: "/agents", destination: "/panel/task-manager", permanent: false },

@@ -54,6 +54,11 @@ const STATUS_META: Record<
     icon: AlertTriangle,
     className: "bg-status-blocked/15 text-status-blocked",
   },
+  cancelled: {
+    label: "Stopped",
+    icon: Archive,
+    className: "bg-muted text-muted-foreground",
+  },
 };
 
 function parseFilter(value: string | null): ArtifactFilter {

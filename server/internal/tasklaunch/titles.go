@@ -99,6 +99,26 @@ func TitleFrom(kind string, v map[string]string) (title, description string) {
 			p = p[:80]
 		}
 		return "Image: " + p, p
+	case model.BuiltinCareerOps:
+		job := strings.TrimSpace(v["job_url"])
+		if job == "" {
+			job = strings.TrimSpace(v["jd_text"])
+			if len(job) > 40 {
+				job = job[:40]
+			}
+		}
+		if job == "" {
+			job = "job"
+		}
+		title = "Evaluate: " + job
+		var parts []string
+		if u := strings.TrimSpace(v["job_url"]); u != "" {
+			parts = append(parts, "URL: "+u)
+		}
+		if d := strings.TrimSpace(v["jd_text"]); d != "" {
+			parts = append(parts, d)
+		}
+		return title, strings.Join(parts, "\n\n")
 	default:
 		title = strings.TrimSpace(v["title"])
 		if title == "" {

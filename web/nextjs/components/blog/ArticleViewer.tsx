@@ -91,7 +91,8 @@ export function ArticleViewer({ article }: { article: BlogArticle }) {
             Topic: {article.topic}
           </p>
           <p className="mt-0.5 truncate font-mono text-2xs text-muted-foreground">
-            {article.path} · {article.word_count} words ·{" "}
+            {article.path} · {article.word_count.toLocaleString()}{" "}
+            {article.word_count === 1 ? "word" : "words"} ·{" "}
             {referenceCount === 1 ? "1 source" : `${referenceCount} sources`}
           </p>
         </div>
@@ -161,21 +162,29 @@ export function ArticleViewer({ article }: { article: BlogArticle }) {
               // app's tokens so it tracks the theme like everything else.
               "prose-headings:font-display prose-headings:tracking-tight",
               "prose-a:text-primary prose-a:no-underline hover:prose-a:underline",
-              "prose-code:rounded prose-code:bg-muted prose-code:px-1 prose-code:py-0.5",
+              "[&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-muted [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:py-0.5",
               "prose-code:before:content-none prose-code:after:content-none",
-              "prose-pre:border prose-pre:border-border prose-pre:bg-muted/60",
+              "prose-pre:border prose-pre:border-border prose-pre:bg-muted/60 prose-pre:text-foreground",
               "prose-th:text-foreground prose-blockquote:border-l-primary/40"
             )}
           >
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               components={{
-                // A ```mermaid fence becomes a rendered diagram. Every other
-                // fence keeps the default code rendering — an article's shell
-                // and Go snippets must not go anywhere near a diagram parser.
-                code({ className, children, ...props }) {
+                pre({ children }) {
+                  return <>{children}</>;
+                },
+                code({ className, children, node: _node, ...props }) {
                   if (/language-mermaid/.test(className ?? "")) {
                     return <MermaidDiagram chart={String(children)} />;
+                  }
+                  const isBlock = /language-/.test(className ?? "");
+                  if (isBlock) {
+                    return (
+                      <pre className="overflow-x-auto rounded-lg border border-border bg-muted/60 p-4">
+                        <code className={className}>{children}</code>
+                      </pre>
+                    );
                   }
                   return (
                     <code className={className} {...props}>
@@ -197,7 +206,10 @@ export function ArticleViewer({ article }: { article: BlogArticle }) {
                       <StoredImage
                         src={src}
                         alt={alt ?? ""}
-                        className="my-4 h-auto w-full rounded-lg border border-border object-contain"
+                        width={article.cover_image_meta?.width}
+                        height={article.cover_image_meta?.height}
+                        loading="lazy"
+                        className="mx-auto my-4 h-auto max-w-full rounded-lg border border-border object-contain"
                       />
                     );
                   }
@@ -206,7 +218,8 @@ export function ArticleViewer({ article }: { article: BlogArticle }) {
                     <img
                       src={src}
                       alt={alt ?? ""}
-                      className="my-4 w-full rounded-lg border border-border"
+                      loading="lazy"
+                      className="mx-auto my-4 max-w-full rounded-lg border border-border"
                     />
                   );
                 },

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import {
   useQuery,
   useMutation,
@@ -14,6 +15,7 @@ import {
   getTaskRun,
   getTaskRuns,
 } from "@/lib/api/task-runs";
+import { taskKeys } from "@/lib/hooks/useTasks";
 import type { PaginatedResponse } from "@/lib/types/common";
 import type {
   CreateTaskRunRequest,
@@ -52,7 +54,8 @@ export function useTaskRuns(
 export function useTaskRun(
   runId: string | null
 ): UseQueryResult<TaskRun> {
-  return useQuery({
+  const queryClient = useQueryClient();
+  const result = useQuery({
     queryKey: taskRunKeys.detail(runId ?? ""),
     queryFn: () => getTaskRun(runId as string),
     enabled: Boolean(runId),
@@ -61,6 +64,21 @@ export function useTaskRun(
       return run && isTaskRunActive(run.status) ? 1500 : false;
     },
   });
+  const status = result.data?.status;
+  const prev = useRef<string | undefined>();
+  useEffect(() => {
+    if (
+      prev.current &&
+      isTaskRunActive(prev.current as TaskRun["status"]) &&
+      status &&
+      !isTaskRunActive(status)
+    ) {
+      void queryClient.invalidateQueries({ queryKey: taskKeys.all });
+      void queryClient.invalidateQueries({ queryKey: taskRunKeys.all });
+    }
+    prev.current = status;
+  }, [status, queryClient]);
+  return result;
 }
 
 /**
@@ -91,6 +109,7 @@ export function useCreateTaskRun(): UseMutationResult<
       queryClient.invalidateQueries({
         queryKey: taskRunKeys.byTask(run.task_id),
       });
+      queryClient.invalidateQueries({ queryKey: taskKeys.all });
       toast.success("Run started.");
     },
     onError: (error: Error) => {

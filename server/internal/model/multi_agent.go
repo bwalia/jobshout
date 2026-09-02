@@ -63,9 +63,8 @@ type RunMultiAgentRequest struct {
 }
 
 // AgentBoardEntry is one row on the agent board: an agent paired with the
-// activity derived from its most recent multi_agent_jobs participation or
-// blog_runs attribution, whichever is newer. The
-// frontend groups these by Activity to render Kanban columns.
+// activity derived from its most recent job, blog run, mail thread, or
+// generic task_run. The frontend groups these by Activity to render columns.
 type AgentBoardEntry struct {
 	AgentID   uuid.UUID `json:"agent_id"`
 	Name      string    `json:"name"`
@@ -76,12 +75,21 @@ type AgentBoardEntry struct {
 	// constants above.
 	Activity string `json:"activity"`
 
-	// CurrentJobID is the multi-agent job or blog run driving the activity
-	// (nil when idle).
+	// ActivityKind is the source of the current activity: job | blog | mail |
+	// task_run. Omitted when idle. The client uses this to pick a deep link.
+	ActivityKind *string `json:"activity_kind,omitempty"`
+
+	// CurrentJobID is the source row driving the activity (job, blog run,
+	// mail thread, or task_run id). Nil when idle.
 	CurrentJobID *uuid.UUID `json:"current_job_id,omitempty"`
 
+	// TaskID is set when ActivityKind is task_run so the card can open the
+	// board task (CurrentJobID is the run, not the task).
+	TaskID *uuid.UUID `json:"task_id,omitempty"`
+
 	// Role within the current work — planner | executor | reviewer for a
-	// collaboration job, writer for a blog run (omitted when idle).
+	// collaboration job, writer for a blog run, mail / researcher for mail
+	// (omitted when idle).
 	JobRole *string `json:"job_role,omitempty"`
 
 	// CurrentJobPrompt describes what the agent is doing: the task prompt for a

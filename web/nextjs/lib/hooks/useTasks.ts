@@ -10,12 +10,15 @@ import {
   getTasks,
   getProjectTasks,
   getTask,
+  getTaskHistory,
   createTask,
   updateTask,
   deleteTask,
   transitionTask,
   reorderTask,
+  fetchAllTaskPages,
   type TaskListParams,
+  type TaskHistory,
   type TransitionTaskRequest,
   type ReorderTaskRequest,
 } from "@/lib/api/tasks";
@@ -33,6 +36,7 @@ export const taskKeys = {
     [...taskKeys.all, "project", projectId] as const,
   details: () => [...taskKeys.all, "detail"] as const,
   detail: (id: string) => [...taskKeys.details(), id] as const,
+  history: (id: string) => [...taskKeys.all, "history", id] as const,
 };
 
 // ---------------------------------------------------------------------------
@@ -60,8 +64,24 @@ export function useProjectTasks(
 ): UseQueryResult<PaginatedResponse<Task>> {
   return useQuery({
     queryKey: taskKeys.projectLists(projectId),
-    queryFn: () => getProjectTasks(projectId, params),
+    queryFn: () =>
+      fetchAllTaskPages((page, perPage) =>
+        getProjectTasks(projectId, { ...params, page, per_page: perPage })
+      ),
     enabled: Boolean(projectId),
+  });
+}
+
+/** Org-wide task list, walking pages so boards are not silently truncated. */
+export function useAllTasks(
+  params: TaskListParams = {}
+): UseQueryResult<PaginatedResponse<Task>> {
+  return useQuery({
+    queryKey: [...taskKeys.lists(), "all", params],
+    queryFn: () =>
+      fetchAllTaskPages((page, perPage) =>
+        getTasks({ ...params, page, per_page: perPage })
+      ),
   });
 }
 
@@ -73,6 +93,16 @@ export function useTask(id: string): UseQueryResult<Task> {
     queryKey: taskKeys.detail(id),
     queryFn: () => getTask(id),
     enabled: Boolean(id),
+  });
+}
+
+export function useTaskHistory(
+  taskId: string | null
+): UseQueryResult<TaskHistory> {
+  return useQuery({
+    queryKey: taskKeys.history(taskId ?? ""),
+    queryFn: () => getTaskHistory(taskId as string),
+    enabled: Boolean(taskId),
   });
 }
 
@@ -165,13 +195,8 @@ export function useTransitionTask(): UseMutationResult<
 
   return useMutation({
     mutationFn: ({ id, payload }) => transitionTask(id, payload),
-    onSuccess: (updatedTask) => {
-      queryClient.invalidateQueries({
-        queryKey: taskKeys.detail(updatedTask.id),
-      });
-      queryClient.invalidateQueries({
-        queryKey: taskKeys.projectLists(updatedTask.project_id),
-      });
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: taskKeys.all });
     },
     onError: (error: Error) => {
       toast.error(`Failed to transition task: ${error.message}`);
@@ -193,10 +218,8 @@ export function useReorderTask(): UseMutationResult<
 
   return useMutation({
     mutationFn: ({ id, payload }) => reorderTask(id, payload),
-    onSuccess: (updatedTask) => {
-      queryClient.invalidateQueries({
-        queryKey: taskKeys.projectLists(updatedTask.project_id),
-      });
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: taskKeys.all });
     },
     onError: (error: Error) => {
       toast.error(`Failed to reorder task: ${error.message}`);

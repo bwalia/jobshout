@@ -126,6 +126,9 @@ func launchResultToTool(res *tasklaunch.Result) *Result {
 	if res.RunID != nil {
 		data["run_id"] = res.RunID.String()
 	}
+	if res.EvaluationID != nil {
+		data["evaluation_id"] = res.EvaluationID.String()
+	}
 	var ents []model.EntityRef
 	if res.Task != nil {
 		href := "/panel/task-manager?project=" + res.Task.ProjectID.String() + "&task=" + res.Task.ID.String()
@@ -133,7 +136,7 @@ func launchResultToTool(res *tasklaunch.Result) *Result {
 			href += "&run=" + res.RunID.String()
 		}
 		tref := model.EntityRef{Kind: model.EntityTask, ID: res.Task.ID.String(), Label: res.Task.Title, Href: href}
-		pref := model.EntityRef{Kind: model.EntityProject, ID: res.Task.ProjectID.String(), Label: "project", Href: "/panel/task-manager?project=" + res.Task.ProjectID.String()}
+		pref := model.EntityRef{Kind: model.EntityProject, ID: res.Task.ProjectID.String(), Label: "project", Href: "/panel/projects?project=" + res.Task.ProjectID.String()}
 		ents = append(ents, tref, pref)
 		data["task"] = res.Task.Title
 		return &Result{Data: data, Entity: &tref, Entities: ents}

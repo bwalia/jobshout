@@ -14,6 +14,7 @@ const (
 	BlogRunStatusRunning   = "running"
 	BlogRunStatusCompleted = "completed"
 	BlogRunStatusFailed    = "failed"
+	BlogRunStatusCancelled = "cancelled"
 )
 
 // Blog step keys. These name the phases of a run in order, and are what the

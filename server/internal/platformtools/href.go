@@ -11,7 +11,9 @@ import (
 
 func agentHref(id uuid.UUID) string    { return "/agents/" + id.String() }
 func taskHref(id uuid.UUID) string     { return "/task-manager" }
-func projectHref(id uuid.UUID) string  { return "/projects/" + id.String() }
+func projectHref(id uuid.UUID) string {
+	return "/panel/projects?project=" + id.String()
+}
 func workflowHref(id uuid.UUID) string { return "/workflows/" + id.String() }
 func executionHref(agentID uuid.UUID) string {
 	return "/agents/" + agentID.String()
@@ -20,6 +22,7 @@ func articleHref(id uuid.UUID) string { return "/articles/" + id.String() }
 func pentestHref() string             { return "/agents/pentest" }
 func reviewHref() string              { return "/agents/review" }
 func mailHref() string                { return "/panel/task-manager?agent=mail" }
+func careerHref() string              { return "/panel/task-manager?agent=career" }
 func sprintHref() string              { return "/sprints" }
 
 func agentRef(a model.Agent) model.EntityRef {
