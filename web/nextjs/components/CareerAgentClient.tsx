@@ -292,7 +292,7 @@ export function CareerAgentClient() {
   }
 
   async function scoreJobs(picked: CareerJob[]) {
-    const urls = [...new Set(picked.map((j) => j.listing_url.trim()).filter(Boolean))];
+    const urls = Array.from(new Set(picked.map((j) => j.listing_url.trim()).filter(Boolean)));
     const pasteOnly = picked.filter((j) => !j.listing_url.trim() && j.evaluation?.jd_text?.trim());
     if (urls.length === 0 && pasteOnly.length === 0) {
       toast.message("Tick jobs that have a posting URL, then Score selected.");
