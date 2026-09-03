@@ -591,7 +591,7 @@ export function CareerAgentClient() {
             onSavePortal={() => {
               if (!scanSlug.trim() || scanBoard === "all") return;
               void addCareerPortal({ board: scanBoard, slug: scanSlug })
-                .then(loadAll)
+                .then(() => loadAll())
                 .then(() => toast.success("Board saved."))
                 .catch((e) => {
                   const msg = apiErrorMessage(e, "Could not save board.");
