@@ -190,6 +190,12 @@ test.describe("Agents (Task Manager panel)", () => {
     await expect(page.getByRole("heading", { name })).toBeVisible({
       timeout: 5_000,
     });
+    await expect(page.getByRole("button", { name: "Remove" })).toBeVisible();
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByRole("button", { name: "Remove" }).click();
+    await expect(page.getByRole("heading", { name })).not.toBeVisible({
+      timeout: 8_000,
+    });
   });
 
   test("import of a seeded specialist shows overlay confirm copy", async ({
@@ -221,5 +227,14 @@ test.describe("Agents (Task Manager panel)", () => {
     ).toBeVisible();
     await expect(page.getByRole("button", { name: "Update agent" })).toBeEnabled();
     await page.getByRole("button", { name: "Cancel" }).click();
+  });
+
+  test("specialist tab has export and no remove", async ({ page }) => {
+    await navigateTo(page, "/panel/task-manager?agent=mail");
+    await expect(page.getByRole("heading", { name: "Mail Agent" })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(page.getByRole("button", { name: "Export" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Remove" })).toHaveCount(0);
   });
 });

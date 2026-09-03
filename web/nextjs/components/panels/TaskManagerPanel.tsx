@@ -45,6 +45,7 @@ import { NewProjectDialog } from "@/components/task-manager/NewProjectDialog";
 import { CreateAgentDialog } from "@/components/agent/CreateAgentDialog";
 import { ExportAgentButton } from "@/components/agent/ExportAgentButton";
 import { ImportAgentPackageDialog } from "@/components/agent/ImportAgentPackageDialog";
+import { RemoveAgentButton } from "@/components/agent/RemoveAgentButton";
 import { AgentStatusBadge } from "@/components/agent/AgentStatusBadge";
 import { AgentCatalogNotice } from "@/components/task-manager/AgentCatalogNotice";
 import { BuiltinAgentTab } from "@/components/task-manager/BuiltinAgentTab";
@@ -387,6 +388,14 @@ export function TaskManagerPanel() {
               agents={agents}
               projects={projects}
               onLaunched={handleLaunchResult}
+              onRemoved={() => {
+                if (projects[0]) {
+                  select({ kind: "project", id: projects[0].id });
+                  return;
+                }
+                setSelection(null);
+                router.replace("/panel/task-manager", { scroll: false });
+              }}
             />
           )}
           {!selection && (
@@ -698,11 +707,13 @@ function AgentDetailView({
   agents,
   projects,
   onLaunched,
+  onRemoved,
 }: {
   agent: Agent;
   agents: Agent[];
   projects: Project[];
   onLaunched: (result: LaunchResult) => void;
+  onRemoved: () => void;
 }) {
   const { data: tasksResp } = useAllTasks({
     assigned_agent_id: agent.id,
@@ -733,6 +744,7 @@ function AgentDetailView({
         </div>
         <div className="flex gap-2">
           <ExportAgentButton agentId={agent.id} />
+          <RemoveAgentButton agent={agent} onRemoved={onRemoved} />
           <Link
             href={`/agents/${agent.id}`}
             className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border px-3 text-sm hover:bg-secondary"

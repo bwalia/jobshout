@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -10,6 +11,9 @@ import (
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/repository"
 )
+
+// ErrCannotDeleteBuiltin is delete of a platform-seeded specialist.
+var ErrCannotDeleteBuiltin = errors.New("seeded specialists cannot be deleted")
 
 type AgentService interface {
 	Create(ctx context.Context, orgID uuid.UUID, createdBy uuid.UUID, req model.CreateAgentRequest) (*model.Agent, error)
@@ -122,6 +126,13 @@ func (s *agentService) Update(ctx context.Context, id uuid.UUID, req model.Updat
 }
 
 func (s *agentService) Delete(ctx context.Context, id uuid.UUID) error {
+	agent, err := s.repo.FindByID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("deleting agent: %w", err)
+	}
+	if agent != nil && agent.SeededBuiltin() != "" {
+		return ErrCannotDeleteBuiltin
+	}
 	return s.repo.Delete(ctx, id)
 }
 

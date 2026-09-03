@@ -128,6 +128,10 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.svc.Delete(r.Context(), id); err != nil {
+		if errors.Is(err, service.ErrCannotDeleteBuiltin) {
+			RespondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		RespondError(w, http.StatusInternalServerError, "failed to delete agent")
 		return
 	}
