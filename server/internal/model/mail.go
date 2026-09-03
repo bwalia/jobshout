@@ -165,6 +165,14 @@ type MailOAuthStartResponse struct {
 	AuthorizationURL string `json:"authorization_url"`
 }
 
+// MailSyncResult is POST /mail/sync after the Gmail list+ingest call.
+type MailSyncResult struct {
+	Status   string `json:"status"`
+	Query    string `json:"query"`
+	Listed   int    `json:"listed"`
+	Ingested int    `json:"ingested"`
+}
+
 // UpdateMailDraftRequest is PATCH /drafts/{id}.
 type UpdateMailDraftRequest struct {
 	Body    *string `json:"body"`

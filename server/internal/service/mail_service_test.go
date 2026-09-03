@@ -320,6 +320,7 @@ type fakeGmail struct {
 	sendCalls int
 	listCalls int
 	listErr   error
+	lastQuery string
 	tokens    mail.TokenSet
 }
 
@@ -334,6 +335,7 @@ func (f *fakeGmail) Profile(ctx context.Context, accessToken string) (string, er
 }
 func (f *fakeGmail) ListMessages(ctx context.Context, accessToken, query string, limit int) ([]mail.InboxMessage, error) {
 	f.listCalls++
+	f.lastQuery = query
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
@@ -981,5 +983,93 @@ func TestProcessDueSyncsClearsLeaseOnFailure(t *testing.T) {
 	}
 	if got.SyncLeaseUntil != nil {
 		t.Fatal("failed sync must persist sync_lease_until = NULL")
+	}
+}
+
+func TestSyncInboxPullsWithoutDrafting(t *testing.T) {
+	gmail := &fakeGmail{
+		email:  "org@example.com",
+		tokens: mail.TokenSet{AccessToken: "a", RefreshToken: "r", Expiry: time.Now().Add(time.Hour)},
+		messages: []mail.InboxMessage{{
+			GmailThreadID: "th-sync-inbox", FromEmail: "alex@c.com", Subject: "Hello", Body: "Hi",
+		}},
+	}
+	svc, repo, orgID := setupMail(t, gmail, nil, nil)
+	connectOrg(t, svc, repo, orgID)
+	out, err := svc.SyncInbox(context.Background(), orgID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Listed != 1 || out.Ingested != 1 {
+		t.Fatalf("listed=%d ingested=%d", out.Listed, out.Ingested)
+	}
+	if !strings.Contains(out.Query, "in:inbox") {
+		t.Fatalf("query %q", out.Query)
+	}
+	listed, err := repo.ListThreads(context.Background(), orgID, model.PaginationParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Data) != 1 || listed.Data[0].Status != model.MailThreadNew {
+		t.Fatalf("want one new thread, got %+v", listed.Data)
+	}
+	if drafts, _ := repo.ListDraftsByStatus(context.Background(), orgID, model.MailDraftDraft, model.PaginationParams{}); drafts != nil && drafts.Total != 0 {
+		t.Fatal("SyncInbox must not draft; reconciler does that")
+	}
+}
+
+func TestSyncInboxQuotesDisplayNameSenders(t *testing.T) {
+	gmail := &fakeGmail{
+		email:  "org@example.com",
+		tokens: mail.TokenSet{AccessToken: "a", RefreshToken: "r", Expiry: time.Now().Add(time.Hour)},
+	}
+	svc, repo, orgID := setupMail(t, gmail, nil, nil)
+	connectOrg(t, svc, repo, orgID)
+	c, err := repo.GetConnectionByOrg(context.Background(), orgID)
+	if err != nil || c == nil {
+		t.Fatal(err)
+	}
+	c.WatchSenders = []string{"Balinder Walia"}
+	if err := repo.UpsertConnection(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+	out, err := svc.SyncInbox(context.Background(), orgID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gmail.lastQuery != `in:inbox newer_than:7d (from:"Balinder Walia")` {
+		t.Fatalf("query %q", gmail.lastQuery)
+	}
+	if out.Listed != 0 {
+		t.Fatalf("listed %d", out.Listed)
+	}
+}
+
+func TestProcessDueSyncsProcessesQueuedNewThreads(t *testing.T) {
+	gmail := &fakeGmail{
+		email:  "org@example.com",
+		tokens: mail.TokenSet{AccessToken: "a", RefreshToken: "r", Expiry: time.Now().Add(time.Hour)},
+	}
+	svc, repo, orgID := setupMail(t, gmail, nil, nil)
+	connectOrg(t, svc, repo, orgID)
+	c, err := repo.GetConnectionByOrg(context.Background(), orgID)
+	if err != nil || c == nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpsertThread(context.Background(), &model.MailThread{
+		OrgID: c.OrgID, ConnectionID: c.ID, Status: model.MailThreadNew,
+		GmailThreadID: "queued-th", FromEmail: "alex@c.com", Subject: "Queued", BodyText: "Hi",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ProcessDueSyncs(context.Background(), 5); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := repo.ListThreads(context.Background(), orgID, model.PaginationParams{})
+	if err != nil || len(listed.Data) != 1 {
+		t.Fatalf("threads: %v %+v", err, listed)
+	}
+	if listed.Data[0].Status != model.MailThreadDraftReady && listed.Data[0].Status != model.MailThreadIgnored {
+		t.Fatalf("queued thread status %q", listed.Data[0].Status)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -151,7 +152,7 @@ func (g *httpGmail) Send(ctx context.Context, accessToken string, msg OutboundMe
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("mail: gmail send: status %d", resp.StatusCode)
+		return "", fmt.Errorf("mail: gmail send: %w", gmailAPIStatusError(resp.StatusCode, body))
 	}
 	var out struct {
 		ID string `json:"id"`
@@ -171,6 +172,29 @@ func (g *httpGmail) getMessage(ctx context.Context, accessToken, id string) (Inb
 }
 
 func (g *httpGmail) getJSON(ctx context.Context, accessToken, rawURL string, v any) error {
+	var last error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			delay := time.Duration(1<<uint(attempt-1)) * time.Second
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+		err := g.doGetJSON(ctx, accessToken, rawURL, v)
+		if err == nil {
+			return nil
+		}
+		if !gmailRetryable(err) {
+			return err
+		}
+		last = err
+	}
+	return last
+}
+
+func (g *httpGmail) doGetJSON(ctx context.Context, accessToken, rawURL string, v any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return err
@@ -183,12 +207,46 @@ func (g *httpGmail) getJSON(ctx context.Context, accessToken, rawURL string, v a
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("mail: gmail api: status %d", resp.StatusCode)
+		return gmailAPIStatusError(resp.StatusCode, body)
 	}
 	if err := json.Unmarshal(body, v); err != nil {
 		return fmt.Errorf("mail: gmail api: decode (%v)", err)
 	}
 	return nil
+}
+
+type gmailStatusError struct {
+	status int
+	msg    string
+}
+
+func (e gmailStatusError) Error() string {
+	if e.msg != "" {
+		return fmt.Sprintf("mail: gmail api: status %d: %s", e.status, e.msg)
+	}
+	return fmt.Sprintf("mail: gmail api: status %d", e.status)
+}
+
+func gmailRetryable(err error) bool {
+	var ge gmailStatusError
+	if errors.As(err, &ge) {
+		return ge.status == http.StatusTooManyRequests || ge.status == http.StatusServiceUnavailable
+	}
+	return false
+}
+
+func gmailAPIStatusError(status int, body []byte) error {
+	var ge struct {
+		Error struct {
+			Message string `json:"message"`
+			Status  string `json:"status"`
+		} `json:"error"`
+	}
+	msg := ""
+	if json.Unmarshal(body, &ge) == nil {
+		msg = strings.TrimSpace(ge.Error.Message)
+	}
+	return gmailStatusError{status: status, msg: Redact(msg)}
 }
 
 type gmailMessage struct {
@@ -346,9 +404,11 @@ func encodeRFC822(msg OutboundMessage) string {
 
 // SearchQuery builds a Gmail search string from watch rules.
 func SearchQuery(rules ...string) string {
-	// Default: unread inbox from the last week, so a first connect does not
-	// ingest years of mail.
-	q := "is:unread in:inbox newer_than:7d"
+	// Recent inbox only — already-ingested threads are skipped in the
+	// service layer, so is:unread is not required and hides mail the
+	// operator already opened in Gmail (the usual "Sync now did nothing"
+	// case). newer_than:7d still caps a first connect.
+	q := "in:inbox newer_than:7d"
 	var extra []string
 	for _, r := range rules {
 		r = strings.TrimSpace(r)
@@ -362,25 +422,37 @@ func SearchQuery(rules ...string) string {
 	return q + " " + strings.Join(extra, " ")
 }
 
+// gmailOp formats a Gmail search operator. Values with spaces or reserved
+// characters must be quoted — `from:Balinder Walia` is parsed as
+// `from:Balinder` AND the word Walia, which matches nothing.
+func gmailOp(op, value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	value = strings.ReplaceAll(value, `"`, "")
+	if strings.ContainsAny(value, " \t(){}[]:'") {
+		return op + `:"` + value + `"`
+	}
+	return op + ":" + value
+}
+
 // RulesQuery maps stored watch rules onto Gmail search operators.
 func RulesQuery(labels, senders, prefixes []string) string {
 	var parts []string
 	for _, s := range senders {
-		s = strings.TrimSpace(s)
-		if s != "" {
-			parts = append(parts, "from:"+s)
+		if t := gmailOp("from", s); t != "" {
+			parts = append(parts, t)
 		}
 	}
 	for _, l := range labels {
-		l = strings.TrimSpace(l)
-		if l != "" {
-			parts = append(parts, "label:"+l)
+		if t := gmailOp("label", l); t != "" {
+			parts = append(parts, t)
 		}
 	}
 	for _, p := range prefixes {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			parts = append(parts, `subject:"`+p+`"`)
+		if t := gmailOp("subject", p); t != "" {
+			parts = append(parts, t)
 		}
 	}
 	if len(parts) == 0 {

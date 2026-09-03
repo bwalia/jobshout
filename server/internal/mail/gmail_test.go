@@ -14,17 +14,38 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 )
 
-func TestRulesQueryDefaultUnreadInbox(t *testing.T) {
+func TestRulesQueryDefaultRecentInbox(t *testing.T) {
 	q := RulesQuery(nil, nil, nil)
-	if q != "is:unread in:inbox newer_than:7d" {
+	if q != "in:inbox newer_than:7d" {
 		t.Errorf("got %q", q)
 	}
 }
 
 func TestRulesQueryIncludesSenders(t *testing.T) {
 	q := RulesQuery(nil, []string{"alex@c.com"}, nil)
-	if q != `is:unread in:inbox newer_than:7d (from:alex@c.com)` {
+	if q != `in:inbox newer_than:7d (from:alex@c.com)` {
 		t.Errorf("got %q", q)
+	}
+}
+
+func TestRulesQueryQuotesDisplayNames(t *testing.T) {
+	q := RulesQuery(nil, []string{"Balinder Walia", "Sukhvir Singh"}, []string{"[INT] OTP"})
+	want := `in:inbox newer_than:7d (from:"Balinder Walia" OR from:"Sukhvir Singh" OR subject:"[INT] OTP")`
+	if q != want {
+		t.Errorf("got %q want %q", q, want)
+	}
+}
+
+func TestGmailAPIStatusErrorIncludesMessage(t *testing.T) {
+	err := gmailAPIStatusError(403, []byte(`{"error":{"message":"Gmail API has not been used in project 123 before or it is disabled.","status":"PERMISSION_DENIED"}}`))
+	if err.Error() != "mail: gmail api: status 403: Gmail API has not been used in project 123 before or it is disabled." {
+		t.Fatalf("got %q", err.Error())
+	}
+	if !gmailRetryable(gmailAPIStatusError(429, nil)) {
+		t.Fatal("429 must be retryable")
+	}
+	if gmailRetryable(gmailAPIStatusError(403, nil)) {
+		t.Fatal("403 must not be retryable")
 	}
 }
 

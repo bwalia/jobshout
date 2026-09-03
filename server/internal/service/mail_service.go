@@ -42,6 +42,10 @@ type MailService interface {
 	UpdateConnection(ctx context.Context, orgID uuid.UUID, req model.UpdateMailConnectionRequest) (*model.MailConnectionStatus, error)
 
 	SyncNow(ctx context.Context, orgID uuid.UUID) error
+	// SyncInbox lists Gmail now (so Sync now fails in the request, not
+	// silently in the reconciler) and upserts new threads. Classify/draft
+	// still runs on the next reconciler pass.
+	SyncInbox(ctx context.Context, orgID uuid.UUID) (*model.MailSyncResult, error)
 	EnqueueSync(ctx context.Context, orgID uuid.UUID) error
 	ProcessDueSyncs(ctx context.Context, limit int) error
 	// BindTasks lets a launched sync update its Task Manager card. Optional.
@@ -297,6 +301,7 @@ func (s *mailService) CompleteOAuth(ctx context.Context, state, code string) err
 		conn.WatchSenders = existing.WatchSenders
 		conn.WatchSubjectPrefixes = existing.WatchSubjectPrefixes
 		conn.WatchKnowledgeURLs = existing.WatchKnowledgeURLs
+		conn.KnowledgeNotes = existing.KnowledgeNotes
 		conn.ResearchFocus = existing.ResearchFocus
 		conn.ReplyInstructions = existing.ReplyInstructions
 	}
@@ -407,6 +412,79 @@ func (s *mailService) SyncNow(ctx context.Context, orgID uuid.UUID) error {
 	return syncErr
 }
 
+func (s *mailService) SyncInbox(ctx context.Context, orgID uuid.UUID) (*model.MailSyncResult, error) {
+	if !s.Available(ctx, orgID) {
+		if !s.Configured() {
+			return nil, ErrMailNotConfigured
+		}
+		return nil, ErrMailNotConnected
+	}
+	c, err := s.repo.GetConnectionByOrg(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	if c == nil {
+		return nil, ErrMailNotConnected
+	}
+	out, err := s.pullInbox(ctx, c)
+	if err != nil {
+		s.logger.Warn("mail: sync failed",
+			zap.String("org_id", c.OrgID.String()),
+			zap.Error(mail.RedactErr(err)))
+		msg := mail.Redact(err.Error())
+		c.Status = model.MailConnError
+		c.StatusError = &msg
+		c.SyncLeaseUntil = nil
+		_ = s.repo.UpsertConnection(ctx, c)
+		return nil, err
+	}
+	now := time.Now()
+	c.NextSyncAt = &now
+	c.SyncLeaseUntil = nil
+	c.Status = model.MailConnConnected
+	c.StatusError = nil
+	c.LastSyncAt = &now
+	if err := s.repo.UpsertConnection(ctx, c); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (s *mailService) pullInbox(ctx context.Context, c *model.MailConnection) (*model.MailSyncResult, error) {
+	access, err := s.accessToken(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	query := mail.RulesQuery(c.WatchLabels, c.WatchSenders, c.WatchSubjectPrefixes)
+	msgs, err := s.gmail.ListMessages(ctx, access, query, 25)
+	if err != nil {
+		return nil, mail.RedactErr(err)
+	}
+	agent, _ := s.EnsureMailAgent(ctx, c.OrgID)
+	ingested := 0
+	for _, msg := range msgs {
+		_, skipped, err := s.upsertThreadFromMessage(ctx, c, agent, msg)
+		if err != nil {
+			s.logger.Warn("mail: thread ingest failed",
+				zap.String("gmail_thread_id", msg.GmailThreadID),
+				zap.Error(mail.RedactErr(err)))
+			continue
+		}
+		if !skipped {
+			ingested++
+		}
+	}
+	s.logger.Info("mail: gmail listed",
+		zap.String("org_id", c.OrgID.String()),
+		zap.String("email", c.GoogleEmail),
+		zap.String("query", query),
+		zap.Int("listed", len(msgs)),
+		zap.Int("ingested", ingested))
+	return &model.MailSyncResult{
+		Status: "ok", Query: query, Listed: len(msgs), Ingested: ingested,
+	}, nil
+}
+
 func (s *mailService) ProcessDueSyncs(ctx context.Context, limit int) error {
 	if s.gmail == nil || len(s.key) != 32 {
 		return nil
@@ -453,9 +531,16 @@ func (s *mailService) syncConnection(ctx context.Context, c *model.MailConnectio
 	if err != nil {
 		return mail.RedactErr(err)
 	}
+	s.logger.Info("mail: gmail listed",
+		zap.String("org_id", c.OrgID.String()),
+		zap.String("email", c.GoogleEmail),
+		zap.String("query", query),
+		zap.Int("listed", len(msgs)))
 	launchTask := s.peekLaunchTask(c.OrgID)
 	drafted := 0
+	seen := map[string]bool{}
 	for _, msg := range msgs {
+		seen[msg.GmailThreadID] = true
 		ok, err := s.ingestAndProcess(ctx, c, agent, msg, launchTask)
 		if err != nil {
 			s.logger.Warn("mail: thread processing failed",
@@ -467,6 +552,7 @@ func (s *mailService) syncConnection(ctx context.Context, c *model.MailConnectio
 			drafted++
 		}
 	}
+	drafted += s.processQueuedThreads(ctx, c, launchTask, seen)
 	if launchTask != uuid.Nil && drafted == 0 {
 		s.notifyMailTask(ctx, launchTask,
 			"Mailbox sync finished. No new drafts. Nothing is sent until you Approve.",
@@ -478,13 +564,13 @@ func (s *mailService) syncConnection(ctx context.Context, c *model.MailConnectio
 	return nil
 }
 
-func (s *mailService) ingestAndProcess(ctx context.Context, c *model.MailConnection, agent *model.Agent, msg mail.InboxMessage, launchTask uuid.UUID) (bool, error) {
+func (s *mailService) upsertThreadFromMessage(ctx context.Context, c *model.MailConnection, agent *model.Agent, msg mail.InboxMessage) (*model.MailThread, bool, error) {
 	existing, err := s.repo.GetThreadByGmailID(ctx, c.OrgID, msg.GmailThreadID)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 	if existing != nil && existing.Status != model.MailThreadNew && existing.Status != model.MailThreadFailed {
-		return false, nil
+		return existing, true, nil
 	}
 	th := existing
 	if th == nil {
@@ -513,12 +599,75 @@ func (s *mailService) ingestAndProcess(ctx context.Context, c *model.MailConnect
 		th.Status = model.MailThreadNew
 	}
 	if err := s.repo.UpsertThread(ctx, th); err != nil {
+		return nil, false, err
+	}
+	return th, false, nil
+}
+
+func (s *mailService) ingestAndProcess(ctx context.Context, c *model.MailConnection, agent *model.Agent, msg mail.InboxMessage, launchTask uuid.UUID) (bool, error) {
+	th, skipped, err := s.upsertThreadFromMessage(ctx, c, agent, msg)
+	if err != nil {
 		return false, err
+	}
+	if skipped {
+		return false, nil
 	}
 	if err := s.processThread(ctx, th, msg, c, launchTask); err != nil {
 		return false, err
 	}
 	return th.Status == model.MailThreadDraftReady, nil
+}
+
+func inboxMessageFromThread(th *model.MailThread) mail.InboxMessage {
+	msg := mail.InboxMessage{
+		GmailThreadID:    th.GmailThreadID,
+		GmailMessageID:   th.GmailMessageID,
+		FromEmail:        th.FromEmail,
+		FromName:         th.FromName,
+		ToEmail:          th.ToEmail,
+		Subject:          th.Subject,
+		Snippet:          th.Snippet,
+		Body:             th.BodyText,
+		MessageIDHeader:  th.MessageIDHeader,
+		ReferencesHeader: th.ReferencesHeader,
+	}
+	if th.ReceivedAt != nil {
+		msg.ReceivedAt = *th.ReceivedAt
+	}
+	return msg
+}
+
+func queuedThread(status string) bool {
+	switch status {
+	case model.MailThreadNew, model.MailThreadFailed, model.MailThreadClassifying, model.MailThreadResearching:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *mailService) processQueuedThreads(ctx context.Context, c *model.MailConnection, launchTask uuid.UUID, seen map[string]bool) int {
+	listed, err := s.repo.ListThreads(ctx, c.OrgID, model.PaginationParams{Page: 1, PerPage: 50})
+	if err != nil || listed == nil {
+		return 0
+	}
+	drafted := 0
+	for i := range listed.Data {
+		th := &listed.Data[i]
+		if seen[th.GmailThreadID] || !queuedThread(th.Status) {
+			continue
+		}
+		if err := s.processThread(ctx, th, inboxMessageFromThread(th), c, launchTask); err != nil {
+			s.logger.Warn("mail: queued thread processing failed",
+				zap.String("gmail_thread_id", th.GmailThreadID),
+				zap.Error(mail.RedactErr(err)))
+			continue
+		}
+		if th.Status == model.MailThreadDraftReady {
+			drafted++
+		}
+	}
+	return drafted
 }
 
 func (s *mailService) processThread(ctx context.Context, th *model.MailThread, msg mail.InboxMessage, c *model.MailConnection, launchTask uuid.UUID) error {
@@ -909,6 +1058,7 @@ func (s *mailService) ConnectSimulated(ctx context.Context, orgID uuid.UUID) (*m
 		conn.WatchSenders = existing.WatchSenders
 		conn.WatchSubjectPrefixes = existing.WatchSubjectPrefixes
 		conn.WatchKnowledgeURLs = existing.WatchKnowledgeURLs
+		conn.KnowledgeNotes = existing.KnowledgeNotes
 		conn.ResearchFocus = existing.ResearchFocus
 		conn.ReplyInstructions = existing.ReplyInstructions
 	}
