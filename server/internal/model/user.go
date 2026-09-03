@@ -15,6 +15,7 @@ type User struct {
 	AvatarURL *string    `json:"avatar_url"`
 	Role      string     `json:"role"`
 	OrgID     *uuid.UUID `json:"org_id"`
+	GoogleSub *string    `json:"-"`
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
 }
@@ -49,6 +50,26 @@ type RefreshRequest struct {
 type UpdateProfileRequest struct {
 	FullName  *string `json:"full_name"`
 	AvatarURL *string `json:"avatar_url"`
+}
+
+// GoogleCompleteRequest exchanges a one-time OAuth ticket for JobShout tokens.
+type GoogleCompleteRequest struct {
+	Ticket string `json:"ticket" validate:"required"`
+}
+
+// GoogleOAuthState is CSRF state for the Google login redirect.
+type GoogleOAuthState struct {
+	State     string
+	Intent    string
+	OrgName   string
+	ExpiresAt time.Time
+}
+
+// GoogleOAuthTicket is a one-time code the frontend exchanges for JWTs.
+type GoogleOAuthTicket struct {
+	Ticket    string
+	UserID    uuid.UUID
+	ExpiresAt time.Time
 }
 
 // RefreshToken represents a stored refresh token.

@@ -75,7 +75,8 @@ data:
   REVIEW_BOT_MAX_RUNTIME: {{ .Values.reviewBot.maxRuntime | default "40m" | quote }}
   REVIEW_BOT_ALLOWED_REPOS: {{ join "," (.Values.reviewBot.allowedRepos | default list) | quote }}
   # Public origin of this ring — OAuth return and Telegram links. Secrets for
-  # Gmail (GMAIL_CLIENT_ID / GMAIL_CLIENT_SECRET / GMAIL_TOKEN_KEY) live in an
+  # Gmail (GMAIL_CLIENT_ID / GMAIL_CLIENT_SECRET / GMAIL_TOKEN_KEY) and Google
+  # login (GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET) live in an
   # extraSecretRefs secret, never here.
   # Sidebar build stamp. image.tag is the git release RP deploys (v1.0.8), not
   # a SHA — that is the version the UI must show. APP_DEPLOYED_AT is when this
@@ -85,6 +86,7 @@ data:
   APP_DEPLOYED_AT: {{ now | date "2006-01-02T15:04:05Z07:00" | quote }}
   FRONTEND_BASE_URL: {{ printf "https://%s" .Values.host | quote }}
   GMAIL_OAUTH_REDIRECT_URL: {{ printf "https://%s/api/v1/mail/connection/oauth/callback" .Values.host | quote }}
+  GOOGLE_OAUTH_REDIRECT_URL: {{ printf "https://%s/api/v1/auth/google/callback" .Values.host | quote }}
   MAIL_POLL_INTERVAL: {{ .Values.mail.pollInterval | default "5m" | quote }}
   MAIL_RECONCILE_INTERVAL: {{ .Values.mail.reconcileInterval | default "15s" | quote }}
   MAIL_MODEL: {{ .Values.ai.mailModel | default "" | quote }}

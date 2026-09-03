@@ -30,6 +30,7 @@ import (
 	"github.com/jobshout/server/internal/database"
 	"github.com/jobshout/server/internal/engine"
 	"github.com/jobshout/server/internal/executor"
+	"github.com/jobshout/server/internal/googleauth"
 	"github.com/jobshout/server/internal/handler"
 	"github.com/jobshout/server/internal/imagegen"
 	"github.com/jobshout/server/internal/imagestore"
@@ -430,7 +431,16 @@ func main() {
 
 	// ─── Services ────────────────────────────────────────────────────────────
 	jwtSvc := service.NewJWTService(cfg)
-	authSvc := service.NewAuthService(userRepo, tokenRepo, orgRepo, agentRepo, rbacRepo, jwtSvc, logger)
+	googleCfg := googleauth.LoadConfig()
+	var googleID googleauth.Identity
+	if googleCfg.Configured() {
+		googleID = googleauth.NewClient(googleCfg, nil)
+		logger.Info("google login oauth configured",
+			zap.String("redirect_url", googleCfg.RedirectURL))
+	} else {
+		logger.Info("google login oauth not configured (set GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET)")
+	}
+	authSvc := service.NewAuthService(userRepo, tokenRepo, orgRepo, agentRepo, rbacRepo, jwtSvc, googleID, googleCfg, logger)
 	agentSvc := service.NewAgentService(agentRepo, logger)
 	agentPackStore := repository.NewAgentPackStore(pool)
 	agentPackSvc := service.NewAgentPackService(
@@ -773,7 +783,7 @@ func main() {
 	}
 
 	// ─── Handlers ────────────────────────────────────────────────────────────
-	authHandler := handler.NewAuthHandler(authSvc)
+	authHandler := handler.NewAuthHandler(authSvc, cfg.FrontendBaseURL)
 	imageHandler := handler.NewImageHandler(imageSvc)
 	agentHandler := handler.NewAgentHandler(agentSvc)
 	agentPackHandler := handler.NewAgentPackHandler(agentPackSvc, rbacSvc)
@@ -876,6 +886,10 @@ func main() {
 		r.Post("/auth/register", authHandler.Register)
 		r.Post("/auth/login", authHandler.Login)
 		r.Post("/auth/refresh", authHandler.Refresh)
+		r.Get("/auth/google/status", authHandler.GoogleStatus)
+		r.Get("/auth/google/start", authHandler.GoogleStart)
+		r.Get("/auth/google/callback", authHandler.GoogleCallback)
+		r.Post("/auth/google/complete", authHandler.GoogleComplete)
 		// Google redirects the browser here with ?code=&state= — no JWT.
 		r.Get("/mail/connection/oauth/callback", mailHandler.OAuthCallback)
 

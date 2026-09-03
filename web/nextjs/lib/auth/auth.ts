@@ -1,4 +1,4 @@
-import { apiClient } from "@/lib/api/client";
+import { API_BASE_URL, apiClient } from "@/lib/api/client";
 
 export interface AuthUser {
   id: string;
@@ -94,5 +94,70 @@ export async function fetchCurrentUser(): Promise<AuthUser | null> {
     return data;
   } catch {
     return null;
+  }
+}
+
+export function googleAuthStartHref(opts?: {
+  intent?: "login" | "signup";
+  orgName?: string;
+}): string {
+  const params = new URLSearchParams();
+  params.set("intent", opts?.intent ?? "login");
+  const orgName = opts?.orgName?.trim();
+  if (orgName) params.set("org_name", orgName);
+  const qs = params.toString();
+  const path = `/api/v1/auth/google/start?${qs}`;
+
+  // Cluster nginx serves UI and API on one host at /api/v1. Helm's
+  // publicApiURL is often `https://<host>/api`, and concatenating /api/v1
+  // onto that would 404. Same-origin /api/v1 is the public callback path.
+  // Locally the UI (:3001) and API (:8190) differ, so use the API origin.
+  if (typeof window !== "undefined") {
+    const env = API_BASE_URL.replace(/\/$/, "");
+    try {
+      const api = new URL(env);
+      if (api.origin !== window.location.origin) {
+        return `${env}${path}`;
+      }
+    } catch {
+      // fall through to same-origin
+    }
+    return `${window.location.origin}${path}`;
+  }
+  return path;
+}
+
+export async function fetchGoogleAuthEnabled(): Promise<boolean> {
+  try {
+    const { data } = await apiClient.get<{ enabled: boolean }>("/auth/google/status");
+    return Boolean(data.enabled);
+  } catch {
+    return false;
+  }
+}
+
+export async function completeGoogleAuth(ticket: string): Promise<AuthResponse> {
+  const { data } = await apiClient.post<AuthResponse>("/auth/google/complete", {
+    ticket,
+  });
+  setTokens(data.access_token, data.refresh_token);
+  return data;
+}
+
+export function googleAuthErrorMessage(code: string | null): string | null {
+  if (!code) return null;
+  switch (code) {
+    case "denied":
+      return "Google sign-in was cancelled.";
+    case "not_configured":
+      return "Google sign-in is not configured on this server.";
+    case "invalid_state":
+      return "Google sign-in expired. Try again.";
+    case "unverified_email":
+      return "That Google account's email is not verified.";
+    case "missing_code":
+      return "Google sign-in did not complete. Try again.";
+    default:
+      return "Google sign-in failed. Try again.";
   }
 }
