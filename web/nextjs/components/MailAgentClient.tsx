@@ -441,6 +441,7 @@ export function MailAgentClient() {
                   value={senders}
                   onChange={setSenders}
                   disabled={busy}
+                  size="lg"
                   placeholder="ops@example.com"
                 />
               </div>
