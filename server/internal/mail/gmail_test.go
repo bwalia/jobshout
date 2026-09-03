@@ -34,11 +34,19 @@ func TestWatchMatchesSubjectPrefixOTP(t *testing.T) {
 		FromEmail: "noreply@diytaxreturn.co.uk",
 		Subject:   "[INT] Your DIY Tax Return Verification Code",
 	}
-	if !WatchMatches(msg, nil, []string{"Balinder Walia", "Sukhvir Singh"}, []string{"[INT] Your DIY Tax Return Verification Code"}) {
+	prefix := []string{"[INT] Your DIY Tax Return Verification Code"}
+	if !WatchMatches(msg, nil, []string{"Balinder Walia", "Sukhvir Singh"}, prefix) {
 		t.Fatal("exact subject prefix must match even when senders do not")
+	}
+	msg.Subject = "Re: [INT] Your DIY Tax Return Verification Code"
+	if !WatchMatches(msg, nil, nil, prefix) {
+		t.Fatal("Gmail subject: is contains; Re: must still match")
 	}
 	if WatchMatches(msg, nil, []string{"Balinder Walia"}, nil) {
 		t.Fatal("unrelated sender must not match")
+	}
+	if !WatchMatches(msg, []string{"inbox"}, []string{"", "  "}, nil) {
+		t.Fatal("labels-only must ignore blank senders")
 	}
 }
 

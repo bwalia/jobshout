@@ -461,39 +461,39 @@ func RulesQuery(labels, senders, prefixes []string) string {
 	return SearchQuery("(" + strings.Join(parts, " OR ") + ")")
 }
 
-func hasWatchRule(labels, senders, prefixes []string) bool {
-	for _, xs := range [][]string{labels, senders, prefixes} {
-		for _, x := range xs {
-			if strings.TrimSpace(x) != "" {
-				return true
-			}
+func compactWatch(xs []string) []string {
+	out := make([]string, 0, len(xs))
+	for _, x := range xs {
+		if t := strings.TrimSpace(x); t != "" {
+			out = append(out, t)
 		}
 	}
-	return false
+	return out
+}
+
+func hasWatchRule(labels, senders, prefixes []string) bool {
+	return len(compactWatch(labels)) > 0 || len(compactWatch(senders)) > 0 || len(compactWatch(prefixes)) > 0
 }
 
 // WatchMatches is true when the operator asked to watch this mail (sender,
-// subject prefix, or Gmail label). Labels are applied in the Gmail query, so
-// a labels-only playbook treats every ingested message as a match.
+// subject prefix, or Gmail label). Matching follows Gmail search: `from:` and
+// `subject:` are contains, not exact prefix. Labels are applied in the Gmail
+// query, so a labels-only playbook treats every ingested message as a match.
 func WatchMatches(msg InboxMessage, labels, senders, prefixes []string) bool {
+	senders = compactWatch(senders)
+	prefixes = compactWatch(prefixes)
 	if !hasWatchRule(labels, senders, prefixes) {
 		return false
 	}
-	fromEmail := strings.ToLower(strings.TrimSpace(msg.FromEmail))
-	fromName := strings.ToLower(strings.TrimSpace(msg.FromName))
+	from := strings.ToLower(strings.TrimSpace(msg.FromName + " " + msg.FromEmail))
 	for _, s := range senders {
-		s = strings.ToLower(strings.TrimSpace(s))
-		if s == "" {
-			continue
-		}
-		if strings.Contains(fromEmail, s) || strings.Contains(fromName, s) {
+		if strings.Contains(from, strings.ToLower(s)) {
 			return true
 		}
 	}
 	subj := strings.ToLower(strings.TrimSpace(msg.Subject))
 	for _, p := range prefixes {
-		p = strings.ToLower(strings.TrimSpace(p))
-		if p != "" && strings.HasPrefix(subj, p) {
+		if strings.Contains(subj, strings.ToLower(p)) {
 			return true
 		}
 	}

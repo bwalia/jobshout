@@ -575,6 +575,7 @@ func (s *mailService) upsertThreadFromMessage(ctx context.Context, c *model.Mail
 			return existing, true, nil
 		}
 	}
+	reopen := existing != nil && existing.Status == model.MailThreadIgnored
 	th := existing
 	if th == nil {
 		th = &model.MailThread{
@@ -598,11 +599,20 @@ func (s *mailService) upsertThreadFromMessage(ctx context.Context, c *model.Mail
 		t := msg.ReceivedAt
 		th.ReceivedAt = &t
 	}
-	if th.Status == "" {
+	if th.Status == "" || reopen {
 		th.Status = model.MailThreadNew
 	}
 	if err := s.repo.UpsertThread(ctx, th); err != nil {
 		return nil, false, err
+	}
+	// ON CONFLICT does not update status and RETURNING writes the old
+	// ignored value back. Sync now only upserts; the reconciler's queued
+	// pass skips ignored, so persist new or the row stays dimmed forever.
+	if reopen && th.Status != model.MailThreadNew {
+		th.Status = model.MailThreadNew
+		if err := s.repo.UpdateThread(ctx, th); err != nil {
+			return nil, false, err
+		}
 	}
 	return th, false, nil
 }

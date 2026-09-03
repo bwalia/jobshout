@@ -813,6 +813,47 @@ func TestProcessReopensIgnoredThreadWhenWatchPrefixMatches(t *testing.T) {
 	}
 }
 
+func TestSyncInboxReopensIgnoredWatchedAsNew(t *testing.T) {
+	gmail := &fakeGmail{
+		email:  "org@example.com",
+		tokens: mail.TokenSet{AccessToken: "a", RefreshToken: "r", Expiry: time.Now().Add(time.Hour)},
+		messages: []mail.InboxMessage{{
+			GmailThreadID: "th-otp-syncinbox",
+			FromEmail:     "noreply@diytaxreturn.co.uk",
+			FromName:      "Diy Tax Return",
+			Subject:       "Re: [INT] Your DIY Tax Return Verification Code",
+			Body:          "Your code is 123456.",
+		}},
+	}
+	svc, repo, orgID := setupMail(t, gmail, nil, nil)
+	connectOrg(t, svc, repo, orgID)
+	c, _ := repo.GetConnectionByOrg(context.Background(), orgID)
+	if err := repo.UpsertThread(context.Background(), &model.MailThread{
+		OrgID: c.OrgID, ConnectionID: c.ID, Status: model.MailThreadIgnored,
+		GmailThreadID: "th-otp-syncinbox", FromEmail: "noreply@diytaxreturn.co.uk",
+		Subject: "[INT] Your DIY Tax Return Verification Code", BodyText: "Your code is 123456.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	c.WatchSubjectPrefixes = []string{"[INT] Your DIY Tax Return Verification Code"}
+	if err := repo.UpsertConnection(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.SyncInbox(context.Background(), orgID); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := repo.ListThreads(context.Background(), orgID, model.PaginationParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Data) != 1 || listed.Data[0].Status != model.MailThreadNew {
+		t.Fatalf("Sync now must queue ignored+watched as new, got %+v", listed.Data)
+	}
+	if drafts, _ := repo.ListDraftsByStatus(context.Background(), orgID, model.MailDraftDraft, model.PaginationParams{}); drafts != nil && drafts.Total != 0 {
+		t.Fatal("SyncInbox must not draft")
+	}
+}
+
 func TestUpdateConnectionRoundTripsKnowledgePlaybook(t *testing.T) {
 	svc, repo, orgID := setupMail(t, &fakeGmail{}, nil, nil)
 	urls := []string{"https://example.com/pricing", "http://docs.example.com/sla"}
