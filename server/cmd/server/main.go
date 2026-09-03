@@ -1073,6 +1073,7 @@ func main() {
 				r.Post("/sync", mailHandler.Sync)
 				r.Get("/threads", mailHandler.ListThreads)
 				r.Get("/threads/{id}", mailHandler.GetThread)
+				r.Post("/threads/{id}/draft", mailHandler.DraftIgnored)
 				r.Get("/drafts", mailHandler.ListDrafts)
 				r.Patch("/drafts/{id}", mailHandler.PatchDraft)
 				r.Post("/drafts/{id}/approve", mailHandler.ApproveDraft)

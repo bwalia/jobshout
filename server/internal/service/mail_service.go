@@ -26,6 +26,7 @@ var (
 	ErrMailNotFound            = errors.New("mail: not found")
 	ErrMailCannotSend          = errors.New("mail: send requires an approved draft")
 	ErrMailDraftNotEditable    = errors.New("mail: draft cannot be edited in its current state")
+	ErrMailNotIgnored          = errors.New("mail: only ignored or failed mail can be drafted this way")
 	ErrMailInvalidKnowledgeURL = mail.ErrInvalidKnowledgeURL
 )
 
@@ -56,6 +57,8 @@ type MailService interface {
 
 	ListThreads(ctx context.Context, orgID uuid.UUID, pagination model.PaginationParams) (*model.PaginatedResponse[model.MailThread], error)
 	GetThread(ctx context.Context, orgID, threadID uuid.UUID) (*model.MailThreadDetail, error)
+	// DraftIgnored un-ignores one thread, watches its sender, and drafts a reply.
+	DraftIgnored(ctx context.Context, orgID, threadID uuid.UUID) (*model.MailDraftIgnoredResult, error)
 	ListPendingDrafts(ctx context.Context, orgID uuid.UUID, pagination model.PaginationParams) (*model.PaginatedResponse[model.MailDraft], error)
 
 	UpdateDraft(ctx context.Context, orgID, draftID uuid.UUID, req model.UpdateMailDraftRequest) (*model.MailDraft, error)
@@ -625,7 +628,7 @@ func (s *mailService) ingestAndProcess(ctx context.Context, c *model.MailConnect
 	if skipped {
 		return false, nil
 	}
-	if err := s.processThread(ctx, th, msg, c, launchTask); err != nil {
+	if err := s.processThread(ctx, th, msg, c, launchTask, false); err != nil {
 		return false, err
 	}
 	return th.Status == model.MailThreadDraftReady, nil
@@ -670,7 +673,7 @@ func (s *mailService) processQueuedThreads(ctx context.Context, c *model.MailCon
 		if seen[th.GmailThreadID] || !queuedThread(th.Status) {
 			continue
 		}
-		if err := s.processThread(ctx, th, inboxMessageFromThread(th), c, launchTask); err != nil {
+		if err := s.processThread(ctx, th, inboxMessageFromThread(th), c, launchTask, false); err != nil {
 			s.logger.Warn("mail: queued thread processing failed",
 				zap.String("gmail_thread_id", th.GmailThreadID),
 				zap.Error(mail.RedactErr(err)))
@@ -683,7 +686,7 @@ func (s *mailService) processQueuedThreads(ctx context.Context, c *model.MailCon
 	return drafted
 }
 
-func (s *mailService) processThread(ctx context.Context, th *model.MailThread, msg mail.InboxMessage, c *model.MailConnection, launchTask uuid.UUID) error {
+func (s *mailService) processThread(ctx context.Context, th *model.MailThread, msg mail.InboxMessage, c *model.MailConnection, launchTask uuid.UUID, forceReply bool) error {
 	th.Status = model.MailThreadClassifying
 	_ = s.repo.UpdateThread(ctx, th)
 
@@ -691,8 +694,12 @@ func (s *mailService) processThread(ctx context.Context, th *model.MailThread, m
 	if err != nil {
 		return s.failThread(ctx, th, err)
 	}
-	if c != nil && mail.WatchMatches(msg, c.WatchLabels, c.WatchSenders, c.WatchSubjectPrefixes) {
+	watched := c != nil && mail.WatchMatches(msg, c.WatchLabels, c.WatchSenders, c.WatchSubjectPrefixes)
+	if forceReply || watched {
 		class = mail.HonorOperatorWatch(class)
+		if forceReply {
+			class.Reason = "Operator asked to draft a reply; do not ignore."
+		}
 	}
 	th.Classification = &class
 	th.NeedsResearch = class.NeedsResearch
@@ -827,6 +834,50 @@ func (s *mailService) GetThread(ctx context.Context, orgID, threadID uuid.UUID) 
 		return nil, err
 	}
 	return &model.MailThreadDetail{Thread: *th, Draft: d}, nil
+}
+
+func (s *mailService) DraftIgnored(ctx context.Context, orgID, threadID uuid.UUID) (*model.MailDraftIgnoredResult, error) {
+	th, err := s.repo.GetThread(ctx, threadID)
+	if err != nil {
+		return nil, err
+	}
+	if th == nil || th.OrgID != orgID {
+		return nil, ErrMailNotFound
+	}
+	if th.Status != model.MailThreadIgnored && th.Status != model.MailThreadFailed {
+		return nil, ErrMailNotIgnored
+	}
+	c, err := s.repo.GetConnectionByOrg(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	if c == nil {
+		return nil, ErrMailNotConnected
+	}
+	senders, added := mail.AppendWatchSender(c.WatchSenders, th.FromEmail, th.FromName)
+	if added != "" {
+		c.WatchSenders = senders
+		if err := s.repo.UpdateConnectionMeta(ctx, c); err != nil {
+			return nil, err
+		}
+	}
+	if err := s.processThread(ctx, th, inboxMessageFromThread(th), c, uuid.Nil, true); err != nil {
+		return nil, err
+	}
+	detail, err := s.GetThread(ctx, orgID, threadID)
+	if err != nil {
+		return nil, err
+	}
+	st, err := s.ConnectionStatus(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	return &model.MailDraftIgnoredResult{
+		Thread:        detail.Thread,
+		Draft:         detail.Draft,
+		Rules:         st.Rules,
+		WatchedSender: added,
+	}, nil
 }
 
 func (s *mailService) ListPendingDrafts(ctx context.Context, orgID uuid.UUID, pagination model.PaginationParams) (*model.PaginatedResponse[model.MailDraft], error) {

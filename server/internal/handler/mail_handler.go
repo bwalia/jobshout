@@ -62,6 +62,8 @@ func (h *MailHandler) writeErr(w http.ResponseWriter, err error) {
 		RespondError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, service.ErrMailCannotSend), errors.Is(err, service.ErrMailDraftNotEditable):
 		RespondError(w, http.StatusForbidden, err.Error())
+	case errors.Is(err, service.ErrMailNotIgnored):
+		RespondError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, mail.ErrInvalidKnowledgeURL), errors.Is(err, mail.ErrKnowledgeNotesTooLong):
 		RespondError(w, http.StatusBadRequest, err.Error())
 	default:
@@ -196,6 +198,25 @@ func (h *MailHandler) GetThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := h.svc.GetThread(r.Context(), orgID, id)
+	if err != nil {
+		h.writeErr(w, err)
+		return
+	}
+	RespondJSON(w, http.StatusOK, out)
+}
+
+// DraftIgnored POST /api/v1/mail/threads/{id}/draft
+func (h *MailHandler) DraftIgnored(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := h.orgID(w, r)
+	if !ok {
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid thread id")
+		return
+	}
+	out, err := h.svc.DraftIgnored(r.Context(), orgID, id)
 	if err != nil {
 		h.writeErr(w, err)
 		return

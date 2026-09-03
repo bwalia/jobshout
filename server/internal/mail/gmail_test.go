@@ -60,6 +60,25 @@ func TestHonorOperatorWatchOverridesIgnore(t *testing.T) {
 	}
 }
 
+func TestAppendWatchSenderPrefersEmailAndDedupes(t *testing.T) {
+	out, added := AppendWatchSender(nil, "news@list.com", "Weekly Digest")
+	if added != "news@list.com" || len(out) != 1 || out[0] != "news@list.com" {
+		t.Fatalf("first add: %q %v", added, out)
+	}
+	out, added = AppendWatchSender(out, "News@List.com", "Weekly Digest")
+	if added != "" || len(out) != 1 {
+		t.Fatalf("dedupe: %q %v", added, out)
+	}
+	out, added = AppendWatchSender(nil, "  ", "Diy Tax Return")
+	if added != "Diy Tax Return" {
+		t.Fatalf("name fallback: %q", added)
+	}
+	out, added = AppendWatchSender([]string{"ops@example.com"}, "news@list.com", "")
+	if added != "news@list.com" || len(out) != 2 || out[1] != "news@list.com" {
+		t.Fatalf("append: %q %v", added, out)
+	}
+}
+
 func TestRulesQueryQuotesDisplayNames(t *testing.T) {
 	q := RulesQuery(nil, []string{"Balinder Walia", "Sukhvir Singh"}, []string{"[INT] OTP"})
 	want := `in:inbox newer_than:7d (from:"Balinder Walia" OR from:"Sukhvir Singh" OR subject:"[INT] OTP")`

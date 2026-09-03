@@ -730,6 +730,162 @@ func TestProcessIgnoreMailDoesNotResearchEvenWithPinnedURLs(t *testing.T) {
 	}
 }
 
+func TestDraftIgnoredAddsSenderAndWritesDraft(t *testing.T) {
+	class := scriptClass{result: mail.ClassifyResult{
+		Intent: "fyi", NeedsResearch: false, SuggestedAction: "ignore",
+		Reason: "newsletter", TriageLabel: "newsletter", Urgency: "low",
+	}}
+	svc, repo, orgID := setupMail(t, &fakeGmail{
+		email:  "org@example.com",
+		tokens: mail.TokenSet{AccessToken: "a", RefreshToken: "r", Expiry: time.Now().Add(time.Hour)},
+	}, class, nil)
+	connectOrg(t, svc, repo, orgID)
+	c, _ := repo.GetConnectionByOrg(context.Background(), orgID)
+	th := &model.MailThread{
+		OrgID: c.OrgID, ConnectionID: c.ID, Status: model.MailThreadIgnored,
+		GmailThreadID: "th-unignore", FromEmail: "news@list.com", FromName: "Weekly Digest",
+		Subject: "This week", BodyText: "Unsubscribe if you no longer want this newsletter.",
+	}
+	if err := repo.UpsertThread(context.Background(), th); err != nil {
+		t.Fatal(err)
+	}
+	out, err := svc.DraftIgnored(context.Background(), orgID, th.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.WatchedSender != "news@list.com" {
+		t.Fatalf("watched %q", out.WatchedSender)
+	}
+	if out.Thread.Status != model.MailThreadDraftReady {
+		t.Fatalf("status %q", out.Thread.Status)
+	}
+	if out.Draft == nil || strings.TrimSpace(out.Draft.Body) == "" {
+		t.Fatal("expected a draft body")
+	}
+	if out.Thread.Classification == nil || out.Thread.Classification.SuggestedAction == "ignore" {
+		t.Fatalf("classification %+v", out.Thread.Classification)
+	}
+	got, _ := repo.GetConnectionByOrg(context.Background(), orgID)
+	if len(got.WatchSenders) != 1 || got.WatchSenders[0] != "news@list.com" {
+		t.Fatalf("senders %v", got.WatchSenders)
+	}
+
+	again, err := svc.DraftIgnored(context.Background(), orgID, th.ID)
+	if !errors.Is(err, ErrMailNotIgnored) {
+		t.Fatalf("second draft err=%v result=%+v", err, again)
+	}
+	got, _ = repo.GetConnectionByOrg(context.Background(), orgID)
+	if len(got.WatchSenders) != 1 {
+		t.Fatalf("sender must not duplicate, %v", got.WatchSenders)
+	}
+}
+
+func TestDraftIgnoredDoesNotDuplicateSender(t *testing.T) {
+	class := scriptClass{result: mail.ClassifyResult{
+		Intent: "fyi", SuggestedAction: "ignore", Reason: "newsletter", TriageLabel: "newsletter",
+	}}
+	svc, repo, orgID := setupMail(t, &fakeGmail{
+		email:  "org@example.com",
+		tokens: mail.TokenSet{AccessToken: "a", RefreshToken: "r", Expiry: time.Now().Add(time.Hour)},
+	}, class, nil)
+	connectOrg(t, svc, repo, orgID)
+	c, _ := repo.GetConnectionByOrg(context.Background(), orgID)
+	c.WatchSenders = []string{"news@list.com", "ops@example.com"}
+	if err := repo.UpsertConnection(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+	th := &model.MailThread{
+		OrgID: c.OrgID, ConnectionID: c.ID, Status: model.MailThreadIgnored,
+		GmailThreadID: "th-already-watched", FromEmail: "News@List.com",
+		Subject: "This week", BodyText: "Hello",
+	}
+	if err := repo.UpsertThread(context.Background(), th); err != nil {
+		t.Fatal(err)
+	}
+	out, err := svc.DraftIgnored(context.Background(), orgID, th.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.WatchedSender != "" {
+		t.Fatalf("already watched, added %q", out.WatchedSender)
+	}
+	got, _ := repo.GetConnectionByOrg(context.Background(), orgID)
+	if len(got.WatchSenders) != 2 {
+		t.Fatalf("senders %v", got.WatchSenders)
+	}
+}
+
+func TestDraftIgnoredTeachesSenderSoLaterMailIsNotIgnored(t *testing.T) {
+	class := scriptClass{result: mail.ClassifyResult{
+		Intent: "fyi", NeedsResearch: false, SuggestedAction: "ignore",
+		Reason: "newsletter", TriageLabel: "newsletter", Urgency: "low",
+	}}
+	gmail := &fakeGmail{
+		email:  "org@example.com",
+		tokens: mail.TokenSet{AccessToken: "a", RefreshToken: "r", Expiry: time.Now().Add(time.Hour)},
+	}
+	svc, repo, orgID := setupMail(t, gmail, class, nil)
+	connectOrg(t, svc, repo, orgID)
+	c, _ := repo.GetConnectionByOrg(context.Background(), orgID)
+	th := &model.MailThread{
+		OrgID: c.OrgID, ConnectionID: c.ID, Status: model.MailThreadIgnored,
+		GmailThreadID: "th-week-1", FromEmail: "news@list.com",
+		Subject: "Week 1", BodyText: "Unsubscribe anytime.",
+	}
+	if err := repo.UpsertThread(context.Background(), th); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.DraftIgnored(context.Background(), orgID, th.ID); err != nil {
+		t.Fatal(err)
+	}
+	gmail.messages = []mail.InboxMessage{{
+		GmailThreadID: "th-week-2", FromEmail: "news@list.com", Subject: "Week 2",
+		Body: "Unsubscribe anytime. View in browser.",
+	}}
+	if err := svc.SyncNow(context.Background(), orgID); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := repo.ListThreads(context.Background(), orgID, model.PaginationParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var week2 *model.MailThread
+	for i := range listed.Data {
+		if listed.Data[i].GmailThreadID == "th-week-2" {
+			week2 = &listed.Data[i]
+			break
+		}
+	}
+	if week2 == nil {
+		t.Fatal("expected the later mail to be ingested")
+	}
+	if week2.Status == model.MailThreadIgnored {
+		t.Fatal("later mail from a taught sender must not be ignored")
+	}
+	if week2.Status != model.MailThreadDraftReady {
+		t.Fatalf("status %q", week2.Status)
+	}
+}
+
+func TestDraftIgnoredRefusesReadyThread(t *testing.T) {
+	svc, repo, orgID := setupMail(t, &fakeGmail{
+		email:  "org@example.com",
+		tokens: mail.TokenSet{AccessToken: "a", RefreshToken: "r", Expiry: time.Now().Add(time.Hour)},
+	}, nil, nil)
+	connectOrg(t, svc, repo, orgID)
+	c, _ := repo.GetConnectionByOrg(context.Background(), orgID)
+	th := &model.MailThread{
+		OrgID: c.OrgID, ConnectionID: c.ID, Status: model.MailThreadDraftReady,
+		GmailThreadID: "th-ready", FromEmail: "alex@c.com", Subject: "Hi", BodyText: "Hello",
+	}
+	if err := repo.UpsertThread(context.Background(), th); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.DraftIgnored(context.Background(), orgID, th.ID); !errors.Is(err, ErrMailNotIgnored) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func TestProcessDoesNotIgnoreMailMatchingWatchPrefix(t *testing.T) {
 	class := scriptClass{result: mail.ClassifyResult{
 		Intent: "fyi", NeedsResearch: false, SuggestedAction: "ignore",
