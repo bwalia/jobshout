@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { registerUser } from "@/lib/auth/auth";
+import { googleAuthErrorMessage, registerUser } from "@/lib/auth/auth";
 import { useAuthStore } from "@/lib/store/auth-store";
+import { GoogleContinueButton } from "@/components/auth/GoogleContinueButton";
 
 const inputClass =
   "flex h-11 w-full rounded-lg border border-input bg-card px-3.5 py-2 text-sm text-foreground ring-offset-background transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2";
@@ -18,6 +19,12 @@ export default function SignupPage() {
   const [orgName, setOrgName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get("error");
+    const fromGoogle = googleAuthErrorMessage(code);
+    if (fromGoogle) setError(fromGoogle);
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -132,6 +139,8 @@ export default function SignupPage() {
           {loading ? "Creating account..." : "Create account"}
         </button>
       </form>
+
+      <GoogleContinueButton intent="signup" orgName={orgName} />
 
       <p className="text-center text-sm text-muted-foreground">
         Already have an account?{" "}

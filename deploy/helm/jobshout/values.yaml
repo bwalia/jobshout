@@ -192,6 +192,18 @@ mail:
   pollInterval: "5m"
   reconcileInterval: "15s"
 
+# Google sign-in / sign-up (platform login, not Gmail). Client id/secret live in
+# an extraSecretRefs secret. Empty client id hides the button; email/password
+# still works. Helm sets GOOGLE_OAUTH_REDIRECT_URL from .Values.host.
+#
+#   kubectl -n <ring> create secret generic jobshout-google \
+#     --from-literal=GOOGLE_OAUTH_CLIENT_ID=<id> \
+#     --from-literal=GOOGLE_OAUTH_CLIENT_SECRET=<secret> \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#
+# Name that secret in extraSecretRefs. You may instead add those two keys to
+# jobshout-mail if the ring already mounts it.
+
 # In-cluster PR reviewer (OpenCode + git clones in the pod; Ollama on the Mac
 # via ollama.workstation.co.uk). Off by default — int opts in. No public URL:
 # the API reaches it at http://jobshout-review-bot:8765. Create the operator

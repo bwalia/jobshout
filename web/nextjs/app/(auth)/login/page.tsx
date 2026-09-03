@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { loginUser } from "@/lib/auth/auth";
+import { googleAuthErrorMessage, loginUser } from "@/lib/auth/auth";
 import { useAuthStore } from "@/lib/store/auth-store";
+import { GoogleContinueButton } from "@/components/auth/GoogleContinueButton";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -13,6 +14,12 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get("error");
+    const fromGoogle = googleAuthErrorMessage(code);
+    if (fromGoogle) setError(fromGoogle);
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -90,6 +97,8 @@ export default function LoginPage() {
           {loading ? "Signing in..." : "Sign in"}
         </button>
       </form>
+
+      <GoogleContinueButton intent="login" />
 
       <p className="text-center text-sm text-muted-foreground">
         Don&apos;t have an account?{" "}

@@ -12,10 +12,14 @@ logLevel: debug
 #     --from-literal=GMAIL_CLIENT_ID=... \
 #     --from-literal=GMAIL_CLIENT_SECRET=... \
 #     --from-literal=GMAIL_TOKEN_KEY=$(openssl rand -hex 32)
+#   kubectl -n int create secret generic jobshout-google \
+#     --from-literal=GOOGLE_OAUTH_CLIENT_ID=... \
+#     --from-literal=GOOGLE_OAUTH_CLIENT_SECRET=...
 extraSecretRefs:
   - jobshout-cms
   - jobshout-review
   - jobshout-mail
+  - jobshout-google
 
 # opsapi CMS — the Article Writer files generated articles there as drafts.
 # The host and namespace slug are not secret; the API key is, and comes from

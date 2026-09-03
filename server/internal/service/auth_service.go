@@ -12,6 +12,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/jobshout/server/internal/agentmodule"
+	"github.com/jobshout/server/internal/googleauth"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/repository"
 )
@@ -23,6 +24,11 @@ type AuthService interface {
 	RefreshToken(ctx context.Context, refreshToken string) (*model.AuthResponse, error)
 	GetMe(ctx context.Context, userID uuid.UUID) (*model.User, error)
 	UpdateProfile(ctx context.Context, userID uuid.UUID, req model.UpdateProfileRequest) (*model.User, error)
+	GoogleEnabled() bool
+	StartGoogle(ctx context.Context, intent, orgName string) (authURL string, err error)
+	AbandonGoogle(ctx context.Context, state string) (intent string)
+	CompleteGoogle(ctx context.Context, state, code string) (ticket, intent string, err error)
+	ExchangeGoogleTicket(ctx context.Context, ticket string) (*model.AuthResponse, error)
 }
 
 type authService struct {
@@ -32,12 +38,15 @@ type authService struct {
 	agentRepo repository.AgentRepository
 	rbacRepo  repository.RBACRepository
 	jwtSvc    JWTService
+	google    googleauth.Identity
+	googleCfg googleauth.Config
 	logger    *zap.Logger
 }
 
 // NewAuthService creates a new AuthService. agentRepo is used to give each new
 // organization its built-in agents; rbacRepo to seed its system roles and make
-// the creator an admin. Pass nil to skip either seeding.
+// the creator an admin. Pass nil to skip either seeding. google may be nil when
+// Google login is not configured.
 func NewAuthService(
 	userRepo repository.UserRepository,
 	tokenRepo repository.TokenRepository,
@@ -45,6 +54,8 @@ func NewAuthService(
 	agentRepo repository.AgentRepository,
 	rbacRepo repository.RBACRepository,
 	jwtSvc JWTService,
+	google googleauth.Identity,
+	googleCfg googleauth.Config,
 	logger *zap.Logger,
 ) AuthService {
 	return &authService{
@@ -54,6 +65,8 @@ func NewAuthService(
 		agentRepo: agentRepo,
 		rbacRepo:  rbacRepo,
 		jwtSvc:    jwtSvc,
+		google:    google,
+		googleCfg: googleCfg,
 		logger:    logger,
 	}
 }
@@ -177,6 +190,11 @@ func (s *authService) Login(ctx context.Context, req model.LoginRequest) (*model
 		return nil, ErrInvalidCredentials
 	}
 
+	// Google-only accounts have no password hash. Do not bcrypt an empty string.
+	if user.Password == "" {
+		return nil, ErrInvalidCredentials
+	}
+
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
 		return nil, ErrInvalidCredentials
 	}
@@ -287,11 +305,15 @@ func slugify(name string) string {
 
 // Sentinel errors for auth operations.
 var (
-	ErrEmailAlreadyExists  = authError("email already exists")
-	ErrInvalidCredentials  = authError("invalid email or password")
-	ErrInvalidRefreshToken = authError("invalid refresh token")
-	ErrRefreshTokenExpired = authError("refresh token expired")
-	ErrUserNotFound        = authError("user not found")
+	ErrEmailAlreadyExists      = authError("email already exists")
+	ErrInvalidCredentials      = authError("invalid email or password")
+	ErrInvalidRefreshToken     = authError("invalid refresh token")
+	ErrRefreshTokenExpired     = authError("refresh token expired")
+	ErrUserNotFound            = authError("user not found")
+	ErrGoogleAuthNotConfigured = authError("google sign-in is not configured")
+	ErrInvalidGoogleState      = authError("invalid or expired google sign-in state")
+	ErrInvalidGoogleTicket     = authError("invalid or expired google sign-in ticket")
+	ErrGoogleEmailNotVerified  = authError("google email is not verified")
 )
 
 type authError string
