@@ -1399,9 +1399,12 @@ func main() {
 	go blogReconciler.Start(ctx)
 
 	srv := &http.Server{
-		Addr:        cfg.ServerPort,
-		Handler:     r,
-		ReadTimeout: 15 * time.Second,
+		Addr:    cfg.ServerPort,
+		Handler: r,
+		// Header-only; keeps slowloris protection without killing a 5MB CV
+		// upload that takes longer than 15s through the Int edge.
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       2 * time.Minute,
 		// Must exceed the longest per-route handler deadline (research or sync
 		// image generation), or the response is cut off after the work is done.
 		WriteTimeout: max(researchRequestTimeout, imageRequestTimeout, chatRequestTimeout) + time.Minute,

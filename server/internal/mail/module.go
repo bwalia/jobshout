@@ -49,9 +49,9 @@ func schema() agentschema.Schema {
 		Hint:           "Saves who to watch and how to answer, then syncs Gmail. Connect Gmail first if you have not. Nothing is sent until you Approve a draft.",
 		Prefill:        "mailbox",
 		Fields: []agentschema.Field{
-			{Key: "senders", Label: "Watch senders", Type: "text", Group: "Who to watch", Placeholder: "ops@example.com, support@client.com", Help: "Comma-separated emails or display names. Empty = recent inbox from the last 7 days.", Question: "Any sender addresses to watch? Leave blank for recent inbox mail."},
-			{Key: "subject_prefixes", Label: "Subject prefixes", Type: "text", Group: "Who to watch", Placeholder: "[support], [billing]"},
-			{Key: "labels", Label: "Gmail labels", Type: "text", Group: "Who to watch", Placeholder: "INBOX, Support"},
+			{Key: "senders", Label: "Watch senders", Type: "tags", Group: "Who to watch", Placeholder: "ops@example.com", Help: "Type an email or display name and press Enter. Empty = recent inbox from the last 7 days.", Question: "Any sender addresses to watch? Leave blank for recent inbox mail."},
+			{Key: "subject_prefixes", Label: "Subject prefixes", Type: "tags", Group: "Who to watch", Placeholder: "[support]"},
+			{Key: "labels", Label: "Gmail labels", Type: "tags", Group: "Who to watch", Placeholder: "INBOX"},
 			{Key: "knowledge_notes", Label: "What the agent should know", Type: "textarea", Group: "How to answer", Placeholder: "Mac Studio M5 Max: $2,499\nMac Studio M5 Ultra: $5,499\nRefunds within 30 days, shipping 3–5 working days…", Help: "Prices, products, policies — plain text or markdown. Replies quote only what is written here.", Question: "What should replies be based on? Prices, products, policies — write it here."},
 			{Key: "knowledge_urls", Label: "Knowledge links (optional)", Type: "textarea", Group: "How to answer", Placeholder: "https://example.com/pricing", Help: "Optional pages to research on top of your notes (one URL per line). Incoming mail links are researched too.", Question: "Any pricing or product pages I should read on top of that? One URL per line."},
 			{Key: "research_focus", Label: "What to look for", Type: "textarea", Group: "How to answer", Placeholder: "Prices, SLA, refund window…"},

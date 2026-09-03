@@ -118,6 +118,9 @@ test.describe("Career Agent", () => {
     await expect(page.getByRole("button", { name: /3\. Jobs/ })).toBeVisible();
     await expect(page.getByRole("button", { name: /4\. Prepare/ })).toBeVisible();
     await expect(page.getByRole("button", { name: /Upload CV|Replace CV PDF/ })).toBeVisible();
+    await page.locator("#career-titles").fill("Head of AI");
+    await page.locator("#career-titles").press("Enter");
+    await expect(page.getByRole("button", { name: "Remove Head of AI" })).toBeVisible();
     if (!process.env.CI) {
       await page.screenshot({ path: "/tmp/career-1-profile.png", fullPage: true });
     }

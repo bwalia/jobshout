@@ -19,7 +19,7 @@ type Field struct {
 	Key         string
 	Label       string
 	Question    string
-	Type        string // text, textarea, number, select, checkbox, repo
+	Type        string // text, textarea, tags, number, select, checkbox, repo
 	Required    bool
 	MinLength   int
 	Min         int

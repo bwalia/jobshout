@@ -26,6 +26,14 @@ apiClient.interceptors.request.use(
         config.headers.Authorization = `Bearer ${token}`;
       }
     }
+    // Default JSON Content-Type has no multipart boundary. Int nginx rejects
+    // that as a bad upload. Let the runtime set multipart/form-data itself.
+    if (typeof FormData !== "undefined" && config.data instanceof FormData) {
+      const headers = config.headers;
+      if (headers && typeof headers.delete === "function") {
+        headers.delete("Content-Type");
+      }
+    }
     return config;
   },
   (error: AxiosError) => Promise.reject(error)

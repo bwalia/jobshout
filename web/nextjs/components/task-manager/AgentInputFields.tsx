@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { apiClient } from "@/lib/api/client";
 import type { AgentField } from "@/lib/agents/input-schemas";
+import { parseTags, TagInput } from "@/components/ui/TagInput";
 import type { ReviewRepos } from "@/types/review";
 import { cn } from "@/lib/utils/cn";
 
@@ -163,6 +164,15 @@ function Field({
           required={field.required}
           minLength={minLen}
           error={Boolean(error)}
+        />
+      ) : field.type === "tags" ? (
+        <TagInput
+          id={`agent-field-${field.key}`}
+          value={parseTags(value)}
+          onChange={(tags) => onChange(tags.join(", "))}
+          placeholder={field.placeholder}
+          disabled={disabled}
+          className={error ? "border-destructive" : undefined}
         />
       ) : (
         <input
