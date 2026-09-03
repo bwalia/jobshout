@@ -38,7 +38,7 @@ First slice (Phase 1–2) is custom-agent round-trip + UI. Builtin overlay and
 | Preview | Mandatory in the UI. Confirm disabled while there are **errors**. |
 | Secrets | Never in the file. Strip on **both** export and import. |
 | Builtin overlay | Explicit confirm copy. No silent overwrite. Overlay **cannot be undone** in v1. |
-| Custom create undo | Allowed only if the new agent has **zero executions** (`DELETE /agents/{id}`). |
+| Custom create undo | Allowed only if the new agent has **zero executions** (`POST /agents/{id}/import/undo`). Overlay and specialists are not undoable. |
 | Empty tool list | Preserved, but preview **warns** (executor runs with no tools). |
 | `shell_command` (and other gated tools) | Preview call-out; **skip by default** unless the user opts in. |
 | Marketplace | Unchanged. File import lives on Task Manager, not Marketplace. |
@@ -141,11 +141,13 @@ destination specialist fields drifted.
 GET  /api/v1/agents/{agentID}/export
 POST /api/v1/agents/import/preview
 POST /api/v1/agents/import
+POST /api/v1/agents/{agentID}/import/undo
 ```
 
 RBAC: `agents:read` export; `agents:create` create-import; `agents:update`
-overlay. Wire `RequirePermission` on **these** routes even if older agent
-routes are still auth-only.
+overlay; `agents:create` or `agents:delete` undo. Wire `RequirePermission` on
+**these** routes even if older agent routes are still auth-only. Undo is
+org-scoped and returns 409 if the imported agent has executions.
 
 Preview returns `preview_id`, `mode` (`create` \| `overlay`), `issues[]`
 (`error` \| `warning` \| `info`), and editable `bindings` (name, model remap,
@@ -176,7 +178,8 @@ blocked (errors) → importing → success (toast + `?agent=<uuid>`) / failure
 Builtin overlay copy:
 
 > This organisation already has **{Agent}**. Import will update its prompt,
-> model, tools, skills, and knowledge. Credentials are not in the file —
+> model, and tools. Skills and knowledge in the file replace the current set;
+> if the file has none, the current ones stay. Credentials are not in the file —
 > reconnect on the agent tab if needed.
 
 ---
@@ -253,7 +256,7 @@ Order is dependency-aware. Tick the matching **Master checklist** box when done.
 
 ### 2. Export API
 
-- Load agent **in org**; 403 if mismatch; 404 if missing.
+- Load agent **in org**; missing and other-org both **404** (`agent not found`) so existence is not leaked.
 - Load tools, skills (with org-private inline defs), knowledge files.
 - `GET /agents/{id}/export` → JSON download (`Content-Disposition`).
 - Warnings in file (e.g. “Gmail connection not included”) when builtin has `Requirements`.
@@ -269,7 +272,7 @@ Order is dependency-aware. Tick the matching **Master checklist** box when done.
 ### 4. Verify Phase 1
 
 - Two orgs not required yet: export a custom agent, open the JSON, confirm no secrets and no `org_id`.
-- Wrong-org id → 403.
+- Wrong-org id → 404 (same as missing).
 
 ---
 
@@ -365,7 +368,7 @@ Tick in this file when the work is in the tree and checked on the matching surfa
 #### Export API
 
 - [x] `GET /api/v1/agents/{agentID}/export`
-- [x] Org match required (403 other org, 404 missing)
+- [x] Org match required (404 other org and missing — no existence leak)
 - [x] `Content-Disposition` filename `{slug}-YYYYMMDD.jobshout-agent.json`
 - [x] Tools, skills (inline org-private), knowledge included
 - [x] `warnings` array present (at least generic “credentials not exported”)
@@ -384,7 +387,7 @@ Tick in this file when the work is in the tree and checked on the matching surfa
 #### Verify Phase 1
 
 - [x] Exported JSON has no secrets and no `org_id`
-- [x] Cross-org export of another org’s id returns 403
+- [x] Cross-org export of another org’s id returns 404
 
 ### Phase 2 — import custom agents
 
@@ -451,7 +454,8 @@ Tick in this file when the work is in the tree and checked on the matching surfa
 
 - [x] `RequirePermission` on export / preview / import
 - [x] Size limits on preview and import (not only export)
-- [x] Undo create: delete imported custom agent if zero executions (UI + API reuse)
+- [x] Undo create: `POST /agents/{id}/import/undo` (org-scoped; 409 after executions; specialists blocked)
+- [x] Overlay with empty packaged skills/knowledge leaves destination lists in place
 - [x] No overlay undo (confirm we did not accidentally add a misleading Undo)
 - [x] Playwright: export downloads; import shows in Task Manager rail
 - [x] Security test: `openai_api_key` in package never persisted

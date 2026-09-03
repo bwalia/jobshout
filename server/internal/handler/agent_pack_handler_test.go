@@ -24,11 +24,13 @@ type stubPackSvc struct {
 	exportErr  error
 	previewErr error
 	importErr  error
+	undoErr    error
 	pkg        *agentpack.Package
 	filename   string
 	preview    *service.PackPreview
 	result     *service.ImportAgentResult
 	report     agentpack.Report
+	undoID     uuid.UUID
 }
 
 func (s *stubPackSvc) Export(context.Context, uuid.UUID, uuid.UUID, uuid.UUID) (*agentpack.Package, string, error) {
@@ -42,6 +44,10 @@ func (s *stubPackSvc) ResolvePreview(context.Context, uuid.UUID, service.ImportA
 }
 func (s *stubPackSvc) Import(context.Context, uuid.UUID, uuid.UUID, service.ImportAgentRequest) (*service.ImportAgentResult, error) {
 	return s.result, s.importErr
+}
+func (s *stubPackSvc) Undo(_ context.Context, _, _, agentID uuid.UUID) error {
+	s.undoID = agentID
+	return s.undoErr
 }
 
 func withPackAuth(r *http.Request, orgID, userID uuid.UUID) *http.Request {
@@ -66,8 +72,8 @@ func TestAgentPackExportNotFound(t *testing.T) {
 	}
 }
 
-func TestAgentPackExportForbiddenOtherOrg(t *testing.T) {
-	h := NewAgentPackHandler(&stubPackSvc{exportErr: repository.ErrAgentPackForbidden}, nil)
+func TestAgentPackExportOtherOrgNotFound(t *testing.T) {
+	h := NewAgentPackHandler(&stubPackSvc{exportErr: repository.ErrAgentPackNotFound}, nil)
 	org, user, agent := uuid.New(), uuid.New(), uuid.New()
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/"+agent.String()+"/export", nil)
@@ -76,8 +82,11 @@ func TestAgentPackExportForbiddenOtherOrg(t *testing.T) {
 	rctx.URLParams.Add("agentID", agent.String())
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 	h.Export(rec, req)
-	if rec.Code != http.StatusForbidden {
+	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "agent not found") {
+		t.Fatalf("body %s", rec.Body.String())
 	}
 }
 
@@ -157,6 +166,55 @@ func TestAgentPackImportCreated(t *testing.T) {
 	req = withPackAuth(req, org, user)
 	h.Import(rec, req)
 	if rec.Code != http.StatusCreated {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAgentPackUndoNoContent(t *testing.T) {
+	svc := &stubPackSvc{}
+	h := NewAgentPackHandler(svc, nil)
+	org, user, agent := uuid.New(), uuid.New(), uuid.New()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/"+agent.String()+"/import/undo", nil)
+	req = withPackAuth(req, org, user)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("agentID", agent.String())
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	h.Undo(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+	if svc.undoID != agent {
+		t.Fatalf("undo id %s", svc.undoID)
+	}
+}
+
+func TestAgentPackUndoInUseConflict(t *testing.T) {
+	h := NewAgentPackHandler(&stubPackSvc{undoErr: repository.ErrAgentPackInUse}, nil)
+	org, user, agent := uuid.New(), uuid.New(), uuid.New()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/"+agent.String()+"/import/undo", nil)
+	req = withPackAuth(req, org, user)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("agentID", agent.String())
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	h.Undo(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAgentPackUndoNotUndoable(t *testing.T) {
+	h := NewAgentPackHandler(&stubPackSvc{undoErr: repository.ErrAgentPackNotUndoable}, nil)
+	org, user, agent := uuid.New(), uuid.New(), uuid.New()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/"+agent.String()+"/import/undo", nil)
+	req = withPackAuth(req, org, user)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("agentID", agent.String())
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	h.Undo(rec, req)
+	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 	}
 }

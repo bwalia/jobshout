@@ -907,6 +907,7 @@ func main() {
 					r.Delete("/", agentHandler.Delete)
 					r.Patch("/status", agentHandler.UpdateStatus)
 					r.With(middleware.RequirePermission(rbacSvc, model.PermAgentsRead)).Get("/export", agentPackHandler.Export)
+					r.With(middleware.RequireAnyPermission(rbacSvc, model.PermAgentsCreate, model.PermAgentsDelete)).Post("/import/undo", agentPackHandler.Undo)
 
 					// Agent LLM execution
 					r.Post("/execute", execHandler.Execute)

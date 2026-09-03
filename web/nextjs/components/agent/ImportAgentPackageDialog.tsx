@@ -6,9 +6,9 @@ import { toast } from "sonner";
 import { X } from "lucide-react";
 import { ModelPicker } from "@/components/agent/ModelPicker";
 import {
-  deleteAgent,
   importAgentPackage,
   previewAgentImport,
+  undoAgentImport,
   type AgentPackBindings,
   type AgentPackDocument,
   type AgentPackPreview,
@@ -106,10 +106,16 @@ export function ImportAgentPackageDialog({
           action: {
             label: "Undo",
             onClick: () => {
-              void deleteAgent(result.agent.id).then(() => {
-                void queryClient.invalidateQueries({ queryKey: agentKeys.lists() });
-                toast.message("Import undone.");
-              });
+              void undoAgentImport(result.agent.id)
+                .then(() => {
+                  void queryClient.invalidateQueries({ queryKey: agentKeys.lists() });
+                  toast.message("Import undone.");
+                })
+                .catch((undoErr) => {
+                  toast.error(
+                    undoErr instanceof Error ? undoErr.message : "Failed to undo import",
+                  );
+                });
             },
           },
         });
@@ -201,7 +207,8 @@ export function ImportAgentPackageDialog({
                 {preview.mode === "overlay" && (
                   <p className="mt-2 text-sm text-amber-700 dark:text-amber-400">
                     This organisation already has {preview.target_name ?? preview.agent.name}.
-                    Import will update its prompt, model, tools, skills, and knowledge.
+                    Import will update its prompt, model, and tools.
+                    Skills and knowledge in the file replace the current set; if the file has none, the current ones stay.
                     Credentials are not in the file — reconnect on the agent tab if needed.
                     This cannot be undone from this dialog.
                   </p>

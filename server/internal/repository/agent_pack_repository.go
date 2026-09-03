@@ -15,11 +15,15 @@ import (
 	"github.com/jobshout/server/internal/model"
 )
 
-// ErrAgentPackNotFound is a missing agent.
+// ErrAgentPackNotFound is a missing agent. Wrong-org loads use the same
+// error so existence is not leaked.
 var ErrAgentPackNotFound = errors.New("agent not found")
 
-// ErrAgentPackForbidden is an agent that belongs to another organisation.
-var ErrAgentPackForbidden = errors.New("agent belongs to another organisation")
+// ErrAgentPackInUse is undo after the imported agent has already run.
+var ErrAgentPackInUse = errors.New("imported agent has executions and cannot be undone")
+
+// ErrAgentPackNotUndoable is undo of a specialist or other non-create import.
+var ErrAgentPackNotUndoable = errors.New("this agent cannot be undone from import")
 
 // AgentPackStore loads and applies portable agent packages.
 type AgentPackStore interface {
@@ -29,6 +33,7 @@ type AgentPackStore interface {
 	ApplyOverlay(ctx context.Context, orgID, agentID uuid.UUID, pkg *agentpack.Package, provider, modelName string, tools []string) (*model.Agent, error)
 	ExecutionCount(ctx context.Context, agentID uuid.UUID) (int, error)
 	KnowledgeFiles(ctx context.Context, agentID uuid.UUID) ([]KnowledgeFileRef, error)
+	UndoCreate(ctx context.Context, orgID, agentID uuid.UUID) error
 }
 
 // KnowledgeFileRef is enough to re-ingest embeddings after import.
@@ -62,7 +67,7 @@ func (s *agentPackStore) LoadBundle(ctx context.Context, orgID, agentID uuid.UUI
 		return nil, fmt.Errorf("agent_pack: load agent: %w", err)
 	}
 	if a.OrgID != orgID {
-		return nil, ErrAgentPackForbidden
+		return nil, ErrAgentPackNotFound
 	}
 
 	tools, err := listToolNames(ctx, s.pool, agentID)
@@ -223,7 +228,7 @@ func (s *agentPackStore) ApplyOverlay(ctx context.Context, orgID, agentID uuid.U
 		return nil, err
 	}
 	if a.OrgID != orgID {
-		return nil, ErrAgentPackForbidden
+		return nil, ErrAgentPackNotFound
 	}
 
 	desc := pkg.Agent.Description
@@ -252,14 +257,20 @@ func (s *agentPackStore) ApplyOverlay(ctx context.Context, orgID, agentID uuid.U
 	if err := replaceTools(ctx, tx, a.ID, tools); err != nil {
 		return nil, err
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM agent_skills WHERE agent_id = $1`, a.ID); err != nil {
-		return nil, err
+	// Empty skills/knowledge in the package leave the destination set
+	// (same idea as skipped tools). A non-empty list still replaces.
+	if overlayReplaceSkills(pkg) {
+		if _, err := tx.Exec(ctx, `DELETE FROM agent_skills WHERE agent_id = $1`, a.ID); err != nil {
+			return nil, err
+		}
+		if err := applySkills(ctx, tx, orgID, uuid.Nil, a.ID, pkg.Skills); err != nil {
+			return nil, err
+		}
 	}
-	if err := applySkills(ctx, tx, orgID, uuid.Nil, a.ID, pkg.Skills); err != nil {
-		return nil, err
-	}
-	if err := replaceKnowledge(ctx, tx, a.ID, pkg.Knowledge); err != nil {
-		return nil, err
+	if overlayReplaceKnowledge(pkg) {
+		if err := replaceKnowledge(ctx, tx, a.ID, pkg.Knowledge); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
@@ -443,6 +454,53 @@ func nonEmpty(s, fallback string) string {
 		return fallback
 	}
 	return s
+}
+
+func (s *agentPackStore) UndoCreate(ctx context.Context, orgID, agentID uuid.UUID) error {
+	a, err := scanAgent(s.pool.QueryRow(ctx, `SELECT `+agentColumns+` FROM agents WHERE id = $1`, agentID))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrAgentPackNotFound
+		}
+		return fmt.Errorf("agent_pack: undo load: %w", err)
+	}
+	if a.OrgID != orgID {
+		return ErrAgentPackNotFound
+	}
+	if builtinOf(a) != "" {
+		return ErrAgentPackNotUndoable
+	}
+	n, err := s.ExecutionCount(ctx, agentID)
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		return ErrAgentPackInUse
+	}
+	tag, err := s.pool.Exec(ctx, `DELETE FROM agents WHERE id = $1 AND org_id = $2`, agentID, orgID)
+	if err != nil {
+		return fmt.Errorf("agent_pack: undo delete: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrAgentPackNotFound
+	}
+	return nil
+}
+
+func overlayReplaceSkills(pkg *agentpack.Package) bool {
+	return pkg != nil && len(pkg.Skills) > 0
+}
+
+func overlayReplaceKnowledge(pkg *agentpack.Package) bool {
+	return pkg != nil && len(pkg.Knowledge) > 0
+}
+
+func builtinOf(a *model.Agent) string {
+	if a == nil || a.Metadata == nil {
+		return ""
+	}
+	s, _ := a.Metadata[model.MetadataKeyBuiltin].(string)
+	return strings.TrimSpace(s)
 }
 
 func (s *agentPackStore) KnowledgeFiles(ctx context.Context, agentID uuid.UUID) ([]KnowledgeFileRef, error) {

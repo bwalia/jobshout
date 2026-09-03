@@ -23,6 +23,8 @@ type fakePackStore struct {
 	createdTools []string
 	overlaid     *uuid.UUID
 	overlayTools []string
+	undoID       uuid.UUID
+	undoErr      error
 }
 
 func (f *fakePackStore) LoadBundle(context.Context, uuid.UUID, uuid.UUID) (*repository.AgentBundle, error) {
@@ -67,6 +69,10 @@ func (f *fakePackStore) ExecutionCount(context.Context, uuid.UUID) (int, error) 
 func (f *fakePackStore) KnowledgeFiles(context.Context, uuid.UUID) ([]repository.KnowledgeFileRef, error) {
 	return nil, nil
 }
+func (f *fakePackStore) UndoCreate(_ context.Context, _, agentID uuid.UUID) error {
+	f.undoID = agentID
+	return f.undoErr
+}
 
 func TestAgentPackExportStripsSecretsAndOrg(t *testing.T) {
 	org := uuid.New()
@@ -97,9 +103,9 @@ func TestAgentPackExportStripsSecretsAndOrg(t *testing.T) {
 		t.Fatalf("filename %q", filename)
 	}
 
-	store.err = repository.ErrAgentPackForbidden
+	store.err = repository.ErrAgentPackNotFound
 	if _, _, err := svc.Export(context.Background(), other, uuid.New(), agent.ID); err == nil {
-		t.Fatal("expected forbidden for other org")
+		t.Fatal("expected not found for other org")
 	}
 }
 
@@ -334,6 +340,29 @@ func TestAgentPackImportFallsBackToPackageWhenPreviewMissing(t *testing.T) {
 	}
 	if out.Agent.Name != "Fallback" {
 		t.Fatalf("name %q", out.Agent.Name)
+	}
+}
+
+func TestAgentPackUndoCreate(t *testing.T) {
+	org := uuid.New()
+	user := uuid.New()
+	agentID := uuid.New()
+	store := &fakePackStore{}
+	svc := NewAgentPackService(store, nil, nil, tools.NewRegistry(), nil, nil, nil, false, nil)
+	if err := svc.Undo(context.Background(), org, user, agentID); err != nil {
+		t.Fatal(err)
+	}
+	if store.undoID != agentID {
+		t.Fatalf("undo id %s", store.undoID)
+	}
+}
+
+func TestAgentPackUndoRefusesInUse(t *testing.T) {
+	store := &fakePackStore{undoErr: repository.ErrAgentPackInUse}
+	svc := NewAgentPackService(store, nil, nil, tools.NewRegistry(), nil, nil, nil, false, nil)
+	err := svc.Undo(context.Background(), uuid.New(), uuid.New(), uuid.New())
+	if err == nil || !strings.Contains(err.Error(), "executions") {
+		t.Fatalf("err %v", err)
 	}
 }
 

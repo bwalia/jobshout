@@ -172,6 +172,15 @@ export async function importAgentPackage(payload: {
   }
 }
 
+/** Undo a create-mode import. Fails if the agent has already run. */
+export async function undoAgentImport(id: string): Promise<void> {
+  try {
+    await apiClient.post(`/agents/${id}/import/undo`);
+  } catch (err) {
+    throw new Error(await packErrorMessage(err, "Failed to undo import"));
+  }
+}
+
 async function packErrorMessage(err: unknown, fallback: string): Promise<string> {
   if (axios.isAxiosError(err) && err.response?.data instanceof Blob) {
     try {

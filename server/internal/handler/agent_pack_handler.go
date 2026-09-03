@@ -71,7 +71,7 @@ func (h *AgentPackHandler) Preview(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, agentpack.MaxJSONBytes+4096)
 	var req previewRequest
-	if !DecodeJSON(w, r, &req) {
+	if !decodePackJSON(w, r, &req) {
 		return
 	}
 	if req.Package == nil {
@@ -99,7 +99,7 @@ func (h *AgentPackHandler) Import(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, agentpack.MaxJSONBytes+4096)
 	var req service.ImportAgentRequest
-	if !DecodeJSON(w, r, &req) {
+	if !decodePackJSON(w, r, &req) {
 		return
 	}
 	if req.Package == nil && req.PreviewID == "" {
@@ -125,6 +125,29 @@ func (h *AgentPackHandler) Import(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	RespondJSON(w, http.StatusCreated, result)
+}
+
+func (h *AgentPackHandler) Undo(w http.ResponseWriter, r *http.Request) {
+	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid org_id in token")
+		return
+	}
+	userID, err := uuid.Parse(middleware.GetUserID(r.Context()))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid user_id in token")
+		return
+	}
+	agentID, err := uuid.Parse(chi.URLParam(r, "agentID"))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid agent ID")
+		return
+	}
+	if err := h.svc.Undo(r.Context(), orgID, userID, agentID); err != nil {
+		h.packError(w, err)
+		return
+	}
+	RespondJSON(w, http.StatusNoContent, nil)
 }
 
 func firstIssue(rep agentpack.Report) string {
@@ -162,13 +185,30 @@ func (h *AgentPackHandler) requireImportPerm(r *http.Request, mode agentpack.Mod
 	return nil
 }
 
+func decodePackJSON(w http.ResponseWriter, r *http.Request, target any) bool {
+	if err := json.NewDecoder(r.Body).Decode(target); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			RespondError(w, http.StatusRequestEntityTooLarge, "package exceeds size limit")
+			return false
+		}
+		RespondError(w, http.StatusBadRequest, "invalid request body")
+		return false
+	}
+	return true
+}
+
 func (h *AgentPackHandler) packError(w http.ResponseWriter, err error) {
 	if errors.Is(err, repository.ErrAgentPackNotFound) {
 		RespondError(w, http.StatusNotFound, "agent not found")
 		return
 	}
-	if errors.Is(err, repository.ErrAgentPackForbidden) {
-		RespondError(w, http.StatusForbidden, "agent belongs to another organisation")
+	if errors.Is(err, repository.ErrAgentPackInUse) {
+		RespondError(w, http.StatusConflict, "imported agent has executions and cannot be undone")
+		return
+	}
+	if errors.Is(err, repository.ErrAgentPackNotUndoable) {
+		RespondError(w, http.StatusBadRequest, "this agent cannot be undone from import")
 		return
 	}
 	msg := err.Error()

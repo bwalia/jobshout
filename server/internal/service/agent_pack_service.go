@@ -30,6 +30,7 @@ type AgentPackService interface {
 	Preview(ctx context.Context, orgID uuid.UUID, pkg *agentpack.Package) (*PackPreview, error)
 	ResolvePreview(ctx context.Context, orgID uuid.UUID, req ImportAgentRequest) (agentpack.Report, error)
 	Import(ctx context.Context, orgID, userID uuid.UUID, req ImportAgentRequest) (*ImportAgentResult, error)
+	Undo(ctx context.Context, orgID, userID, agentID uuid.UUID) error
 }
 
 type PackPreview struct {
@@ -189,6 +190,18 @@ func (s *agentPackService) Import(ctx context.Context, orgID, userID uuid.UUID, 
 		s.mu.Unlock()
 	}
 	return &ImportAgentResult{Agent: agent, Mode: rep.Mode, CanUndo: rep.CanUndo}, nil
+}
+
+func (s *agentPackService) Undo(ctx context.Context, orgID, userID, agentID uuid.UUID) error {
+	if err := s.store.UndoCreate(ctx, orgID, agentID); err != nil {
+		return err
+	}
+	var who *uuid.UUID
+	if userID != uuid.Nil {
+		who = &userID
+	}
+	s.record(ctx, orgID, who, "agent.import.undo", &agentID, nil)
+	return nil
 }
 
 // ResolvePreview repeats Evaluate for an import request so the handler can
