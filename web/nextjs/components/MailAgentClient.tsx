@@ -357,13 +357,16 @@ export function MailAgentClient() {
     setError("");
     setSaveNote("");
     setWatchNote("");
-    const from = (selected.thread.from_email || selected.thread.from_name || "").trim();
     try {
       const { data } = await apiClient.post<MailDraftIgnoredResult>(
         `/mail/threads/${selected.thread.id}/draft`,
       );
-      const watched = (data.watched_sender || from).trim();
-      if (watched) {
+      const watched = (data.watched_sender || "").trim();
+      // Server is the source of truth after a watch-rule write. Merging into
+      // local tags would let an unsaved clear + Save rules wipe other senders.
+      if (watched && Array.isArray(data.rules?.senders)) {
+        setSenders(data.rules.senders);
+      } else if (watched) {
         rememberSender(watched);
       }
       setSelected({ thread: data.thread, draft: data.draft });
@@ -376,6 +379,12 @@ export function MailAgentClient() {
       }
     } catch (e: unknown) {
       setError(apiErrorMessage(e, "Could not draft a reply."));
+      try {
+        await openThread(selected.thread.id);
+        await loadThreads();
+      } catch {
+        /* keep the draft error */
+      }
     } finally {
       setBusy(false);
     }

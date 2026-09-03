@@ -696,8 +696,9 @@ func (s *mailService) processThread(ctx context.Context, th *model.MailThread, m
 	}
 	watched := c != nil && mail.WatchMatches(msg, c.WatchLabels, c.WatchSenders, c.WatchSubjectPrefixes)
 	if forceReply || watched {
+		wasIgnore := class.SuggestedAction == "ignore"
 		class = mail.HonorOperatorWatch(class)
-		if forceReply {
+		if forceReply && wasIgnore {
 			class.Reason = "Operator asked to draft a reply; do not ignore."
 		}
 	}
@@ -844,7 +845,8 @@ func (s *mailService) DraftIgnored(ctx context.Context, orgID, threadID uuid.UUI
 	if th == nil || th.OrgID != orgID {
 		return nil, ErrMailNotFound
 	}
-	if th.Status != model.MailThreadIgnored && th.Status != model.MailThreadFailed {
+	ignored := th.Status == model.MailThreadIgnored
+	if !ignored && th.Status != model.MailThreadFailed {
 		return nil, ErrMailNotIgnored
 	}
 	c, err := s.repo.GetConnectionByOrg(ctx, orgID)
@@ -854,15 +856,26 @@ func (s *mailService) DraftIgnored(ctx context.Context, orgID, threadID uuid.UUI
 	if c == nil {
 		return nil, ErrMailNotConnected
 	}
-	senders, added := mail.AppendWatchSender(c.WatchSenders, th.FromEmail, th.FromName)
-	if added != "" {
-		c.WatchSenders = senders
-		if err := s.repo.UpdateConnectionMeta(ctx, c); err != nil {
-			return nil, err
-		}
-	}
 	if err := s.processThread(ctx, th, inboxMessageFromThread(th), c, uuid.Nil, true); err != nil {
 		return nil, err
+	}
+	// Teach the sender only after a successful draft, and only for ignored
+	// mail. Retrying a failed (non-ignore) draft must not turn an empty
+	// playbook into "only sync this person". Labels-only already honor-watches
+	// every ingested message; adding a sender would undo that.
+	var added string
+	if ignored && mail.TeachWatchSender(c.WatchLabels, c.WatchSenders, c.WatchSubjectPrefixes) {
+		senders, add := mail.AppendWatchSender(c.WatchSenders, th.FromEmail, th.FromName)
+		if add != "" {
+			c.WatchSenders = senders
+			if err := s.repo.UpdateConnectionMeta(ctx, c); err != nil {
+				s.logger.Warn("mail: drafted ignored mail but could not watch sender",
+					zap.String("thread_id", threadID.String()),
+					zap.Error(mail.RedactErr(err)))
+			} else {
+				added = add
+			}
+		}
 	}
 	detail, err := s.GetThread(ctx, orgID, threadID)
 	if err != nil {

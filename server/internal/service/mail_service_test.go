@@ -867,6 +867,82 @@ func TestDraftIgnoredTeachesSenderSoLaterMailIsNotIgnored(t *testing.T) {
 	}
 }
 
+func TestDraftIgnoredFailedDoesNotWatchSender(t *testing.T) {
+	class := scriptClass{result: mail.ClassifyResult{
+		Intent: "request", SuggestedAction: "reply", Reason: "question", TriageLabel: "support",
+	}}
+	svc, repo, orgID := setupMail(t, &fakeGmail{
+		email:  "org@example.com",
+		tokens: mail.TokenSet{AccessToken: "a", RefreshToken: "r", Expiry: time.Now().Add(time.Hour)},
+	}, class, nil)
+	connectOrg(t, svc, repo, orgID)
+	c, _ := repo.GetConnectionByOrg(context.Background(), orgID)
+	th := &model.MailThread{
+		OrgID: c.OrgID, ConnectionID: c.ID, Status: model.MailThreadFailed,
+		GmailThreadID: "th-failed-retry", FromEmail: "alex@c.com",
+		Subject: "Team plan?", BodyText: "How much is the team plan?",
+	}
+	if err := repo.UpsertThread(context.Background(), th); err != nil {
+		t.Fatal(err)
+	}
+	out, err := svc.DraftIgnored(context.Background(), orgID, th.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Thread.Status != model.MailThreadDraftReady {
+		t.Fatalf("status %q", out.Thread.Status)
+	}
+	if out.WatchedSender != "" {
+		t.Fatalf("failed retry must not teach a sender, got %q", out.WatchedSender)
+	}
+	got, _ := repo.GetConnectionByOrg(context.Background(), orgID)
+	if len(got.WatchSenders) != 0 {
+		t.Fatalf("empty playbook must stay empty on failed retry, %v", got.WatchSenders)
+	}
+}
+
+func TestDraftIgnoredLabelsOnlyDoesNotWatchSender(t *testing.T) {
+	class := scriptClass{result: mail.ClassifyResult{
+		Intent: "fyi", SuggestedAction: "ignore", Reason: "newsletter", TriageLabel: "newsletter",
+	}}
+	svc, repo, orgID := setupMail(t, &fakeGmail{
+		email:  "org@example.com",
+		tokens: mail.TokenSet{AccessToken: "a", RefreshToken: "r", Expiry: time.Now().Add(time.Hour)},
+	}, class, nil)
+	connectOrg(t, svc, repo, orgID)
+	c, _ := repo.GetConnectionByOrg(context.Background(), orgID)
+	c.WatchLabels = []string{"INBOX"}
+	if err := repo.UpsertConnection(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+	th := &model.MailThread{
+		OrgID: c.OrgID, ConnectionID: c.ID, Status: model.MailThreadIgnored,
+		GmailThreadID: "th-labels-only", FromEmail: "news@list.com",
+		Subject: "This week", BodyText: "Unsubscribe anytime.",
+	}
+	if err := repo.UpsertThread(context.Background(), th); err != nil {
+		t.Fatal(err)
+	}
+	out, err := svc.DraftIgnored(context.Background(), orgID, th.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Thread.Status != model.MailThreadDraftReady {
+		t.Fatalf("status %q", out.Thread.Status)
+	}
+	if out.WatchedSender != "" {
+		t.Fatalf("labels-only must not add a sender, got %q", out.WatchedSender)
+	}
+	got, _ := repo.GetConnectionByOrg(context.Background(), orgID)
+	if len(got.WatchSenders) != 0 {
+		t.Fatalf("senders %v", got.WatchSenders)
+	}
+	other := mail.InboxMessage{FromEmail: "other@elsewhere.com", Subject: "Hi"}
+	if !mail.WatchMatches(other, got.WatchLabels, got.WatchSenders, got.WatchSubjectPrefixes) {
+		t.Fatal("labels-only must still honor-watch other ingested mail")
+	}
+}
+
 func TestDraftIgnoredRefusesReadyThread(t *testing.T) {
 	svc, repo, orgID := setupMail(t, &fakeGmail{
 		email:  "org@example.com",

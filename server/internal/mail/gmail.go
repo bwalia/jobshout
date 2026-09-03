@@ -503,6 +503,17 @@ func WatchMatches(msg InboxMessage, labels, senders, prefixes []string) bool {
 	return false
 }
 
+// TeachWatchSender is whether Draft-reply should add this mail's sender to
+// the watch list. A labels-only playbook already honor-watches every ingested
+// message; adding a sender would require a sender/prefix match and let other
+// labelled mail be ignored again.
+func TeachWatchSender(labels, senders, prefixes []string) bool {
+	labels = compactWatch(labels)
+	senders = compactWatch(senders)
+	prefixes = compactWatch(prefixes)
+	return !(len(labels) > 0 && len(senders) == 0 && len(prefixes) == 0)
+}
+
 // AppendWatchSender adds this mail's sender to the watch list so later
 // triage will not ignore them. Prefers the email address; falls back to the
 // display name. Does not add subject prefixes — those are too easy to guess
@@ -512,13 +523,12 @@ func AppendWatchSender(senders []string, fromEmail, fromName string) (out []stri
 	if candidate == "" {
 		candidate = strings.TrimSpace(fromName)
 	}
-	out = make([]string, len(senders))
-	copy(out, senders)
+	out = compactWatch(senders)
 	if candidate == "" {
 		return out, ""
 	}
 	for _, s := range out {
-		if strings.EqualFold(strings.TrimSpace(s), candidate) {
+		if strings.EqualFold(s, candidate) {
 			return out, ""
 		}
 	}
