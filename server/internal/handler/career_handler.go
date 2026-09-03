@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -46,8 +47,16 @@ func (h *CareerHandler) writeErr(w http.ResponseWriter, err error) {
 		RespondError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, service.ErrCareerBadStatus):
 		RespondError(w, http.StatusConflict, err.Error())
-	case errors.Is(err, service.ErrCareerMissingInput), errors.Is(err, service.ErrCareerEmptyBlacklist), errors.Is(err, service.ErrCareerBadUpload):
+	case errors.Is(err, service.ErrCareerMissingInput), errors.Is(err, service.ErrCareerEmptyBlacklist):
 		RespondError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, service.ErrCareerBadUpload):
+		msg := strings.TrimPrefix(err.Error(), service.ErrCareerBadUpload.Error())
+		msg = strings.TrimPrefix(msg, ": ")
+		msg = strings.TrimPrefix(msg, "career: ")
+		if msg == "" {
+			msg = "could not read that file"
+		}
+		RespondError(w, http.StatusBadRequest, msg)
 	default:
 		RespondError(w, http.StatusInternalServerError, err.Error())
 	}
@@ -88,7 +97,14 @@ func (h *CareerHandler) UploadCV(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// 5MB file plus multipart wrapping. Reject before buffering the rest.
+	r.Body = http.MaxBytesReader(w, r.Body, (5<<20)+512<<10)
 	if err := r.ParseMultipartForm(5 << 20); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			RespondError(w, http.StatusRequestEntityTooLarge, "file is larger than 5MB")
+			return
+		}
 		RespondError(w, http.StatusBadRequest, "expected a multipart file field named file")
 		return
 	}
@@ -104,7 +120,7 @@ func (h *CareerHandler) UploadCV(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(data) > 5<<20 {
-		RespondError(w, http.StatusBadRequest, "file is larger than 5MB")
+		RespondError(w, http.StatusRequestEntityTooLarge, "file is larger than 5MB")
 		return
 	}
 	ct := hdr.Header.Get("Content-Type")

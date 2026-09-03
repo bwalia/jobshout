@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { FieldHintProvider, FieldLabel } from "@/components/ui/field-hint";
+import { TagInput } from "@/components/ui/TagInput";
 import { apiClient, apiErrorMessage } from "@/lib/api/client";
 import type {
   MailConnectionStatus,
@@ -114,9 +116,9 @@ export function MailAgentClient() {
   const [polling, setPolling] = useState(false);
   const [busy, setBusy] = useState(false);
   const [savingRules, setSavingRules] = useState(false);
-  const [senders, setSenders] = useState("");
-  const [prefixes, setPrefixes] = useState("");
-  const [labels, setLabels] = useState("");
+  const [senders, setSenders] = useState<string[]>([]);
+  const [prefixes, setPrefixes] = useState<string[]>([]);
+  const [labels, setLabels] = useState<string[]>([]);
   const [knowledgeNotes, setKnowledgeNotes] = useState("");
   const [knowledgeUrls, setKnowledgeUrls] = useState("");
   const [researchFocus, setResearchFocus] = useState("");
@@ -125,9 +127,9 @@ export function MailAgentClient() {
   const loadConnection = useCallback(async () => {
     const { data } = await apiClient.get<MailConnectionStatus>("/mail/connection");
     setConnection(data);
-    setSenders((data.rules?.senders ?? []).join(", "));
-    setPrefixes((data.rules?.subject_prefixes ?? []).join(", "));
-    setLabels((data.rules?.labels ?? []).join(", "));
+    setSenders(data.rules?.senders ?? []);
+    setPrefixes(data.rules?.subject_prefixes ?? []);
+    setLabels(data.rules?.labels ?? []);
     setKnowledgeNotes(data.knowledge_notes ?? "");
     setKnowledgeUrls((data.knowledge_urls ?? []).join("\n"));
     setResearchFocus(data.research_focus ?? "");
@@ -260,16 +262,11 @@ export function MailAgentClient() {
     setError("");
     setSaveNote("");
     try {
-      const split = (s: string) =>
-        s
-          .split(",")
-          .map((x) => x.trim())
-          .filter(Boolean);
       await apiClient.patch("/mail/connection", {
         rules: {
-          senders: split(senders),
-          labels: split(labels),
-          subject_prefixes: split(prefixes),
+          senders,
+          labels,
+          subject_prefixes: prefixes,
         },
         knowledge_notes: knowledgeNotes.trim(),
         knowledge_urls: knowledgeUrls
@@ -353,6 +350,7 @@ export function MailAgentClient() {
     (connection.status !== "disconnected" && Boolean(connection.email));
 
   return (
+    <FieldHintProvider>
     <div className="space-y-4">
       {error && (
         <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
@@ -431,31 +429,49 @@ export function MailAgentClient() {
                 Disconnect
               </button>
             </div>
-            <div className="grid gap-2 text-sm">
-              <label className="text-xs text-muted-foreground">
-                Watch senders (comma-separated emails or names, empty = recent inbox)
-                <input
+            <div className="grid gap-3 text-sm">
+              <div>
+                <FieldLabel
+                  htmlFor="mail-senders"
+                  label="Watch senders"
+                  hint="Emails or display names to watch. Type one and press Enter. Empty = recent inbox."
+                />
+                <TagInput
+                  id="mail-senders"
                   value={senders}
-                  onChange={(e) => setSenders(e.target.value)}
-                  className="mt-1 flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  onChange={setSenders}
+                  disabled={busy}
+                  placeholder="ops@example.com"
                 />
-              </label>
-              <label className="text-xs text-muted-foreground">
-                Subject prefixes
-                <input
+              </div>
+              <div>
+                <FieldLabel
+                  htmlFor="mail-prefixes"
+                  label="Subject prefixes"
+                  hint="Only mail whose subject starts with one of these. Type a prefix and press Enter."
+                />
+                <TagInput
+                  id="mail-prefixes"
                   value={prefixes}
-                  onChange={(e) => setPrefixes(e.target.value)}
-                  className="mt-1 flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  onChange={setPrefixes}
+                  disabled={busy}
+                  placeholder="[support]"
                 />
-              </label>
-              <label className="text-xs text-muted-foreground">
-                Gmail labels
-                <input
+              </div>
+              <div>
+                <FieldLabel
+                  htmlFor="mail-labels"
+                  label="Gmail labels"
+                  hint="Gmail labels to include. Type a label and press Enter."
+                />
+                <TagInput
+                  id="mail-labels"
                   value={labels}
-                  onChange={(e) => setLabels(e.target.value)}
-                  className="mt-1 flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  onChange={setLabels}
+                  disabled={busy}
+                  placeholder="INBOX"
                 />
-              </label>
+              </div>
               <label className="text-xs text-muted-foreground">
                 What should the agent know when replying?
                 <textarea
@@ -465,7 +481,7 @@ export function MailAgentClient() {
                   placeholder={
                     "Mac Studio M5 Max: $2,499\nMac Studio M5 Ultra: $5,499\nRefunds within 30 days, shipping 3–5 working days…"
                   }
-                  className="mt-1 w-full rounded-md border border-input bg-background p-3 font-mono text-sm"
+                  className="mt-1 w-full min-h-[8rem] resize-y rounded-md border border-input bg-background p-3 font-mono text-sm"
                 />
                 <span className="mt-1 block text-[11px]">
                   Prices, products, policies — plain text or markdown. Replies
@@ -654,5 +670,6 @@ export function MailAgentClient() {
         </div>
       )}
     </div>
+    </FieldHintProvider>
   );
 }

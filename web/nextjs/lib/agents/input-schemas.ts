@@ -4,6 +4,7 @@ import type { Agent } from "@/lib/types/agent";
 export type AgentFieldType =
   | "text"
   | "textarea"
+  | "tags"
   | "number"
   | "select"
   | "checkbox"

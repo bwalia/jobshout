@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { FieldHint, FieldLabel } from "@/components/ui/field-hint";
+import { TagInput } from "@/components/ui/TagInput";
 import { apiErrorMessage } from "@/lib/api/client";
 import { addCareerBlacklist, uploadCareerCV, upsertCareerStory } from "@/lib/api/career";
 import type { CareerBlacklistEntry, CareerStory } from "@/types/career";
@@ -36,8 +37,8 @@ export function CareerProfilePanel({
   setFullName: (v: string) => void;
   sponsorship: boolean;
   setSponsorship: (v: boolean) => void;
-  titles: string;
-  setTitles: (v: string) => void;
+  titles: string[];
+  setTitles: (v: string[]) => void;
   minComp: string;
   setMinComp: (v: string) => void;
   houseRules: string;
@@ -49,7 +50,7 @@ export function CareerProfilePanel({
   savedFlash: boolean;
   onSave: () => void;
   onFillFromCV: () => void;
-  onReload: () => Promise<void>;
+  onReload: (opts?: { preserveDrafts?: boolean }) => Promise<void>;
   onError: (msg: string) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
@@ -68,7 +69,7 @@ export function CareerProfilePanel({
       const prop = await uploadCareerCV(file);
       if (prop.patch.cv_markdown) setCvDraft(prop.patch.cv_markdown);
       if (prop.patch.identity?.full_name) setFullName(prop.patch.identity.full_name);
-      await onReload();
+      await onReload({ preserveDrafts: true });
       toast.success("CV PDF saved.");
     } catch (e: unknown) {
       const msg = apiErrorMessage(e, "Could not read that file.");
@@ -110,15 +111,16 @@ export function CareerProfilePanel({
       <div>
         <FieldLabel
           htmlFor="career-titles"
-          label="Target titles (comma-separated)"
-          hint="Roles you want, e.g. Head of AI, Staff engineer. Used to filter portal scans and judge fit."
+          label="Target titles"
+          hint="Roles you want, e.g. Head of AI, Staff engineer. Type one and press Enter. Used to filter portal scans and judge fit."
         />
-        <input
+        <TagInput
           id="career-titles"
           value={titles}
-          onChange={(e) => setTitles(e.target.value)}
-          className="w-full max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm"
-          placeholder="Head of AI, Staff engineer"
+          onChange={setTitles}
+          disabled={busy}
+          size="lg"
+          placeholder="Head of AI"
         />
       </div>
       <div>
@@ -146,7 +148,7 @@ export function CareerProfilePanel({
           value={houseRules}
           onChange={(e) => setHouseRules(e.target.value)}
           rows={3}
-          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          className="w-full min-h-[4.5rem] resize-y rounded-md border border-input bg-background px-3 py-2 text-sm"
           placeholder="Scoring overrides. Floors cannot drop below 4.0 / 4.5."
         />
       </div>

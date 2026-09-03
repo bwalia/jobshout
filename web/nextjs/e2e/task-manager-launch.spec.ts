@@ -53,6 +53,9 @@ test.describe("Task Manager launch fields", () => {
     });
     await expect(page.getByText("How to answer").first()).toBeVisible();
     await expect(page.locator("#agent-field-senders")).toBeVisible();
+    await page.locator("#agent-field-senders").fill("ops@example.com");
+    await page.locator("#agent-field-senders").press("Enter");
+    await expect(page.getByRole("button", { name: "Remove ops@example.com" })).toBeVisible();
     await expect(page.locator("#agent-field-knowledge_notes")).toBeVisible();
     await expect(page.locator("#agent-field-knowledge_urls")).toBeVisible();
 

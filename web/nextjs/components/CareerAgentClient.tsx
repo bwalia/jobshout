@@ -77,7 +77,7 @@ export function CareerAgentClient() {
   const [cvDraft, setCvDraft] = useState("");
   const [fullName, setFullName] = useState("");
   const [sponsorship, setSponsorship] = useState(false);
-  const [titles, setTitles] = useState("");
+  const [titles, setTitles] = useState<string[]>([]);
   const [minComp, setMinComp] = useState("");
   const [houseRules, setHouseRules] = useState("");
   const [scanBoard, setScanBoard] = useState("all");
@@ -88,7 +88,7 @@ export function CareerAgentClient() {
   const selected = jobs.find((j) => j.key === selectedKey) ?? null;
   const hasCV = Boolean(profile?.cv_markdown?.trim() || cvDraft.trim());
 
-  const loadAll = useCallback(async () => {
+  const loadAll = useCallback(async (opts?: { preserveDrafts?: boolean }) => {
     const [p, d, e, pipe, apps, ports, bl, st, pat] = await Promise.all([
       getCareerProfile(),
       careerDoctor(),
@@ -102,11 +102,16 @@ export function CareerAgentClient() {
     ]);
     setProfile(p);
     setCvDraft(p.cv_markdown ?? "");
-    setFullName(p.identity?.full_name ?? "");
-    setSponsorship(!!p.work_auth?.needs_sponsorship);
-    setTitles((p.targets?.titles ?? []).join(", "));
-    setMinComp(p.targets?.min_comp ?? "");
-    setHouseRules(p.house_rules ?? "");
+    if (opts?.preserveDrafts) {
+      // CV upload writes the PDF immediately; keep unsaved titles and rules.
+      setFullName((prev) => prev.trim() || p.identity?.full_name || "");
+    } else {
+      setFullName(p.identity?.full_name ?? "");
+      setSponsorship(!!p.work_auth?.needs_sponsorship);
+      setTitles(p.targets?.titles ?? []);
+      setMinComp(p.targets?.min_comp ?? "");
+      setHouseRules(p.house_rules ?? "");
+    }
     setDoctor(d);
     setEvals(e.data ?? []);
     setPipeline(pipe.data ?? []);
@@ -168,10 +173,7 @@ export function CareerAgentClient() {
         work_auth: { ...(profile?.work_auth ?? {}), needs_sponsorship: sponsorship },
         targets: {
           ...(profile?.targets ?? {}),
-          titles: titles
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean),
+          titles,
           min_comp: minComp,
         },
         house_rules: houseRules,
@@ -552,8 +554,8 @@ export function CareerAgentClient() {
             savedFlash={savedFlash}
             onSave={() => void saveProfile()}
             onFillFromCV={() => void fillFromCV()}
-            onReload={async () => {
-              await loadAll();
+            onReload={async (opts) => {
+              await loadAll(opts);
             }}
             onError={setError}
           />
