@@ -110,8 +110,10 @@ export function MailAgentClient() {
   const [draftBody, setDraftBody] = useState("");
   const [error, setError] = useState("");
   const [syncNote, setSyncNote] = useState("");
+  const [saveNote, setSaveNote] = useState("");
   const [polling, setPolling] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [savingRules, setSavingRules] = useState(false);
   const [senders, setSenders] = useState("");
   const [prefixes, setPrefixes] = useState("");
   const [labels, setLabels] = useState("");
@@ -254,7 +256,9 @@ export function MailAgentClient() {
 
   async function saveRules() {
     setBusy(true);
+    setSavingRules(true);
     setError("");
+    setSaveNote("");
     try {
       const split = (s: string) =>
         s
@@ -276,9 +280,11 @@ export function MailAgentClient() {
         reply_instructions: replyInstructions,
       });
       await loadConnection();
+      setSaveNote("Rules saved. The next Sync now will use these filters and playbook.");
     } catch (e: unknown) {
       setError(apiErrorMessage(e, "Could not save rules."));
     } finally {
+      setSavingRules(false);
       setBusy(false);
     }
   }
@@ -502,14 +508,19 @@ export function MailAgentClient() {
                 optional extra pages researched on top of them; with neither,
                 drafts fall back to open-web research.
               </p>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void saveRules()}
-                className="w-fit rounded-md border border-border px-3 py-1.5 text-xs hover:bg-muted"
-              >
-                Save rules
-              </button>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void saveRules()}
+                  className="w-fit rounded-md border border-border px-3 py-1.5 text-xs hover:bg-muted disabled:opacity-50"
+                >
+                  {savingRules ? "Saving…" : "Save rules"}
+                </button>
+                {saveNote ? (
+                  <p className="text-xs text-emerald-700 dark:text-emerald-400">{saveNote}</p>
+                ) : null}
+              </div>
             </div>
           </div>
         )}
