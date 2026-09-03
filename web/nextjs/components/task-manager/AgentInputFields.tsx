@@ -172,6 +172,7 @@ function Field({
           onChange={(tags) => onChange(tags.join(", "))}
           placeholder={field.placeholder}
           disabled={disabled}
+          size={field.key === "senders" || field.key === "titles" ? "lg" : "md"}
           className={error ? "border-destructive" : undefined}
         />
       ) : (
