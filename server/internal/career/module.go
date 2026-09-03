@@ -43,6 +43,16 @@ func Module(eval Evaluator) agentmodule.Module {
 			}
 			vals["jd_text"] = prompt
 		},
+		Requirements: []agentmodule.Requirement{{
+			Key: "career_profile", Kind: "config",
+			Message: "Career profiles, CVs, and pipeline are per user and are not included. Complete Profile on Career Agent after import.",
+		}},
+		Ready: func(context.Context, uuid.UUID) []agentmodule.Issue {
+			return []agentmodule.Issue{{
+				Severity: "warning", Code: "career_profile",
+				Message: "Career profiles, CVs, and pipeline are per user and are not included. Complete Profile on Career Agent after import.",
+			}}
+		},
 	}
 }
 

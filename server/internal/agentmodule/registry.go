@@ -46,6 +46,29 @@ type Module struct {
 	// InstallTools registers extra chat tools. Signature is untyped so this
 	// package does not import platformtools; the chat registry passes (reg, deps).
 	InstallTools func(reg, deps any)
+
+	// Requirements are destination checks declared by the specialist (Gmail,
+	// Strix, a career profile). Import/export iterates these — do not add a
+	// per-builtin switch in the pack service.
+	Requirements []Requirement
+
+	// Ready is a live check for this org. Never return secrets. Nil is fine.
+	Ready func(ctx context.Context, orgID uuid.UUID) []Issue
+}
+
+// Requirement is a static dependency the specialist needs on the destination.
+type Requirement struct {
+	Key      string // gmail_oauth, strix, career_profile, github_integration
+	Kind     string // integration | capability | config
+	Blocking bool
+	Message  string
+}
+
+// Issue is a preview finding produced by Ready or by the pack service.
+type Issue struct {
+	Severity string // error | warning | info
+	Code     string
+	Message  string
 }
 
 var (

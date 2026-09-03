@@ -32,6 +32,26 @@ func Module(run Runner) agentmodule.Module {
 		Schema:   schema(),
 		Seed:     Seed,
 		Launch:   launch(run),
+		Requirements: []agentmodule.Requirement{{
+			Key: "github_integration", Kind: "integration",
+			Message: "GitHub credentials are not included. PR review must be enabled on this JobShout.",
+		}},
+		Ready: func(context.Context, uuid.UUID) []agentmodule.Issue {
+			if run == nil {
+				return []agentmodule.Issue{{
+					Severity: "warning", Code: "review_unconfigured",
+					Message: "PR review is not enabled on this environment.",
+				}}
+			}
+			type enabler interface{ Enabled() bool }
+			if e, ok := run.(enabler); ok && !e.Enabled() {
+				return []agentmodule.Issue{{
+					Severity: "warning", Code: "review_unconfigured",
+					Message: "PR review is not enabled on this environment.",
+				}}
+			}
+			return nil
+		},
 	}
 }
 
