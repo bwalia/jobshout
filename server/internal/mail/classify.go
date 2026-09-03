@@ -81,7 +81,7 @@ Return JSON:
 }
 
 needs_research is true when a useful reply needs current facts from the web (versions, outages, docs, prices) that are not already in the email, or when the email includes a product/docs URL that should be read before drafting. Small talk, thanks, scheduling, and newsletters do not need research.
-suggested_action is ignore for newsletters, bounce mail, no-reply notifications, and obvious spam.
+suggested_action is ignore for newsletters, bounce mail, no-reply notifications, and obvious spam — unless the operator is clearly watching this thread (matching sender or subject), in which case suggested_action must be reply.
 
 From: %s <%s>
 To: %s

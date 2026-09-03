@@ -28,6 +28,30 @@ func TestRulesQueryIncludesSenders(t *testing.T) {
 	}
 }
 
+func TestWatchMatchesSubjectPrefixOTP(t *testing.T) {
+	msg := InboxMessage{
+		FromName:  "Diy Tax Return",
+		FromEmail: "noreply@diytaxreturn.co.uk",
+		Subject:   "[INT] Your DIY Tax Return Verification Code",
+	}
+	if !WatchMatches(msg, nil, []string{"Balinder Walia", "Sukhvir Singh"}, []string{"[INT] Your DIY Tax Return Verification Code"}) {
+		t.Fatal("exact subject prefix must match even when senders do not")
+	}
+	if WatchMatches(msg, nil, []string{"Balinder Walia"}, nil) {
+		t.Fatal("unrelated sender must not match")
+	}
+}
+
+func TestHonorOperatorWatchOverridesIgnore(t *testing.T) {
+	got := HonorOperatorWatch(ClassifyResult{SuggestedAction: "ignore", Intent: "fyi", Reason: "noreply"})
+	if got.SuggestedAction != "reply" {
+		t.Fatalf("action %q", got.SuggestedAction)
+	}
+	if got.Reason != "Operator watch rule matched; do not ignore." {
+		t.Fatalf("reason %q", got.Reason)
+	}
+}
+
 func TestRulesQueryQuotesDisplayNames(t *testing.T) {
 	q := RulesQuery(nil, []string{"Balinder Walia", "Sukhvir Singh"}, []string{"[INT] OTP"})
 	want := `in:inbox newer_than:7d (from:"Balinder Walia" OR from:"Sukhvir Singh" OR subject:"[INT] OTP")`

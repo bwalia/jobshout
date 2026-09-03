@@ -460,3 +460,60 @@ func RulesQuery(labels, senders, prefixes []string) string {
 	}
 	return SearchQuery("(" + strings.Join(parts, " OR ") + ")")
 }
+
+func hasWatchRule(labels, senders, prefixes []string) bool {
+	for _, xs := range [][]string{labels, senders, prefixes} {
+		for _, x := range xs {
+			if strings.TrimSpace(x) != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// WatchMatches is true when the operator asked to watch this mail (sender,
+// subject prefix, or Gmail label). Labels are applied in the Gmail query, so
+// a labels-only playbook treats every ingested message as a match.
+func WatchMatches(msg InboxMessage, labels, senders, prefixes []string) bool {
+	if !hasWatchRule(labels, senders, prefixes) {
+		return false
+	}
+	fromEmail := strings.ToLower(strings.TrimSpace(msg.FromEmail))
+	fromName := strings.ToLower(strings.TrimSpace(msg.FromName))
+	for _, s := range senders {
+		s = strings.ToLower(strings.TrimSpace(s))
+		if s == "" {
+			continue
+		}
+		if strings.Contains(fromEmail, s) || strings.Contains(fromName, s) {
+			return true
+		}
+	}
+	subj := strings.ToLower(strings.TrimSpace(msg.Subject))
+	for _, p := range prefixes {
+		p = strings.ToLower(strings.TrimSpace(p))
+		if p != "" && strings.HasPrefix(subj, p) {
+			return true
+		}
+	}
+	if len(senders) == 0 && len(prefixes) == 0 {
+		return true
+	}
+	return false
+}
+
+// HonorOperatorWatch keeps triage from discarding mail the operator
+// explicitly watched. OTP / no-reply / "notification" heuristics otherwise
+// mark those threads ignored after a successful Gmail match.
+func HonorOperatorWatch(c ClassifyResult) ClassifyResult {
+	if c.SuggestedAction != "ignore" {
+		return c
+	}
+	c.SuggestedAction = "reply"
+	if c.Intent == "spam" {
+		c.Intent = "request"
+	}
+	c.Reason = "Operator watch rule matched; do not ignore."
+	return c
+}

@@ -570,7 +570,10 @@ func (s *mailService) upsertThreadFromMessage(ctx context.Context, c *model.Mail
 		return nil, false, err
 	}
 	if existing != nil && existing.Status != model.MailThreadNew && existing.Status != model.MailThreadFailed {
-		return existing, true, nil
+		watched := mail.WatchMatches(msg, c.WatchLabels, c.WatchSenders, c.WatchSubjectPrefixes)
+		if existing.Status != model.MailThreadIgnored || !watched {
+			return existing, true, nil
+		}
 	}
 	th := existing
 	if th == nil {
@@ -677,6 +680,9 @@ func (s *mailService) processThread(ctx context.Context, th *model.MailThread, m
 	class, err := s.classifier.Classify(ctx, msg)
 	if err != nil {
 		return s.failThread(ctx, th, err)
+	}
+	if c != nil && mail.WatchMatches(msg, c.WatchLabels, c.WatchSenders, c.WatchSubjectPrefixes) {
+		class = mail.HonorOperatorWatch(class)
 	}
 	th.Classification = &class
 	th.NeedsResearch = class.NeedsResearch

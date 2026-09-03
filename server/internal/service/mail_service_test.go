@@ -730,6 +730,89 @@ func TestProcessIgnoreMailDoesNotResearchEvenWithPinnedURLs(t *testing.T) {
 	}
 }
 
+func TestProcessDoesNotIgnoreMailMatchingWatchPrefix(t *testing.T) {
+	class := scriptClass{result: mail.ClassifyResult{
+		Intent: "fyi", NeedsResearch: false, SuggestedAction: "ignore",
+		Reason: "no-reply notification", TriageLabel: "notification", Urgency: "low",
+	}}
+	gmail := &fakeGmail{
+		email:  "org@example.com",
+		tokens: mail.TokenSet{AccessToken: "a", RefreshToken: "r", Expiry: time.Now().Add(time.Hour)},
+		messages: []mail.InboxMessage{{
+			GmailThreadID: "th-otp",
+			FromEmail:     "noreply@diytaxreturn.co.uk",
+			FromName:      "Diy Tax Return",
+			Subject:       "[INT] Your DIY Tax Return Verification Code",
+			Body:          "Your code is 123456.",
+		}},
+	}
+	svc, repo, orgID := setupMail(t, gmail, class, nil)
+	connectOrg(t, svc, repo, orgID)
+	c, _ := repo.GetConnectionByOrg(context.Background(), orgID)
+	c.WatchSenders = []string{"Balinder Walia", "Sukhvir Singh"}
+	c.WatchSubjectPrefixes = []string{"[INT] Your DIY Tax Return Verification Code"}
+	if err := repo.UpsertConnection(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.SyncNow(context.Background(), orgID); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := repo.ListThreads(context.Background(), orgID, model.PaginationParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Data) != 1 {
+		t.Fatalf("threads %d", len(listed.Data))
+	}
+	if listed.Data[0].Status == model.MailThreadIgnored {
+		t.Fatal("operator-watched subject prefix must not be ignored")
+	}
+	if listed.Data[0].Status != model.MailThreadDraftReady {
+		t.Fatalf("status %q", listed.Data[0].Status)
+	}
+}
+
+func TestProcessReopensIgnoredThreadWhenWatchPrefixMatches(t *testing.T) {
+	class := scriptClass{result: mail.ClassifyResult{
+		Intent: "fyi", SuggestedAction: "ignore", Reason: "notification", TriageLabel: "notification",
+	}}
+	gmail := &fakeGmail{
+		email:  "org@example.com",
+		tokens: mail.TokenSet{AccessToken: "a", RefreshToken: "r", Expiry: time.Now().Add(time.Hour)},
+		messages: []mail.InboxMessage{{
+			GmailThreadID: "th-otp-reopen",
+			FromEmail:     "noreply@diytaxreturn.co.uk",
+			FromName:      "Diy Tax Return",
+			Subject:       "[INT] Your DIY Tax Return Verification Code",
+			Body:          "Your code is 123456.",
+		}},
+	}
+	svc, repo, orgID := setupMail(t, gmail, class, nil)
+	connectOrg(t, svc, repo, orgID)
+	c, _ := repo.GetConnectionByOrg(context.Background(), orgID)
+	if err := repo.UpsertThread(context.Background(), &model.MailThread{
+		OrgID: c.OrgID, ConnectionID: c.ID, Status: model.MailThreadIgnored,
+		GmailThreadID: "th-otp-reopen", FromEmail: "noreply@diytaxreturn.co.uk",
+		Subject: "[INT] Your DIY Tax Return Verification Code", BodyText: "Your code is 123456.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	c.WatchSubjectPrefixes = []string{"[INT] Your DIY Tax Return Verification Code"}
+	if err := repo.UpsertConnection(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.SyncNow(context.Background(), orgID); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := repo.ListThreads(context.Background(), orgID, model.PaginationParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Data) != 1 || listed.Data[0].Status == model.MailThreadIgnored {
+		t.Fatalf("ignored+watched thread must be reopened, got %+v", listed.Data)
+	}
+}
+
 func TestUpdateConnectionRoundTripsKnowledgePlaybook(t *testing.T) {
 	svc, repo, orgID := setupMail(t, &fakeGmail{}, nil, nil)
 	urls := []string{"https://example.com/pricing", "http://docs.example.com/sla"}
