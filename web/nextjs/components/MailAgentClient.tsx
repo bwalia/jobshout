@@ -6,6 +6,7 @@ import { apiClient, apiErrorMessage } from "@/lib/api/client";
 import type {
   MailConnectionStatus,
   MailDraft,
+  MailSyncResult,
   MailThread,
   MailThreadDetail,
   PaginatedMailThreads,
@@ -108,6 +109,7 @@ export function MailAgentClient() {
   const [selected, setSelected] = useState<MailThreadDetail | null>(null);
   const [draftBody, setDraftBody] = useState("");
   const [error, setError] = useState("");
+  const [syncNote, setSyncNote] = useState("");
   const [polling, setPolling] = useState(false);
   const [busy, setBusy] = useState(false);
   const [senders, setSenders] = useState("");
@@ -215,8 +217,23 @@ export function MailAgentClient() {
   async function syncNow() {
     setBusy(true);
     setError("");
+    setSyncNote("");
     try {
-      await apiClient.post("/mail/sync");
+      const { data } = await apiClient.post<MailSyncResult>("/mail/sync");
+      if (data.listed === 0) {
+        setSyncNote(
+          `Gmail returned no conversations for: ${data.query || "in:inbox newer_than:7d"}. ` +
+            "Clear watch senders, labels, or subject prefixes if you expected mail, then Sync now again.",
+        );
+      } else if (data.ingested === 0) {
+        setSyncNote(
+          `Gmail listed ${data.listed} conversation(s); all were already in this inbox.`,
+        );
+      } else {
+        setSyncNote(
+          `Pulled ${data.ingested} new conversation(s) from Gmail. Drafts appear as the agent finishes each one.`,
+        );
+      }
       setPolling(true);
       window.setTimeout(() => setPolling(false), 20000);
       await loadThreads();
@@ -382,6 +399,9 @@ export function MailAgentClient() {
             {connection.status === "error" && connection.status_error ? (
               <p className="text-sm text-destructive">{connection.status_error}</p>
             ) : null}
+            {syncNote ? (
+              <p className="text-sm text-muted-foreground">{syncNote}</p>
+            ) : null}
             {connection.last_sync_at && (
               <p className="text-xs text-muted-foreground">
                 Last sync {new Date(connection.last_sync_at).toLocaleString()}
@@ -407,7 +427,7 @@ export function MailAgentClient() {
             </div>
             <div className="grid gap-2 text-sm">
               <label className="text-xs text-muted-foreground">
-                Watch senders (comma-separated, empty = all unread)
+                Watch senders (comma-separated emails or names, empty = recent inbox)
                 <input
                   value={senders}
                   onChange={(e) => setSenders(e.target.value)}
@@ -503,7 +523,11 @@ export function MailAgentClient() {
             means a draft is ready for review. Ignored mail is dimmed.
           </p>
           {threads.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No threads yet. Sync now to pull unread mail.</p>
+            <p className="text-sm text-muted-foreground">
+              No threads yet. Sync now pulls the last 7 days of inbox mail
+              matching your watch rules. Leave senders, labels, and subject
+              prefixes empty to pull everything recent.
+            </p>
           ) : (
             <ul className="divide-y divide-border">
               {threads.map((t) => {

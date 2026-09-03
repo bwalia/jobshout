@@ -40,6 +40,13 @@ export interface MailConnectionStatus {
   agent_id?: string | null;
 }
 
+export interface MailSyncResult {
+  status: string;
+  query: string;
+  listed: number;
+  ingested: number;
+}
+
 export interface MailClassification {
   intent: string;
   needs_research: boolean;

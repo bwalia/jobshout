@@ -160,11 +160,12 @@ func (h *MailHandler) Sync(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.svc.EnqueueSync(r.Context(), orgID); err != nil {
+	out, err := h.svc.SyncInbox(r.Context(), orgID)
+	if err != nil {
 		h.writeErr(w, err)
 		return
 	}
-	RespondJSON(w, http.StatusAccepted, map[string]string{"status": "queued"})
+	RespondJSON(w, http.StatusOK, out)
 }
 
 // ListThreads GET /api/v1/mail/threads

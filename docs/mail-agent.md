@@ -10,7 +10,7 @@ notification adapter.
 ## What it does
 
 ```
-Inbox (poll / Sync now)
+Inbox (poll / Sync now — Gmail `users.messages.list`, last 7 days)
   → Mail Agent classifies
       → optional: Research Agent (typed research.Request)
       → draft stored in JobShout (not sent)
@@ -20,6 +20,13 @@ Inbox (poll / Sync now)
 
 The agent is seeded like Research / Security Tester (`builtin: mail`). New orgs
 get it from registration; existing orgs from migration `000033_mail_agent`.
+
+Sync talks to the Gmail REST API (`users.messages.list` / `get` / `send`) with
+an OAuth refresh token. **Sync now** lists the last 7 days of INBOX mail
+immediately and returns how many conversations Gmail matched. Watch senders
+that contain spaces are quoted (`from:"Balinder Walia"`) so Gmail does not
+parse them as two terms. Already-ingested threads are skipped; classify and
+draft still run in the background reconciler.
 
 ## Google Cloud (ops prerequisite)
 
