@@ -1,3 +1,4 @@
+import axios from "axios";
 import { API_BASE_URL, apiClient } from "@/lib/api/client";
 
 export interface AuthUser {
@@ -97,53 +98,6 @@ export async function fetchCurrentUser(): Promise<AuthUser | null> {
   }
 }
 
-export function googleAuthStartHref(opts?: {
-  intent?: "login" | "signup";
-  orgName?: string;
-}): string {
-  const params = new URLSearchParams();
-  params.set("intent", opts?.intent ?? "login");
-  const orgName = opts?.orgName?.trim();
-  if (orgName) params.set("org_name", orgName);
-  const qs = params.toString();
-  const path = `/api/v1/auth/google/start?${qs}`;
-
-  // Cluster nginx serves UI and API on one host at /api/v1. Helm's
-  // publicApiURL is often `https://<host>/api`, and concatenating /api/v1
-  // onto that would 404. Same-origin /api/v1 is the public callback path.
-  // Locally the UI (:3001) and API (:8190) differ, so use the API origin.
-  if (typeof window !== "undefined") {
-    const env = API_BASE_URL.replace(/\/$/, "");
-    try {
-      const api = new URL(env);
-      if (api.origin !== window.location.origin) {
-        return `${env}${path}`;
-      }
-    } catch {
-      // fall through to same-origin
-    }
-    return `${window.location.origin}${path}`;
-  }
-  return path;
-}
-
-export async function fetchGoogleAuthEnabled(): Promise<boolean> {
-  try {
-    const { data } = await apiClient.get<{ enabled: boolean }>("/auth/google/status");
-    return Boolean(data.enabled);
-  } catch {
-    return false;
-  }
-}
-
-export async function completeGoogleAuth(ticket: string): Promise<AuthResponse> {
-  const { data } = await apiClient.post<AuthResponse>("/auth/google/complete", {
-    ticket,
-  });
-  setTokens(data.access_token, data.refresh_token);
-  return data;
-}
-
 export function googleAuthErrorMessage(code: string | null): string | null {
   if (!code) return null;
   switch (code) {
@@ -159,5 +113,72 @@ export function googleAuthErrorMessage(code: string | null): string | null {
       return "Google sign-in did not complete. Try again.";
     default:
       return "Google sign-in failed. Try again.";
+  }
+}
+
+export class GoogleAuthCompleteError extends Error {
+  constructor(readonly code: "expired" | "failed") {
+    super(code === "expired" ? "Google sign-in expired. Try again." : "Google sign-in failed. Try again.");
+    this.name = "GoogleAuthCompleteError";
+  }
+}
+
+/** API v1 root for Google OAuth browser calls (status, start, complete). */
+export function authApiV1Base(): string {
+  const env = API_BASE_URL.replace(/\/$/, "");
+  if (typeof window !== "undefined") {
+    try {
+      if (env) {
+        const api = new URL(env);
+        if (api.origin !== window.location.origin) {
+          return `${env}/api/v1`;
+        }
+      }
+    } catch {
+      // Empty NEXT_PUBLIC_API_URL in cluster image builds.
+    }
+    return `${window.location.origin}/api/v1`;
+  }
+  return env ? `${env}/api/v1` : "/api/v1";
+}
+
+export function googleAuthStartHref(opts?: {
+  intent?: "login" | "signup";
+  orgName?: string;
+}): string {
+  const params = new URLSearchParams();
+  params.set("intent", opts?.intent ?? "login");
+  const orgName = opts?.orgName?.trim();
+  if (orgName) params.set("org_name", orgName);
+  return `${authApiV1Base()}/auth/google/start?${params.toString()}`;
+}
+
+export async function fetchGoogleAuthEnabled(): Promise<boolean> {
+  try {
+    // Plain axios: a stale Bearer on apiClient must not 401-refresh this public probe.
+    const { data } = await axios.get<{ enabled: boolean }>(
+      `${authApiV1Base()}/auth/google/status`
+    );
+    return Boolean(data.enabled);
+  } catch {
+    return false;
+  }
+}
+
+export async function completeGoogleAuth(ticket: string): Promise<AuthResponse> {
+  try {
+    // Do not use apiClient: its 401 interceptor redirects to /login and
+    // swallows an expired ticket before the callback page can explain it.
+    const { data } = await axios.post<AuthResponse>(
+      `${authApiV1Base()}/auth/google/complete`,
+      { ticket }
+    );
+    setTokens(data.access_token, data.refresh_token);
+    return data;
+  } catch (err) {
+    if (axios.isAxiosError(err) && err.response?.status === 401) {
+      throw new GoogleAuthCompleteError("expired");
+    }
+    throw new GoogleAuthCompleteError("failed");
   }
 }

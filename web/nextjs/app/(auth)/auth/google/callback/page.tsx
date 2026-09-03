@@ -2,7 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { completeGoogleAuth } from "@/lib/auth/auth";
+import {
+  completeGoogleAuth,
+  GoogleAuthCompleteError,
+} from "@/lib/auth/auth";
 import { useAuthStore } from "@/lib/store/auth-store";
 
 export default function GoogleCallbackPage() {
@@ -13,7 +16,7 @@ export default function GoogleCallbackPage() {
   useEffect(() => {
     const ticket = new URLSearchParams(window.location.search).get("ticket");
     if (!ticket) {
-      setError("Missing sign-in ticket. Start again from the login page.");
+      router.replace("/login?error=missing_code");
       return;
     }
     let cancelled = false;
@@ -23,10 +26,17 @@ export default function GoogleCallbackPage() {
         if (cancelled) return;
         setUser(data.user);
         router.replace("/chat");
-      } catch {
-        if (!cancelled) {
-          setError("Google sign-in could not be completed. Try again.");
+      } catch (err) {
+        if (cancelled) return;
+        if (err instanceof GoogleAuthCompleteError && err.code === "expired") {
+          router.replace("/login?error=invalid_state");
+          return;
         }
+        setError(
+          err instanceof GoogleAuthCompleteError
+            ? err.message
+            : "Google sign-in could not be completed. Try again."
+        );
       }
     })();
     return () => {
