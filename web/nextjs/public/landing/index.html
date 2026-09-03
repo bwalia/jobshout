@@ -3,22 +3,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>JobShout · Quick jobs, done by AI agents</title>
-<meta name="description" content="Brief a job in chat. Specialist AI agents run it with real tools, stream every step live, and wait for your approval on anything irreversible.">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230d0c0a'/><circle cx='16' cy='16' r='5' fill='%232ee6a0'/></svg>">
+<title>AI teammates that finish the work | JobShout</title>
+<meta name="description" content="Specialist AI agents you can give real work to. They sign into your tools, run the job live, and come back when your approval is needed.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230a0a0b'/><circle cx='16' cy='16' r='5' fill='%232ee6a0'/></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
 <link rel="stylesheet" href="/landing/scrollcraft.css">
 <link rel="stylesheet" href="/landing/app.css">
 <noscript><style>
-  /* Without JS the page reads as a finished story: every state shown settled. */
   [data-sc-cue], [data-sc-in], [data-sc-stagger] > * { opacity: 1 !important; transform: none !important; }
   [data-sc-reveal] { clip-path: none !important; }
-  .msg, .plan, .row, .artifact { opacity: 1 !important; transform: none !important; }
-  .hello { position: static !important; padding: 0 0 24px !important; }
-  .composer, .ticket__time, .pane__empty { display: none; }
-  .console__meter-fill { transform: none !important; }
+  .scene, .bubble, .cursor, .toast, .job__panel { opacity: 1 !important; transform: none !important; visibility: visible !important; }
+  .composer, .desk__empty { display: none; }
 </style></noscript>
 </head>
 <body>
@@ -27,308 +24,357 @@
 <div class="sc-grain" aria-hidden="true"></div>
 
 <header class="bar">
-  <a class="bar__mark" href="#witness" aria-label="JobShout, back to top">
+  <a class="bar__mark" href="#top" aria-label="JobShout, back to top">
     <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><rect width="18" height="18" rx="4.5" fill="var(--sc-ink)"/><circle cx="9" cy="9" r="3.2" fill="var(--sc-canvas)"/><circle cx="9" cy="9" r="3.2" fill="var(--sc-accent)" opacity="0.9"/></svg>
     <span>JobShout</span>
   </a>
-  <span class="bar__env sc-label" title="Everything on this page computes from sample data in the page itself."><span class="env-full">sample run · illustrative data</span><span class="env-short">sample data</span></span>
   <nav class="bar__nav" aria-label="Account">
-    <a class="bar__signin" href="/login">Sign in</a>
+    <a class="bar__link" href="/login">Sign in</a>
     <a class="btn btn--pill" href="/signup">Shout a job</a>
   </nav>
 </header>
 
 <main id="top">
 
-  <!-- ═══ ACT 1 · WITNESS · pin ═══════════════════════════════════════════
-       The console is already on when you land. Scrolling types the brief,
-       sends it, and watches an agent pick it up and plan. -->
-  <section id="witness" data-sc-act="pin" data-sc-span="2.6" data-sc-drift="#0d0c0a" aria-label="Demo: briefing a job">
-    <div data-sc-stage>
-      <div class="stage-center">
-        <div class="console" id="console1" data-sc-verify-state="phase:0">
-          <div class="console__head">
-            <span class="console__app mono">jobshout / new job</span>
-            <span class="chip" id="run-status" data-state="wait">queued to run</span>
-          </div>
-          <div class="console__body console__body--hero">
-
-            <section class="pane pane--chat" aria-label="Job chat">
-              <div class="thread">
-                <div class="hello" id="hello">
-                  <h1 class="hello__title">Shout a job.<br>Watch it get done.</h1>
-                  <p class="hello__sub">Automations, one-off tasks, small workflows. Specialist AI agents run them live, and anything irreversible waits for you.</p>
-                  <p class="hello__cta"><a class="btn btn--pill btn--lg" href="/signup">Shout a job</a></p>
-                </div>
-                <div class="msg msg--user" id="msg-brief">
-                  <p>Pull last month's invoices, chase the two that are overdue, and send me a one-page summary.</p>
-                </div>
-                <div class="msg msg--agent" id="msg-pickup">
-                  <span class="msg__who mono">Ledger</span>
-                  <p>Picked up. Courier will handle the emails. Drafting a plan now.</p>
-                </div>
-              </div>
-              <div class="composer" aria-hidden="true">
-                <p class="composer__field mono" id="typer" data-text="Pull last month's invoices, chase the two that are overdue, and send me a one-page summary."><span class="composer__ph">Describe the job</span><span class="composer__typed"></span><span class="caret"></span></p>
-                <span class="composer__send btn btn--pill btn--sm">Send</span>
-              </div>
-            </section>
-
-            <section class="pane pane--side" aria-label="Run activity">
-              <div class="pane__empty pane__empty--run" id="side-empty">
-                <p class="mono">no run yet</p>
-                <p>Activity streams here the moment a job starts.</p>
-              </div>
-              <div class="plan" id="plan">
-                <p class="plan__head mono">plan · drafted by Ledger</p>
-                <ol class="plan__list">
-                  <li class="plan__item"><span class="tick" aria-hidden="true"></span>Fetch July invoices</li>
-                  <li class="plan__item"><span class="tick" aria-hidden="true"></span>Flag overdue, draft chasers</li>
-                  <li class="plan__item"><span class="tick" aria-hidden="true"></span>Send chasers <span class="plan__gate mono">needs your approval</span></li>
-                  <li class="plan__item"><span class="tick" aria-hidden="true"></span>Write the one-page summary</li>
-                </ol>
-              </div>
-            </section>
-
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ═══ ACT 2 · RECOGNITION · flow ═══════════════════════════════════════
-       The one document-like moment: a compact help pane, three lines. -->
-  <section id="how" class="sc-section sc-section--after-pin" data-sc-act="flow" aria-label="What JobShout is">
-    <div class="sc-wrap how" data-sc-in data-sc-stagger="70">
-      <p class="how__tab mono" aria-hidden="true">jobshout / help</p>
-      <h2 class="h-med">What you just watched</h2>
-      <ol class="how__list">
-        <li>
-          <span class="how__n mono" aria-hidden="true">01</span>
-          <div><h3>Brief it in chat</h3><p class="p-soft">A sentence is enough. Add files, links or a schedule if you have one.</p></div>
-        </li>
-        <li>
-          <span class="how__n mono" aria-hidden="true">02</span>
-          <div><h3>Agents run it</h3><p class="p-soft">Each agent brings its own tools and skills. Every step streams as it happens.</p></div>
-        </li>
-        <li>
-          <span class="how__n mono" aria-hidden="true">03</span>
-          <div><h3>You hold the gate</h3><p class="p-soft">Risky steps pause and wait for your sign-off. Nothing ships behind your back.</p></div>
-        </li>
-      </ol>
-      <p class="how__note">Not a chatbot. Agents execute: real tool calls, real workflows, results you can open.</p>
-    </div>
-  </section>
-
-  <!-- ═══ ACT 3 · RANGE · pan ═════════════════════════════════════════════
-       The roster travels sideways: options, not an argument. -->
-  <section id="roster" data-sc-act="pan" data-sc-span="2.6" aria-label="Agent roster">
-    <div data-sc-stage>
-      <div class="rail" data-sc-pan="0.06">
-
-        <div class="rail__lead">
-          <h2 class="h-med">Pick the agent.<br>Or several.</h2>
-          <p class="p-soft">A sample of today's board. Every agent lists its skills, its tools, and the limits you set.</p>
-        </div>
-
-        <article class="agent" style="--i:1">
-          <div class="agent__in" data-sc-tilt="6">
-            <header class="agent__head"><h3>Ledger</h3><span class="dot dot--ok" title="available"></span></header>
-            <p class="agent__role p-soft">Billing and reconciliation</p>
-            <ul class="agent__skills" aria-label="Skills"><li>invoices</li><li>dunning</li><li>reports</li></ul>
-            <p class="agent__tools mono">stripe · sheets · email</p>
-          </div>
-        </article>
-
-        <article class="agent" style="--i:2">
-          <div class="agent__in" data-sc-tilt="6">
-            <header class="agent__head"><h3>Scout</h3><span class="dot dot--ok" title="available"></span></header>
-            <p class="agent__role p-soft">Research and monitoring</p>
-            <ul class="agent__skills" aria-label="Skills"><li>web research</li><li>watchlists</li><li>digests</li></ul>
-            <p class="agent__tools mono">browser · search · slack</p>
-          </div>
-        </article>
-
-        <article class="agent" style="--i:3">
-          <div class="agent__in" data-sc-tilt="6">
-            <header class="agent__head"><h3>Courier</h3><span class="dot dot--ok" title="available"></span></header>
-            <p class="agent__role p-soft">Email and messaging</p>
-            <ul class="agent__skills" aria-label="Skills"><li>outreach</li><li>replies</li><li>scheduling</li></ul>
-            <p class="agent__tools mono">gmail · slack · calendar</p>
-          </div>
-        </article>
-
-        <article class="agent" style="--i:4">
-          <div class="agent__in" data-sc-tilt="6">
-            <header class="agent__head"><h3>Draftsman</h3><span class="dot dot--ok" title="available"></span></header>
-            <p class="agent__role p-soft">Documents and decks</p>
-            <ul class="agent__skills" aria-label="Skills"><li>reports</li><li>proposals</li><li>briefs</li></ul>
-            <p class="agent__tools mono">docs · pdf · templates</p>
-          </div>
-        </article>
-
-        <article class="agent" style="--i:5">
-          <div class="agent__in" data-sc-tilt="6">
-            <header class="agent__head"><h3>Stagehand</h3><span class="dot dot--busy" title="on a job"></span></header>
-            <p class="agent__role p-soft">Browser automation</p>
-            <ul class="agent__skills" aria-label="Skills"><li>form filling</li><li>scraping</li><li>checks</li></ul>
-            <p class="agent__tools mono">browser · vision</p>
-          </div>
-        </article>
-
-        <article class="agent" style="--i:6">
-          <div class="agent__in" data-sc-tilt="6">
-            <header class="agent__head"><h3>Keeper</h3><span class="dot dot--ok" title="available"></span></header>
-            <p class="agent__role p-soft">Data and spreadsheets</p>
-            <ul class="agent__skills" aria-label="Skills"><li>cleanups</li><li>imports</li><li>syncs</li></ul>
-            <p class="agent__tools mono">sheets · csv · apis</p>
-          </div>
-        </article>
-
-        <div class="rail__tail">
-          <p>Need something narrower?</p>
-          <p class="p-soft">Build your own agent in the studio: pick a model, grant tools, set spending and approval limits.</p>
-        </div>
-
-      </div>
-    </div>
-  </section>
-
-  <!-- ═══ ACT 4 · CONTROL · flow ══════════════════════════════════════════
-       The quiet act, authored. One card. The run is paused on purpose. -->
-  <section id="gate" class="sc-section sc-section--after-pin" data-sc-act="flow" aria-label="Approval gate">
-    <div class="sc-wrap gate">
-      <div class="gate__head" data-sc-in>
-        <span class="chip chip--wait" id="gate-chip">paused · waiting on you</span>
-        <h2 class="h-med">Nothing irreversible runs without you</h2>
-      </div>
-
-      <figure class="approval" data-sc-reveal="up" data-sc-reveal-at="0.2 0.48" id="approval">
-        <figcaption class="approval__head">
-          <span>Approval requested</span>
-          <span class="mono">email.send</span>
-        </figcaption>
-        <div class="approval__body">
-          <p><span class="mono approval__agent">Courier</span> wants to send 2 emails outside your org.</p>
-          <p class="approval__detail mono">to: billing@acmefreight.example, accounts@nordwind.example<br>subject: Overdue invoice reminder</p>
-          <div class="approval__actions">
-            <button class="btn btn--pill btn--sm" id="btn-approve" type="button">Approve</button>
-            <button class="btn btn--ghost btn--sm" id="btn-decline" type="button">Decline</button>
-          </div>
-          <p class="approval__stamp mono" id="stamp" aria-live="polite"></p>
-        </div>
-      </figure>
-
-      <p class="gate__note p-soft" data-sc-in>Sending, spending and deleting always pause for sign-off. Read only work just runs. Every run keeps a full step history you can audit later.</p>
-    </div>
-  </section>
-
-  <!-- ═══ ACT 5 · PAYOFF · pin · THE PEAK ═════════════════════════════════
-       The run cascades under the reader's hand, then settles into the
-       deliverable. Largest span on the page. -->
-  <section id="run" data-sc-act="pin" data-sc-span="3.6" data-sc-drift="#12100c" aria-label="Demo: the run, streamed live">
-    <div data-sc-stage>
-      <div class="stage-center">
-        <div class="console console--run" id="console2" data-sc-verify-state="phase:0">
-          <div class="console__head">
-            <span class="console__app mono">jobshout / run 88f3 · Ledger + Courier</span>
-            <span class="console__meter" aria-hidden="true"><span class="console__meter-fill" id="meter"></span></span>
-            <span class="chip" id="run2-status" data-state="done">delivered</span>
-          </div>
-          <div class="console__body console__body--run">
-
-            <section class="pane pane--log" aria-label="Live step log">
-              <ol class="log" id="log">
-                <li class="row" data-at="0.06"><span class="row__t mono">00:04</span><span class="row__tool mono">stripe.invoices.list</span><span class="row__d">July: 38 invoices</span><span class="row__dur mono">3.8s</span><span class="dot"></span></li>
-                <li class="row" data-at="0.125"><span class="row__t mono">00:12</span><span class="row__tool mono">sheets.append</span><span class="row__d">ledger tab updated</span><span class="row__dur mono">1.2s</span><span class="dot"></span></li>
-                <li class="row" data-at="0.19"><span class="row__t mono">00:19</span><span class="row__tool mono">ledger.flag_overdue</span><span class="row__d">INV-2041, INV-2033</span><span class="row__dur mono">0.6s</span><span class="dot"></span></li>
-                <li class="row" data-at="0.255"><span class="row__t mono">00:26</span><span class="row__tool mono">email.draft</span><span class="row__d">chaser for INV-2041</span><span class="row__dur mono">4.1s</span><span class="dot"></span></li>
-                <li class="row" data-at="0.32"><span class="row__t mono">00:31</span><span class="row__tool mono">email.draft</span><span class="row__d">chaser for INV-2033</span><span class="row__dur mono">3.6s</span><span class="dot"></span></li>
-                <li class="row" data-at="0.385" id="row-send">
-                  <span class="row__t mono">00:38</span><span class="row__tool mono">email.send</span>
-                  <span class="row__d" data-approved="2 sent · approved by you" data-declined="skipped · declined by you">2 sent · approved by you</span>
-                  <span class="row__dur mono">2.2s</span><span class="dot"></span>
-                </li>
-                <li class="row" data-at="0.45"><span class="row__t mono">01:04</span><span class="row__tool mono">doc.compose</span><span class="row__d">summary, one page</span><span class="row__dur mono">21.4s</span><span class="dot"></span></li>
-                <li class="row" data-at="0.515"><span class="row__t mono">01:27</span><span class="row__tool mono">run.self_check</span><span class="row__d">all steps verified</span><span class="row__dur mono">1.9s</span><span class="dot"></span></li>
-              </ol>
-              <p class="log__cap" data-sc-cue="0.1 0.5 0.2 0.2">Every step streams as it runs. Stop it or steer it at any point.</p>
-            </section>
-
-            <section class="pane pane--artifact" aria-label="Deliverable">
-              <div class="pane__empty" id="artifact-empty">
-                <p class="mono">deliverable</p>
-                <p>Lands here when the run settles.</p>
-              </div>
-              <figure class="artifact" id="artifact" data-sc-reveal="up" data-sc-reveal-at="0.62 0.84">
-                <figcaption class="artifact__head">
-                  <span>July invoice summary</span>
-                  <span class="mono">doc · one page</span>
-                </figcaption>
-                <div class="artifact__body">
-                  <p><strong>38</strong> invoices reviewed. 36 paid on time.</p>
-                  <p>Two overdue: <span class="mono">INV-2041</span> (£1,850, 12 days late) and <span class="mono">INV-2033</span> (£420, 6 days).</p>
-                  <p id="artifact-outcome" data-approved="Chasers sent to both. Replies will land in your inbox." data-declined="Chasers drafted, not sent. You declined the send, so they wait in your outbox.">Chasers sent to both. Replies will land in your inbox.</p>
-                </div>
-                <footer class="artifact__foot mono">delivered by Ledger with Courier · 8 steps · 90 seconds</footer>
-              </figure>
-            </section>
-
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ═══ ACT 6 · COMMITMENT · flow ═══════════════════════════════════════
-       The close is an actual input. The ticket above it is stamped done. -->
-  <section id="shout" class="sc-section sc-section--after-pin shout" data-sc-act="flow" aria-label="Start your first job">
-    <div class="sc-wrap">
-      <p class="shout__done mono" data-sc-in id="shout-done">
-        <span class="tick tick--done" aria-hidden="true"></span>
-        JOB-4721 · done · deliverable: this page · runtime <span id="done-time">your visit</span>
+  <!-- ═══ HERO ═══════════════════════════════════════════════════════════ -->
+  <section id="hero" class="sc-section hero" data-sc-act="flow" aria-label="Meet JobShout">
+    <div class="sc-wrap hero__in" data-sc-in data-sc-stagger="80">
+      <p class="eyebrow">AI teammates that finish the work</p>
+      <h1 class="hero__title">Meet JobShout</h1>
+      <p class="hero__lede">Specialist agents you can give real work to. They sign into your tools, use them just like you do, and come back when your approval is needed.</p>
+      <p class="hero__cta">
+        <a class="btn btn--pill btn--lg" href="/signup">Shout a job</a>
+        <a class="btn btn--ghost btn--lg" href="/login">Sign in</a>
       </p>
+    </div>
+  </section>
+
+  <!-- ═══ TWO PILLARS ════════════════════════════════════════════════════ -->
+  <section id="pillars" class="sc-section pillars" data-sc-act="flow" aria-label="How you work with agents">
+    <div class="sc-wrap pillars__grid">
+      <article class="pillar" data-sc-in>
+        <h2>Message agents like teammates</h2>
+        <p>Give tasks in chat the way you would a colleague. Agents take a job from start to end, keep context on how you work, and only come back when something needs your sign-off.</p>
+      </article>
+      <article class="pillar" data-sc-in>
+        <h2>Work with many agents at once</h2>
+        <p>Create an agent, give it a task, and add another when the work grows — one on mail, one on research, one on a pull request. They work in parallel and hand off where it makes sense.</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ═══ THE DEMO · one computer, four scenes, scrubbed by scroll ═══════
+       Grok Bot’s landing demo is a product computer: chrome, control
+       toggle, the live app, and a floating chat card. We keep that shape.
+       Content is JobShout’s specialists. -->
+  <section id="demo" data-sc-act="pin" data-sc-span="5.2" data-sc-drift="#070708" aria-label="Product demo">
+    <div data-sc-stage>
+      <div class="demo">
+        <div class="demo__copy">
+          <article class="feat" data-sc-cue="0 0.24 0 0.22">
+            <h2>JobShout works where you work</h2>
+            <p>Log an agent in once. It uses your apps and websites just like you would — Gmail, job boards, GitHub, the tools that are harder to navigate.</p>
+          </article>
+          <article class="feat" data-sc-cue="0.26 0.48 0.18 0.22">
+            <h2>Show an agent how it’s done</h2>
+            <p>Ask an agent to follow along as you complete a workflow once. It saves it as a routine and runs it on its own next time.</p>
+          </article>
+          <article class="feat" data-sc-cue="0.50 0.72 0.18 0.22">
+            <h2>Agents get smarter over time</h2>
+            <p>They keep context and learn from each other. Show one a workflow today, hand off the project by Friday.</p>
+          </article>
+          <article class="feat" data-sc-cue="0.74 0.98 0.18 0.18">
+            <h2>Connect the agents</h2>
+            <p>Put a few agents in the same thread and they pass work between themselves. You watch them take action instead of approving every step.</p>
+          </article>
+        </div>
+
+        <div class="desk" id="desk" data-sc-verify-state="scene:0" aria-label="Sample computer">
+          <div class="desk__bar">
+            <div class="desk__dots" aria-hidden="true"><span></span><span></span><span></span></div>
+            <span class="desk__title">Computer</span>
+            <div class="seg" role="status" aria-live="polite">
+              <span class="seg__knob" id="seg-knob" aria-hidden="true"></span>
+              <span class="seg__opt is-on" id="mode-control">You’re in control</span>
+              <span class="seg__opt" id="mode-work">Working</span>
+            </div>
+          </div>
+
+          <div class="desk__screen">
+            <div class="wallpaper" aria-hidden="true"></div>
+
+            <!-- Scene 1 · sign-in, then Gmail -->
+            <div class="scene is-on" data-scene="work" id="scene-work">
+              <div class="signin" id="gmail-signin">
+                <div class="signin__card">
+                  <p class="signin__mark" aria-hidden="true">G</p>
+                  <h3>Sign in</h3>
+                  <p>to continue to Gmail</p>
+                  <label class="signin__field">Email or phone<input value="ops@jobshout.example" readonly tabindex="-1"></label>
+                  <div class="signin__actions">
+                    <span class="signin__forgot">Forgot email?</span>
+                    <span class="signin__next" id="signin-next">Next</span>
+                  </div>
+                </div>
+              </div>
+              <div class="app app--mail app--light" id="gmail-app">
+                <header class="app__chrome">
+                  <span class="app__nav" aria-hidden="true"></span>
+                  <span class="app__urlbar"><span class="app__lock"></span><span class="app__url">mail.google.com/inbox</span></span>
+                </header>
+                <div class="app__body">
+                  <aside class="mail__nav">
+                    <p class="mail__compose">Compose</p>
+                    <ul>
+                      <li class="is-on">Inbox <em>38</em></li>
+                      <li>Starred</li>
+                      <li>Sent</li>
+                      <li>Drafts <em>2</em></li>
+                    </ul>
+                  </aside>
+                  <div class="mail__list">
+                    <article class="mail__row is-hot">
+                      <span class="mail__from">Acme Freight</span>
+                      <span class="mail__sub">Overdue invoice INV-2041</span>
+                      <span class="mail__meta">12d</span>
+                    </article>
+                    <article class="mail__row">
+                      <span class="mail__from">Nordwind</span>
+                      <span class="mail__sub">Overdue invoice INV-2033</span>
+                      <span class="mail__meta">6d</span>
+                    </article>
+                    <article class="mail__row">
+                      <span class="mail__from">Lattice</span>
+                      <span class="mail__sub">Q3 seat renewal</span>
+                      <span class="mail__meta">2d</span>
+                    </article>
+                    <article class="mail__row">
+                      <span class="mail__from">Dana · Acme</span>
+                      <span class="mail__sub">Re: pricing — annual only</span>
+                      <span class="mail__meta">1d</span>
+                    </article>
+                  </div>
+                  <aside class="mail__draft" id="mail-draft">
+                    <p class="mail__draft-kicker">draft · waiting on you</p>
+                    <p class="mail__draft-to">to billing@acmefreight.example</p>
+                    <p class="mail__draft-sub">Overdue invoice reminder — INV-2041</p>
+                    <p class="mail__draft-body">Following up on INV-2041 (£1,850, 12 days). Happy to resend the PDF or take a card today.</p>
+                    <p class="mail__draft-gate">Approve to send</p>
+                  </aside>
+                </div>
+              </div>
+            </div>
+
+            <!-- Scene 2 · Teach -->
+            <div class="scene" data-scene="teach" id="scene-teach">
+              <div class="app app--mail app--light app--dim">
+                <header class="app__chrome">
+                  <span class="app__nav" aria-hidden="true"></span>
+                  <span class="app__urlbar"><span class="app__lock"></span><span class="app__url">mail.google.com/settings/filters</span></span>
+                </header>
+                <div class="app__body">
+                  <aside class="mail__nav">
+                    <p class="mail__compose">Compose</p>
+                    <ul>
+                      <li>Inbox</li>
+                      <li class="is-on">Filters</li>
+                      <li>Labels</li>
+                    </ul>
+                  </aside>
+                  <div class="teach__steps">
+                    <p class="teach__step is-done"><span class="tick tick--done"></span>Open watch rules</p>
+                    <p class="teach__step is-done"><span class="tick tick--done"></span>Add senders: billing@, accounts@</p>
+                    <p class="teach__step is-now"><span class="tick"></span>Set “never send without approve”</p>
+                    <p class="teach__step"><span class="tick"></span>Save as weekly chase</p>
+                  </div>
+                </div>
+              </div>
+              <div class="rec" id="teach-banner">
+                <span class="rec__dot" aria-hidden="true"></span>
+                <span class="rec__copy">Mail Agent is watching and learning</span>
+                <span class="rec__time mono" id="teach-time">0:00</span>
+                <span class="rec__cta">Teach a task</span>
+              </div>
+            </div>
+
+            <!-- Scene 3 · Memory · same computer, toast on the live inbox -->
+            <div class="scene" data-scene="memory" id="scene-memory">
+              <div class="app app--mail app--light app--dim">
+                <header class="app__chrome">
+                  <span class="app__nav" aria-hidden="true"></span>
+                  <span class="app__urlbar"><span class="app__lock"></span><span class="app__url">mail.google.com/inbox</span></span>
+                </header>
+                <div class="app__body">
+                  <aside class="mail__nav">
+                    <p class="mail__compose">Compose</p>
+                    <ul>
+                      <li class="is-on">Inbox <em>38</em></li>
+                      <li>Starred</li>
+                      <li>Sent</li>
+                    </ul>
+                  </aside>
+                  <div class="mail__list">
+                    <article class="mail__row is-hot">
+                      <span class="mail__from">Dana · Acme</span>
+                      <span class="mail__sub">Re: pricing — annual only</span>
+                      <span class="mail__meta">now</span>
+                    </article>
+                    <article class="mail__row">
+                      <span class="mail__from">Acme Freight</span>
+                      <span class="mail__sub">Overdue invoice INV-2041</span>
+                      <span class="mail__meta">12d</span>
+                    </article>
+                    <article class="mail__row">
+                      <span class="mail__from">Nordwind</span>
+                      <span class="mail__sub">Overdue invoice INV-2033</span>
+                      <span class="mail__meta">6d</span>
+                    </article>
+                  </div>
+                </div>
+              </div>
+              <aside class="toast" id="mem-note">
+                <p class="toast__who">Mail Agent</p>
+                <p>Acme replied on pricing. I already had last quarter’s thread, so I drafted without waiting.</p>
+                <p class="toast__note">Noted: they only sign annual. Dana approves.</p>
+              </aside>
+              <p class="mem__chip" id="mem-chip">Updated memory for <strong>Mail Agent</strong></p>
+            </div>
+
+            <!-- Scene 4 · Connect · group thread as a light app on the desktop -->
+            <div class="scene" data-scene="connect" id="scene-connect">
+              <div class="app app--thread app--light">
+                <header class="app__chrome">
+                  <span class="app__nav" aria-hidden="true"></span>
+                  <span class="app__urlbar"><span class="app__lock"></span><span class="app__url">jobshout.example/thread/ops</span></span>
+                </header>
+                <div class="thread">
+                  <div class="thread__head">
+                    <span class="avatar">M</span>
+                    <span class="avatar avatar--r">R</span>
+                    <div>
+                      <p class="thread__title">Mail Agent + Research Agent</p>
+                      <p class="thread__sub">Shared thread · live</p>
+                    </div>
+                  </div>
+                  <div class="bubble bubble--user">
+                    <p>Chase the two overdue invoices. Pull the latest SLA from their help centre before you write.</p>
+                  </div>
+                  <div class="bubble bubble--agent">
+                    <span class="bubble__who">Mail Agent</span>
+                    <p>On it. Handing the SLA lookup to Research.</p>
+                  </div>
+                  <p class="handoff" id="handoff"><span class="handoff__dot"></span>Asking Research…</p>
+                  <div class="bubble bubble--agent" id="research-reply">
+                    <span class="bubble__who">Research Agent</span>
+                    <p>Acme Freight SLA: net 14, late fee after day 15. Source checked against their /legal/terms page.</p>
+                  </div>
+                  <div class="bubble bubble--agent" id="mail-close">
+                    <span class="bubble__who">Mail Agent</span>
+                    <p>Drafted both chasers with the SLA cited. Parked on your board — nothing sent.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <svg class="cursor" id="cursor" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4.2 3.2 19 13.6l-6.4.9 3.2 6.6-2.6 1.2-3.2-6.7-4.8 3.6z" fill="#111" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/>
+            </svg>
+          </div>
+
+          <div class="chatcard" id="chatcard">
+            <p class="chatcard__text" id="chatcard-text">Sign in to Gmail so I can watch the support queue.</p>
+            <div class="chatcard__meta">
+              <span class="chatcard__you">You</span>
+              <span class="chatcard__send" aria-hidden="true"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ GIVE EACH AGENT A JOB ══════════════════════════════════════════ -->
+  <section id="jobs" class="sc-section jobs" data-sc-act="flow" aria-label="Give each agent a job">
+    <div class="sc-wrap">
+      <div class="jobs__head" data-sc-in>
+        <h2 class="h-display">Give each agent a job</h2>
+        <p class="p-soft">A specialist for each lane. Same chat, same approval gate.</p>
+      </div>
+      <div class="jobs__picks" role="tablist" aria-label="JobShout agents" data-sc-in>
+        <button type="button" role="tab" aria-selected="true" aria-controls="job-panel" id="tab-mail" data-job="mail">Mail Agent</button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="job-panel" id="tab-career" data-job="career">Career Agent</button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="job-panel" id="tab-research" data-job="research">Research Agent</button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="job-panel" id="tab-article" data-job="article">Article Writer</button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="job-panel" id="tab-security" data-job="security">Security Tester</button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="job-panel" id="tab-review" data-job="review">PR Reviewer</button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="job-panel" id="tab-image" data-job="image">Image Generator</button>
+      </div>
+      <div class="job" id="job-panel" role="tabpanel" aria-labelledby="tab-mail" data-sc-in>
+        <div class="job__copy">
+          <h3 id="job-title">Mail Agent</h3>
+          <p id="job-body">Watch the senders you care about, research the thread, and leave a reply draft. Nothing is sent until you approve.</p>
+        </div>
+        <figure class="job__preview" id="job-preview" aria-hidden="true">
+          <figcaption class="job__preview-bar"><span id="job-preview-app">mail / inbox</span><span class="chip chip--wait">2 drafts</span></figcaption>
+          <div class="job__preview-body" id="job-preview-body">
+            <p><strong>Acme Freight</strong> · Overdue INV-2041</p>
+            <p><strong>Nordwind</strong> · Overdue INV-2033</p>
+            <p class="p-soft">Drafts parked. Approve in Mail Agent to send.</p>
+          </div>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ FAQ ════════════════════════════════════════════════════════════ -->
+  <section id="faq" class="sc-section faq" data-sc-act="flow" aria-label="Questions">
+    <div class="sc-wrap faq__in">
+      <h2 class="h-display" data-sc-in>Questions</h2>
+      <div class="faq__list" data-sc-in data-sc-stagger="60">
+        <details>
+          <summary>How is JobShout different from a chatbot?</summary>
+          <p>Agents execute. They call real tools, stream every step, and wait on you for anything irreversible. A chatbot drafts. These specialists run the job.</p>
+        </details>
+        <details>
+          <summary>What can an agent actually do?</summary>
+          <p>Mail Agent drafts Gmail replies. Career Agent evaluates a posting against your profile. Research Agent returns cited findings. Article Writer files a draft. Security Tester scans an authorised target. PR Reviewer reviews a GitHub pull request. Image Generator makes one picture and stores it on the board.</p>
+        </details>
+        <details>
+          <summary>Can an agent send, spend, or delete on its own?</summary>
+          <p>No. Sending, spending and deleting always pause for sign-off. Read-only work just runs. Every run keeps a full step history you can audit later.</p>
+        </details>
+        <details>
+          <summary>Do I need to build a workflow first?</summary>
+          <p>No. Message an agent and grant access as needed. No graph to draw. When you want a job to repeat, show it once and save the routine.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ CLOSE ══════════════════════════════════════════════════════════ -->
+  <section id="shout" class="sc-section shout" data-sc-act="flow" aria-label="Meet your first agent">
+    <div class="sc-wrap shout__in">
       <div class="shout__head" data-sc-in>
-        <h2 class="h-big">Your turn</h2>
-        <p class="p-soft">Describe the job. A sentence is enough.</p>
+        <h2 class="h-display">Meet your first agent</h2>
+        <p class="p-soft">An AI teammate you can trust to get work done. Describe the job. A sentence is enough.</p>
       </div>
       <form class="shout__composer" data-sc-in action="/signup" method="get" id="shout-form">
         <label class="visually-hidden" for="brief">Describe your job</label>
-        <input class="shout__field mono" id="brief" name="brief" type="text"
+        <input class="shout__field" id="brief" name="brief" type="text"
                placeholder="e.g. Watch these pricing pages, ping me on changes"
                autocomplete="off" maxlength="280">
         <button class="btn btn--pill btn--lg" type="submit">Shout a job</button>
       </form>
+      <p class="shout__alt" data-sc-in><a href="/login">Sign in</a> if you already have an account.</p>
       <footer class="foot" data-sc-in>
         <span>© 2026 JobShout</span>
         <span class="foot__dot" aria-hidden="true">·</span>
-        <a href="/login">Sign in</a>
-        <span class="foot__dot" aria-hidden="true">·</span>
-        <span class="p-faint">The run above is a sample. Yours will be real.</span>
+        <span class="p-faint">The computer above is a sample. Yours will be real.</span>
       </footer>
     </div>
   </section>
 
 </main>
-
-<!-- ═══ THE SIGNATURE · the page itself is a job ══════════════════════════
-     Fixed ticket rail. Cut on landing, stamped step by step as the visitor
-     scrolls, done at the close. Steps link back to their acts. -->
-<nav class="ticket" id="ticket" aria-label="This page, tracked as a job" data-sc-verify-state="steps:0">
-  <span class="ticket__id">
-    <span class="mono ticket__no">JOB-4721</span>
-    <span class="ticket__brief">this page is a job: explain JobShout to a first-time visitor</span>
-  </span>
-  <ol class="ticket__steps">
-    <li><a href="#witness" data-step="briefed"><span class="tick" aria-hidden="true"></span>Briefed</a></li>
-    <li><a href="#witness" data-step="planned"><span class="tick" aria-hidden="true"></span>Planned</a></li>
-    <li><a href="#roster" data-step="crew"><span class="tick" aria-hidden="true"></span>Crew picked</a></li>
-    <li><a href="#gate" data-step="gate"><span class="tick" aria-hidden="true"></span>Gate held</a></li>
-    <li><a href="#run" data-step="run"><span class="tick" aria-hidden="true"></span>Run streamed</a></li>
-    <li><a href="#shout" data-step="done"><span class="tick" aria-hidden="true"></span>Delivered</a></li>
-  </ol>
-  <span class="ticket__time mono" id="ticket-time" title="Elapsed time of your visit">0:00</span>
-</nav>
 
 <script src="/landing/scrollcraft.js"></script>
 <script src="/landing/app.js"></script>
