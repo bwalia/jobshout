@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, type KeyboardEvent, type ClipboardEvent } from "react";
+import { useEffect, useRef, type KeyboardEvent, type ClipboardEvent } from "react";
 import { flushSync } from "react-dom";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
@@ -52,18 +52,31 @@ export function TagInput({
   size = "md",
 }: TagInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const draftRef = useRef("");
+  const valueRef = useRef(value);
+  const onChangeRef = useRef(onChange);
+  valueRef.current = value;
+  onChangeRef.current = onChange;
 
   function commit(raw: string, rest = "") {
-    const next = uniqueTags([...value, ...parseTags(raw)]);
-    // Save/click runs after blur. flushSync so the parent sees the new chip
-    // in the same turn instead of PATCHing the previous (empty) list.
+    const next = uniqueTags([...valueRef.current, ...parseTags(raw)]);
+    // Save/click can run in the same turn as blur (touch especially).
+    // flushSync so the parent PATCHes the chip, not the previous list.
     flushSync(() => {
-      onChange(next);
+      onChangeRef.current(next);
     });
     if (inputRef.current) inputRef.current.value = rest;
-    draftRef.current = rest;
   }
+
+  useEffect(() => {
+    function onPointerDown(e: PointerEvent) {
+      const el = inputRef.current;
+      if (!el || !el.value.trim()) return;
+      if (e.target instanceof Node && el.contains(e.target)) return;
+      commit(el.value);
+    }
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, []);
 
   function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     const draft = e.currentTarget.value;
@@ -86,7 +99,6 @@ export function TagInput({
     }
     if (e.key === "Escape") {
       e.currentTarget.value = "";
-      draftRef.current = "";
     }
   }
 
@@ -150,9 +162,6 @@ export function TagInput({
             onPaste={onPaste}
             onBlur={(e) => {
               if (e.currentTarget.value.trim()) commit(e.currentTarget.value);
-            }}
-            onChange={(e) => {
-              draftRef.current = e.currentTarget.value;
             }}
             className="min-w-[8rem] flex-1 bg-transparent px-1 py-0.5 text-sm outline-none placeholder:text-muted-foreground"
           />
