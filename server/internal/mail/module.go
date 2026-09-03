@@ -39,6 +39,19 @@ func Module(svc Launcher) agentmodule.Module {
 			IfContains: "draft", UnlessContains: "sync",
 			Tool: "mail_list_drafts", OnlyIfNoLaunch: true,
 		},
+		Requirements: []agentmodule.Requirement{{
+			Key: "gmail_oauth", Kind: "integration",
+			Message: "Gmail OAuth tokens are not included. Connect Gmail on Mail Agent after import.",
+		}},
+		Ready: func(ctx context.Context, orgID uuid.UUID) []agentmodule.Issue {
+			if svc == nil || !svc.Available(ctx, orgID) {
+				return []agentmodule.Issue{{
+					Severity: "warning", Code: "gmail_disconnected",
+					Message: "Gmail is not connected in this organisation.",
+				}}
+			}
+			return nil
+		},
 	}
 }
 

@@ -15,6 +15,7 @@ import {
   Newspaper,
   Image as ImageIcon,
   Search,
+  Upload,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -42,6 +43,8 @@ import {
 } from "@/components/task-manager/TaskProgressChip";
 import { NewProjectDialog } from "@/components/task-manager/NewProjectDialog";
 import { CreateAgentDialog } from "@/components/agent/CreateAgentDialog";
+import { ExportAgentButton } from "@/components/agent/ExportAgentButton";
+import { ImportAgentPackageDialog } from "@/components/agent/ImportAgentPackageDialog";
 import { AgentStatusBadge } from "@/components/agent/AgentStatusBadge";
 import { AgentCatalogNotice } from "@/components/task-manager/AgentCatalogNotice";
 import { BuiltinAgentTab } from "@/components/task-manager/BuiltinAgentTab";
@@ -135,6 +138,7 @@ export function TaskManagerPanel() {
     parseSelection(projectParam, agentParam, new Set())
   );
   const [createAgentOpen, setCreateAgentOpen] = useState(false);
+  const [importAgentOpen, setImportAgentOpen] = useState(false);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
 
   useEffect(() => {
@@ -204,6 +208,13 @@ export function TaskManagerPanel() {
             className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-sm hover:bg-secondary"
           >
             <Plus className="h-4 w-4" /> New project
+          </button>
+          <button
+            type="button"
+            onClick={() => setImportAgentOpen(true)}
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-sm hover:bg-secondary"
+          >
+            <Upload className="h-4 w-4" /> Import agent
           </button>
           <button
             type="button"
@@ -389,6 +400,11 @@ export function TaskManagerPanel() {
       <CreateAgentDialog
         open={createAgentOpen}
         onClose={() => setCreateAgentOpen(false)}
+      />
+      <ImportAgentPackageDialog
+        open={importAgentOpen}
+        onClose={() => setImportAgentOpen(false)}
+        onImported={(id) => select({ kind: "agent", id })}
       />
       {createProjectOpen && (
         <NewProjectDialog
@@ -716,6 +732,7 @@ function AgentDetailView({
           )}
         </div>
         <div className="flex gap-2">
+          <ExportAgentButton agentId={agent.id} />
           <Link
             href={`/agents/${agent.id}`}
             className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border px-3 text-sm hover:bg-secondary"

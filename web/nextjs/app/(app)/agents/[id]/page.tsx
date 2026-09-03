@@ -17,6 +17,7 @@ import {
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AgentStatusBadge } from "@/components/agent/AgentStatusBadge";
+import { ExportAgentButton } from "@/components/agent/ExportAgentButton";
 import { useAgent, useUpdateAgent } from "@/lib/hooks/useAgents";
 import { ModelPicker } from "@/components/agent/ModelPicker";
 import { useBlogConfig } from "@/lib/hooks/useBlog";
@@ -897,7 +898,8 @@ export default function AgentProfilePage() {
           </div>
 
           {/* Performance score badge */}
-          <div className="flex flex-col items-start gap-1 sm:items-end">
+          <div className="flex flex-col items-start gap-2 sm:items-end">
+            <ExportAgentButton agentId={agent.id} />
             <span className="text-xs text-muted-foreground">Performance</span>
             <span className="text-2xl font-bold text-foreground">
               {agent.performance_score}%

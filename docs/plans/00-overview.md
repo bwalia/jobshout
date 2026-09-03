@@ -28,6 +28,7 @@ Chat does **not** go through Task Manager. `runAgentExecute` in `server/internal
 | [04-task-manager.md](04-task-manager.md) | Task Manager | Server `tasklaunch` + per-agent fields + board stay |
 | [05-chatbot.md](05-chatbot.md) | Chat | Scripted invocation evals, then route through `tasklaunch` |
 | [06-task-history-and-board-ux.md](06-task-history-and-board-ux.md) | Board + Task Manager UX | Run + history from the card; completed-at; honest progress |
+| [07-agent-import-export.md](07-agent-import-export.md) | Agent file import/export | Versioned JSON package; custom create then builtin overlay |
 
 ## Implementation order
 

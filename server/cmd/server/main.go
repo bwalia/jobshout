@@ -432,6 +432,11 @@ func main() {
 	jwtSvc := service.NewJWTService(cfg)
 	authSvc := service.NewAuthService(userRepo, tokenRepo, orgRepo, agentRepo, rbacRepo, jwtSvc, logger)
 	agentSvc := service.NewAgentService(agentRepo, logger)
+	agentPackStore := repository.NewAgentPackStore(pool)
+	agentPackSvc := service.NewAgentPackService(
+		agentPackStore, agentRepo, skillRepo, toolRegistry, llmRouter,
+		knowledgeIngestSvc, auditRepo, cfg.AutoModelSelection, logger,
+	)
 	projectSvc := service.NewProjectService(projectRepo, logger)
 	taskSvc := service.NewTaskService(taskRepo, logger)
 	// Langfuse tracing for executions the Python sidecar does not see. Nil when
@@ -771,6 +776,7 @@ func main() {
 	authHandler := handler.NewAuthHandler(authSvc)
 	imageHandler := handler.NewImageHandler(imageSvc)
 	agentHandler := handler.NewAgentHandler(agentSvc)
+	agentPackHandler := handler.NewAgentPackHandler(agentPackSvc, rbacSvc)
 	projectHandler := handler.NewProjectHandler(projectSvc)
 	taskHandler := handler.NewTaskHandler(taskSvc, launchSvc)
 	agentSchemaHandler := handler.NewAgentSchemaHandler()
@@ -839,7 +845,7 @@ func main() {
 		AllowedOrigins:   cfg.CORSOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Request-ID"},
-		ExposedHeaders:   []string{"X-Request-ID"},
+		ExposedHeaders:   []string{"X-Request-ID", "Content-Disposition", "X-Agent-Pack-Warnings"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	})
@@ -890,11 +896,17 @@ func main() {
 			r.Route("/agents", func(r chi.Router) {
 				r.Get("/", agentHandler.List)
 				r.Post("/", agentHandler.Create)
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireAnyPermission(rbacSvc, model.PermAgentsCreate, model.PermAgentsUpdate))
+					r.Post("/import/preview", agentPackHandler.Preview)
+					r.Post("/import", agentPackHandler.Import)
+				})
 				r.Route("/{agentID}", func(r chi.Router) {
 					r.Get("/", agentHandler.GetByID)
 					r.Put("/", agentHandler.Update)
 					r.Delete("/", agentHandler.Delete)
 					r.Patch("/status", agentHandler.UpdateStatus)
+					r.With(middleware.RequirePermission(rbacSvc, model.PermAgentsRead)).Get("/export", agentPackHandler.Export)
 
 					// Agent LLM execution
 					r.Post("/execute", execHandler.Execute)
