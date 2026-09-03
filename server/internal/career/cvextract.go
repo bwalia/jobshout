@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/ledongthuc/pdf"
 )
 
 const maxCVUploadBytes = 5 << 20
@@ -40,7 +42,15 @@ func extractPDF(data []byte) (string, error) {
 	if !bytes.Contains(data, []byte("%PDF")) {
 		return "", fmt.Errorf("career: not a PDF")
 	}
+	// Prefer pdftotext when available: it understands ToUnicode CMaps and keeps
+	// layout. Many designer-exported CVs (Google Docs, Word, Affinity) store
+	// glyphs as hex strings that the naive stream scrape cannot read.
 	if t := strings.TrimSpace(extractViaPdftotext(data)); t != "" {
+		return t, nil
+	}
+	// Pure-Go reader: works in containers without poppler and on hosts where
+	// Homebrew is not on PATH (launchd, minimal CI images).
+	if t := strings.TrimSpace(extractViaPDFLib(data)); t != "" {
 		return t, nil
 	}
 	if t := strings.TrimSpace(extractPDFContentStreams(data)); t != "" {
@@ -50,8 +60,8 @@ func extractPDF(data []byte) (string, error) {
 }
 
 func extractViaPdftotext(data []byte) string {
-	exe, err := exec.LookPath("pdftotext")
-	if err != nil {
+	exe := findPdftotext()
+	if exe == "" {
 		return ""
 	}
 	dir, err := os.MkdirTemp("", "career-cv-")
@@ -68,6 +78,46 @@ func extractViaPdftotext(data []byte) string {
 		return ""
 	}
 	return string(out)
+}
+
+func findPdftotext() string {
+	if exe, err := exec.LookPath("pdftotext"); err == nil {
+		return exe
+	}
+	// launchd and some container entrypoints ship a PATH with no Homebrew.
+	for _, p := range []string{
+		"/opt/homebrew/bin/pdftotext",
+		"/usr/local/bin/pdftotext",
+		"/usr/bin/pdftotext",
+	} {
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p
+		}
+	}
+	return ""
+}
+
+func extractViaPDFLib(data []byte) string {
+	r, err := pdf.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return ""
+	}
+	var b strings.Builder
+	for i := 1; i <= r.NumPage(); i++ {
+		page := r.Page(i)
+		if page.V.IsNull() {
+			continue
+		}
+		text, err := page.GetPlainText(nil)
+		if err != nil {
+			continue
+		}
+		b.WriteString(text)
+		if text != "" && !strings.HasSuffix(text, "\n") {
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
 }
 
 var pdfLengthRe = regexp.MustCompile(`/Length\s+(\d+)`)

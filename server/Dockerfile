@@ -43,7 +43,9 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then uname -m | grep -qx x86_64; fi
 
 # git is required at runtime by the automated blog generator, which shells
 # out to `git clone/commit/push` against the target repo.
-RUN apk add --no-cache ca-certificates tzdata git
+# poppler-utils provides pdftotext for CV PDF uploads — many CVs use custom
+# font encodings that need ToUnicode maps the naive stream scrape cannot read.
+RUN apk add --no-cache ca-certificates tzdata git poppler-utils
 
 WORKDIR /app
 
