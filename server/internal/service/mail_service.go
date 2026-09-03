@@ -570,8 +570,12 @@ func (s *mailService) upsertThreadFromMessage(ctx context.Context, c *model.Mail
 		return nil, false, err
 	}
 	if existing != nil && existing.Status != model.MailThreadNew && existing.Status != model.MailThreadFailed {
-		return existing, true, nil
+		watched := mail.WatchMatches(msg, c.WatchLabels, c.WatchSenders, c.WatchSubjectPrefixes)
+		if existing.Status != model.MailThreadIgnored || !watched {
+			return existing, true, nil
+		}
 	}
+	reopen := existing != nil && existing.Status == model.MailThreadIgnored
 	th := existing
 	if th == nil {
 		th = &model.MailThread{
@@ -595,11 +599,20 @@ func (s *mailService) upsertThreadFromMessage(ctx context.Context, c *model.Mail
 		t := msg.ReceivedAt
 		th.ReceivedAt = &t
 	}
-	if th.Status == "" {
+	if th.Status == "" || reopen {
 		th.Status = model.MailThreadNew
 	}
 	if err := s.repo.UpsertThread(ctx, th); err != nil {
 		return nil, false, err
+	}
+	// ON CONFLICT does not update status and RETURNING writes the old
+	// ignored value back. Sync now only upserts; the reconciler's queued
+	// pass skips ignored, so persist new or the row stays dimmed forever.
+	if reopen && th.Status != model.MailThreadNew {
+		th.Status = model.MailThreadNew
+		if err := s.repo.UpdateThread(ctx, th); err != nil {
+			return nil, false, err
+		}
 	}
 	return th, false, nil
 }
@@ -677,6 +690,9 @@ func (s *mailService) processThread(ctx context.Context, th *model.MailThread, m
 	class, err := s.classifier.Classify(ctx, msg)
 	if err != nil {
 		return s.failThread(ctx, th, err)
+	}
+	if c != nil && mail.WatchMatches(msg, c.WatchLabels, c.WatchSenders, c.WatchSubjectPrefixes) {
+		class = mail.HonorOperatorWatch(class)
 	}
 	th.Classification = &class
 	th.NeedsResearch = class.NeedsResearch
