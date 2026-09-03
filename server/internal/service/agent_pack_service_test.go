@@ -50,11 +50,18 @@ func (f *fakePackStore) ApplyCreate(_ context.Context, orgID, userID uuid.UUID, 
 	f.createdTools = append([]string(nil), tools...)
 	return a, nil
 }
-func (f *fakePackStore) ApplyOverlay(_ context.Context, _, agentID uuid.UUID, _ *agentpack.Package, _ string, _ string, tools []string) (*model.Agent, error) {
+func (f *fakePackStore) ApplyOverlay(_ context.Context, _, agentID uuid.UUID, _ *agentpack.Package, provider, modelName string, tools []string) (*model.Agent, error) {
 	id := agentID
 	f.overlaid = &id
 	f.overlayTools = append([]string(nil), tools...)
-	return &model.Agent{ID: agentID, Name: "Existing"}, nil
+	a := &model.Agent{ID: agentID, Name: "Existing"}
+	if provider != "" {
+		a.ModelProvider = &provider
+	}
+	if modelName != "" {
+		a.ModelName = &modelName
+	}
+	return a, nil
 }
 func (f *fakePackStore) ExecutionCount(context.Context, uuid.UUID) (int, error) { return 0, nil }
 func (f *fakePackStore) KnowledgeFiles(context.Context, uuid.UUID) ([]repository.KnowledgeFileRef, error) {
@@ -76,7 +83,7 @@ func TestAgentPackExportStripsSecretsAndOrg(t *testing.T) {
 	reg.Register(&stubTool{name: "http_request"})
 	svc := NewAgentPackService(store, nil, nil, reg, nil, nil, nil, false, nil)
 
-	pkg, filename, err := svc.Export(context.Background(), org, agent.ID)
+	pkg, filename, err := svc.Export(context.Background(), org, uuid.New(), agent.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +98,7 @@ func TestAgentPackExportStripsSecretsAndOrg(t *testing.T) {
 	}
 
 	store.err = repository.ErrAgentPackForbidden
-	if _, _, err := svc.Export(context.Background(), other, agent.ID); err == nil {
+	if _, _, err := svc.Export(context.Background(), other, uuid.New(), agent.ID); err == nil {
 		t.Fatal("expected forbidden for other org")
 	}
 }
@@ -234,7 +241,7 @@ func TestAgentPackRoundTripNewIDNoSecrets(t *testing.T) {
 	reg := tools.NewRegistry()
 	reg.Register(&stubTool{name: "http_request"})
 	exportSvc := NewAgentPackService(exportStore, nil, nil, reg, nil, nil, nil, false, nil)
-	pkg, _, err := exportSvc.Export(context.Background(), orgA, src.ID)
+	pkg, _, err := exportSvc.Export(context.Background(), orgA, user, src.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,6 +263,77 @@ func TestAgentPackRoundTripNewIDNoSecrets(t *testing.T) {
 	}
 	if deref(out.Agent.SystemPrompt) != prompt {
 		t.Fatalf("prompt %q", deref(out.Agent.SystemPrompt))
+	}
+}
+
+func TestAgentPackOverlayKeepsDestModelAndTools(t *testing.T) {
+	agentmodule.Register(agentmodule.Module{
+		Builtin: "pack_overlay_test",
+		Label:   "Pack Overlay",
+		Schema:  agentschema.Schema{Builtin: "pack_overlay_test"},
+	})
+	org := uuid.New()
+	user := uuid.New()
+	existingID := uuid.New()
+	destProvider := "ollama"
+	destModel := "llama3"
+	existing := &model.Agent{
+		ID: existingID, OrgID: org, Name: "Pack Overlay",
+		ModelProvider: &destProvider, ModelName: &destModel,
+	}
+	store := &fakePackStore{bundle: &repository.AgentBundle{
+		Agent: existing, Tools: []string{"http_request"},
+	}}
+	finder := &fakeBuiltinFinder{agent: existing}
+	svc := NewAgentPackService(store, finder, nil, tools.NewRegistry(), nil, nil, nil, false, nil)
+	pkg := &agentpack.Package{
+		Kind: agentpack.Kind, SchemaVersion: 1,
+		Agent: agentpack.Body{
+			Name: "Pack Overlay", Role: "QA", Builtin: "pack_overlay_test",
+			ModelProvider: "missing", ModelName: "nope",
+		},
+		Tools: []string{"not_a_tool", "shell_command"},
+	}
+	prev, err := svc.Preview(context.Background(), org, pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := svc.Import(context.Background(), org, user, ImportAgentRequest{
+		PreviewID: prev.PreviewID,
+		Bindings:  agentpack.Bindings{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deref(out.Agent.ModelProvider) != "ollama" || deref(out.Agent.ModelName) != "llama3" {
+		t.Fatalf("overlay wiped dest model: %+v %+v", out.Agent.ModelProvider, out.Agent.ModelName)
+	}
+	if len(store.overlayTools) != 1 || store.overlayTools[0] != "http_request" {
+		t.Fatalf("overlay wiped dest tools: %#v", store.overlayTools)
+	}
+}
+
+func TestAgentPackImportFallsBackToPackageWhenPreviewMissing(t *testing.T) {
+	org := uuid.New()
+	user := uuid.New()
+	store := &fakePackStore{}
+	reg := tools.NewRegistry()
+	reg.Register(&stubTool{name: "http_request"})
+	svc := NewAgentPackService(store, nil, nil, reg, nil, nil, nil, false, nil)
+	pkg := &agentpack.Package{
+		Kind: agentpack.Kind, SchemaVersion: 1,
+		Agent: agentpack.Body{Name: "Fallback", Role: "QA"},
+		Tools: []string{"http_request"},
+	}
+	out, err := svc.Import(context.Background(), org, user, ImportAgentRequest{
+		PreviewID: uuid.New().String(),
+		Package:   pkg,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Agent.Name != "Fallback" {
+		t.Fatalf("name %q", out.Agent.Name)
 	}
 }
 

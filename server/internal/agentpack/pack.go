@@ -1,6 +1,7 @@
 package agentpack
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -136,23 +137,12 @@ func CheckSize(pkg *Package) error {
 			return fmt.Errorf("knowledge file %q exceeds %d bytes", f.Filename, MaxKnowledgeBytes)
 		}
 	}
-	n := estimateJSONSize(pkg)
-	if n > MaxJSONBytes {
+	raw, err := json.Marshal(pkg)
+	if err != nil {
+		return fmt.Errorf("package is not valid JSON")
+	}
+	if len(raw) > MaxJSONBytes {
 		return fmt.Errorf("package exceeds %d bytes", MaxJSONBytes)
 	}
 	return nil
-}
-
-func estimateJSONSize(pkg *Package) int {
-	n := len(pkg.Agent.Name) + len(pkg.Agent.Role) + len(pkg.Agent.Description) + len(pkg.Agent.SystemPrompt)
-	for _, t := range pkg.Tools {
-		n += len(t)
-	}
-	for _, s := range pkg.Skills {
-		n += len(s.Slug) + len(s.Name) + len(s.Description)
-	}
-	for _, f := range pkg.Knowledge {
-		n += len(f.Filename) + len(f.Content)
-	}
-	return n + 512
 }

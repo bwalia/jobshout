@@ -31,12 +31,17 @@ func (h *AgentPackHandler) Export(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, http.StatusBadRequest, "invalid org_id in token")
 		return
 	}
+	userID, err := uuid.Parse(middleware.GetUserID(r.Context()))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid user_id in token")
+		return
+	}
 	agentID, err := uuid.Parse(chi.URLParam(r, "agentID"))
 	if err != nil {
 		RespondError(w, http.StatusBadRequest, "invalid agent ID")
 		return
 	}
-	pkg, filename, err := h.svc.Export(r.Context(), orgID, agentID)
+	pkg, filename, err := h.svc.Export(r.Context(), orgID, userID, agentID)
 	if err != nil {
 		h.packError(w, err)
 		return
@@ -46,9 +51,10 @@ func (h *AgentPackHandler) Export(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, http.StatusInternalServerError, "failed to encode package")
 		return
 	}
+	safeName := agentpack.HeaderSafe(filename)
 	w.Header().Set("Content-Type", agentpack.ContentType)
-	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
-	w.Header().Set("X-Agent-Pack-Warnings", strings.Join(pkg.Warnings, "; "))
+	w.Header().Set("Content-Disposition", `attachment; filename="`+safeName+`"`)
+	w.Header().Set("X-Agent-Pack-Warnings", agentpack.HeaderSafe(strings.Join(pkg.Warnings, "; ")))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(body)
 }
@@ -167,7 +173,9 @@ func (h *AgentPackHandler) packError(w http.ResponseWriter, err error) {
 	}
 	msg := err.Error()
 	switch {
-	case strings.Contains(msg, "exceeds") || strings.Contains(msg, "too many"):
+	case strings.Contains(msg, "request body too large"),
+		strings.Contains(msg, "exceeds"),
+		strings.Contains(msg, "too many"):
 		RespondError(w, http.StatusRequestEntityTooLarge, msg)
 	case strings.Contains(msg, "specialist") || strings.Contains(msg, "seeded"):
 		RespondError(w, http.StatusUnprocessableEntity, msg)
@@ -176,9 +184,10 @@ func (h *AgentPackHandler) packError(w http.ResponseWriter, err error) {
 		strings.Contains(msg, "schema_version"),
 		strings.Contains(msg, "kind"),
 		strings.Contains(msg, "name is required"),
+		strings.Contains(msg, "already exists"),
 		strings.Contains(msg, "cannot be imported"):
 		RespondError(w, http.StatusBadRequest, msg)
 	default:
-		RespondError(w, http.StatusBadRequest, msg)
+		RespondError(w, http.StatusInternalServerError, "failed to process agent package")
 	}
 }

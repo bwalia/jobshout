@@ -417,7 +417,7 @@ func replaceKnowledge(ctx context.Context, tx pgx.Tx, agentID uuid.UUID, files [
 		return fmt.Errorf("agent_pack: clear knowledge: %w", err)
 	}
 	for _, f := range files {
-		name := strings.TrimSpace(f.Filename)
+		name := agentpack.SafeFilename(f.Filename)
 		if name == "" {
 			continue
 		}

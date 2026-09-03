@@ -3,6 +3,7 @@ package agentpack
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -12,8 +13,14 @@ import (
 func TestSanitizeStripsSecretKeysKeepsStructuredModel(t *testing.T) {
 	in := map[string]any{
 		"structured_model": "qwen3-coder:30b",
-		"graph_definition": map[string]any{"nodes": []any{}},
-		"openai_api_key":   "sk-secret",
+		"webhook_url":      "https://evil.example",
+		"private_key":      "-----BEGIN",
+		"graph_definition": map[string]any{
+			"nodes": []any{
+				map[string]any{"id": "a", "openai_api_key": "sk-secret", "keep": "yes"},
+			},
+		},
+		"openai_api_key": "sk-secret",
 		"nested": map[string]any{
 			"refresh_token": "abc",
 			"keep":          "yes",
@@ -23,18 +30,38 @@ func TestSanitizeStripsSecretKeysKeepsStructuredModel(t *testing.T) {
 	if out["structured_model"] != "qwen3-coder:30b" {
 		t.Fatalf("structured_model: %#v", out["structured_model"])
 	}
-	if _, ok := out["graph_definition"]; !ok {
-		t.Fatal("graph_definition must be kept")
+	if _, ok := out["webhook_url"]; ok {
+		t.Fatal("non-allowlisted keys must be dropped")
+	}
+	if _, ok := out["private_key"]; ok {
+		t.Fatal("private_key must be stripped")
 	}
 	if _, ok := out["openai_api_key"]; ok {
 		t.Fatal("api_key must be stripped")
 	}
-	nested, _ := out["nested"].(map[string]any)
-	if nested["keep"] != "yes" {
-		t.Fatalf("nested keep: %#v", nested)
+	if _, ok := out["nested"]; ok {
+		t.Fatal("non-allowlisted nested object must be dropped")
 	}
-	if _, ok := nested["refresh_token"]; ok {
-		t.Fatal("refresh_token must be stripped")
+	graph, _ := out["graph_definition"].(map[string]any)
+	nodes, _ := graph["nodes"].([]any)
+	if len(nodes) != 1 {
+		t.Fatalf("nodes %#v", nodes)
+	}
+	node, _ := nodes[0].(map[string]any)
+	if node["keep"] != "yes" || node["id"] != "a" {
+		t.Fatalf("graph node: %#v", node)
+	}
+	if _, ok := node["openai_api_key"]; ok {
+		t.Fatal("nested array secret must be stripped")
+	}
+}
+
+func TestSafeFilenameIsSingleSegment(t *testing.T) {
+	if got := SafeFilename(`..\..\etc\passwd`); got != "passwd" {
+		t.Fatalf("got %q", got)
+	}
+	if got := SafeFilename("  "); got != "file" {
+		t.Fatalf("empty %q", got)
 	}
 }
 
@@ -208,6 +235,36 @@ func TestCheckSizeRejectsTooManyKnowledgeFiles(t *testing.T) {
 	}
 	if err := CheckSize(pkg); err == nil {
 		t.Fatal("expected too many files")
+	}
+}
+
+func TestCheckSizeCountsEngineConfig(t *testing.T) {
+	pkg := &Package{
+		Kind: Kind, SchemaVersion: 1,
+		Agent: Body{
+			Name: "A", Role: "B",
+			EngineConfig: map[string]any{"graph_definition": strings.Repeat("x", MaxJSONBytes)},
+		},
+	}
+	if err := CheckSize(pkg); err == nil {
+		t.Fatal("expected oversize engine_config to fail")
+	}
+}
+
+func TestSanitizeTruncatesPromptOnRuneBoundary(t *testing.T) {
+	pkg := &Package{Agent: Body{SystemPrompt: strings.Repeat("é", MaxSystemPrompt)}}
+	SanitizePackage(pkg)
+	if len(pkg.Agent.SystemPrompt) > MaxSystemPrompt {
+		t.Fatalf("len %d", len(pkg.Agent.SystemPrompt))
+	}
+	if !utf8.ValidString(pkg.Agent.SystemPrompt) {
+		t.Fatal("truncated mid-rune")
+	}
+}
+
+func TestHeaderSafeStripsNewlines(t *testing.T) {
+	if got := HeaderSafe("a\r\nb"); got != "ab" {
+		t.Fatalf("got %q", got)
 	}
 }
 

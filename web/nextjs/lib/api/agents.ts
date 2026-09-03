@@ -157,7 +157,8 @@ export async function previewAgentImport(
 }
 
 export async function importAgentPackage(payload: {
-  preview_id: string;
+  preview_id?: string;
+  package?: AgentPackDocument;
   bindings: AgentPackBindings;
 }): Promise<ImportAgentResult> {
   try {

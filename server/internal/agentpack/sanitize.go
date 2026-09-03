@@ -1,11 +1,13 @@
 package agentpack
 
 import (
+	"path"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
-var secretKey = regexp.MustCompile(`(?i)(secret|token|password|api_key|apikey|credential|refresh)`)
+var secretKey = regexp.MustCompile(`(?i)(secret|token|password|api[_-]?key|apikey|credential|refresh|private[_-]?key|access[_-]?key|authorization)`)
 
 var engineAllow = map[string]bool{
 	"structured_model": true,
@@ -16,22 +18,18 @@ func isSecretKey(k string) bool {
 	return secretKey.MatchString(strings.TrimSpace(k))
 }
 
-// SanitizeEngineConfig drops secret-shaped keys. Allowlisted keys are kept
-// even if a future allowlist name happened to match the secret regex.
+// SanitizeEngineConfig keep-lists structured_model and graph_definition, then
+// strips secret-shaped keys from whatever remains (including arrays).
 func SanitizeEngineConfig(in map[string]any) map[string]any {
 	if in == nil {
 		return map[string]any{}
 	}
-	out := make(map[string]any, len(in))
+	out := make(map[string]any, len(engineAllow))
 	for k, v := range in {
-		if isSecretKey(k) && !engineAllow[k] {
+		if !engineAllow[k] {
 			continue
 		}
-		if nested, ok := v.(map[string]any); ok {
-			out[k] = SanitizeEngineConfig(nested)
-			continue
-		}
-		out[k] = v
+		out[k] = sanitizeValue(v)
 	}
 	return out
 }
@@ -47,16 +45,27 @@ func SanitizeMap(in map[string]any) map[string]any {
 		if isSecretKey(k) {
 			continue
 		}
-		if nested, ok := v.(map[string]any); ok {
-			out[k] = SanitizeMap(nested)
-			continue
-		}
-		out[k] = v
+		out[k] = sanitizeValue(v)
 	}
 	if len(out) == 0 {
 		return map[string]any{}
 	}
 	return out
+}
+
+func sanitizeValue(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		return SanitizeMap(t)
+	case []any:
+		out := make([]any, len(t))
+		for i, item := range t {
+			out[i] = sanitizeValue(item)
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 // SanitizePackage mutates pkg in place: engine_config, skill configs, no ids.
@@ -66,7 +75,7 @@ func SanitizePackage(pkg *Package) {
 	}
 	pkg.Agent.EngineConfig = SanitizeEngineConfig(pkg.Agent.EngineConfig)
 	if len(pkg.Agent.SystemPrompt) > MaxSystemPrompt {
-		pkg.Agent.SystemPrompt = pkg.Agent.SystemPrompt[:MaxSystemPrompt]
+		pkg.Agent.SystemPrompt = truncateBytes(pkg.Agent.SystemPrompt, MaxSystemPrompt)
 	}
 	for i := range pkg.Skills {
 		pkg.Skills[i].ConfigJSON = SanitizeMap(pkg.Skills[i].ConfigJSON)
@@ -75,21 +84,65 @@ func SanitizePackage(pkg *Package) {
 	if pkg.Tools == nil {
 		pkg.Tools = []string{}
 	}
+	for i := range pkg.Knowledge {
+		pkg.Knowledge[i].Filename = SafeFilename(pkg.Knowledge[i].Filename)
+	}
+}
+
+// SafeFilename is a single path segment, so knowledge names cannot traverse.
+func SafeFilename(name string) string {
+	name = strings.TrimSpace(name)
+	name = strings.ReplaceAll(name, "\\", "/")
+	name = path.Base(name)
+	name = strings.TrimSpace(name)
+	if name == "" || name == "." || name == "/" || name == ".." {
+		return "file"
+	}
+	if len(name) > 255 {
+		name = truncateBytes(name, 255)
+	}
+	return name
+}
+
+func truncateBytes(s string, n int) string {
+	if n <= 0 || len(s) <= n {
+		return s
+	}
+	s = s[:n]
+	for len(s) > 0 && !utf8.ValidString(s) {
+		s = s[:len(s)-1]
+	}
+	return s
 }
 
 func remainingSecretKeys(m map[string]any) []string {
 	var found []string
-	var walk func(map[string]any)
-	walk = func(cur map[string]any) {
-		for k, v := range cur {
-			if isSecretKey(k) && !engineAllow[k] {
-				found = append(found, k)
+	var walk func(any)
+	walk = func(v any) {
+		switch t := v.(type) {
+		case map[string]any:
+			for k, child := range t {
+				if isSecretKey(k) && !engineAllow[k] {
+					found = append(found, k)
+				}
+				walk(child)
 			}
-			if nested, ok := v.(map[string]any); ok {
-				walk(nested)
+		case []any:
+			for _, child := range t {
+				walk(child)
 			}
 		}
 	}
 	walk(m)
 	return found
+}
+
+// HeaderSafe strips CR/LF so values can go in HTTP headers.
+func HeaderSafe(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\r' || r == '\n' {
+			return -1
+		}
+		return r
+	}, s)
 }

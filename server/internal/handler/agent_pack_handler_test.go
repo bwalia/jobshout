@@ -31,7 +31,7 @@ type stubPackSvc struct {
 	report     agentpack.Report
 }
 
-func (s *stubPackSvc) Export(context.Context, uuid.UUID, uuid.UUID) (*agentpack.Package, string, error) {
+func (s *stubPackSvc) Export(context.Context, uuid.UUID, uuid.UUID, uuid.UUID) (*agentpack.Package, string, error) {
 	return s.pkg, s.filename, s.exportErr
 }
 func (s *stubPackSvc) Preview(context.Context, uuid.UUID, *agentpack.Package) (*service.PackPreview, error) {

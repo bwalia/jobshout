@@ -31,12 +31,14 @@ export function ImportAgentPackageDialog({
   const [previewing, setPreviewing] = useState(false);
   const [importing, setImporting] = useState(false);
   const [preview, setPreview] = useState<AgentPackPreview | null>(null);
+  const [packDoc, setPackDoc] = useState<AgentPackDocument | null>(null);
   const [bindings, setBindings] = useState<AgentPackBindings>({});
 
   useEffect(() => {
     if (!open) {
       setParseError("");
       setPreview(null);
+      setPackDoc(null);
       setBindings({});
       setPreviewing(false);
       setImporting(false);
@@ -62,6 +64,7 @@ export function ImportAgentPackageDialog({
     if (!file) return;
     setParseError("");
     setPreview(null);
+    setPackDoc(null);
     let parsed: AgentPackDocument;
     try {
       const text = await file.text();
@@ -77,6 +80,7 @@ export function ImportAgentPackageDialog({
     setPreviewing(true);
     try {
       const report = await previewAgentImport(parsed);
+      setPackDoc(parsed);
       setPreview(report);
       setBindings({ ...report.bindings });
     } catch (err) {
@@ -92,6 +96,7 @@ export function ImportAgentPackageDialog({
     try {
       const result = await importAgentPackage({
         preview_id: preview.preview_id,
+        package: packDoc ?? undefined,
         bindings,
       });
       await queryClient.invalidateQueries({ queryKey: agentKeys.lists() });
@@ -157,7 +162,11 @@ export function ImportAgentPackageDialog({
               type="file"
               accept=".json,.jobshout-agent.json,application/json"
               className="sr-only"
-              onChange={(e) => void onFile(e.target.files?.[0])}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                void onFile(file);
+              }}
             />
             <label
               htmlFor="agent-pack-file"

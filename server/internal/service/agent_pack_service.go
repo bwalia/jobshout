@@ -26,7 +26,7 @@ type builtinFinder interface {
 }
 
 type AgentPackService interface {
-	Export(ctx context.Context, orgID, agentID uuid.UUID) (*agentpack.Package, string, error)
+	Export(ctx context.Context, orgID, userID, agentID uuid.UUID) (*agentpack.Package, string, error)
 	Preview(ctx context.Context, orgID uuid.UUID, pkg *agentpack.Package) (*PackPreview, error)
 	ResolvePreview(ctx context.Context, orgID uuid.UUID, req ImportAgentRequest) (agentpack.Report, error)
 	Import(ctx context.Context, orgID, userID uuid.UUID, req ImportAgentRequest) (*ImportAgentResult, error)
@@ -98,7 +98,7 @@ func NewAgentPackService(
 	}
 }
 
-func (s *agentPackService) Export(ctx context.Context, orgID, agentID uuid.UUID) (*agentpack.Package, string, error) {
+func (s *agentPackService) Export(ctx context.Context, orgID, userID, agentID uuid.UUID) (*agentpack.Package, string, error) {
 	b, err := s.store.LoadBundle(ctx, orgID, agentID)
 	if err != nil {
 		return nil, "", err
@@ -112,7 +112,11 @@ func (s *agentPackService) Export(ctx context.Context, orgID, agentID uuid.UUID)
 	if err != nil {
 		return nil, "", err
 	}
-	s.record(ctx, orgID, nil, "agent.export", &agentID, map[string]any{
+	var who *uuid.UUID
+	if userID != uuid.Nil {
+		who = &userID
+	}
+	s.record(ctx, orgID, who, "agent.export", &agentID, map[string]any{
 		"builtin": pkg.Agent.Builtin, "warnings": len(pkg.Warnings),
 	})
 	return pkg, agentpack.FilenameSlug(pkg.Agent.Name, pkg.ExportedAt), nil
@@ -162,18 +166,12 @@ func (s *agentPackService) Import(ctx context.Context, orgID, userID uuid.UUID, 
 		if rep.TargetAgentID == nil {
 			return nil, fmt.Errorf("overlay target missing")
 		}
+		provider, modelName, tools = s.overlayPreserve(ctx, orgID, *rep.TargetAgentID, pkg, provider, modelName, tools)
 		agent, err = s.store.ApplyOverlay(ctx, orgID, *rep.TargetAgentID, pkg, provider, modelName, tools)
 	default:
-		name := strings.TrimSpace(rep.Bindings.Name)
-		if name == "" {
-			name = pkg.Agent.Name
-		}
-		taken, terr := s.store.NameTaken(ctx, orgID, name, nil)
-		if terr != nil {
-			return nil, terr
-		}
-		if taken {
-			name = agentpack.DefaultName(pkg, true)
+		name, nerr := s.uniqueCreateName(ctx, orgID, pkg, rep.Bindings.Name)
+		if nerr != nil {
+			return nil, nerr
 		}
 		agent, err = s.store.ApplyCreate(ctx, orgID, userID, pkg, name, provider, modelName, tools)
 	}
@@ -206,10 +204,12 @@ func (s *agentPackService) resolve(ctx context.Context, orgID uuid.UUID, req Imp
 		s.mu.Lock()
 		c, ok := s.cache[req.PreviewID]
 		s.mu.Unlock()
-		if !ok || time.Now().After(c.expires) || c.orgID != orgID {
+		if ok && time.Now().Before(c.expires) && c.orgID == orgID {
+			pkg = clonePkg(c.pkg)
+		} else if req.Package == nil {
 			return nil, agentpack.Report{}, fmt.Errorf("preview expired; upload the file again")
 		}
-		pkg = clonePkg(c.pkg)
+		// Cache miss (other replica or restart): fall back to the uploaded package.
 	}
 	if pkg == nil {
 		return nil, agentpack.Report{}, fmt.Errorf("package is required")
@@ -250,6 +250,55 @@ func (s *agentPackService) resolve(ctx context.Context, orgID uuid.UUID, req Imp
 		}
 	}
 	return pkg, rep, nil
+}
+
+func (s *agentPackService) uniqueCreateName(ctx context.Context, orgID uuid.UUID, pkg *agentpack.Package, preferred string) (string, error) {
+	for attempt := 0; attempt < 20; attempt++ {
+		name := strings.TrimSpace(preferred)
+		if name == "" {
+			name = strings.TrimSpace(pkg.Agent.Name)
+		}
+		if attempt > 0 {
+			name = agentpack.UniqueName(pkg, true, attempt)
+		}
+		taken, err := s.store.NameTaken(ctx, orgID, name, nil)
+		if err != nil {
+			return "", err
+		}
+		if !taken {
+			return name, nil
+		}
+	}
+	return "", fmt.Errorf("an agent named %q already exists", strings.TrimSpace(pkg.Agent.Name))
+}
+
+// overlayPreserve keeps the destination model/tools when the package would
+// otherwise blank them (unavailable model, or every packaged tool skipped).
+func (s *agentPackService) overlayPreserve(ctx context.Context, orgID, agentID uuid.UUID, pkg *agentpack.Package, provider, modelName string, tools []string) (string, string, []string) {
+	needModel := provider == "" && modelName == ""
+	needTools := len(tools) == 0 && len(pkg.Tools) > 0
+	if !needModel && !needTools {
+		return provider, modelName, tools
+	}
+	b, err := s.store.LoadBundle(ctx, orgID, agentID)
+	if err != nil || b == nil || b.Agent == nil {
+		return provider, modelName, tools
+	}
+	if needModel {
+		provider = derefStr(b.Agent.ModelProvider)
+		modelName = derefStr(b.Agent.ModelName)
+	}
+	if needTools {
+		tools = append([]string(nil), b.Tools...)
+	}
+	return provider, modelName, tools
+}
+
+func derefStr(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 func (s *agentPackService) dest(ctx context.Context, orgID uuid.UUID, pkg *agentpack.Package) (agentpack.Dest, error) {
@@ -386,6 +435,9 @@ func clonePkg(pkg *agentpack.Package) *agentpack.Package {
 	cp.Warnings = append([]string(nil), pkg.Warnings...)
 	if pkg.Agent.EngineConfig != nil {
 		cp.Agent.EngineConfig = agentpack.SanitizeEngineConfig(pkg.Agent.EngineConfig)
+	}
+	if pkg.Source.FieldKeys != nil {
+		cp.Source.FieldKeys = append([]string(nil), pkg.Source.FieldKeys...)
 	}
 	return &cp
 }

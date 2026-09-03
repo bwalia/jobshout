@@ -30,11 +30,19 @@ func ValidateKind(pkg *Package) error {
 
 // DefaultName returns the create-mode name, with a clash suffix when needed.
 func DefaultName(pkg *Package, taken bool) string {
+	return UniqueName(pkg, taken, 1)
+}
+
+// UniqueName is "{name} (imported)" then "{name} (imported 2)" …
+func UniqueName(pkg *Package, taken bool, attempt int) string {
 	name := strings.TrimSpace(pkg.Agent.Name)
 	if !taken {
 		return name
 	}
-	return name + " (imported)"
+	if attempt <= 1 {
+		return name + " (imported)"
+	}
+	return fmt.Sprintf("%s (imported %d)", name, attempt)
 }
 
 func skipSet(skip []string, includeGated bool, tools []string) map[string]bool {
