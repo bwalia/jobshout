@@ -1,8 +1,10 @@
 package model
 
 import (
-	"github.com/google/uuid"
+	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // EngineType constants identify which runtime executes a given agent or step.
@@ -81,11 +83,16 @@ const EngineConfigStructuredModel = "structured_model"
 // IsBuiltin reports whether the agent was seeded by the platform under the
 // given builtin name.
 func (a *Agent) IsBuiltin(name string) bool {
-	if a.Metadata == nil {
-		return false
+	return a.SeededBuiltin() == name
+}
+
+// SeededBuiltin is the specialist name in metadata, or empty for a custom agent.
+func (a *Agent) SeededBuiltin() string {
+	if a == nil || a.Metadata == nil {
+		return ""
 	}
 	v, _ := a.Metadata[MetadataKeyBuiltin].(string)
-	return v == name
+	return strings.TrimSpace(v)
 }
 
 type CreateAgentRequest struct {

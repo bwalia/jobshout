@@ -18,6 +18,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AgentStatusBadge } from "@/components/agent/AgentStatusBadge";
 import { ExportAgentButton } from "@/components/agent/ExportAgentButton";
+import { RemoveAgentButton } from "@/components/agent/RemoveAgentButton";
 import { useAgent, useUpdateAgent } from "@/lib/hooks/useAgents";
 import { ModelPicker } from "@/components/agent/ModelPicker";
 import { useBlogConfig } from "@/lib/hooks/useBlog";
@@ -899,7 +900,13 @@ export default function AgentProfilePage() {
 
           {/* Performance score badge */}
           <div className="flex flex-col items-start gap-2 sm:items-end">
-            <ExportAgentButton agentId={agent.id} />
+            <div className="flex flex-wrap justify-end gap-2">
+              <ExportAgentButton agentId={agent.id} />
+              <RemoveAgentButton
+                agent={agent}
+                onRemoved={() => router.push("/panel/task-manager")}
+              />
+            </div>
             <span className="text-xs text-muted-foreground">Performance</span>
             <span className="text-2xl font-bold text-foreground">
               {agent.performance_score}%
