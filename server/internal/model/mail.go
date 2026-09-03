@@ -160,6 +160,15 @@ type MailThreadDetail struct {
 	Draft  *MailDraft `json:"draft,omitempty"`
 }
 
+// MailDraftIgnoredResult is POST /threads/{id}/draft: the operator asked to
+// un-ignore this mail. Rules is the playbook after the sender was added.
+type MailDraftIgnoredResult struct {
+	Thread        MailThread     `json:"thread"`
+	Draft         *MailDraft     `json:"draft,omitempty"`
+	Rules         MailWatchRules `json:"rules"`
+	WatchedSender string         `json:"watched_sender,omitempty"`
+}
+
 // MailOAuthStartResponse is POST /connection/oauth/start.
 type MailOAuthStartResponse struct {
 	AuthorizationURL string `json:"authorization_url"`

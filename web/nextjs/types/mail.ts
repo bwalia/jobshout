@@ -105,3 +105,10 @@ export interface PaginatedMailThreads {
   per_page: number;
   total_pages: number;
 }
+
+export interface MailDraftIgnoredResult {
+  thread: MailThread;
+  draft?: MailDraft | null;
+  rules: MailWatchRules;
+  watched_sender?: string;
+}

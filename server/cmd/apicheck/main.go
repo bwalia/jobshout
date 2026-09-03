@@ -181,6 +181,46 @@ func main() {
 			"ignored", false)
 	})
 
+	c.step("M3b draft ignored newsletter", func() error {
+		found, err := c.findThread("th-news-"+fmt.Sprint(stamp), "This newsletter: August digest")
+		if err != nil {
+			return err
+		}
+		if found == nil {
+			return fmt.Errorf("ignored newsletter not found")
+		}
+		id := str(found, "id")
+		st, raw, err := c.do(http.MethodPost, "/api/v1/mail/threads/"+id+"/draft", map[string]any{}, true)
+		if err != nil {
+			return err
+		}
+		if st != 200 {
+			return fmt.Errorf("draft ignored %d: %s", st, raw)
+		}
+		m := asMap(raw)
+		thread := asMap(anyToJSON(m["thread"]))
+		if str(thread, "status") != "draft_ready" {
+			return fmt.Errorf("unignored status %s", raw)
+		}
+		if str(m, "watched_sender") != "noreply@list.com" {
+			return fmt.Errorf("watched_sender %s", raw)
+		}
+		st, body, err := c.do(http.MethodGet, "/api/v1/mail/connection", nil, true)
+		if err != nil {
+			return err
+		}
+		if st != 200 {
+			return fmt.Errorf("connection %d: %s", st, body)
+		}
+		senders := asSlice(asMap(anyToJSON(asMap(body)["rules"]))["senders"])
+		for _, s := range senders {
+			if fmt.Sprint(s) == "noreply@list.com" {
+				return nil
+			}
+		}
+		return fmt.Errorf("watch senders missing noreply@list.com: %s", body)
+	})
+
 	c.step("M4 tracking link skipped, still drafts", func() error {
 		return c.injectAndSync("th-track-"+fmt.Sprint(stamp), "ops@partner.com",
 			"Can we jump on a call?",

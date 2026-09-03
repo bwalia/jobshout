@@ -8,6 +8,7 @@ import { apiClient, apiErrorMessage } from "@/lib/api/client";
 import type {
   MailConnectionStatus,
   MailDraft,
+  MailDraftIgnoredResult,
   MailSyncResult,
   MailThread,
   MailThreadDetail,
@@ -113,6 +114,7 @@ export function MailAgentClient() {
   const [error, setError] = useState("");
   const [syncNote, setSyncNote] = useState("");
   const [saveNote, setSaveNote] = useState("");
+  const [watchNote, setWatchNote] = useState("");
   const [polling, setPolling] = useState(false);
   const [busy, setBusy] = useState(false);
   const [savingRules, setSavingRules] = useState(false);
@@ -145,6 +147,7 @@ export function MailAgentClient() {
 
   const openThread = useCallback(async (id: string) => {
     setError("");
+    setWatchNote("");
     try {
       const { data } = await apiClient.get<MailThreadDetail>(`/mail/threads/${id}`);
       setSelected(data);
@@ -332,6 +335,56 @@ export function MailAgentClient() {
       await loadThreads();
     } catch {
       setError("Could not reject the draft.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function rememberSender(email: string) {
+    const next = email.trim();
+    if (!next) return;
+    setSenders((prev) => {
+      if (prev.some((s) => s.toLowerCase() === next.toLowerCase())) {
+        return prev;
+      }
+      return [...prev, next];
+    });
+  }
+
+  async function draftIgnored() {
+    if (!selected) return;
+    setBusy(true);
+    setError("");
+    setSaveNote("");
+    setWatchNote("");
+    try {
+      const { data } = await apiClient.post<MailDraftIgnoredResult>(
+        `/mail/threads/${selected.thread.id}/draft`,
+      );
+      const watched = (data.watched_sender || "").trim();
+      // Server is the source of truth after a watch-rule write. Merging into
+      // local tags would let an unsaved clear + Save rules wipe other senders.
+      if (watched && Array.isArray(data.rules?.senders)) {
+        setSenders(data.rules.senders);
+      } else if (watched) {
+        rememberSender(watched);
+      }
+      setSelected({ thread: data.thread, draft: data.draft });
+      setDraftBody(data.draft?.body ?? "");
+      await loadThreads();
+      if (watched) {
+        const note = `Watching ${watched} — similar mail won’t be ignored. Nothing is sent until you Approve.`;
+        setSaveNote(note);
+        setWatchNote(note);
+      }
+    } catch (e: unknown) {
+      setError(apiErrorMessage(e, "Could not draft a reply."));
+      try {
+        await openThread(selected.thread.id);
+        await loadThreads();
+      } catch {
+        /* keep the draft error */
+      }
     } finally {
       setBusy(false);
     }
@@ -548,7 +601,8 @@ export function MailAgentClient() {
           <h2 className="font-semibold">Inbox</h2>
           <p className="mb-3 text-sm text-muted-foreground">
             An amber badge means the agent is still working on that mail; green
-            means a draft is ready for review. Ignored mail is dimmed.
+            means a draft is ready for review. Ignored mail is dimmed — open it
+            to draft a reply and watch that sender.
           </p>
           {threads.length === 0 ? (
             <p className="text-sm text-muted-foreground">
@@ -592,7 +646,10 @@ export function MailAgentClient() {
         <div className="rounded-lg border border-border bg-card p-4 text-card-foreground">
           <button
             type="button"
-            onClick={() => setSelected(null)}
+            onClick={() => {
+              setSelected(null);
+              setWatchNote("");
+            }}
             className="mb-3 text-sm font-medium text-primary hover:underline"
           >
             ← Back to inbox
@@ -620,6 +677,36 @@ export function MailAgentClient() {
             <div className="mt-3 rounded-md border border-border p-3">
               <p className="text-xs font-semibold uppercase text-muted-foreground">Research</p>
               <p className="mt-1 text-sm">{selected.thread.research_summary}</p>
+            </div>
+          )}
+          {watchNote ? (
+            <p className="mt-3 text-sm text-emerald-700 dark:text-emerald-400">{watchNote}</p>
+          ) : null}
+          {!selected.draft &&
+            (selected.thread.status === "ignored" || selected.thread.status === "failed") && (
+            <div className="mt-4 space-y-2">
+              {selected.thread.status === "ignored" ? (
+                <p className="text-sm text-muted-foreground">
+                  The agent skipped this mail. Draft a reply to watch this sender
+                  — nothing is sent until you Approve.
+                </p>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Drafting failed
+                  {selected.thread.error_message
+                    ? `: ${selected.thread.error_message}.`
+                    : "."}{" "}
+                  Try again — nothing is sent until you Approve.
+                </p>
+              )}
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void draftIgnored()}
+                className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              >
+                {busy ? "Drafting…" : "Draft reply"}
+              </button>
             </div>
           )}
           {selected.draft && (

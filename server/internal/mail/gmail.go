@@ -503,6 +503,38 @@ func WatchMatches(msg InboxMessage, labels, senders, prefixes []string) bool {
 	return false
 }
 
+// TeachWatchSender is whether Draft-reply should add this mail's sender to
+// the watch list. A labels-only playbook already honor-watches every ingested
+// message; adding a sender would require a sender/prefix match and let other
+// labelled mail be ignored again.
+func TeachWatchSender(labels, senders, prefixes []string) bool {
+	labels = compactWatch(labels)
+	senders = compactWatch(senders)
+	prefixes = compactWatch(prefixes)
+	return !(len(labels) > 0 && len(senders) == 0 && len(prefixes) == 0)
+}
+
+// AppendWatchSender adds this mail's sender to the watch list so later
+// triage will not ignore them. Prefers the email address; falls back to the
+// display name. Does not add subject prefixes — those are too easy to guess
+// wrong. Empty candidate or a case-insensitive duplicate is a no-op.
+func AppendWatchSender(senders []string, fromEmail, fromName string) (out []string, added string) {
+	candidate := strings.TrimSpace(fromEmail)
+	if candidate == "" {
+		candidate = strings.TrimSpace(fromName)
+	}
+	out = compactWatch(senders)
+	if candidate == "" {
+		return out, ""
+	}
+	for _, s := range out {
+		if strings.EqualFold(s, candidate) {
+			return out, ""
+		}
+	}
+	return append(out, candidate), candidate
+}
+
 // HonorOperatorWatch keeps triage from discarding mail the operator
 // explicitly watched. OTP / no-reply / "notification" heuristics otherwise
 // mark those threads ignored after a successful Gmail match.

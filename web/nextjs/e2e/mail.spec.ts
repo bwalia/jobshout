@@ -146,5 +146,6 @@ test.describe("Mail Agent", () => {
     await expect(
       page.getByRole("button", { name: "Approve and send" }),
     ).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Draft reply" })).toHaveCount(0);
   });
 });
