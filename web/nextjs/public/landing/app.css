@@ -31,7 +31,8 @@
 
 .mono { font-family: var(--sc-font-mono); }
 .p-soft { color: var(--sc-ink-soft); text-wrap: pretty; margin: 0; }
-.p-faint { color: color-mix(in oklab, var(--sc-ink) 42%, transparent); }
+/* 50% is the floor that still clears 4.5:1 against --sc-canvas. */
+.p-faint { color: color-mix(in oklab, var(--sc-ink) 50%, transparent); }
 .h-display {
   font-family: var(--sc-font-display);
   font-weight: 600;
@@ -97,6 +98,17 @@
   color: var(--sc-accent);
 }
 
+/* Keyboard users land here first; it stays off-screen until focused. */
+.skip {
+  position: fixed; top: 8px; left: 8px; z-index: calc(var(--sc-z-chrome) + 1);
+  transform: translateY(calc(-100% - 16px));
+  background: var(--sc-ink); color: var(--sc-canvas);
+  border-radius: var(--sc-r-pill); padding: 10px 18px;
+  font-size: var(--sc-t-sm); text-decoration: none;
+  transition: transform var(--sc-d-fast) var(--sc-ease-out);
+}
+.skip:focus-visible { transform: none; }
+
 /* ------------------------------------------------------------- top chrome -- */
 .bar {
   position: fixed; inset: 0 0 auto 0; height: var(--js-bar-h);
@@ -112,10 +124,13 @@
   color: var(--sc-ink); text-decoration: none;
 }
 .bar__nav { display: inline-flex; align-items: center; gap: 18px; }
+.bar__sections { display: inline-flex; align-items: center; gap: 22px; }
 .bar__link { font-size: var(--sc-t-sm); color: var(--sc-ink-soft); text-decoration: none; }
 .bar__link:hover { color: var(--sc-ink); }
 
-#pillars, #jobs, #faq, #shout { scroll-margin-top: calc(var(--js-bar-h) + 8px); }
+#what, #how, #pillars, #jobs, #control, #platform, #faq, #shout {
+  scroll-margin-top: calc(var(--js-bar-h) + 8px);
+}
 
 /* ----------------------------------------------------------------- hero -- */
 .hero { min-height: 100svh; display: grid; align-items: center; padding-top: var(--js-bar-h); padding-bottom: 8vh; }
@@ -129,7 +144,7 @@
 .hero__title {
   margin: 0;
   font-family: var(--sc-font-display); font-weight: 600;
-  font-size: var(--sc-t-4xl);
+  font-size: var(--sc-t-3xl);
   line-height: var(--sc-leading-none);
   letter-spacing: var(--sc-track-tight);
   text-wrap: balance;
@@ -718,14 +733,248 @@
 .shout__alt a { color: var(--sc-ink); }
 .foot {
   margin-top: var(--sc-5);
-  display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px;
+  display: grid; justify-items: center; gap: var(--sc-4);
+  padding-top: var(--sc-5);
+  border-top: 1px solid var(--sc-hairline);
+  width: min(48rem, 100%);
   font-size: var(--sc-t-sm); color: var(--sc-ink-soft);
 }
 .foot__dot { color: color-mix(in oklab, var(--sc-ink) 30%, transparent); }
 
 @keyframes js-blink { 50% { opacity: 0; } }
 
+/* ═══════════════════════════════════════════════════ explanatory sections ══
+   Hero proof strip, "what it is", "how it works", control, platform. These
+   are plain flow sections: they carry the argument, the pinned demo shows it.
+   ========================================================================== */
+
+/* shared section furniture */
+.sec__head { display: grid; gap: 12px; max-width: 46rem; margin-bottom: var(--sc-7); }
+.kicker {
+  margin: 0;
+  font-family: var(--sc-font-mono); font-size: var(--sc-t-xs);
+  letter-spacing: var(--sc-track-wide); text-transform: uppercase;
+  color: var(--sc-accent);
+}
+.sec__lede { font-size: var(--sc-t-base); max-width: 44rem; }
+
+/* card is the shared surface for the control and platform grids */
+.card {
+  display: grid; align-content: start; gap: 8px;
+  padding: clamp(1.15rem, 2.4vw, 1.6rem);
+  background: var(--sc-surface);
+  border: 1px solid var(--sc-hairline);
+  border-radius: var(--sc-r-lg);
+}
+.card h3 {
+  margin: 0; font-size: var(--sc-t-base); font-weight: 600;
+  letter-spacing: var(--sc-track-snug); text-wrap: balance;
+}
+.card p { font-size: var(--sc-t-sm); }
+.card__kicker {
+  margin: 0 0 2px; font-size: var(--sc-t-xs);
+  letter-spacing: var(--sc-track-wide); text-transform: uppercase;
+  color: color-mix(in oklab, var(--sc-accent) 78%, var(--sc-ink));
+}
+
+/* ------------------------------------------------------- hero proof strip -- */
+.proof {
+  list-style: none; margin: var(--sc-2) 0 0; padding: 0;
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 18px clamp(1rem, 3vw, 2rem);
+  border-top: 1px solid var(--sc-hairline);
+  padding-top: var(--sc-5);
+  width: 100%; max-width: 52rem;
+}
+.proof li { display: grid; gap: 2px; text-align: center; }
+.proof strong {
+  font-size: var(--sc-t-base); font-weight: 600; color: var(--sc-ink);
+  letter-spacing: var(--sc-track-snug);
+}
+.proof span { font-size: var(--sc-t-sm); color: var(--sc-ink-soft); }
+
+/* ----------------------------------------------------------- what it is -- */
+.split {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: clamp(1rem, 2.5vw, 1.75rem);
+}
+.split__col {
+  padding: clamp(1.25rem, 2.6vw, 1.9rem);
+  background: var(--sc-surface);
+  border: 1px solid var(--sc-hairline);
+  border-radius: var(--sc-r-lg);
+}
+/* The "is" column is the one we want read first, so it carries the accent. */
+.split__col--yes { border-color: color-mix(in oklab, var(--sc-accent) 26%, transparent); }
+.split__title {
+  display: flex; align-items: center; gap: 10px;
+  margin: 0 0 var(--sc-4); font-size: var(--sc-t-lg); font-weight: 600;
+  letter-spacing: var(--sc-track-snug);
+}
+.split__mark {
+  flex: none; width: 22px; height: 22px; border-radius: 50%;
+  display: inline-grid; place-items: center;
+  font-size: 11px; line-height: 1;
+}
+.split__mark--yes {
+  background: var(--js-green-wash); color: var(--sc-accent);
+  border: 1px solid color-mix(in oklab, var(--sc-accent) 45%, transparent);
+}
+.split__mark--no {
+  background: color-mix(in oklab, var(--sc-ink) 8%, transparent);
+  color: var(--sc-ink-soft);
+  border: 1px solid var(--sc-hairline-strong);
+}
+.split__list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sc-4); }
+.split__list li {
+  font-size: var(--sc-t-sm); color: var(--sc-ink-soft);
+  text-wrap: pretty; padding-left: 16px; position: relative;
+}
+.split__list li::before {
+  content: ""; position: absolute; left: 0; top: 0.62em;
+  width: 5px; height: 1px; background: var(--sc-hairline-strong);
+}
+.split__list strong { color: var(--sc-ink); font-weight: 500; }
+
+/* --------------------------------------------------------- how it works -- */
+.steps {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; grid-template-columns: repeat(5, 1fr);
+  gap: clamp(1rem, 2.2vw, 1.75rem);
+}
+.step {
+  display: grid; align-content: start; gap: 8px;
+  padding-top: var(--sc-4);
+  border-top: 1px solid var(--sc-hairline-strong);
+}
+.step__n {
+  margin: 0; font-family: var(--sc-font-mono); font-size: var(--sc-t-xs);
+  letter-spacing: var(--sc-track-wide); color: var(--sc-accent);
+}
+.step h3 {
+  margin: 0; font-size: var(--sc-t-base); font-weight: 600;
+  letter-spacing: var(--sc-track-snug); text-wrap: balance;
+}
+.step p { font-size: var(--sc-t-sm); }
+
+/* ------------------------------------------------------------- job facts -- */
+.job__facts {
+  margin: var(--sc-4) 0 0; display: grid; gap: 8px;
+  border-top: 1px solid var(--sc-hairline); padding-top: var(--sc-4);
+}
+.job__facts > div { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.job__facts dt {
+  flex: none; min-width: 4.5rem;
+  font-family: var(--sc-font-mono); font-size: var(--sc-t-xs);
+  letter-spacing: var(--sc-track-wide); text-transform: uppercase;
+  color: color-mix(in oklab, var(--sc-ink) 55%, transparent);
+}
+.job__facts dd {
+  margin: 0; flex: 1 1 14rem;
+  font-size: var(--sc-t-sm); color: var(--sc-ink-soft);
+}
+.jobs__foot { margin-top: var(--sc-5); font-size: var(--sc-t-sm); max-width: 52rem; }
+
+/* --------------------------------------------------------------- control -- */
+.control__grid {
+  display: grid; grid-template-columns: 1fr minmax(17rem, 23rem);
+  gap: clamp(1.25rem, 3vw, 2.5rem); align-items: start;
+}
+.control__cards {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: clamp(1rem, 2.2vw, 1.5rem);
+}
+
+/* the pending-approval sample; same "real screenshot" language as .job__preview */
+.gate {
+  margin: 0; overflow: hidden;
+  background: var(--js-well);
+  border: 1px solid var(--sc-hairline-strong);
+  border-radius: var(--sc-r-lg);
+  box-shadow: var(--sc-edge);
+}
+.gate__bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--sc-hairline);
+  font-size: var(--sc-t-xs); color: var(--sc-ink-soft);
+}
+.gate__body { padding: 16px; display: grid; gap: 10px; }
+.gate__agent { margin: 0; font-size: var(--sc-t-sm); color: var(--sc-ink-soft); }
+.gate__tool {
+  margin: 0; font-size: var(--sc-t-sm); color: var(--sc-ink);
+  background: color-mix(in oklab, var(--sc-ink) 7%, transparent);
+  border: 1px solid var(--sc-hairline);
+  border-radius: var(--sc-r-sm);
+  padding: 6px 10px; width: fit-content;
+}
+.gate__args { margin: 0; display: grid; gap: 6px; }
+.gate__args > div { display: flex; gap: 10px; font-size: var(--sc-t-xs); }
+.gate__args dt {
+  flex: none; min-width: 3.75rem; font-family: var(--sc-font-mono);
+  color: color-mix(in oklab, var(--sc-ink) 55%, transparent);
+}
+.gate__args dd { margin: 0; color: var(--sc-ink-soft); word-break: break-word; }
+.gate__note { font-size: var(--sc-t-xs); }
+.gate__actions {
+  margin: 4px 0 0; display: flex; gap: 8px;
+  border-top: 1px solid var(--sc-hairline); padding-top: 12px;
+}
+.gate__btn {
+  font-size: var(--sc-t-xs); border-radius: var(--sc-r-pill);
+  padding: 7px 16px; border: 1px solid var(--sc-hairline-strong);
+  color: var(--sc-ink-soft);
+}
+.gate__btn--yes {
+  background: var(--js-green-wash); color: var(--sc-accent);
+  border-color: color-mix(in oklab, var(--sc-accent) 45%, transparent);
+}
+
+/* -------------------------------------------------------------- platform -- */
+.grid {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: clamp(1rem, 2.2vw, 1.5rem);
+}
+.strip {
+  margin-top: clamp(1rem, 2.2vw, 1.5rem);
+  display: grid; grid-template-columns: 1fr auto;
+  gap: var(--sc-5); align-items: center;
+  padding: clamp(1.25rem, 2.8vw, 2rem);
+  background: var(--sc-surface);
+  border: 1px solid var(--sc-hairline);
+  border-radius: var(--sc-r-lg);
+}
+.strip h3 {
+  margin: 0 0 8px; font-size: var(--sc-t-lg); font-weight: 600;
+  letter-spacing: var(--sc-track-snug);
+}
+.strip p { font-size: var(--sc-t-sm); max-width: 58ch; }
+.strip code {
+  font-size: 0.92em; color: var(--sc-ink);
+  background: color-mix(in oklab, var(--sc-ink) 8%, transparent);
+  border-radius: var(--sc-r-sm); padding: 2px 6px;
+}
+.strip__cta { margin: 0; }
+
+/* ---------------------------------------------------------------- footer -- */
+.foot__nav {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 20px;
+}
+.foot__nav a { color: var(--sc-ink-soft); text-decoration: none; }
+.foot__nav a:hover { color: var(--sc-ink); }
+.foot__legal {
+  margin: 0; display: flex; flex-wrap: wrap;
+  align-items: center; justify-content: center; gap: 10px;
+}
+
 /* -------------------------------------------------------------- responsive -- */
+@media (max-width: 1180px) {
+  .steps { grid-template-columns: repeat(3, 1fr); }
+  .grid { grid-template-columns: repeat(2, 1fr); }
+  .control__grid { grid-template-columns: 1fr; }
+  .control__cards { grid-template-columns: repeat(2, 1fr); }
+  .bar__sections { display: none; }
+}
 @media (max-width: 980px) {
   .demo { grid-template-columns: 1fr; grid-template-rows: auto 1fr; padding-top: calc(var(--js-bar-h) + 12px); }
   .demo__copy { min-height: 5.5rem; overflow: hidden; }
@@ -735,10 +984,14 @@
   .pillars__grid { grid-template-columns: 1fr; }
   .job { grid-template-columns: 1fr; }
   .seg { min-width: 0; }
+  .split { grid-template-columns: 1fr; }
+  .strip { grid-template-columns: 1fr; justify-items: start; }
 }
 @media (max-width: 640px) {
-  .hero__title { font-size: var(--sc-t-3xl); }
   .bar__link { display: none; }
+  .steps { grid-template-columns: 1fr; }
+  .grid, .control__cards { grid-template-columns: 1fr; }
+  .proof { grid-template-columns: repeat(2, 1fr); }
   .desk__title { display: none; }
   .seg { min-width: 196px; }
   .seg__opt { padding: 5px 6px; font-size: 10px; }

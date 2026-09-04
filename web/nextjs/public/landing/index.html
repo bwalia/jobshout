@@ -3,8 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>AI teammates that finish the work | JobShout</title>
-<meta name="description" content="Specialist AI agents you can give real work to. They sign into your tools, run the job live, and come back when your approval is needed.">
+<title>JobShout — specialist AI agents that do the job, and stop for your approval</title>
+<meta name="description" content="JobShout is a chat-first workspace for specialist AI agents. Describe a job in plain English; the agent plans it, signs into your real tools, runs every step in the open, and pauses for your approval before anything is sent, spent, or deleted.">
+<link rel="canonical" href="/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="JobShout — specialist AI agents that do the job">
+<meta property="og:description" content="Describe a job in plain English. A specialist agent plans it, runs it in your real tools, and pauses for your approval before anything irreversible.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#0a0a0b">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230a0a0b'/><circle cx='16' cy='16' r='5' fill='%232ee6a0'/></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -20,6 +26,8 @@
 </head>
 <body>
 
+<a class="skip" href="#top">Skip to content</a>
+
 <span data-sc-progress></span>
 <div class="sc-grain" aria-hidden="true"></div>
 
@@ -28,24 +36,111 @@
     <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><rect width="18" height="18" rx="4.5" fill="var(--sc-ink)"/><circle cx="9" cy="9" r="3.2" fill="var(--sc-canvas)"/><circle cx="9" cy="9" r="3.2" fill="var(--sc-accent)" opacity="0.9"/></svg>
     <span>JobShout</span>
   </a>
+  <nav class="bar__sections" aria-label="Sections">
+    <a class="bar__link" href="#what">What it is</a>
+    <a class="bar__link" href="#how">How it works</a>
+    <a class="bar__link" href="#jobs">Agents</a>
+    <a class="bar__link" href="#control">Control</a>
+    <a class="bar__link" href="#platform">Platform</a>
+    <a class="bar__link" href="#faq">FAQ</a>
+  </nav>
   <nav class="bar__nav" aria-label="Account">
-    <a class="bar__link" href="/login">Sign in</a>
-    <a class="btn btn--pill" href="/signup">Shout a job</a>
+    <a class="bar__link" href="/login" data-js-signin>Sign in</a>
+    <a class="btn btn--pill" href="/signup" data-js-cta>Shout a job</a>
   </nav>
 </header>
 
 <main id="top">
 
   <!-- ═══ HERO ═══════════════════════════════════════════════════════════ -->
-  <section id="hero" class="sc-section hero" data-sc-act="flow" aria-label="Meet JobShout">
+  <section id="hero" class="sc-section hero" data-sc-act="flow" aria-labelledby="hero-title">
     <div class="sc-wrap hero__in" data-sc-in data-sc-stagger="80">
-      <p class="eyebrow">AI teammates that finish the work</p>
-      <h1 class="hero__title">Meet JobShout</h1>
-      <p class="hero__lede">Specialist agents you can give real work to. They sign into your tools, use them just like you do, and come back when your approval is needed.</p>
+      <p class="eyebrow">The workspace for AI coworkers</p>
+      <h1 class="hero__title" id="hero-title">Hand over the job.<br>Keep the final say.</h1>
+      <p class="hero__lede">JobShout is a chat-first workspace for specialist AI agents. Describe a job in plain English. The agent plans it, signs into your real tools, runs every step where you can watch, and stops for your approval before anything is sent, spent, or deleted.</p>
       <p class="hero__cta">
         <a class="btn btn--pill btn--lg" href="/signup">Shout a job</a>
-        <a class="btn btn--ghost btn--lg" href="/login">Sign in</a>
+        <a class="btn btn--ghost btn--lg" href="#how">See how it works</a>
       </p>
+      <ul class="proof" aria-label="At a glance">
+        <li><strong>7</strong><span>specialists built in</span></li>
+        <li><strong>Every step</strong><span>streamed and logged</span></li>
+        <li><strong>Approval gates</strong><span>on irreversible steps</span></li>
+        <li><strong>Your models</strong><span>hosted or fully local</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ═══ WHAT IT IS ═════════════════════════════════════════════════════ -->
+  <section id="what" class="sc-section what" data-sc-act="flow" aria-labelledby="what-title">
+    <div class="sc-wrap">
+      <div class="sec__head" data-sc-in>
+        <p class="kicker">What it is</p>
+        <h2 class="h-display" id="what-title">Agents that finish work, not chats that describe it</h2>
+        <p class="p-soft sec__lede">Most AI tools give you text back. JobShout gives you a completed job: a reply drafted in your mailbox, a pull request reviewed, a security report with reproduction steps, a researched brief with citations you can open. The agent does the work; you decide what ships.</p>
+      </div>
+
+      <div class="split" data-sc-in>
+        <div class="split__col split__col--yes">
+          <h3 class="split__title"><span class="split__mark split__mark--yes" aria-hidden="true">✓</span>What JobShout is</h3>
+          <ul class="split__list">
+            <li><strong>A place to delegate.</strong> You brief an agent the way you would brief a colleague — one sentence is usually enough.</li>
+            <li><strong>A team of specialists.</strong> Seven built-in agents, each with its own tools, prompt and rules. Mail. Career. Research. Articles. Security. PR review. Images.</li>
+            <li><strong>Real tool use.</strong> Agents sign into Gmail, GitHub, job boards and live sites, then click through them like a person would.</li>
+            <li><strong>Supervised by design.</strong> You mark which tools need a human decision. Those calls pause the run until you approve or reject.</li>
+            <li><strong>An open record.</strong> Every run keeps its full step history, token counts, latency and cost.</li>
+          </ul>
+        </div>
+        <div class="split__col split__col--no">
+          <h3 class="split__title"><span class="split__mark split__mark--no" aria-hidden="true">✕</span>What it is not</h3>
+          <ul class="split__list">
+            <li><strong>Not a chatbot.</strong> A chatbot writes about the task. These agents execute it and hand back a result on your board.</li>
+            <li><strong>Not a workflow builder.</strong> There is no canvas of boxes and arrows to draw before you get value. Message an agent and go.</li>
+            <li><strong>Not unattended automation.</strong> Nothing is sent, spent or deleted on an agent's own authority.</li>
+            <li><strong>Not a black box.</strong> You can read every tool call, every input, every decision after the fact.</li>
+            <li><strong>Not locked to one vendor.</strong> Point it at OpenAI, Anthropic, or a local model on your own hardware.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ HOW IT WORKS ═══════════════════════════════════════════════════ -->
+  <section id="how" class="sc-section how" data-sc-act="flow" aria-labelledby="how-title">
+    <div class="sc-wrap">
+      <div class="sec__head" data-sc-in>
+        <p class="kicker">How it works</p>
+        <h2 class="h-display" id="how-title">One job, start to finish, in five moves</h2>
+        <p class="p-soft sec__lede">The same loop runs behind every specialist. Nothing here is configured up front — the agent works it out from what you asked for.</p>
+      </div>
+
+      <ol class="steps" data-sc-in data-sc-stagger="70">
+        <li class="step">
+          <p class="step__n" aria-hidden="true">01</p>
+          <h3>Describe the job</h3>
+          <p class="p-soft">Type it in chat, or fill the short form the agent publishes for itself. "Chase the two overdue invoices." "Review pull request 184." "Evaluate this job posting against my profile."</p>
+        </li>
+        <li class="step">
+          <p class="step__n" aria-hidden="true">02</p>
+          <h3>The agent plans</h3>
+          <p class="p-soft">It picks the tools it needs and asks for anything missing — a target URL, a repository, the sender to watch. It will not invent the details it was not given.</p>
+        </li>
+        <li class="step">
+          <p class="step__n" aria-hidden="true">03</p>
+          <h3>It runs for real</h3>
+          <p class="p-soft">Signed into your tools, one step at a time: search, open, read, cross-check, draft. Each step streams into the run as it happens, so you are never waiting on a silent spinner.</p>
+        </li>
+        <li class="step">
+          <p class="step__n" aria-hidden="true">04</p>
+          <h3>It stops at the gate</h3>
+          <p class="p-soft">Reach a tool you marked as gated and the run pauses mid-loop. Its state is saved, and it resumes from exactly that step when you approve — or takes your reason on board when you reject.</p>
+        </li>
+        <li class="step">
+          <p class="step__n" aria-hidden="true">05</p>
+          <h3>The result lands</h3>
+          <p class="p-soft">A draft, a report, a brief or an image arrives on your task board with the artifacts and the full step history attached. You review it, then send it yourself.</p>
+        </li>
+      </ol>
     </div>
   </section>
 
@@ -293,12 +388,14 @@
     </div>
   </section>
 
+
   <!-- ═══ GIVE EACH AGENT A JOB ══════════════════════════════════════════ -->
-  <section id="jobs" class="sc-section jobs" data-sc-act="flow" aria-label="Give each agent a job">
+  <section id="jobs" class="sc-section jobs" data-sc-act="flow" aria-labelledby="jobs-title">
     <div class="sc-wrap">
-      <div class="jobs__head" data-sc-in>
-        <h2 class="h-display">Give each agent a job</h2>
-        <p class="p-soft">A specialist for each lane. Same chat, same approval gate.</p>
+      <div class="sec__head" data-sc-in>
+        <p class="kicker">The specialists</p>
+        <h2 class="h-display" id="jobs-title">Give each agent a job</h2>
+        <p class="p-soft sec__lede">Seven specialists ship with JobShout. Each one owns a lane, brings its own tools, and answers in the same chat behind the same approval gate. Pick one to see what it hands back.</p>
       </div>
       <div class="jobs__picks" role="tablist" aria-label="JobShout agents" data-sc-in>
         <button type="button" role="tab" aria-selected="true" aria-controls="job-panel" id="tab-mail" data-job="mail">Mail Agent</button>
@@ -313,6 +410,10 @@
         <div class="job__copy">
           <h3 id="job-title">Mail Agent</h3>
           <p id="job-body">Watch the senders you care about, research the thread, and leave a reply draft. Nothing is sent until you approve.</p>
+          <dl class="job__facts">
+            <div><dt>Give it</dt><dd id="job-input">the senders to watch and how you answer them</dd></div>
+            <div><dt>You get</dt><dd id="job-output">reply drafts parked in the mailbox for approval</dd></div>
+          </dl>
         </div>
         <figure class="job__preview" id="job-preview" aria-hidden="true">
           <figcaption class="job__preview-bar"><span id="job-preview-app">mail / inbox</span><span class="chip chip--wait">2 drafts</span></figcaption>
@@ -323,13 +424,118 @@
           </div>
         </figure>
       </div>
+      <p class="jobs__foot p-soft" data-sc-in>Need one that is not on this list? Agents are modular — a new specialist registers its own prompt, tools and launch form, and shows up in chat and on the board without the platform being touched.</p>
+    </div>
+  </section>
+
+  <!-- ═══ CONTROL & AUDIT ════════════════════════════════════════════════ -->
+  <section id="control" class="sc-section control" data-sc-act="flow" aria-labelledby="control-title">
+    <div class="sc-wrap">
+      <div class="sec__head" data-sc-in>
+        <p class="kicker">Control</p>
+        <h2 class="h-display" id="control-title">The agent does the work. You sign it off.</h2>
+        <p class="p-soft sec__lede">Autonomy is useful right up to the moment something leaves the building. JobShout draws that line explicitly, per agent and per tool, rather than trusting a model to know where it is.</p>
+      </div>
+
+      <div class="control__grid">
+        <div class="control__cards" data-sc-in data-sc-stagger="70">
+          <article class="card">
+            <h3>You choose what needs a signature</h3>
+            <p class="p-soft">Gating is set per agent, per tool. Read-only work — searching, reading, cross-checking — just runs. Sending, spending, posting and deleting wait for a person.</p>
+          </article>
+          <article class="card">
+            <h3>A paused run resumes, it does not restart</h3>
+            <p class="p-soft">When a gated call comes up, the agent's working state is saved and the run stops there. Approve it and the run picks up from that exact step. Reject it with a reason and the reason goes back to the agent.</p>
+          </article>
+          <article class="card">
+            <h3>Nothing happens off the record</h3>
+            <p class="p-soft">Every run stores its steps, tool inputs, artifacts, token counts, latency and cost in USD. You can reconstruct what an agent did months later, and who approved it.</p>
+          </article>
+          <article class="card">
+            <h3>Access is granted, never assumed</h3>
+            <p class="p-soft">An agent reaches only the connections you hand it. Sign it into one mailbox and one repository and that is the whole of its world.</p>
+          </article>
+        </div>
+
+        <figure class="gate" data-sc-in aria-label="Example of an approval waiting on a person">
+          <figcaption class="gate__bar">
+            <span class="mono">approval · pending</span>
+            <span class="chip chip--wait">waiting on you</span>
+          </figcaption>
+          <div class="gate__body">
+            <p class="gate__agent">Mail Agent wants to run</p>
+            <p class="gate__tool mono">gmail_send_message</p>
+            <dl class="gate__args">
+              <div><dt>to</dt><dd>billing@acmefreight.example</dd></div>
+              <div><dt>subject</dt><dd>Overdue invoice reminder — INV-2041</dd></div>
+            </dl>
+            <p class="gate__note p-soft">Run paused at step 7 of 9. It continues from here.</p>
+            <p class="gate__actions">
+              <span class="gate__btn gate__btn--yes">Approve</span>
+              <span class="gate__btn">Reject</span>
+            </p>
+          </div>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ PLATFORM ═══════════════════════════════════════════════════════ -->
+  <section id="platform" class="sc-section platform" data-sc-act="flow" aria-labelledby="platform-title">
+    <div class="sc-wrap">
+      <div class="sec__head" data-sc-in>
+        <p class="kicker">The platform</p>
+        <h2 class="h-display" id="platform-title">Everything around the agents</h2>
+        <p class="p-soft sec__lede">Agents are the part you talk to. This is the machinery that makes their work repeatable, inspectable and yours.</p>
+      </div>
+
+      <div class="grid" data-sc-in data-sc-stagger="60">
+        <article class="card">
+          <p class="card__kicker mono">board</p>
+          <h3>Tasks, projects and sprints</h3>
+          <p class="p-soft">Every run becomes a task you can see, sort and reassign, with its output and artifacts attached. Group them into projects, plan them into sprints.</p>
+        </article>
+        <article class="card">
+          <p class="card__kicker mono">workflows</p>
+          <h3>Multi-agent workflows</h3>
+          <p class="p-soft">Chain specialists into a dependency graph. Steps with no prerequisites run at the same time; dependent steps wait for their inputs. For when a job is bigger than one agent.</p>
+        </article>
+        <article class="card">
+          <p class="card__kicker mono">scheduler</p>
+          <h3>Jobs that repeat</h3>
+          <p class="p-soft">Put a job on a cron schedule and it runs without being asked — the Monday chase, the morning research brief, the weekly article. Results land on the board as usual.</p>
+        </article>
+        <article class="card">
+          <p class="card__kicker mono">tools</p>
+          <h3>Skills, plugins and MCP</h3>
+          <p class="p-soft">Teach an agent your own tools. JobShout speaks the Model Context Protocol, so any MCP server you run becomes a set of tools your agents can discover and call.</p>
+        </article>
+        <article class="card">
+          <p class="card__kicker mono">models</p>
+          <h3>Bring your own model</h3>
+          <p class="p-soft">OpenAI, Anthropic Claude, or a model running locally through Ollama — no API key leaving the building. Set a default, then override it per agent when one job needs a bigger brain.</p>
+        </article>
+        <article class="card">
+          <p class="card__kicker mono">metrics</p>
+          <h3>Cost and traces</h3>
+          <p class="p-soft">Per-run tokens, latency and USD cost, priced per token for hosted models and per compute-second for self-hosted ones. Export OpenTelemetry traces to Langfuse when you want to go deeper.</p>
+        </article>
+      </div>
+
+      <aside class="strip" data-sc-in>
+        <div>
+          <h3>Run it on your own infrastructure</h3>
+          <p class="p-soft">A Go API, a Next.js interface, PostgreSQL and MinIO for object storage. Start the whole stack with <code class="mono">docker compose up</code>, or deploy the Kubernetes manifests. Your data and your prompts stay where you put them.</p>
+        </div>
+        <p class="strip__cta"><a class="btn btn--ghost" href="/signup">Get started</a></p>
+      </aside>
     </div>
   </section>
 
   <!-- ═══ FAQ ════════════════════════════════════════════════════════════ -->
-  <section id="faq" class="sc-section faq" data-sc-act="flow" aria-label="Questions">
+  <section id="faq" class="sc-section faq" data-sc-act="flow" aria-labelledby="faq-title">
     <div class="sc-wrap faq__in">
-      <h2 class="h-display" data-sc-in>Questions</h2>
+      <h2 class="h-display" id="faq-title" data-sc-in>Questions</h2>
       <div class="faq__list" data-sc-in data-sc-stagger="60">
         <details>
           <summary>How is JobShout different from a chatbot?</summary>
@@ -345,17 +551,33 @@
         </details>
         <details>
           <summary>Do I need to build a workflow first?</summary>
-          <p>No. Message an agent and grant access as needed. No graph to draw. When you want a job to repeat, show it once and save the routine.</p>
+          <p>No. Message an agent and grant access as needed. No graph to draw. When you want a job to repeat, show it once and save the routine — or put it on a schedule.</p>
+        </details>
+        <details>
+          <summary>Which AI models does it run on?</summary>
+          <p>OpenAI, Anthropic Claude, or local models served by Ollama. You set a default provider for the workspace and override it on any individual agent, so an expensive model handles the hard lane and a cheap or local one handles the rest.</p>
+        </details>
+        <details>
+          <summary>Can I self-host it?</summary>
+          <p>Yes. The stack is a Go API, a Next.js interface, PostgreSQL and MinIO. Bring it up with Docker Compose for a workstation, or apply the Kubernetes manifests for a cluster. Paired with a local model, nothing leaves your network.</p>
+        </details>
+        <details>
+          <summary>What happens when an agent gets something wrong?</summary>
+          <p>Reject the step and give a reason. The reason is fed back to the agent and the run continues from the point it paused, so a bad draft costs you a sentence of correction rather than a restart. If it is already finished, the run history shows every tool call that led there.</p>
+        </details>
+        <details>
+          <summary>Can I add my own tools and agents?</summary>
+          <p>Yes. Connect an MCP server and its tools become available to your agents. Agents themselves are modular: a new specialist brings its own prompt, launch form and tools, and registers itself into chat and the board.</p>
         </details>
       </div>
     </div>
   </section>
 
   <!-- ═══ CLOSE ══════════════════════════════════════════════════════════ -->
-  <section id="shout" class="sc-section shout" data-sc-act="flow" aria-label="Meet your first agent">
+  <section id="shout" class="sc-section shout" data-sc-act="flow" aria-labelledby="shout-title">
     <div class="sc-wrap shout__in">
       <div class="shout__head" data-sc-in>
-        <h2 class="h-display">Meet your first agent</h2>
+        <h2 class="h-display" id="shout-title">Meet your first agent</h2>
         <p class="p-soft">An AI teammate you can trust to get work done. Describe the job. A sentence is enough.</p>
       </div>
       <form class="shout__composer" data-sc-in action="/signup" method="get" id="shout-form">
@@ -367,9 +589,19 @@
       </form>
       <p class="shout__alt" data-sc-in><a href="/login">Sign in</a> if you already have an account.</p>
       <footer class="foot" data-sc-in>
-        <span>© 2026 JobShout</span>
-        <span class="foot__dot" aria-hidden="true">·</span>
-        <span class="p-faint">The computer above is a sample. Yours will be real.</span>
+        <nav class="foot__nav" aria-label="Footer">
+          <a href="#what">What it is</a>
+          <a href="#how">How it works</a>
+          <a href="#jobs">Agents</a>
+          <a href="#control">Control</a>
+          <a href="#platform">Platform</a>
+          <a href="#faq">FAQ</a>
+        </nav>
+        <p class="foot__legal">
+          <span>© 2026 JobShout</span>
+          <span class="foot__dot" aria-hidden="true">·</span>
+          <span class="p-faint">The computer above is a sample. Yours will be real.</span>
+        </p>
       </footer>
     </div>
   </section>

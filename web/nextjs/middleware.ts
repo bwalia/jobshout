@@ -6,8 +6,9 @@ const publicPaths = ["/login", "/signup", "/landing", "/auth"];
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Allow public paths
-  if (publicPaths.some((path) => pathname.startsWith(path))) {
+  // Allow public paths. "/" is matched exactly — it is the marketing landing
+  // page, and startsWith("/") would make every route public.
+  if (pathname === "/" || publicPaths.some((path) => pathname.startsWith(path))) {
     return NextResponse.next();
   }
 
