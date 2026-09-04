@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jobshout/server/internal/config"
 )
@@ -133,5 +134,93 @@ func TestNewChatInner_OllamaUsesChatNumCtx(t *testing.T) {
 	}
 	if oc.effectiveNumCtx("qwen3-coder:30b") != 16384 && oc.NumCtx != 16384 {
 		t.Fatal("chat num_ctx should be 16384 before model clamp")
+	}
+}
+
+// budgetClient records how much context budget each call was given, so the
+// primary/fallback split can be asserted without actually waiting.
+type budgetClient struct {
+	provider  string
+	budgets   []time.Duration
+	hasDeadln []bool
+	failFirst int
+}
+
+func (c *budgetClient) Generate(ctx context.Context, req GenerateRequest) (*GenerateResponse, error) {
+	if d, ok := ctx.Deadline(); ok {
+		c.budgets = append(c.budgets, time.Until(d))
+		c.hasDeadln = append(c.hasDeadln, true)
+	} else {
+		c.budgets = append(c.budgets, 0)
+		c.hasDeadln = append(c.hasDeadln, false)
+	}
+	if c.failFirst > 0 && len(c.budgets) <= c.failFirst {
+		return nil, errors.New("primary hung")
+	}
+	return &GenerateResponse{Content: "ok", Model: req.Model, FinishReason: "stop"}, nil
+}
+func (c *budgetClient) ProviderName() string { return c.provider }
+
+func TestChatFallbackClient_ReservesBudgetForFallback(t *testing.T) {
+	inner := &budgetClient{provider: "ollama", failFirst: 1}
+	c := NewChatClient(inner, "qwen3-coder:30b", "llama3.1:8b", nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	if _, err := c.Generate(ctx, GenerateRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(inner.budgets) != 2 {
+		t.Fatalf("calls = %d; want 2", len(inner.budgets))
+	}
+	// The primary must stop short so the fallback is not handed a dead context.
+	want := 10*time.Minute - chatFallbackReserve
+	if inner.budgets[0] > want || inner.budgets[0] < want-time.Second {
+		t.Fatalf("primary budget = %s; want ~%s", inner.budgets[0], want)
+	}
+	if inner.budgets[1] < chatFallbackReserve {
+		t.Fatalf("fallback budget = %s; want >= %s", inner.budgets[1], chatFallbackReserve)
+	}
+}
+
+func TestChatFallbackClient_KeepsShortBudgetWhole(t *testing.T) {
+	inner := &budgetClient{provider: "ollama"}
+	c := NewChatClient(inner, "qwen3-coder:30b", "llama3.1:8b", nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if _, err := c.Generate(ctx, GenerateRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if inner.budgets[0] < 29*time.Second {
+		t.Fatalf("short budget was trimmed: %s", inner.budgets[0])
+	}
+}
+
+func TestChatFallbackClient_NoFallbackKeepsFullBudget(t *testing.T) {
+	// Hosted providers never fall back, so nothing should be held in reserve.
+	inner := &budgetClient{provider: "openai"}
+	c := NewChatClient(inner, "gpt-4o", "llama3.1:8b", nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	if _, err := c.Generate(ctx, GenerateRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if inner.budgets[0] < 10*time.Minute-time.Second {
+		t.Fatalf("budget = %s; want the full 10m", inner.budgets[0])
+	}
+}
+
+func TestChatFallbackClient_NoDeadlinePassesThrough(t *testing.T) {
+	inner := &budgetClient{provider: "ollama", failFirst: 1}
+	c := NewChatClient(inner, "qwen3-coder:30b", "llama3.1:8b", nil)
+	if _, err := c.Generate(context.Background(), GenerateRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	for i, has := range inner.hasDeadln {
+		if has {
+			t.Fatalf("call %d gained a deadline the caller never set", i)
+		}
 	}
 }

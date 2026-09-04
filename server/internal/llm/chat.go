@@ -3,11 +3,18 @@ package llm
 import (
 	"context"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/jobshout/server/internal/config"
 )
+
+// chatFallbackReserve is the slice of the turn budget withheld from the primary
+// model so the fallback still has time to answer. A hung primary otherwise eats
+// the whole deadline and the fallback fails on an already-expired context,
+// which is how a chat turn ends with no reply at all.
+const chatFallbackReserve = 2 * time.Minute
 
 // ChatFallbackClient pins GenerateRequest.Model to the chat primary and
 // retries once on the Ollama fallback when the primary fails or returns empty.
@@ -57,6 +64,11 @@ func (c *ChatFallbackClient) ProviderName() string {
 	return c.inner.ProviderName()
 }
 
+// ModelName is the model this client pins requests to before any fallback.
+func (c *ChatFallbackClient) ModelName() string {
+	return c.primary
+}
+
 func (c *ChatFallbackClient) SupportsTools() bool {
 	tc, ok := c.inner.(ToolCapableClient)
 	return ok && tc.SupportsTools()
@@ -64,7 +76,9 @@ func (c *ChatFallbackClient) SupportsTools() bool {
 
 func (c *ChatFallbackClient) Generate(ctx context.Context, req GenerateRequest) (*GenerateResponse, error) {
 	req.Model = c.primary
-	resp, err := c.inner.Generate(ctx, req)
+	primaryCtx, releasePrimary := c.budgetPrimary(ctx)
+	resp, err := c.inner.Generate(primaryCtx, req)
+	releasePrimary()
 	if !shouldFallback(resp, err) {
 		return resp, err
 	}
@@ -77,6 +91,33 @@ func (c *ChatFallbackClient) Generate(ctx context.Context, req GenerateRequest) 
 	c.logger.Info("chatagent: falling back to " + c.fallback)
 	req.Model = c.fallback
 	return c.inner.Generate(ctx, req)
+}
+
+// budgetPrimary caps the primary call short of the caller's deadline so the
+// reserve is left for the fallback. It only trims when there is enough budget
+// to be worth splitting; otherwise the primary gets everything, as before.
+func (c *ChatFallbackClient) budgetPrimary(ctx context.Context) (context.Context, context.CancelFunc) {
+	if !c.canFallBack() {
+		return ctx, func() {}
+	}
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return ctx, func() {}
+	}
+	remaining := time.Until(deadline)
+	if remaining <= 2*chatFallbackReserve {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, remaining-chatFallbackReserve)
+}
+
+// canFallBack reports whether a fallback attempt is even possible, so the
+// primary keeps the full budget when there is nothing to reserve it for.
+func (c *ChatFallbackClient) canFallBack() bool {
+	if c.inner == nil || c.inner.ProviderName() != "ollama" {
+		return false
+	}
+	return c.fallback != "" && c.fallback != c.primary && !forbiddenChatModel(c.fallback)
 }
 
 func shouldFallback(resp *GenerateResponse, err error) bool {

@@ -11,6 +11,9 @@ const (
 	EventClarify      = "clarify"
 	EventDone         = "done"
 	EventError        = "error"
+	// EventModel names the model serving this turn. Emitted before the first
+	// call and again if the client falls back to another model mid-turn.
+	EventModel = "model"
 )
 
 // Event is one step of a streaming chat turn.
@@ -27,6 +30,8 @@ type Event struct {
 	Clarify      *model.ClarifyRequest  `json:"clarify,omitempty"`
 	Response     *model.ChatResponse    `json:"response,omitempty"`
 	Error        string                 `json:"error,omitempty"`
+	Model        string                 `json:"model,omitempty"`
+	Provider     string                 `json:"provider,omitempty"`
 }
 
 // StreamFunc receives events as a turn progresses. Nil is fine.

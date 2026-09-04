@@ -305,6 +305,16 @@ func (a *Agent) loop(ctx context.Context, req TurnRequest, meta map[string]any, 
 			zap.String("session", req.Ident.SessionID.String()))
 	}
 
+	// Say who is answering before the first token. A slow model can leave the
+	// user staring at a spinner for minutes; the name is the difference
+	// between "it is broken" and "the 30B one is busy".
+	if named, ok := a.client.(llm.ModelNamed); ok {
+		if name := named.ModelName(); name != "" {
+			modelName = name
+			emit(req.Stream, Event{Type: EventModel, Model: name, Provider: a.client.ProviderName()})
+		}
+	}
+
 	for iteration := 1; iteration <= maxIter; iteration++ {
 		toolsForTurn := a.reg.SelectForTurn(platformtools.PermissionsFrom(ctx), disclosed)
 		defs := platformtools.ToolDefs(toolsForTurn)
@@ -317,8 +327,11 @@ func (a *Agent) loop(ctx context.Context, req TurnRequest, meta map[string]any, 
 		}
 		inputTokens += llmResp.InputTokens
 		outputTokens += llmResp.OutputTokens
-		if llmResp.Model != "" {
+		if llmResp.Model != "" && llmResp.Model != modelName {
+			// The fallback client swaps models mid-turn when the primary is
+			// unusable — tell the client so the label stops lying.
 			modelName = llmResp.Model
+			emit(req.Stream, Event{Type: EventModel, Model: modelName, Provider: a.client.ProviderName()})
 		}
 
 		if len(llmResp.ToolCalls) == 0 {

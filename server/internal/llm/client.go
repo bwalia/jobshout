@@ -119,3 +119,10 @@ type Client interface {
 type ToolCapableClient interface {
 	SupportsTools() bool
 }
+
+// ModelNamed is an OPTIONAL capability interface: the client can say which
+// model it is about to use. Chat announces it before the first call so the
+// user knows who is answering while the model is still thinking.
+type ModelNamed interface {
+	ModelName() string
+}
