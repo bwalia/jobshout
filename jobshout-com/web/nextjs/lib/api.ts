@@ -86,7 +86,10 @@ export interface JobMatch {
   reasons: string[];
 }
 
-const API_BASE = process.env.JOBSHOUT_COM_API_URL ?? "http://127.0.0.1:8088";
+const API_BASE =
+  typeof window === "undefined"
+    ? (process.env.JOBSHOUT_COM_API_URL ?? "http://127.0.0.1:8088")
+    : (process.env.NEXT_PUBLIC_JOBSHOUT_COM_API_URL ?? "");
 
 export async function listJobs(): Promise<Job[]> {
   const res = await fetch(`${API_BASE}/api/v1/jobs?limit=50`, {

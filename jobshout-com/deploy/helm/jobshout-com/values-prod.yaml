@@ -1,0 +1,13 @@
+env: prod
+host: www.jobshout.com
+
+api:
+  replicas: 2
+
+web:
+  replicas: 2
+  apiURL: "http://jobshout-com-api.prod.svc.cluster.local:8088"
+
+postgres:
+  enabled: true
+  storage: 50Gi

@@ -1,0 +1,89 @@
+{{- if .Values.postgres.enabled }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: jobshout-com-db
+  labels:
+    {{- include "jobshout-com.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  POSTGRES_USER: {{ .Values.postgres.user | quote }}
+  POSTGRES_PASSWORD: {{ .Values.postgres.password | quote }}
+  POSTGRES_DB: {{ .Values.postgres.database | quote }}
+  DATABASE_URL: {{ printf "postgres://%s:%s@jobshout-com-postgres:%d/%s" .Values.postgres.user .Values.postgres.password (int .Values.postgres.port) .Values.postgres.database | quote }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: jobshout-com-postgres
+  labels:
+    {{- include "jobshout-com.labels" . | nindent 4 }}
+    {{- include "jobshout-com.selector" (dict "name" "postgres") | nindent 4 }}
+spec:
+  serviceName: jobshout-com-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "jobshout-com.selector" (dict "name" "postgres") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "jobshout-com.selector" (dict "name" "postgres") | nindent 8 }}
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.postgres.image }}
+          ports:
+            - containerPort: {{ .Values.postgres.port }}
+              name: postgres
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: jobshout-com-db
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: jobshout-com-db
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: jobshout-com-db
+                  key: POSTGRES_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", {{ .Values.postgres.user | quote }}]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.postgres.resources | nindent 12 }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.postgres.storage }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jobshout-com-postgres
+  labels:
+    {{- include "jobshout-com.labels" . | nindent 4 }}
+spec:
+  ports:
+    - port: {{ .Values.postgres.port }}
+      targetPort: {{ .Values.postgres.port }}
+      name: postgres
+  selector:
+    {{- include "jobshout-com.selector" (dict "name" "postgres") | nindent 4 }}
+{{- end }}

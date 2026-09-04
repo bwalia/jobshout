@@ -17,6 +17,9 @@ existing Go agent platform (`server/` + `web/nextjs/`).
 Next.js (:3010)  →  Axum API (:8088)  →  Postgres (:5434)
 ```
 
+Deployed int ring: **https://int.jobshout.com** via Helm + Ring Promoter
+(`rp.workstation.co.uk/?app=jobshout-com`). See [docs/deploy.md](deploy.md).
+
 Implemented:
 
 - Cargo workspace with domain crates (many stubs) matching the north-star layout

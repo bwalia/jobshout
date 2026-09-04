@@ -1,0 +1,13 @@
+env: acc
+host: acc.jobshout.com
+
+api:
+  replicas: 1
+
+web:
+  replicas: 1
+  apiURL: "http://jobshout-com-api.acc.svc.cluster.local:8088"
+
+postgres:
+  enabled: true
+  storage: 20Gi

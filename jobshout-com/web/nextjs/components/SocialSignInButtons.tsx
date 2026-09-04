@@ -65,14 +65,14 @@ export function SocialSignInButtons({ providers, callbackUrl }: Props) {
               if (!p.configured) return;
               void signIn(p.id, { callbackUrl });
             }}
-            className="group flex w-full items-center gap-3 rounded-xl border border-slate/20 bg-white px-4 py-3.5 text-left text-sm font-semibold text-ink shadow-sm transition enabled:hover:border-accent/50 enabled:hover:bg-mist/60 disabled:cursor-not-allowed disabled:opacity-45"
+            className="group flex w-full items-center gap-3 border border-line bg-white px-4 py-3.5 text-left text-sm font-semibold text-ink transition enabled:hover:border-signal enabled:hover:bg-paper/80 disabled:cursor-not-allowed disabled:opacity-45"
           >
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-mist">
+            <span className="flex h-9 w-9 items-center justify-center bg-paper">
               {ICONS[p.id]}
             </span>
             <span className="flex-1">{p.label}</span>
             {!p.configured && (
-              <span className="text-xs font-medium text-slate">Add credentials</span>
+              <span className="text-xs font-medium text-mute">Add credentials</span>
             )}
           </button>
         </li>

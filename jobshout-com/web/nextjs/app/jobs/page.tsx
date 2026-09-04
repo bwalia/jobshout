@@ -13,58 +13,59 @@ export default async function JobsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-12">
-      <div className="flex items-end justify-between gap-4">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-accent">Board</p>
-          <h1 className="mt-2 font-display text-4xl tracking-tight">Open roles</h1>
-          <p className="mt-2 text-slate">Published jobs from the JobShout.com marketplace API.</p>
+    <div className="mx-auto max-w-board px-6 pb-20 pt-12">
+      <div className="flex flex-wrap items-end justify-between gap-6 border-b border-line pb-8">
+        <div className="max-w-2xl">
+          <h1 className="font-display text-4xl tracking-tight text-ink md:text-5xl">Open roles</h1>
+          <p className="mt-3 text-mute">
+            Live listings from the marketplace API. Build a profile to see ranked matches.
+          </p>
         </div>
-        <Link href="/" className="text-sm font-medium text-slate hover:text-ink">
-          ← Home
+        <Link
+          href="/profile"
+          className="border border-ink/20 bg-white/60 px-4 py-2 text-sm font-semibold text-ink transition hover:border-signal hover:text-signal"
+        >
+          Match my profile
         </Link>
       </div>
 
       {error && (
-        <p className="mt-8 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-          {error}. Is the API running on :8088?
+        <p className="mt-8 border border-shout/30 bg-shout/5 px-4 py-3 text-sm text-ink">
+          {error}. Start the API on :8088, then refresh.
         </p>
       )}
 
-      <ul className="mt-10 space-y-4">
+      <ul className="mt-2">
         {jobs.map((job) => (
           <li key={job.id}>
-            <Link
-              href={`/jobs/${job.id}`}
-              className="block rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate/10 transition hover:ring-accent/40"
-            >
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-xl font-semibold tracking-tight">{job.title}</h2>
-                  <p className="mt-1 text-sm text-slate">{formatLocation(job.location)}</p>
-                </div>
-                <p className="text-sm font-medium text-ink">{formatCompensation(job.compensation)}</p>
+            <Link href={`/jobs/${job.id}`} className="job-row pl-4">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
+                <h2 className="font-display text-2xl tracking-tight text-ink md:text-[1.65rem]">
+                  {job.title}
+                </h2>
+                <p className="text-sm font-medium text-ink">
+                  {formatCompensation(job.compensation)}
+                </p>
               </div>
-              <p className="mt-3 line-clamp-2 text-slate">{job.summary || job.description}</p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <span className="rounded-full bg-mist px-2.5 py-1 text-xs font-medium uppercase tracking-wide text-slate">
-                  {job.employment_type.replace("_", " ")}
-                </span>
-                {job.requirements.slice(0, 4).map((r) => (
-                  <span
-                    key={r}
-                    className="rounded-full bg-mist px-2.5 py-1 text-xs font-medium text-slate"
-                  >
-                    {r}
-                  </span>
-                ))}
-              </div>
+              <p className="mt-2 text-sm text-mute">
+                {formatLocation(job.location)}
+                <span className="mx-2 text-line">/</span>
+                {job.employment_type.replaceAll("_", " ")}
+              </p>
+              <p className="mt-3 max-w-3xl text-[0.95rem] leading-relaxed text-mute line-clamp-2">
+                {job.summary || job.description}
+              </p>
+              {job.requirements.length > 0 && (
+                <p className="mt-3 text-sm text-ink/70">
+                  {job.requirements.slice(0, 5).join(" · ")}
+                </p>
+              )}
             </Link>
           </li>
         ))}
         {!error && jobs.length === 0 && (
-          <li className="rounded-2xl bg-white p-8 text-center text-slate ring-1 ring-slate/10">
-            No published jobs yet. Run <code className="text-ink">make seed</code>.
+          <li className="py-16 text-center text-mute">
+            No published jobs yet. Seed the API, then refresh this page.
           </li>
         )}
       </ul>

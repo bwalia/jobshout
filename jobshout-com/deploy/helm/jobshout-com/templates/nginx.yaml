@@ -1,0 +1,57 @@
+{{- if .Values.gateway.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jobshout-com-nginx
+  labels:
+    {{- include "jobshout-com.labels" . | nindent 4 }}
+    {{- include "jobshout-com.selector" (dict "name" "nginx") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "jobshout-com.selector" (dict "name" "nginx") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "jobshout-com.selector" (dict "name" "nginx") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/nginx-config.yaml") . | sha256sum }}
+    spec:
+      containers:
+        - name: nginx
+          image: {{ .Values.gateway.image }}
+          ports:
+            - containerPort: 80
+              name: http
+          readinessProbe:
+            tcpSocket:
+              port: 80
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.gateway.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+      volumes:
+        - name: config
+          configMap:
+            name: jobshout-com-nginx-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jobshout-com-nginx
+  labels:
+    {{- include "jobshout-com.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: 80
+      name: http
+  selector:
+    {{- include "jobshout-com.selector" (dict "name" "nginx") | nindent 4 }}
+{{- end }}

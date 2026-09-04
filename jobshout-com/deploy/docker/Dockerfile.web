@@ -1,14 +1,17 @@
 FROM node:22-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json* ./
-RUN npm install
+RUN npm ci
 
 FROM node:22-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
-ARG JOBSHOUT_COM_API_URL=http://api:8088
+# Browser uses same-origin /api via the nginx gateway; SSR uses JOBSHOUT_COM_API_URL at runtime.
+ARG NEXT_PUBLIC_JOBSHOUT_COM_API_URL=
+ENV NEXT_PUBLIC_JOBSHOUT_COM_API_URL=$NEXT_PUBLIC_JOBSHOUT_COM_API_URL
+ARG JOBSHOUT_COM_API_URL=http://jobshout-com-api:8088
 ENV JOBSHOUT_COM_API_URL=$JOBSHOUT_COM_API_URL
 RUN npm run build
 

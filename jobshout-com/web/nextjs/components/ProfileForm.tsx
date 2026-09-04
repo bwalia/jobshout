@@ -113,18 +113,16 @@ export function ProfileForm({ initial, defaultEmail = "", defaultName = "" }: Pr
   }
 
   const field =
-    "mt-1.5 w-full rounded-xl border border-slate/20 bg-white px-3 py-2.5 text-sm text-ink outline-none ring-accent/30 focus:ring-2";
+    "mt-1.5 w-full border border-line bg-white px-3 py-2.5 text-sm text-ink outline-none transition focus:border-signal";
 
   return (
     <form onSubmit={onSubmit} className="space-y-8">
       {error && (
-        <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-          {error}
-        </p>
+        <p className="border border-shout/30 bg-shout/5 px-4 py-3 text-sm text-ink">{error}</p>
       )}
 
       <section className="space-y-4">
-        <h2 className="font-display text-2xl">Who you are</h2>
+        <h2 className="font-display text-2xl tracking-tight">Who you are</h2>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="block text-sm font-medium">
             Email
@@ -168,8 +166,8 @@ export function ProfileForm({ initial, defaultEmail = "", defaultName = "" }: Pr
       </section>
 
       <section className="space-y-4">
-        <h2 className="font-display text-2xl">Skills & roles</h2>
-        <p className="text-sm text-slate">
+        <h2 className="font-display text-2xl tracking-tight">Skills & roles</h2>
+        <p className="text-sm text-mute">
           Skills and preferred roles are the primary signals the Career agent uses to rank jobs.
         </p>
         <label className="block text-sm font-medium">
@@ -211,8 +209,8 @@ export function ProfileForm({ initial, defaultEmail = "", defaultName = "" }: Pr
                   key={opt.value}
                   type="button"
                   onClick={() => toggleEmployment(opt.value)}
-                  className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
-                    on ? "bg-ink text-white" : "bg-mist text-slate"
+                  className={`px-3 py-1.5 text-xs font-semibold ${
+                    on ? "bg-ink text-white" : "bg-paper text-mute"
                   }`}
                 >
                   {opt.label}
@@ -224,7 +222,7 @@ export function ProfileForm({ initial, defaultEmail = "", defaultName = "" }: Pr
       </section>
 
       <section className="space-y-4">
-        <h2 className="font-display text-2xl">Location & pay</h2>
+        <h2 className="font-display text-2xl tracking-tight">Location & pay</h2>
         <div className="grid gap-4 sm:grid-cols-3">
           <label className="block text-sm font-medium">
             Country
@@ -239,7 +237,7 @@ export function ProfileForm({ initial, defaultEmail = "", defaultName = "" }: Pr
               type="checkbox"
               checked={openToRemote}
               onChange={(e) => setOpenToRemote(e.target.checked)}
-              className="h-4 w-4 rounded border-slate/30"
+              className="h-4 w-4 border-line"
             />
             Open to remote
           </label>
@@ -266,7 +264,7 @@ export function ProfileForm({ initial, defaultEmail = "", defaultName = "" }: Pr
       </section>
 
       <section className="space-y-4">
-        <h2 className="font-display text-2xl">Agent context</h2>
+        <h2 className="font-display text-2xl tracking-tight">Agent context</h2>
         <label className="block text-sm font-medium">
           CV / resume text (optional)
           <textarea
@@ -292,7 +290,7 @@ export function ProfileForm({ initial, defaultEmail = "", defaultName = "" }: Pr
       <button
         type="submit"
         disabled={pending}
-        className="rounded-full bg-accent px-6 py-3 text-sm font-semibold text-white shadow-sm hover:brightness-110 disabled:opacity-60"
+        className="bg-shout px-6 py-3 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-60"
       >
         {pending ? "Saving…" : "Save profile & see matches"}
       </button>
