@@ -1,0 +1,8 @@
+[package]
+name = "jobshout-candidates"
+description = "Candidate profiles"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

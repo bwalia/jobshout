@@ -1,0 +1,30 @@
+# JobShout.com architecture (Phase 1)
+
+JobShout.com is the **AI-native employment marketplace** packaged as
+`jobshout-com/` inside the JobShout ecosystem monorepo. It is separate from the
+existing Go agent platform (`server/` + `web/nextjs/`).
+
+## Products
+
+| Path | Product |
+| --- | --- |
+| `server/`, `web/nextjs/` | JobShout agent orchestration platform |
+| `jobshout-com/` | JobShout.com marketplace (Rust + Next.js + future Swift) |
+
+## Phase 1 shape
+
+```text
+Next.js (:3010)  →  Axum API (:8088)  →  Postgres (:5434)
+```
+
+Implemented:
+
+- Cargo workspace with domain crates (many stubs) matching the north-star layout
+- `jobshout-jobs` + `GET/POST /api/v1/jobs`
+- Marketplace web: home, job list, job detail
+- Own `docker-compose.yml` and Helm chart under `deploy/`
+
+Deferred: auth, MCP, agents, matching, interviews, iOS app screens, billing.
+
+North-star: the full Rust + Next.js + Swift build prompt (agents, MCP, interviews,
+policy, globalisation).

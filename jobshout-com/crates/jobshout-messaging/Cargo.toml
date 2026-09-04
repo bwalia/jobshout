@@ -1,0 +1,8 @@
+[package]
+name = "jobshout-messaging"
+description = "Conversations and messages"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

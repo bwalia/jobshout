@@ -1,0 +1,8 @@
+[package]
+name = "jobshout-audit"
+description = "Immutable audit events"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
