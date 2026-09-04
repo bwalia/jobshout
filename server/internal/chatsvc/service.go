@@ -20,6 +20,10 @@ import (
 // request. A reload cancels r.Context(); this deadline is independent of that.
 const chatTurnTimeout = 10 * time.Minute
 
+// chatPersistTimeout bounds the writes that save a finished turn. It runs on a
+// context detached from chatTurnTimeout so a late reply is still stored.
+const chatPersistTimeout = 15 * time.Second
+
 // ChatService manages chat sessions and dispatches messages through the
 // tool-calling chat agent.
 type ChatService interface {
@@ -229,7 +233,15 @@ func (s *chatService) SendTurn(ctx context.Context, orgID, userID, sessionID uui
 		tr.Metadata = meta
 	}
 	delete(tr.Metadata, model.ChatMetaTurnStartedAt)
-	if err := s.chatRepo.UpdateSessionMetadata(runCtx, sessionID, tr.Metadata); err != nil {
+
+	// chatTurnTimeout bounds the model, not the bookkeeping. A turn that spends
+	// the whole budget waiting on a busy Ollama still produced an answer, and
+	// writing it under the expired deadline loses it — which is how a slow
+	// model turned into a chat with no reply at all.
+	saveCtx, cancelSave := context.WithTimeout(context.WithoutCancel(runCtx), chatPersistTimeout)
+	defer cancelSave()
+
+	if err := s.chatRepo.UpdateSessionMetadata(saveCtx, sessionID, tr.Metadata); err != nil {
 		s.logger.Warn("chat_svc: persist session metadata", zap.Error(err))
 	}
 
@@ -243,7 +255,7 @@ func (s *chatService) SendTurn(ctx context.Context, orgID, userID, sessionID uui
 		if row.Source == "" {
 			row.Source = source
 		}
-		if err := s.chatRepo.AppendMessage(runCtx, &row); err != nil {
+		if err := s.chatRepo.AppendMessage(saveCtx, &row); err != nil {
 			s.logger.Warn("chat_svc: persist tool transcript", zap.Error(err))
 		}
 	}
@@ -258,7 +270,7 @@ func (s *chatService) SendTurn(ctx context.Context, orgID, userID, sessionID uui
 		Content:   resp.Message,
 		Metadata:  agentMeta,
 	}
-	if err := s.chatRepo.AppendMessage(runCtx, agentMsg); err != nil {
+	if err := s.chatRepo.AppendMessage(saveCtx, agentMsg); err != nil {
 		s.logger.Warn("failed to persist agent response", zap.Error(err))
 	}
 

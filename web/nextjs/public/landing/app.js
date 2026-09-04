@@ -12,6 +12,8 @@
 
   var JOBS = {
     mail: {
+      input: 'the senders to watch and how you answer them',
+      output: 'reply drafts parked in the mailbox for approval',
       title: 'Mail Agent',
       body: 'Watch the senders you care about, research the thread, and leave a reply draft. Nothing is sent until you approve.',
       app: 'mail / inbox',
@@ -20,6 +22,8 @@
       preview: '<p><strong>Acme Freight</strong> · Overdue INV-2041</p><p><strong>Nordwind</strong> · Overdue INV-2033</p><p class="p-soft">Drafts parked. Approve in Mail Agent to send.</p>'
     },
     career: {
+      input: 'a job URL or a pasted job description',
+      output: 'a fit score, the gaps, and a tailored CV draft',
       title: 'Career Agent',
       body: 'Evaluate a job URL or pasted JD against your career profile. Tailor a CV if you ask. Nothing is submitted for you.',
       app: 'career / evaluate',
@@ -28,6 +32,8 @@
       preview: '<p><strong>Staff engineer · Lattice</strong></p><p>Fit 7/10 · gaps: public speaking, EU travel</p><p class="p-soft">CV draft ready. You send it.</p>'
     },
     research: {
+      input: 'a subject and how deep to go',
+      output: 'a brief whose claims are checked against their sources',
       title: 'Research Agent',
       body: 'Plan searches, read the sources, and return cited findings checked against the pages they came from.',
       app: 'research / brief',
@@ -36,6 +42,8 @@
       preview: '<p><strong>Kubernetes cost patterns, 2026</strong></p><p>Bin-packing + spot for batch. Citation checked.</p><p class="p-soft">Brief filed on the board.</p>'
     },
     article: {
+      input: 'a topic — the writer picks its own title',
+      output: 'an SEO-ready draft filed in the CMS for review',
       title: 'Article Writer',
       body: 'Give a topic. The writer researches, picks its own title, and files an SEO-ready draft in the CMS for review.',
       app: 'articles / draft',
@@ -44,6 +52,8 @@
       preview: '<p><strong>Edge inference without the tax</strong></p><p>1,140 words · 3 code samples · Further reading</p><p class="p-soft">Draft in the CMS. You publish.</p>'
     },
     security: {
+      input: 'an authorised target and a budget: quick, standard or deep',
+      output: 'findings ranked by severity, with reproduction steps',
       title: 'Security Tester',
       body: 'Start an authorised scan against a live target. Quick, standard, or deep — you set the budget.',
       app: 'pentest / run',
@@ -52,6 +62,8 @@
       preview: '<p><strong>int.example.com</strong> · quick · 11 min</p><p>2 high, 4 medium. Repro steps attached.</p><p class="p-soft">Report on the board.</p>'
     },
     review: {
+      input: 'a GitHub pull request',
+      output: 'a verdict and line-level comments, previewed before posting',
       title: 'PR Reviewer',
       body: 'Queue an AI review of a GitHub pull request. Preview first. Nothing posts to the PR unless you say so.',
       app: 'review / acme#184',
@@ -60,6 +72,8 @@
       preview: '<p><strong>MERGE</strong> · one nit on the timeout path</p><p>Explored the diff and the surrounding tests.</p><p class="p-soft">Preview only. You post it.</p>'
     },
     image: {
+      input: 'a prompt describing the picture',
+      output: 'one image stored on the task, ready to attach',
       title: 'Image Generator',
       body: 'Generate one image from a prompt. The board task stores the result.',
       app: 'images / generate',
@@ -69,8 +83,23 @@
     }
   };
 
+  // The landing page is "/" for everyone, signed in or not. Rather than bounce
+  // an authenticated visitor away from the marketing page, point the header at
+  // the workspace. Presence of the token is enough — it is only a link target,
+  // and the app re-validates on arrival.
+  function reflectSession() {
+    var token;
+    try { token = localStorage.getItem('access_token'); } catch (e) { return; }
+    if (!token) return;
+    var cta = document.querySelector('[data-js-cta]');
+    var signin = document.querySelector('[data-js-signin]');
+    if (cta) { cta.setAttribute('href', '/chat'); cta.textContent = 'Open workspace'; }
+    if (signin) { signin.remove(); }
+  }
+
   function init() {
     var $ = function (s) { return document.querySelector(s); };
+    reflectSession();
     var actDemo = $('#demo');
     var desk = $('#desk');
     var chatText = $('#chatcard-text');
@@ -182,6 +211,8 @@
       if (!job) return;
       $('#job-title').textContent = job.title;
       $('#job-body').textContent = job.body;
+      $('#job-input').textContent = job.input;
+      $('#job-output').textContent = job.output;
       $('#job-preview-app').textContent = job.app;
       var chip = $('#job-preview .chip');
       chip.textContent = job.chip;

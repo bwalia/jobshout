@@ -7,17 +7,22 @@ const apiBase = (process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8080").rep
 const nextConfig = {
   output: "standalone",
   async rewrites() {
-    return [
-      // Static marketing page in public/landing; its asset paths are absolute
-      // (/landing/...) so it serves correctly with or without a trailing slash.
-      { source: "/landing", destination: "/landing/index.html" },
-      // Article markdown uses /api/v1/images/file/… — without this, a plain
-      // <img> on the Next origin 404s and the prompt shows as alt text.
-      {
-        source: "/api/v1/images/file/:path*",
-        destination: `${apiBase}/api/v1/images/file/:path*`,
-      },
-    ];
+    return {
+      // "/" is the marketing page, not the app. It is static HTML in
+      // public/landing, and beforeFiles is the only phase that can claim "/"
+      // ahead of the app router. Its asset paths are absolute (/landing/...)
+      // so they resolve straight from public/ with no second rewrite.
+      beforeFiles: [{ source: "/", destination: "/landing/index.html" }],
+      afterFiles: [
+        // Article markdown uses /api/v1/images/file/… — without this, a plain
+        // <img> on the Next origin 404s and the prompt shows as alt text.
+        {
+          source: "/api/v1/images/file/:path*",
+          destination: `${apiBase}/api/v1/images/file/:path*`,
+        },
+      ],
+      fallback: [],
+    };
   },
   images: {
     remotePatterns: [
@@ -37,6 +42,10 @@ const nextConfig = {
   },
   async redirects() {
     return [
+      // The landing page is "/" now. Keep the old URL working, but send it to
+      // the canonical one so the two do not serve the same page. Exact match,
+      // so /landing/app.css and friends still load from public/.
+      { source: "/landing", destination: "/", permanent: false },
       { source: "/dashboard", destination: "/panel/dashboard", permanent: false },
       { source: "/metrics", destination: "/panel/dashboard", permanent: false },
       { source: "/agent-board", destination: "/panel/task-board", permanent: false },

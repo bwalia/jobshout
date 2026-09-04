@@ -69,7 +69,7 @@ export function ExecutionCard({
         <button
           type="button"
           onClick={() => void refetch()}
-          className="underline hover:text-foreground"
+          className="rounded underline transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           Retry
         </button>
@@ -106,7 +106,8 @@ export function ExecutionCard({
         </span>
         <Link
           href={detailHref}
-          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:h-11 max-sm:w-11"
+          aria-label="Open this run in Task Manager"
           title="Open in Task Manager"
         >
           <ExternalLink className="h-3.5 w-3.5" />
@@ -117,7 +118,8 @@ export function ExecutionCard({
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="flex w-full items-center gap-2 border-t border-border px-3 py-1.5 text-left text-xs text-muted-foreground hover:bg-accent"
+          aria-expanded={open}
+          className="flex w-full items-center gap-2 border-t border-border px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring max-sm:min-h-[44px]"
         >
           <Wrench className="h-3.5 w-3.5" />
           {tools.length} tool call{tools.length === 1 ? "" : "s"}
