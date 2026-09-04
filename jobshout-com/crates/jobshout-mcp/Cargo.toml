@@ -1,0 +1,8 @@
+[package]
+name = "jobshout-mcp"
+description = "MCP protocol types and adapters"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

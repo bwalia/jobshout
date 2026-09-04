@@ -1,0 +1,10 @@
+replicaCount: 1
+image:
+  api: jobshout-com-api:0.1.0
+  web: jobshout-com-web:0.1.0
+service:
+  apiPort: 8088
+  webPort: 3010
+env:
+  DATABASE_URL: "postgres://jobshout:jobshout@postgres:5432/jobshout_com"
+  JOBSHOUT_COM_API_URL: "http://jobshout-com-api:8088"

@@ -1,0 +1,8 @@
+[package]
+name = "jobshout-users"
+description = "User accounts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

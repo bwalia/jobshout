@@ -1,0 +1,69 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: jobshout
+      POSTGRES_PASSWORD: jobshout
+      POSTGRES_DB: jobshout_com
+    ports:
+      - "5434:5432"
+    volumes:
+      - jscom_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jobshout -d jobshout_com"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+
+  nats:
+    image: nats:2.10-alpine
+    ports:
+      - "4223:4222"
+      - "8223:8222"
+    command: ["-js", "-m", "8222"]
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: jobshout
+      MINIO_ROOT_PASSWORD: jobshoutsecret
+    ports:
+      - "9010:9000"
+      - "9011:9001"
+    volumes:
+      - jscom_minio:/data
+
+  api:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.api
+    environment:
+      DATABASE_URL: postgres://jobshout:jobshout@postgres:5432/jobshout_com
+      HOST: 0.0.0.0
+      PORT: "8088"
+    ports:
+      - "8088:8088"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./web/nextjs
+      dockerfile: ../../deploy/docker/Dockerfile.web
+    environment:
+      JOBSHOUT_COM_API_URL: http://api:8088
+    ports:
+      - "3010:3010"
+    depends_on:
+      - api
+
+volumes:
+  jscom_pg:
+  jscom_minio:

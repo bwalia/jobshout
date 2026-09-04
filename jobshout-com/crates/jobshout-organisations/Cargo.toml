@@ -1,0 +1,8 @@
+[package]
+name = "jobshout-organisations"
+description = "Organisations and membership"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

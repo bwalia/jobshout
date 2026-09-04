@@ -1,0 +1,21 @@
+[package]
+name = "jobshout-com-api"
+description = "JobShout.com HTTP API binary"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "jobshout-api"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+axum = { workspace = true }
+dotenvy = { workspace = true }
+jobshout-api = { path = "../../crates/jobshout-api" }
+jobshout-jobs = { path = "../../crates/jobshout-jobs" }
+jobshout-observability = { path = "../../crates/jobshout-observability" }
+jobshout-storage = { path = "../../crates/jobshout-storage" }
+tokio = { workspace = true }
+tracing = { workspace = true }

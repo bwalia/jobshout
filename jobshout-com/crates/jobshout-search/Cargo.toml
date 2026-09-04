@@ -1,0 +1,8 @@
+[package]
+name = "jobshout-search"
+description = "Search abstraction (keyword + semantic)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

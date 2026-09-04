@@ -1,0 +1,14 @@
+[package]
+name = "jobshout-com-agent-runtime"
+description = "JobShout.com agent-runtime (Phase 1 stub)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "jobshout-agent-runtime"
+path = "src/main.rs"
+
+[dependencies]
+tracing = { workspace = true }
+jobshout-observability = { path = "../../crates/jobshout-observability" }
