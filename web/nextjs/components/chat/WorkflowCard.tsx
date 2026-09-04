@@ -27,7 +27,7 @@ export function WorkflowCard({ runId }: { runId: string }) {
         <button
           type="button"
           onClick={() => void refetch()}
-          className="underline hover:text-foreground"
+          className="rounded underline transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           Retry
         </button>
@@ -43,9 +43,7 @@ export function WorkflowCard({ runId }: { runId: string }) {
     );
   }
 
-  const steps = (workflow?.steps ?? [])
-    .slice()
-    .sort((a, b) => a.position - b.position);
+  const steps = (workflow?.steps ?? []).slice().sort((a, b) => a.position - b.position);
   const outputs = run.outputs ?? {};
   const done = (name: string) => Object.prototype.hasOwnProperty.call(outputs, name);
   const completedCount = steps.filter((s) => done(s.name)).length;
@@ -107,7 +105,13 @@ export function WorkflowCard({ runId }: { runId: string }) {
                   ) : (
                     <Circle className="h-3.5 w-3.5 text-muted-foreground" />
                   )}
-                  <span className={isDone ? "min-w-0 truncate" : "min-w-0 truncate text-muted-foreground"}>
+                  <span
+                    className={
+                      isDone
+                        ? "min-w-0 truncate"
+                        : "min-w-0 truncate text-muted-foreground"
+                    }
+                  >
                     {s.name}
                   </span>
                 </li>

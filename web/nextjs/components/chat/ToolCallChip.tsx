@@ -13,7 +13,7 @@ export function ToolCallChip({
   label?: string;
   running?: boolean;
 }) {
-  const status = running ? "running" : action?.status ?? "ok";
+  const status = running ? "running" : (action?.status ?? "ok");
   return (
     <details className="group min-w-0 rounded-md border border-border/70 bg-secondary/30 text-xs">
       <summary className="flex cursor-pointer list-none items-center gap-2 px-2.5 py-1.5 text-muted-foreground [&::-webkit-details-marker]:hidden">

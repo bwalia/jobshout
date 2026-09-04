@@ -1,14 +1,24 @@
 import type { Metadata } from "next";
-import { Sora, JetBrains_Mono } from "next/font/google";
+import { Inter, Sora, JetBrains_Mono } from "next/font/google";
 import "@/styles/globals.css";
 import { Providers } from "./providers";
 
 // Clean chat-first type system:
-//   - Sora (variable) → UI/body + display (--font-sans / --font-display)
-//   - JetBrains Mono  → logs, run output, telemetry (--font-mono)
-const sora = Sora({
+//   - Inter (variable) → UI and body text (--font-sans). Sora is a display
+//     face: at reading sizes its low x-height and wide letterforms made long
+//     agent replies tiring, so body text is set in Inter instead.
+//   - Sora (variable)  → headings, where the character earns its keep
+//     (--font-display)
+//   - JetBrains Mono   → logs, run output, telemetry (--font-mono)
+const inter = Inter({
   subsets: ["latin"],
   variable: "--font-sans",
+  display: "swap",
+});
+
+const sora = Sora({
+  subsets: ["latin"],
+  variable: "--font-display",
   display: "swap",
 });
 
@@ -33,12 +43,7 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${sora.variable} ${jetbrainsMono.variable}`}
-      style={
-        {
-          ["--font-display" as string]: "var(--font-sans)",
-        } as React.CSSProperties
-      }
+      className={`${inter.variable} ${sora.variable} ${jetbrainsMono.variable}`}
     >
       <body className="font-sans antialiased">
         <Providers>{children}</Providers>

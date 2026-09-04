@@ -81,7 +81,15 @@ export interface ChatTurnResult {
 }
 
 export interface ChatStreamEvent {
-  type: "token" | "tool_call" | "tool_result" | "confirmation" | "clarify" | "done" | "error";
+  type:
+    | "token"
+    | "tool_call"
+    | "tool_result"
+    | "confirmation"
+    | "clarify"
+    | "done"
+    | "error"
+    | "model";
   token?: string;
   tool?: string;
   label?: string;
@@ -93,6 +101,9 @@ export interface ChatStreamEvent {
   clarify?: ClarifyRequest;
   response?: ChatResponse;
   error?: string;
+  /** Model serving this turn — sent up front, and again on a mid-turn fallback. */
+  model?: string;
+  provider?: string;
 }
 
 export function sessionTitle(session: ChatSession): string {

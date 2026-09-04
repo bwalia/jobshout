@@ -11,7 +11,7 @@ export function EntityCard({ entity }: { entity: EntityRef }) {
     return (
       <Link
         href={href}
-        className="block min-w-0 overflow-hidden rounded-lg border border-border bg-card transition-colors hover:border-primary/40"
+        className="block min-w-0 overflow-hidden rounded-lg border border-border bg-card transition-colors hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
       >
         <StoredImage
           src={entity.url}
@@ -19,7 +19,7 @@ export function EntityCard({ entity }: { entity: EntityRef }) {
           className="max-h-80 w-full bg-muted object-contain"
         />
         <div className="px-3 py-2 text-sm">
-          <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+          <p className="font-mono text-2xs uppercase tracking-wider text-muted-foreground">
             image
           </p>
           <p className="min-w-0 break-words font-medium text-foreground">{entity.label}</p>
@@ -30,9 +30,9 @@ export function EntityCard({ entity }: { entity: EntityRef }) {
   return (
     <Link
       href={href}
-      className="block min-w-0 rounded-lg border border-border bg-card px-3 py-2 text-sm transition-colors hover:border-primary/40 hover:bg-secondary/40"
+      className="block min-w-0 rounded-lg border border-border bg-card px-3 py-2 text-sm transition-colors hover:border-primary/40 hover:bg-secondary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background max-sm:min-h-[44px]"
     >
-      <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+      <p className="font-mono text-2xs uppercase tracking-wider text-muted-foreground">
         {entity.kind.replace(/_/g, " ")}
       </p>
       <p className="min-w-0 break-words font-medium text-foreground">{entity.label}</p>

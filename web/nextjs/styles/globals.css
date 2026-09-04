@@ -199,6 +199,52 @@
       transform: none;
     }
   }
+  /* ── Chat surface motion ──────────────────────────────────────────────
+     Kept in the 150-300ms band except the deliberate ambient loops
+     (shimmer/pulse), which signal an ongoing wait rather than a
+     state change. All of them are disabled under reduced-motion below. */
+  @keyframes chat-bounce {
+    0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
+    30% { transform: translateY(-3px); opacity: 1; }
+  }
+  @keyframes chat-shimmer {
+    0%, 100% { opacity: 0.35; }
+    50% { opacity: 0.8; }
+  }
+  @keyframes chat-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.6; transform: scale(0.92); }
+  }
+  @keyframes chat-message-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+  }
+  .animate-chat-bounce {
+    animation: chat-bounce 1.1s ease-in-out infinite;
+  }
+  .animate-chat-shimmer {
+    animation: chat-shimmer 1.6s ease-in-out infinite;
+  }
+  .animate-chat-pulse {
+    animation: chat-pulse 1.8s ease-in-out infinite;
+  }
+  .animate-chat-message-in {
+    animation: chat-message-in 220ms ease-out both;
+  }
+
+  /* Caret trailing the streamed reply, so a paused stream still reads
+     as "connected" rather than "finished". */
+  .chat-caret::after {
+    content: "";
+    display: inline-block;
+    width: 2px;
+    height: 1em;
+    margin-left: 2px;
+    vertical-align: text-bottom;
+    background-color: hsl(var(--primary));
+    animation: chat-shimmer 1s steps(2, start) infinite;
+  }
+
   .animate-panel-from-bottom {
     animation: panel-in-from-bottom 300ms ease-out both;
   }
@@ -211,7 +257,12 @@
   .animate-panel-from-bottom,
   .animate-panel-from-top,
   .animate-signal-ping,
-  .animate-signal-breathe {
+  .animate-signal-breathe,
+  .animate-chat-bounce,
+  .animate-chat-shimmer,
+  .animate-chat-pulse,
+  .animate-chat-message-in,
+  .chat-caret::after {
     animation: none !important;
   }
 }
