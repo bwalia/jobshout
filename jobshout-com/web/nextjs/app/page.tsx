@@ -15,24 +15,23 @@ export default function HomePage() {
       </p>
       <div className="mt-10 flex flex-wrap gap-4">
         <Link
-          href="/jobs"
+          href="/profile"
           className="rounded-full bg-accent px-6 py-3 text-sm font-semibold text-white shadow-sm hover:brightness-110"
         >
-          Find a Job
+          Create matching profile
         </Link>
-        <a
-          id="hire"
+        <Link
           href="/jobs"
           className="rounded-full border border-slate/25 bg-white px-6 py-3 text-sm font-semibold text-ink hover:border-slate/50"
         >
-          Hire Talent
-        </a>
-        <a
-          href="https://github.com/bwalia/jobshout/tree/master/jobshout-com"
+          Browse jobs
+        </Link>
+        <Link
+          href="/login"
           className="rounded-full border border-transparent px-6 py-3 text-sm font-semibold text-slate hover:text-ink"
         >
-          Build with JobShout
-        </a>
+          Sign in
+        </Link>
       </div>
 
       <section className="mt-20 grid gap-8 md:grid-cols-2">

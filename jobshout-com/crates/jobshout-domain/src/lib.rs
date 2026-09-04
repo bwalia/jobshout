@@ -13,6 +13,7 @@ use uuid::Uuid;
 pub type OrganisationId = Uuid;
 pub type JobId = Uuid;
 pub type UserId = Uuid;
+pub type CandidateProfileId = Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -148,6 +149,69 @@ pub struct CreateJobRequest {
     /// When true, create as published; otherwise draft.
     #[serde(default)]
     pub publish: bool,
+}
+
+/// Candidate profile shaped for humans and for Career / matching agents.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CandidateProfile {
+    pub id: CandidateProfileId,
+    pub email: String,
+    pub display_name: String,
+    pub headline: String,
+    pub summary: String,
+    pub skills: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub years_experience: Option<i32>,
+    pub preferred_roles: Vec<String>,
+    pub preferred_locations: Vec<Location>,
+    pub preferred_employment_types: Vec<EmploymentType>,
+    pub open_to_remote: bool,
+    pub salary_expectation: Compensation,
+    pub cv_text: String,
+    /// Free-text hints the matching agent should respect.
+    pub matching_notes: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UpsertCandidateProfileRequest {
+    pub email: String,
+    pub display_name: String,
+    #[serde(default)]
+    pub headline: String,
+    #[serde(default)]
+    pub summary: String,
+    #[serde(default)]
+    pub skills: Vec<String>,
+    #[serde(default)]
+    pub years_experience: Option<i32>,
+    #[serde(default)]
+    pub preferred_roles: Vec<String>,
+    #[serde(default)]
+    pub preferred_locations: Vec<Location>,
+    #[serde(default)]
+    pub preferred_employment_types: Vec<EmploymentType>,
+    #[serde(default = "default_true")]
+    pub open_to_remote: bool,
+    #[serde(default)]
+    pub salary_expectation: Compensation,
+    #[serde(default)]
+    pub cv_text: String,
+    #[serde(default)]
+    pub matching_notes: String,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JobMatch {
+    pub job: Job,
+    /// 0–100 explainable score for agents and UI.
+    pub score: u8,
+    pub reasons: Vec<String>,
 }
 
 #[derive(Debug, Error)]
