@@ -45,7 +45,51 @@ export interface JobListResponse {
   offset: number;
 }
 
-const API_BASE = process.env.JOBSHOUT_COM_API_URL ?? "http://127.0.0.1:8088";
+export interface CandidateProfile {
+  id: string;
+  email: string;
+  display_name: string;
+  headline: string;
+  summary: string;
+  skills: string[];
+  years_experience?: number | null;
+  preferred_roles: string[];
+  preferred_locations: Location[];
+  preferred_employment_types: EmploymentType[];
+  open_to_remote: boolean;
+  salary_expectation: Compensation;
+  cv_text: string;
+  matching_notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type UpsertCandidateProfileInput = {
+  email: string;
+  display_name: string;
+  headline?: string;
+  summary?: string;
+  skills?: string[];
+  years_experience?: number | null;
+  preferred_roles?: string[];
+  preferred_locations?: Location[];
+  preferred_employment_types?: EmploymentType[];
+  open_to_remote?: boolean;
+  salary_expectation?: Compensation;
+  cv_text?: string;
+  matching_notes?: string;
+};
+
+export interface JobMatch {
+  job: Job;
+  score: number;
+  reasons: string[];
+}
+
+const API_BASE =
+  typeof window === "undefined"
+    ? (process.env.JOBSHOUT_COM_API_URL ?? "http://127.0.0.1:8088")
+    : (process.env.NEXT_PUBLIC_JOBSHOUT_COM_API_URL ?? "");
 
 export async function listJobs(): Promise<Job[]> {
   const res = await fetch(`${API_BASE}/api/v1/jobs?limit=50`, {
@@ -67,6 +111,47 @@ export async function getJob(id: string): Promise<Job | null> {
     throw new Error(`Failed to load job (${res.status})`);
   }
   return (await res.json()) as Job;
+}
+
+export async function getProfileByEmail(email: string): Promise<CandidateProfile | null> {
+  const res = await fetch(
+    `${API_BASE}/api/v1/profiles/by-email?email=${encodeURIComponent(email)}`,
+    { cache: "no-store" },
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    throw new Error(`Failed to load profile (${res.status})`);
+  }
+  return (await res.json()) as CandidateProfile;
+}
+
+export async function upsertProfile(
+  input: UpsertCandidateProfileInput,
+): Promise<CandidateProfile> {
+  const res = await fetch(`${API_BASE}/api/v1/profiles`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as {
+      error?: { message?: string };
+    } | null;
+    throw new Error(body?.error?.message ?? `Failed to save profile (${res.status})`);
+  }
+  return (await res.json()) as CandidateProfile;
+}
+
+export async function listProfileMatches(profileId: string): Promise<JobMatch[]> {
+  const res = await fetch(`${API_BASE}/api/v1/profiles/${profileId}/matches?limit=20`, {
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to load matches (${res.status})`);
+  }
+  const body = (await res.json()) as { data: JobMatch[] };
+  return body.data;
 }
 
 export function formatCompensation(c: Compensation): string {

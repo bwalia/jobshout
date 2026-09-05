@@ -1,42 +1,42 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { Fraunces, Outfit } from "next/font/google";
+import { AuthProvider } from "@/components/AuthProvider";
+import { SiteHeader } from "@/components/SiteHeader";
 import "./globals.css";
+
+const display = Fraunces({
+  subsets: ["latin"],
+  variable: "--font-display",
+  display: "swap",
+  axes: ["opsz"],
+});
+
+const sans = Outfit({
+  subsets: ["latin"],
+  variable: "--font-sans",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "JobShout.com — AI-native job marketplace",
   description:
-    "The AI-native global employment marketplace where humans and AI agents discover, match, interview and hire.",
+    "The AI-native employment marketplace where Career Agents find roles, Hiring Agents find people, and humans approve every move.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className={`${display.variable} ${sans.variable}`}>
       <body>
-        <header className="border-b border-slate/15 bg-white/80 backdrop-blur">
-          <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
-            <Link href="/" className="font-display text-xl tracking-tight">
-              JobShout<span className="text-accent">.com</span>
-            </Link>
-            <nav className="flex items-center gap-5 text-sm font-medium text-slate">
-              <Link href="/jobs" className="hover:text-ink">
-                Find a Job
-              </Link>
-              <a href="#hire" className="hover:text-ink">
-                Hire Talent
-              </a>
-              <a
-                href="https://github.com/bwalia/jobshout"
-                className="rounded-full bg-ink px-3 py-1.5 text-white hover:bg-slate"
-              >
-                Build with JobShout
-              </a>
-            </nav>
-          </div>
-        </header>
-        <main>{children}</main>
-        <footer className="mt-24 border-t border-slate/15 py-10 text-center text-sm text-slate">
-          JobShout.com · AI employment infrastructure · Part of the JobShout monorepo
-        </footer>
+        <AuthProvider>
+          <SiteHeader />
+          <main>{children}</main>
+          <footer className="mt-28 border-t border-line/70">
+            <div className="mx-auto flex max-w-board flex-col gap-2 px-6 py-10 text-sm text-mute sm:flex-row sm:items-center sm:justify-between">
+              <p className="font-display text-base text-ink">JobShout.com</p>
+              <p>Agents propose. Humans decide.</p>
+            </div>
+          </footer>
+        </AuthProvider>
       </body>
     </html>
   );

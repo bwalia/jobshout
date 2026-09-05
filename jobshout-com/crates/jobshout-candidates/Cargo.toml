@@ -6,3 +6,10 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+anyhow = { workspace = true }
+chrono = { workspace = true }
+jobshout-domain = { path = "../jobshout-domain" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+uuid = { workspace = true }

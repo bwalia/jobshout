@@ -781,8 +781,10 @@ dependencies = [
  "axum",
  "chrono",
  "http",
+ "jobshout-candidates",
  "jobshout-domain",
  "jobshout-jobs",
+ "jobshout-matching",
  "serde",
  "serde_json",
  "tower-http",
@@ -809,6 +811,15 @@ version = "0.1.0"
 [[package]]
 name = "jobshout-candidates"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "jobshout-domain",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "uuid",
+]
 
 [[package]]
 name = "jobshout-com-agent-runtime"
@@ -826,6 +837,7 @@ dependencies = [
  "axum",
  "dotenvy",
  "jobshout-api",
+ "jobshout-candidates",
  "jobshout-jobs",
  "jobshout-observability",
  "jobshout-storage",
@@ -935,6 +947,11 @@ version = "0.1.0"
 [[package]]
 name = "jobshout-matching"
 version = "0.1.0"
+dependencies = [
+ "chrono",
+ "jobshout-domain",
+ "uuid",
+]
 
 [[package]]
 name = "jobshout-mcp"

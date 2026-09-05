@@ -1,10 +1,66 @@
-replicaCount: 1
+# Base defaults for the JobShout.com marketplace chart.
+# Per-environment overlays: values-<env>.yaml. Deployed into shared ring
+# namespaces (int/test/acc/prod) with jobshout-com-prefixed resources so it
+# coexists with the Go platform chart.
+
+env: int
+# Public host. jobshout.com has no wildcard — each host needs a Cloudflare
+# CNAME -> lon1.pop0.uk plus a wslproxy vhost (register-edge-vhost workflow).
+host: int.jobshout.com
+
 image:
-  api: jobshout-com-api:0.1.0
-  web: jobshout-com-web:0.1.0
-service:
-  apiPort: 8088
-  webPort: 3010
-env:
-  DATABASE_URL: "postgres://jobshout:jobshout@postgres:5432/jobshout_com"
-  JOBSHOUT_COM_API_URL: "http://jobshout-com-api:8088"
+  registry: int-spectoncr.diytaxreturn.co.uk
+  namespace: jobshout-com
+  # Injected by Ring Promoter: --set image.tag=<jsc-vX.Y.Z>
+  tag: latest
+  pullPolicy: IfNotPresent
+  pullSecret: jobshout-com-registry
+
+api:
+  replicas: 1
+  port: 8088
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 1Gi }
+
+web:
+  replicas: 1
+  port: 3010
+  # In-cluster URL used by Next.js SSR. Browsers call same-origin /api via nginx.
+  apiURL: "http://jobshout-com-api:8088"
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+
+postgres:
+  enabled: true
+  image: postgres:16-alpine
+  port: 5432
+  database: jobshout_com
+  user: jobshout
+  # Placeholder only — override via --set-string or a Secret in the ring.
+  password: "change-me-in-ring"
+  storage: 10Gi
+  resources:
+    requests: { cpu: 50m, memory: 256Mi }
+    limits: { cpu: 500m, memory: 1Gi }
+
+# wslproxy edge routes the whole host to ONE backend; nginx fans out by path.
+gateway:
+  enabled: true
+  image: nginx:1.27-alpine
+  resolver: "10.43.0.10"
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 128Mi }
+
+ingress:
+  enabled: true
+  className: wslproxy
+  clusterIssuer: main-issuer
+  tls: true
+  annotations: {}
+
+secrets:
+  registryUsername: ""
+  registryPassword: ""

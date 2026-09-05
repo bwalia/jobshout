@@ -4,6 +4,7 @@
 
 mod error;
 mod jobs;
+mod profiles;
 mod state;
 
 use axum::{routing::get, Json, Router};
@@ -25,6 +26,7 @@ pub fn router(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/api/v1/health", get(health))
         .merge(jobs::routes())
+        .merge(profiles::routes())
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
         .with_state(state)

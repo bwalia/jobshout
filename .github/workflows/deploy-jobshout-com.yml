@@ -1,0 +1,366 @@
+name: Build & seed JobShout.com (Ring Promoter)
+
+# Marketplace release path, separate from the Go platform deploy-k3s.yml.
+# Builds api+web images under the jobshout-com registry namespace, tags
+# jsc-vX.Y.Z, and seeds Ring Promoter app `jobshout-com`
+# (https://rp.workstation.co.uk/?app=jobshout-com).
+#
+# Int edge (beaconpulse-style, every int run, idempotent):
+#   Cloudflare CNAME int.jobshout.com → lon1.pop0.uk
+#   wslproxy vhost from jobshout-com/deploy/edge/wslproxy-server-int.json
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "jobshout-com/**"
+      - ".github/workflows/deploy-jobshout-com.yml"
+  workflow_dispatch:
+    inputs:
+      TARGET_ENV:
+        type: choice
+        description: "Target ring"
+        default: "int"
+        required: true
+        options: [int, test, acc, prod]
+      DEPLOYMENT_TYPE:
+        type: choice
+        description: "Build only, deploy only, or both"
+        default: "build-and-deploy"
+        required: true
+        options: [build, deploy, build-and-deploy]
+      IMAGE_TAG:
+        type: string
+        description: "Image/tag to DEPLOY (deploy-only; e.g. jsc-v0.1.0). Blank = this run's version."
+        default: ""
+        required: false
+      VERSION_TYPE:
+        type: choice
+        description: "Version bump type"
+        default: "patch"
+        required: false
+        options: [patch, minor, major]
+      CUSTOM_VERSION:
+        type: string
+        description: "Custom version (e.g. jsc-v0.2.0) — overrides VERSION_TYPE"
+        default: ""
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: jobshout-com-release
+  cancel-in-progress: false
+
+env:
+  IMAGE_REGISTRY: int-spectoncr.diytaxreturn.co.uk
+  IMAGE_NAMESPACE: jobshout-com
+  TARGET_ENV: ${{ github.event.inputs.TARGET_ENV || 'int' }}
+  DEPLOYMENT_TYPE: ${{ github.event.inputs.DEPLOYMENT_TYPE || 'build-and-deploy' }}
+  RP_APP: jobshout-com
+
+jobs:
+  compute-version:
+    name: Compute next jsc-v* version
+    runs-on: self-hosted
+    if: >-
+      github.event_name == 'push'
+      || (github.event_name == 'workflow_dispatch' && inputs.DEPLOYMENT_TYPE != 'deploy')
+    permissions:
+      contents: read
+    outputs:
+      next_version: ${{ steps.calc_version.outputs.next_version }}
+      should_build: ${{ steps.calc_version.outputs.should_build }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Calculate next version
+        id: calc_version
+        run: |
+          set -euo pipefail
+          LATEST_TAG=$(git tag -l 'jsc-v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)
+          if [ -z "$LATEST_TAG" ]; then
+            LATEST_TAG="jsc-v0.0.0"
+          fi
+          echo "Latest marketplace tag: $LATEST_TAG"
+
+          if [ -n "${{ github.event.inputs.CUSTOM_VERSION }}" ]; then
+            NEXT_VERSION="${{ github.event.inputs.CUSTOM_VERSION }}"
+          else
+            BASE="${LATEST_TAG#jsc-v}"
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE"
+            case "${{ github.event.inputs.VERSION_TYPE || 'patch' }}" in
+              major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+              minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+              *)     PATCH=$((PATCH + 1)) ;;
+            esac
+            NEXT_VERSION="jsc-v${MAJOR}.${MINOR}.${PATCH}"
+          fi
+          case "$NEXT_VERSION" in jsc-v*) ;; *) NEXT_VERSION="jsc-v${NEXT_VERSION#v}" ;; esac
+
+          if git tag -l "$NEXT_VERSION" | grep -q "^$NEXT_VERSION$"; then
+            echo "::warning::Tag $NEXT_VERSION already exists — skipping build."
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "next_version=$NEXT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Next version: $NEXT_VERSION"
+
+  build:
+    name: Build & push api + web
+    needs: [compute-version]
+    if: needs.compute-version.outputs.should_build == 'true'
+    runs-on: self-hosted
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Pick LAN SpectonCR NodePort
+        id: push_host
+        run: |
+          set -euo pipefail
+          REGISTRY_HOSTS="192.168.1.23 192.168.1.140 192.168.1.104 192.168.1.47 192.168.1.36"
+          PUSH=""
+          for h in $REGISTRY_HOSTS; do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 5 \
+              "http://${h}:30500/v2/" || echo 000)
+            if [ "$code" = "401" ] || [ "$code" = "200" ]; then
+              PUSH="${h}:30500"
+              break
+            fi
+          done
+          if [ -z "$PUSH" ]; then
+            echo "::error::SpectonCR NodePort :30500 not reachable on the LAN."
+            exit 1
+          fi
+          echo "host=$PUSH" >> "$GITHUB_OUTPUT"
+          echo "PUSH_REGISTRY=$PUSH" >> "$GITHUB_ENV"
+          echo "REGISTRY_HOSTS=$REGISTRY_HOSTS" >> "$GITHUB_ENV"
+
+      - name: Registry login
+        env:
+          PUSH_REGISTRY: ${{ steps.push_host.outputs.host }}
+        run: |
+          set -euo pipefail
+          docker login "$IMAGE_REGISTRY" -u "${{ secrets.REGISTRY_USERNAME }}" -p "${{ secrets.REGISTRY_PASSWORD }}"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          p = Path.home() / ".docker" / "config.json"
+          cfg = json.loads(p.read_text()) if p.exists() else {}
+          auths = cfg.setdefault("auths", {})
+          want = os.environ["IMAGE_REGISTRY"]
+          src = next((v for k, v in auths.items() if want in k), None)
+          if not src:
+              raise SystemExit(f"docker login did not store auth for {want}")
+          hosts = [f"{h}:30500" for h in os.environ["REGISTRY_HOSTS"].split()]
+          for host in hosts:
+              auths[host] = src
+              auths[f"http://{host}"] = src
+          p.write_text(json.dumps(cfg, indent=2) + "\n")
+          PY
+
+      - name: Buildx linux/amd64 api + web
+        env:
+          PUSH_REGISTRY: ${{ steps.push_host.outputs.host }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.compute-version.outputs.next_version }}"
+          CFG="${RUNNER_TEMP:-/tmp}/jobshout-com-buildkitd.toml"
+          python3 - "$CFG" <<'PY'
+          from pathlib import Path
+          import os, sys
+          hosts = [f"{h}:30500" for h in os.environ["REGISTRY_HOSTS"].split()]
+          Path(sys.argv[1]).write_text("".join(
+              f'[registry."{h}"]\n  http = true\n  insecure = true\n' for h in hosts
+          ))
+          PY
+          docker buildx rm jobshout-com-lan >/dev/null 2>&1 || true
+          docker buildx create --name jobshout-com-lan --driver docker-container --bootstrap --config "$CFG"
+          NS="$PUSH_REGISTRY/$IMAGE_NAMESPACE"
+          bx() {
+            docker buildx build --builder jobshout-com-lan --platform linux/amd64 \
+              --provenance=false --sbom=false --push "$@"
+          }
+          bx -f jobshout-com/deploy/docker/Dockerfile.api \
+            -t "$NS/api:$VERSION" -t "$NS/api:latest" \
+            jobshout-com
+          bx -f jobshout-com/deploy/docker/Dockerfile.web \
+            --build-arg NEXT_PUBLIC_JOBSHOUT_COM_API_URL="" \
+            --build-arg JOBSHOUT_COM_API_URL=http://jobshout-com-api:8088 \
+            -t "$NS/web:$VERSION" -t "$NS/web:latest" \
+            jobshout-com/web/nextjs
+          echo "Pushed $NS/{api,web}:$VERSION"
+
+  auto-tag:
+    name: Create jsc-v* tag
+    needs: [compute-version, build]
+    runs-on: self-hosted
+    permissions:
+      contents: write
+    outputs:
+      tag_created: ${{ steps.create_tag.outputs.tag_created }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+      - name: Create and push tag
+        id: create_tag
+        run: |
+          NEXT_VERSION="${{ needs.compute-version.outputs.next_version }}"
+          if git ls-remote --exit-code --tags origin "refs/tags/$NEXT_VERSION" >/dev/null 2>&1; then
+            echo "::warning::Tag $NEXT_VERSION already on remote"
+            echo "tag_created=false" >> "$GITHUB_OUTPUT"
+          else
+            git tag -a "$NEXT_VERSION" -m "JobShout.com $NEXT_VERSION"
+            git push origin "$NEXT_VERSION"
+            echo "tag_created=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: GitHub Release
+        if: steps.create_tag.outputs.tag_created == 'true'
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ needs.compute-version.outputs.next_version }}
+          name: JobShout.com ${{ needs.compute-version.outputs.next_version }}
+          generate_release_notes: true
+
+  register-edge:
+    name: Ensure int.jobshout.com DNS + wslproxy
+    runs-on: ubuntu-latest
+    # Beaconpulse-style: every int deploy upserts CF CNAME + ensures wslproxy vhost.
+    if: >-
+      (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.DEPLOYMENT_TYPE != 'build'))
+      && (github.event.inputs.TARGET_ENV || 'int') == 'int'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure Cloudflare CNAME
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          chmod +x jobshout-com/deploy/scripts/cloudflare-dns.sh
+          jobshout-com/deploy/scripts/cloudflare-dns.sh \
+            --name int.jobshout.com \
+            --content lon1.pop0.uk \
+            --zone jobshout.com \
+            --proxied false
+      - name: Register wslproxy vhost
+        env:
+          WSLPROXY_USER: ${{ secrets.WSLPROXY_USER }}
+          WSLPROXY_PASSWORD: ${{ secrets.WSLPROXY_PASSWORD }}
+          WSLPROXY_GATEWAY_URL: ${{ secrets.WSLPROXY_GATEWAY_URL }}
+          HOST: int.jobshout.com
+          SPEC: jobshout-com/deploy/edge/wslproxy-server-int.json
+        run: |
+          set -euo pipefail
+          GW="${WSLPROXY_GATEWAY_URL:-}"
+          if [ -z "${WSLPROXY_USER:-}" ] || [ -z "${WSLPROXY_PASSWORD:-}" ] || [ -z "$GW" ]; then
+            echo "::error::WSLPROXY_USER / WSLPROXY_PASSWORD / WSLPROXY_GATEWAY_URL required."
+            exit 1
+          fi
+          TOKEN=$(curl -fsS -X POST "$GW/api/user/login" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -nc --arg e "$WSLPROXY_USER" --arg p "$WSLPROXY_PASSWORD" '{email:$e,password:$p}')" \
+            | jq -r '.data.accessToken')
+          existing=$(curl -fsS -X GET "$GW/api/servers" -H "Authorization: Bearer $TOKEN" \
+            | jq -r --arg h "$HOST" '.data[]? | select(.server_name==$h) | .id' | head -1)
+          if [ -n "$existing" ]; then
+            echo "wslproxy vhost for ${HOST} already exists (id=$existing)"; exit 0
+          fi
+          resp=$(curl -fsS -X POST "$GW/api/servers" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            -d @"$SPEC")
+          sid=$(echo "$resp" | jq -r '.data.id // .id // empty')
+          if [ -z "$sid" ]; then
+            echo "::error::wslproxy create failed: $resp"; exit 1
+          fi
+          echo "registered wslproxy vhost ${HOST} (id=$sid)."
+
+  deploy:
+    name: Seed Ring Promoter (${{ github.event.inputs.TARGET_ENV || 'int' }})
+    needs: [compute-version, build, auto-tag, register-edge]
+    runs-on: self-hosted
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    if: >-
+      always()
+      && (github.event_name != 'workflow_dispatch' || inputs.DEPLOYMENT_TYPE != 'build')
+      && (
+        (github.event_name == 'workflow_dispatch' && inputs.DEPLOYMENT_TYPE == 'deploy')
+        || needs.auto-tag.outputs.tag_created == 'true'
+      )
+      && (
+        needs.register-edge.result == 'success'
+        || needs.register-edge.result == 'skipped'
+      )
+    steps:
+      - name: Seed jobshout-com and wait
+        env:
+          RP_API_TOKEN: ${{ secrets.RP_API_TOKEN }}
+          RP_URL: ${{ secrets.RP_URL }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.IMAGE_TAG }}"
+          [ -z "$TAG" ] && TAG="${{ needs.compute-version.outputs.next_version }}"
+          RP="${RP_URL:-https://rp.workstation.co.uk}"
+          if [ -z "${RP_API_TOKEN:-}" ]; then
+            echo "::error::RP_API_TOKEN is not set"; exit 1
+          fi
+          echo "Seeding ${RP_APP} '${TARGET_ENV}' @ ${TAG}"
+          echo "Track: ${RP}/?app=${RP_APP}"
+          code=$(curl -sS -o /tmp/seed.out -w '%{http_code}' \
+            -X POST "${RP}/api/apps/${RP_APP}/seed?async=1" \
+            -H "Authorization: Bearer ${RP_API_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            -d "$(printf '{"ring":"%s","version":"%s"}' "$TARGET_ENV" "$TAG")" || echo 000)
+          echo "seed -> HTTP ${code} :: $(cat /tmp/seed.out)"
+          case "${code}" in 200|202) ;; *) echo "::error::seed failed"; exit 1 ;; esac
+          JOB_ID=$(python3 -c 'import json; print(json.load(open("/tmp/seed.out")).get("job_id") or "")')
+          if [ -z "$JOB_ID" ]; then
+            echo "::error::no job_id"; exit 1
+          fi
+          python3 - "$RP" "$RP_API_TOKEN" "$JOB_ID" "$TAG" "$RP_APP" <<'PY'
+          import json, sys, time, urllib.error, urllib.request
+          rp, token, job_id, tag, app = sys.argv[1:6]
+          url = f"{rp}/api/apps/{app}/jobs/{job_id}"
+          deadline = time.time() + 15 * 60
+          while time.time() < deadline:
+              req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as resp:
+                      body = json.load(resp)
+              except urllib.error.HTTPError as e:
+                  print(f"::warning::poll HTTP {e.code}")
+                  time.sleep(15)
+                  continue
+              status = (body.get("status") or "").lower()
+              print(f"RP job {job_id} status={status}")
+              for step in body.get("steps") or []:
+                  print(f"--- step {step.get('id')} status={step.get('status')} ---")
+                  for line in step.get("logs") or []:
+                      print(line)
+              if status == "success":
+                  sys.exit(0)
+              if status in ("failed", "error", "cancelled"):
+                  print(f"::error::RP job {status}")
+                  sys.exit(1)
+              time.sleep(15)
+          print("::error::timed out waiting for RP job")
+          sys.exit(1)
+          PY

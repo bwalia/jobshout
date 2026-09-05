@@ -4,8 +4,77 @@
 
 :root {
   color-scheme: light;
+  --paper: #eef2f6;
+  --ink: #0c1b2a;
+  --mute: #5a6b7d;
+  --line: #c5d0dc;
+  --signal: #00a8b8;
+  --shout: #ff4d1a;
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 body {
-  @apply bg-mist text-ink antialiased;
+  @apply bg-paper font-sans text-ink antialiased;
+  background-image:
+    radial-gradient(ellipse 90% 55% at 80% -10%, rgba(0, 168, 184, 0.14), transparent 55%),
+    linear-gradient(180deg, #f7f9fb 0%, #eef2f6 42%, #e8eef4 100%);
+  background-attachment: fixed;
+  min-height: 100vh;
+}
+
+::selection {
+  background: rgba(0, 168, 184, 0.25);
+}
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 3px;
+}
+
+.signal-field {
+  background-image: repeating-linear-gradient(
+    90deg,
+    transparent,
+    transparent 47px,
+    rgba(12, 27, 42, 0.04) 47px,
+    rgba(12, 27, 42, 0.04) 48px
+  );
+}
+
+.job-row {
+  @apply relative block border-b border-line/80 py-7 transition-colors;
+}
+
+.job-row::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 1.25rem;
+  bottom: 1.25rem;
+  width: 2px;
+  background: transparent;
+  transition: background-color 160ms ease, width 160ms ease;
+}
+
+.job-row:hover::before,
+.job-row:focus-visible::before {
+  width: 4px;
+  background: var(--signal);
+}
+
+.job-row:hover {
+  background: rgba(255, 255, 255, 0.45);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-signal-pulse,
+  .animate-hero-in {
+    animation: none !important;
+  }
 }

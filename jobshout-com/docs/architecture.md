@@ -17,14 +17,19 @@ existing Go agent platform (`server/` + `web/nextjs/`).
 Next.js (:3010)  →  Axum API (:8088)  →  Postgres (:5434)
 ```
 
+Deployed int ring: **https://int.jobshout.com** via Helm + Ring Promoter
+(`rp.workstation.co.uk/?app=jobshout-com`). See [docs/deploy.md](deploy.md).
+
 Implemented:
 
 - Cargo workspace with domain crates (many stubs) matching the north-star layout
 - `jobshout-jobs` + `GET/POST /api/v1/jobs`
-- Marketplace web: home, job list, job detail
+- Candidate profiles + explainable matching for Career agents
+  (`POST /api/v1/profiles`, `GET …/matches`, `GET …/matching-context`)
+- Marketplace web: home, job board, profile builder, ranked matches, social login scaffolding
 - Own `docker-compose.yml` and Helm chart under `deploy/`
 
-Deferred: auth, MCP, agents, matching, interviews, iOS app screens, billing.
+Deferred: full auth identity linking, MCP, agents runtime, interviews, iOS app screens, billing.
 
 North-star: the full Rust + Next.js + Swift build prompt (agents, MCP, interviews,
 policy, globalisation).

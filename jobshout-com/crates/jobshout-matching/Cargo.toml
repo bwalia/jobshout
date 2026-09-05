@@ -6,3 +6,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+chrono = { workspace = true }
+jobshout-domain = { path = "../jobshout-domain" }
+uuid = { workspace = true }
+
+[dev-dependencies]

@@ -1,0 +1,17 @@
+env: int
+host: int.jobshout.com
+
+# image.tag is injected by Ring Promoter (--set image.tag=<jsc-v…>).
+
+api:
+  replicas: 1
+
+web:
+  replicas: 1
+  apiURL: "http://jobshout-com-api.int.svc.cluster.local:8088"
+
+postgres:
+  enabled: true
+  storage: 10Gi
+  # int proving-ring default; override via helm --set-string for stronger secrets.
+  password: jobshout

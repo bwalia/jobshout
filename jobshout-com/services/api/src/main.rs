@@ -1,5 +1,6 @@
 use anyhow::Context;
 use jobshout_api::{router, AppState};
+use jobshout_candidates::CandidateService;
 use jobshout_jobs::{seed_organisation_id, JobService};
 use std::net::SocketAddr;
 
@@ -20,7 +21,8 @@ async fn main() -> anyhow::Result<()> {
     jobshout_storage::migrate(&pool).await?;
 
     let state = AppState {
-        jobs: JobService::new(pool, seed_organisation_id()),
+        jobs: JobService::new(pool.clone(), seed_organisation_id()),
+        candidates: CandidateService::new(pool),
     };
 
     let app = router(state);

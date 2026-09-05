@@ -1,0 +1,34 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: jobshout-com-ingress
+  labels:
+    {{- include "jobshout-com.labels" . | nindent 4 }}
+  annotations:
+    {{- if .Values.ingress.tls }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.clusterIssuer }}
+    {{- end }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ .Values.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: jobshout-com-nginx
+                port:
+                  number: 80
+  {{- if .Values.ingress.tls }}
+  tls:
+    - hosts:
+        - {{ .Values.host }}
+      secretName: jobshout-com-tls
+  {{- end }}
+{{- end }}
