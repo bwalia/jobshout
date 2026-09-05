@@ -28,6 +28,16 @@ spec:
               value: {{ .Values.web.apiURL | quote }}
             - name: NEXTAUTH_URL
               value: {{ printf "https://%s" .Values.host | quote }}
+            - name: NEXTAUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: jobshout-com-auth
+                  key: NEXTAUTH_SECRET
+            - name: AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: jobshout-com-auth
+                  key: NEXTAUTH_SECRET
             - name: PORT
               value: {{ .Values.web.port | quote }}
           readinessProbe:
