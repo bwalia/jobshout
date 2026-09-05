@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Idempotent Cloudflare CNAME upsert (beaconpulse-style).
-# Env: CF_API_TOKEN (required), CLOUDFLARE_ZONE or --zone
+# Env: CLOUDFLARE_API_TOKEN (required), CLOUDFLARE_ZONE or --zone
 # Usage:
 #   ./cloudflare-dns.sh --name int.jobshout.com --content lon1.pop0.uk --zone jobshout.com
 set -euo pipefail
@@ -24,13 +24,13 @@ if [[ -z "$NAME" ]]; then
   echo "usage: $0 --name <fqdn> [--content lon1.pop0.uk] [--zone jobshout.com]" >&2
   exit 2
 fi
-if [[ -z "${CF_API_TOKEN:-}" ]]; then
-  echo "CF_API_TOKEN not set — skipping DNS for ${NAME}" >&2
+if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+  echo "CLOUDFLARE_API_TOKEN not set — skipping DNS for ${NAME}" >&2
   exit 0
 fi
 
 api="https://api.cloudflare.com/client/v4"
-auth=(-H "Authorization: Bearer ${CF_API_TOKEN}" -H "Content-Type: application/json")
+auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H "Content-Type: application/json")
 
 zone_id=$(curl -fsS "${auth[@]}" "$api/zones?name=${ZONE}" | jq -r '.result[0].id // empty')
 if [[ -z "$zone_id" ]]; then

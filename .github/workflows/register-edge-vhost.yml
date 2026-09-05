@@ -6,7 +6,7 @@ name: Register edge vhost (Cloudflare + wslproxy)
 #
 # Secrets:
 #   WSLPROXY_USER / WSLPROXY_PASSWORD / WSLPROXY_GATEWAY_URL
-#   CF_API_TOKEN (optional)
+#   CLOUDFLARE_API_TOKEN (optional)
 
 on:
   workflow_dispatch:
@@ -45,18 +45,18 @@ jobs:
 
       - name: Ensure Cloudflare CNAME
         env:
-          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           HOST: ${{ inputs.host }}
           ZONE: ${{ inputs.zone }}
           CNAME_TARGET: ${{ inputs.cname_target || 'lon1.pop0.uk' }}
         run: |
           set -euo pipefail
-          if [ -z "${CF_API_TOKEN:-}" ]; then
-            echo "::notice::CF_API_TOKEN not set — relying on existing DNS for ${HOST} -> ${CNAME_TARGET}."
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo "::notice::CLOUDFLARE_API_TOKEN not set — relying on existing DNS for ${HOST} -> ${CNAME_TARGET}."
             exit 0
           fi
           api="https://api.cloudflare.com/client/v4"
-          auth=(-H "Authorization: Bearer ${CF_API_TOKEN}" -H "Content-Type: application/json")
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H "Content-Type: application/json")
           zone_id=$(curl -fsS "${auth[@]}" "$api/zones?name=${ZONE}" | jq -r '.result[0].id // empty')
           if [ -z "$zone_id" ]; then
             echo "::notice::zone ${ZONE} not found for this Cloudflare token — leaving DNS as-is."

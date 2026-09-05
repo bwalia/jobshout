@@ -250,7 +250,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Ensure Cloudflare CNAME
         env:
-          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           set -euo pipefail
           chmod +x jobshout-com/deploy/scripts/cloudflare-dns.sh
