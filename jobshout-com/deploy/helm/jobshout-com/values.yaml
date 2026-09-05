@@ -64,3 +64,5 @@ ingress:
 secrets:
   registryUsername: ""
   registryPassword: ""
+  # Auth.js / NextAuth production secret. Leave empty to auto-generate on install.
+  authSecret: ""
