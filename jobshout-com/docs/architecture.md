@@ -26,10 +26,17 @@ Implemented:
 - `jobshout-jobs` + `GET/POST /api/v1/jobs`
 - Candidate profiles + explainable matching for Career agents
   (`POST /api/v1/profiles`, `GET …/matches`, `GET …/matching-context`)
-- Marketplace web: home, job board, profile builder, ranked matches, social login scaffolding
+- `jobshout-applications` + apply flow
+  (`POST/GET /api/v1/jobs/{id}/applications`, `GET …/applications/check`,
+  `GET /api/v1/applications?email=`). Re-applying with the same email updates the
+  existing application rather than creating a duplicate.
+- Marketplace web: landing, job board with URL-driven search/filter/sort, job detail,
+  apply, post a job (with live preview), profile builder, ranked matches, application
+  tracking, social login scaffolding, light/dark theming
 - Own `docker-compose.yml` and Helm chart under `deploy/`
 
-Deferred: full auth identity linking, MCP, agents runtime, interviews, iOS app screens, billing.
+Deferred: full auth identity linking, employer-side application review UI, MCP, agents
+runtime, interviews, iOS app screens, billing.
 
 North-star: the full Rust + Next.js + Swift build prompt (agents, MCP, interviews,
 policy, globalisation).

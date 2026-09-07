@@ -1,16 +1,52 @@
-# JobShout.com API image. Built with buildx --platform linux/amd64 for k3s1.
-FROM rust:1.90-bookworm AS builder
+# JobShout.com API image.
+#
+# The builder pins itself to $BUILDPLATFORM and cross-compiles to $TARGETPLATFORM
+# rather than running an emulated toolchain. Building linux/amd64 on the arm64
+# runner used to go through QEMU, where gcc's collect2 segfaulted intermittently
+# (`internal compiler error` on zerovec-derive) and a clean build took ~40 min.
+# Compiling natively and emitting foreign object code removes both problems.
+FROM --platform=$BUILDPLATFORM rust:1.90-bookworm AS builder
+
+ARG TARGETARCH
 WORKDIR /app
+
+# Cross linker, C toolchain and target libc for the target arch. A bare rustup
+# target is not enough: without libc6-dev-*-cross the link fails on missing
+# Scrt1.o / crti.o.
+RUN set -eux; \
+    case "$TARGETARCH" in \
+      amd64) rust_target=x86_64-unknown-linux-gnu;  pkgs="gcc-x86-64-linux-gnu libc6-dev-amd64-cross" ;; \
+      arm64) rust_target=aarch64-unknown-linux-gnu; pkgs="gcc-aarch64-linux-gnu libc6-dev-arm64-cross" ;; \
+      *) echo "unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; \
+    esac; \
+    echo "$rust_target" > /rust_target; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends $pkgs pkg-config; \
+    rm -rf /var/lib/apt/lists/*; \
+    rustup target add "$rust_target"
+
+# Point cargo at the cross linker for whichever target we resolved above.
+ENV CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=x86_64-linux-gnu-gcc \
+    CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
+    CC_x86_64_unknown_linux_gnu=x86_64-linux-gnu-gcc \
+    CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
+
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY services ./services
 COPY migrations ./migrations
-RUN cargo build --release -p jobshout-com-api
+
+RUN set -eux; \
+    rust_target="$(cat /rust_target)"; \
+    cargo build --release --target "$rust_target" -p jobshout-com-api; \
+    # Lift the binary out of the target-specific path so the runtime stage has
+    # one stable location to copy from.
+    cp "target/$rust_target/release/jobshout-api" /app/jobshout-api
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
  && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /app/target/release/jobshout-api /usr/local/bin/jobshout-api
+COPY --from=builder /app/jobshout-api /usr/local/bin/jobshout-api
 ENV HOST=0.0.0.0 PORT=8088
 EXPOSE 8088
 CMD ["jobshout-api"]

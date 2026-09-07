@@ -55,7 +55,7 @@ type Props = {
 
 export function SocialSignInButtons({ providers, callbackUrl }: Props) {
   return (
-    <ul className="space-y-3">
+    <ul className="space-y-2.5">
       {providers.map((p) => (
         <li key={p.id}>
           <button
@@ -65,14 +65,14 @@ export function SocialSignInButtons({ providers, callbackUrl }: Props) {
               if (!p.configured) return;
               void signIn(p.id, { callbackUrl });
             }}
-            className="group flex w-full items-center gap-3 border border-line bg-white px-4 py-3.5 text-left text-sm font-semibold text-ink transition enabled:hover:border-signal enabled:hover:bg-paper/80 disabled:cursor-not-allowed disabled:opacity-45"
+            className="group flex min-h-[3.25rem] w-full cursor-pointer items-center gap-3 rounded-xl border border-line bg-surface px-3 py-2.5 text-left text-sm font-semibold text-ink transition-colors duration-200 enabled:hover:border-edge enabled:hover:bg-raised disabled:cursor-not-allowed disabled:opacity-45"
           >
-            <span className="flex h-9 w-9 items-center justify-center bg-paper">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-raised">
               {ICONS[p.id]}
             </span>
-            <span className="flex-1">{p.label}</span>
+            <span className="flex-1">Continue with {p.label.replace(/^Continue with /, "")}</span>
             {!p.configured && (
-              <span className="text-xs font-medium text-mute">Add credentials</span>
+              <span className="text-xs font-medium text-mute">Not configured</span>
             )}
           </button>
         </li>

@@ -14,6 +14,7 @@ pub type OrganisationId = Uuid;
 pub type JobId = Uuid;
 pub type UserId = Uuid;
 pub type CandidateProfileId = Uuid;
+pub type JobApplicationId = Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -204,6 +205,86 @@ pub struct UpsertCandidateProfileRequest {
 
 fn default_true() -> bool {
     true
+}
+
+/// Where an application sits in the hiring pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApplicationStatus {
+    Submitted,
+    Reviewing,
+    Shortlisted,
+    Interviewing,
+    Offered,
+    Rejected,
+    Withdrawn,
+}
+
+impl ApplicationStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Submitted => "submitted",
+            Self::Reviewing => "reviewing",
+            Self::Shortlisted => "shortlisted",
+            Self::Interviewing => "interviewing",
+            Self::Offered => "offered",
+            Self::Rejected => "rejected",
+            Self::Withdrawn => "withdrawn",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "submitted" => Some(Self::Submitted),
+            "reviewing" => Some(Self::Reviewing),
+            "shortlisted" => Some(Self::Shortlisted),
+            "interviewing" => Some(Self::Interviewing),
+            "offered" => Some(Self::Offered),
+            "rejected" => Some(Self::Rejected),
+            "withdrawn" => Some(Self::Withdrawn),
+            _ => None,
+        }
+    }
+}
+
+/// A candidate's application to one job.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JobApplication {
+    pub id: JobApplicationId,
+    pub job_id: JobId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub candidate_profile_id: Option<CandidateProfileId>,
+    pub full_name: String,
+    pub email: String,
+    pub phone: String,
+    pub cover_letter: String,
+    pub cv_text: String,
+    pub cv_url: String,
+    pub status: ApplicationStatus,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// An application joined with the job it targets — what "my applications" renders.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JobApplicationWithJob {
+    #[serde(flatten)]
+    pub application: JobApplication,
+    pub job: Job,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CreateJobApplicationRequest {
+    pub full_name: String,
+    pub email: String,
+    #[serde(default)]
+    pub phone: String,
+    #[serde(default)]
+    pub cover_letter: String,
+    #[serde(default)]
+    pub cv_text: String,
+    #[serde(default)]
+    pub cv_url: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

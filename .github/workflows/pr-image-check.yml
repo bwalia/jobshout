@@ -1,8 +1,9 @@
 name: PR image check
 
-# Cross-build the four k3s images for linux/amd64 without pushing or seeding
-# Ring Promoter. Auto-merge is not used; this is the pre-merge gate so a broken
-# Dockerfile fails on the PR instead of after it hits master.
+# Cross-build the k3s images and the JobShout.com marketplace images for
+# linux/amd64 without pushing or seeding Ring Promoter. Auto-merge is not used;
+# this is the pre-merge gate so a broken Dockerfile fails on the PR instead of
+# after it hits master.
 
 on:
   pull_request:
@@ -16,7 +17,7 @@ jobs:
   pr-image-check:
     name: PR image check
     runs-on: self-hosted
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -36,7 +37,14 @@ jobs:
           bx -t jobshout/python-sidecar:pr -f python-sidecar/Dockerfile python-sidecar
           bx -t jobshout/review-bot:pr -f review-bot/Dockerfile review-bot
 
-          for img in jobshout/server:pr jobshout/web:pr jobshout/python-sidecar:pr jobshout/review-bot:pr; do
+          # JobShout.com marketplace — same images deploy-jobshout-com.yml pushes.
+          bx -t jobshout-com/api:pr -f jobshout-com/deploy/docker/Dockerfile.api jobshout-com
+          bx --build-arg NEXT_PUBLIC_JOBSHOUT_COM_API_URL="" \
+            --build-arg JOBSHOUT_COM_API_URL=http://jobshout-com-api:8088 \
+            -t jobshout-com/web:pr -f jobshout-com/deploy/docker/Dockerfile.web jobshout-com/web/nextjs
+
+          for img in jobshout/server:pr jobshout/web:pr jobshout/python-sidecar:pr jobshout/review-bot:pr \
+                     jobshout-com/api:pr jobshout-com/web:pr; do
             arch=$(docker image inspect --format '{{.Architecture}}' "$img")
             echo "$img architecture=$arch"
             [ "$arch" = "amd64" ]
@@ -50,3 +58,7 @@ jobs:
             -c 'uname -m | grep -qx x86_64'
           docker run --rm --platform=linux/amd64 --entrypoint /bin/sh jobshout/review-bot:pr \
             -c 'uname -m | grep -qx x86_64 && command -v opencode >/dev/null && command -v git >/dev/null'
+          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh jobshout-com/api:pr \
+            -c 'test -x /usr/local/bin/jobshout-api && uname -m | grep -qx x86_64'
+          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh jobshout-com/web:pr \
+            -c 'uname -m | grep -qx x86_64 && test -d /app/.next'

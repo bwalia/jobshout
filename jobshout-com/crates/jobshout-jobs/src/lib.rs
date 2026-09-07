@@ -8,7 +8,7 @@ use jobshout_domain::{CreateJobRequest, DomainError, Job, JobId, JobStatus, Orga
 use sqlx::PgPool;
 use uuid::Uuid;
 
-pub use repo::JobRepository;
+pub use repo::{job_from_row, JobRepository};
 
 #[derive(Clone)]
 pub struct JobService {

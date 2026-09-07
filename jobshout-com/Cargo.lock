@@ -781,6 +781,7 @@ dependencies = [
  "axum",
  "chrono",
  "http",
+ "jobshout-applications",
  "jobshout-candidates",
  "jobshout-domain",
  "jobshout-jobs",
@@ -795,6 +796,16 @@ dependencies = [
 [[package]]
 name = "jobshout-applications"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "jobshout-domain",
+ "jobshout-jobs",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "uuid",
+]
 
 [[package]]
 name = "jobshout-audit"
@@ -837,6 +848,7 @@ dependencies = [
  "axum",
  "dotenvy",
  "jobshout-api",
+ "jobshout-applications",
  "jobshout-candidates",
  "jobshout-jobs",
  "jobshout-observability",

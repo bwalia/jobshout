@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+mod applications;
 mod error;
 mod jobs;
 mod profiles;
@@ -27,6 +28,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/health", get(health))
         .merge(jobs::routes())
         .merge(profiles::routes())
+        .merge(applications::routes())
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
         .with_state(state)

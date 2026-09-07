@@ -9,6 +9,7 @@ license.workspace = true
 axum = { workspace = true }
 chrono = { workspace = true }
 http = { workspace = true }
+jobshout-applications = { path = "../jobshout-applications" }
 jobshout-candidates = { path = "../jobshout-candidates" }
 jobshout-domain = { path = "../jobshout-domain" }
 jobshout-jobs = { path = "../jobshout-jobs" }
