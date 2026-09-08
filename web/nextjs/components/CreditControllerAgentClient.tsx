@@ -59,7 +59,7 @@ export function CreditControllerAgentClient() {
         setSelected(list.invoices[0].invoice_id);
       }
     } catch (err) {
-      setError(apiErrorMessage(err));
+      setError(apiErrorMessage(err, "Could not load invoices."));
     }
   }, [selected]);
 
@@ -75,7 +75,7 @@ export function CreditControllerAgentClient() {
         setDoc(detail.document_text ?? "");
       } catch (err) {
         setDoc("");
-        toast.error(apiErrorMessage(err));
+        toast.error(apiErrorMessage(err, "Could not load that invoice."));
       }
     })();
   }, [selected]);
@@ -94,7 +94,7 @@ export function CreditControllerAgentClient() {
       await fn();
       await refresh();
     } catch (err) {
-      toast.error(apiErrorMessage(err));
+      toast.error(apiErrorMessage(err, "That action failed."));
     } finally {
       setBusy(null);
     }
