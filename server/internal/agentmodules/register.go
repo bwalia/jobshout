@@ -20,6 +20,7 @@ import (
 	"github.com/jobshout/server/internal/prreview"
 	"github.com/jobshout/server/internal/research"
 	"github.com/jobshout/server/internal/service"
+	"github.com/jobshout/server/internal/simpro"
 )
 
 // Deps is the launch surface each specialist needs. Nil fields mean that
@@ -34,6 +35,7 @@ type Deps struct {
 	Reviews          service.ReviewService
 	Images           *service.ImageService
 	CreditController *creditcontroller.Client
+	Simpro           *simpro.Client
 }
 
 func init() {
@@ -58,6 +60,7 @@ func Register(d Deps) {
 	agentmodule.Register(images.Module(imageAdapter{d.Images}))
 	agentmodule.Register(research.Module(d.Research))
 	agentmodule.Register(creditcontroller.Module(d.CreditController))
+	agentmodule.Register(simpro.Module(d.Simpro))
 }
 
 type imageAdapter struct{ svc *service.ImageService }

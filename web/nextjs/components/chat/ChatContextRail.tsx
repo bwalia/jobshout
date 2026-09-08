@@ -11,6 +11,7 @@ import {
   Image as ImageIcon,
   Landmark,
   Mail,
+  Receipt,
   Search,
   ShieldCheck,
   Sparkles,
@@ -270,6 +271,7 @@ const BUILTIN_ICONS: Record<string, LucideIcon> = {
   pr_reviewer: GitPullRequest,
   images: ImageIcon,
   credit_controller: Landmark,
+  simpro_payments: Receipt,
 };
 
 function count(n: number | undefined): string {
