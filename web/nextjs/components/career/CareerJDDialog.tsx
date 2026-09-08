@@ -33,12 +33,12 @@ export function CareerJDDialog({
         <div className="mb-3 flex items-start justify-between gap-3">
           <div>
             <h2 className="text-base font-semibold">{preview.title || "Job description"}</h2>
-            <p className="text-sm text-muted-foreground">{preview.company || "Company"}</p>
+            <p className="text-base text-muted-foreground">{preview.company || "Company"}</p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md border border-border px-2 py-1 text-sm"
+            className="rounded-md border border-border px-2 py-1 text-base"
             aria-label="Close"
           >
             Close
@@ -49,17 +49,17 @@ export function CareerJDDialog({
             href={href}
             target="_blank"
             rel="noreferrer"
-            className="mb-3 self-start rounded-md border border-border px-3 py-1.5 text-sm"
+            className="mb-3 self-start rounded-md border border-border px-3 py-2.5 text-base"
           >
             Go to posting
           </a>
         )}
         {preview.loading ? (
-          <p className="text-sm text-muted-foreground">Loading the job description…</p>
+          <p className="text-base text-muted-foreground">Loading the job description…</p>
         ) : preview.error ? (
-          <p className="text-sm text-destructive">{preview.error}</p>
+          <p className="text-base text-destructive">{preview.error}</p>
         ) : (
-          <pre className="flex-1 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted/40 p-3 text-xs leading-relaxed">
+          <pre className="flex-1 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted/40 p-3 text-sm leading-relaxed">
             {preview.text || "No job text on this posting."}
           </pre>
         )}

@@ -104,6 +104,13 @@ type startedExec struct {
 	req        model.ExecuteAgentRequest
 	agentTools []string
 	engineType string
+	// maxTokens is the resolved agent_policies.max_tokens_per_exec for this run,
+	// or 0 for no cap. Resolved once here, next to the policy check, rather than
+	// looked up again at run time.
+	maxTokens int
+	// maxCost is the resolved agent_policies.max_cost_per_exec in USD, or 0 for
+	// no cap. Resolved alongside maxTokens for the same reason.
+	maxCost float64
 }
 
 func (s *executionService) begin(ctx context.Context, orgID uuid.UUID, agentID uuid.UUID, req model.ExecuteAgentRequest) (*startedExec, error) {
@@ -124,6 +131,8 @@ func (s *executionService) begin(ctx context.Context, orgID uuid.UUID, agentID u
 		agent = &clone
 	}
 
+	maxTokens := 0
+	maxCost := 0.0
 	if s.govSvc != nil {
 		provider := ""
 		if agent.ModelProvider != nil {
@@ -136,6 +145,8 @@ func (s *executionService) begin(ctx context.Context, orgID uuid.UUID, agentID u
 		if err := s.govSvc.EnforcePolicy(ctx, orgID, agentID, provider, modelName); err != nil {
 			return nil, err
 		}
+		maxTokens = s.govSvc.MaxTokensPerExec(ctx, orgID, agentID)
+		maxCost = s.govSvc.MaxCostPerExec(ctx, orgID, agentID)
 	}
 
 	engineType := engine.ResolveEngine(agent, req.EngineOverride, "")
@@ -180,13 +191,17 @@ func (s *executionService) begin(ctx context.Context, orgID uuid.UUID, agentID u
 		req:        req,
 		agentTools: agentTools,
 		engineType: engineType,
+		maxTokens:  maxTokens,
+		maxCost:    maxCost,
 	}, nil
 }
 
 func (s *executionService) finish(ctx context.Context, st *startedExec) (*model.AgentExecution, error) {
-	if len(st.req.SkillSlugs) > 0 {
+	if len(st.req.SkillSlugs) > 0 || st.maxTokens > 0 || st.maxCost > 0 {
 		ctx = executor.WithRunOptions(ctx, executor.RunOptions{
 			SkillSlugs: st.req.SkillSlugs,
+			MaxTokens:  st.maxTokens,
+			MaxCostUSD: st.maxCost,
 		})
 	}
 	runner := s.engineRouter.For(st.engineType)

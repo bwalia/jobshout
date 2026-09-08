@@ -205,7 +205,7 @@ export function ImportAgentPackageDialog({
                     : ""}
                 </p>
                 {preview.mode === "overlay" && (
-                  <p className="mt-2 text-sm text-amber-700 dark:text-amber-400">
+                  <p className="mt-2 text-sm text-orange-700 dark:text-orange-400">
                     This organisation already has {preview.target_name ?? preview.agent.name}.
                     Import will update its prompt, model, and tools.
                     Skills and knowledge in the file replace the current set; if the file has none, the current ones stay.
@@ -301,7 +301,7 @@ export function ImportAgentPackageDialog({
                         issue.severity === "error"
                           ? "border-destructive/40 bg-destructive/10 text-destructive"
                           : issue.severity === "warning"
-                            ? "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-200"
+                            ? "border-orange-500/30 bg-orange-500/10 text-orange-800 dark:text-orange-200"
                             : "border-border bg-muted/50 text-muted-foreground"
                       }`}
                       role={issue.severity === "error" ? "alert" : undefined}

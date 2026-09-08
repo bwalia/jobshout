@@ -19,7 +19,7 @@ const AVATAR_COLOURS = [
   "bg-blue-500",
   "bg-cyan-500",
   "bg-emerald-500",
-  "bg-amber-500",
+  "bg-orange-500",
   "bg-rose-500",
   "bg-pink-500",
   "bg-indigo-500",
@@ -49,7 +49,7 @@ function initials(name: string): string {
 
 const STATUS_DOT_COLOURS: Record<string, string> = {
   active: "bg-emerald-500",
-  idle: "bg-yellow-400",
+  idle: "bg-orange-400",
   paused: "bg-orange-500",
   offline: "bg-zinc-500",
 };

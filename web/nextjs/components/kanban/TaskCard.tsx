@@ -26,7 +26,7 @@ function PriorityIcon({ priority }: { priority: Priority }) {
     case "high":
       return <ArrowUp className={cn(className, "text-orange-500")} />;
     case "medium":
-      return <Minus className={cn(className, "text-amber-500")} />;
+      return <Minus className={cn(className, "text-orange-500")} />;
     case "low":
       return <ArrowDown className={cn(className, "text-blue-500")} />;
     default:

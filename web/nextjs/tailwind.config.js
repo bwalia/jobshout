@@ -33,15 +33,21 @@ module.exports = {
           "monospace",
         ],
       },
+      // Every size moved up a step. `base` was 14px, so anything written as
+      // text-base — which is most of the app — rendered below the 16px that
+      // browsers and iOS treat as normal body text. That single number was
+      // why the dashboard and chat read small no matter what the components
+      // asked for; fixing it here fixes every page at once.
       fontSize: {
-        "2xs": ["10px", { lineHeight: "14px", letterSpacing: "0.02em" }],
-        xs: ["12px", { lineHeight: "16px" }],
-        sm: ["13px", { lineHeight: "20px" }],
-        base: ["14px", { lineHeight: "22px" }],
-        lg: ["16px", { lineHeight: "24px" }],
-        xl: ["18px", { lineHeight: "28px", letterSpacing: "-0.01em" }],
-        "2xl": ["22px", { lineHeight: "30px", letterSpacing: "-0.015em" }],
-        "3xl": ["28px", { lineHeight: "36px", letterSpacing: "-0.02em" }],
+        "2xs": ["11px", { lineHeight: "15px", letterSpacing: "0.02em" }],
+        xs: ["13px", { lineHeight: "18px" }],
+        sm: ["14px", { lineHeight: "21px" }],
+        base: ["16px", { lineHeight: "25px" }],
+        lg: ["18px", { lineHeight: "27px" }],
+        xl: ["20px", { lineHeight: "29px", letterSpacing: "-0.01em" }],
+        "2xl": ["25px", { lineHeight: "33px", letterSpacing: "-0.015em" }],
+        "3xl": ["32px", { lineHeight: "40px", letterSpacing: "-0.02em" }],
+        "4xl": ["40px", { lineHeight: "47px", letterSpacing: "-0.022em" }],
       },
       colors: {
         border: "hsl(var(--border))",

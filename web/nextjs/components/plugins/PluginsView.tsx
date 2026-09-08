@@ -185,7 +185,7 @@ function PluginCard({ plugin }: { plugin: Plugin }) {
             {plugin.permissions.map((perm) => (
               <span
                 key={perm}
-                className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-400"
+                className="rounded bg-orange-500/10 px-1.5 py-0.5 text-[10px] text-orange-400"
               >
                 {perm}
               </span>

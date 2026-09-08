@@ -11,7 +11,7 @@ const AVATAR_COLOURS = [
   "bg-violet-600",
   "bg-blue-600",
   "bg-emerald-600",
-  "bg-amber-600",
+  "bg-orange-600",
   "bg-rose-600",
   "bg-cyan-600",
   "bg-indigo-600",
@@ -35,13 +35,13 @@ function getInitials(name: string): string {
 
 function performanceColour(score: number): string {
   if (score >= 80) return "text-emerald-600 dark:text-emerald-400";
-  if (score >= 50) return "text-amber-600 dark:text-amber-400";
+  if (score >= 50) return "text-orange-600 dark:text-orange-400";
   return "text-red-600 dark:text-red-400";
 }
 
 function performanceBgColour(score: number): string {
   if (score >= 80) return "bg-emerald-500";
-  if (score >= 50) return "bg-amber-500";
+  if (score >= 50) return "bg-orange-500";
   return "bg-red-500";
 }
 

@@ -59,3 +59,8 @@ __pycache__/
 strix-service/strix_runs/
 strix_runs/
 .serena/
+
+# Alternate Next build dirs (NEXT_DIST_DIR), so a second dev server can run
+# against the same checkout without fighting the first over .next/.
+web/nextjs/.next-*
+web/nextjs/.next.*

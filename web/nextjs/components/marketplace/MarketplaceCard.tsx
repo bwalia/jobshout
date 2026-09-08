@@ -86,7 +86,7 @@ export function MarketplaceCard({ agent, onImport }: MarketplaceCardProps) {
             {Array.from({ length: fullStars }).map((_, i) => (
               <svg
                 key={`full-${i}`}
-                className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400"
+                className="h-3.5 w-3.5 fill-orange-400 text-orange-400"
                 xmlns="http://www.w3.org/2000/svg"
                 viewBox="0 0 20 20"
                 fill="currentColor"
@@ -97,7 +97,7 @@ export function MarketplaceCard({ agent, onImport }: MarketplaceCardProps) {
             {hasHalfStar && (
               <svg
                 key="half"
-                className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400 opacity-60"
+                className="h-3.5 w-3.5 fill-orange-400 text-orange-400 opacity-60"
                 xmlns="http://www.w3.org/2000/svg"
                 viewBox="0 0 20 20"
                 fill="currentColor"

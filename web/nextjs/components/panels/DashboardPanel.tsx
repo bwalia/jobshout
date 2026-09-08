@@ -37,7 +37,7 @@ const RANGES: { label: string; value: DateRange; days: number }[] = [
 const PRIORITY_PILL: Record<string, string> = {
   critical: "bg-red-500/10 text-red-600 dark:text-red-400",
   high: "bg-orange-500/10 text-orange-600 dark:text-orange-400",
-  medium: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  medium: "bg-orange-500/10 text-orange-600 dark:text-orange-400",
   low: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
 };
 
@@ -45,7 +45,7 @@ const AVATAR_COLOURS = [
   "bg-violet-600",
   "bg-blue-600",
   "bg-emerald-600",
-  "bg-amber-600",
+  "bg-orange-600",
   "bg-rose-600",
   "bg-cyan-600",
 ];
@@ -308,7 +308,7 @@ export function DashboardPanel() {
             value={(summary?.tasks_in_progress ?? 0).toLocaleString()}
             hint="being worked on right now"
             icon={Activity}
-            tint="bg-amber-500/10 text-amber-600 dark:text-amber-400"
+            tint="bg-orange-500/10 text-orange-600 dark:text-orange-400"
           />
           <KpiCard
             label="Active agents"

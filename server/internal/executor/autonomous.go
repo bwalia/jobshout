@@ -231,7 +231,7 @@ func (a *AutonomousExecutor) generatePlan(
 			{Role: llm.RoleUser, Content: prompt},
 		},
 		Model:       choice.Model,
-		MaxTokens:   2048,
+		MaxTokens:   capTokens(ctx, 2048),
 		Temperature: 0.3,
 	})
 	if err != nil {
@@ -286,7 +286,7 @@ func (a *AutonomousExecutor) generateReflection(
 			{Role: llm.RoleUser, Content: prompt},
 		},
 		Model:       choice.Model,
-		MaxTokens:   1024,
+		MaxTokens:   capTokens(ctx, 1024),
 		Temperature: 0.4,
 	})
 	if err != nil {

@@ -409,6 +409,10 @@ func main() {
 	costEng := costengine.New()
 	logger.Info("cost engine initialised", zap.Int("known_models", len(costEng.KnownModels())))
 
+	// Enforce agent_policies.max_cost_per_exec with the same pricing that later
+	// produces the bill, so a run's cap and its invoice can never disagree.
+	goNativeExec.WithCostEstimator(costEng)
+
 	// ─── Auto model selection ────────────────────────────────────────────────
 	// Wired here rather than at executor construction because selection is
 	// cost-aware and the cost engine does not exist until now. Agents pinned to
@@ -609,7 +613,7 @@ func main() {
 	} else {
 		careerLLM = c
 	}
-	careerSvc := service.NewCareerService(careerRepo, agentRepo, researchClient, careerLLM, researchSvc, logger)
+	careerSvc := service.NewCareerService(careerRepo, agentRepo, researchClient, careerLLM, cfg.CareerModel, researchSvc, logger)
 	logger.Info("career ops agent initialised")
 
 	// All specialists are wired this way: own package, then one Register call.
@@ -1125,6 +1129,10 @@ func main() {
 				r.Post("/evaluations/{id}/email", careerHandler.EmailDraft)
 				r.Get("/pipeline", careerHandler.ListPipeline)
 				r.Post("/pipeline/batch", careerHandler.BatchEvaluate)
+				// Apply sequence over many jobs. Dry run only: it prepares a
+				// tailored CV, cover letter and submission package per posting
+				// and submits none of them (career.NeverSubmit).
+				r.Post("/apply", careerHandler.Apply)
 				r.Post("/listing", careerHandler.PreviewListing)
 				r.Get("/applications", careerHandler.ListTracker)
 				r.Post("/applications/{id}/status", careerHandler.SetStatus)
@@ -1409,6 +1417,13 @@ func main() {
 	// the appropriate path (blog pipeline / workflow / agent).
 	schedulerRunner := scheduler.NewRunner(schedulerRepo, blogSvc, workflowSvc, execSvc, multiAgentSvc, logger).WithCareer(careerSvc)
 	go schedulerRunner.Start(ctx)
+
+	// ─── Usage partition maintainer ─────────────────────────────────────────
+	// usage_records is partitioned by month and migration 000008 only reaches
+	// three months past boot. A server that outlives that horizon stops being
+	// able to record usage, silently, and takes budget enforcement down with it
+	// because spend is read from that table. Keeps the horizon rolling.
+	go database.StartUsagePartitionMaintainer(ctx, pool, logger)
 
 	// ─── Pentest reconciler ─────────────────────────────────────────────────
 	// Ticks every STRIX_POLL_INTERVAL, claims due pentest runs with FOR UPDATE

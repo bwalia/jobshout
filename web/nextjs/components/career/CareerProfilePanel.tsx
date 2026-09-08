@@ -83,7 +83,7 @@ export function CareerProfilePanel({
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
+      <p className="text-base text-muted-foreground">
         Upload a PDF CV. We save it and use the extracted text to score jobs. A tailored CV keeps your sections and page count — only keywords change. What we changed is shown in Prepare, not on the PDF.
       </p>
       <div>
@@ -96,10 +96,10 @@ export function CareerProfilePanel({
           id="career-name"
           value={fullName}
           onChange={(e) => setFullName(e.target.value)}
-          className="w-full max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm"
+          className="w-full max-w-md rounded-md border border-input bg-background px-3 py-2 text-base"
         />
       </div>
-      <label className="flex items-center gap-2 text-sm">
+      <label className="flex items-center gap-2 text-base">
         <input
           type="checkbox"
           checked={sponsorship}
@@ -133,7 +133,7 @@ export function CareerProfilePanel({
           id="career-comp"
           value={minComp}
           onChange={(e) => setMinComp(e.target.value)}
-          className="w-full max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm"
+          className="w-full max-w-md rounded-md border border-input bg-background px-3 py-2 text-base"
           placeholder="£180k+"
         />
       </div>
@@ -148,7 +148,7 @@ export function CareerProfilePanel({
           value={houseRules}
           onChange={(e) => setHouseRules(e.target.value)}
           rows={3}
-          className="w-full min-h-[4.5rem] resize-y rounded-md border border-input bg-background px-3 py-2 text-sm"
+          className="w-full min-h-[4.5rem] resize-y rounded-md border border-input bg-background px-3 py-2 text-base"
           placeholder="Scoring overrides. Floors cannot drop below 4.0 / 4.5."
         />
       </div>
@@ -169,13 +169,13 @@ export function CareerProfilePanel({
           />
           <button
             type="button"
-            className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+            className="rounded-md bg-primary px-3 py-2 text-base font-medium text-primary-foreground disabled:opacity-50"
             disabled={busy || uploading}
             onClick={() => fileRef.current?.click()}
           >
             {uploading ? "Saving PDF…" : cvDraft.trim() ? "Replace CV PDF" : "Upload CV"}
           </button>
-          <span className="text-xs text-muted-foreground">
+          <span className="text-sm text-muted-foreground">
             {cvDraft.trim() ? "PDF saved. Upload another to replace it." : "PDF only, up to 5MB."}
           </span>
         </div>
@@ -185,7 +185,7 @@ export function CareerProfilePanel({
             value={cvDraft}
             readOnly
             rows={10}
-            className="mt-2 w-full rounded-md border border-input bg-muted/40 px-3 py-2 font-mono text-sm"
+            className="mt-2 w-full rounded-md border border-input bg-muted/40 px-3 py-2 font-mono text-base"
             aria-label="Extracted CV text"
           />
         )}
@@ -195,7 +195,7 @@ export function CareerProfilePanel({
           type="button"
           onClick={onSave}
           disabled={busy}
-          className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+          className="rounded-md bg-primary px-3 py-2 text-base font-medium text-primary-foreground disabled:opacity-50"
         >
           {saving ? "Saving…" : savedFlash ? "Saved" : "Save profile"}
         </button>
@@ -203,18 +203,18 @@ export function CareerProfilePanel({
           type="button"
           onClick={onFillFromCV}
           disabled={busy || !cvDraft.trim()}
-          className="rounded-md border border-border px-3 py-2 text-sm disabled:opacity-50"
+          className="rounded-md border border-border px-3 py-2 text-base disabled:opacity-50"
         >
           Fill name from CV
         </button>
-        {savedFlash && <span className="text-sm text-muted-foreground">Profile saved.</span>}
+        {savedFlash && <span className="text-base text-muted-foreground">Profile saved.</span>}
       </div>
       <div className="border-t border-border pt-4">
-        <p className="mb-2 flex items-center gap-1.5 text-sm font-medium">
+        <p className="mb-2 flex items-center gap-1.5 text-lg font-semibold">
           Blacklist
           <FieldHint text="Companies you never want recommended. Evaluate will ask before continuing — it never silently skips." />
         </p>
-        <ul className="mb-2 text-sm text-muted-foreground">
+        <ul className="mb-2 text-base text-muted-foreground">
           {blacklist.length === 0 ? (
             <li>Empty — evaluate will never skip a company silently.</li>
           ) : (
@@ -234,17 +234,17 @@ export function CareerProfilePanel({
         />
       </div>
       <div className="border-t border-border pt-4">
-        <p className="mb-2 flex items-center gap-1.5 text-sm font-medium">
+        <p className="mb-2 flex items-center gap-1.5 text-lg font-semibold">
           Story bank (STAR+R)
           <FieldHint text="Interview stories: title plus situation. Used for interview prep." />
         </p>
         {stories.length === 0 ? (
-          <p className="mb-2 text-sm text-muted-foreground">None yet. Optional for a first pass.</p>
+          <p className="mb-2 text-base text-muted-foreground">None yet. Optional for a first pass.</p>
         ) : (
-          <ul className="mb-2 space-y-1 text-sm text-muted-foreground">
+          <ul className="mb-2 space-y-1 text-base text-muted-foreground">
             {stories.map((s) => (
               <li key={s.id}>
-                {s.title} <span className="text-xs">({s.provenance})</span>
+                {s.title} <span className="text-sm">({s.provenance})</span>
               </li>
             ))}
           </ul>
@@ -271,15 +271,15 @@ export function CareerProfilePanel({
             value={storyTitle}
             onChange={(e) => setStoryTitle(e.target.value)}
             placeholder="Story title"
-            className="rounded-md border border-input bg-background px-2 py-1 text-sm"
+            className="rounded-md border border-input bg-background px-2 py-1 text-base"
           />
           <input
             value={storySit}
             onChange={(e) => setStorySit(e.target.value)}
             placeholder="Situation"
-            className="min-w-[12rem] flex-1 rounded-md border border-input bg-background px-2 py-1 text-sm"
+            className="min-w-[12rem] flex-1 rounded-md border border-input bg-background px-2 py-1 text-base"
           />
-          <button type="submit" className="rounded-md border border-border px-2 py-1 text-sm">
+          <button type="submit" className="rounded-md border border-border px-2 py-1 text-base">
             Add story
           </button>
         </form>
@@ -310,15 +310,15 @@ function BlacklistForm({
         value={company}
         onChange={(e) => setCompany(e.target.value)}
         placeholder="Company"
-        className="rounded-md border border-input bg-background px-2 py-1 text-sm"
+        className="rounded-md border border-input bg-background px-2 py-1 text-base"
       />
       <input
         value={reason}
         onChange={(e) => setReason(e.target.value)}
         placeholder="Reason"
-        className="rounded-md border border-input bg-background px-2 py-1 text-sm"
+        className="rounded-md border border-input bg-background px-2 py-1 text-base"
       />
-      <button type="submit" className="rounded-md border border-border px-2 py-1 text-sm">
+      <button type="submit" className="rounded-md border border-border px-2 py-1 text-base">
         Add
       </button>
     </form>

@@ -58,7 +58,7 @@ export function SidebarFooter({ collapsed }: { collapsed: boolean }) {
         <button
           type="button"
           onClick={() => setTheme(isDark ? "light" : "dark")}
-          className="flex h-9 w-9 items-center justify-center rounded-lg text-sidebar-foreground hover:bg-sidebar-muted hover:text-foreground"
+          className="flex h-10 w-10 items-center justify-center rounded-lg text-sidebar-foreground hover:bg-sidebar-muted hover:text-foreground"
           aria-label={isDark ? "Switch to light" : "Switch to dark"}
         >
           {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
@@ -67,7 +67,7 @@ export function SidebarFooter({ collapsed }: { collapsed: boolean }) {
           <button
             type="button"
             onClick={() => setMenuOpen((v) => !v)}
-            className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-[11px] font-semibold text-primary-foreground"
+            className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground"
             aria-label="Account menu"
             aria-expanded={menuOpen}
           >
@@ -104,14 +104,14 @@ export function SidebarFooter({ collapsed }: { collapsed: boolean }) {
             aria-haspopup="true"
             aria-expanded={menuOpen}
           >
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-[11px] font-semibold text-primary-foreground">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
               {avatar}
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium text-foreground">
+              <span className="block truncate text-base font-semibold text-foreground">
                 {label}
               </span>
-              <span className="block truncate text-[11px] text-muted-foreground">
+              <span className="block truncate text-sm text-muted-foreground">
                 {user?.email}
               </span>
             </span>
@@ -136,7 +136,7 @@ export function SidebarFooter({ collapsed }: { collapsed: boolean }) {
         <button
           type="button"
           onClick={() => setTheme(isDark ? "light" : "dark")}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sidebar-foreground hover:bg-sidebar-muted hover:text-foreground"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-sidebar-foreground hover:bg-sidebar-muted hover:text-foreground"
           aria-label={isDark ? "Switch to light" : "Switch to dark"}
         >
           {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
@@ -168,7 +168,7 @@ function AccountMenu({
         type="button"
         role="menuitem"
         onClick={onProfile}
-        className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-sm hover:bg-secondary"
+        className="flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-base font-medium hover:bg-secondary"
       >
         <User className="h-4 w-4 text-muted-foreground" />
         Profile & workspace
@@ -177,7 +177,7 @@ function AccountMenu({
         type="button"
         role="menuitem"
         onClick={onLogout}
-        className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-sm text-destructive hover:bg-destructive/10"
+        className="flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-base font-medium text-destructive hover:bg-destructive/10"
       >
         <LogOut className="h-4 w-4" />
         Sign out
@@ -208,7 +208,7 @@ function BuildStamp({
   if (collapsed) {
     return (
       <span
-        className="max-w-full truncate px-0.5 text-center font-mono text-[9px] leading-tight text-muted-foreground"
+        className="max-w-full truncate px-0.5 text-center font-mono text-2xs leading-tight text-muted-foreground"
         title={title}
       >
         {info.version}
@@ -221,10 +221,10 @@ function BuildStamp({
       className="mt-2 flex items-start justify-between gap-2 px-2"
       title={title}
     >
-      <span className="min-w-0 truncate text-[10px] leading-tight text-muted-foreground">
+      <span className="min-w-0 truncate text-2xs leading-tight text-muted-foreground">
         {detail || "\u00a0"}
       </span>
-      <span className="shrink-0 font-mono text-[10px] leading-tight text-muted-foreground">
+      <span className="shrink-0 font-mono text-2xs leading-tight text-muted-foreground">
         {info.version}
       </span>
     </div>

@@ -3,109 +3,157 @@
 @tailwind utilities;
 
 @layer base {
-  /*
-   * Clean chat-first workspace — Linear / ChatGPT feel, not sterile.
-   * One amber accent on neutrals; semantic green/amber/red for status.
-   * Hairline borders + subtle surface tints; no glows or decorative dots.
-   */
+  /* ═══════════════════════════════════════════════════════════════════════
+     BRAND — the whole palette is these four colours and nothing else.
+
+       #F9F0E0  beige      the page ground
+       #FFF7EB  cream      panels, cards, and text that sits on a colour
+       #A2AB73  sage       success / "done"
+       #CC3A63  raspberry  every primary action
+
+     There is deliberately no white: cards are cream and lift off a beige
+     ground, which is the way round this palette wants. The only colour not
+     in the four is a warm charcoal for text, because the palette has no dark.
+
+     To lighten or darken everything, change --brand-canvas-l alone.
+     ═══════════════════════════════════════════════════════════════════════ */
   :root {
-    --background: 40 20% 98%;
-    --foreground: 240 10% 10%;
+    /* ── Brand ───────────────────────────────────────────────────────────── */
+    --brand-canvas-h: 38.4;
+    --brand-canvas-s: 67.6%;
+    --brand-canvas-l: 92.7%;        /* #F9F0E0 beige — the ground */
 
-    --card: 0 0% 100%;
-    --card-foreground: 240 10% 10%;
+    --brand-card-h: 36;
+    --brand-card-s: 100%;
+    --brand-card-l: 96.1%;          /* #FFF7EB cream — panels sit above it */
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 240 10% 10%;
+    /* Warm charcoal, biased to the cream so text never looks blue on it. */
+    --brand-ink-h: 32;
+    --brand-ink-s: 16%;
+    --brand-ink-l: 15%;             /* 13.9:1 on cream, 13.1:1 on beige */
 
-    --primary: 39 96% 48%;
-    --primary-foreground: 32 45% 12%;
+    --brand-accent-h: 343.2;
+    --brand-accent-s: 58.9%;
+    --brand-accent-l: 51%;          /* #CC3A63 — cream text on it is 4.58:1 */
 
-    --secondary: 40 12% 94%;
-    --secondary-foreground: 240 10% 10%;
+    --brand-success-h: 69.6;
+    --brand-success-s: 25%;
+    --brand-success-l: 56.1%;       /* #A2AB73 — text on it uses -19% */
 
-    --muted: 40 10% 95%;
-    --muted-foreground: 240 5% 42%;
+    /* A deeper, browner red than the accent so Delete never reads as Save. */
+    --brand-danger-h: 4;
+    --brand-danger-s: 58%;
+    --brand-danger-l: 38%;
 
-    --accent: 39 80% 95%;
-    --accent-foreground: 32 70% 30%;
+    /* ── Derived — do not edit; change the brand block above ─────────────── */
+    --background: var(--brand-canvas-h) var(--brand-canvas-s) var(--brand-canvas-l);
+    --foreground: var(--brand-ink-h) var(--brand-ink-s) var(--brand-ink-l);
 
-    --destructive: 2 78% 52%;
-    --destructive-foreground: 0 0% 100%;
+    --card: var(--brand-card-h) var(--brand-card-s) var(--brand-card-l);
+    --card-foreground: var(--brand-ink-h) var(--brand-ink-s) var(--brand-ink-l);
 
-    --border: 40 10% 88%;
-    --input: 40 10% 88%;
-    --ring: 39 96% 48%;
+    --popover: var(--brand-card-h) var(--brand-card-s) var(--brand-card-l);
+    --popover-foreground: var(--brand-ink-h) var(--brand-ink-s) var(--brand-ink-l);
+
+    /* Cream, not white, on every coloured surface. */
+    --primary: var(--brand-accent-h) var(--brand-accent-s) var(--brand-accent-l);
+    --primary-foreground: var(--brand-card-h) var(--brand-card-s) var(--brand-card-l);
+
+    --secondary: var(--brand-canvas-h) var(--brand-canvas-s) calc(var(--brand-canvas-l) - 3%);
+    --secondary-foreground: var(--brand-ink-h) var(--brand-ink-s) var(--brand-ink-l);
+
+    --muted: var(--brand-canvas-h) var(--brand-canvas-s) calc(var(--brand-canvas-l) - 2%);
+    /* 6.9:1 on cream and 6.5:1 on beige — secondary text you can actually read. */
+    --muted-foreground: var(--brand-ink-h) calc(var(--brand-ink-s) - 4%) calc(var(--brand-ink-l) + 18%);
+
+    --accent: var(--brand-accent-h) calc(var(--brand-accent-s) - 20%) 92%;
+    --accent-foreground: var(--brand-accent-h) var(--brand-accent-s) 32%;
+
+    --destructive: var(--brand-danger-h) var(--brand-danger-s) var(--brand-danger-l);
+    --destructive-foreground: var(--brand-card-h) var(--brand-card-s) var(--brand-card-l);
+
+    /* Cards lift off the ground by only 1.07, so the border is what actually
+       draws the layout. Kept at ~3:1 against the ground for that reason. */
+    --border: var(--brand-ink-h) 18% 51%;
+    --input: var(--brand-ink-h) 18% 49%;
+    --ring: var(--brand-accent-h) var(--brand-accent-s) var(--brand-accent-l);
 
     --radius: 0.5rem;
 
-    --sidebar: 240 8% 97%;
-    --sidebar-foreground: 240 6% 34%;
-    --sidebar-accent: 39 96% 48%;
-    --sidebar-muted: 240 6% 93%;
-    --sidebar-border: 240 8% 90%;
+    /* Sidebar recedes below the ground; cards advance above it. */
+    --sidebar: var(--brand-canvas-h) var(--brand-canvas-s) calc(var(--brand-canvas-l) - 4%);
+    --sidebar-foreground: var(--brand-ink-h) calc(var(--brand-ink-s) - 4%) calc(var(--brand-ink-l) + 16%);
+    --sidebar-accent: var(--brand-accent-h) var(--brand-accent-s) var(--brand-accent-l);
+    --sidebar-muted: var(--brand-canvas-h) var(--brand-canvas-s) calc(var(--brand-canvas-l) - 8%);
+    --sidebar-border: var(--brand-ink-h) 18% 58%;
 
-    --status-todo: 240 5% 42%;
-    --status-progress: 39 96% 48%;
-    --status-review: 262 70% 52%;
-    --status-done: 151 55% 38%;
-    --status-blocked: 2 78% 52%;
-    --status-idle: 240 5% 62%;
+    --status-todo: var(--brand-ink-h) 12% 38%;
+    --status-progress: 210 55% 36%;
+    --status-review: 275 42% 42%;
+    --status-done: var(--brand-success-h) calc(var(--brand-success-s) + 6%) calc(var(--brand-success-l) - 21%);
+    --status-blocked: var(--brand-danger-h) var(--brand-danger-s) var(--brand-danger-l);
+    --status-idle: var(--brand-ink-h) 12% 52%;
 
-    --signal: 151 55% 38%;
-    --signal-live: 151 55% 40%;
-    --signal-warn: 262 70% 52%;
-    --signal-error: 2 78% 52%;
-    --signal-info: 220 70% 50%;
+    --signal: var(--brand-success-h) calc(var(--brand-success-s) + 6%) calc(var(--brand-success-l) - 21%);
+    --signal-live: var(--brand-success-h) calc(var(--brand-success-s) + 4%) calc(var(--brand-success-l) - 13%);
+    --signal-warn: 25 72% 34%;
+    --signal-error: var(--brand-danger-h) var(--brand-danger-s) var(--brand-danger-l);
+    --signal-info: 210 55% 36%;
   }
 
+  /* Dark mode: the same four hues with the neutrals inverted — a warm
+     near-black ground carrying the cream into the text, so both themes read
+     as one product. Driven by the same brand block. */
   .dark {
-    --background: 240 8% 7%;
-    --foreground: 40 10% 94%;
+    --brand-canvas-l: 9%;
+    --brand-card-l: 13%;
 
-    --card: 240 7% 10%;
-    --card-foreground: 40 10% 94%;
+    --background: var(--brand-ink-h) 12% var(--brand-canvas-l);
+    --foreground: var(--brand-card-h) 45% 93%;
 
-    --popover: 240 7% 10%;
-    --popover-foreground: 40 10% 94%;
+    --card: var(--brand-ink-h) 11% var(--brand-card-l);
+    --card-foreground: var(--brand-card-h) 45% 93%;
 
-    --primary: 39 96% 52%;
-    --primary-foreground: 30 40% 9%;
+    --popover: var(--brand-ink-h) 11% var(--brand-card-l);
+    --popover-foreground: var(--brand-card-h) 45% 93%;
 
-    --secondary: 240 6% 14%;
-    --secondary-foreground: 40 8% 90%;
+    --primary: var(--brand-accent-h) 62% 57%;
+    --primary-foreground: var(--brand-ink-h) 30% 10%;
 
-    --muted: 240 6% 14%;
-    --muted-foreground: 240 5% 58%;
+    --secondary: var(--brand-ink-h) 10% 18%;
+    --secondary-foreground: var(--brand-card-h) 30% 90%;
 
-    --accent: 39 30% 14%;
-    --accent-foreground: 39 90% 70%;
+    --muted: var(--brand-ink-h) 10% 18%;
+    --muted-foreground: var(--brand-card-h) 14% 70%;
 
-    --destructive: 0 72% 55%;
-    --destructive-foreground: 40 10% 96%;
+    --accent: var(--brand-accent-h) 30% 22%;
+    --accent-foreground: var(--brand-accent-h) 62% 74%;
 
-    --border: 240 6% 16%;
-    --input: 240 6% 18%;
-    --ring: 39 96% 52%;
+    --destructive: var(--brand-danger-h) 60% 55%;
+    --destructive-foreground: var(--brand-card-h) 45% 95%;
 
-    --sidebar: 240 8% 8%;
-    --sidebar-foreground: 240 5% 58%;
-    --sidebar-accent: 39 96% 52%;
-    --sidebar-muted: 240 6% 12%;
-    --sidebar-border: 240 6% 14%;
+    --border: var(--brand-ink-h) 10% 26%;
+    --input: var(--brand-ink-h) 10% 28%;
+    --ring: var(--brand-accent-h) 62% 57%;
 
-    --status-todo: 240 5% 62%;
-    --status-progress: 39 96% 52%;
-    --status-review: 262 72% 68%;
-    --status-done: 151 55% 45%;
-    --status-blocked: 0 72% 55%;
-    --status-idle: 240 5% 42%;
+    --sidebar: var(--brand-ink-h) 12% 11%;
+    --sidebar-foreground: var(--brand-card-h) 12% 68%;
+    --sidebar-accent: var(--brand-accent-h) 62% 57%;
+    --sidebar-muted: var(--brand-ink-h) 11% 16%;
+    --sidebar-border: var(--brand-ink-h) 10% 24%;
 
-    --signal: 151 55% 45%;
-    --signal-live: 151 55% 45%;
-    --signal-warn: 262 72% 68%;
-    --signal-error: 0 72% 55%;
-    --signal-info: 220 80% 65%;
+    --status-todo: var(--brand-card-h) 10% 64%;
+    --status-progress: 210 62% 64%;
+    --status-review: 275 50% 72%;
+    --status-done: var(--brand-success-h) 34% 64%;
+    --status-blocked: var(--brand-danger-h) 60% 55%;
+    --status-idle: var(--brand-ink-h) 8% 44%;
+
+    --signal: var(--brand-success-h) 34% 64%;
+    --signal-live: var(--brand-success-h) 36% 66%;
+    --signal-warn: 30 70% 60%;
+    --signal-error: var(--brand-danger-h) 60% 55%;
+    --signal-info: 210 62% 64%;
   }
 }
 
@@ -116,6 +164,19 @@
   body {
     @apply bg-background text-foreground antialiased;
   }
+  /* Headings default to the display face at a real weight. Utilities still
+     win (Tailwind sits above @layer base), so a component asking for
+     font-semibold keeps it — this is the floor, not a ceiling. */
+  h1, h2, h3, h4 {
+    font-family: var(--font-display), var(--font-sans), system-ui, sans-serif;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+  }
+  h1 { @apply text-3xl; }
+  h2 { @apply text-2xl; }
+  h3 { @apply text-xl; }
+  h4 { @apply text-lg; }
   .tabular {
     font-family: var(--font-mono), ui-monospace, monospace;
     font-variant-numeric: tabular-nums;

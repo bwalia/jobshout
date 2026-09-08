@@ -1,6 +1,7 @@
 import { apiClient } from "@/lib/api/client";
 import type {
   CareerApplication,
+  CareerApplyResult,
   CareerArtifact,
   CareerBlacklistEntry,
   CareerDoctorReport,
@@ -110,6 +111,27 @@ export async function careerScan(payload: {
   query?: string;
 }) {
   const { data } = await apiClient.post("/career/scan", payload, { timeout: 180_000 });
+  return data;
+}
+
+// careerApplyRun prepares materials for several jobs at once: evaluate, tailor
+// the CV to each posting, write the cover letter, assemble a package. Nothing
+// is submitted — dry_run is the only supported mode and the server rejects
+// anything else.
+//
+// The timeout is generous because each job costs three model calls; the server
+// caps the run so it stays inside its own ten-minute window.
+export async function careerApplyRun(payload: {
+  urls?: string[];
+  limit?: number;
+  concurrency?: number;
+  min_score?: number;
+}) {
+  const { data } = await apiClient.post<CareerApplyResult>(
+    "/career/apply",
+    { ...payload, dry_run: true },
+    { timeout: 600_000 },
+  );
   return data;
 }
 

@@ -6,6 +6,11 @@ const apiBase = (process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8080").rep
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
+  // Build output directory. Overridable so a second dev server can run against
+  // the same checkout without fighting the first one over .next — which is
+  // exactly what happens when a stray root-owned dev server is still holding
+  // it and every fresh start dies on EACCES. Defaults to the usual .next.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   async rewrites() {
     return {
       // "/" is the marketing page, not the app. It is static HTML in

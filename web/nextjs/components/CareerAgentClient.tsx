@@ -11,6 +11,7 @@ import { apiErrorMessage } from "@/lib/api/client";
 import { splitCareerTailorNote } from "@/lib/career/tailor-note";
 import {
   addCareerPortal,
+  careerApplyRun,
   careerBatchEvaluate,
   careerCoverLetter,
   careerDoctor,
@@ -47,6 +48,7 @@ import type {
   CareerApplication,
 } from "@/types/career";
 import { toast } from "sonner";
+import { CareerNextStep, CareerStepper, type CareerStepId, type CareerStepState } from "./career/CareerStepper";
 
 type Screen = "profile" | "find" | "jobs" | "prepare";
 
@@ -87,6 +89,90 @@ export function CareerAgentClient() {
   const jobs = useMemo(() => mergeJobs(pipeline, tracker, evals), [pipeline, tracker, evals]);
   const selected = jobs.find((j) => j.key === selectedKey) ?? null;
   const hasCV = Boolean(profile?.cv_markdown?.trim() || cvDraft.trim());
+
+  // ── Where the user is, and what to do next ────────────────────────────────
+  // Both the stepper and the next-step bar read from here, so the two can never
+  // disagree about whether a step is finished.
+  const scoredCount = jobs.filter((j) => j.evaluation).length;
+  const readyToScan = hasCV && titles.length > 0;
+
+  const stepStates: Record<CareerStepId, CareerStepState> = {
+    profile: {
+      done: readyToScan,
+      locked: false,
+      detail: !hasCV
+        ? "Upload your CV to start"
+        : titles.length === 0
+          ? "CV saved — now add the job titles you want"
+          : `CV saved · ${titles.length} target title${titles.length === 1 ? "" : "s"}`,
+    },
+    find: {
+      done: jobs.length > 0,
+      locked: !readyToScan,
+      blockedReason: !hasCV ? "Upload your CV first" : "Add target job titles first",
+      detail: jobs.length > 0 ? `${jobs.length} job${jobs.length === 1 ? "" : "s"} found` : undefined,
+    },
+    jobs: {
+      done: scoredCount > 0,
+      locked: jobs.length === 0,
+      blockedReason: "Scan for jobs first",
+      detail:
+        jobs.length === 0
+          ? undefined
+          : scoredCount > 0
+            ? `${scoredCount} of ${jobs.length} scored`
+            : `${jobs.length} waiting to be scored`,
+    },
+    prepare: {
+      done: artifacts.length > 0,
+      locked: !selected,
+      blockedReason: "Open a job from Score & prepare",
+      detail: selected ? `${selected.company || "This job"} — ${selected.role || "role"}` : undefined,
+    },
+  };
+
+  const nextStep: {
+    headline: string;
+    detail?: string;
+    actionLabel?: string;
+    onAction?: () => void;
+    tone?: "primary" | "done";
+  } = !hasCV
+    ? {
+        headline: "Start by uploading your CV",
+        detail: "PDF only. Everything after this — scores, tailored CVs, cover letters — is built from it.",
+        actionLabel: screen === "profile" ? undefined : "Go to Your profile",
+        onAction: screen === "profile" ? undefined : () => setScreen("profile"),
+      }
+    : titles.length === 0
+      ? {
+          headline: "Add the job titles you are looking for",
+          detail: "The scan uses these to filter thousands of postings down to the ones worth reading.",
+          actionLabel: screen === "profile" ? undefined : "Go to Your profile",
+          onAction: screen === "profile" ? undefined : () => setScreen("profile"),
+        }
+      : jobs.length === 0
+        ? {
+            headline: "Scan company job boards",
+            detail: "Greenhouse, Ashby and Lever. Takes under a minute and fills your job list.",
+            actionLabel: "Scan all companies",
+            onAction: () => void scan(true),
+          }
+        : scoredCount === 0
+          ? {
+              headline: `${jobs.length} jobs found — score them next`,
+              detail: "Scoring rates each posting against your CV so you only spend time on real matches.",
+              actionLabel: screen === "jobs" ? undefined : "Go to Score & prepare",
+              onAction: screen === "jobs" ? undefined : () => setScreen("jobs"),
+            }
+          : {
+              headline: `${scoredCount} job${scoredCount === 1 ? "" : "s"} scored`,
+              detail:
+                "Use Prepare to rewrite your CV for a posting and draft the cover letter. Nothing is ever submitted for you.",
+              actionLabel: screen === "jobs" ? undefined : "Go to Score & prepare",
+              onAction: screen === "jobs" ? undefined : () => setScreen("jobs"),
+              tone: "done" as const,
+            };
 
   const loadAll = useCallback(async (opts?: { preserveDrafts?: boolean }) => {
     const [p, d, e, pipe, apps, ports, bl, st, pat] = await Promise.all([
@@ -335,6 +421,45 @@ export function CareerAgentClient() {
     }
   }
 
+  // Dry-run apply over several jobs: score, rewrite the CV for each posting,
+  // draft the cover letter, assemble a package. The server refuses to submit,
+  // so there is no "really apply" variant of this button to guard against.
+  async function applyRun(picked: CareerJob[]) {
+    const urls = picked.map((j) => j.listing_url.trim()).filter(Boolean);
+    setBusy(true);
+    setError("");
+    try {
+      const out = await careerApplyRun({
+        // No selection means "work through the open pipeline", which is what
+        // makes this an agent rather than a bulk button.
+        urls: urls.length > 0 ? urls : undefined,
+        limit: urls.length > 0 ? Math.min(urls.length, 5) : 5,
+        concurrency: 4,
+      });
+      await loadAll();
+
+      const tailored = out.outcomes.filter((o) => o.cv_tailored).length;
+      const parts = [`Prepared ${out.prepared} of ${out.considered}`];
+      if (out.skipped > 0) parts.push(`${out.skipped} skipped`);
+      if (out.failed > 0) parts.push(`${out.failed} failed`);
+      parts.push(`${tailored} CV${tailored === 1 ? "" : "s"} rewritten`);
+      toast.success(`${parts.join(" · ")}. Nothing was submitted.`);
+
+      if (out.prepared > 0 && tailored === 0) {
+        toast.message(
+          "No CV could be truthfully rewritten for these postings — the tailored copies match your stored CV."
+        );
+      }
+      if (out.notice) toast.message(out.notice);
+    } catch (e: unknown) {
+      const msg = apiErrorMessage(e, "Could not prepare these jobs.");
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function seeJD(job: CareerJob) {
     setSelectedKey(job.key);
     const cached = job.evaluation?.jd_text?.trim() ?? "";
@@ -495,37 +620,16 @@ export function CareerAgentClient() {
   return (
     <FieldHintProvider>
       <div className="space-y-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <ol className="flex flex-wrap items-center gap-1 text-sm" aria-label="Career steps">
-            {(
-              [
-                ["profile", "1. Profile"],
-                ["find", "2. Find"],
-                ["jobs", "3. Jobs"],
-                ["prepare", "4. Prepare"],
-              ] as const
-            ).map(([id, label], i) => (
-              <li key={id} className="flex items-center gap-1">
-                {i > 0 && (
-                  <span className="text-muted-foreground" aria-hidden>
-                    →
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setScreen(id)}
-                  className={`rounded-md px-3 py-1.5 ${
-                    screen === id
-                      ? "bg-primary text-primary-foreground"
-                      : "border border-border text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {label}
-                </button>
-              </li>
-            ))}
-          </ol>
-        </div>
+        <CareerStepper current={screen} states={stepStates} onGo={setScreen} />
+
+        <CareerNextStep
+          headline={nextStep.headline}
+          detail={nextStep.detail}
+          actionLabel={nextStep.actionLabel}
+          onAction={nextStep.onAction}
+          busy={busy}
+          tone={nextStep.tone}
+        />
 
         {error && (
           <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -602,6 +706,7 @@ export function CareerAgentClient() {
             patterns={patterns}
             onScore={() => void scoreSelected()}
             onScoreSelected={(picked) => void scoreJobs(picked)}
+            onApplyRun={(picked) => void applyRun(picked)}
             onTailor={() => void tailorSelected()}
             onCover={() =>
               void draftFromEval(careerCoverLetter, "Cover letter draft ready. A human sends it.")

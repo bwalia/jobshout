@@ -51,19 +51,19 @@ function statusBadge(status: string): {
     case "new":
       return {
         label: "Queued",
-        className: `${base} animate-pulse bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400`,
+        className: `${base} animate-pulse bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400`,
         dim: false,
       };
     case "classifying":
       return {
         label: "Drafting…",
-        className: `${base} animate-pulse bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400`,
+        className: `${base} animate-pulse bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400`,
         dim: false,
       };
     case "researching":
       return {
         label: "Researching…",
-        className: `${base} animate-pulse bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400`,
+        className: `${base} animate-pulse bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400`,
         dim: false,
       };
     case "draft_ready":

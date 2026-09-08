@@ -174,7 +174,7 @@ function SeverityTile({
     tone === "red"
       ? "text-red-600 dark:text-red-400"
       : tone === "amber"
-        ? "text-amber-600 dark:text-amber-400"
+        ? "text-orange-600 dark:text-orange-400"
         : "text-blue-600 dark:text-blue-400";
   return (
     <div className="rounded-lg border border-border bg-background px-3 py-2">

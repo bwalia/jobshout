@@ -428,6 +428,68 @@ type CareerBatchResult struct {
 	Results   []CareerEvaluateResult `json:"results"`
 }
 
+// CareerApplyRequest runs the apply sequence over several jobs at once:
+// evaluate, tailor the CV to each posting, write the cover letter, and assemble
+// a submission package. Nothing is ever sent.
+type CareerApplyRequest struct {
+	// URLs are explicit targets. Empty means "take open pipeline items", which
+	// is what makes this a job agent rather than a single-listing tool.
+	URLs []string `json:"urls,omitempty"`
+	// Limit caps jobs per run. Defaults to CareerApplyDefaultLimit.
+	Limit int `json:"limit,omitempty"`
+	// Concurrency is how many jobs are prepared at once. Each job costs three
+	// model calls, so this is the difference between a run that finishes inside
+	// the request window and one that does not.
+	Concurrency int `json:"concurrency,omitempty"`
+	// MinScore is the score below which a job is skipped rather than prepared.
+	// Defaults to career.RecommendFloor.
+	MinScore float64 `json:"min_score,omitempty"`
+	// DryRun defaults to true and is the only supported value. False is
+	// rejected rather than silently downgraded, because no submission path
+	// exists to fall back to.
+	DryRun *bool `json:"dry_run,omitempty"`
+}
+
+// CareerApplyOutcome is one job's trip through the sequence.
+type CareerApplyOutcome struct {
+	ListingURL string `json:"listing_url"`
+	Company    string `json:"company,omitempty"`
+	Role       string `json:"role,omitempty"`
+	// Stage is prepared, skipped or failed.
+	Stage      string  `json:"stage"`
+	Reason     string  `json:"reason,omitempty"`
+	Score      float64 `json:"score,omitempty"`
+	Submitted  bool    `json:"submitted"`
+	CVTailored bool    `json:"cv_tailored"`
+
+	EvaluationID      string `json:"evaluation_id,omitempty"`
+	ApplicationID     string `json:"application_id,omitempty"`
+	CVArtifactID      string `json:"cv_artifact_id,omitempty"`
+	CoverArtifactID   string `json:"cover_artifact_id,omitempty"`
+	PackageArtifactID string `json:"package_artifact_id,omitempty"`
+
+	DurationMs int `json:"duration_ms,omitempty"`
+}
+
+// CareerApplyResult is the report for one run.
+type CareerApplyResult struct {
+	DryRun     bool    `json:"dry_run"`
+	MinScore   float64 `json:"min_score"`
+	Considered int     `json:"considered"`
+	Prepared   int     `json:"prepared"`
+	Skipped    int     `json:"skipped"`
+	Failed     int     `json:"failed"`
+	// Submitted is always zero. It is reported so the caller can assert on it
+	// rather than infer it from the absence of a field.
+	Submitted int    `json:"submitted"`
+	Note      string `json:"note"`
+	// Notice is set when the run was asked to do something it will not do,
+	// such as prepare below the recommend floor.
+	Notice     string               `json:"notice,omitempty"`
+	DurationMs int                  `json:"duration_ms"`
+	Outcomes   []CareerApplyOutcome `json:"outcomes"`
+}
+
 // CareerListingPreview is a fetched JD with no score and no tracker write.
 type CareerListingPreview struct {
 	URL        string `json:"url"`
