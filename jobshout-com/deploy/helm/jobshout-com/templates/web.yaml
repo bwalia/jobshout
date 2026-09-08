@@ -28,18 +28,18 @@ spec:
               value: {{ .Values.web.apiURL | quote }}
             - name: NEXTAUTH_URL
               value: {{ printf "https://%s" .Values.host | quote }}
-            - name: NEXTAUTH_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: jobshout-com-auth
-                  key: NEXTAUTH_SECRET
-            - name: AUTH_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: jobshout-com-auth
-                  key: NEXTAUTH_SECRET
             - name: PORT
               value: {{ .Values.web.port | quote }}
+          # NEXTAUTH_SECRET / AUTH_SECRET arrive via envFrom rather than two
+          # `env` entries with valueFrom. `env` is strategic-merged against the
+          # live Deployment, and a running pod whose env list predates those
+          # entries merges them onto slots that already carry `value`, which
+          # the API server rejects:
+          #   env[2].valueFrom: may not be specified when `value` is not empty
+          # envFrom is a separate field, so it cannot collide that way.
+          envFrom:
+            - secretRef:
+                name: jobshout-com-auth
           readinessProbe:
             tcpSocket:
               port: http
