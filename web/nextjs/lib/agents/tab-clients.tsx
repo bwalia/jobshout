@@ -7,6 +7,7 @@ import { MailAgentClient } from "@/components/MailAgentClient";
 import { PentestAgentClient } from "@/components/PentestAgentClient";
 import { ReviewAgentClient } from "@/components/ReviewAgentClient";
 import { SimproPaymentsAgentClient } from "@/components/SimproPaymentsAgentClient";
+import { WafLabAgentClient } from "@/components/WafLabAgentClient";
 import { ArticlesView } from "@/components/articles/ArticlesView";
 import { ImagesView } from "@/components/image/ImagesView";
 
@@ -23,6 +24,7 @@ export const AGENT_CLIENTS: Record<string, ComponentType> = {
   pr_reviewer: ReviewAgentClient,
   credit_controller: CreditControllerAgentClient,
   simpro_payments: SimproPaymentsAgentClient,
+  waf_lab: WafLabAgentClient,
   article_writer: function ArticleWriterClient() {
     return <ArticlesView hideHeader />;
   },

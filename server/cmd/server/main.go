@@ -26,6 +26,7 @@ import (
 	"github.com/jobshout/server/internal/costengine"
 	"github.com/jobshout/server/internal/creditcontroller"
 	"github.com/jobshout/server/internal/simpro"
+	"github.com/jobshout/server/internal/waflab"
 	"github.com/jobshout/server/internal/scheduler"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
@@ -211,6 +212,7 @@ func main() {
 	blogRepo := repository.NewBlogRepository(pool)
 	pentestRunRepo := repository.NewPentestRunRepository(pool)
 	pentestFindingRepo := repository.NewPentestFindingRepository(pool)
+	wafLabRunRepo := repository.NewWAFLabRunRepository(pool)
 	reviewRunRepo := repository.NewReviewRunRepository(pool)
 	taskRunRepo := repository.NewTaskRunRepository(pool)
 	mailRepo := repository.NewMailRepository(pool)
@@ -633,6 +635,15 @@ func main() {
 		zap.Bool("live_configured", simproClient.LiveConfigured()),
 	)
 
+	wafLabCfg := waflab.LoadConfig()
+	wafLabClient := waflab.NewClient(wafLabCfg, logger)
+	wafLabSvc := service.NewWAFLabService(wafLabRunRepo, agentRepo, wafLabCfg, wafLabClient, logger)
+	logger.Info("waf efficacy lab initialised",
+		zap.Bool("enabled", wafLabClient.Enabled()),
+		zap.String("base_url", wafLabCfg.BaseURL),
+		zap.Bool("cloudflare", waflab.CloudflareConfigured()),
+	)
+
 	// All specialists are wired this way: own package, then one Register call.
 	// A new agent does not need significant platform changes — register it.
 	agentmodules.Register(agentmodules.Deps{
@@ -645,6 +656,7 @@ func main() {
 		Images:           imageSvc,
 		CreditController: aivcClient,
 		Simpro:           simproClient,
+		WAFLab:           wafLabSvc,
 	})
 
 	// ─── Autonomous agent engine ────────────────────────────────────────────
@@ -847,6 +859,7 @@ func main() {
 	careerHandler := handler.NewCareerHandler(careerSvc)
 	creditControllerHandler := handler.NewCreditControllerHandler(creditControllerSvc)
 	simproPaymentsHandler := handler.NewSimproPaymentsHandler(simproPaymentsSvc)
+	wafLabHandler := handler.NewWAFLabHandler(wafLabSvc)
 
 	// Chat, goal, multi-agent, and Telegram handlers
 	chatHandler := handler.NewChatHandler(chatSvc)
@@ -1201,6 +1214,16 @@ func main() {
 				r.Get("/month-end", simproPaymentsHandler.MonthEnd)
 				r.Get("/fgas", simproPaymentsHandler.FGas)
 				r.Get("/fgas/events", simproPaymentsHandler.ListFGas)
+			})
+
+			r.Route("/waf-lab", func(r chi.Router) {
+				r.Get("/status", wafLabHandler.Status)
+				r.Get("/runs", wafLabHandler.ListRuns)
+				r.Post("/runs", wafLabHandler.CreateRun)
+				r.Get("/runs/{runID}", wafLabHandler.GetRun)
+				r.Get("/runs/{runID}/steps", wafLabHandler.ListSteps)
+				r.Get("/runs/{runID}/results", wafLabHandler.ListResults)
+				r.Post("/runs/{runID}/cancel", wafLabHandler.CancelRun)
 			})
 
 			// Plugins (user-defined LangGraph/LangChain workflows)

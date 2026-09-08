@@ -13,6 +13,7 @@ import {
   Mail,
   Receipt,
   Search,
+  Shield,
   ShieldCheck,
   Sparkles,
   Users,
@@ -128,6 +129,10 @@ const BUILTIN_META: Record<string, { icon: LucideIcon; blurb: string }> = {
   simpro_payments: {
     icon: Receipt,
     blurb: "Simpro AR, payments, and F-Gas compliance",
+  },
+  waf_lab: {
+    icon: Shield,
+    blurb: "Measures WAF efficacy secure vs open",
   },
 };
 

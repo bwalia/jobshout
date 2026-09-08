@@ -61,6 +61,15 @@ data:
   STRIX_MAX_RUNTIME: {{ .Values.pentest.maxRuntime | default "2h" | quote }}
   STRIX_ENGAGEMENT_RETRIES: {{ .Values.pentest.engagementRetries | default 1 | quote }}
   STRIX_TARGET_ALLOWLIST: {{ .Values.pentest.targetAllowlist | default "" | quote }}
+  # WAF Efficacy Lab → wslproxy. Empty baseURL disables. Token/password live in
+  # extraSecretRefs (same pattern as AIVC / STRIX secrets), never here.
+  WSLPROXY_ENABLED: {{ .Values.wafLab.enabled | default false | quote }}
+  WSLPROXY_BASE_URL: {{ .Values.wafLab.baseURL | default "" | quote }}
+  WSLPROXY_PLATFORM: {{ .Values.wafLab.platform | default "openresty-admin-next" | quote }}
+  WSLPROXY_PROFILE: {{ .Values.wafLab.profile | default "prod" | quote }}
+  WSLPROXY_TIMEOUT: {{ .Values.wafLab.timeout | default "30s" | quote }}
+  WSLPROXY_LAB_MAX_RUNTIME: {{ .Values.wafLab.labMaxRuntime | default "10m" | quote }}
+  WSLPROXY_TARGET_ALLOWLIST: {{ .Values.wafLab.targetAllowlist | default "" | quote }}
   # In-cluster PR reviewer sidecar. Empty base URL disables the feature (same
   # pattern as STRIX_BASE_URL). The sidecar is ClusterIP-only; the API talks
   # to it with REVIEW_BOT_TOKEN from extraSecretRefs, not a workstation JWT.

@@ -16,6 +16,7 @@ import (
 	"github.com/jobshout/server/internal/pentester"
 	"github.com/jobshout/server/internal/prreview"
 	"github.com/jobshout/server/internal/research"
+	"github.com/jobshout/server/internal/waflab"
 )
 
 func launchIn(vals map[string]string, source string) agentmodule.LaunchInput {
@@ -223,6 +224,42 @@ func (s *stubImages) Generate(_ context.Context, _, _ uuid.UUID, prompt, source 
 	s.source = source
 	id := uuid.New()
 	return "https://img.example/" + prompt, &id, nil
+}
+
+type stubWAFLab struct{ last model.CreateWAFLabRunRequest }
+
+func (s *stubWAFLab) CreateRun(_ context.Context, req model.CreateWAFLabRunRequest, _ uuid.UUID, _ *uuid.UUID) (*model.WAFLabRun, error) {
+	s.last = req
+	return &model.WAFLabRun{ID: uuid.New()}, nil
+}
+
+func TestWAFLabLaunch(t *testing.T) {
+	w := &stubWAFLab{}
+	out, err := waflab.Module(w).Launch(context.Background(), launchIn(map[string]string{
+		"wslproxy_base_url": "https://lon1.pop0.uk",
+		"secure_host":       "payments-secure.fictionally.org",
+		"open_host":         "payments-open.fictionally.org",
+		"mode":              "provision_and_test",
+	}, "task_manager"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.RunID == nil || w.last.SecureHost != "payments-secure.fictionally.org" {
+		t.Fatalf("last=%+v out=%+v", w.last, out)
+	}
+	if w.last.Mode != "provision_and_test" || w.last.AttackSet != "full" {
+		t.Fatalf("defaults last=%+v", w.last)
+	}
+
+	_, err = waflab.Module(w).Launch(context.Background(), launchIn(map[string]string{
+		"wslproxy_base_url": "http://insecure.example",
+		"secure_host":       "a.example",
+		"open_host":         "b.example",
+		"mode":              "test_only",
+	}, "chat"))
+	if err == nil || !strings.Contains(err.Error(), "https") {
+		t.Fatalf("http base url err = %v", err)
+	}
 }
 
 func TestImageLaunch_RecordsTaskManagerSource(t *testing.T) {
