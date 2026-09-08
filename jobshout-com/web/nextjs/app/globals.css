@@ -2,79 +2,132 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ---------------------------------------------------------------------------
+   Design tokens. Every colour is an RGB triplet so Tailwind opacity modifiers
+   work (bg-shout/10). Dark values re-declare the same names under .dark — no
+   colour is ever defined in only one theme.
+   --------------------------------------------------------------------------- */
 :root {
   color-scheme: light;
-  --paper: #eef2f6;
-  --ink: #0c1b2a;
-  --mute: #5a6b7d;
-  --line: #c5d0dc;
-  --signal: #00a8b8;
-  --shout: #ff4d1a;
+
+  --bg: 250 250 249;
+  --bg-subtle: 243 243 241;
+  --surface: 255 255 255;
+  --surface-2: 246 246 244;
+
+  --ink: 20 21 26;
+  --ink-2: 61 64 73;
+  --muted: 98 102 111;
+
+  --border: 227 227 224;
+  --border-strong: 208 208 202;
+
+  --brand: 255 77 26;
+  --on-brand: 20 21 26;
+  --signal: 14 110 122;
+  --success: 15 123 71;
+  --warning: 180 83 9;
+
+  --shadow: 20 21 26;
+  --grid: 20 21 26;
+}
+
+.dark {
+  color-scheme: dark;
+
+  --bg: 11 12 14;
+  --bg-subtle: 15 17 19;
+  --surface: 20 22 26;
+  --surface-2: 27 30 35;
+
+  --ink: 242 243 245;
+  --ink-2: 198 201 208;
+  --muted: 148 154 165;
+
+  --border: 38 42 49;
+  --border-strong: 52 57 69;
+
+  --brand: 255 92 43;
+  --on-brand: 20 21 26;
+  --signal: 34 198 216;
+  --success: 52 211 153;
+  --warning: 251 191 36;
+
+  --shadow: 0 0 0;
+  --grid: 255 255 255;
 }
 
 html {
   scroll-behavior: smooth;
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
-  @apply bg-paper font-sans text-ink antialiased;
-  background-image:
-    radial-gradient(ellipse 90% 55% at 80% -10%, rgba(0, 168, 184, 0.14), transparent 55%),
-    linear-gradient(180deg, #f7f9fb 0%, #eef2f6 42%, #e8eef4 100%);
-  background-attachment: fixed;
+  @apply bg-bg font-sans text-body antialiased;
   min-height: 100vh;
 }
 
 ::selection {
-  background: rgba(0, 168, 184, 0.25);
+  background: rgb(var(--brand) / 0.28);
+  color: rgb(var(--ink));
 }
 
-a:focus-visible,
-button:focus-visible,
-input:focus-visible,
-textarea:focus-visible {
-  outline: 2px solid var(--signal);
-  outline-offset: 3px;
+/* Visible focus everywhere — never removed, only restyled. */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid rgb(var(--brand));
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
-.signal-field {
-  background-image: repeating-linear-gradient(
-    90deg,
-    transparent,
-    transparent 47px,
-    rgba(12, 27, 42, 0.04) 47px,
-    rgba(12, 27, 42, 0.04) 48px
-  );
-}
+@layer components {
+  .surface-card {
+    @apply rounded-card border border-line bg-surface;
+  }
 
-.job-row {
-  @apply relative block border-b border-line/80 py-7 transition-colors;
-}
+  /* Faint engineering grid — the "board" texture behind hero sections. */
+  .grid-field {
+    background-image:
+      linear-gradient(to right, rgb(var(--grid) / 0.045) 1px, transparent 1px),
+      linear-gradient(to bottom, rgb(var(--grid) / 0.045) 1px, transparent 1px);
+    background-size: 64px 64px;
+    background-position: center;
+    -webkit-mask-image: radial-gradient(ellipse 80% 70% at 50% 0%, #000 25%, transparent 78%);
+    mask-image: radial-gradient(ellipse 80% 70% at 50% 0%, #000 25%, transparent 78%);
+  }
 
-.job-row::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 1.25rem;
-  bottom: 1.25rem;
-  width: 2px;
-  background: transparent;
-  transition: background-color 160ms ease, width 160ms ease;
-}
+  .halo {
+    background:
+      radial-gradient(ellipse 60% 50% at 15% 0%, rgb(var(--brand) / 0.16), transparent 60%),
+      radial-gradient(ellipse 50% 45% at 85% 10%, rgb(var(--signal) / 0.14), transparent 62%);
+  }
 
-.job-row:hover::before,
-.job-row:focus-visible::before {
-  width: 4px;
-  background: var(--signal);
-}
+  .skeleton {
+    @apply relative overflow-hidden bg-raised;
+  }
 
-.job-row:hover {
-  background: rgba(255, 255, 255, 0.45);
+  .skeleton::after {
+    content: "";
+    @apply absolute inset-0 -translate-x-full animate-shimmer;
+    background: linear-gradient(90deg, transparent, rgb(var(--grid) / 0.07), transparent);
+  }
+
+  /* Job descriptions arrive as plain text with markdown-ish headings; style
+     the container rather than parsing it. */
+  .job-prose {
+    @apply whitespace-pre-wrap break-words text-[1.0625rem] leading-[1.75] text-body;
+    overflow-wrap: anywhere;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .animate-signal-pulse,
-  .animate-hero-in {
-    animation: none !important;
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

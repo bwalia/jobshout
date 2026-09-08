@@ -40,7 +40,7 @@ impl JobRepository {
         .await
         .map_err(|e| DomainError::Other(e.into()))?;
 
-        rows.into_iter().map(map_row).collect()
+        rows.iter().map(job_from_row).collect()
     }
 
     pub async fn get(&self, id: JobId) -> Result<Job, DomainError> {
@@ -58,7 +58,7 @@ impl JobRepository {
         .map_err(|e| DomainError::Other(e.into()))?;
 
         match row {
-            Some(r) => map_row(r),
+            Some(r) => job_from_row(&r),
             None => Err(DomainError::NotFound),
         }
     }
@@ -114,7 +114,8 @@ impl JobRepository {
     }
 }
 
-fn map_row(row: sqlx::postgres::PgRow) -> Result<Job, DomainError> {
+/// Map one `jobs` row into a [`Job`]. Shared with other crates that join on jobs.
+pub fn job_from_row(row: &sqlx::postgres::PgRow) -> Result<Job, DomainError> {
     let employment_type =
         EmploymentType::parse(row.get::<String, _>("employment_type").as_str())
             .ok_or_else(|| DomainError::Other(anyhow::anyhow!("invalid employment_type")))?;

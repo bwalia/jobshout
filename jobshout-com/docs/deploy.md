@@ -26,6 +26,22 @@ gh workflow run register-edge-vhost.yml --repo bwalia/jobshout \
 Push to `master` under `jobshout-com/**` → builds `jobshout-com/{api,web}:jsc-v…`
 → seeds Ring Promoter int. Promote in the RP UI.
 
+## Image builds
+
+`Dockerfile.api` pins its builder to `$BUILDPLATFORM` and cross-compiles to
+`$TARGETPLATFORM` (`gcc-<arch>-linux-gnu` + `libc6-dev-<arch>-cross` + the matching
+rustup target). Building `linux/amd64` on the arm64 self-hosted runner previously
+ran the whole Rust toolchain under QEMU, where gcc's `collect2` segfaulted
+intermittently on `zerovec-derive` and a clean build took ~40 minutes. Compiling
+natively and emitting foreign object code takes ~3 minutes and does not segfault.
+
+`Dockerfile.web` still builds under emulation (~8 min) — Next.js ships
+per-platform SWC binaries in `node_modules`, so the builder has to match the
+runtime arch.
+
+Both images are cross-built (no push) on every PR by `pr-image-check.yml`, so a
+broken Dockerfile fails the PR instead of the post-merge release run.
+
 ## Helm
 Chart: `jobshout-com/deploy/helm/jobshout-com`  
 Overlays: `values-{int,test,acc,prod}.yaml`  

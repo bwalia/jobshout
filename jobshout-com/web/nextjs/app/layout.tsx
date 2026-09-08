@@ -1,41 +1,73 @@
-import type { Metadata } from "next";
-import { Fraunces, Outfit } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import { Bricolage_Grotesque, Plus_Jakarta_Sans } from "next/font/google";
 import { AuthProvider } from "@/components/AuthProvider";
+import { SiteFooter } from "@/components/SiteFooter";
 import { SiteHeader } from "@/components/SiteHeader";
 import "./globals.css";
 
-const display = Fraunces({
+const display = Bricolage_Grotesque({
   subsets: ["latin"],
   variable: "--font-display",
   display: "swap",
-  axes: ["opsz"],
 });
 
-const sans = Outfit({
+const sans = Plus_Jakarta_Sans({
   subsets: ["latin"],
   variable: "--font-sans",
   display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "JobShout.com — AI-native job marketplace",
+  title: {
+    default: "JobShout.com — find work, post work",
+    template: "%s · JobShout.com",
+  },
   description:
-    "The AI-native employment marketplace where Career Agents find roles, Hiring Agents find people, and humans approve every move.",
+    "The AI-native employment marketplace. Search open roles, apply in a couple of minutes, and post jobs that reach candidates who actually match.",
 };
+
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#FAFAF9" },
+    { media: "(prefers-color-scheme: dark)", color: "#0B0C0E" },
+  ],
+};
+
+/**
+ * Resolves the theme before first paint so the page never flashes the wrong
+ * one. Kept inline and tiny — it must run ahead of any stylesheet.
+ */
+const NO_FLASH_THEME = `
+(function () {
+  try {
+    var stored = localStorage.getItem('jobshout-theme');
+    var dark = stored ? stored === 'dark'
+      : window.matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.classList.toggle('dark', dark);
+  } catch (e) {}
+})();`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${display.variable} ${sans.variable}`}>
+    <html lang="en" className={`${display.variable} ${sans.variable}`} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: NO_FLASH_THEME }} />
+      </head>
       <body>
+        <a
+          href="#main"
+          className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-pill focus:bg-shout focus:px-5 focus:py-3 focus:text-sm focus:font-semibold focus:text-[rgb(var(--on-brand))]"
+        >
+          Skip to content
+        </a>
         <AuthProvider>
-          <SiteHeader />
-          <main>{children}</main>
-          <footer className="mt-28 border-t border-line/70">
-            <div className="mx-auto flex max-w-board flex-col gap-2 px-6 py-10 text-sm text-mute sm:flex-row sm:items-center sm:justify-between">
-              <p className="font-display text-base text-ink">JobShout.com</p>
-              <p>Agents propose. Humans decide.</p>
-            </div>
-          </footer>
+          <div className="flex min-h-screen flex-col">
+            <SiteHeader />
+            <main id="main" className="flex-1">
+              {children}
+            </main>
+            <SiteFooter />
+          </div>
         </AuthProvider>
       </body>
     </html>

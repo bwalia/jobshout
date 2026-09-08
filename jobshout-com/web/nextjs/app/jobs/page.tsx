@@ -1,74 +1,166 @@
 import Link from "next/link";
-import { formatCompensation, formatLocation, listJobs, type Job } from "@/lib/api";
+import type { Metadata } from "next";
+import { JobCard, JobCardSkeleton } from "@/components/JobCard";
+import { BoardSort, JobFilters } from "@/components/JobFilters";
+import { JobSearchBar } from "@/components/JobSearchBar";
+import { Badge, EmptyState, ErrorNotice, buttonClass } from "@/components/ui";
+import { BriefcaseIcon, SearchIcon } from "@/components/icons";
+import { listJobs, type Job } from "@/lib/api";
+import { applyFilters, hasActiveFilters, parseFilters } from "@/lib/filter";
+import { employmentLabel } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-export default async function JobsPage() {
+export const metadata: Metadata = {
+  title: "Open roles",
+  description: "Search and filter every open role on the JobShout.com board.",
+};
+
+export default async function JobsPage({
+  searchParams,
+}: {
+  searchParams: Record<string, string | string[] | undefined>;
+}) {
+  const filters = parseFilters(searchParams);
+
   let jobs: Job[] = [];
   let error = "";
   try {
-    jobs = await listJobs();
+    jobs = await listJobs(100);
   } catch (e) {
     error = e instanceof Error ? e.message : "Could not load jobs";
   }
 
+  const results = applyFilters(jobs, filters);
+  const filtered = hasActiveFilters(filters);
+
   return (
-    <div className="mx-auto max-w-board px-6 pb-20 pt-12">
-      <div className="flex flex-wrap items-end justify-between gap-6 border-b border-line pb-8">
-        <div className="max-w-2xl">
-          <h1 className="font-display text-4xl tracking-tight text-ink md:text-5xl">Open roles</h1>
-          <p className="mt-3 text-mute">
-            Live listings from the marketplace API. Build a profile to see ranked matches.
-          </p>
-        </div>
-        <Link
-          href="/profile"
-          className="border border-ink/20 bg-white/60 px-4 py-2 text-sm font-semibold text-ink transition hover:border-signal hover:text-signal"
-        >
-          Match my profile
-        </Link>
+    <div className="mx-auto max-w-board px-5 pb-24 pt-10 sm:px-8 sm:pt-14">
+      <header>
+        <h1 className="font-display text-4xl font-semibold tracking-[-0.03em] text-ink sm:text-5xl">
+          Open roles
+        </h1>
+        <p className="mt-3 max-w-xl text-base leading-relaxed text-mute">
+          {jobs.length} live {jobs.length === 1 ? "listing" : "listings"} from the marketplace.
+          Filter it down, then apply in a couple of minutes.
+        </p>
+      </header>
+
+      <div className="mt-8">
+        <JobSearchBar
+          size="md"
+          defaultQuery={filters.q}
+          defaultLocation={filters.where}
+        />
       </div>
 
-      {error && (
-        <p className="mt-8 border border-shout/30 bg-shout/5 px-4 py-3 text-sm text-ink">
-          {error}. Start the API on :8088, then refresh.
-        </p>
-      )}
-
-      <ul className="mt-2">
-        {jobs.map((job) => (
-          <li key={job.id}>
-            <Link href={`/jobs/${job.id}`} className="job-row pl-4">
-              <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
-                <h2 className="font-display text-2xl tracking-tight text-ink md:text-[1.65rem]">
-                  {job.title}
-                </h2>
-                <p className="text-sm font-medium text-ink">
-                  {formatCompensation(job.compensation)}
-                </p>
-              </div>
-              <p className="mt-2 text-sm text-mute">
-                {formatLocation(job.location)}
-                <span className="mx-2 text-line">/</span>
-                {job.employment_type.replaceAll("_", " ")}
-              </p>
-              <p className="mt-3 max-w-3xl text-[0.95rem] leading-relaxed text-mute line-clamp-2">
-                {job.summary || job.description}
-              </p>
-              {job.requirements.length > 0 && (
-                <p className="mt-3 text-sm text-ink/70">
-                  {job.requirements.slice(0, 5).join(" · ")}
-                </p>
-              )}
+      {/* Active filters, restated as removable chips. */}
+      {filtered ? (
+        <ul className="mt-4 flex flex-wrap items-center gap-2">
+          <li className="text-xs font-semibold uppercase tracking-[0.14em] text-mute">Active</li>
+          {filters.q ? <Chip label={`“${filters.q}”`} /> : null}
+          {filters.where ? <Chip label={filters.where} /> : null}
+          {filters.category ? <Chip label={filters.category} /> : null}
+          {filters.remote ? <Chip label="Remote only" /> : null}
+          {filters.types.map((t) => (
+            <Chip key={t} label={employmentLabel(t)} />
+          ))}
+          {filters.minSalary !== null ? (
+            <Chip label={`£${(filters.minSalary / 1000).toFixed(0)}k+`} />
+          ) : null}
+          <li>
+            <Link
+              href="/jobs"
+              className="inline-flex min-h-[36px] items-center rounded-pill px-2 text-xs font-medium text-mute underline decoration-line underline-offset-4 transition-colors duration-200 hover:text-shout"
+            >
+              Clear all
             </Link>
           </li>
-        ))}
-        {!error && jobs.length === 0 && (
-          <li className="py-16 text-center text-mute">
-            No published jobs yet. Seed the API, then refresh this page.
-          </li>
-        )}
-      </ul>
+        </ul>
+      ) : null}
+
+      {error ? (
+        <div className="mt-8">
+          <ErrorNotice
+            title={error}
+            body="The board could not reach the marketplace API. Start it on port 8088 and refresh."
+          />
+        </div>
+      ) : null}
+
+      <div className="mt-8 grid gap-8 lg:grid-cols-[16rem_1fr] lg:gap-12">
+        <JobFilters filters={filters} resultCount={results.length} />
+
+        <section aria-label="Job results">
+          <div className="hidden items-center justify-between gap-4 border-b border-line pb-4 lg:flex">
+            <p className="text-sm text-mute">
+              <span className="font-semibold text-ink">{results.length}</span>{" "}
+              {results.length === 1 ? "role" : "roles"}
+              {filtered ? " match your filters" : " on the board"}
+            </p>
+            <BoardSort value={filters.sort} />
+          </div>
+
+          {results.length > 0 ? (
+            <ul className="mt-6 grid gap-4 xl:grid-cols-2">
+              {results.map((job) => (
+                <li key={job.id}>
+                  <JobCard job={job} />
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="mt-6">
+              {/* A dead end always offers a way out. */}
+              {filtered ? (
+                <EmptyState
+                  icon={<SearchIcon className="h-6 w-6" />}
+                  title="No roles match those filters"
+                  body={
+                    filters.q
+                      ? `Nothing on the board mentions “${filters.q}”. Try a broader keyword, drop the location, or clear the salary floor.`
+                      : "Try widening the work type, turning off remote-only, or lowering the salary floor."
+                  }
+                  action={
+                    <div className="flex flex-wrap justify-center gap-3">
+                      <Link href="/jobs" className={buttonClass("primary", "md")}>
+                        Clear all filters
+                      </Link>
+                      {filters.q ? (
+                        <Link
+                          href={`/jobs?q=${encodeURIComponent(filters.q)}`}
+                          className={buttonClass("secondary", "md")}
+                        >
+                          Keep “{filters.q}” only
+                        </Link>
+                      ) : null}
+                    </div>
+                  }
+                />
+              ) : (
+                <EmptyState
+                  icon={<BriefcaseIcon className="h-6 w-6" />}
+                  title="No published roles yet"
+                  body="Nothing has been posted to the board. Be the first — publishing takes about two minutes."
+                  action={
+                    <Link href="/post-job" className={buttonClass("primary", "md")}>
+                      Post a job
+                    </Link>
+                  }
+                />
+              )}
+            </div>
+          )}
+        </section>
+      </div>
     </div>
+  );
+}
+
+function Chip({ label }: { label: string }) {
+  return (
+    <li>
+      <Badge tone="brand">{label}</Badge>
+    </li>
   );
 }

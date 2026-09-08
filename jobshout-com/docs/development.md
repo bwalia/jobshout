@@ -32,6 +32,31 @@ PROFILE_ID=…
 curl -s "http://127.0.0.1:8088/api/v1/profiles/$PROFILE_ID/matching-context" | jq .
 ```
 
+## Posting and applying
+
+Post a role at http://127.0.0.1:3010/post-job — the form previews the board card live,
+and publishes through `POST /api/v1/jobs`. Apply from any job at `/jobs/{id}/apply`.
+
+```bash
+JOB_ID=$(curl -s http://127.0.0.1:8088/api/v1/jobs | jq -r '.data[0].id')
+
+curl -s -X POST "http://127.0.0.1:8088/api/v1/jobs/$JOB_ID/applications" \
+  -H 'content-type: application/json' \
+  -d '{"full_name":"Ada Lovelace","email":"ada@example.com","cover_letter":"…"}' | jq .
+
+# Everything one candidate has applied to, with the job attached
+curl -s "http://127.0.0.1:8088/api/v1/applications?email=ada@example.com" | jq '.data[].job.title'
+```
+
+Track them in the UI at http://127.0.0.1:3010/applications?email=ada@example.com.
+
+## Theming
+
+The web app ships light and dark themes. Tokens live in `app/globals.css` as RGB
+triplets (`--brand`, `--ink`, …) re-declared under `.dark`; Tailwind maps them in
+`tailwind.config.js`. An inline script in `app/layout.tsx` resolves the theme before
+first paint, so there is no flash. Add a colour by declaring it in **both** blocks.
+
 ## Social login (optional)
 
 Copy `web/nextjs/.env.example` to `web/nextjs/.env.local`, set `NEXTAUTH_SECRET` and

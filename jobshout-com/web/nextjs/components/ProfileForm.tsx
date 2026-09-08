@@ -1,299 +1,310 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
-import type {
-  CandidateProfile,
-  EmploymentType,
-  UpsertCandidateProfileInput,
-} from "@/lib/api";
-import { upsertProfile } from "@/lib/api";
+import Link from "next/link";
+import { useState } from "react";
+import { useFormState, useFormStatus } from "react-dom";
+import { EMPTY_FORM_STATE, saveProfileAction } from "@/app/actions";
+import {
+  Button,
+  Checkbox,
+  ErrorNotice,
+  Field,
+  Input,
+  Select,
+  Textarea,
+  buttonClass,
+} from "@/components/ui";
+import { CheckCircleIcon, TargetIcon } from "@/components/icons";
+import { EMPLOYMENT_TYPES, type CandidateProfile } from "@/lib/api";
+import { employmentLabel } from "@/lib/format";
 
-const EMPLOYMENT: { value: EmploymentType; label: string }[] = [
-  { value: "permanent", label: "Permanent" },
-  { value: "contract", label: "Contract" },
-  { value: "freelance", label: "Freelance" },
-  { value: "temporary", label: "Temporary" },
-  { value: "part_time", label: "Part-time" },
-  { value: "internship", label: "Internship" },
-  { value: "apprenticeship", label: "Apprenticeship" },
-];
+const CURRENCIES = ["GBP", "USD", "EUR", "INR", "AUD", "CAD"];
+const PERIODS = ["annual", "monthly", "weekly", "daily", "hourly"];
 
-function splitCsv(value: string): string[] {
-  return value
-    .split(/[,;\n]/)
-    .map((s) => s.trim())
-    .filter(Boolean);
+function SubmitButton() {
+  const { pending } = useFormStatus();
+  return (
+    <Button type="submit" size="lg" disabled={pending}>
+      {pending ? "Saving…" : "Save profile"}
+    </Button>
+  );
 }
 
-type Props = {
-  initial?: CandidateProfile | null;
-  defaultEmail?: string;
-  defaultName?: string;
-};
+export function ProfileForm({
+  initial,
+  defaultEmail,
+  defaultName,
+}: {
+  initial: CandidateProfile | null;
+  defaultEmail: string;
+  defaultName: string;
+}) {
+  const [state, formAction] = useFormState(saveProfileAction, EMPTY_FORM_STATE);
+  const [skills, setSkills] = useState(initial?.skills.join(", ") ?? "");
 
-export function ProfileForm({ initial, defaultEmail = "", defaultName = "" }: Props) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
-  const [error, setError] = useState("");
-  const [email, setEmail] = useState(initial?.email ?? defaultEmail);
-  const [displayName, setDisplayName] = useState(initial?.display_name ?? defaultName);
-  const [headline, setHeadline] = useState(initial?.headline ?? "");
-  const [summary, setSummary] = useState(initial?.summary ?? "");
-  const [skills, setSkills] = useState((initial?.skills ?? []).join(", "));
-  const [years, setYears] = useState(
-    initial?.years_experience != null ? String(initial.years_experience) : "",
-  );
-  const [roles, setRoles] = useState((initial?.preferred_roles ?? []).join(", "));
-  const [country, setCountry] = useState(initial?.preferred_locations?.[0]?.country ?? "GB");
-  const [city, setCity] = useState(initial?.preferred_locations?.[0]?.city ?? "");
-  const [openToRemote, setOpenToRemote] = useState(initial?.open_to_remote ?? true);
-  const [employment, setEmployment] = useState<EmploymentType[]>(
-    initial?.preferred_employment_types?.length
-      ? initial.preferred_employment_types
-      : ["permanent", "contract"],
-  );
-  const [currency, setCurrency] = useState(initial?.salary_expectation?.currency ?? "GBP");
-  const [minSalary, setMinSalary] = useState(
-    initial?.salary_expectation?.min_amount != null
-      ? String(initial.salary_expectation.min_amount)
-      : "",
-  );
-  const [cvText, setCvText] = useState(initial?.cv_text ?? "");
-  const [notes, setNotes] = useState(initial?.matching_notes ?? "");
-
-  function toggleEmployment(value: EmploymentType) {
-    setEmployment((prev) =>
-      prev.includes(value) ? prev.filter((x) => x !== value) : [...prev, value],
-    );
-  }
-
-  function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError("");
-    const payload: UpsertCandidateProfileInput = {
-      email,
-      display_name: displayName,
-      headline,
-      summary,
-      skills: splitCsv(skills),
-      years_experience: years.trim() === "" ? null : Number(years),
-      preferred_roles: splitCsv(roles),
-      preferred_locations: [
-        {
-          country: country.trim() || "GB",
-          city: city.trim() || null,
-          remote: openToRemote,
-        },
-      ],
-      preferred_employment_types: employment,
-      open_to_remote: openToRemote,
-      salary_expectation: {
-        currency: currency || null,
-        min_amount: minSalary.trim() === "" ? null : Number(minSalary),
-        period: "annual",
-      },
-      cv_text: cvText,
-      matching_notes: notes,
-    };
-
-    startTransition(async () => {
-      try {
-        const saved = await upsertProfile(payload);
-        if (typeof window !== "undefined") {
-          window.localStorage.setItem("jobshout_profile_email", saved.email);
-          window.localStorage.setItem("jobshout_profile_id", saved.id);
-        }
-        router.push(`/profile/matches?id=${saved.id}`);
-        router.refresh();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Could not save profile");
-      }
-    });
-  }
-
-  const field =
-    "mt-1.5 w-full border border-line bg-white px-3 py-2.5 text-sm text-ink outline-none transition focus:border-signal";
+  const errors = state.fieldErrors ?? {};
+  const savedId = state.result?.profileId ?? initial?.id;
+  const location = initial?.preferred_locations?.[0];
+  const skillCount = skills.split(/[\n,]/).filter((s) => s.trim()).length;
 
   return (
-    <form onSubmit={onSubmit} className="space-y-8">
-      {error && (
-        <p className="border border-shout/30 bg-shout/5 px-4 py-3 text-sm text-ink">{error}</p>
-      )}
-
-      <section className="space-y-4">
-        <h2 className="font-display text-2xl tracking-tight">Who you are</h2>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <label className="block text-sm font-medium">
-            Email
-            <input
-              required
-              type="email"
-              className={field}
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </label>
-          <label className="block text-sm font-medium">
-            Display name
-            <input
-              required
-              className={field}
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-            />
-          </label>
+    <form action={formAction} className="space-y-10" noValidate>
+      {state.ok ? (
+        <div
+          role="status"
+          className="flex flex-wrap items-center gap-4 rounded-card border border-good/30 bg-good/[0.08] px-5 py-4"
+        >
+          <CheckCircleIcon className="h-5 w-5 shrink-0 text-good" />
+          <p className="flex-1 text-sm font-medium text-ink">
+            {state.message} Your Career Agent can rank open roles against it now.
+          </p>
+          {savedId ? (
+            <Link
+              href={`/profile/matches?id=${savedId}`}
+              className={buttonClass("primary", "sm")}
+            >
+              <TargetIcon className="h-4 w-4" />
+              See my matches
+            </Link>
+          ) : null}
         </div>
-        <label className="block text-sm font-medium">
-          Headline
-          <input
-            className={field}
-            placeholder="Senior Rust engineer · marketplace systems"
-            value={headline}
-            onChange={(e) => setHeadline(e.target.value)}
-          />
-        </label>
-        <label className="block text-sm font-medium">
-          Summary for the matching agent
-          <textarea
-            rows={4}
-            className={field}
-            placeholder="What you want next, strengths, domains you care about…"
-            value={summary}
-            onChange={(e) => setSummary(e.target.value)}
-          />
-        </label>
-      </section>
+      ) : null}
 
-      <section className="space-y-4">
-        <h2 className="font-display text-2xl tracking-tight">Skills & roles</h2>
-        <p className="text-sm text-mute">
-          Skills and preferred roles are the primary signals the Career agent uses to rank jobs.
-        </p>
-        <label className="block text-sm font-medium">
-          Skills (comma-separated)
-          <input
-            className={field}
-            placeholder="Rust, Axum, PostgreSQL, Kubernetes"
+      {state.message && !state.ok ? <ErrorNotice title={state.message} /> : null}
+
+      <Section title="Who you are" step={1}>
+        <div className="grid gap-5 sm:grid-cols-2">
+          <Field label="Display name" htmlFor="display_name" required error={errors.display_name}>
+            <Input
+              id="display_name"
+              name="display_name"
+              defaultValue={initial?.display_name || defaultName}
+              autoComplete="name"
+              placeholder="Ada Lovelace"
+              aria-invalid={Boolean(errors.display_name)}
+            />
+          </Field>
+
+          <Field
+            label="Email"
+            htmlFor="email"
+            required
+            hint="Your profile is keyed to this address."
+            error={errors.email}
+          >
+            <Input
+              id="email"
+              name="email"
+              type="email"
+              defaultValue={initial?.email || defaultEmail}
+              autoComplete="email"
+              placeholder="you@example.com"
+              aria-invalid={Boolean(errors.email)}
+            />
+          </Field>
+        </div>
+
+        <Field label="Headline" htmlFor="headline" hint="One line, the way you would introduce yourself.">
+          <Input
+            id="headline"
+            name="headline"
+            defaultValue={initial?.headline}
+            placeholder="Backend engineer — Rust, Postgres, distributed systems"
+            maxLength={120}
+          />
+        </Field>
+
+        <Field label="Summary" htmlFor="summary">
+          <Textarea
+            id="summary"
+            name="summary"
+            rows={4}
+            defaultValue={initial?.summary}
+            placeholder="What you have built, and what you want to build next."
+          />
+        </Field>
+      </Section>
+
+      <Section title="What you do" step={2}>
+        <Field
+          label="Skills"
+          htmlFor="skills"
+          hint="Comma separated. These carry the most weight in matching."
+        >
+          <Textarea
+            id="skills"
+            name="skills"
+            rows={3}
             value={skills}
             onChange={(e) => setSkills(e.target.value)}
+            placeholder="Rust, PostgreSQL, Kubernetes, Axum"
           />
-        </label>
-        <label className="block text-sm font-medium">
-          Preferred roles (comma-separated)
-          <input
-            className={field}
-            placeholder="Rust Engineer, Platform Engineer"
-            value={roles}
-            onChange={(e) => setRoles(e.target.value)}
-          />
-        </label>
-        <label className="block text-sm font-medium">
-          Years of experience
-          <input
-            type="number"
-            min={0}
-            max={60}
-            className={field}
-            value={years}
-            onChange={(e) => setYears(e.target.value)}
-          />
-        </label>
+          <p className="mt-1.5 text-xs text-mute">
+            {skillCount} {skillCount === 1 ? "skill" : "skills"} listed
+            {skillCount > 0 && skillCount < 4 ? " — add a few more for better matches." : ""}
+          </p>
+        </Field>
+
+        <div className="grid gap-5 sm:grid-cols-2">
+          <Field label="Preferred roles" htmlFor="preferred_roles" hint="Comma separated.">
+            <Input
+              id="preferred_roles"
+              name="preferred_roles"
+              defaultValue={initial?.preferred_roles.join(", ")}
+              placeholder="Senior Engineer, Staff Engineer"
+            />
+          </Field>
+
+          <Field label="Years of experience" htmlFor="years_experience">
+            <Input
+              id="years_experience"
+              name="years_experience"
+              inputMode="numeric"
+              defaultValue={initial?.years_experience ?? ""}
+              placeholder="8"
+            />
+          </Field>
+        </div>
+
         <fieldset>
-          <legend className="text-sm font-medium">Employment types</legend>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {EMPLOYMENT.map((opt) => {
-              const on = employment.includes(opt.value);
-              return (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => toggleEmployment(opt.value)}
-                  className={`px-3 py-1.5 text-xs font-semibold ${
-                    on ? "bg-ink text-white" : "bg-paper text-mute"
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              );
-            })}
+          <legend className="text-sm font-semibold text-ink">Work types you would take</legend>
+          <div className="mt-3 flex flex-wrap gap-x-6">
+            {EMPLOYMENT_TYPES.map((t) => (
+              <Checkbox
+                key={t}
+                name="preferred_employment_types"
+                value={t}
+                label={employmentLabel(t)}
+                defaultChecked={initial?.preferred_employment_types.includes(t)}
+              />
+            ))}
           </div>
         </fieldset>
-      </section>
+      </Section>
 
-      <section className="space-y-4">
-        <h2 className="font-display text-2xl tracking-tight">Location & pay</h2>
-        <div className="grid gap-4 sm:grid-cols-3">
-          <label className="block text-sm font-medium">
-            Country
-            <input className={field} value={country} onChange={(e) => setCountry(e.target.value)} />
-          </label>
-          <label className="block text-sm font-medium">
-            City
-            <input className={field} value={city} onChange={(e) => setCity(e.target.value)} />
-          </label>
-          <label className="flex items-end gap-2 pb-2 text-sm font-medium">
-            <input
-              type="checkbox"
-              checked={openToRemote}
-              onChange={(e) => setOpenToRemote(e.target.checked)}
-              className="h-4 w-4 border-line"
+      <Section title="Where and for how much" step={3}>
+        <div className="grid gap-5 sm:grid-cols-2">
+          <Field label="Country" htmlFor="country">
+            <Input
+              id="country"
+              name="country"
+              defaultValue={location?.country ?? ""}
+              placeholder="GB"
             />
-            Open to remote
-          </label>
+          </Field>
+          <Field label="City" htmlFor="city">
+            <Input
+              id="city"
+              name="city"
+              defaultValue={location?.city ?? ""}
+              placeholder="London"
+            />
+          </Field>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <label className="block text-sm font-medium">
-            Salary currency
-            <input
-              className={field}
-              value={currency}
-              onChange={(e) => setCurrency(e.target.value)}
-            />
-          </label>
-          <label className="block text-sm font-medium">
-            Minimum annual expectation
-            <input
-              type="number"
-              className={field}
-              value={minSalary}
-              onChange={(e) => setMinSalary(e.target.value)}
-            />
-          </label>
-        </div>
-      </section>
 
-      <section className="space-y-4">
-        <h2 className="font-display text-2xl tracking-tight">Agent context</h2>
-        <label className="block text-sm font-medium">
-          CV / resume text (optional)
-          <textarea
-            rows={6}
-            className={field}
-            placeholder="Paste plain-text CV content the agent can scan…"
-            value={cvText}
-            onChange={(e) => setCvText(e.target.value)}
+        <div className="rounded-xl border border-line bg-raised px-4 py-2">
+          <Checkbox
+            name="open_to_remote"
+            label="Open to remote work"
+            defaultChecked={initial?.open_to_remote ?? true}
           />
-        </label>
-        <label className="block text-sm font-medium">
-          Matching notes for the agent
-          <textarea
+        </div>
+
+        <div className="grid gap-5 sm:grid-cols-3">
+          <Field label="Currency" htmlFor="currency">
+            <Select
+              id="currency"
+              name="currency"
+              defaultValue={initial?.salary_expectation.currency ?? "GBP"}
+            >
+              {CURRENCIES.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </Select>
+          </Field>
+
+          <Field label="Salary floor" htmlFor="salary_min">
+            <Input
+              id="salary_min"
+              name="salary_min"
+              inputMode="numeric"
+              defaultValue={initial?.salary_expectation.min_amount ?? ""}
+              placeholder="90000"
+            />
+          </Field>
+
+          <Field label="Period" htmlFor="period">
+            <Select
+              id="period"
+              name="period"
+              defaultValue={initial?.salary_expectation.period ?? "annual"}
+            >
+              {PERIODS.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+      </Section>
+
+      <Section title="For the agent" step={4}>
+        <Field
+          label="CV text"
+          htmlFor="cv_text"
+          hint="Paste your CV as plain text. Never shared without your say-so."
+        >
+          <Textarea id="cv_text" name="cv_text" rows={8} defaultValue={initial?.cv_text} />
+        </Field>
+
+        <Field
+          label="Matching notes"
+          htmlFor="matching_notes"
+          hint="Hard constraints your Career Agent must respect."
+        >
+          <Textarea
+            id="matching_notes"
+            name="matching_notes"
             rows={3}
-            className={field}
-            placeholder="e.g. Prefer deep systems work; avoid pure frontend; OK with EU timezone overlap"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
+            defaultValue={initial?.matching_notes}
+            placeholder="No relocation. Four-day week preferred. Not interested in adtech."
           />
-        </label>
-      </section>
+        </Field>
+      </Section>
 
-      <button
-        type="submit"
-        disabled={pending}
-        className="bg-shout px-6 py-3 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-60"
-      >
-        {pending ? "Saving…" : "Save profile & see matches"}
-      </button>
+      <div className="flex flex-wrap items-center gap-4 border-t border-line pt-8">
+        <SubmitButton />
+        {savedId ? (
+          <Link href={`/profile/matches?id=${savedId}`} className={buttonClass("secondary", "lg")}>
+            See ranked matches
+          </Link>
+        ) : null}
+      </div>
     </form>
+  );
+}
+
+function Section({
+  title,
+  step,
+  children,
+}: {
+  title: string;
+  step: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="space-y-5">
+      <div className="flex items-center gap-3 border-b border-line pb-3">
+        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-ink text-xs font-bold text-bg">
+          {step}
+        </span>
+        <h2 className="font-display text-lg font-semibold text-ink">{title}</h2>
+      </div>
+      {children}
+    </section>
   );
 }
