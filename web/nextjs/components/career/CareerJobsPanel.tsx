@@ -428,7 +428,19 @@ function JobsListPane({
                       {job.status ? ` · ${job.status}` : ""}
                     </span>
                   </button>
-                  <div className="mt-1 flex flex-wrap gap-3 px-2 text-sm">
+                  {/* Prepare is the way through to the One job screen, so it
+                      reads as a button while the other two stay as links. As a
+                      third underlined link it was indistinguishable from them,
+                      and the step card telling people to "open a job" pointed
+                      at nothing they could see. */}
+                  <div className="mt-1.5 flex flex-wrap items-center gap-3 px-2 text-sm">
+                    <button
+                      type="button"
+                      onClick={() => onSelect(job)}
+                      className="rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+                    >
+                      Prepare
+                    </button>
                     {href && (
                       <a href={href} target="_blank" rel="noreferrer" className="underline underline-offset-2">
                         Go to posting
@@ -436,9 +448,6 @@ function JobsListPane({
                     )}
                     <button type="button" className="underline underline-offset-2" onClick={() => onSeeJD(job)}>
                       See JD
-                    </button>
-                    <button type="button" className="underline underline-offset-2" onClick={() => onSelect(job)}>
-                      Prepare
                     </button>
                   </div>
                 </div>

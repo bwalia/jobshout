@@ -2,7 +2,16 @@
  * What a scheduled task fires. "blog" runs the article pipeline, which can
  * either write supplied topics or discover a trending one each time it fires.
  */
-export type ScheduledTaskType = "agent" | "workflow" | "blog";
+export type ScheduledTaskType =
+  | "agent"
+  | "workflow"
+  | "blog"
+  | "multi_agent"
+  // Career Agent schedules. career_apply prepares materials unattended —
+  // scoring, tailoring the CV and drafting the cover letter — and submits
+  // nothing; see Runner.dispatchCareerApply.
+  | "career_scan"
+  | "career_apply";
 
 export interface ScheduledTask {
   id: string;

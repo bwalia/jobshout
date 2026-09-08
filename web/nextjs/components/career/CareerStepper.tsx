@@ -2,7 +2,7 @@
 
 import { Check, Lock } from "lucide-react";
 
-export type CareerStepId = "profile" | "find" | "jobs" | "prepare";
+export type CareerStepId = "profile" | "find" | "jobs" | "prepare" | "auto";
 
 export type CareerStepState = {
   /** Finished — the user can still go back to it. */
@@ -10,6 +10,10 @@ export type CareerStepState = {
   /** Not reachable yet. `blockedReason` says what to do instead. */
   locked: boolean;
   blockedReason?: string;
+  /** Where clicking a locked step should send you. Without this a locked card
+   *  is inert, which reads as a broken button rather than a prerequisite —
+   *  the fastest way to get someone stuck. */
+  blockedGoTo?: CareerStepId;
   /** Short status under the title: "12 jobs found", "CV uploaded". */
   detail?: string;
 };
@@ -19,6 +23,7 @@ const STEPS: { id: CareerStepId; title: string; blurb: string }[] = [
   { id: "find", title: "Find jobs", blurb: "Scan company job boards" },
   { id: "jobs", title: "Score & prepare", blurb: "Rate the matches, write the materials" },
   { id: "prepare", title: "One job", blurb: "Tailored CV, cover letter, tracker" },
+  { id: "auto", title: "Automate", blurb: "Prepare jobs on a schedule" },
 ];
 
 /**
@@ -40,20 +45,29 @@ export function CareerStepper({
 }) {
   return (
     <nav aria-label="Career Agent steps">
-      <ol className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {/* The panel sits inside two other columns, so the content area is far
+          narrower than the viewport. Five across only at 2xl; below that the
+          cards squeeze until the titles wrap to five lines each. */}
+      <ol className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
         {STEPS.map((step, i) => {
           const state = states[step.id];
           const isCurrent = current === step.id;
-          const disabled = state.locked && !isCurrent;
+          const locked = state.locked && !isCurrent;
+          // Locked with somewhere to send them is still clickable: it takes
+          // them to the step that unblocks this one.
+          const disabled = locked && !state.blockedGoTo;
 
           return (
             <li key={step.id}>
               <button
                 type="button"
-                onClick={() => !disabled && onGo(step.id)}
+                onClick={() => {
+                  if (disabled) return;
+                  onGo(locked && state.blockedGoTo ? state.blockedGoTo : step.id);
+                }}
                 disabled={disabled}
                 aria-current={isCurrent ? "step" : undefined}
-                title={disabled ? state.blockedReason : undefined}
+                title={locked ? state.blockedReason : undefined}
                 className={[
                   "group flex w-full items-start gap-3 rounded-lg border p-4 text-left transition-colors duration-200",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
@@ -61,7 +75,9 @@ export function CareerStepper({
                     ? "border-primary bg-primary/5 ring-1 ring-primary"
                     : disabled
                       ? "cursor-not-allowed border-border bg-muted/30 opacity-70"
-                      : "cursor-pointer border-border hover:border-primary/50 hover:bg-muted/40",
+                      : locked
+                        ? "cursor-pointer border-border bg-muted/30 hover:border-primary/50 hover:bg-muted/50"
+                        : "cursor-pointer border-border hover:border-primary/50 hover:bg-muted/40",
                 ].join(" ")}
               >
                 <span
@@ -77,7 +93,7 @@ export function CareerStepper({
                 >
                   {state.done ? (
                     <Check className="h-4 w-4" strokeWidth={2.5} />
-                  ) : disabled ? (
+                  ) : locked ? (
                     <Lock className="h-4 w-4" strokeWidth={2} />
                   ) : (
                     i + 1
@@ -89,7 +105,7 @@ export function CareerStepper({
                     {step.title}
                   </span>
                   <span className="mt-1 block text-sm leading-snug text-muted-foreground">
-                    {disabled ? state.blockedReason : (state.detail ?? step.blurb)}
+                    {locked ? state.blockedReason : (state.detail ?? step.blurb)}
                   </span>
                 </span>
               </button>
