@@ -50,7 +50,7 @@ export function SimproPaymentsAgentClient() {
       setPayments(pay.payments ?? []);
       setFgas(fg.events ?? []);
     } catch (err) {
-      setError(apiErrorMessage(err));
+      setError(apiErrorMessage(err, "Could not load Simpro data."));
     }
   }, []);
 
@@ -64,7 +64,7 @@ export function SimproPaymentsAgentClient() {
       await fn();
       await refresh();
     } catch (err) {
-      toast.error(apiErrorMessage(err));
+      toast.error(apiErrorMessage(err, "That action failed."));
     } finally {
       setBusy(null);
     }
