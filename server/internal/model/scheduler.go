@@ -87,7 +87,11 @@ type ScheduledTask struct {
 type CreateScheduledTaskRequest struct {
 	Name        string  `json:"name" validate:"required,min=2"`
 	Description *string `json:"description"`
-	TaskType    string  `json:"task_type" validate:"required,oneof=agent workflow multi_agent blog"`
+	// career_scan and career_apply were dispatchable by the runner before they
+	// were accepted here, so a schedule for either could not be created through
+	// the API at all. career_apply prepares materials; it does not submit —
+	// see Runner.dispatchCareerApply.
+	TaskType    string  `json:"task_type" validate:"required,oneof=agent workflow multi_agent blog career_scan career_apply"`
 	AgentID     *string `json:"agent_id"`
 	WorkflowID  *string `json:"workflow_id"`
 	// Multi-agent fields (required when task_type = "multi_agent").

@@ -101,8 +101,37 @@ func (r *Runner) tick(ctx context.Context) {
 
 	r.logger.Info("scheduler: dispatching due tasks", zap.Int("count", len(tasks)))
 	for i := range tasks {
+		// Claim the task before dispatching it. Due tasks are selected by
+		// next_run_at <= NOW(), and the run itself is asynchronous, so a task
+		// that outlives one tick was being selected again on the next one —
+		// and the one after that. A career_apply run takes minutes against a
+		// 30s tick, which meant dozens of overlapping runs racing each other
+		// and multiplying the model spend. Fast tasks hid this because they
+		// finished inside a single tick.
+		//
+		// Pushing next_run_at forward here makes the claim atomic enough for a
+		// single runner: the next tick no longer sees the task. runOne still
+		// advances it properly on completion.
+		r.claim(ctx, tasks[i])
 		// Spawn per-task so a slow LLM call can't block the tick loop.
 		go r.runOne(ctx, tasks[i])
+	}
+}
+
+// claim pushes next_run_at past the point where the next tick would re-select
+// the task. A failure here is logged and not fatal: the worst case is the old
+// behaviour of a duplicate dispatch, which is better than dropping the run.
+func (r *Runner) claim(ctx context.Context, t model.ScheduledTask) {
+	next, err := r.computeNextRun(t)
+	if err != nil || next == nil {
+		// No computable next run (one-shot, or a bad expression). runOne's
+		// scheduleNext handles both; hold it off for one tick meanwhile.
+		hold := time.Now().Add(TickInterval)
+		next = &hold
+	}
+	if err := r.repo.SetNextRunAt(ctx, t.ID, *next); err != nil {
+		r.logger.Error("scheduler: claim task failed — it may run twice",
+			zap.String("task_id", t.ID.String()), zap.Error(err))
 	}
 }
 
@@ -127,6 +156,8 @@ func (r *Runner) runOne(ctx context.Context, t model.ScheduledTask) {
 		err = r.dispatchBlog(ctx, t, runRec)
 	case t.TaskType == "career_scan":
 		err = r.dispatchCareerScan(ctx, t)
+	case t.TaskType == "career_apply":
+		err = r.dispatchCareerApply(ctx, t)
 	case t.TaskType == "workflow" && t.WorkflowID != nil:
 		err = r.dispatchWorkflow(ctx, t, runRec)
 	case t.TaskType == "multi_agent":
@@ -312,6 +343,66 @@ func (r *Runner) dispatchCareerScan(ctx context.Context, t model.ScheduledTask) 
 	}
 	_, err := r.career.Scan(ctx, t.OrgID, *t.CreatedBy, req)
 	return err
+}
+
+// dispatchCareerApply runs the apply sequence unattended: score the open
+// pipeline, rewrite the CV for each posting that clears the threshold, draft
+// the cover letter, and assemble a submission package.
+//
+// It prepares. It does not apply. career.NeverSubmit holds here exactly as it
+// does for a run started by hand — there is no submission path for a scheduled
+// task to reach — so what this produces is a tracker full of ready-to-send
+// material, still waiting on a person. A schedule that could file applications
+// on its own would need a browser driver per ATS and a consent model, neither
+// of which exists.
+func (r *Runner) dispatchCareerApply(ctx context.Context, t model.ScheduledTask) error {
+	if r.career == nil {
+		return fmt.Errorf("scheduler: career apply is not configured")
+	}
+	if t.CreatedBy == nil || *t.CreatedBy == uuid.Nil {
+		return fmt.Errorf("scheduler: career apply needs the user who created the schedule")
+	}
+
+	req := model.CareerApplyRequest{}
+	if t.InputJSON != nil {
+		if v, ok := numFrom(t.InputJSON["limit"]); ok {
+			req.Limit = int(v)
+		}
+		if v, ok := numFrom(t.InputJSON["concurrency"]); ok {
+			req.Concurrency = int(v)
+		}
+		if v, ok := numFrom(t.InputJSON["min_score"]); ok {
+			req.MinScore = v
+		}
+	}
+
+	out, err := r.career.ApplyRun(ctx, t.OrgID, *t.CreatedBy, req)
+	if err != nil {
+		return err
+	}
+	r.logger.Info("scheduler: career apply finished",
+		zap.String("task", t.Name),
+		zap.Int("considered", out.Considered),
+		zap.Int("prepared", out.Prepared),
+		zap.Int("skipped", out.Skipped),
+		zap.Int("failed", out.Failed),
+		zap.Int("submitted", out.Submitted), // always zero; logged so it is auditable
+	)
+	return nil
+}
+
+// numFrom reads a number out of InputJSON. JSON numbers decode as float64, but
+// a task written by hand may carry an int, so both are accepted.
+func numFrom(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	}
+	return 0, false
 }
 
 func isBlogTask(t model.ScheduledTask) bool {

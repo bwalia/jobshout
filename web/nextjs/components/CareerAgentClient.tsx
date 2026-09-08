@@ -49,8 +49,9 @@ import type {
 } from "@/types/career";
 import { toast } from "sonner";
 import { CareerNextStep, CareerStepper, type CareerStepId, type CareerStepState } from "./career/CareerStepper";
+import { CareerAutomationPanel } from "./career/CareerAutomationPanel";
 
-type Screen = "profile" | "find" | "jobs" | "prepare";
+type Screen = "profile" | "find" | "jobs" | "prepare" | "auto";
 
 export function CareerAgentClient() {
   const search = useSearchParams();
@@ -110,12 +111,14 @@ export function CareerAgentClient() {
       done: jobs.length > 0,
       locked: !readyToScan,
       blockedReason: !hasCV ? "Upload your CV first" : "Add target job titles first",
+      blockedGoTo: "profile",
       detail: jobs.length > 0 ? `${jobs.length} job${jobs.length === 1 ? "" : "s"} found` : undefined,
     },
     jobs: {
       done: scoredCount > 0,
       locked: jobs.length === 0,
       blockedReason: "Scan for jobs first",
+      blockedGoTo: "find",
       detail:
         jobs.length === 0
           ? undefined
@@ -123,10 +126,21 @@ export function CareerAgentClient() {
             ? `${scoredCount} of ${jobs.length} scored`
             : `${jobs.length} waiting to be scored`,
     },
+    auto: {
+      done: false,
+      locked: !readyToScan,
+      blockedReason: !hasCV ? "Upload your CV first" : "Add target job titles first",
+      blockedGoTo: "profile",
+      detail: "Prepare jobs on a schedule — never submits",
+    },
     prepare: {
       done: artifacts.length > 0,
       locked: !selected,
-      blockedReason: "Open a job from Score & prepare",
+      blockedReason:
+        jobs.length === 0
+          ? "Scan for jobs first"
+          : "Pick a job — press Prepare on any row",
+      blockedGoTo: jobs.length === 0 ? "find" : "jobs",
       detail: selected ? `${selected.company || "This job"} — ${selected.role || "role"}` : undefined,
     },
   };
@@ -665,7 +679,16 @@ export function CareerAgentClient() {
           />
         )}
 
-        {screen !== "profile" && (
+        {screen === "auto" && (
+          <CareerAutomationPanel
+            doctor={doctor}
+            hasCV={hasCV}
+            titleCount={titles.length}
+            onGoToProfile={() => setScreen("profile")}
+          />
+        )}
+
+        {screen !== "profile" && screen !== "auto" && (
           <CareerJobsPanel
             pane={screen}
             doctor={doctor}
