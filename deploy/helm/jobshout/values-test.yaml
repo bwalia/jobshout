@@ -26,3 +26,17 @@ pythonRuntime:
 
 storage:
   postgres: 10Gi
+
+# WAF Efficacy Lab — off in this ring. int is the proving ring: a run is watched
+# end-to-end there before any other ring points the agent at live traffic.
+#
+# To enable here, all three parts are needed — baseURL alone leaves the client
+# disabled, and so does the secret alone:
+#   1. set enabled: true and a baseURL below
+#   2. kubectl -n test create secret generic jobshout-wslproxy \
+#        --from-literal=WSLPROXY_API_TOKEN=<token>
+#   3. add an extraSecretRefs list to this file naming jobshout-wslproxy
+#      (this ring has none yet, so it inherits the empty default)
+wafLab:
+  enabled: false
+  baseURL: ""
