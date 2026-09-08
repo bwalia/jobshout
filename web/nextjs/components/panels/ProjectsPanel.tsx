@@ -303,7 +303,7 @@ function ProjectListing() {
           <StatCard
             value={stats.starred}
             label="Starred"
-            valueClass="text-amber-600 dark:text-amber-400"
+            valueClass="text-orange-600 dark:text-orange-400"
           />
         </div>
       )}
@@ -878,8 +878,8 @@ function ProjectCardItem({
               className={cn(
                 "rounded-lg p-2 transition-colors",
                 isStarred
-                  ? "text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-500/10"
-                  : "text-muted-foreground hover:bg-secondary hover:text-amber-500"
+                  ? "text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-500/10"
+                  : "text-muted-foreground hover:bg-secondary hover:text-orange-500"
               )}
               aria-label={isStarred ? "Unstar project" : "Star project"}
             >
@@ -922,8 +922,8 @@ function ProjectCardItem({
             className={cn(
               "rounded-lg p-1.5 transition-colors",
               isStarred
-                ? "text-amber-500"
-                : "text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-amber-500"
+                ? "text-orange-500"
+                : "text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-orange-500"
             )}
             aria-label={isStarred ? "Unstar project" : "Star project"}
           >

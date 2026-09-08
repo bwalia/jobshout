@@ -55,13 +55,19 @@ function groupByRecency(sessions: ChatSession[]) {
   return groups.filter((g) => g.items.length > 0);
 }
 
+// Navigation is the one thing every user touches on every visit, so it is
+// sized for comfort rather than density: 16px at medium weight, a ~44px hit
+// area, and an active state you can pick out from across the room rather than
+// a faint tint. Someone with tired eyes should not have to hunt for where
+// they are.
 function navItemClass(active: boolean, collapsed: boolean) {
   return cn(
-    "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors",
-    collapsed && "h-10 w-10 justify-center px-0",
+    "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-base transition-colors",
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+    collapsed && "h-11 w-11 justify-center px-0",
     active
-      ? "bg-sidebar-muted text-foreground"
-      : "text-sidebar-foreground hover:bg-sidebar-muted/70 hover:text-foreground"
+      ? "bg-primary/12 font-semibold text-foreground shadow-[inset_3px_0_0_0_hsl(var(--primary))]"
+      : "font-medium text-sidebar-foreground hover:bg-sidebar-muted hover:text-foreground"
   );
 }
 
@@ -146,9 +152,9 @@ function SidebarBody({
           onClick={onNewChat}
           title="JobShout"
           aria-label="JobShout home"
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-foreground hover:bg-sidebar-muted"
+          className="flex h-10 w-10 items-center justify-center rounded-lg text-foreground hover:bg-sidebar-muted"
         >
-          <Box className="h-5 w-5" />
+          <Box className="h-6 w-6" />
         </button>
         {!collapsed && <div className="flex-1" />}
         {onToggleCollapse && (
@@ -169,9 +175,9 @@ function SidebarBody({
           onClick={() => setCommandPaletteOpen(true)}
           title="Search"
           aria-label="Search"
-          className="flex h-8 w-8 items-center justify-center rounded-md text-sidebar-foreground hover:bg-sidebar-muted hover:text-foreground"
+          className="flex h-10 w-10 items-center justify-center rounded-md text-sidebar-foreground hover:bg-sidebar-muted hover:text-foreground"
         >
-          <Search className="h-4 w-4" />
+          <Search className="h-5 w-5" />
         </button>
       </div>
 
@@ -183,7 +189,7 @@ function SidebarBody({
           aria-label="New chat"
           className={navItemClass(onEmptyChat, collapsed)}
         >
-          <Plus className="h-4 w-4 shrink-0" />
+          <Plus className="h-5 w-5 shrink-0" />
           {!collapsed && "New Chat"}
         </button>
 
@@ -203,7 +209,7 @@ function SidebarBody({
               onClick={isDashboard ? onDashboardClick : () => markPanelNav(item.href)}
               className={navItemClass(active, collapsed)}
             >
-              <Icon className="h-4 w-4 shrink-0" />
+              <Icon className="h-5 w-5 shrink-0" />
               {!collapsed && (
                 <>
                   <span className="min-w-0 flex-1 truncate">{item.label}</span>
@@ -252,7 +258,7 @@ function SidebarBody({
               }}
                 className={navItemClass(active, collapsed)}
               >
-                <Icon className="h-4 w-4 shrink-0" />
+                <Icon className="h-5 w-5 shrink-0" />
                 {!collapsed && <span className="truncate">{panel.label}</span>}
               </Link>
             );
@@ -263,13 +269,13 @@ function SidebarBody({
       {!collapsed && (
         <nav className="mt-2 px-2 pb-2">
           {groups.length === 0 ? (
-            <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+            <p className="px-3 py-6 text-center text-sm text-muted-foreground">
               No chats yet
             </p>
           ) : (
             groups.map((g) => (
               <div key={g.label} className="mb-3">
-                <p className="mb-1 px-2 text-[11px] font-medium text-muted-foreground">
+                <p className="mb-1.5 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   {g.label}
                 </p>
                 <ul className="space-y-0.5">
@@ -290,14 +296,14 @@ function SidebarBody({
                               if (e.key === "Enter") commitRename();
                               if (e.key === "Escape") setRenamingId(null);
                             }}
-                            className="w-full rounded-md border border-ring bg-background px-2 py-1.5 text-sm outline-none"
+                            className="w-full rounded-md border border-ring bg-background px-2 py-2 text-base outline-none"
                           />
                         ) : (
                           <button
                             type="button"
                             onClick={() => goSession(s.id)}
                             className={cn(
-                              "w-full truncate rounded-md px-2 py-1.5 pr-14 text-left text-sm transition-colors",
+                              "w-full truncate rounded-md px-3 py-2 pr-14 text-left text-base font-medium transition-colors",
                               active
                                 ? "bg-sidebar-muted text-foreground"
                                 : "text-sidebar-foreground hover:bg-sidebar-muted/70 hover:text-foreground"

@@ -5,34 +5,77 @@
    ========================================================================== */
 
 :root {
-  --sc-canvas:      #0a0a0b;
-  --sc-surface:     #121214;
-  --sc-ink:         #f4f2ef;
-  --sc-ink-soft:    #9a9893;
-  --sc-accent:      #2ee6a0;
-  --sc-accent-ink:  #0a0a0b;
+  /* ═════════════════════════════════════════════════════════════════════════
+     BRAND — the landing palette derives from these numbers alone, and matches
+     the app (styles/globals.css) so the two read as one product.
 
-  --sc-font-display: "Geist", system-ui, sans-serif;
-  --sc-font-text:    "Geist", system-ui, sans-serif;
+       cream   #FFF7EB   ground        sage      #A2AB73  success
+       beige   #F9F0E0   raised        raspberry #CC3A63  every action
+
+     To lighten or darken the page, change --brand-canvas-l and nothing else.
+     ═════════════════════════════════════════════════════════════════════════ */
+  --brand-canvas-h: 38.4;
+  --brand-canvas-s: 67.6%;
+  --brand-canvas-l: 92.7%;        /* #F9F0E0 beige — the ground */
+
+  --brand-card-h: 36;
+  --brand-card-s: 100%;
+  --brand-card-l: 96.1%;          /* #FFF7EB cream — panels */
+
+  --brand-ink-h: 32;
+  --brand-ink-s: 16%;
+  --brand-ink-l: 15%;
+
+  --brand-accent-h: 343.2;
+  --brand-accent-s: 58.9%;
+  --brand-accent-l: 51%;
+
+  --brand-success-h: 69.6;
+  --brand-success-s: 25%;
+  --brand-success-l: 56.1%;
+
+  /* ── Derived surfaces: lightest to deepest ─────────────────────────────── */
+  /* No white: cream is the lightest surface in this palette. */
+  --sc-tint-1: hsl(var(--brand-card-h) var(--brand-card-s) var(--brand-card-l));
+  --sc-tint-2: hsl(var(--brand-canvas-h) var(--brand-canvas-s) var(--brand-canvas-l));
+  --sc-tint-3: hsl(var(--brand-canvas-h) var(--brand-canvas-s) calc(var(--brand-canvas-l) - 4%));
+  --sc-tint-4: hsl(var(--brand-canvas-h) var(--brand-canvas-s) calc(var(--brand-canvas-l) - 9%));
+
+  /* ── Engine tokens (scrollcraft reads these) ───────────────────────────── */
+  --sc-canvas:      hsl(var(--brand-canvas-h) var(--brand-canvas-s) var(--brand-canvas-l));
+  --sc-surface:     var(--sc-tint-1);
+  --sc-ink:         hsl(var(--brand-ink-h) var(--brand-ink-s) var(--brand-ink-l));
+  --sc-ink-soft:    hsl(var(--brand-ink-h) calc(var(--brand-ink-s) - 4%) calc(var(--brand-ink-l) + 18%));
+  --sc-accent:      hsl(var(--brand-accent-h) var(--brand-accent-s) var(--brand-accent-l));
+  --sc-accent-ink:  hsl(var(--brand-card-h) var(--brand-card-s) var(--brand-card-l));
+
+  --sc-font-display: "Outfit", system-ui, sans-serif;
+  --sc-font-text:    "Plus Jakarta Sans", system-ui, sans-serif;
   --sc-font-mono:    "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 
-  --sc-shadow-color: 240 8% 2%;
+  --sc-shadow-color: var(--brand-ink-h) var(--brand-ink-s) var(--brand-ink-l);
 
-  --js-surface-2: #1a1a1d;
-  --js-well:      #070708;
-  --js-amber:     #ffc53d;
-  --js-amber-wash: rgba(255, 197, 61, 0.14);
-  --js-green-wash: rgba(46, 230, 160, 0.14);
-  --js-app:       #161618;
-  --js-app-ink:   #eceae6;
+  /* Hairlines carry the outlined-box look. White cards barely lift off a 96%
+     cream, so the border is what gives the page its structure. */
+  --sc-hairline:        color-mix(in oklab, var(--sc-ink) 22%, transparent);
+  --sc-hairline-strong: color-mix(in oklab, var(--sc-ink) 38%, transparent);
+
+  /* ── Product-computer mock ─────────────────────────────────────────────── */
+  --js-surface-2: var(--sc-tint-3);
+  --js-well:      var(--sc-tint-4);
+  --js-amber:     var(--sc-accent);
+  --js-amber-wash: color-mix(in oklab, var(--sc-accent) 14%, transparent);
+  --js-green-wash: color-mix(in oklab, hsl(var(--brand-success-h) var(--brand-success-s) var(--brand-success-l)) 22%, transparent);
+  --js-app:       var(--sc-tint-1);
+  --js-app-ink:   var(--sc-ink);
 
   --js-bar-h: 64px;
 }
 
 .mono { font-family: var(--sc-font-mono); }
 .p-soft { color: var(--sc-ink-soft); text-wrap: pretty; margin: 0; }
-/* 50% is the floor that still clears 4.5:1 against --sc-canvas. */
-.p-faint { color: color-mix(in oklab, var(--sc-ink) 50%, transparent); }
+/* 72% is the floor that still clears 4.5:1 for navy ink on the blush canvas. */
+.p-faint { color: color-mix(in oklab, var(--sc-ink) 72%, transparent); }
 .h-display {
   font-family: var(--sc-font-display);
   font-weight: 600;
@@ -195,7 +238,7 @@
   position: relative;
   width: 100%;
   height: clamp(460px, 74svh, 680px);
-  background: #0c0c0e;
+  background: var(--sc-tint-2);
   border: 1px solid color-mix(in oklab, var(--sc-ink) 14%, transparent);
   border-radius: 16px;
   box-shadow: var(--sc-e3), var(--sc-edge);
@@ -206,7 +249,7 @@
   display: flex; align-items: center; gap: 12px;
   padding-inline: 14px;
   border-bottom: 1px solid var(--sc-hairline);
-  background: #141416;
+  background: var(--sc-tint-1);
 }
 .desk__dots { display: flex; gap: 6px; }
 .desk__dots span { width: 10px; height: 10px; border-radius: 50%; }
@@ -220,7 +263,7 @@
   margin-left: auto;
   position: relative;
   display: grid; grid-template-columns: 1fr 1fr;
-  background: #0c0c0e;
+  background: var(--sc-tint-2);
   border: 1px solid var(--sc-hairline);
   border-radius: var(--sc-r-pill);
   padding: 3px;
@@ -230,12 +273,12 @@
   position: absolute; top: 3px; bottom: 3px; left: 3px;
   width: calc(50% - 3px);
   border-radius: var(--sc-r-pill);
-  background: #2a2a2e;
+  background: var(--sc-ink);
   transition: transform 320ms var(--sc-ease-out), background 320ms var(--sc-ease-out);
 }
 .desk.is-working .seg__knob {
   transform: translateX(100%);
-  background: color-mix(in oklab, var(--sc-accent) 22%, #141416);
+  background: color-mix(in oklab, var(--sc-accent) 22%, var(--sc-tint-1));
 }
 .seg__opt {
   position: relative; z-index: 1;
@@ -254,10 +297,12 @@
 }
 .wallpaper {
   position: absolute; inset: 0;
+  /* The desktop behind the app window. It was the old near-black wallpaper,
+     which read as a hole punched through the page once the site went light. */
   background:
-    radial-gradient(70% 55% at 78% 8%, rgba(46, 230, 160, 0.10), transparent 46%),
-    radial-gradient(90% 80% at 12% 100%, rgba(80, 90, 140, 0.16), transparent 50%),
-    linear-gradient(180deg, #1a1b20 0%, #0b0c10 58%, #08080a 100%);
+    radial-gradient(70% 55% at 78% 8%, color-mix(in oklab, var(--sc-accent) 14%, transparent), transparent 46%),
+    radial-gradient(90% 80% at 12% 100%, color-mix(in oklab, var(--sc-ink) 12%, transparent), transparent 50%),
+    linear-gradient(180deg, var(--sc-tint-1) 0%, var(--sc-tint-3) 58%, var(--sc-tint-4) 100%);
 }
 
 .scene {
@@ -330,14 +375,14 @@
   inset: 16px 16px 80px;
   background: var(--js-app);
   color: var(--js-app-ink);
-  border: 1px solid rgba(255,255,255,0.08);
+  border: 1px solid color-mix(in oklab, var(--sc-ink) 16%, transparent);
   border-radius: 10px;
   overflow: clip;
   box-shadow: 0 28px 70px rgba(0,0,0,0.50);
 }
 .app--light {
   background: #fff; color: #202124;
-  border-color: rgba(255,255,255,0.10);
+  border-color: color-mix(in oklab, var(--sc-ink) 20%, transparent);
 }
 #gmail-app {
   opacity: 0; visibility: hidden;
@@ -349,7 +394,7 @@
   height: 36px;
   display: flex; align-items: center; gap: 10px;
   padding-inline: 10px;
-  background: #101012;
+  background: var(--sc-tint-2);
   border-bottom: 1px solid var(--sc-hairline);
 }
 .app--light .app__chrome {
@@ -373,7 +418,7 @@
   border: 1px solid #dadce0;
 }
 .app--light .app__urlbar { background: #fff; }
-.app:not(.app--light) .app__urlbar { background: #1a1a1d; border-color: var(--sc-hairline); }
+.app:not(.app--light) .app__urlbar { background: var(--sc-tint-3); border-color: var(--sc-hairline); }
 .app__lock {
   width: 7px; height: 7px; border-radius: 50%;
   background: #34a853; flex: none;
@@ -384,7 +429,7 @@
 }
 .app__body { display: grid; grid-template-columns: 132px 1fr; height: calc(100% - 36px); position: relative; }
 
-.mail__nav { padding: 12px 10px; border-right: 1px solid var(--sc-hairline); background: #101012; }
+.mail__nav { padding: 12px 10px; border-right: 1px solid var(--sc-hairline); background: var(--sc-tint-2); }
 .app--light .mail__nav { background: #f6f8fc; border-right-color: #e8eaed; }
 .mail__compose {
   margin: 0 0 12px; padding: 7px 10px;
@@ -444,7 +489,7 @@
 }
 
 /* ---- teach ---- */
-.teach__steps { padding: 22px 20px; display: grid; gap: 10px; align-content: start; background: #fff; }
+.teach__steps { padding: 22px 20px; display: grid; gap: 10px; align-content: start; background: var(--sc-tint-1); }
 .teach__step {
   display: flex; align-items: center; gap: 10px;
   margin: 0; font-size: 13px; color: #5f6368;
@@ -459,7 +504,7 @@
   position: absolute; left: 16px; right: 16px; top: 16px;
   display: flex; align-items: center; gap: 10px;
   padding: 10px 12px 10px 14px;
-  background: color-mix(in oklab, #121214 82%, transparent);
+  background: color-mix(in oklab, var(--sc-tint-1) 86%, transparent);
   -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
   border: 1px solid color-mix(in oklab, var(--sc-ink) 14%, transparent);
   border-radius: 12px;
@@ -492,7 +537,7 @@
   position: absolute; right: 28px; bottom: 96px;
   width: min(300px, 52%);
   padding: 14px 16px;
-  background: #fff;
+  background: var(--sc-tint-1);
   color: #202124;
   border-radius: 14px;
   box-shadow: 0 16px 40px rgba(0,0,0,0.28);
@@ -510,7 +555,7 @@
   width: fit-content;
   padding: 7px 12px;
   border-radius: var(--sc-r-pill);
-  background: color-mix(in oklab, #0e0e10 78%, transparent);
+  background: color-mix(in oklab, var(--sc-tint-1) 82%, transparent);
   -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
   border: 1px solid color-mix(in oklab, var(--sc-accent) 34%, transparent);
   color: var(--sc-accent);
@@ -549,7 +594,7 @@
   margin: 0; width: fit-content;
   padding: 6px 12px;
   border-radius: var(--sc-r-pill);
-  background: #fff;
+  background: var(--sc-tint-1);
   border: 1px solid #dadce0;
   font-size: 12px; color: #5f6368;
   opacity: 0;
@@ -572,7 +617,7 @@
   padding: 9px 12px; border-radius: 16px;
   border: 1px solid #e8eaed;
   font-size: 12.5px; line-height: 1.45;
-  background: #fff;
+  background: var(--sc-tint-1);
   color: #202124;
 }
 .bubble p { margin: 0; }
@@ -591,7 +636,7 @@
   position: absolute; left: 18px; bottom: 14px; z-index: 4;
   width: min(380px, calc(100% - 36px));
   padding: 14px 16px 12px;
-  background: color-mix(in oklab, #16161a 90%, transparent);
+  background: color-mix(in oklab, var(--sc-tint-1) 92%, transparent);
   -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
   border: 1px solid color-mix(in oklab, var(--sc-ink) 18%, transparent);
   border-radius: 18px;
@@ -670,7 +715,7 @@
 .job__copy p { margin: 0; color: var(--sc-ink-soft); max-width: 44ch; text-wrap: pretty; }
 .job__preview {
   margin: 0;
-  background: #fff;
+  background: var(--sc-tint-1);
   color: #202124;
   border: 1px solid var(--sc-hairline);
   border-radius: 10px;

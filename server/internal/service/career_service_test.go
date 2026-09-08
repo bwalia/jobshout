@@ -543,7 +543,7 @@ func setupCareer(t *testing.T) (*careerService, *careerMem, uuid.UUID, uuid.UUID
 	t.Helper()
 	repo := newCareerMem()
 	agents := &careerTestAgents{byBuiltin: map[string]*model.Agent{}}
-	svc := NewCareerService(repo, agents, nil, nil, nil, zap.NewNop()).(*careerService)
+	svc := NewCareerService(repo, agents, nil, nil, "", nil, zap.NewNop()).(*careerService)
 	return svc, repo, uuid.New(), uuid.New()
 }
 
@@ -581,7 +581,7 @@ func TestEnsureCareerOpsRenamesLegacy(t *testing.T) {
 	if err := agents.Create(context.Background(), legacy); err != nil {
 		t.Fatal(err)
 	}
-	svc := NewCareerService(repo, agents, nil, nil, nil, zap.NewNop()).(*careerService)
+	svc := NewCareerService(repo, agents, nil, nil, "", nil, zap.NewNop()).(*careerService)
 	got, err := svc.EnsureCareerOps(context.Background(), orgID)
 	if err != nil {
 		t.Fatal(err)
@@ -964,7 +964,7 @@ func (previewFetch) Fetch(_ context.Context, rawURL string) (*research.Document,
 func TestPreviewListingReturnsJD(t *testing.T) {
 	repo := newCareerMem()
 	agents := &careerTestAgents{byBuiltin: map[string]*model.Agent{}}
-	svc := NewCareerService(repo, agents, previewFetch{}, nil, nil, zap.NewNop()).(*careerService)
+	svc := NewCareerService(repo, agents, previewFetch{}, nil, "", nil, zap.NewNop()).(*careerService)
 	orgID, userID := uuid.New(), uuid.New()
 	out, err := svc.PreviewListing(context.Background(), orgID, userID, "https://jobs.example/staff")
 	if err != nil {

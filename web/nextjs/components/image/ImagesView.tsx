@@ -81,7 +81,7 @@ export function ImagesView({
       )}
 
       {!enabled && (
-        <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-4 text-sm">
+        <div className="rounded-xl border border-orange-500/40 bg-orange-500/5 p-4 text-sm">
           <p className="font-medium">Image generation is not configured on this server.</p>
           <p className="mt-1 text-muted-foreground">
             Set <code className="text-xs">GEMINI_API_KEY</code> to use Gemini,{" "}
@@ -186,7 +186,7 @@ export function ImagesView({
             </div>
           </dl>
           {!result.url && (
-            <p className="mt-3 text-xs text-amber-600 dark:text-amber-400">
+            <p className="mt-3 text-xs text-orange-600 dark:text-orange-400">
               Object storage is not configured, so this image has no permanent URL and will be
               gone when you leave the page.
             </p>

@@ -62,7 +62,7 @@ const AVATAR_COLOURS = [
   "bg-violet-600",
   "bg-blue-600",
   "bg-emerald-600",
-  "bg-amber-600",
+  "bg-orange-600",
   "bg-rose-600",
   "bg-cyan-600",
   "bg-indigo-600",
@@ -323,7 +323,7 @@ function OverviewTab({ agent }: { agent: NonNullable<ReturnType<typeof useAgent>
 const PRIORITY_CLASSES: Record<string, string> = {
   critical: "bg-red-500/20 text-red-400",
   high: "bg-orange-500/20 text-orange-400",
-  medium: "bg-yellow-500/20 text-yellow-400",
+  medium: "bg-orange-500/20 text-orange-400",
   low: "bg-blue-500/20 text-blue-400",
 };
 
@@ -682,7 +682,7 @@ const SKILL_KIND_META: Record<
 > = {
   tool: { icon: Wrench, color: "text-sky-400" },
   prompt: { icon: MessageSquareText, color: "text-violet-400" },
-  bundle: { icon: Boxes, color: "text-amber-400" },
+  bundle: { icon: Boxes, color: "text-orange-400" },
 };
 
 function SkillsTab({ agentId }: { agentId: string }) {

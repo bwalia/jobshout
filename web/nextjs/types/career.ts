@@ -240,3 +240,39 @@ export interface CareerContact {
   company: string;
   linkedin_draft: string;
 }
+
+// One job's trip through the apply sequence. Mirrors model.CareerApplyOutcome.
+export interface CareerApplyOutcome {
+  listing_url: string;
+  company?: string;
+  role?: string;
+  /** prepared | skipped | failed */
+  stage: string;
+  reason?: string;
+  score?: number;
+  submitted: boolean;
+  /** True only when the CV was genuinely rewritten for this posting, not when
+   *  tailoring fell back to the stored CV with a note appended. */
+  cv_tailored: boolean;
+  evaluation_id?: string;
+  application_id?: string;
+  cv_artifact_id?: string;
+  cover_artifact_id?: string;
+  package_artifact_id?: string;
+  duration_ms?: number;
+}
+
+export interface CareerApplyResult {
+  dry_run: boolean;
+  min_score: number;
+  considered: number;
+  prepared: number;
+  skipped: number;
+  failed: number;
+  /** Always 0. Reported so the UI can assert it rather than imply it. */
+  submitted: number;
+  note: string;
+  notice?: string;
+  duration_ms: number;
+  outcomes: CareerApplyOutcome[];
+}

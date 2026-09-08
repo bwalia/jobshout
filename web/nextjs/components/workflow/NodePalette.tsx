@@ -16,7 +16,7 @@ const nodeTypes = [
     type: "tool",
     label: "Tool",
     icon: "T",
-    color: "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-500/20 dark:text-amber-400 dark:border-amber-500/50",
+    color: "bg-orange-100 text-orange-800 border-orange-300 dark:bg-orange-500/20 dark:text-orange-400 dark:border-orange-500/50",
     description: "External tool invocation",
   },
   {

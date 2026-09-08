@@ -78,6 +78,12 @@ func tryTailor(ctx context.Context, prompt, src string, generate Generator) (str
 	if !KeepLayout(src, body) {
 		return "", strings.TrimSpace(out.Note), false
 	}
+	// A whole-body rewrite bypasses the per-replacement grounding above, so it
+	// is checked here too. KeepLayout would pass a fabricated claim happily:
+	// invented experience is the same shape and length as the real thing.
+	if !IsGrounded(src, body) {
+		return "", strings.TrimSpace(out.Note), false
+	}
 	return body, strings.TrimSpace(out.Note), true
 }
 
@@ -93,6 +99,13 @@ func applyReplacements(src string, swaps []tailorSwap) (string, int) {
 			continue
 		}
 		if utf8Len(to) > utf8Len(from)*130/100+12 {
+			continue
+		}
+		// The replacement may re-word the claim; it may not add a new one.
+		// Grounded against the whole source CV, not just the span being
+		// replaced, so moving an existing skill into a bullet still works
+		// while inventing one does not. See grounding.go.
+		if !IsGrounded(src, to) {
 			continue
 		}
 		body = strings.Replace(body, from, to, 1)

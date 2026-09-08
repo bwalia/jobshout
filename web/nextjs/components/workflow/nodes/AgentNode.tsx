@@ -11,7 +11,7 @@ export function AgentNode({ data }: NodeProps) {
       className={cn(
         "rounded-lg border-2 bg-card px-4 py-3 shadow-md min-w-[160px]",
         status === "completed" && "border-green-500",
-        status === "running" && "border-yellow-500 animate-pulse",
+        status === "running" && "border-orange-500 animate-pulse",
         status === "failed" && "border-red-500",
         !status && "border-cyan-500"
       )}

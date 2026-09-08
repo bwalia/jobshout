@@ -35,6 +35,7 @@ export function CareerJobsPanel({
   patterns,
   onScore,
   onScoreSelected,
+  onApplyRun,
   onTailor,
   onCover,
   onEmail,
@@ -69,6 +70,9 @@ export function CareerJobsPanel({
   patterns: CareerPatterns | null;
   onScore: () => void;
   onScoreSelected: (jobs: CareerJob[]) => void;
+  /** Dry-run apply: prepare materials for these jobs, or the open pipeline
+   *  when the list is empty. Never submits. */
+  onApplyRun: (jobs: CareerJob[]) => void;
   onTailor: () => void;
   onCover: () => void;
   onEmail: () => void;
@@ -97,7 +101,7 @@ export function CareerJobsPanel({
   return (
     <div className="space-y-5">
       {doctor && !doctor.ok && (
-        <p className="rounded-md border border-signal-warn/40 bg-muted/40 px-3 py-2 text-sm">
+        <p className="rounded-md border border-signal-warn/40 bg-muted/40 px-3 py-2 text-base">
           Finish Profile first (name and CV) so scores and tailored CVs are about you, not a blank page.
         </p>
       )}
@@ -134,6 +138,7 @@ export function CareerJobsPanel({
           onToggleAll={toggleAll}
           onSelect={onSelect}
           onScoreSelected={onScoreSelected}
+          onApplyRun={onApplyRun}
           onSeeJD={onSeeJD}
         />
       )}
@@ -156,7 +161,7 @@ export function CareerJobsPanel({
               onBack={onBackToJobs}
             />
           ) : (
-            <p className="text-sm text-muted-foreground">
+            <p className="text-base text-muted-foreground">
               Pick a job in <span className="font-medium text-foreground">Jobs</span> to score it, tailor a CV, or draft a cover letter.
             </p>
           )}
@@ -202,8 +207,8 @@ function FindPane({
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <section className="space-y-3 rounded-md border border-border p-4">
-        <h3 className="text-sm font-medium">Scan companies</h3>
-        <p className="text-sm text-muted-foreground">
+        <h3 className="text-lg font-semibold">Scan companies</h3>
+        <p className="text-base text-muted-foreground">
           Greenhouse, Ashby, and Lever — not LinkedIn or Indeed. Title filter comes from Profile.
         </p>
         <div className="flex flex-wrap items-center gap-2">
@@ -211,14 +216,14 @@ function FindPane({
             type="button"
             disabled={busy}
             onClick={onScanAll}
-            className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
+            className="rounded-md bg-primary px-3 py-2.5 text-base font-medium text-primary-foreground disabled:opacity-50"
           >
             {busy ? "Scanning…" : "Scan all companies"}
           </button>
           <FieldHint text="Hits every saved company on those three boards. A minute or two." />
         </div>
         {portals.length > 0 && (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             Watching {portals.length} companies
             {portalBoardSummary(portals) ? ` (${portalBoardSummary(portals)})` : ""}.
           </p>
@@ -230,7 +235,7 @@ function FindPane({
             onScanOne();
           }}
         >
-          <label className="flex items-center gap-1.5 text-sm" htmlFor="career-board">
+          <label className="flex items-center gap-1.5 text-base" htmlFor="career-board">
             Board
             <FieldHint text="All boards tries Greenhouse, Ashby, and Lever for this slug." />
             <select
@@ -245,7 +250,7 @@ function FindPane({
               <option value="lever">Lever</option>
             </select>
           </label>
-          <label className="flex items-center gap-1.5 text-sm" htmlFor="career-slug">
+          <label className="flex items-center gap-1.5 text-base" htmlFor="career-slug">
             Company slug
             <FieldHint text="From the careers URL, e.g. anthropic from boards.greenhouse.io/anthropic." />
             <input
@@ -259,13 +264,13 @@ function FindPane({
           <button
             type="submit"
             disabled={busy || !scanSlug.trim()}
-            className="rounded-md border border-border px-3 py-1.5 text-sm disabled:opacity-50"
+            className="rounded-md border border-border px-3 py-2.5 text-base disabled:opacity-50"
           >
             {busy ? "Scanning…" : "Scan this company"}
           </button>
           <button
             type="button"
-            className="rounded-md border border-border px-3 py-1.5 text-sm"
+            className="rounded-md border border-border px-3 py-2.5 text-base"
             disabled={!scanSlug.trim() || scanBoard === "all"}
             onClick={onSavePortal}
           >
@@ -275,8 +280,8 @@ function FindPane({
       </section>
 
       <section className="space-y-3 rounded-md border border-border p-4">
-        <h3 className="text-sm font-medium">Add one posting</h3>
-        <p className="text-sm text-muted-foreground">A public URL or a pasted JD. You do not need both.</p>
+        <h3 className="text-lg font-semibold">Add one posting</h3>
+        <p className="text-base text-muted-foreground">A public URL or a pasted JD. You do not need both.</p>
         <div>
           <FieldLabel
             htmlFor="career-job-url"
@@ -288,7 +293,7 @@ function FindPane({
             value={jobUrl}
             onChange={(e) => setJobUrl(e.target.value)}
             placeholder="https://boards.greenhouse.io/…"
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-base"
           />
         </div>
         <div>
@@ -302,7 +307,7 @@ function FindPane({
             value={jdText}
             onChange={(e) => setJdText(e.target.value)}
             rows={5}
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-base"
             placeholder="Paste the JD."
           />
         </div>
@@ -310,7 +315,7 @@ function FindPane({
           type="button"
           disabled={busy || (!jobUrl.trim() && !jdText.trim())}
           onClick={onAddJob}
-          className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+          className="rounded-md bg-primary px-3 py-2 text-base font-medium text-primary-foreground disabled:opacity-50"
         >
           {busy ? "Adding…" : "Add and score"}
         </button>
@@ -331,6 +336,7 @@ function JobsListPane({
   onToggleAll,
   onSelect,
   onScoreSelected,
+  onApplyRun,
   onSeeJD,
 }: {
   jobs: CareerJob[];
@@ -344,18 +350,19 @@ function JobsListPane({
   onToggleAll: (value: boolean) => void;
   onSelect: (job: CareerJob) => void;
   onScoreSelected: (jobs: CareerJob[]) => void;
+  onApplyRun: (jobs: CareerJob[]) => void;
   onSeeJD: (job: CareerJob) => void;
 }) {
   return (
     <section className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h3 className="text-sm font-medium">Your jobs</h3>
-          <p className="text-xs text-muted-foreground">Open a row to tailor a CV or draft materials.</p>
+          <h3 className="text-lg font-semibold">Your jobs</h3>
+          <p className="text-sm text-muted-foreground">Open a row to tailor a CV or draft materials.</p>
         </div>
         {jobs.length > 0 && (
           <div className="flex flex-wrap items-center gap-2">
-            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
               <input
                 type="checkbox"
                 checked={allChecked}
@@ -368,7 +375,7 @@ function JobsListPane({
               type="button"
               disabled={busy || selectedJobs.length === 0}
               onClick={() => onScoreSelected(selectedJobs)}
-              className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
+              className="rounded-md bg-primary px-3 py-2.5 text-base font-medium text-primary-foreground disabled:opacity-50"
             >
               {busy
                 ? "Scoring…"
@@ -377,13 +384,24 @@ function JobsListPane({
                   : "Score selected"}
             </button>
             <FieldHint text="Tick jobs, then score them against your profile. Up to 8 at a time. Score is advice." />
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onApplyRun(selectedJobs)}
+              className="rounded-md border border-border px-3 py-2.5 text-base font-medium disabled:opacity-50"
+            >
+              {selectedJobs.length > 0
+                ? `Prepare selected (${selectedJobs.length})`
+                : "Prepare open jobs"}
+            </button>
+            <FieldHint text="Scores each job, rewrites your CV for that posting, drafts the cover letter and assembles a package you could paste into the form. It does not apply: nothing is sent, and no job moves to Applied." />
           </div>
         )}
       </div>
       {jobs.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Nothing here yet. Use Find to scan companies or paste a posting.</p>
+        <p className="text-base text-muted-foreground">Nothing here yet. Use Find to scan companies or paste a posting.</p>
       ) : (
-        <ul className="divide-y divide-border rounded-md border border-border text-sm">
+        <ul className="divide-y divide-border rounded-md border border-border text-base">
           {jobs.map((job) => {
             const href = postingHref(job.listing_url);
             return (
@@ -404,13 +422,13 @@ function JobsListPane({
                     }`}
                   >
                     <span className="font-medium">{job.role || job.listing_url || "Job"}</span>
-                    <span className="text-xs text-muted-foreground">
+                    <span className="text-sm text-muted-foreground">
                       {job.company || "Company"}
                       {job.score != null ? ` · ${job.score.toFixed(1)} / 5` : " · not scored"}
                       {job.status ? ` · ${job.status}` : ""}
                     </span>
                   </button>
-                  <div className="mt-1 flex flex-wrap gap-3 px-2 text-xs">
+                  <div className="mt-1 flex flex-wrap gap-3 px-2 text-sm">
                     {href && (
                       <a href={href} target="_blank" rel="noreferrer" className="underline underline-offset-2">
                         Go to posting
@@ -430,7 +448,7 @@ function JobsListPane({
         </ul>
       )}
       {patterns && patterns.applications > 0 && (
-        <p className="text-xs text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           {patterns.applications} scored
           {patterns.avg_score ? ` · average ${patterns.avg_score.toFixed(1)} / 5` : ""}
           {patterns.skill_gaps && patterns.skill_gaps.length > 0

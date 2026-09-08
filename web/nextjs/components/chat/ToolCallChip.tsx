@@ -49,7 +49,7 @@ function statusIcon(status: string) {
     return <Check className="h-3 w-3 shrink-0 text-emerald-500" />;
   }
   if (status === "pending_confirmation") {
-    return <Clock className="h-3 w-3 shrink-0 text-amber-500" />;
+    return <Clock className="h-3 w-3 shrink-0 text-orange-500" />;
   }
   if (status === "denied") {
     return <Ban className="h-3 w-3 shrink-0 text-muted-foreground" />;

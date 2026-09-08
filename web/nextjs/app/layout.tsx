@@ -1,23 +1,26 @@
 import type { Metadata } from "next";
-import { Inter, Sora, JetBrains_Mono } from "next/font/google";
+import { Plus_Jakarta_Sans, Outfit, JetBrains_Mono } from "next/font/google";
 import "@/styles/globals.css";
 import { Providers } from "./providers";
 
-// Clean chat-first type system:
-//   - Inter (variable) → UI and body text (--font-sans). Sora is a display
-//     face: at reading sizes its low x-height and wide letterforms made long
-//     agent replies tiring, so body text is set in Inter instead.
-//   - Sora (variable)  → headings, where the character earns its keep
-//     (--font-display)
-//   - JetBrains Mono   → logs, run output, telemetry (--font-mono)
-const inter = Inter({
+// Type system:
+//   - Plus Jakarta Sans → UI and body text (--font-sans). Chosen over Inter for
+//     its taller x-height: at the same pixel size it reads noticeably larger,
+//     which is most of what "make the text bigger" actually needs in a dense
+//     dashboard.
+//   - Outfit (variable)  → headings (--font-display). Geometric and openly
+//     modern, with real weight up to 800 for the big numbers on the dashboard.
+//   - JetBrains Mono     → logs, run output, telemetry (--font-mono)
+const plusJakarta = Plus_Jakarta_Sans({
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800"],
   variable: "--font-sans",
   display: "swap",
 });
 
-const sora = Sora({
+const outfit = Outfit({
   subsets: ["latin"],
+  weight: ["500", "600", "700", "800"],
   variable: "--font-display",
   display: "swap",
 });
@@ -43,7 +46,7 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${inter.variable} ${sora.variable} ${jetbrainsMono.variable}`}
+      className={`${plusJakarta.variable} ${outfit.variable} ${jetbrainsMono.variable}`}
     >
       <body className="font-sans antialiased">
         <Providers>{children}</Providers>

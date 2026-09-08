@@ -185,6 +185,20 @@ type Config struct {
 	// this, using it at all meant accepting the failures.
 	BlogProseModel      string `mapstructure:"BLOG_PROSE_MODEL"`
 	BlogStructuredModel string `mapstructure:"BLOG_STRUCTURED_MODEL"`
+
+	// CareerModel pins the model behind Career Agent, separately from the
+	// worker OLLAMA_DEFAULT_MODEL, for the same reason CHAT_MODEL and
+	// BLOG_MODEL are pinned: the work is different.
+	//
+	// Career's hardest call is CV tailoring, which must return JSON whose
+	// "from" values are exact substrings of the CV. A small model answers with
+	// one trivial replacement and the tailored CV comes back identical to the
+	// stored one. Empty falls back to the provider default.
+	//
+	// A stronger model here also rewrites more freely, including inventing
+	// experience the CV does not contain — that is what the grounding check in
+	// package career refuses, so raising this must not be done without it.
+	CareerModel string `mapstructure:"CAREER_MODEL"`
 	// BlogOrphanTimeout is how stale a running run's heartbeat may be before
 	// the reconciler marks it failed. Must outlast a legitimate long LLM call.
 	BlogOrphanTimeout time.Duration `mapstructure:"BLOG_ORPHAN_TIMEOUT"`
@@ -346,6 +360,7 @@ func Load() (*Config, error) {
 		BlogAuthorName:       viper.GetString("BLOG_AUTHOR_NAME"),
 		BlogModel:            viper.GetString("BLOG_MODEL"),
 		BlogProseModel:       viper.GetString("BLOG_PROSE_MODEL"),
+		CareerModel:          viper.GetString("CAREER_MODEL"),
 		BlogStructuredModel:  viper.GetString("BLOG_STRUCTURED_MODEL"),
 		BlogOrphanTimeout:    viper.GetDuration("BLOG_ORPHAN_TIMEOUT"),
 		BlogMaxRuntime:       viper.GetDuration("BLOG_MAX_RUNTIME"),

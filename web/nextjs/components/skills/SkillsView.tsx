@@ -25,7 +25,7 @@ const KIND_META: Record<
 > = {
   tool: { label: "Tool", icon: Wrench, color: "text-sky-700 dark:text-sky-400" },
   prompt: { label: "Prompt", icon: MessageSquareText, color: "text-violet-700 dark:text-violet-400" },
-  bundle: { label: "Bundle", icon: Boxes, color: "text-amber-700 dark:text-amber-400" },
+  bundle: { label: "Bundle", icon: Boxes, color: "text-orange-700 dark:text-orange-400" },
 };
 
 function StatusBadge({ status }: { status: string }) {

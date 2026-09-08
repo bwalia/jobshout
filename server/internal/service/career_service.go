@@ -26,6 +26,10 @@ var (
 	ErrCareerMissingInput   = errors.New("career: job URL or JD text is required")
 	ErrCareerEmptyBlacklist = errors.New("career: company or domain is required")
 	ErrCareerBadUpload      = errors.New("career: unsupported or unreadable CV file")
+	// ErrCareerSubmitDisabled answers dry_run:false. There is no submission
+	// path to fall back to, so this is refused outright rather than downgraded
+	// to a dry run the caller did not ask for and might not notice.
+	ErrCareerSubmitDisabled = errors.New("career: submitting applications is disabled — this agent prepares materials only (dry_run must be true)")
 )
 
 // CareerService is the person-scoped career specialist.
@@ -75,6 +79,7 @@ type CareerService interface {
 	AddContact(ctx context.Context, orgID, userID uuid.UUID, req model.AddCareerContactRequest) (*model.CareerContact, error)
 	ListContacts(ctx context.Context, orgID, userID uuid.UUID) ([]model.CareerContact, error)
 	BatchEvaluate(ctx context.Context, orgID, userID uuid.UUID, limit int, urls []string) (*model.CareerBatchResult, error)
+	ApplyRun(ctx context.Context, orgID, userID uuid.UUID, req model.CareerApplyRequest) (*model.CareerApplyResult, error)
 }
 
 type careerService struct {
@@ -83,6 +88,9 @@ type careerService struct {
 	fetcher   career.Fetcher
 	httpc     *http.Client
 	llm       llm.Client
+	// model pins Career Agent's model (CAREER_MODEL). Empty uses the provider
+	// default, which is too weak for CV tailoring — see config.CareerModel.
+	model     string
 	research  ResearchService
 	logger    *zap.Logger
 	scanBoard func(ctx context.Context, httpc *http.Client, board, slug, company string) ([]career.PostedJob, error)
@@ -93,6 +101,7 @@ func NewCareerService(
 	agentRepo repository.AgentRepository,
 	fetcher career.Fetcher,
 	llmClient llm.Client,
+	modelName string,
 	researchSvc ResearchService,
 	logger *zap.Logger,
 ) CareerService {
@@ -102,7 +111,7 @@ func NewCareerService(
 	return &careerService{
 		repo: repo, agentRepo: agentRepo, fetcher: fetcher,
 		httpc: &http.Client{Timeout: 20 * time.Second},
-		llm:   llmClient, research: researchSvc, logger: logger,
+		llm: llmClient, model: modelName, research: researchSvc, logger: logger,
 	}
 }
 
@@ -133,7 +142,7 @@ func (s *careerService) EnsureCareerOps(ctx context.Context, orgID uuid.UUID) (*
 }
 
 func (s *careerService) gen() career.Generator {
-	return career.GeneratorFromLLM(s.llm, "")
+	return career.GeneratorFromLLM(s.llm, s.model)
 }
 
 func (s *careerService) GetOrCreateProfile(ctx context.Context, orgID, userID uuid.UUID) (*model.CareerProfile, error) {
@@ -1111,6 +1120,250 @@ func (s *careerService) BatchEvaluate(ctx context.Context, orgID, userID uuid.UU
 		out.Results = append(out.Results, *res)
 	}
 	return out, nil
+}
+
+// Apply-run sizing. Each job costs three model calls (evaluate, tailor CV,
+// cover letter), so the limits keep a run inside the ten-minute window the
+// /career/ routes get from requestTimeout rather than having it cut off with
+// half the work persisted.
+const (
+	careerApplyDefaultLimit       = 5
+	careerApplyMaxLimit           = 25
+	careerApplyDefaultConcurrency = 4
+	careerApplyMaxConcurrency     = 8
+)
+
+// ApplyRun drives the apply sequence over several jobs: evaluate, tailor the CV
+// to that specific posting, write the cover letter, and assemble a submission
+// package. Nothing is submitted — see career.NeverSubmit.
+func (s *careerService) ApplyRun(
+	ctx context.Context,
+	orgID, userID uuid.UUID,
+	req model.CareerApplyRequest,
+) (*model.CareerApplyResult, error) {
+	if req.DryRun != nil && !*req.DryRun {
+		return nil, ErrCareerSubmitDisabled
+	}
+
+	limit := clampInt(req.Limit, careerApplyDefaultLimit, 1, careerApplyMaxLimit)
+	workers := clampInt(req.Concurrency, careerApplyDefaultConcurrency, 1, careerApplyMaxConcurrency)
+	minScore := req.MinScore
+	if minScore <= 0 {
+		minScore = career.RecommendFloor
+	}
+
+	profile, err := s.GetOrCreateProfile(ctx, orgID, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	targets, err := s.applyTargets(ctx, orgID, userID, req.URLs, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	started := time.Now()
+	out := &model.CareerApplyResult{
+		DryRun:     true,
+		MinScore:   minScore,
+		Considered: len(targets),
+		Outcomes:   make([]model.CareerApplyOutcome, len(targets)),
+		Note:       "Dry run: materials were prepared and stored. Nothing was submitted to any job portal, and no tracker row moved to applied.",
+	}
+	if minScore < career.RecommendFloor {
+		out.Notice = fmt.Sprintf(
+			"min_score %.2f is below the %.2f CareerOps floor. Materials were still prepared, but each evaluation's own recommend_apply is unchanged — preparing is not recommending.",
+			minScore, career.RecommendFloor)
+	}
+
+	if workers > len(targets) {
+		workers = max(1, len(targets))
+	}
+
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, workers)
+	for i, url := range targets {
+		wg.Add(1)
+		go func(i int, url string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			defer func() {
+				// One job panicking must not take the whole run — and must not
+				// leave a zero-value outcome that reads as a silent success.
+				if rec := recover(); rec != nil {
+					s.logger.Error("career: apply panic", zap.Any("panic", rec), zap.String("url", url))
+					out.Outcomes[i] = model.CareerApplyOutcome{
+						ListingURL: url, Stage: career.ApplyStageFailed,
+						Reason: "internal error while preparing this job",
+					}
+				}
+			}()
+			out.Outcomes[i] = s.applyOne(ctx, orgID, userID, profile, url, minScore)
+		}(i, url)
+	}
+	wg.Wait()
+
+	for _, o := range out.Outcomes {
+		switch o.Stage {
+		case career.ApplyStagePrepared:
+			out.Prepared++
+		case career.ApplyStageFailed:
+			out.Failed++
+		default:
+			out.Skipped++
+		}
+	}
+	out.DurationMs = int(time.Since(started).Milliseconds())
+	return out, nil
+}
+
+// applyTargets resolves what to work on: the caller's explicit URLs, or the
+// open pipeline when none are given — the latter is what lets this run as an
+// agent over whatever the last scan found.
+func (s *careerService) applyTargets(
+	ctx context.Context,
+	orgID, userID uuid.UUID,
+	urls []string,
+	limit int,
+) ([]string, error) {
+	seen := map[string]bool{}
+	out := make([]string, 0, limit)
+
+	add := func(u string) bool {
+		u = strings.TrimSpace(u)
+		if u == "" || seen[u] {
+			return false
+		}
+		seen[u] = true
+		out = append(out, u)
+		return len(out) >= limit
+	}
+
+	for _, u := range urls {
+		if add(u) {
+			return out, nil
+		}
+	}
+	if len(out) > 0 {
+		return out, nil
+	}
+
+	pipe, err := s.ListPipeline(ctx, orgID, userID, model.PaginationParams{Page: 1, PerPage: 100})
+	if err != nil {
+		return nil, err
+	}
+	for _, it := range pipe.Data {
+		if it.Status != model.CareerPipelineOpen {
+			continue
+		}
+		if add(it.ListingURL) {
+			break
+		}
+	}
+	return out, nil
+}
+
+// applyOne runs the sequence for a single job. Every exit records why, so a run
+// that prepares nothing still explains itself instead of returning an empty list.
+func (s *careerService) applyOne(
+	ctx context.Context,
+	orgID, userID uuid.UUID,
+	profile *model.CareerProfile,
+	url string,
+	minScore float64,
+) model.CareerApplyOutcome {
+	started := time.Now()
+	o := model.CareerApplyOutcome{ListingURL: url, Stage: career.ApplyStageSkipped}
+	done := func() model.CareerApplyOutcome {
+		o.DurationMs = int(time.Since(started).Milliseconds())
+		return o
+	}
+
+	res, err := s.Evaluate(ctx, orgID, userID, model.EvaluateCareerRequest{
+		JobURL: url, Mode: model.CareerEvalModeFull,
+	})
+	if err != nil {
+		o.Stage = career.ApplyStageFailed
+		o.Reason = err.Error()
+		return done()
+	}
+	switch {
+	case res.BlacklistHit != nil:
+		o.Reason = "company is blacklisted"
+		return done()
+	case res.Dead:
+		o.Reason = "posting is dead: " + res.DeadReason
+		return done()
+	}
+
+	ev := res.Evaluation
+	if ev == nil {
+		o.Stage = career.ApplyStageFailed
+		o.Reason = "evaluation returned no result"
+		return done()
+	}
+	o.Company, o.Role = ev.Company, ev.Role
+	o.Score = ev.Score.Overall
+	o.EvaluationID = ev.ID.String()
+	if ev.ApplicationID != nil {
+		o.ApplicationID = ev.ApplicationID.String()
+	}
+
+	if d := career.DecideApply(ev, minScore); !d.Proceed {
+		o.Reason = d.Reason
+		return done()
+	}
+
+	// The CV is re-tailored per posting: this is the step that makes the
+	// package specific to the job rather than the same document sent everywhere.
+	cvArt, err := s.TailorCV(ctx, orgID, userID, ev.ID)
+	if err != nil {
+		o.Stage = career.ApplyStageFailed
+		o.Reason = "tailor CV: " + err.Error()
+		return done()
+	}
+	o.CVArtifactID = cvArt.ID.String()
+	o.CVTailored = career.CVWasTailored(profile.CVMarkdown, cvArt.BodyMarkdown)
+
+	coverArt, err := s.CoverLetter(ctx, orgID, userID, ev.ID)
+	if err != nil {
+		o.Stage = career.ApplyStageFailed
+		o.Reason = "cover letter: " + err.Error()
+		return done()
+	}
+	o.CoverArtifactID = coverArt.ID.String()
+
+	pkg := &model.CareerArtifact{
+		OrgID: profile.OrgID, ProfileID: profile.ID, EvaluationID: &ev.ID,
+		Kind:         model.CareerArtifactAnswers,
+		Title:        "Application package (not submitted)",
+		BodyMarkdown: career.SubmissionPackage(ev, profile, cvArt.BodyMarkdown, coverArt.BodyMarkdown),
+	}
+	pkg.ApplicationID = ev.ApplicationID
+	if err := s.repo.InsertArtifact(ctx, pkg); err != nil {
+		o.Stage = career.ApplyStageFailed
+		o.Reason = "store package: " + err.Error()
+		return done()
+	}
+	o.PackageArtifactID = pkg.ID.String()
+
+	o.Stage = career.ApplyStagePrepared
+	o.Submitted = false
+	return done()
+}
+
+func clampInt(v, def, lo, hi int) int {
+	if v <= 0 {
+		v = def
+	}
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 var _ CareerService = (*careerService)(nil)

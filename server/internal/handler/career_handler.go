@@ -49,6 +49,10 @@ func (h *CareerHandler) writeErr(w http.ResponseWriter, err error) {
 		RespondError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, service.ErrCareerMissingInput), errors.Is(err, service.ErrCareerEmptyBlacklist):
 		RespondError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, service.ErrCareerSubmitDisabled):
+		// 501: the request was well-formed and the caller may not ask for this
+		// anywhere, so it is the server declining a capability, not a bad input.
+		RespondError(w, http.StatusNotImplemented, err.Error())
 	case errors.Is(err, service.ErrCareerBadUpload):
 		msg := strings.TrimPrefix(err.Error(), service.ErrCareerBadUpload.Error())
 		msg = strings.TrimPrefix(msg, ": ")
@@ -567,6 +571,25 @@ func (h *CareerHandler) BatchEvaluate(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	out, err := h.svc.BatchEvaluate(r.Context(), orgID, userID, req.Limit, req.URLs)
+	if err != nil {
+		h.writeErr(w, err)
+		return
+	}
+	RespondJSON(w, http.StatusOK, out)
+}
+
+// Apply runs the apply sequence over several jobs: evaluate, tailor the CV to
+// each posting, write the cover letter, assemble a package. It never submits.
+func (h *CareerHandler) Apply(w http.ResponseWriter, r *http.Request) {
+	orgID, userID, ok := h.ids(w, r)
+	if !ok {
+		return
+	}
+	var req model.CareerApplyRequest
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+	out, err := h.svc.ApplyRun(r.Context(), orgID, userID, req)
 	if err != nil {
 		h.writeErr(w, err)
 		return

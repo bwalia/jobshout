@@ -90,6 +90,45 @@ type RunOptions struct {
 	// SkillSlugs are extra skills to fold into this run, on top of the agent's
 	// enabled skills. Resolved by slug; unknown slugs are ignored.
 	SkillSlugs []string
+
+	// MaxTokens caps the response length of every model call in this run. It
+	// carries the resolved agent_policies.max_tokens_per_exec, which until now
+	// was stored and exposed through the API but never enforced. Zero means no
+	// policy cap, leaving each call site's own default in place; a cap only
+	// ever tightens that default, never raises it.
+	MaxTokens int
+
+	// MaxCostUSD caps what one run may spend, carrying the resolved
+	// agent_policies.max_cost_per_exec. Zero means no cap.
+	//
+	// Unlike MaxTokens this cannot be applied to a single call: cost is only
+	// known after a call returns, and a run is a loop of them. It is checked
+	// between iterations instead, against the spend accumulated so far, so the
+	// worst case is one iteration of overshoot — the alternative, refusing to
+	// start on a guess at what a run might cost, blocks legitimate work to
+	// avoid a cost nobody has incurred yet.
+	MaxCostUSD float64
+}
+
+// CostEstimator prices the tokens a run has spent so far. Satisfied by
+// *costengine.Engine, and kept as a narrow interface here so the executor does
+// not depend on the cost engine package — and so the cap is priced by exactly
+// the same function that later produces the bill, rather than a second opinion
+// that could disagree with it.
+type CostEstimator interface {
+	Calculate(provider, model string, inputTokens, outputTokens, latencyMs int) float64
+}
+
+// capTokens returns the token limit to send for one model call: the call site's
+// own default, tightened by the run's policy cap when one is set. A policy that
+// asks for more than the call site budgets is ignored — the cap is a ceiling,
+// not an allowance.
+func capTokens(ctx context.Context, def int) int {
+	limit := runOptionsFrom(ctx).MaxTokens
+	if limit > 0 && limit < def {
+		return limit
+	}
+	return def
 }
 
 type runOptionsKey struct{}
@@ -116,6 +155,7 @@ type Executor struct {
 	embedder  tools.Embedder
 	gate      ApprovalGate
 	selector  *modelselect.Selector
+	cost      CostEstimator
 	logger    *zap.Logger
 }
 
@@ -165,6 +205,44 @@ func (e *Executor) WithApprovalGate(g ApprovalGate) *Executor {
 func (e *Executor) WithAutoSelect(s *modelselect.Selector) *Executor {
 	e.selector = s
 	return e
+}
+
+// WithCostEstimator attaches the pricing used to enforce a run's cost cap.
+// Returns the receiver for fluent wiring. When no estimator is set,
+// RunOptions.MaxCostUSD is not enforced and runs proceed unchanged — the same
+// stance every other optional dependency here takes.
+func (e *Executor) WithCostEstimator(c CostEstimator) *Executor {
+	e.cost = c
+	return e
+}
+
+// costCapExceeded returns the error to fail a run with when the spend so far
+// has reached the run's cost cap, or nil to carry on.
+//
+// Called between iterations, never mid-call: a model call that has started
+// cannot be un-spent, so the cap stops the next one rather than the current
+// one. A run whose very first iteration blows the cap therefore still costs
+// that iteration — the ceiling is one iteration of overshoot, not zero.
+func (e *Executor) costCapExceeded(
+	ctx context.Context,
+	provider, modelName string,
+	inputTokens, outputTokens int,
+	runStart time.Time,
+) error {
+	limit := runOptionsFrom(ctx).MaxCostUSD
+	if limit <= 0 || e.cost == nil {
+		return nil
+	}
+
+	latencyMs := int(time.Since(runStart).Milliseconds())
+	spent := e.cost.Calculate(provider, modelName, inputTokens, outputTokens, latencyMs)
+	if spent < limit {
+		return nil
+	}
+	return fmt.Errorf(
+		"executor: execution cost cap reached (spent $%.6f of $%.6f limit)",
+		spent, limit,
+	)
 }
 
 // Run executes the ReAct loop for agent against taskPrompt.
@@ -324,10 +402,17 @@ func (e *Executor) reactLoop(ctx context.Context, st *reactLoopState) Result {
 	for iteration := st.iteration + 1; iteration <= MaxIterations; iteration++ {
 		st.log.Info("ReAct iteration", zap.Int("iteration", iteration))
 
+		if err := e.costCapExceeded(ctx, st.provider, st.modelName,
+			st.inputTokens, st.outputTokens, st.runStart); err != nil {
+			st.log.Warn("stopping run: cost cap reached", zap.Error(err))
+			return buildResult("", iteration-1, st.totalTokens, st.inputTokens, st.outputTokens,
+				st.runStart, st.provider, st.modelName, st.toolCalls, err)
+		}
+
 		llmResp, err := st.client.Generate(ctx, llm.GenerateRequest{
 			Messages:    st.messages,
 			Model:       st.modelName,
-			MaxTokens:   4096,
+			MaxTokens:   capTokens(ctx, 4096),
 			Temperature: 0.2,
 		})
 		if err != nil {
@@ -694,10 +779,17 @@ func (e *Executor) runNative(
 	for iteration := 1; iteration <= MaxIterations; iteration++ {
 		log.Info("native tool-calling iteration", zap.Int("iteration", iteration))
 
+		if err := e.costCapExceeded(ctx, resolvedProvider, modelName,
+			inputTokens, outputTokens, runStart); err != nil {
+			log.Warn("stopping run: cost cap reached", zap.Error(err))
+			return buildResult("", iteration-1, totalTokens, inputTokens, outputTokens,
+				runStart, resolvedProvider, modelName, toolCalls, err)
+		}
+
 		llmResp, err := client.Generate(ctx, llm.GenerateRequest{
 			Messages:    messages,
 			Model:       modelName,
-			MaxTokens:   4096,
+			MaxTokens:   capTokens(ctx, 4096),
 			Temperature: 0.2,
 			ToolDefs:    toolDefs,
 		})
