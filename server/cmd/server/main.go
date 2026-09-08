@@ -25,6 +25,7 @@ import (
 	"github.com/jobshout/server/internal/config"
 	"github.com/jobshout/server/internal/costengine"
 	"github.com/jobshout/server/internal/creditcontroller"
+	"github.com/jobshout/server/internal/simpro"
 	"github.com/jobshout/server/internal/scheduler"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
@@ -624,6 +625,14 @@ func main() {
 		zap.String("aivc_base_url", aivcCfg.BaseURL),
 	)
 
+	simproCfg := simpro.LoadConfig()
+	simproClient := simpro.NewClient(simproCfg, logger)
+	simproPaymentsSvc := service.NewSimproPaymentsService(simproClient)
+	logger.Info("simpro payments agent initialised",
+		zap.String("mode", simproClient.Mode()),
+		zap.Bool("live_configured", simproClient.LiveConfigured()),
+	)
+
 	// All specialists are wired this way: own package, then one Register call.
 	// A new agent does not need significant platform changes — register it.
 	agentmodules.Register(agentmodules.Deps{
@@ -635,6 +644,7 @@ func main() {
 		Reviews:          reviewSvc,
 		Images:           imageSvc,
 		CreditController: aivcClient,
+		Simpro:           simproClient,
 	})
 
 	// ─── Autonomous agent engine ────────────────────────────────────────────
@@ -836,6 +846,7 @@ func main() {
 	mailHandler := handler.NewMailHandler(mailSvc, mailCfg.FrontendBaseURL)
 	careerHandler := handler.NewCareerHandler(careerSvc)
 	creditControllerHandler := handler.NewCreditControllerHandler(creditControllerSvc)
+	simproPaymentsHandler := handler.NewSimproPaymentsHandler(simproPaymentsSvc)
 
 	// Chat, goal, multi-agent, and Telegram handlers
 	chatHandler := handler.NewChatHandler(chatSvc)
@@ -1177,6 +1188,19 @@ func main() {
 				r.Post("/triage/batch", creditControllerHandler.TriageBatch)
 				r.Get("/queue", creditControllerHandler.Queue)
 				r.Post("/approve", creditControllerHandler.Approve)
+			})
+
+			r.Route("/simpro-payments", func(r chi.Router) {
+				r.Get("/status", simproPaymentsHandler.Status)
+				r.Get("/summary", simproPaymentsHandler.Summary)
+				r.Get("/invoices", simproPaymentsHandler.ListInvoices)
+				r.Get("/payments", simproPaymentsHandler.ListPayments)
+				r.Get("/jobs", simproPaymentsHandler.ListJobs)
+				r.Get("/aging", simproPaymentsHandler.Aging)
+				r.Get("/reconcile-preview", simproPaymentsHandler.ReconcilePreview)
+				r.Get("/month-end", simproPaymentsHandler.MonthEnd)
+				r.Get("/fgas", simproPaymentsHandler.FGas)
+				r.Get("/fgas/events", simproPaymentsHandler.ListFGas)
 			})
 
 			// Plugins (user-defined LangGraph/LangChain workflows)

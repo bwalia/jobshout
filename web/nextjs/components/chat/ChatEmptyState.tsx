@@ -11,6 +11,7 @@ import {
   Landmark,
   LayoutDashboard,
   Mail,
+  Receipt,
   Search,
   ShieldCheck,
   Sparkles,
@@ -123,6 +124,10 @@ const BUILTIN_META: Record<string, { icon: LucideIcon; blurb: string }> = {
   credit_controller: {
     icon: Landmark,
     blurb: "Triages AP invoices and runs month-end",
+  },
+  simpro_payments: {
+    icon: Receipt,
+    blurb: "Simpro AR, payments, and F-Gas compliance",
   },
 };
 
