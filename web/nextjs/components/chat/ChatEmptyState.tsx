@@ -8,6 +8,7 @@ import {
   FileText,
   GitPullRequest,
   Image as ImageIcon,
+  Landmark,
   LayoutDashboard,
   Mail,
   Search,
@@ -119,6 +120,10 @@ const BUILTIN_META: Record<string, { icon: LucideIcon; blurb: string }> = {
     blurb: "Reads diffs and flags the risky ones",
   },
   images: { icon: ImageIcon, blurb: "Generates and edits pictures" },
+  credit_controller: {
+    icon: Landmark,
+    blurb: "Triages AP invoices and runs month-end",
+  },
 };
 
 export function ChatEmptyState({ onPick }: { onPick: (prompt: string) => void }) {
@@ -127,7 +132,7 @@ export function ChatEmptyState({ onPick }: { onPick: (prompt: string) => void })
 
   const specialists = useMemo(() => {
     const all = agentsQuery.data?.data ?? [];
-    return all.filter((a) => typeof a.metadata?.builtin === "string").slice(0, 7);
+    return all.filter((a) => typeof a.metadata?.builtin === "string").slice(0, 8);
   }, [agentsQuery.data]);
 
   const active = GROUPS.find((g) => g.name === group) ?? GROUPS[0];
