@@ -15,11 +15,16 @@ logLevel: debug
 #   kubectl -n int create secret generic jobshout-google \
 #     --from-literal=GOOGLE_OAUTH_CLIENT_ID=... \
 #     --from-literal=GOOGLE_OAUTH_CLIENT_SECRET=...
+#   kubectl -n int create secret generic jobshout-wslproxy \
+#     --from-literal=WSLPROXY_API_TOKEN=...
 extraSecretRefs:
   - jobshout-cms
   - jobshout-review
   - jobshout-mail
   - jobshout-google
+  # wafLab.baseURL below is set, but the client stays disabled until it also has
+  # a token (or username+password) — those arrive only through this secret.
+  - jobshout-wslproxy
 
 # opsapi CMS — the Article Writer files generated articles there as drafts.
 # The host and namespace slug are not secret; the API key is, and comes from
