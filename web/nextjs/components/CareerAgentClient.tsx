@@ -247,24 +247,42 @@ export function CareerAgentClient() {
       .catch(() => setArtifacts([]));
   }, [selected?.application?.id, selected?.evaluation?.application_id]);
 
+  // True when the form holds edits the server has not been told about. The
+  // scan filters by the SAVED profile, so scanning while this is true both
+  // ignores the titles on screen and — once loadAll refreshes from the
+  // server — silently replaces them with what was stored.
+  const profileDirty =
+    fullName !== (profile?.identity?.full_name ?? "") ||
+    sponsorship !== !!profile?.work_auth?.needs_sponsorship ||
+    minComp !== (profile?.targets?.min_comp ?? "") ||
+    houseRules !== (profile?.house_rules ?? "") ||
+    titles.join("\u0000") !== (profile?.targets?.titles ?? []).join("\u0000");
+
+  // The PATCH on its own, so scan() can persist without the toasts and the
+  // full reload that saveProfile() runs.
+  async function persistProfile() {
+    const p = await patchCareerProfile({
+      ...(cvDraft.trim() ? { cv_markdown: cvDraft } : {}),
+      identity: { ...(profile?.identity ?? {}), full_name: fullName },
+      work_auth: { ...(profile?.work_auth ?? {}), needs_sponsorship: sponsorship },
+      targets: {
+        ...(profile?.targets ?? {}),
+        titles,
+        min_comp: minComp,
+      },
+      house_rules: houseRules,
+    });
+    setProfile(p);
+    return p;
+  }
+
   async function saveProfile() {
     setBusy(true);
     setSaving(true);
     setSavedFlash(false);
     setError("");
     try {
-      const p = await patchCareerProfile({
-        ...(cvDraft.trim() ? { cv_markdown: cvDraft } : {}),
-        identity: { ...(profile?.identity ?? {}), full_name: fullName },
-        work_auth: { ...(profile?.work_auth ?? {}), needs_sponsorship: sponsorship },
-        targets: {
-          ...(profile?.targets ?? {}),
-          titles,
-          min_comp: minComp,
-        },
-        house_rules: houseRules,
-      });
-      setProfile(p);
+      await persistProfile();
       const d = await loadAll();
       setSavedFlash(true);
       toast.success("Profile saved.");
@@ -429,6 +447,11 @@ export function CareerAgentClient() {
     setBusy(true);
     setError("");
     try {
+      // Scoring and tailoring read the SAVED profile, so unsaved edits would be
+      // ignored here and then overwritten by the reload below.
+      if (profileDirty) {
+        await persistProfile();
+      }
       const out = await careerApplyRun({
         // No selection means "work through the open pipeline", which is what
         // makes this an agent rather than a bulk button.
@@ -595,6 +618,12 @@ export function CareerAgentClient() {
     setBusy(true);
     setError("");
     try {
+      // Save first when the form is ahead of the server. Without this the scan
+      // runs against the stored profile — so freshly typed target titles are
+      // not applied as a filter — and the reload below then overwrites them.
+      if (profileDirty) {
+        await persistProfile();
+      }
       const out = (await careerScan(
         allCompanies
           ? { board: "all" }

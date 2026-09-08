@@ -4,6 +4,13 @@ services:
     # vector, which stock postgres images cannot install. Keep this in step with
     # postgres.image in deploy/helm/jobshout/values.yaml.
     image: pgvector/pgvector:pg16
+    # Docker gives a container 64MB of /dev/shm. Postgres puts parallel query
+    # workers there, and when a segment cannot be resized the backend dies —
+    # the postmaster then kills every other backend and reinitialises, which
+    # reads as random "server process exited with exit code 2" crashes under
+    # nothing more than normal load. 256MB is the usual floor for Postgres in
+    # a container; it is shared memory, so it costs nothing until used.
+    shm_size: 256mb
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-jobshout}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jobshout}

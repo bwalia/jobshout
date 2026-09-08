@@ -281,6 +281,11 @@ pythonRuntime:
     limits: { cpu: "2", memory: 2Gi }
 
 postgres:
+  # Size of the in-memory /dev/shm mount. Postgres puts parallel query workers
+  # there; the platform default of 64Mi is low enough that a backend can die
+  # mid-query and take the cluster down with it. Counts against
+  # resources.limits.memory below.
+  shmSize: 256Mi
   enabled: true
   port: 5432
   database: jobshout

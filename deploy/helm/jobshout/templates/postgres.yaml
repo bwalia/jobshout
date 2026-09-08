@@ -42,6 +42,14 @@ spec:
           volumeMounts:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data
+            # Kubernetes, like Docker, gives a container 64MB of /dev/shm.
+            # Postgres puts parallel query workers there; when a segment cannot
+            # be resized the backend dies and the postmaster reinitialises the
+            # whole cluster, which surfaces as random restarts under ordinary
+            # load. An in-memory emptyDir raises it. Counts against the pod's
+            # memory limit, so keep postgres.resources.limits.memory above it.
+            - name: dshm
+              mountPath: /dev/shm
           resources:
             {{- toYaml .Values.postgres.resources | nindent 12 }}
           livenessProbe:
@@ -54,6 +62,11 @@ spec:
               command: ["pg_isready", "-U", {{ .Values.secrets.databaseUser | default "jobshout" | quote }}]
             initialDelaySeconds: 5
             periodSeconds: 5
+      volumes:
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ .Values.postgres.shmSize | default "256Mi" }}
   volumeClaimTemplates:
     - metadata:
         name: postgres-data
