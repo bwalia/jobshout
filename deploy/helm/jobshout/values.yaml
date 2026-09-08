@@ -178,6 +178,22 @@ pentest:
   # Comma-separated hosts, wildcards, CIDRs or URL prefixes.
   targetAllowlist: ""
 
+# WAF Efficacy Lab — talks to wslproxy. Empty baseURL disables the feature.
+# Token / username / password belong in extraSecretRefs (never committed).
+#
+#   kubectl -n <ring> create secret generic jobshout-wslproxy \
+#     --from-literal=WSLPROXY_API_TOKEN=<token> \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#
+wafLab:
+  enabled: true
+  baseURL: ""
+  platform: "openresty-admin-next"
+  profile: "prod"
+  timeout: "30s"
+  labMaxRuntime: "10m"
+  targetAllowlist: ""
+
 # Mail Agent — one shared org Gmail. OAuth client id/secret and GMAIL_TOKEN_KEY
 # are secrets (extraSecretRefs), not chart values. Empty client id leaves Connect
 # disabled; the builtin agent still seeds.

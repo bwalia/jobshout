@@ -8,6 +8,7 @@ import {
   Plus,
   Rocket,
   BookOpen,
+  Shield,
   ShieldAlert,
   GitPullRequest,
   Mail,
@@ -66,6 +67,7 @@ type Selection =
 
 const RAIL_ICONS: Record<string, LucideIcon> = {
   "shield-alert": ShieldAlert,
+  shield: Shield,
   "git-pull-request": GitPullRequest,
   mail: Mail,
   briefcase: Briefcase,

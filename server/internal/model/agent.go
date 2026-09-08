@@ -55,6 +55,9 @@ const (
 	// BuiltinPentester is the Penetration Testing Agent: autonomous security testing
 	// powered by Strix. Tests live APIs, applications, and codebases for vulnerabilities.
 	BuiltinPentester = "pentester"
+	// BuiltinWAFLab is the WAF Efficacy Lab: provisions a before/after WAF pair on
+	// wslproxy and measures the attack matrix (secure vs open).
+	BuiltinWAFLab = "waf_lab"
 	// BuiltinPRReviewer reviews GitHub pull requests via the in-cluster review-bot sidecar.
 	BuiltinPRReviewer = "pr_reviewer"
 	// BuiltinMail is the Mail Agent: one shared org Gmail, draft-only replies,

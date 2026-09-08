@@ -13,6 +13,7 @@ import {
   Mail,
   Receipt,
   Search,
+  Shield,
   ShieldCheck,
   Sparkles,
   type LucideIcon,
@@ -272,6 +273,7 @@ const BUILTIN_ICONS: Record<string, LucideIcon> = {
   images: ImageIcon,
   credit_controller: Landmark,
   simpro_payments: Receipt,
+  waf_lab: Shield,
 };
 
 function count(n: number | undefined): string {
