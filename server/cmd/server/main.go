@@ -24,6 +24,7 @@ import (
 	"github.com/jobshout/server/internal/chatsvc"
 	"github.com/jobshout/server/internal/config"
 	"github.com/jobshout/server/internal/costengine"
+	"github.com/jobshout/server/internal/creditcontroller"
 	"github.com/jobshout/server/internal/scheduler"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
@@ -616,16 +617,24 @@ func main() {
 	careerSvc := service.NewCareerService(careerRepo, agentRepo, researchClient, careerLLM, cfg.CareerModel, researchSvc, logger)
 	logger.Info("career ops agent initialised")
 
+	aivcCfg := creditcontroller.LoadConfig()
+	aivcClient := creditcontroller.NewClient(aivcCfg, logger)
+	creditControllerSvc := service.NewCreditControllerService(aivcClient)
+	logger.Info("credit controller agent initialised",
+		zap.String("aivc_base_url", aivcCfg.BaseURL),
+	)
+
 	// All specialists are wired this way: own package, then one Register call.
 	// A new agent does not need significant platform changes — register it.
 	agentmodules.Register(agentmodules.Deps{
-		Career:   careerSvc,
-		Research: researchSvc,
-		Blog:     blogSvc,
-		Mail:     mailSvc,
-		Pentest:  pentestSvc,
-		Reviews:  reviewSvc,
-		Images:   imageSvc,
+		Career:           careerSvc,
+		Research:         researchSvc,
+		Blog:             blogSvc,
+		Mail:             mailSvc,
+		Pentest:          pentestSvc,
+		Reviews:          reviewSvc,
+		Images:           imageSvc,
+		CreditController: aivcClient,
 	})
 
 	// ─── Autonomous agent engine ────────────────────────────────────────────
@@ -826,6 +835,7 @@ func main() {
 	reviewHandler := handler.NewReviewHandler(reviewSvc)
 	mailHandler := handler.NewMailHandler(mailSvc, mailCfg.FrontendBaseURL)
 	careerHandler := handler.NewCareerHandler(careerSvc)
+	creditControllerHandler := handler.NewCreditControllerHandler(creditControllerSvc)
 
 	// Chat, goal, multi-agent, and Telegram handlers
 	chatHandler := handler.NewChatHandler(chatSvc)
@@ -1155,6 +1165,18 @@ func main() {
 				r.Get("/doctor", careerHandler.Doctor)
 				r.Get("/patterns", careerHandler.Patterns)
 				r.Get("/upskill", careerHandler.Upskill)
+			})
+
+			r.Route("/credit-controller", func(r chi.Router) {
+				r.Get("/status", creditControllerHandler.Status)
+				r.Get("/summary", creditControllerHandler.Summary)
+				r.Get("/invoices", creditControllerHandler.ListInvoices)
+				r.Get("/invoices/{invoiceID}", creditControllerHandler.GetInvoice)
+				r.Post("/invoices/generate", creditControllerHandler.Generate)
+				r.Post("/triage", creditControllerHandler.Triage)
+				r.Post("/triage/batch", creditControllerHandler.TriageBatch)
+				r.Get("/queue", creditControllerHandler.Queue)
+				r.Post("/approve", creditControllerHandler.Approve)
 			})
 
 			// Plugins (user-defined LangGraph/LangChain workflows)

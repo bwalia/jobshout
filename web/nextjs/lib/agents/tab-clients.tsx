@@ -2,6 +2,7 @@
 
 import type { ComponentType } from "react";
 import { CareerAgentClient } from "@/components/CareerAgentClient";
+import { CreditControllerAgentClient } from "@/components/CreditControllerAgentClient";
 import { MailAgentClient } from "@/components/MailAgentClient";
 import { PentestAgentClient } from "@/components/PentestAgentClient";
 import { ReviewAgentClient } from "@/components/ReviewAgentClient";
@@ -19,6 +20,7 @@ export const AGENT_CLIENTS: Record<string, ComponentType> = {
   mail: MailAgentClient,
   pentester: PentestAgentClient,
   pr_reviewer: ReviewAgentClient,
+  credit_controller: CreditControllerAgentClient,
   article_writer: function ArticleWriterClient() {
     return <ArticlesView hideHeader />;
   },

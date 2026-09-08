@@ -77,6 +77,7 @@ echo "[start-dev] Starting Go backend on :8080 (logs: $LOG_DIR/server.log)"
   MINIO_SECRET_KEY="${MINIO_SECRET_KEY:-minioadmin}" \
   PYTHON_SIDECAR_URL="${PYTHON_SIDECAR_URL:-http://localhost:8001}" \
   OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://localhost:11434}" \
+  AIVC_BASE_URL="${AIVC_BASE_URL:-http://127.0.0.1:8000}" \
   IMAGE_BASE_URL="${IMAGE_BASE_URL:-http://localhost:11435}" \
   IMAGE_JWT_SECRET="${IMAGE_JWT_SECRET:-}" \
   STRIX_ENABLED="${STRIX_ENABLED:-true}" \

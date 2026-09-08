@@ -9,6 +9,7 @@ import {
   FileText,
   GitPullRequest,
   Image as ImageIcon,
+  Landmark,
   Mail,
   Search,
   ShieldCheck,
@@ -268,6 +269,7 @@ const BUILTIN_ICONS: Record<string, LucideIcon> = {
   pentester: ShieldCheck,
   pr_reviewer: GitPullRequest,
   images: ImageIcon,
+  credit_controller: Landmark,
 };
 
 function count(n: number | undefined): string {

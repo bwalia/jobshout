@@ -13,6 +13,7 @@ import (
 	"github.com/jobshout/server/internal/agentmodule"
 	"github.com/jobshout/server/internal/blog"
 	"github.com/jobshout/server/internal/career"
+	"github.com/jobshout/server/internal/creditcontroller"
 	"github.com/jobshout/server/internal/images"
 	"github.com/jobshout/server/internal/mail"
 	"github.com/jobshout/server/internal/pentester"
@@ -25,13 +26,14 @@ import (
 // agent's Launch returns "not configured". Extra chat tools attach via
 // agentmodule.SetToolInstaller in the tools package, not from here.
 type Deps struct {
-	Career   service.CareerService
-	Research service.ResearchService
-	Blog     service.BlogService
-	Mail     service.MailService
-	Pentest  service.PentestService
-	Reviews  service.ReviewService
-	Images   *service.ImageService
+	Career           service.CareerService
+	Research         service.ResearchService
+	Blog             service.BlogService
+	Mail             service.MailService
+	Pentest          service.PentestService
+	Reviews          service.ReviewService
+	Images           *service.ImageService
+	CreditController *creditcontroller.Client
 }
 
 func init() {
@@ -55,6 +57,7 @@ func Register(d Deps) {
 	agentmodule.Register(blog.Module(d.Blog))
 	agentmodule.Register(images.Module(imageAdapter{d.Images}))
 	agentmodule.Register(research.Module(d.Research))
+	agentmodule.Register(creditcontroller.Module(d.CreditController))
 }
 
 type imageAdapter struct{ svc *service.ImageService }
