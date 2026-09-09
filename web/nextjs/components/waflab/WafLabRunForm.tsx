@@ -21,7 +21,7 @@ export function WafLabRunForm({ agentId, onRunCreated }: WafLabRunFormProps) {
   const [wslproxyBaseUrl, setWslproxyBaseUrl] = useState("https://lon1.pop0.uk");
   const [secureHost, setSecureHost] = useState("payments-secure.fictionally.org");
   const [openHost, setOpenHost] = useState("payments-open.fictionally.org");
-  const [originUpstream, setOriginUpstream] = useState("127.0.0.1:30084");
+  const [originUpstream, setOriginUpstream] = useState("");
   const [policyId, setPolicyId] = useState("waf-policy-payments-hard");
   const [mode, setMode] = useState("provision_and_test");
   const [manageDns, setManageDns] = useState("off");
@@ -42,6 +42,9 @@ export function WafLabRunForm({ agentId, onRunCreated }: WafLabRunFormProps) {
         setEnabled(Boolean(st.enabled));
         if (typeof st.wslproxy_base_url === "string" && st.wslproxy_base_url) {
           setWslproxyBaseUrl(st.wslproxy_base_url);
+        }
+        if (typeof st.origin_upstream === "string" && st.origin_upstream) {
+          setOriginUpstream(st.origin_upstream);
         }
         const cf = st.cloudflare_configured ? "Cloudflare DNS available" : "DNS phase will skip without CLOUDFLARE_API_TOKEN";
         setStatusNote(
@@ -133,6 +136,7 @@ export function WafLabRunForm({ agentId, onRunCreated }: WafLabRunFormProps) {
           <input
             className={inputClass}
             value={originUpstream}
+            placeholder="host:port of the origin (defaults to the server setting)"
             onChange={(e) => setOriginUpstream(e.target.value)}
           />
         </Field>

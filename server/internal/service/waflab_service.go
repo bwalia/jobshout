@@ -82,6 +82,7 @@ func (s *wafLabService) Status() map[string]any {
 		"platform":              s.cfg.Platform,
 		"profile":               s.cfg.Profile,
 		"lab_max_runtime":       s.cfg.LabMaxRuntime.String(),
+		"origin_upstream":       waflab.DefaultOriginUpstream(),
 	}
 }
 
@@ -114,7 +115,7 @@ func (s *wafLabService) CreateRun(ctx context.Context, req model.CreateWAFLabRun
 		Mode:            req.Mode,
 		SecureHost:      strings.TrimSpace(req.SecureHost),
 		OpenHost:        strings.TrimSpace(req.OpenHost),
-		OriginUpstream:  defaultStr(req.OriginUpstream, "127.0.0.1:30084"),
+		OriginUpstream:  defaultStr(req.OriginUpstream, waflab.DefaultOriginUpstream()),
 		PolicyID:        defaultStr(req.PolicyID, "waf-policy-payments-hard"),
 		ManageDNS:       defaultStr(req.ManageDNS, "off"),
 		DNSZone:         strings.TrimSpace(req.DNSZone),
