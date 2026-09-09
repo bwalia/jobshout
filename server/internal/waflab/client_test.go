@@ -198,3 +198,59 @@ func TestEnabledRequiresBaseAndCreds(t *testing.T) {
 		t.Fatal("flag false should disable")
 	}
 }
+
+func TestHTMLErrorPageIsSummarised(t *testing.T) {
+	// wslproxy answers some 5xx with a full styled error page. Verbatim, it put
+	// kilobytes of CSS in the run's step detail and hid the actual failure.
+	page := `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8" />
+<title>Server Error | WSL Proxy</title>
+<style>` + strings.Repeat(".btn-home { background: var(--gradient); }\n", 200) + `</style>
+</head><body><div class="error-code">500</div></body></html>`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(page))
+	}))
+	defer srv.Close()
+
+	c := NewClient(Config{Enabled: true, BaseURL: srv.URL, APIToken: "t", Platform: "openresty-admin-next"}, nil)
+	err := c.SeedWAFRules(context.Background(), "prod")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "background") || strings.Contains(msg, "<style>") {
+		t.Fatalf("markup leaked into the error: %s", msg)
+	}
+	if !strings.Contains(msg, "Server Error | WSL Proxy") {
+		t.Fatalf("title should survive: %s", msg)
+	}
+	if !strings.Contains(msg, "HTTP 500") || !strings.Contains(msg, "/api/waf_rules/seed") {
+		t.Fatalf("status and path should survive: %s", msg)
+	}
+	if len(msg) > 300 {
+		t.Fatalf("error is %d bytes, want one readable line: %s", len(msg), msg)
+	}
+}
+
+func TestLongNonHTMLErrorIsTruncated(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, strings.Repeat("stack frame ", 500), http.StatusBadGateway)
+	}))
+	defer srv.Close()
+
+	c := NewClient(Config{Enabled: true, BaseURL: srv.URL, APIToken: "t", Platform: "openresty-admin-next"}, nil)
+	err := c.SeedWAFRules(context.Background(), "prod")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "more bytes)") {
+		t.Fatalf("expected a truncation note: %s", msg)
+	}
+	if len(msg) > 600 {
+		t.Fatalf("error is %d bytes: %s", len(msg), msg)
+	}
+}

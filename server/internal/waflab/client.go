@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"go.uber.org/zap"
 )
@@ -524,7 +525,7 @@ func (c *Client) doOnce(ctx context.Context, method, path string, payload []byte
 		return err
 	}
 	if resp.StatusCode >= 300 {
-		msg := redactSecrets(strings.TrimSpace(string(data)))
+		msg := errorBody(resp.Header.Get("Content-Type"), data)
 		return fmt.Errorf("wslproxy %s %s: HTTP %d: %s", method, path, resp.StatusCode, msg)
 	}
 	if dest == nil || len(data) == 0 {
@@ -534,6 +535,61 @@ func (c *Client) doOnce(ctx context.Context, method, path string, payload []byte
 		return fmt.Errorf("wslproxy decode %s: %w", path, err)
 	}
 	return nil
+}
+
+// maxErrBody bounds what a failed response contributes to an error string. The
+// body is read to 8MB because success payloads are large; an error is read by a
+// human in a run step, so it gets one line.
+const maxErrBody = 400
+
+// errorBody reduces a failed response body to something legible. wslproxy answers
+// some 5xx with its full styled HTML error page — inlining that verbatim buried
+// the actual failure under kilobytes of CSS in the run's step detail.
+func errorBody(contentType string, data []byte) string {
+	s := strings.TrimSpace(string(data))
+	if s == "" {
+		return "(empty body)"
+	}
+	if isHTML(contentType, s) {
+		if title := htmlTitle(s); title != "" {
+			return "HTML error page: " + title
+		}
+		return "HTML error page (no title)"
+	}
+	return truncate(redactSecrets(s), maxErrBody)
+}
+
+func isHTML(contentType, body string) bool {
+	if strings.Contains(strings.ToLower(contentType), "text/html") {
+		return true
+	}
+	head := strings.ToLower(body)
+	if len(head) > 64 {
+		head = head[:64]
+	}
+	return strings.HasPrefix(head, "<!doctype html") || strings.HasPrefix(head, "<html")
+}
+
+var reTitle = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
+
+func htmlTitle(body string) string {
+	m := reTitle.FindStringSubmatch(body)
+	if len(m) < 2 {
+		return ""
+	}
+	return truncate(strings.Join(strings.Fields(m[1]), " "), 120)
+}
+
+// truncate cuts on a rune boundary and says how much it dropped.
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	cut := max
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return fmt.Sprintf("%s… (%d more bytes)", s[:cut], len(s)-cut)
 }
 
 // redactSecrets strips bearer tokens and password-like values from error text.
