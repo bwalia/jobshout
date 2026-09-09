@@ -58,7 +58,7 @@ func (s *Service) LaunchFromChat(ctx context.Context, orgID, userID uuid.UUID, a
 		values = map[string]string{}
 	}
 	hint := strings.TrimSpace(values["project"])
-	dec, err := s.ResolveProject(ctx, orgID, hint, lastProjectID)
+	dec, err := s.ResolveProject(ctx, orgID, userID, hint, lastProjectID)
 	if err != nil {
 		return nil, nil, err
 	}

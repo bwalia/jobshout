@@ -18,10 +18,11 @@ import (
 )
 
 var (
-	reBearer   = regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9\-_\.=]+`)
-	rePassword = regexp.MustCompile(`(?i)"password"\s*:\s*"[^"]*"`)
-	reAccess   = regexp.MustCompile(`(?i)"accessToken"\s*:\s*"[^"]*"`)
-	reAPIToken = regexp.MustCompile(`(?i)"api[_-]?token"\s*:\s*"[^"]*"`)
+	reBearer    = regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9\-_\.=]+`)
+	rePassword  = regexp.MustCompile(`(?i)"password"\s*:\s*"[^"]*"`)
+	reAccess    = regexp.MustCompile(`(?i)"accessToken"\s*:\s*"[^"]*"`)
+	reAPIToken  = regexp.MustCompile(`(?i)"api[_-]?token"\s*:\s*"[^"]*"`)
+	reHTMLTitle = regexp.MustCompile(`(?is)<title>(.*?)</title>`)
 )
 
 // Config is loaded from WSLPROXY_* environment variables.
@@ -88,6 +89,21 @@ func LoadConfig() Config {
 		LabMaxRuntime: maxRT,
 		TargetAllow:   allow,
 	}
+}
+
+// DefaultOriginUpstream is the address the demo hosts proxy to.
+//
+// It must not be a loopback address: wslproxy commonly runs off-cluster, where
+// 127.0.0.1 is the proxy host itself rather than the node holding the
+// NodePort, which yields a 502 on every lab host. A resolvable name also
+// survives the origin node being replaced, which a pinned node IP does not.
+// wslproxy strips the scheme before proxy_pass (execution.lua), so including
+// it here is safe.
+func DefaultOriginUpstream() string {
+	if v := strings.TrimSpace(os.Getenv("WSLPROXY_ORIGIN_UPSTREAM")); v != "" {
+		return v
+	}
+	return "http://origin-uk-001.pop0.uk:30084"
 }
 
 func parseBool(v string, def bool) bool {
@@ -524,7 +540,7 @@ func (c *Client) doOnce(ctx context.Context, method, path string, payload []byte
 		return err
 	}
 	if resp.StatusCode >= 300 {
-		msg := redactSecrets(strings.TrimSpace(string(data)))
+		msg := redactSecrets(summarizeErrorBody(string(data)))
 		return fmt.Errorf("wslproxy %s %s: HTTP %d: %s", method, path, resp.StatusCode, msg)
 	}
 	if dest == nil || len(data) == 0 {
@@ -534,6 +550,48 @@ func (c *Client) doOnce(ctx context.Context, method, path string, payload []byte
 		return fmt.Errorf("wslproxy decode %s: %w", path, err)
 	}
 	return nil
+}
+
+// summarizeErrorBody reduces a failed response body to a line a person can
+// read in the run history. wslproxy answers 5xx with a full HTML error page —
+// several KB of inline CSS — and putting that in the error buried the actual
+// failure behind a wall of stylesheet in the task log.
+func summarizeErrorBody(body string) string {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return "(empty response body)"
+	}
+	// wslproxy's structured errors: {"error":{"message":..,"code":..}}.
+	var probe struct {
+		Error struct {
+			Message string `json:"message"`
+			Code    string `json:"code"`
+		} `json:"error"`
+		Message string `json:"message"`
+	}
+	if json.Unmarshal([]byte(body), &probe) == nil {
+		if m := strings.TrimSpace(probe.Error.Message); m != "" {
+			if probe.Error.Code != "" {
+				return m + " (" + probe.Error.Code + ")"
+			}
+			return m
+		}
+		if m := strings.TrimSpace(probe.Message); m != "" {
+			return m
+		}
+	}
+	if lower := strings.ToLower(body); strings.HasPrefix(lower, "<!doctype") || strings.HasPrefix(lower, "<html") {
+		if m := reHTMLTitle.FindStringSubmatch(body); len(m) == 2 {
+			if t := strings.TrimSpace(m[1]); t != "" {
+				return "HTML error page from wslproxy (" + t + ") — check the wslproxy error log for the real cause"
+			}
+		}
+		return "HTML error page from wslproxy — check the wslproxy error log for the real cause"
+	}
+	if len(body) > 400 {
+		return body[:400] + "… (truncated)"
+	}
+	return body
 }
 
 // redactSecrets strips bearer tokens and password-like values from error text.
