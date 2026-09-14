@@ -47,16 +47,22 @@ func Module(client *Client) agentmodule.Module {
 			}
 		},
 		Ready: func(ctx context.Context, _ uuid.UUID) []agentmodule.Issue {
-			if client == nil || !client.Enabled() {
+			if client == nil {
 				return []agentmodule.Issue{{
 					Severity: "warning", Code: "aivc_unconfigured",
-					Message: "AIVC_BASE_URL is not set. Point it at the aivc-agents API (default http://127.0.0.1:8000).",
+					Message: "Credit Controller client not initialised.",
+				}}
+			}
+			if !client.LiveConfigured() {
+				return []agentmodule.Issue{{
+					Severity: "info", Code: "aivc_demo_mode",
+					Message: demoStatusMessage,
 				}}
 			}
 			if _, err := client.Ping(ctx); err != nil {
 				return []agentmodule.Issue{{
 					Severity: "warning", Code: "aivc_unreachable",
-					Message: "Credit Controller runtime unreachable at " + client.baseURL + ". Run `make serve` in aivc-agents.",
+					Message: err.Error(),
 				}}
 			}
 			return nil
@@ -121,8 +127,8 @@ func Seed(orgID uuid.UUID) *model.Agent {
 
 func launch(client *Client) agentmodule.LaunchFunc {
 	return func(ctx context.Context, in agentmodule.LaunchInput) (*agentmodule.LaunchOutput, error) {
-		if client == nil || !client.Enabled() {
-			return nil, fmt.Errorf("credit controller runtime not configured (set AIVC_BASE_URL)")
+		if client == nil {
+			return nil, fmt.Errorf("credit controller client not initialised")
 		}
 		action := strings.TrimSpace(in.Values["action"])
 		if action == "" {
@@ -136,8 +142,24 @@ func launch(client *Client) agentmodule.LaunchFunc {
 		var (
 			msg  string
 			desc string
-			meta = map[string]any{"credit_controller_action": action}
+			meta = map[string]any{"credit_controller_action": action, "mode": client.Mode()}
 		)
+
+		// Demo mode: reads come from fixtures, but generation, triage and
+		// month-end need aivc-agents. Finish the task with that explanation
+		// rather than an error that leaves it stuck in progress.
+		if !client.LiveConfigured() {
+			if label, mutating := demoActionLabels[action]; mutating {
+				msg = demoWriteError(label).Error()
+				meta["write_live"] = false
+				return &agentmodule.LaunchOutput{
+					Message:     msg,
+					Description: msg + "\n\nOpen: /panel/task-manager?agent=credit-controller",
+					Status:      "done",
+					ExtraMeta:   meta,
+				}, nil
+			}
+		}
 
 		switch action {
 		case "summary":
@@ -146,6 +168,9 @@ func launch(client *Client) agentmodule.LaunchFunc {
 				return nil, err
 			}
 			msg = "Credit controller summary ready"
+			if !client.LiveConfigured() {
+				msg += " (demo fixtures — set AIVC_BASE_URL for the live mailbox)"
+			}
 			desc = fmt.Sprintf("Mailbox summary loaded. Open: /panel/task-manager?agent=credit-controller\n\n%v", compactJSON(sum))
 			meta["summary"] = sum
 
@@ -237,14 +262,29 @@ func launch(client *Client) agentmodule.LaunchFunc {
 	}
 }
 
+// demoActionLabels names the launch actions that need aivc-agents to run.
+var demoActionLabels = map[string]string{
+	"generate_monthly": "AI invoice generation",
+	"generate_weekly":  "AI invoice generation",
+	"triage_one":       "Triage",
+	"triage_untriaged": "Batch triage",
+	"month_end":        "The month-end run",
+}
+
 func untriagedIDs(list map[string]any) []string {
-	raw, _ := list["invoices"].([]any)
-	var ids []string
-	for _, row := range raw {
-		m, ok := row.(map[string]any)
-		if !ok {
-			continue
+	var rows []map[string]any
+	switch raw := list["invoices"].(type) {
+	case []any: // decoded from aivc-agents JSON
+		for _, row := range raw {
+			if m, ok := row.(map[string]any); ok {
+				rows = append(rows, m)
+			}
 		}
+	case []map[string]any: // demo fixtures
+		rows = raw
+	}
+	var ids []string
+	for _, m := range rows {
 		if m["workflow"] != nil {
 			continue
 		}

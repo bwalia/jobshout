@@ -76,11 +76,13 @@ type MailScopeDoc struct {
 
 // MailConnectionStatus is the safe API view of a connection: no tokens.
 type MailConnectionStatus struct {
-	Configured            bool           `json:"configured"`
-	Connected             bool           `json:"connected"`
-	Email                 string         `json:"email,omitempty"`
-	Status                string         `json:"status"`
-	StatusError           string         `json:"status_error,omitempty"`
+	Configured  bool   `json:"configured"`
+	Connected   bool   `json:"connected"`
+	Email       string `json:"email,omitempty"`
+	Status      string `json:"status"`
+	StatusError string `json:"status_error,omitempty"`
+	// NeedsReconnect: Google revoked the grant; only a fresh consent restores it.
+	NeedsReconnect        bool           `json:"needs_reconnect"`
 	AllowMailboxMutations bool           `json:"allow_mailbox_mutations"`
 	Rules                 MailWatchRules `json:"rules"`
 	KnowledgeURLs         []string       `json:"knowledge_urls"`

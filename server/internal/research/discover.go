@@ -6,8 +6,6 @@ import (
 	"strings"
 
 	"go.uber.org/zap"
-
-	"github.com/jobshout/server/internal/llm"
 )
 
 // Topic is a subject worth writing about, discovered rather than supplied.
@@ -176,6 +174,16 @@ func (a *Agent) gatherCandidates(ctx context.Context, req DiscoverRequest) ([]Tr
 	return dedupeTrending(items), nil
 }
 
+// discoverSpare is how many proposals beyond the requested count the model is
+// asked for.
+//
+// Proposals that repeat something already written are dropped after the model
+// answers. Asked for exactly one, a daily schedule with narrow focus areas got
+// back one subject close to last week's article, dropped it, and failed with
+// "found nothing worth writing about" on most days. The spares are what is left
+// to choose from when that happens; selectByFocus still returns only count.
+const discoverSpare = 3
+
 // chooseTopics asks the model to turn trending items into writable subjects.
 func (a *Agent) chooseTopics(ctx context.Context, req DiscoverRequest, items []TrendingItem, count int) ([]Topic, error) {
 	var b strings.Builder
@@ -218,7 +226,7 @@ ALREADY WRITTEN ABOUT RECENTLY — do not propose these again, or close variants
 FOCUS AREAS — what this blog wants to cover:
 %s
 
-Choose the %d best subjects to write about.
+Choose the %d best subjects to write about, best first.
 
 Prefer subjects that sit squarely inside the focus areas above, and mark those
 with "in_focus": true. If nothing in the candidates is really about those areas,
@@ -250,12 +258,7 @@ Reference the candidate numbers you drew on in "seeds".
 
 Respond with JSON only, in exactly this shape:
 {"topics": [{"topic": "...", "context": "...", "rationale": "...", "seeds": [0, 4], "in_focus": true}]}`,
-		b.String(), avoid, focus, count)
-
-	resp, err := a.generate(ctx, req.Model, prompt)
-	if err != nil {
-		return nil, fmt.Errorf("research: discover: %w", err)
-	}
+		b.String(), avoid, focus, count+discoverSpare)
 
 	var parsed struct {
 		Topics []struct {
@@ -266,8 +269,11 @@ Respond with JSON only, in exactly this shape:
 			InFocus   bool   `json:"in_focus"`
 		} `json:"topics"`
 	}
-	if err := llm.DecodeJSON(resp, &parsed); err != nil {
-		return nil, fmt.Errorf("research: discover: parse response: %w", err)
+	// generateJSON repairs what it can and asks once more when it cannot: a
+	// reply that is almost JSON was failing a whole scheduled run with
+	// "parse response: invalid character".
+	if err := a.generateJSON(ctx, req.Model, "choosing topics", prompt, maxResearchTokens, &parsed); err != nil {
+		return nil, fmt.Errorf("research: discover: %w", err)
 	}
 
 	out := make([]Topic, 0, len(parsed.Topics))

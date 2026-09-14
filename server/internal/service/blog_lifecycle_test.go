@@ -170,7 +170,8 @@ func TestRetry_RefusesAnotherOrgsRun(t *testing.T) {
 	}
 }
 
-// A run with no topics cannot be re-run — there is nothing to ask the LLM for.
+// A run with no topics that was not a trending run cannot be re-run — there is
+// nothing to ask the LLM for.
 func TestRetry_RefusesRunWithNoTopics(t *testing.T) {
 	org := uuid.New()
 	svc, store := newLifecycleSvc(aRun(org, model.BlogRunStatusFailed))
@@ -443,5 +444,80 @@ func TestRetry_RefusesWhenEveryTopicHasAnArticle(t *testing.T) {
 	}
 	if store.articlesCleared {
 		t.Error("retry must not delete stored articles")
+	}
+}
+
+// retryAgents resolves the Article Writer for Retry without a database.
+type retryAgents struct {
+	repository.AgentRepository
+	agent *model.Agent
+}
+
+func (a *retryAgents) FindBuiltin(context.Context, uuid.UUID, string) (*model.Agent, error) {
+	return a.agent, nil
+}
+
+// A trending run that failed while choosing its topic has no briefs. Retry
+// used to answer "run has no topics to retry" while the UI offered the button;
+// it must start discovery again instead.
+func TestRetry_TrendingRunThatNeverChoseATopicDiscoversAgain(t *testing.T) {
+	org := uuid.New()
+	run := aRun(org, model.BlogRunStatusFailed)
+	run.Options = model.BlogRunOptions{Trending: true, TrendingCount: 1, Focus: []string{"SRE"}}
+	failed := "research: discover: ollama: unexpected status 504"
+	run.ErrorMessage = &failed
+	svc, store := newLifecycleSvc(run)
+	svc.runner = nonNilRunner()
+	svc.agentRepo = &retryAgents{agent: &model.Agent{ID: uuid.New(), OrgID: org}}
+	// Stop at the point generation would start, so no goroutine runs.
+	svc.stopping = true
+
+	_, err := svc.Retry(context.Background(), org, run.ID)
+	if !errors.Is(err, errRunStopping) {
+		t.Fatalf("Retry = %v, want it to reach generation", err)
+	}
+	var discovering bool
+	for _, step := range store.run.Steps {
+		if step.Key == model.BlogStepDiscovering {
+			discovering = true
+		}
+	}
+	if !discovering {
+		t.Error("the retried run has no discovery step")
+	}
+}
+
+// Runs created before options were stored are recognised by their trace.
+func TestRetry_LegacyTrendingRunIsRecognisedByItsTrace(t *testing.T) {
+	org := uuid.New()
+	run := aRun(org, model.BlogRunStatusFailed)
+	run.Steps = initialSteps(true)
+	svc, _ := newLifecycleSvc(run)
+	svc.runner = nonNilRunner()
+	svc.agentRepo = &retryAgents{agent: &model.Agent{ID: uuid.New(), OrgID: org}}
+	svc.stopping = true
+
+	if _, err := svc.Retry(context.Background(), org, run.ID); !errors.Is(err, errRunStopping) {
+		t.Fatalf("Retry = %v, want it to reach generation", err)
+	}
+}
+
+func TestDiscoveryRetryRequest_ReplaysTheOriginalSteering(t *testing.T) {
+	model_ := "qwen3:30b"
+	run := &model.BlogRun{
+		Model: &model_,
+		Options: model.BlogRunOptions{
+			Trending: true, TrendingCount: 2, Focus: []string{"SRE", "Grafana"}, AutoPublish: true,
+		},
+	}
+	req := discoveryRetryRequest(run)
+	if !req.Trending || req.TrendingCount != 2 || !req.AutoPublish || req.Model != model_ {
+		t.Errorf("request = %+v, want the run's trending settings", req)
+	}
+	if strings.Join(req.Focus, ",") != "SRE,Grafana" {
+		t.Errorf("focus = %v, want the run's focus areas", req.Focus)
+	}
+	if err := req.Validate(); err != nil {
+		t.Errorf("replayed request does not validate: %v", err)
 	}
 }

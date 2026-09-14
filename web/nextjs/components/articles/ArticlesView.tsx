@@ -24,7 +24,7 @@ import {
 import { GenerateArticleDialog } from "@/components/blog/GenerateArticleDialog";
 import { SignalDot } from "@/components/ui/signal-dot";
 import { cn } from "@/lib/utils/cn";
-import type { BlogRun, BlogRunStatus } from "@/lib/types/blog";
+import { blogRunTitle, type BlogRun, type BlogRunStatus } from "@/lib/types/blog";
 
 const STATUS_META: Record<
   BlogRunStatus,
@@ -91,10 +91,7 @@ function RunCard({ run }: { run: BlogRun }) {
     e.stopPropagation();
     fn();
   };
-  const title =
-    run.topics.length === 1
-      ? run.topics[0]
-      : `${run.topics.length} articles`;
+  const title = blogRunTitle(run);
 
   return (
     <Link

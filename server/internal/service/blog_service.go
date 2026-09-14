@@ -407,7 +407,7 @@ func (t *stepTracker) finish() {
 // stay pending, so the trace shows how far the run got.
 func (t *stepTracker) fail(err error) {
 	now := time.Now()
-	msg := err.Error()
+	msg := readableRunError(err)
 	for i := range t.steps {
 		if t.steps[i].Status == model.StepStatusRunning {
 			t.steps[i].Status = model.StepStatusFailed
@@ -459,6 +459,7 @@ func (s *blogService) Generate(
 		Status:      model.BlogRunStatusRunning,
 		Briefs:      req.Briefs,
 		Topics:      req.Topics,
+		Options:     req.RunOptions(),
 		Steps:       initialSteps(req.Trending),
 		Articles:    []model.BlogRunArticle{},
 		StartedAt:   &startedAt,
@@ -575,7 +576,7 @@ func (s *blogService) failRun(
 		run.Steps = tracker.steps
 		completedAt := time.Now()
 		run.CompletedAt = &completedAt
-		msg := cause.Error()
+		msg := readableRunError(cause)
 		if errors.Is(cause, errRunCancelled) {
 			run.Status = model.BlogRunStatusCancelled
 		} else {
@@ -961,6 +962,9 @@ func (s *blogService) Delete(ctx context.Context, orgID uuid.UUID, runID uuid.UU
 // attempt at the same request, and spawning a new card per attempt would leave
 // the failures behind as litter — which is what made deletion necessary in the
 // first place.
+//
+// A trending run that failed before it chose a topic has no briefs to replay,
+// so it discovers again, with the focus areas it was created with.
 func (s *blogService) Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) (*model.BlogRun, error) {
 	if s.runner == nil {
 		return nil, fmt.Errorf("blog_svc: generator not configured")
@@ -977,7 +981,10 @@ func (s *blogService) Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUI
 		return nil, fmt.Errorf("blog_svc: only a failed or cancelled run can be retried (status is %q)", run.Status)
 	}
 	if len(run.Briefs) == 0 {
-		return nil, fmt.Errorf("blog_svc: run has no topics to retry")
+		if !run.Discovers() {
+			return nil, fmt.Errorf("blog_svc: run has no topics to retry")
+		}
+		return s.retryDiscovery(ctx, run)
 	}
 
 	existing, err := s.repo.ListArticlesByRun(ctx, runID)
@@ -1031,21 +1038,80 @@ func (s *blogService) Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUI
 	// Retry replays the briefs, not just the topics: the context is half the
 	// instruction, and a retry that dropped it would write a different article
 	// than the one that was asked for.
-	req := model.GenerateBlogRequest{Briefs: missing}
+	req := model.GenerateBlogRequest{
+		Briefs:      missing,
+		MaxArticles: run.Options.MaxArticles,
+		AutoPublish: run.Options.AutoPublish,
+	}
 	req.Normalize()
 	if run.Model != nil {
 		req.Model = *run.Model
 	}
+	if err := s.restart(ctx, run, agent, req); err != nil {
+		return nil, err
+	}
+	return run, nil
+}
+
+// retryDiscovery restarts a trending run that never got as far as choosing a
+// topic. Nothing was written, so the run starts over from discovery.
+func (s *blogService) retryDiscovery(ctx context.Context, run *model.BlogRun) (*model.BlogRun, error) {
+	agent, err := s.EnsureArticleWriter(ctx, run.OrgID)
+	if err != nil {
+		return nil, err
+	}
+
+	startedAt := time.Now()
+	run.Status = model.BlogRunStatusRunning
+	run.AgentID = &agent.ID
+	run.Steps = initialSteps(true)
+	run.Articles = []model.BlogRunArticle{}
+	run.ErrorMessage = nil
+	run.StartedAt = &startedAt
+	run.CompletedAt = nil
+	if err := s.repo.Update(ctx, run); err != nil {
+		return nil, fmt.Errorf("blog_svc: reset run for retry: %w", err)
+	}
+	if err := s.repo.UpdateSteps(ctx, run.ID, run.Steps); err != nil {
+		return nil, fmt.Errorf("blog_svc: reset steps for retry: %w", err)
+	}
+
+	if err := s.restart(ctx, run, agent, discoveryRetryRequest(run)); err != nil {
+		return nil, err
+	}
+	return run, nil
+}
+
+// discoveryRetryRequest rebuilds the request a trending run was created with.
+//
+// Runs from before options were recorded fall back to the defaults — one
+// article on anything trending — which is better than refusing the retry.
+func discoveryRetryRequest(run *model.BlogRun) model.GenerateBlogRequest {
+	req := model.GenerateBlogRequest{
+		Trending:      true,
+		TrendingCount: run.Options.TrendingCount,
+		Focus:         run.Options.Focus,
+		MaxArticles:   run.Options.MaxArticles,
+		AutoPublish:   run.Options.AutoPublish,
+	}
+	req.Normalize()
+	if run.Model != nil {
+		req.Model = *run.Model
+	}
+	return req
+}
+
+// restart links the retried run back to its board card and starts generation.
+func (s *blogService) restart(ctx context.Context, run *model.BlogRun, agent *model.Agent, req model.GenerateBlogRequest) error {
 	if tid := s.resolveLaunchTaskID(ctx, nil, run.ID); tid != nil {
 		req.TaskID = tid
 		_ = s.tasks.Transition(ctx, *tid, "in_progress", nil)
 	}
 	if err := s.beginGeneration(run, agent, req); err != nil {
 		s.failCreatedRun(run, errRunInterrupted)
-		return nil, err
+		return err
 	}
-
-	return run, nil
+	return nil
 }
 
 // Cancel stops an in-flight run. The row is marked cancelled immediately so the

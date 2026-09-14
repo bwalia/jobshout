@@ -13,12 +13,14 @@ export type BlogRunStatus =
 /** Step keys, in the order the pipeline moves through them. */
 export type BlogStepKey =
   | "queued"
+  | "discovering"
   | "researching"
   | "outlining"
   | "generating"
   | "reviewing"
   | "revising"
   | "expanding"
+  | "illustrating"
   | "converting"
   | "generated"
   | "publishing"
@@ -112,6 +114,33 @@ export interface BlogArticle {
   };
 }
 
+export interface BlogRunOptions {
+  /** The run finds its own topic instead of being given one. */
+  trending?: boolean;
+  trending_count?: number;
+  focus?: string[];
+  max_articles?: number;
+  auto_publish?: boolean;
+}
+
+/**
+ * A heading for a run. A trending run that failed while choosing its topic has
+ * none, and "0 articles" read as a broken card rather than a run that never
+ * got as far as picking a subject.
+ */
+export function blogRunTitle(run: BlogRun): string {
+  if (run.topics.length === 1) return run.topics[0];
+  const discovers =
+    run.options?.trending || run.steps.some((s) => s.key === "discovering");
+  if (run.topics.length === 0 && discovers) {
+    const focus = run.options?.focus ?? [];
+    return focus.length > 0
+      ? `Trending in ${focus.join(", ")} — no topic chosen yet`
+      : "Trending topic — not chosen yet";
+  }
+  return `${run.topics.length} articles`;
+}
+
 export interface BlogRun {
   id: string;
   org_id: string;
@@ -124,6 +153,8 @@ export interface BlogRun {
   /** The same subjects without their context, kept for older runs. */
   topics: string[];
   model: string | null;
+  /** How the run was asked to work; Retry replays these. */
+  options?: BlogRunOptions;
   /** The CMS namespace the drafts were created in; null until published. */
   cms_namespace: string | null;
   articles: BlogRunArticle[];

@@ -13,6 +13,7 @@ import {
   addCareerPortal,
   careerApplyRun,
   careerBatchEvaluate,
+  isCareerRequestTimeout,
   careerCoverLetter,
   careerDoctor,
   careerEmailDraft,
@@ -427,6 +428,11 @@ export function CareerAgentClient() {
           : "No jobs could be scored (closed, blacklist, or fetch failed)."
       );
     } catch (e: unknown) {
+      if (isCareerRequestTimeout(e)) {
+        toast.message("Still scoring on the server — scores appear here as each job finishes.");
+        void loadAll();
+        return;
+      }
       const msg = apiErrorMessage(e, "Could not score the selected jobs.");
       setError(msg);
       toast.error(msg);
@@ -466,6 +472,11 @@ export function CareerAgentClient() {
       }
       if (out.notice) toast.message(out.notice);
     } catch (e: unknown) {
+      if (isCareerRequestTimeout(e)) {
+        toast.message("Still preparing on the server — packages appear here as each job finishes.");
+        void loadAll();
+        return;
+      }
       const msg = apiErrorMessage(e, "Could not prepare these jobs.");
       setError(msg);
       toast.error(msg);

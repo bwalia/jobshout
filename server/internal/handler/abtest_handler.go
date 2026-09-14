@@ -2,11 +2,13 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/jobshout/server/internal/abtest"
 	"github.com/jobshout/server/internal/service"
 	"github.com/jobshout/server/internal/wslproxymcp"
 )
@@ -28,6 +30,24 @@ func (h *ABTestHandler) ensure(w http.ResponseWriter) bool {
 	return true
 }
 
+// respondABError maps agent errors to statuses: refusals the caller can read
+// and act on are 4xx; only wslproxy failing is a 502.
+func respondABError(w http.ResponseWriter, err error) {
+	var notFound *abtest.NotFoundError
+	var notWritable *abtest.NotWritableError
+	var invalid *abtest.InvalidRequestError
+	switch {
+	case errors.As(err, &notFound):
+		RespondError(w, http.StatusNotFound, err.Error())
+	case errors.As(err, &notWritable):
+		RespondError(w, http.StatusConflict, err.Error())
+	case errors.As(err, &invalid):
+		RespondError(w, http.StatusUnprocessableEntity, err.Error())
+	default:
+		RespondError(w, http.StatusBadGateway, err.Error())
+	}
+}
+
 func (h *ABTestHandler) Status(w http.ResponseWriter, r *http.Request) {
 	if !h.ensure(w) {
 		return
@@ -41,7 +61,7 @@ func (h *ABTestHandler) ListExperiments(w http.ResponseWriter, r *http.Request) 
 	}
 	items, mode, err := h.svc.ListExperiments(r.Context())
 	if err != nil {
-		RespondError(w, http.StatusBadGateway, err.Error())
+		respondABError(w, err)
 		return
 	}
 	RespondJSON(w, http.StatusOK, map[string]any{"mode": mode, "count": len(items), "experiments": items})
@@ -54,7 +74,7 @@ func (h *ABTestHandler) GetExperiment(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	ex, err := h.svc.GetExperiment(r.Context(), id)
 	if err != nil {
-		RespondError(w, http.StatusNotFound, err.Error())
+		respondABError(w, err)
 		return
 	}
 	RespondJSON(w, http.StatusOK, ex)
@@ -78,7 +98,7 @@ func (h *ABTestHandler) SetWeights(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := h.svc.SetWeights(r.Context(), id, body.Backends)
 	if err != nil {
-		RespondError(w, http.StatusBadGateway, err.Error())
+		respondABError(w, err)
 		return
 	}
 	RespondJSON(w, http.StatusOK, out)
@@ -93,12 +113,10 @@ func (h *ABTestHandler) Promote(w http.ResponseWriter, r *http.Request) {
 		Label string `json:"label"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
-	if body.Label == "" {
-		body.Label = "v2"
-	}
+	// An empty label promotes the rule's second backend.
 	out, err := h.svc.Promote(r.Context(), id, body.Label)
 	if err != nil {
-		RespondError(w, http.StatusBadGateway, err.Error())
+		respondABError(w, err)
 		return
 	}
 	RespondJSON(w, http.StatusOK, out)
@@ -111,7 +129,7 @@ func (h *ABTestHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	out, err := h.svc.Rollback(r.Context(), id)
 	if err != nil {
-		RespondError(w, http.StatusBadGateway, err.Error())
+		respondABError(w, err)
 		return
 	}
 	RespondJSON(w, http.StatusOK, out)
@@ -130,7 +148,7 @@ func (h *ABTestHandler) Observe(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := h.svc.Observe(r.Context(), id, n)
 	if err != nil {
-		RespondError(w, http.StatusBadGateway, err.Error())
+		respondABError(w, err)
 		return
 	}
 	RespondJSON(w, http.StatusOK, out)
