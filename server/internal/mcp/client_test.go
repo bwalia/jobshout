@@ -129,6 +129,23 @@ func TestClientAuthHeader(t *testing.T) {
 	}
 }
 
+func TestClientCustomHeaders(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-MCP-API-Key") != "k" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18"}}`)
+	}))
+	defer srv.Close()
+
+	c := NewClientWithHeaders(srv.URL, map[string]string{"X-MCP-API-Key": "k"})
+	if err := c.Initialize(context.Background()); err != nil {
+		t.Fatalf("custom header initialize: %v", err)
+	}
+}
+
 func TestClientRPCError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

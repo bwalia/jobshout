@@ -70,6 +70,11 @@ data:
   WSLPROXY_TIMEOUT: {{ .Values.wafLab.timeout | default "30s" | quote }}
   WSLPROXY_LAB_MAX_RUNTIME: {{ .Values.wafLab.labMaxRuntime | default "10m" | quote }}
   WSLPROXY_TARGET_ALLOWLIST: {{ .Values.wafLab.targetAllowlist | default "" | quote }}
+  WSLPROXY_MCP_ENABLED: {{ .Values.wafLab.mcpEnabled | default true | quote }}
+  WSLPROXY_MCP_JSONRPC_PATH: {{ .Values.wafLab.mcpJSONRPCPath | default "/mcp/jsonrpc" | quote }}
+  WSLPROXY_AB_DEMO_HOST: {{ .Values.wafLab.abDemoHost | default "abtesting.fictionally.org" | quote }}
+  WSLPROXY_AB_RULE_ID: {{ .Values.wafLab.abRuleID | default "" | quote }}
+  WSLPROXY_AB_OBSERVE_PATH: {{ .Values.wafLab.abObservePath | default "/version" | quote }}
   # In-cluster PR reviewer sidecar. Empty base URL disables the feature (same
   # pattern as STRIX_BASE_URL). The sidecar is ClusterIP-only; the API talks
   # to it with REVIEW_BOT_TOKEN from extraSecretRefs, not a workstation JWT.

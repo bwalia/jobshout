@@ -58,6 +58,10 @@ const (
 	// BuiltinWAFLab is the WAF Efficacy Lab: provisions a before/after WAF pair on
 	// wslproxy and measures the attack matrix (secure vs open).
 	BuiltinWAFLab = "waf_lab"
+	// BuiltinABTesting manages wslproxy weighted / canary traffic splits (A/B)
+	// via the wslproxy MCP server — control plane for hosts like
+	// abtesting.fictionally.org.
+	BuiltinABTesting = "ab_testing"
 	// BuiltinPRReviewer reviews GitHub pull requests via the in-cluster review-bot sidecar.
 	BuiltinPRReviewer = "pr_reviewer"
 	// BuiltinMail is the Mail Agent: one shared org Gmail, draft-only replies,

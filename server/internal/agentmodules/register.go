@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/jobshout/server/internal/abtest"
 	"github.com/jobshout/server/internal/agentmodule"
 	"github.com/jobshout/server/internal/blog"
 	"github.com/jobshout/server/internal/career"
@@ -38,6 +39,7 @@ type Deps struct {
 	CreditController *creditcontroller.Client
 	Simpro           *simpro.Client
 	WAFLab           waflab.Runner
+	ABTest           *abtest.Client
 }
 
 func init() {
@@ -64,6 +66,7 @@ func Register(d Deps) {
 	agentmodule.Register(creditcontroller.Module(d.CreditController))
 	agentmodule.Register(simpro.Module(d.Simpro))
 	agentmodule.Register(waflab.Module(d.WAFLab))
+	agentmodule.Register(abtest.Module(d.ABTest))
 }
 
 type imageAdapter struct{ svc *service.ImageService }

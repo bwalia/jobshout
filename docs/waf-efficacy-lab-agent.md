@@ -46,6 +46,11 @@ Secrets are never logged, returned by status/Ready, or stored on run rows.
   treated as suspicious; inspect raw responses rather than celebrating it.
 - The relay only fires at hosts on wslproxy’s `waf.test_targets` allow-list.
   Hosts outside that list fail clearly; do not work around the guard.
+- Efficacy matrix runs with concurrency **4** so a full catalogue does not
+  hammer the edge.
+
+Traffic-split / canary work belongs to the **AB Testing** agent over MCP —
+see [wslproxy-mcp.md](./wslproxy-mcp.md) and [ab-testing-agent.md](./ab-testing-agent.md).
 
 ## Modes
 

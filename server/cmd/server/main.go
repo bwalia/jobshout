@@ -17,6 +17,7 @@ import (
 	"github.com/rs/cors"
 	"go.uber.org/zap"
 
+	"github.com/jobshout/server/internal/abtest"
 	"github.com/jobshout/server/internal/agentmodules"
 	"github.com/jobshout/server/internal/blog"
 	"github.com/jobshout/server/internal/bridge"
@@ -27,6 +28,7 @@ import (
 	"github.com/jobshout/server/internal/creditcontroller"
 	"github.com/jobshout/server/internal/simpro"
 	"github.com/jobshout/server/internal/waflab"
+	"github.com/jobshout/server/internal/wslproxymcp"
 	"github.com/jobshout/server/internal/scheduler"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
@@ -644,6 +646,16 @@ func main() {
 		zap.Bool("cloudflare", waflab.CloudflareConfigured()),
 	)
 
+	wslMCPCfg := wslproxymcp.LoadConfig()
+	wslMCPClient := wslproxymcp.NewClient(wslMCPCfg)
+	abTestClient := abtest.NewClient(wslMCPClient)
+	abTestSvc := service.NewABTestService(abTestClient)
+	logger.Info("ab testing agent initialised",
+		zap.Bool("mcp_enabled", wslMCPClient.Enabled()),
+		zap.String("mcp_base_url", wslMCPCfg.BaseURL),
+		zap.Bool("live_configured", abTestClient.LiveConfigured()),
+	)
+
 	// All specialists are wired this way: own package, then one Register call.
 	// A new agent does not need significant platform changes — register it.
 	agentmodules.Register(agentmodules.Deps{
@@ -657,6 +669,7 @@ func main() {
 		CreditController: aivcClient,
 		Simpro:           simproClient,
 		WAFLab:           wafLabSvc,
+		ABTest:           abTestClient,
 	})
 
 	// ─── Autonomous agent engine ────────────────────────────────────────────
@@ -860,6 +873,7 @@ func main() {
 	creditControllerHandler := handler.NewCreditControllerHandler(creditControllerSvc)
 	simproPaymentsHandler := handler.NewSimproPaymentsHandler(simproPaymentsSvc)
 	wafLabHandler := handler.NewWAFLabHandler(wafLabSvc)
+	abTestHandler := handler.NewABTestHandler(abTestSvc)
 
 	// Chat, goal, multi-agent, and Telegram handlers
 	chatHandler := handler.NewChatHandler(chatSvc)
@@ -1224,6 +1238,16 @@ func main() {
 				r.Get("/runs/{runID}/steps", wafLabHandler.ListSteps)
 				r.Get("/runs/{runID}/results", wafLabHandler.ListResults)
 				r.Post("/runs/{runID}/cancel", wafLabHandler.CancelRun)
+			})
+
+			r.Route("/ab-testing", func(r chi.Router) {
+				r.Get("/status", abTestHandler.Status)
+				r.Get("/experiments", abTestHandler.ListExperiments)
+				r.Get("/experiments/{id}", abTestHandler.GetExperiment)
+				r.Post("/experiments/{id}/weights", abTestHandler.SetWeights)
+				r.Post("/experiments/{id}/promote", abTestHandler.Promote)
+				r.Post("/experiments/{id}/rollback", abTestHandler.Rollback)
+				r.Get("/experiments/{id}/observe", abTestHandler.Observe)
 			})
 
 			// Plugins (user-defined LangGraph/LangChain workflows)
