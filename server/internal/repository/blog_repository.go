@@ -80,17 +80,18 @@ func NewBlogRepository(pool *pgxpool.Pool) BlogRepository {
 const blogRunColumns = `
 	id, org_id, agent_id, triggered_by, source, status, topics, briefs, model,
 	cms_namespace, articles, steps, error_message,
-	started_at, heartbeat_at, completed_at, published_at, created_at`
+	started_at, heartbeat_at, completed_at, published_at, created_at, options`
 
 // scanBlogRun reads one row in blogRunColumns order.
 func scanBlogRun(row pgx.Row) (*model.BlogRun, error) {
 	run := &model.BlogRun{}
-	var topicsRaw, briefsRaw, articlesRaw, stepsRaw []byte
+	var topicsRaw, briefsRaw, articlesRaw, stepsRaw, optionsRaw []byte
 	err := row.Scan(
 		&run.ID, &run.OrgID, &run.AgentID, &run.TriggeredBy, &run.Source, &run.Status,
 		&topicsRaw, &briefsRaw, &run.Model, &run.CMSNamespace,
 		&articlesRaw, &stepsRaw, &run.ErrorMessage,
 		&run.StartedAt, &run.HeartbeatAt, &run.CompletedAt, &run.PublishedAt, &run.CreatedAt,
+		&optionsRaw,
 	)
 	if err != nil {
 		return nil, err
@@ -99,6 +100,7 @@ func scanBlogRun(row pgx.Row) (*model.BlogRun, error) {
 	_ = json.Unmarshal(briefsRaw, &run.Briefs)
 	_ = json.Unmarshal(articlesRaw, &run.Articles)
 	_ = json.Unmarshal(stepsRaw, &run.Steps)
+	_ = json.Unmarshal(optionsRaw, &run.Options)
 
 	// Migration 022 backfills briefs for rows that predate the column, but a
 	// run created between that migration running and this code deploying — or
@@ -171,16 +173,17 @@ func (r *blogRepository) Create(ctx context.Context, run *model.BlogRun) error {
 	briefsJSON, _ := json.Marshal(run.Briefs)
 	articlesJSON, _ := json.Marshal(run.Articles)
 	stepsJSON, _ := json.Marshal(run.Steps)
+	optionsJSON, _ := json.Marshal(run.Options)
 
 	const sql = `
 		INSERT INTO blog_runs
-		    (id, org_id, agent_id, triggered_by, source, status, topics, briefs, model, articles, steps, started_at, heartbeat_at, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12, NOW())
+		    (id, org_id, agent_id, triggered_by, source, status, topics, briefs, model, articles, steps, started_at, heartbeat_at, created_at, options)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12, NOW(), $13)
 		RETURNING created_at`
 
 	return r.pool.QueryRow(ctx, sql,
 		run.ID, run.OrgID, run.AgentID, run.TriggeredBy, run.Source, run.Status,
-		topicsJSON, briefsJSON, run.Model, articlesJSON, stepsJSON, run.StartedAt,
+		topicsJSON, briefsJSON, run.Model, articlesJSON, stepsJSON, run.StartedAt, optionsJSON,
 	).Scan(&run.CreatedAt)
 }
 

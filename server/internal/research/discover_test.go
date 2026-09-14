@@ -2,10 +2,13 @@ package research
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
 	"go.uber.org/zap"
+
+	"github.com/jobshout/server/internal/llm"
 )
 
 const promptDiscover = "choosing what a technical blog should write about"
@@ -257,5 +260,73 @@ func TestSignificantWords(t *testing.T) {
 		if _, ok := got[unwanted]; ok {
 			t.Errorf("kept stop word %q", unwanted)
 		}
+	}
+}
+
+// sequenceLLM answers prompts in order, for exercising a re-ask.
+type sequenceLLM struct {
+	replies []string
+	prompts []string
+}
+
+func (s *sequenceLLM) ProviderName() string { return "sequence" }
+
+func (s *sequenceLLM) Generate(_ context.Context, req llm.GenerateRequest) (*llm.GenerateResponse, error) {
+	s.prompts = append(s.prompts, req.Messages[len(req.Messages)-1].Content)
+	if len(s.replies) == 0 {
+		return nil, fmt.Errorf("sequenceLLM: no replies left")
+	}
+	reply := s.replies[0]
+	s.replies = s.replies[1:]
+	return &llm.GenerateResponse{Content: reply}, nil
+}
+
+// A reply that is not JSON used to fail the whole run with "parse response:
+// invalid character". Discovery must ask again instead.
+func TestDiscover_AsksAgainWhenTheReplyIsNotJSON(t *testing.T) {
+	model := &sequenceLLM{replies: []string{
+		`{topics: [{"topic": "unquoted key, not JSON"`,
+		`{"topics":[{"topic":"Operating Thanos at scale","context":"c","rationale":"r","seeds":[]}]}`,
+	}}
+	client := NewWith(nil, nil, []Lister{&trendingBackend{items: sampleTrending()}}, zap.NewNop())
+	agent := NewAgent(client, model, DefaultAgentConfig(), zap.NewNop())
+
+	got, err := agent.Discover(context.Background(), DiscoverRequest{Count: 1}, nil)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(got) != 1 || got[0].Topic != "Operating Thanos at scale" {
+		t.Errorf("got %+v, want the topic from the second reply", got)
+	}
+	if len(model.prompts) != 2 {
+		t.Errorf("model asked %d times, want 2", len(model.prompts))
+	}
+}
+
+// Asked for exactly one subject, a model that proposed one already covered left
+// discovery with nothing. Spares give the de-duplication something to fall back
+// on, while the run still gets only the count it asked for.
+func TestDiscover_SparesSurviveDeduplication(t *testing.T) {
+	model := &scriptedLLM{responses: []scriptedResponse{
+		{trigger: promptDiscover, content: `{"topics":[
+			{"topic":"Observability for AI agents and LLMs","context":"c","rationale":"r","seeds":[]},
+			{"topic":"Downsampling Prometheus metrics with Thanos","context":"c","rationale":"r","seeds":[]},
+			{"topic":"Tracing agent tool calls with AWS X-Ray","context":"c","rationale":"r","seeds":[]}
+		]}`},
+	}}
+	agent := newDiscoverAgent(t, sampleTrending(), model)
+
+	got, err := agent.Discover(context.Background(), DiscoverRequest{
+		Count: 1,
+		Avoid: []string{"Observability for AI Agents and LLMs"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(got) != 1 || got[0].Topic != "Downsampling Prometheus metrics with Thanos" {
+		t.Errorf("got %+v, want the first proposal not already covered", got)
+	}
+	if !strings.Contains(model.prompts[0], fmt.Sprintf("Choose the %d best subjects", 1+discoverSpare)) {
+		t.Error("the model was not asked for spare subjects")
 	}
 }

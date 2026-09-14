@@ -18,15 +18,15 @@ import (
 // Module is the AB Testing Agent specialist (wslproxy traffic splits).
 func Module(client *Client) agentmodule.Module {
 	return agentmodule.Module{
-		Builtin:  model.BuiltinABTesting,
-		Label:    "AB Testing",
-		Icon:     "split",
-		TabSlug:  "ab-testing",
-		Hint:     "Manage wslproxy weighted / canary traffic splits and observe live assignment.",
-		ChatHint: "For A/B tests, canary weights, or traffic splits on wslproxy — call agent_execute on the AB Testing Agent.",
-		Schema:   schema(),
-		Seed:     Seed,
-		Launch:   launch(client),
+		Builtin:   model.BuiltinABTesting,
+		Label:     "AB Testing",
+		Icon:      "split",
+		TabSlug:   "ab-testing",
+		Hint:      "Manage wslproxy weighted / canary traffic splits and observe live assignment.",
+		ChatHint:  "For A/B tests, canary weights, or traffic splits on wslproxy — call agent_execute on the AB Testing Agent.",
+		Schema:    schema(),
+		Seed:      Seed,
+		Launch:    launch(client),
 		StayOnTab: true,
 		AbsorbPrompt: func(prompt string, vals map[string]string) {
 			p := strings.ToLower(prompt)
@@ -47,28 +47,47 @@ func Module(client *Client) agentmodule.Module {
 			}
 		},
 		Ready: func(ctx context.Context, _ uuid.UUID) []agentmodule.Issue {
-			if client == nil {
-				return []agentmodule.Issue{{
-					Severity: "warning", Code: "abtest_unconfigured",
-					Message: "AB Testing client not initialised.",
-				}}
-			}
-			if !client.LiveConfigured() {
-				return []agentmodule.Issue{{
-					Severity: "info", Code: "abtest_demo_mode",
-					Message: "Demo fixtures active. Set WSLPROXY_BASE_URL + WSLPROXY_MCP_API_KEY for live MCP traffic tools.",
-				}}
-			}
-			st := client.Status(ctx)
-			if st["ok"] == false {
-				return []agentmodule.Issue{{
-					Severity: "warning", Code: "abtest_mcp_unreachable",
-					Message: fmt.Sprint(st["message"]),
-				}}
-			}
-			return nil
+			return ready(ctx, client)
 		},
 	}
+}
+
+// ready turns Status and the resolved experiment into preview issues.
+func ready(ctx context.Context, client *Client) []agentmodule.Issue {
+	if client == nil {
+		return []agentmodule.Issue{{
+			Severity: "warning", Code: "abtest_unconfigured",
+			Message: "AB Testing client not initialised.",
+		}}
+	}
+	st := client.Status(ctx)
+	msg := fmt.Sprint(st["message"])
+	switch st["mode"] {
+	case ModeDemo:
+		return []agentmodule.Issue{{Severity: "info", Code: "abtest_demo_mode", Message: msg}}
+	case ModeUnavailable:
+		return []agentmodule.Issue{{Severity: "warning", Code: "abtest_wslproxy_unreachable", Message: msg}}
+	case ModeReadOnly:
+		return []agentmodule.Issue{{Severity: "warning", Code: "abtest_no_write_path", Message: msg}}
+	}
+	var issues []agentmodule.Issue
+	if mcpSt, _ := st["mcp"].(map[string]any); mcpSt != nil && mcpSt["tools_enabled"] == false && st["write_path"] == PathREST {
+		issues = append(issues, agentmodule.Issue{
+			Severity: "info", Code: "abtest_mcp_tools_disabled",
+			Message: fmt.Sprint(mcpSt["message"], " Writes use the wslproxy admin API instead."),
+		})
+	}
+	if list, _, err := client.ListExperiments(ctx); err == nil {
+		for _, ex := range list {
+			if !ex.Writable {
+				issues = append(issues, agentmodule.Issue{
+					Severity: "warning", Code: "abtest_experiment_read_only",
+					Message: ex.ReadOnlyReason,
+				})
+			}
+		}
+	}
+	return issues
 }
 
 func schema() agentschema.Schema {
@@ -91,16 +110,16 @@ func schema() agentschema.Schema {
 				Placeholder: "abtesting", Help: "Experiment id or host",
 			},
 			{
-				Key: "stable_weight", Label: "v1 / stable weight %", Type: "number", Required: false, Default: "80",
-				Help: "Used by set_weights",
+				Key: "stable_weight", Label: "Stable weight %", Type: "number", Required: false, Default: "80",
+				Help: "set_weights: weight for the rule's first backend",
 			},
 			{
-				Key: "canary_weight", Label: "v2 / canary weight %", Type: "number", Required: false, Default: "20",
-				Help: "Used by set_weights",
+				Key: "canary_weight", Label: "Canary weight %", Type: "number", Required: false, Default: "20",
+				Help: "set_weights: weight for the rule's second backend",
 			},
 			{
-				Key: "promote_label", Label: "Promote label", Type: "text", Required: false, Default: "v2",
-				Placeholder: "v2",
+				Key: "promote_label", Label: "Promote backend label", Type: "text", Required: false,
+				Placeholder: "second backend", Help: "promote: backend label; empty promotes the rule's second backend",
 			},
 			{
 				Key: "observe_n", Label: "Observe samples", Type: "number", Required: false, Default: "40",
@@ -157,19 +176,22 @@ func launch(client *Client) agentmodule.LaunchFunc {
 			body = map[string]any{"mode": mode, "experiments": list}
 			msg = "AB experiments listed"
 		case "set_weights":
-			sw := parseWeight(in.Values["stable_weight"], 80)
-			cw := parseWeight(in.Values["canary_weight"], 20)
+			var ex *Experiment
+			ex, err = client.GetExperiment(ctx, expID)
+			if err != nil {
+				break
+			}
+			if len(ex.Backends) < 2 {
+				err = &NotWritableError{Experiment: ex.ID, Reason: readOnlyOr(ex, "the rule has fewer than two backends")}
+				break
+			}
 			body, err = client.SetWeights(ctx, expID, []wslproxymcp.BackendWeight{
-				{Label: "v1", Weight: sw},
-				{Label: "v2", Weight: cw},
+				{Label: ex.Backends[0].Label, Weight: parseWeight(in.Values["stable_weight"], 80)},
+				{Label: ex.Backends[1].Label, Weight: parseWeight(in.Values["canary_weight"], 20)},
 			})
 			msg = "Traffic weights updated"
 		case "promote":
-			label := strings.TrimSpace(in.Values["promote_label"])
-			if label == "" {
-				label = "v2"
-			}
-			body, err = client.Promote(ctx, expID, label)
+			body, err = client.Promote(ctx, expID, in.Values["promote_label"])
 			msg = "Backend promoted"
 		case "rollback":
 			body, err = client.Rollback(ctx, expID)
@@ -182,7 +204,7 @@ func launch(client *Client) agentmodule.LaunchFunc {
 			return nil, fmt.Errorf("unknown action %q", action)
 		}
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("AB Testing %s: %w", action, err)
 		}
 		raw, _ := json.MarshalIndent(body, "", "  ")
 		desc := string(raw)
@@ -198,6 +220,13 @@ func launch(client *Client) agentmodule.LaunchFunc {
 			ExtraMeta:   meta,
 		}, nil
 	}
+}
+
+func readOnlyOr(ex *Experiment, def string) string {
+	if ex.ReadOnlyReason != "" {
+		return ex.ReadOnlyReason
+	}
+	return def
 }
 
 func parseWeight(s string, def float64) float64 {

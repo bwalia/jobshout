@@ -8,9 +8,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"sync/atomic"
 	"time"
 )
@@ -225,12 +227,61 @@ func (c *Client) Initialize(ctx context.Context) error {
 // ListTools returns the tools advertised by the server via tools/list.
 func (c *Client) ListTools(ctx context.Context) ([]Tool, error) {
 	var result struct {
-		Tools []Tool `json:"tools"`
+		Tools json.RawMessage `json:"tools"`
 	}
 	if err := c.call(ctx, "tools/list", map[string]any{}, &result); err != nil {
 		return nil, err
 	}
-	return result.Tools, nil
+	tools, err := decodeTools(result.Tools)
+	if err != nil {
+		return nil, fmt.Errorf("mcp: tools/list: decode tools: %w", err)
+	}
+	return tools, nil
+}
+
+// decodeTools accepts the spec's array, and also the shapes Lua servers emit
+// for it: an empty table encodes as {} (wslproxy with tools disabled), and a
+// name-keyed object is read as one tool per key.
+func decodeTools(raw json.RawMessage) ([]Tool, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return []Tool{}, nil
+	}
+	if trimmed[0] == '[' {
+		var tools []Tool
+		if err := json.Unmarshal(trimmed, &tools); err != nil {
+			return nil, err
+		}
+		return tools, nil
+	}
+	var byName map[string]Tool
+	if err := json.Unmarshal(trimmed, &byName); err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(byName))
+	for name := range byName {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	tools := make([]Tool, 0, len(names))
+	for _, name := range names {
+		t := byName[name]
+		if t.Name == "" {
+			t.Name = name
+		}
+		tools = append(tools, t)
+	}
+	return tools, nil
+}
+
+// ErrorCode returns the JSON-RPC error code carried by err, if the server
+// answered with a JSON-RPC error object.
+func ErrorCode(err error) (int, bool) {
+	var rpcErr *rpcError
+	if errors.As(err, &rpcErr) {
+		return rpcErr.Code, true
+	}
+	return 0, false
 }
 
 // contentBlock is one entry of a tools/call result's content array.

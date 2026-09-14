@@ -3,6 +3,7 @@ package mail
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -186,5 +187,15 @@ func TestListMessagesSkipsUnreadableMessage(t *testing.T) {
 	}
 	if logs.FilterMessage("mail: skipping gmail message").Len() != 1 {
 		t.Fatalf("want one skip warning, got %d", logs.Len())
+	}
+}
+
+func TestParseTokenResponseInvalidGrantIsRevoked(t *testing.T) {
+	body := []byte(`{"error":"invalid_grant","error_description":"Token has been expired or revoked."}`)
+	if _, err := parseTokenResponse(body, 400); !errors.Is(err, ErrGrantRevoked) {
+		t.Fatalf("err = %v, want ErrGrantRevoked", err)
+	}
+	if _, err := parseTokenResponse([]byte(`{"error":"invalid_client"}`), 401); err == nil || errors.Is(err, ErrGrantRevoked) {
+		t.Fatalf("invalid_client must stay a plain error, got %v", err)
 	}
 }

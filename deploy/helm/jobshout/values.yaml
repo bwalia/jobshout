@@ -193,11 +193,15 @@ wafLab:
   timeout: "30s"
   labMaxRuntime: "10m"
   targetAllowlist: ""
-  # MCP (AB Testing agent + optional tool path). API key via secret
-  # WSLPROXY_MCP_API_KEY on the same jobshout-wslproxy secret.
+  # MCP (AB Testing agent writes when wslproxy's MCP tools are on). API key via
+  # secret WSLPROXY_MCP_API_KEY on the same jobshout-wslproxy secret. The AB
+  # Testing agent always reads rules — and writes when MCP tools are off —
+  # over the admin API with the token / username / password above.
   mcpEnabled: true
   mcpJSONRPCPath: "/mcp/jsonrpc"
   abDemoHost: "abtesting.fictionally.org"
+  # Empty: use the rule attached to abDemoHost. Shared or single-backend rules
+  # are shown read-only and never written.
   abRuleID: ""
   abObservePath: "/version"
 

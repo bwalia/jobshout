@@ -5,12 +5,14 @@ import { toast } from "sonner";
 import { apiErrorMessage } from "@/lib/api/client";
 import {
   approveCreditRun,
+  creditControllerStatus,
   creditControllerSummary,
   generateCreditInvoices,
   getCreditInvoice,
   listCreditInvoices,
   triageCreditBatch,
   triageCreditInvoice,
+  type CreditControllerStatus,
   type CreditControllerSummary,
   type InvoiceSummary,
 } from "@/lib/api/credit-controller";
@@ -43,6 +45,7 @@ const btnPrimary =
 export function CreditControllerAgentClient() {
   const [invoices, setInvoices] = useState<InvoiceSummary[]>([]);
   const [summary, setSummary] = useState<CreditControllerSummary | null>(null);
+  const [status, setStatus] = useState<CreditControllerStatus | null>(null);
   const [selected, setSelected] = useState<string>("");
   const [doc, setDoc] = useState<string>("");
   const [filter, setFilter] = useState<"all" | "untriaged" | "awaiting">("all");
@@ -50,18 +53,35 @@ export function CreditControllerAgentClient() {
   const [error, setError] = useState("");
 
   const refresh = useCallback(async () => {
+    setError("");
+    // Status answers 200 even when aivc-agents is down, so load it on its own:
+    // it explains an empty mailbox instead of failing with it.
     try {
-      setError("");
+      setStatus(await creditControllerStatus());
+    } catch {
+      setStatus(null);
+    }
+    try {
       const [list, sum] = await Promise.all([listCreditInvoices(), creditControllerSummary()]);
       setInvoices(list.invoices ?? []);
       setSummary(sum);
-      if (!selected && list.invoices?.[0]) {
-        setSelected(list.invoices[0].invoice_id);
-      }
+      const first = list.invoices?.[0]?.invoice_id ?? "";
+      setSelected((prev) => prev || first);
     } catch (err) {
+      setInvoices([]);
+      setSummary(null);
       setError(apiErrorMessage(err, "Could not load invoices."));
     }
-  }, [selected]);
+  }, []);
+
+  const runtimeDown = status?.mode === "live" && status.ok === false;
+  const writeActions = status?.write_actions ?? summary?.write_actions;
+  const writesDisabled = runtimeDown || writeActions?.enabled === false;
+  const writesTitle = writesDisabled
+    ? writeActions?.enabled === false
+      ? writeActions.message
+      : "The Credit Controller runtime is unavailable."
+    : undefined;
 
   useEffect(() => {
     void refresh();
@@ -112,18 +132,37 @@ export function CreditControllerAgentClient() {
               Supplier invoice mailbox, AI weekly/monthly batches, and the full exception
               workflow from intake through audit.
             </p>
+            {status && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Mode: <span className="font-medium text-foreground">{status.mode}</span>
+                {summary?.company ? ` · ${summary.company}` : null}
+              </p>
+            )}
           </div>
           <div className="flex flex-wrap gap-3 text-sm">
-            <Stat label="Mailbox" value={String(summary?.mailbox.total_invoices ?? invoices.length)} />
+            <Stat label="Mailbox" value={summary ? String(summary.mailbox.total_invoices) : "—"} />
             <Stat label="Untriaged" value={String(summary?.mailbox.untriaged ?? "—")} />
             <Stat label="Awaiting" value={String(summary?.queue.awaiting_approval ?? "—")} />
             <Stat
               label="Portfolio"
-              value={`£${(summary?.mailbox.total_gbp ?? 0).toLocaleString("en-GB")}`}
+              value={summary ? `£${summary.mailbox.total_gbp.toLocaleString("en-GB")}` : "—"}
             />
           </div>
         </div>
-        {error && (
+        {runtimeDown ? (
+          <div className="mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <p className="font-medium">Credit Controller runtime unavailable</p>
+            <p className="mt-0.5">{status?.message}</p>
+          </div>
+        ) : (
+          writeActions?.enabled === false && (
+            <p className="mt-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:text-amber-100">
+              {status?.mode === "demo" ? "Demo mailbox. " : null}
+              {writeActions.message}
+            </p>
+          )
+        )}
+        {error && !(runtimeDown && error === status?.message) && (
           <p className="mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             {error}
           </p>
@@ -161,7 +200,8 @@ export function CreditControllerAgentClient() {
           <button
             type="button"
             className={btn}
-            disabled={!!busy}
+            disabled={!!busy || writesDisabled}
+            title={writesTitle}
             onClick={() =>
               void run("weekly", async () => {
                 const res = await generateCreditInvoices("weekly", 10);
@@ -174,7 +214,8 @@ export function CreditControllerAgentClient() {
           <button
             type="button"
             className={btn}
-            disabled={!!busy}
+            disabled={!!busy || writesDisabled}
+            title={writesTitle}
             onClick={() =>
               void run("monthly", async () => {
                 const res = await generateCreditInvoices("monthly", 10);
@@ -187,7 +228,8 @@ export function CreditControllerAgentClient() {
           <button
             type="button"
             className={btnPrimary}
-            disabled={!!busy}
+            disabled={!!busy || writesDisabled}
+            title={writesTitle}
             onClick={() =>
               void run("batch", async () => {
                 const ids = invoices.filter((i) => !i.workflow).map((i) => i.invoice_id).slice(0, 15);
@@ -207,7 +249,8 @@ export function CreditControllerAgentClient() {
           <button
             type="button"
             className={btnPrimary}
-            disabled={!!busy}
+            disabled={!!busy || writesDisabled}
+            title={writesTitle}
             onClick={() =>
               void run("month_end", async () => {
                 await generateCreditInvoices("monthly", 10);
@@ -277,7 +320,8 @@ export function CreditControllerAgentClient() {
                       <button
                         type="button"
                         className="text-xs text-primary hover:underline disabled:opacity-50"
-                        disabled={!!busy}
+                        disabled={!!busy || writesDisabled}
+                        title={writesTitle}
                         onClick={(e) => {
                           e.stopPropagation();
                           void run(`triage-${inv.invoice_id}`, async () => {
@@ -292,7 +336,8 @@ export function CreditControllerAgentClient() {
                         <button
                           type="button"
                           className="text-xs text-primary hover:underline disabled:opacity-50"
-                          disabled={!!busy}
+                          disabled={!!busy || writesDisabled}
+                          title={writesTitle}
                           onClick={(e) => {
                             e.stopPropagation();
                             void run(`approve-${inv.workflow!.run_id}`, async () => {

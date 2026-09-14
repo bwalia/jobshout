@@ -26,6 +26,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { RunSteps } from "@/components/blog/RunSteps";
 import { ArticleViewer } from "@/components/blog/ArticleViewer";
 import { cn } from "@/lib/utils/cn";
+import { blogRunTitle } from "@/lib/types/blog";
 
 export default function ArticleRunPage() {
   const params = useParams();
@@ -129,9 +130,7 @@ export default function ArticleRunPage() {
         <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
           <div className="min-w-0">
             <h1 className="break-words text-2xl font-bold tracking-tight text-foreground">
-              {run.topics.length === 1
-                ? run.topics[0]
-                : `${run.topics.length} articles`}
+              {blogRunTitle(run)}
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
               Written by the Article Writer ·{" "}

@@ -626,6 +626,7 @@ func main() {
 	aivcClient := creditcontroller.NewClient(aivcCfg, logger)
 	creditControllerSvc := service.NewCreditControllerService(aivcClient)
 	logger.Info("credit controller agent initialised",
+		zap.String("mode", aivcClient.Mode()),
 		zap.String("aivc_base_url", aivcCfg.BaseURL),
 	)
 
@@ -648,11 +649,14 @@ func main() {
 
 	wslMCPCfg := wslproxymcp.LoadConfig()
 	wslMCPClient := wslproxymcp.NewClient(wslMCPCfg)
-	abTestClient := abtest.NewClient(wslMCPClient)
+	// Rules are read (and, with MCP tools off, written) over the admin API
+	// with the WAF lab's wslproxy credentials.
+	abTestClient := abtest.NewClient(wslMCPClient, wafLabClient)
 	abTestSvc := service.NewABTestService(abTestClient)
 	logger.Info("ab testing agent initialised",
 		zap.Bool("mcp_enabled", wslMCPClient.Enabled()),
 		zap.String("mcp_base_url", wslMCPCfg.BaseURL),
+		zap.Bool("admin_api_enabled", wafLabClient.Enabled()),
 		zap.Bool("live_configured", abTestClient.LiveConfigured()),
 	)
 

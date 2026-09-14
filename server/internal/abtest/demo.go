@@ -16,7 +16,9 @@ func demoExperiments(host string) []Experiment {
 		},
 		ObservePath: "/version",
 		PublicURL:   "https://" + host,
-		Note:        "Demo fixtures mirror abtesting.fictionally.org (80/20). Connect wslproxy MCP to drive live weights.",
+		Note:        "Demo fixtures mirror abtesting.fictionally.org (80/20). Configure wslproxy to manage a real rule.",
+		Writable:    true,
+		WritePath:   PathDemo,
 	}}
 }
 
@@ -44,6 +46,7 @@ func demoObserve(ex *Experiment, n int) map[string]any {
 		"counts":     counts,
 		"expected":   expected,
 		"samples":    samples,
-		"message":    fmt.Sprintf("Demo observe (%d samples). Live hits need MCP + a working edge /version.", n),
+		"variants":   []string{"v1", "v2"},
+		"message":    fmt.Sprintf("Demo observe (%d synthetic samples). Configure wslproxy to observe the real host.", n),
 	}
 }

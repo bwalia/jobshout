@@ -11,7 +11,28 @@ export type InvoiceSummary = {
   workflow: { run_id: string; status: string; updated_at: string } | null;
 };
 
+/** Whether mutating actions (AI generation, triage, approve) reach aivc-agents. */
+export type CreditControllerWriteActions = {
+  enabled: boolean;
+  status: string;
+  message: string;
+};
+
+/** demo = fixtures (no AIVC_BASE_URL); live = aivc-agents, `ok` false when unreachable. */
+export type CreditControllerStatus = {
+  mode: "demo" | "live";
+  live_configured: boolean;
+  ok: boolean;
+  message?: string;
+  base_url?: string;
+  write_actions?: CreditControllerWriteActions;
+};
+
 export type CreditControllerSummary = {
+  mode?: "demo" | "live";
+  company?: string;
+  message?: string;
+  write_actions?: CreditControllerWriteActions;
   role: string;
   period: string;
   mailbox: { total_invoices: number; untriaged: number; total_gbp: number };
@@ -22,7 +43,7 @@ export type CreditControllerSummary = {
 };
 
 export async function creditControllerStatus() {
-  const { data } = await apiClient.get<Record<string, unknown>>("/credit-controller/status");
+  const { data } = await apiClient.get<CreditControllerStatus>("/credit-controller/status");
   return data;
 }
 

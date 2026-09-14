@@ -9,6 +9,8 @@ import (
 // CreditControllerService is the JobShout façade over the AIVC AP runtime.
 type CreditControllerService interface {
 	Enabled() bool
+	LiveConfigured() bool
+	Status(ctx context.Context) map[string]any
 	Ping(ctx context.Context) (map[string]any, error)
 	ListInvoices(ctx context.Context) (map[string]any, error)
 	GetInvoice(ctx context.Context, invoiceID string) (map[string]any, error)
@@ -24,13 +26,22 @@ type creditControllerService struct {
 	client *creditcontroller.Client
 }
 
-// NewCreditControllerService wraps the AIVC HTTP client.
+// NewCreditControllerService wraps the AIVC HTTP client (demo fixtures when
+// AIVC_BASE_URL is unset).
 func NewCreditControllerService(client *creditcontroller.Client) CreditControllerService {
 	return &creditControllerService{client: client}
 }
 
 func (s *creditControllerService) Enabled() bool {
 	return s.client != nil && s.client.Enabled()
+}
+
+func (s *creditControllerService) LiveConfigured() bool {
+	return s.client.LiveConfigured()
+}
+
+func (s *creditControllerService) Status(ctx context.Context) map[string]any {
+	return s.client.Status(ctx)
 }
 
 func (s *creditControllerService) Ping(ctx context.Context) (map[string]any, error) {

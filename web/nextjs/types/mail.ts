@@ -27,6 +27,8 @@ export interface MailConnectionStatus {
   email?: string;
   status: string;
   status_error?: string;
+  /** Google revoked the grant; only Reconnect Gmail (fresh consent) restores it. */
+  needs_reconnect?: boolean;
   allow_mailbox_mutations: boolean;
   rules: MailWatchRules;
   knowledge_urls?: string[];

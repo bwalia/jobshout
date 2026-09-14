@@ -12,6 +12,7 @@ package scheduler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -186,7 +187,31 @@ func (r *Runner) runOne(ctx context.Context, t model.ScheduledTask) {
 	if err := r.repo.IncrementRunCount(ctx, t.ID); err != nil {
 		log.Error("scheduler: increment run count failed", zap.Error(err))
 	}
+	if errors.Is(err, errTaskMisconfigured) {
+		r.pauseMisconfigured(ctx, t, log)
+		return
+	}
 	r.scheduleNext(ctx, t, log)
+}
+
+// errTaskMisconfigured marks a failure that no amount of waiting will fix: the
+// task itself does not say what to do. Such a task is paused rather than left
+// to fail on every firing — two article schedules with no topic were failing
+// every five hours, with nothing on the schedule but a growing list of
+// identical errors.
+var errTaskMisconfigured = errors.New("schedule is not configured")
+
+// pauseMisconfigured stops a task that cannot run as written. The failed run
+// recorded just before this carries the reason, and Resume in the scheduler
+// puts the task back once it has been edited.
+func (r *Runner) pauseMisconfigured(ctx context.Context, t model.ScheduledTask, log *zap.Logger) {
+	status := "paused"
+	if _, err := r.repo.UpdateTask(ctx, t.ID, model.UpdateScheduledTaskRequest{Status: &status}); err != nil {
+		log.Error("scheduler: pause misconfigured task failed", zap.Error(err))
+		r.scheduleNext(ctx, t, log)
+		return
+	}
+	log.Warn("scheduler: paused a task that is not configured to do anything")
 }
 
 func (r *Runner) scheduleNext(ctx context.Context, t model.ScheduledTask, log *zap.Logger) {
@@ -433,14 +458,17 @@ func blogRequestFromInput(in map[string]any) (model.GenerateBlogRequest, error) 
 	}
 	var req model.GenerateBlogRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
-		return model.GenerateBlogRequest{}, fmt.Errorf("decode blog input: %w", err)
+		return model.GenerateBlogRequest{}, fmt.Errorf("%w: decode blog input: %v", errTaskMisconfigured, err)
 	}
 	// Tasks stored before briefs existed carry a bare topics array; Normalize
 	// folds either shape into briefs so a schedule created months ago keeps
 	// firing without being rewritten.
 	req.Normalize()
 	if err := req.Validate(); err != nil {
-		return model.GenerateBlogRequest{}, fmt.Errorf("scheduled blog task: %w", err)
+		return model.GenerateBlogRequest{}, fmt.Errorf(
+			"%w: this article schedule has nothing to write (%v). Edit it and choose "+
+				"\"Anything trending\", focus areas or a fixed topic, then resume it — it has been paused",
+			errTaskMisconfigured, err)
 	}
 	return req, nil
 }

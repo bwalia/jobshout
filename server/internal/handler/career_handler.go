@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -39,6 +40,22 @@ func (h *CareerHandler) ids(w http.ResponseWriter, r *http.Request) (orgID, user
 	}
 	ok = true
 	return
+}
+
+// careerWorkTimeout bounds model-backed work once it is detached from its
+// request. It matches the ten minutes requestTimeout gives /career/ routes,
+// which context.WithoutCancel drops along with the cancellation.
+const careerWorkTimeout = 10 * time.Minute
+
+// workContext is the context for career work that calls a model.
+//
+// It is detached from the request's cancellation. Evaluations, tailored CVs and
+// cover letters are saved as each one completes, so someone who reloads the page
+// or opens another agent's tab should come back to finished work. Tied to the
+// request, one navigation cancelled a batch part-way through, and every job not
+// yet scored was logged "skipped: context canceled" and lost.
+func workContext(r *http.Request) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(r.Context()), careerWorkTimeout)
 }
 
 func (h *CareerHandler) writeErr(w http.ResponseWriter, err error) {
@@ -128,7 +145,9 @@ func (h *CareerHandler) UploadCV(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ct := hdr.Header.Get("Content-Type")
-	out, err := h.svc.UploadCV(r.Context(), orgID, userID, hdr.Filename, ct, data)
+	ctx, cancel := workContext(r)
+	defer cancel()
+	out, err := h.svc.UploadCV(ctx, orgID, userID, hdr.Filename, ct, data)
 	if err != nil {
 		h.writeErr(w, err)
 		return
@@ -147,7 +166,9 @@ func (h *CareerHandler) Intake(w http.ResponseWriter, r *http.Request) {
 	if !DecodeJSON(w, r, &req) {
 		return
 	}
-	out, err := h.svc.Intake(r.Context(), orgID, userID, req.Document)
+	ctx, cancel := workContext(r)
+	defer cancel()
+	out, err := h.svc.Intake(ctx, orgID, userID, req.Document)
 	if err != nil {
 		h.writeErr(w, err)
 		return
@@ -164,7 +185,9 @@ func (h *CareerHandler) Evaluate(w http.ResponseWriter, r *http.Request) {
 	if !DecodeJSON(w, r, &req) {
 		return
 	}
-	out, err := h.svc.Evaluate(r.Context(), orgID, userID, req)
+	ctx, cancel := workContext(r)
+	defer cancel()
+	out, err := h.svc.Evaluate(ctx, orgID, userID, req)
 	if err != nil {
 		h.writeErr(w, err)
 		return
@@ -263,7 +286,9 @@ func (h *CareerHandler) Scan(w http.ResponseWriter, r *http.Request) {
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
-	out, err := h.svc.Scan(r.Context(), orgID, userID, req)
+	ctx, cancel := workContext(r)
+	defer cancel()
+	out, err := h.svc.Scan(ctx, orgID, userID, req)
 	if err != nil {
 		h.writeErr(w, err)
 		return
@@ -397,7 +422,9 @@ func (h *CareerHandler) Followup(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	out, err := h.svc.Followup(r.Context(), orgID, userID, id)
+	ctx, cancel := workContext(r)
+	defer cancel()
+	out, err := h.svc.Followup(ctx, orgID, userID, id)
 	if err != nil {
 		h.writeErr(w, err)
 		return
@@ -428,7 +455,9 @@ func (h *CareerHandler) InterviewPrep(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	out, err := h.svc.InterviewPrep(r.Context(), orgID, userID, id)
+	ctx, cancel := workContext(r)
+	defer cancel()
+	out, err := h.svc.InterviewPrep(ctx, orgID, userID, id)
 	if err != nil {
 		h.writeErr(w, err)
 		return
@@ -446,7 +475,9 @@ func (h *CareerHandler) OfferPrep(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	out, err := h.svc.OfferPrep(r.Context(), orgID, userID, id)
+	ctx, cancel := workContext(r)
+	defer cancel()
+	out, err := h.svc.OfferPrep(ctx, orgID, userID, id)
 	if err != nil {
 		h.writeErr(w, err)
 		return
@@ -570,7 +601,9 @@ func (h *CareerHandler) BatchEvaluate(w http.ResponseWriter, r *http.Request) {
 		URLs  []string `json:"urls"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
-	out, err := h.svc.BatchEvaluate(r.Context(), orgID, userID, req.Limit, req.URLs)
+	ctx, cancel := workContext(r)
+	defer cancel()
+	out, err := h.svc.BatchEvaluate(ctx, orgID, userID, req.Limit, req.URLs)
 	if err != nil {
 		h.writeErr(w, err)
 		return
@@ -589,7 +622,9 @@ func (h *CareerHandler) Apply(w http.ResponseWriter, r *http.Request) {
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
-	out, err := h.svc.ApplyRun(r.Context(), orgID, userID, req)
+	ctx, cancel := workContext(r)
+	defer cancel()
+	out, err := h.svc.ApplyRun(ctx, orgID, userID, req)
 	if err != nil {
 		h.writeErr(w, err)
 		return
@@ -607,7 +642,9 @@ func (h *CareerHandler) runArtifact(w http.ResponseWriter, r *http.Request, fn f
 		RespondError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	out, err := fn(r.Context(), orgID, userID, id)
+	ctx, cancel := workContext(r)
+	defer cancel()
+	out, err := fn(ctx, orgID, userID, id)
 	if err != nil {
 		h.writeErr(w, err)
 		return

@@ -162,43 +162,97 @@ func (c *Client) BindWAFPolicy(ctx context.Context, serverID, policyID, profileI
 	})
 }
 
-// Status returns a safe status map for Ready / HTTP status endpoints.
-func (c *Client) Status(ctx context.Context) map[string]any {
-	out := map[string]any{
-		"enabled": c.Enabled(),
-		"base_url": func() string {
-			if c == nil {
-				return ""
+// CodeToolsDisabled is the JSON-RPC error wslproxy returns from tools/call when
+// mcp.tools_enabled is false or mcp.mode is not read-write.
+const CodeToolsDisabled = -32002
+
+// ToolsDisabledHint is what an operator has to change on wslproxy.
+const ToolsDisabledHint = "set mcp.tools_enabled=true and mcp.mode=\"read-write\" in wslproxy settings.json"
+
+// IsToolsDisabled reports whether err is wslproxy refusing a tool call because
+// its MCP tools are switched off.
+func IsToolsDisabled(err error) bool {
+	code, ok := mcp.ErrorCode(err)
+	return ok && code == CodeToolsDisabled
+}
+
+// Probe is what the MCP endpoint can actually do right now.
+type Probe struct {
+	Reachable bool
+	Tools     []string
+	Err       error
+}
+
+// Has reports whether every named tool is advertised.
+func (p Probe) Has(names ...string) bool {
+	for _, n := range names {
+		found := false
+		for _, t := range p.Tools {
+			if t == n {
+				found = true
+				break
 			}
-			return c.cfg.BaseURL
-		}(),
-		"jsonrpc_path": func() string {
-			if c == nil {
-				return ""
-			}
-			return c.cfg.JSONRPCPath
-		}(),
-		"api_key_configured": c != nil && c.cfg.APIKey != "",
+		}
+		if !found {
+			return false
+		}
 	}
+	return len(names) > 0
+}
+
+// Message is a one-line, secret-free description of the probe.
+func (p Probe) Message() string {
+	switch {
+	case p.Err != nil:
+		return "wslproxy MCP unreachable: " + p.Err.Error()
+	case len(p.Tools) == 0:
+		return "wslproxy MCP is reachable but advertises no tools — its tools are disabled (" + ToolsDisabledHint + ")"
+	default:
+		return fmt.Sprintf("wslproxy MCP: %d tools available", len(p.Tools))
+	}
+}
+
+// ProbeTools initializes the session and lists tools. A server that answers
+// with an empty list is reachable but cannot mutate anything.
+func (c *Client) ProbeTools(ctx context.Context) Probe {
 	if !c.Enabled() {
-		out["ok"] = false
-		out["message"] = "wslproxy MCP not configured"
-		return out
+		return Probe{Err: fmt.Errorf("not configured")}
 	}
 	tools, err := c.ListTools(ctx)
 	if err != nil {
-		out["ok"] = false
-		out["message"] = err.Error()
-		return out
+		return Probe{Err: err}
 	}
 	names := make([]string, 0, len(tools))
 	for _, t := range tools {
 		names = append(names, t.Name)
 	}
-	out["ok"] = true
-	out["tool_count"] = len(names)
-	out["tools"] = names
-	out["message"] = fmt.Sprintf("%d MCP tools available", len(names))
+	return Probe{Reachable: true, Tools: names}
+}
+
+// Status returns a safe status map for Ready / HTTP status endpoints.
+func (c *Client) Status(ctx context.Context) map[string]any {
+	out := map[string]any{
+		"enabled":            c.Enabled(),
+		"base_url":           c.BaseURL(),
+		"api_key_configured": c != nil && c.cfg.APIKey != "",
+	}
+	if c != nil {
+		out["jsonrpc_path"] = c.cfg.JSONRPCPath
+	}
+	if !c.Enabled() {
+		out["ok"] = false
+		out["reachable"] = false
+		out["tools_enabled"] = false
+		out["message"] = "wslproxy MCP not configured"
+		return out
+	}
+	p := c.ProbeTools(ctx)
+	out["reachable"] = p.Reachable
+	out["tools_enabled"] = len(p.Tools) > 0
+	out["tool_count"] = len(p.Tools)
+	out["tools"] = p.Tools
+	out["ok"] = p.Reachable && len(p.Tools) > 0
+	out["message"] = p.Message()
 	return out
 }
 

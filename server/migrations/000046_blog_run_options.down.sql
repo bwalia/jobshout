@@ -1,0 +1,1 @@
+ALTER TABLE blog_runs DROP COLUMN IF EXISTS options;

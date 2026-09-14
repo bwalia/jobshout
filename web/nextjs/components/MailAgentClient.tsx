@@ -451,7 +451,8 @@ export function MailAgentClient() {
         {mailboxLinked && (
           <div className="mt-3 space-y-3">
             <p className="text-sm">
-              Connected as <span className="font-medium">{connection.email}</span>
+              {connection.needs_reconnect ? "Was connected as " : "Connected as "}
+              <span className="font-medium">{connection.email}</span>
             </p>
             {connection.status === "error" && connection.status_error ? (
               <p className="text-sm text-destructive">{connection.status_error}</p>
@@ -465,14 +466,25 @@ export function MailAgentClient() {
               </p>
             )}
             <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void syncNow()}
-                className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-              >
-                {busy ? "Working…" : "Sync now"}
-              </button>
+              {connection.needs_reconnect ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void connect()}
+                  className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                >
+                  {busy ? "Working…" : "Reconnect Gmail"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void syncNow()}
+                  className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                >
+                  {busy ? "Working…" : "Sync now"}
+                </button>
+              )}
               <button
                 type="button"
                 disabled={busy}

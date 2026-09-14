@@ -17,8 +17,8 @@ func TestUpdateTrafficSplit(t *testing.T) {
 			return
 		}
 		var req struct {
-			ID     int64  `json:"id"`
-			Method string `json:"method"`
+			ID     int64          `json:"id"`
+			Method string         `json:"method"`
 			Params map[string]any `json:"params"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
@@ -73,5 +73,39 @@ func TestDisabledClient(t *testing.T) {
 	}
 	if _, err := c.CallTool(context.Background(), "x", nil); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestProbeToolsDisabled(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ID     int64  `json:"id"`
+			Method string `json:"method"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		w.Header().Set("Content-Type", "application/json")
+		switch req.Method {
+		case "tools/list":
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"tools":{}}}`))
+		case "tools/call":
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"error":{"code":-32002,"message":"MCP tools are disabled"}}`))
+		default:
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
+		}
+	}))
+	defer srv.Close()
+
+	c := NewClient(Config{Enabled: true, BaseURL: srv.URL, JSONRPCPath: "/mcp/jsonrpc"})
+	p := c.ProbeTools(context.Background())
+	if !p.Reachable || p.Err != nil || len(p.Tools) != 0 || p.Has("update_traffic_split") {
+		t.Fatalf("probe = %+v", p)
+	}
+	st := c.Status(context.Background())
+	if st["ok"] != false || st["reachable"] != true || st["tools_enabled"] != false {
+		t.Fatalf("status = %v", st)
+	}
+	_, err := c.UpdateTrafficSplit(context.Background(), "r", "prod", []BackendWeight{{Label: "a", Weight: 1}})
+	if !IsToolsDisabled(err) {
+		t.Fatalf("want tools-disabled error, got %v", err)
 	}
 }

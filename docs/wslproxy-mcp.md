@@ -4,14 +4,25 @@ JobShout talks to **wslproxy** two ways:
 
 | Path | Used by | Auth |
 | --- | --- | --- |
-| REST `/api/*` | WAF Efficacy Lab (`waflab.Client`) | Bearer API token or login |
-| MCP `/mcp/jsonrpc` | AB Testing Agent (`wslproxymcp` → `internal/mcp`) | `X-MCP-API-Key` |
+| REST `/api/*` | WAF Efficacy Lab (`waflab.Client`); AB Testing rule reads, and its writes when MCP tools are off | Bearer API token or login |
+| MCP `/mcp/jsonrpc` | AB Testing Agent writes when tools are on (`wslproxymcp` → `internal/mcp`) | `X-MCP-API-Key` |
 
 Prefer MCP for traffic engineering (`update_traffic_split`, `promote_backend`,
 `rollback_backend`, `bind_waf_policy`, server/rule CRUD). Prefer REST for the
 WAF attack relay (`POST /api/waf/test`) and bulk `projects/import`.
 
 ## Troubleshooting
+
+### `tools/list` returns `{"tools":{}}` / error `-32002 MCP tools are disabled`
+
+wslproxy answers `initialize` but advertises no tools while `mcp.tools_enabled`
+is false or `mcp.mode` is not `read-write` (its Lua encoder writes the empty
+list as `{}`, which JobShout reads as zero tools). The AB Testing tab then
+says so in its status line and writes over the admin API instead, if
+`WSLPROXY_USERNAME` + `WSLPROXY_PASSWORD` (or `WSLPROXY_API_TOKEN`) are set.
+To use MCP, set `mcp.tools_enabled=true`, `mcp.mode="read-write"` and
+`mcp.api_key` in wslproxy `settings.json`, and the same key as
+`WSLPROXY_MCP_API_KEY` in JobShout.
 
 ### `unexpected status 405` / redirect to `/login`
 
@@ -38,7 +49,8 @@ curl --max-redirs 0 -X POST "$WSLPROXY_BASE_URL/mcp/jsonrpc" \
 1. Set `WSLPROXY_BASE_URL` (admin POP, e.g. `https://lon1.pop0.uk`).
 2. Set `WSLPROXY_MCP_API_KEY` to the same value as wslproxy `settings.json` →
    `mcp.api_key` (header defaults to `X-MCP-API-Key`).
-3. Enable MCP write mode on wslproxy (`mcp.mode=write`, `mcp.tools_enabled=true`).
+3. Enable MCP write mode on wslproxy (`mcp.mode="read-write"`, `mcp.tools_enabled=true`).
+   Without it the AB Testing agent falls back to the admin API for writes.
 4. Open the **AB Testing** Task Manager tab (or `agent_execute` with builtin
    `ab_testing`).
 
@@ -74,9 +86,10 @@ see wslproxy `api/mcp/README.md`.
 
 ## AB Testing agent vs abtesting.fictionally.org
 
-The public host remains the **edge experiment**. JobShout is the **control
-plane**: set weights, promote/rollback, and observe `/version` samples with a
-dot plot (expected vs observed). That replaces the standalone demo UI at
-https://abtesting.fictionally.org/.
+See [ab-testing-agent.md](./ab-testing-agent.md). In short: the agent reads the
+host's real wslproxy rule and only writes when that rule is the host's own
+split. abtesting.fictionally.org currently shares a single-backend rule with
+other hosts, and its 80/20 split lives in the k3s1 Traefik IngressRoute
+`default/webapp-ingress`, so the tab is read-only for it (Observe still works).
 
 Env: `WSLPROXY_AB_DEMO_HOST`, `WSLPROXY_AB_RULE_ID`, `WSLPROXY_AB_OBSERVE_PATH`.

@@ -1,3 +1,4 @@
+import axios from "axios";
 import { apiClient } from "@/lib/api/client";
 import type {
   CareerApplication,
@@ -269,11 +270,23 @@ export async function previewCareerListing(jobUrl: string) {
   return data;
 }
 
+// Scores up to eight jobs one after another. The server keeps scoring if the
+// browser gives up or navigates away — each score is saved as it lands — so the
+// timeout matches its ten-minute work window rather than guessing shorter.
 export async function careerBatchEvaluate(payload?: { limit?: number; urls?: string[] }) {
   const { data } = await apiClient.post(
     "/career/pipeline/batch",
     { limit: payload?.limit ?? 8, urls: payload?.urls },
-    { timeout: 360_000 }
+    { timeout: 600_000 }
   );
   return data as { evaluated?: number; skipped?: number };
+}
+
+/**
+ * True when the browser stopped waiting rather than the server failing. Career
+ * work carries on server-side after that, so callers should reload instead of
+ * reporting the work as lost.
+ */
+export function isCareerRequestTimeout(err: unknown): boolean {
+  return axios.isAxiosError(err) && (err.code === "ECONNABORTED" || err.code === "ETIMEDOUT");
 }
