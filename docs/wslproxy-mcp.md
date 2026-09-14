@@ -11,6 +11,28 @@ Prefer MCP for traffic engineering (`update_traffic_split`, `promote_backend`,
 `rollback_backend`, `bind_waf_policy`, server/rule CRUD). Prefer REST for the
 WAF attack relay (`POST /api/waf/test`) and bulk `projects/import`.
 
+## Troubleshooting
+
+### `unexpected status 405` / redirect to `/login`
+
+`https://lon1.pop0.uk/mcp/*` must hit OpenResty’s MCP location. If nginx’s
+Next.js admin `server` block is missing `/mcp`, requests fall through to the
+dashboard UI, which `307`s to `/login`. Following that redirect with POST
+yields **405 Method Not Allowed**.
+
+Fix: deploy wslproxy with the `/mcp` location on the Next.js admin port
+(see wslproxy PR for `nginx.conf.j2`). JobShout’s MCP client refuses redirects
+so the error names the Location instead of looking like a bogus 405.
+
+Smoke without following redirects:
+
+```bash
+curl --max-redirs 0 -X POST "$WSLPROXY_BASE_URL/mcp/jsonrpc" \
+  -H "Content-Type: application/json" \
+  -H "X-MCP-API-Key: $WSLPROXY_MCP_API_KEY" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
+```
+
 ## Inside JobShout
 
 1. Set `WSLPROXY_BASE_URL` (admin POP, e.g. `https://lon1.pop0.uk`).

@@ -31,7 +31,11 @@ func NewClient(cfg Config) *Client {
 	if cfg.APIKey != "" {
 		headers[cfg.APIKeyHeader] = cfg.APIKey
 	}
-	c.raw = mcp.NewClientWithHeaders(url, headers).WithTimeout(cfg.Timeout)
+	raw := mcp.NewClientWithHeaders(url, headers).WithTimeout(cfg.Timeout)
+	// Never follow redirects: a missing /mcp nginx location on the Next.js
+	// admin port 307s to /login, and re-POSTing login surfaces as HTTP 405.
+	raw.DisallowRedirects()
+	c.raw = raw
 	return c
 }
 

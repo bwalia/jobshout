@@ -61,8 +61,31 @@ func NewClientWithHeaders(url string, headers map[string]string) *Client {
 
 // WithTimeout overrides the default 30s HTTP timeout.
 func (c *Client) WithTimeout(d time.Duration) *Client {
-	if c != nil && d > 0 {
-		c.httpClient = &http.Client{Timeout: d}
+	if c != nil && d > 0 && c.httpClient != nil {
+		c.httpClient = &http.Client{
+			Timeout:       d,
+			CheckRedirect: c.httpClient.CheckRedirect,
+		}
+	}
+	return c
+}
+
+// DisallowRedirects stops the HTTP client from following redirects. Use this
+// for MCP servers that must not bounce to a browser login page (a followed
+// POST → /login often surfaces as HTTP 405).
+func (c *Client) DisallowRedirects() *Client {
+	if c == nil || c.httpClient == nil {
+		return c
+	}
+	c.httpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		loc := ""
+		if len(via) > 0 && via[0].Response != nil {
+			loc = via[0].Response.Header.Get("Location")
+		}
+		if loc == "" {
+			loc = req.URL.String()
+		}
+		return fmt.Errorf("refusing redirect to %s (MCP path may be proxied to a login UI — ensure /mcp is served by OpenResty, not Next.js)", loc)
 	}
 	return c
 }
@@ -132,8 +155,19 @@ func (c *Client) call(ctx context.Context, method string, params any, out any) e
 	if err != nil {
 		return fmt.Errorf("mcp: %s: read response: %w", method, err)
 	}
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		loc := resp.Header.Get("Location")
+		return fmt.Errorf("mcp: %s: unexpected redirect %d to %s (OpenResty /mcp location missing on this host?)", method, resp.StatusCode, loc)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("mcp: %s: unexpected status %d: %s", method, resp.StatusCode, string(raw))
+		snippet := string(raw)
+		if len(snippet) > 200 {
+			snippet = snippet[:200] + "…"
+		}
+		if resp.StatusCode == http.StatusMethodNotAllowed {
+			return fmt.Errorf("mcp: %s: unexpected status 405 Method Not Allowed (often a login redirect followed as POST — check /mcp is not proxied to Next.js): %s", method, snippet)
+		}
+		return fmt.Errorf("mcp: %s: unexpected status %d: %s", method, resp.StatusCode, snippet)
 	}
 
 	payload := extractJSONPayload(raw)
