@@ -1,6 +1,7 @@
 "use client";
 
 import type { ComponentType } from "react";
+import { AbTestAgentClient } from "@/components/AbTestAgentClient";
 import { CareerAgentClient } from "@/components/CareerAgentClient";
 import { CreditControllerAgentClient } from "@/components/CreditControllerAgentClient";
 import { MailAgentClient } from "@/components/MailAgentClient";
@@ -25,6 +26,7 @@ export const AGENT_CLIENTS: Record<string, ComponentType> = {
   credit_controller: CreditControllerAgentClient,
   simpro_payments: SimproPaymentsAgentClient,
   waf_lab: WafLabAgentClient,
+  ab_testing: AbTestAgentClient,
   article_writer: function ArticleWriterClient() {
     return <ArticlesView hideHeader />;
   },

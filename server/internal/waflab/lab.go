@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/jobshout/server/internal/model"
 )
@@ -196,9 +197,9 @@ func RunLab(ctx context.Context, api API, cfg LabConfig, rec StepRecorder) (*Lab
 		return out, nil
 	}
 
-	// 5. Efficacy
+	// 5. Efficacy — fire the matrix with a small concurrency cap so a full
+	// catalogue does not hammer the edge relay.
 	attacks := FilterBySet(cfg.AttackSet)
-	var results []HostResult
 	hosts := []struct {
 		role string
 		host string
@@ -206,31 +207,49 @@ func RunLab(ctx context.Context, api API, cfg LabConfig, rec StepRecorder) (*Lab
 		{"secure", cfg.SecureHost},
 		{"open", cfg.OpenHost},
 	}
+	type job struct {
+		attack Attack
+		role   string
+		host   string
+	}
+	var jobs []job
 	for _, a := range attacks {
 		for _, h := range hosts {
-			target := h.host
+			jobs = append(jobs, job{attack: a, role: h.role, host: h.host})
+		}
+	}
+	results := make([]HostResult, len(jobs))
+	sem := make(chan struct{}, 4)
+	var wg sync.WaitGroup
+	for i, j := range jobs {
+		wg.Add(1)
+		go func(i int, j job) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			target := j.host
 			if !strings.Contains(target, "://") {
 				target = "https://" + target
 			}
 			resp, err := api.WAFTest(ctx, WAFTestRequest{
 				Target:      target,
-				Method:      a.Method,
-				Path:        a.Path,
-				Headers:     a.Headers,
-				Body:        a.Body,
-				ContentType: a.ContentType,
+				Method:      j.attack.Method,
+				Path:        j.attack.Path,
+				Headers:     j.attack.Headers,
+				Body:        j.attack.Body,
+				ContentType: j.attack.ContentType,
 			})
 			hr := HostResult{
-				AttackID:    a.ID,
-				AttackName:  a.Name,
-				Category:    a.Category,
-				HostRole:    h.role,
-				Host:        h.host,
-				Method:      a.Method,
-				Path:        a.Path,
-				Payload:     a.Body,
-				ExpectBlock: a.ExpectBlock,
-				Notes:       a.Notes,
+				AttackID:    j.attack.ID,
+				AttackName:  j.attack.Name,
+				Category:    j.attack.Category,
+				HostRole:    j.role,
+				Host:        j.host,
+				Method:      j.attack.Method,
+				Path:        j.attack.Path,
+				Payload:     j.attack.Body,
+				ExpectBlock: j.attack.ExpectBlock,
+				Notes:       j.attack.Notes,
 			}
 			if err != nil {
 				hr.Notes = err.Error()
@@ -242,9 +261,10 @@ func RunLab(ctx context.Context, api API, cfg LabConfig, rec StepRecorder) (*Lab
 				hr.SupportID = resp.SupportID
 				hr.LatencyMS = resp.LatencyMS
 			}
-			results = append(results, hr)
-		}
+			results[i] = hr
+		}(i, j)
 	}
+	wg.Wait()
 	out.Results = results
 	out.Score = ScoreMatrix(results)
 	_, _ = api.ListWAFEvents(ctx) // best-effort cross-check

@@ -16,6 +16,7 @@ import {
   Shield,
   ShieldCheck,
   Sparkles,
+  Split,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
@@ -274,6 +275,7 @@ const BUILTIN_ICONS: Record<string, LucideIcon> = {
   credit_controller: Landmark,
   simpro_payments: Receipt,
   waf_lab: Shield,
+  ab_testing: Split,
 };
 
 function count(n: number | undefined): string {

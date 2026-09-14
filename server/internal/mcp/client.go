@@ -28,7 +28,8 @@ type Tool struct {
 // Client is a JSON-RPC 2.0 client for one MCP server's Streamable HTTP endpoint.
 type Client struct {
 	url        string
-	authHeader string
+	authHeader string            // Authorization value when set (e.g. "Bearer …")
+	extraHdr   map[string]string // additional headers (e.g. X-MCP-API-Key for wslproxy)
 	httpClient *http.Client
 	nextID     atomic.Int64
 }
@@ -42,6 +43,28 @@ func NewClient(url, authHeader string) *Client {
 		authHeader: authHeader,
 		httpClient: &http.Client{Timeout: 30 * time.Second},
 	}
+}
+
+// NewClientWithHeaders creates a client that sends the given extra HTTP headers
+// on every request. Use this for MCP servers that authenticate with a custom
+// header (e.g. wslproxy's X-MCP-API-Key) instead of Authorization.
+func NewClientWithHeaders(url string, headers map[string]string) *Client {
+	c := NewClient(url, "")
+	if len(headers) > 0 {
+		c.extraHdr = make(map[string]string, len(headers))
+		for k, v := range headers {
+			c.extraHdr[k] = v
+		}
+	}
+	return c
+}
+
+// WithTimeout overrides the default 30s HTTP timeout.
+func (c *Client) WithTimeout(d time.Duration) *Client {
+	if c != nil && d > 0 {
+		c.httpClient = &http.Client{Timeout: d}
+	}
+	return c
 }
 
 // rpcRequest is a JSON-RPC 2.0 request envelope.
@@ -92,6 +115,11 @@ func (c *Client) call(ctx context.Context, method string, params any, out any) e
 	httpReq.Header.Set("Accept", "application/json, text/event-stream")
 	if c.authHeader != "" {
 		httpReq.Header.Set("Authorization", c.authHeader)
+	}
+	for k, v := range c.extraHdr {
+		if k != "" && v != "" {
+			httpReq.Header.Set(k, v)
+		}
 	}
 
 	resp, err := c.httpClient.Do(httpReq)

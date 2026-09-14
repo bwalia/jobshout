@@ -193,6 +193,13 @@ wafLab:
   timeout: "30s"
   labMaxRuntime: "10m"
   targetAllowlist: ""
+  # MCP (AB Testing agent + optional tool path). API key via secret
+  # WSLPROXY_MCP_API_KEY on the same jobshout-wslproxy secret.
+  mcpEnabled: true
+  mcpJSONRPCPath: "/mcp/jsonrpc"
+  abDemoHost: "abtesting.fictionally.org"
+  abRuleID: ""
+  abObservePath: "/version"
 
 # Mail Agent — one shared org Gmail. OAuth client id/secret and GMAIL_TOKEN_KEY
 # are secrets (extraSecretRefs), not chart values. Empty client id leaves Connect
