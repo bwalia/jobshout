@@ -322,12 +322,17 @@ type fakeGmail struct {
 	listErr   error
 	lastQuery string
 	tokens    mail.TokenSet
+	// refreshErr, when set, is returned by Refresh (e.g. mail.ErrGrantRevoked).
+	refreshErr error
 }
 
 func (f *fakeGmail) ExchangeCode(ctx context.Context, code, redirectURL, clientID, clientSecret string) (mail.TokenSet, error) {
 	return f.tokens, nil
 }
 func (f *fakeGmail) Refresh(ctx context.Context, refreshToken, clientID, clientSecret string) (mail.TokenSet, error) {
+	if f.refreshErr != nil {
+		return mail.TokenSet{}, f.refreshErr
+	}
 	return f.tokens, nil
 }
 func (f *fakeGmail) Profile(ctx context.Context, accessToken string) (string, error) {
@@ -1339,6 +1344,48 @@ func TestProcessDueSyncsClearsLeaseOnFailure(t *testing.T) {
 	}
 	if got.SyncLeaseUntil != nil {
 		t.Fatal("failed sync must persist sync_lease_until = NULL")
+	}
+}
+
+func TestProcessDueSyncsRevokedGrantStopsPollingAndAsksReconnect(t *testing.T) {
+	gmail := &fakeGmail{email: "org@example.com", refreshErr: mail.ErrGrantRevoked}
+	svc, repo, orgID := setupMail(t, gmail, nil, nil)
+	connectOrg(t, svc, repo, orgID)
+	ctx := context.Background()
+	c, _ := repo.GetConnectionByOrg(ctx, orgID)
+	c.WatchSenders = []string{"ops@example.com"}
+	if err := repo.UpsertConnection(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ProcessDueSyncs(ctx, 5); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := repo.GetConnectionByOrg(ctx, orgID)
+	if got == nil || got.Status != model.MailConnError {
+		t.Fatalf("status = %+v", got)
+	}
+	if len(got.RefreshTokenEnc) != 0 {
+		t.Fatal("a revoked grant must drop the dead refresh token")
+	}
+	if got.NextSyncAt != nil {
+		t.Fatal("a revoked grant must not schedule another sync")
+	}
+	if len(got.WatchSenders) != 1 {
+		t.Fatal("watch rules must survive so Reconnect Gmail keeps them")
+	}
+
+	st, err := svc.ConnectionStatus(ctx, orgID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.NeedsReconnect || st.Connected || st.Email != "org@example.com" {
+		t.Fatalf("status view = %+v", st)
+	}
+	if svc.Available(ctx, orgID) {
+		t.Fatal("revoked mailbox must not be available to launches")
+	}
+	if _, err := svc.SyncInbox(ctx, orgID); !errors.Is(err, ErrMailNotConnected) {
+		t.Fatalf("SyncInbox err = %v", err)
 	}
 }
 

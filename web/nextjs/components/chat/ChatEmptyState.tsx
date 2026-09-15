@@ -16,6 +16,7 @@ import {
   Shield,
   ShieldCheck,
   Sparkles,
+  Split,
   Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -133,6 +134,10 @@ const BUILTIN_META: Record<string, { icon: LucideIcon; blurb: string }> = {
   waf_lab: {
     icon: Shield,
     blurb: "Measures WAF efficacy secure vs open",
+  },
+  ab_testing: {
+    icon: Split,
+    blurb: "wslproxy canary / A/B traffic splits",
   },
 };
 

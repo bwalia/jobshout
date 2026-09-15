@@ -185,9 +185,36 @@ jobs:
   #   :v<X.Y.Z>  — immutable, what Ring Promoter seeds and the k8sjob clones
   #   :latest    — moving alias, kept for anything that still resolves
   #               images by "latest"
+  # ─── smoke-test the Go server before anything is built ─────────────
+  # Runs on every merge to master. The cross-build below takes the best part
+  # of an hour, so a compile error or a failing test should stop the run in
+  # seconds. A red suite skips build -> auto-tag -> deploy, so Ring Promoter
+  # is never seeded with a version whose tests did not pass.
+  go-smoke:
+    name: Go build, vet & test
+    runs-on: self-hosted
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: Build, vet & test
+        working-directory: server
+        run: |
+          set -euo pipefail
+          go build ./...
+          go vet ./...
+          go test ./...
+
   build:
     name: Build & push images
-    needs: [compute-version]
+    needs: [compute-version, go-smoke]
     # Only fires when the computed version is actually new. Manual dispatches
     # replaying an existing version don't trigger a rebuild — that image is
     # already published under that tag.

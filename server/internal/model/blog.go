@@ -119,6 +119,11 @@ type BlogRun struct {
 	Briefs []BlogBrief `json:"briefs"`
 	Topics []string    `json:"topics"`
 	Model  *string     `json:"model"`
+	// Options is how the run was asked to work beyond its subjects, kept so a
+	// retry replays the same request. A trending run that fails while choosing
+	// its topic has no briefs, and only this says it should discover again —
+	// and with which focus areas.
+	Options BlogRunOptions `json:"options"`
 	// CMSNamespace is the opsapi namespace the run's drafts were created in.
 	// Nil until the run is published.
 	CMSNamespace *string `json:"cms_namespace"`
@@ -135,6 +140,43 @@ type BlogRun struct {
 	CompletedAt *time.Time `json:"completed_at"`
 	PublishedAt *time.Time `json:"published_at"`
 	CreatedAt   time.Time  `json:"created_at"`
+}
+
+// BlogRunOptions is the part of a GenerateBlogRequest that is not the briefs
+// or the model, persisted on the run.
+type BlogRunOptions struct {
+	Trending      bool     `json:"trending,omitempty"`
+	TrendingCount int      `json:"trending_count,omitempty"`
+	Focus         []string `json:"focus,omitempty"`
+	MaxArticles   int      `json:"max_articles,omitempty"`
+	AutoPublish   bool     `json:"auto_publish,omitempty"`
+}
+
+// RunOptions extracts what a run records about how it was asked to work.
+func (r *GenerateBlogRequest) RunOptions() BlogRunOptions {
+	return BlogRunOptions{
+		Trending:      r.Trending,
+		TrendingCount: r.TrendingCount,
+		Focus:         r.Focus,
+		MaxArticles:   r.MaxArticles,
+		AutoPublish:   r.AutoPublish,
+	}
+}
+
+// Discovers reports whether the run finds its own topics.
+//
+// Runs created before options were stored have none recorded, so the trace is
+// the fallback: only a trending run is seeded with the discovery step.
+func (r *BlogRun) Discovers() bool {
+	if r.Options.Trending {
+		return true
+	}
+	for _, s := range r.Steps {
+		if s.Key == BlogStepDiscovering {
+			return true
+		}
+	}
+	return false
 }
 
 // CurrentStep returns the step the run is on, or nil when nothing is running.

@@ -39,6 +39,11 @@ func TestRegisteredSchemasHaveFields(t *testing.T) {
 	}
 }
 
+// TestRegisteredModuleContract pins the launch contract of the builtins listed
+// below: their tab, stay-on-tab flag, field keys and field order, plus the order
+// they appear in relative to each other. It deliberately does not assert the
+// registry's length — a new specialist registers itself and must not have to add
+// a row here. See .claude/rules/agent-modules.md.
 func TestRegisteredModuleContract(t *testing.T) {
 	want := []struct {
 		builtin string
@@ -55,13 +60,22 @@ func TestRegisteredModuleContract(t *testing.T) {
 		{model.BuiltinResearcher, "", false, []string{"topic", "context"}},
 	}
 	got := agentschema.Builtins()
-	if len(got) != len(want) {
-		t.Fatalf("builtins = %v; want %d", got, len(want))
+	at := make(map[string]int, len(got))
+	for i, b := range got {
+		at[b] = i
 	}
-	for i, w := range want {
-		if got[i] != w.builtin {
-			t.Errorf("order[%d] = %q; want %q", i, got[i], w.builtin)
+
+	prev := -1
+	for _, w := range want {
+		i, ok := at[w.builtin]
+		if !ok {
+			t.Fatalf("registry lost pinned builtin %s; builtins = %v", w.builtin, got)
 		}
+		if i <= prev {
+			t.Errorf("%s sits at %d, behind the builtin pinned before it; builtins = %v", w.builtin, i, got)
+		}
+		prev = i
+
 		m, ok := agentmodule.Lookup(w.builtin)
 		if !ok {
 			t.Fatalf("missing module %s", w.builtin)

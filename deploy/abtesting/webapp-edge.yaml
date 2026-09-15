@@ -1,0 +1,131 @@
+# abtesting.fictionally.org — the two variants that wslproxy weights between.
+#
+# lon1.pop0.uk (wslproxy) rule "abtesting-split" sends each request to one of
+# these NodePorts on cloud001 (origin-uk-001.pop0.uk). The JobShout AB Testing
+# agent changes the weights on that rule. See docs/ab-testing-agent.md.
+#
+# Pinned to cloud001, with its edge taint tolerated, because the edge cannot
+# route to pods on the LAN nodes: a NodePort only answers from outside when its
+# pod runs on cloud001 (same constraint as the WAF demo's payments-api).
+#
+# The site content is the existing webapp-v1/webapp-v2 ConfigMaps in default,
+# which also back the older Traefik route default/webapp-ingress.
+#
+#   kubectl --kubeconfig ~/.kube/k3s1.yaml apply -f deploy/abtesting/webapp-edge.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp-v1-edge
+  namespace: default
+  labels: {app: webapp-edge, version: v1, purpose: wslproxy-ab-split}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: webapp-edge, version: v1}
+  template:
+    metadata:
+      labels: {app: webapp-edge, version: v1}
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: cloud001
+      tolerations:
+        - {key: node-role.kubernetes.io/edge, operator: Equal, value: "true", effect: NoSchedule}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: nginx
+          image: nginxinc/nginx-unprivileged:1.27-alpine
+          ports:
+            - {containerPort: 8080, protocol: TCP}
+          readinessProbe:
+            httpGet: {path: /version, port: 8080}
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /version, port: 8080}
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 200m, memory: 64Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: site, mountPath: /usr/share/nginx/html, readOnly: true}
+      volumes:
+        - name: site
+          configMap: {name: webapp-v1-site-5tgd72tfgg}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp-v2-edge
+  namespace: default
+  labels: {app: webapp-edge, version: v2, purpose: wslproxy-ab-split}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: webapp-edge, version: v2}
+  template:
+    metadata:
+      labels: {app: webapp-edge, version: v2}
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: cloud001
+      tolerations:
+        - {key: node-role.kubernetes.io/edge, operator: Equal, value: "true", effect: NoSchedule}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: nginx
+          image: nginxinc/nginx-unprivileged:1.27-alpine
+          ports:
+            - {containerPort: 8080, protocol: TCP}
+          readinessProbe:
+            httpGet: {path: /version, port: 8080}
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /version, port: 8080}
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 200m, memory: 64Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: site, mountPath: /usr/share/nginx/html, readOnly: true}
+      volumes:
+        - name: site
+          configMap: {name: webapp-v2-site-gfbb9c6889}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webapp-v1-edge
+  namespace: default
+  labels: {app: webapp-edge, version: v1, purpose: wslproxy-ab-split}
+spec:
+  type: NodePort
+  selector: {app: webapp-edge, version: v1}
+  ports:
+    - {name: http, port: 80, targetPort: 8080, nodePort: 30086, protocol: TCP}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webapp-v2-edge
+  namespace: default
+  labels: {app: webapp-edge, version: v2, purpose: wslproxy-ab-split}
+spec:
+  type: NodePort
+  selector: {app: webapp-edge, version: v2}
+  ports:
+    - {name: http, port: 80, targetPort: 8080, nodePort: 30087, protocol: TCP}

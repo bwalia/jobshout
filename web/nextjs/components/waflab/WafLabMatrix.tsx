@@ -1,10 +1,13 @@
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
+import { Loader2 } from "lucide-react";
 import type { WAFLabResult, WAFLabScore } from "@/lib/api/waf-lab";
 
 interface WafLabMatrixProps {
   results: WAFLabResult[];
+  /** Run still in flight — an empty matrix means "not yet", not "none". */
+  running?: boolean;
   score?: WAFLabScore | null;
   secureHost: string;
   openHost: string;
@@ -23,7 +26,7 @@ function verdictClass(verdict: string, blocked: boolean): string {
   return "bg-muted text-muted-foreground";
 }
 
-export function WafLabMatrix({ results, score, secureHost, openHost }: WafLabMatrixProps) {
+export function WafLabMatrix({ results, running, score, secureHost, openHost }: WafLabMatrixProps) {
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const rows = useMemo(() => {
@@ -44,7 +47,12 @@ export function WafLabMatrix({ results, score, secureHost, openHost }: WafLabMat
   }, [results]);
 
   if (results.length === 0) {
-    return (
+    return running ? (
+      <p className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin text-primary" />
+        Attacks start once provisioning finishes — results appear here as they land.
+      </p>
+    ) : (
       <p className="text-sm text-muted-foreground">No attack results yet for this run.</p>
     );
   }

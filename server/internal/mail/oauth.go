@@ -3,6 +3,7 @@ package mail
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -31,6 +32,12 @@ func AuthURL(clientID, redirectURL, state string) string {
 	return googleAuthURL + "?" + q.Encode()
 }
 
+// ErrGrantRevoked means Google rejected the stored refresh token (OAuth
+// error invalid_grant): it expired or was revoked. Retrying cannot succeed;
+// only a fresh consent (Reconnect Gmail) restores the mailbox. Refresh tokens
+// of a Google OAuth app left in "Testing" expire after 7 days.
+var ErrGrantRevoked = errors.New("mail: Google revoked this mailbox's access — reconnect Gmail to resume syncing")
+
 type tokenJSON struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
@@ -44,6 +51,9 @@ func parseTokenResponse(body []byte, status int) (TokenSet, error) {
 	var tj tokenJSON
 	if err := json.Unmarshal(body, &tj); err != nil {
 		return TokenSet{}, fmt.Errorf("mail: token response: status %d", status)
+	}
+	if tj.Error == "invalid_grant" {
+		return TokenSet{}, ErrGrantRevoked
 	}
 	if tj.Error != "" || status >= 400 {
 		desc := tj.ErrorDesc

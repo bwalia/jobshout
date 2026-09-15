@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Check, Loader2, Minus, X } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { apiClient, apiErrorMessage } from "@/lib/api/client";
 import {
@@ -18,6 +19,22 @@ import { WafLabRunForm } from "@/components/waflab/WafLabRunForm";
 import { WafLabRunsList } from "@/components/waflab/WafLabRunsList";
 
 type Tab = "run" | "history";
+
+const PHASES: { key: string; label: string }[] = [
+  { key: "preflight", label: "Preflight" },
+  { key: "rules_policy", label: "Rules & policy" },
+  { key: "hosts", label: "Hosts" },
+  { key: "dns", label: "DNS" },
+  { key: "efficacy", label: "Attack matrix" },
+];
+
+function PhaseIcon({ status }: { status?: string }) {
+  if (status === "completed") return <Check className="h-4 w-4 text-signal" strokeWidth={2.5} />;
+  if (status === "failed") return <X className="h-4 w-4 text-destructive" strokeWidth={2.5} />;
+  if (status === "skipped") return <Minus className="h-4 w-4 text-muted-foreground" strokeWidth={2.5} />;
+  if (status === "active") return <Loader2 className="h-4 w-4 animate-spin text-primary" />;
+  return <span className="block h-2 w-2 rounded-full bg-muted-foreground/40" />;
+}
 
 interface AgentSummary {
   id: string;
@@ -131,6 +148,12 @@ export function WafLabAgentClient() {
     );
   }
 
+  const runActive = selected?.status === "queued" || selected?.status === "running";
+  const stepByPhase = new Map(steps.map((s) => [s.phase, s]));
+  const activePhase = PHASES.find((p) => !stepByPhase.has(p.key))?.key ?? "";
+  const activeLabel =
+    PHASES.find((p) => p.key === activePhase)?.label.toLowerCase() ?? "finishing up";
+
   const tabClass = (t: Tab) =>
     `flex-1 rounded-md px-3 py-1.5 text-sm font-medium ${
       tab === t ? "bg-card text-card-foreground shadow" : "text-muted-foreground hover:text-foreground"
@@ -172,28 +195,56 @@ export function WafLabAgentClient() {
             </div>
             <div>
               <h2 className="font-semibold">{selected.secure_host}</h2>
-              <p className="text-sm text-muted-foreground">
-                {selected.status} · {selected.mode} · {selected.attack_set}
+              <p className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                {runActive && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
+                <span className={runActive ? "font-medium text-foreground" : undefined}>
+                  {runActive ? `Running — ${activeLabel}` : selected.status}
+                </span>
+                <span>· {selected.mode} · {selected.attack_set}</span>
               </p>
+              {runActive && (
+                <p className="mt-1 text-sm text-muted-foreground">
+                  This runs on wslproxy and takes a few minutes. The page updates itself —
+                  you can leave it open or come back to it from History.
+                </p>
+              )}
               {selected.error_message && (
                 <p className="mt-2 text-sm text-destructive">{selected.error_message}</p>
               )}
             </div>
             {detailError && <p className="text-sm text-destructive">{detailError}</p>}
-            {steps.length > 0 && (
-              <ol className="space-y-1 text-sm">
-                {steps.map((s) => (
-                  <li key={s.id} className="flex gap-2">
-                    <span className="w-24 shrink-0 font-medium capitalize text-foreground">{s.phase}</span>
-                    <span className="text-muted-foreground">
-                      {s.status}: {s.message}
+            <ol className="space-y-2 text-sm">
+              {PHASES.map((phase) => {
+                const step = stepByPhase.get(phase.key);
+                const isActive = runActive && phase.key === activePhase;
+                return (
+                  <li key={phase.key} className="flex gap-3">
+                    <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center">
+                      <PhaseIcon status={isActive ? "active" : step?.status} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span
+                        className={
+                          step || isActive ? "font-medium text-foreground" : "text-muted-foreground"
+                        }
+                      >
+                        {phase.label}
+                      </span>
+                      <span className="block break-words text-muted-foreground">
+                        {step
+                          ? `${step.status}: ${step.message}`
+                          : isActive
+                            ? "Working…"
+                            : "Waiting"}
+                      </span>
                     </span>
                   </li>
-                ))}
-              </ol>
-            )}
+                );
+              })}
+            </ol>
             <WafLabMatrix
               results={results}
+              running={runActive}
               score={selected.score}
               secureHost={selected.secure_host}
               openHost={selected.open_host}

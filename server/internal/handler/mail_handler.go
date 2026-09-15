@@ -56,7 +56,7 @@ func (h *MailHandler) writeErr(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, service.ErrMailNotConfigured):
 		RespondError(w, http.StatusServiceUnavailable, err.Error())
-	case errors.Is(err, service.ErrMailNotConnected):
+	case errors.Is(err, service.ErrMailNotConnected), errors.Is(err, mail.ErrGrantRevoked):
 		RespondError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, service.ErrMailNotFound):
 		RespondError(w, http.StatusNotFound, err.Error())

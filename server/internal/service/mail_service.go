@@ -213,6 +213,7 @@ func (s *mailService) ConnectionStatus(ctx context.Context, orgID uuid.UUID) (*m
 	if c.StatusError != nil {
 		st.StatusError = mail.Redact(*c.StatusError)
 	}
+	st.NeedsReconnect = c.Status == model.MailConnError && len(c.RefreshTokenEnc) == 0 && c.GoogleEmail != ""
 	st.AllowMailboxMutations = c.AllowMailboxMutations
 	st.Rules = model.MailWatchRules{
 		Labels: c.WatchLabels, Senders: c.WatchSenders, SubjectPrefixes: c.WatchSubjectPrefixes,
@@ -431,14 +432,7 @@ func (s *mailService) SyncInbox(ctx context.Context, orgID uuid.UUID) (*model.Ma
 	}
 	out, err := s.pullInbox(ctx, c)
 	if err != nil {
-		s.logger.Warn("mail: sync failed",
-			zap.String("org_id", c.OrgID.String()),
-			zap.Error(mail.RedactErr(err)))
-		msg := mail.Redact(err.Error())
-		c.Status = model.MailConnError
-		c.StatusError = &msg
-		c.SyncLeaseUntil = nil
-		_ = s.repo.UpsertConnection(ctx, c)
+		s.recordSyncFailure(ctx, c, err, c.NextSyncAt)
 		return nil, err
 	}
 	now := time.Now()
@@ -500,20 +494,34 @@ func (s *mailService) ProcessDueSyncs(ctx context.Context, limit int) error {
 		c := &conns[i]
 		next := time.Now().Add(s.pollInterval())
 		if err := s.syncConnection(ctx, c); err != nil {
-			s.logger.Warn("mail: sync failed",
-				zap.String("org_id", c.OrgID.String()),
-				zap.Error(mail.RedactErr(err)))
-			msg := mail.Redact(err.Error())
-			c.Status = model.MailConnError
-			c.StatusError = &msg
-			c.NextSyncAt = &next
-			c.SyncLeaseUntil = nil
-			_ = s.repo.UpsertConnection(ctx, c)
+			s.recordSyncFailure(ctx, c, err, &next)
 			continue
 		}
 		_ = s.repo.MarkSynced(ctx, c.ID, time.Now(), next)
 	}
 	return nil
+}
+
+// recordSyncFailure stores a failed sync on the connection. A revoked grant
+// also drops the dead refresh token: polling stops (ClaimDueConnections needs a
+// token) and the tab offers Reconnect Gmail, which keeps the watch rules.
+func (s *mailService) recordSyncFailure(ctx context.Context, c *model.MailConnection, err error, next *time.Time) {
+	msg := mail.Redact(err.Error())
+	if errors.Is(err, mail.ErrGrantRevoked) {
+		s.logger.Warn("mail: gmail access revoked; waiting for reconnect",
+			zap.String("org_id", c.OrgID.String()))
+		c.RefreshTokenEnc = nil
+		next = nil
+	} else {
+		s.logger.Warn("mail: sync failed",
+			zap.String("org_id", c.OrgID.String()),
+			zap.Error(mail.RedactErr(err)))
+	}
+	c.Status = model.MailConnError
+	c.StatusError = &msg
+	c.NextSyncAt = next
+	c.SyncLeaseUntil = nil
+	_ = s.repo.UpsertConnection(ctx, c)
 }
 
 func (s *mailService) pollInterval() time.Duration {
@@ -1033,6 +1041,9 @@ func (s *mailService) accessToken(ctx context.Context, c *model.MailConnection) 
 		return "", err
 	}
 	ts, err := s.gmail.Refresh(ctx, string(plain), s.cfg.ClientID, s.cfg.ClientSecret)
+	if errors.Is(err, mail.ErrGrantRevoked) {
+		return "", mail.ErrGrantRevoked
+	}
 	if err != nil {
 		return "", mail.RedactErr(err)
 	}

@@ -24,7 +24,7 @@ type ProjectDecision struct {
 // One project → use it. More than one → interview unless hint matches a name
 // or lastProjectID is a valid org project and the hint is a "that project"
 // reference (empty last_project is not enough).
-func (s *Service) ResolveProject(ctx context.Context, orgID uuid.UUID, hint, lastProjectID string) (ProjectDecision, error) {
+func (s *Service) ResolveProject(ctx context.Context, orgID, userID uuid.UUID, hint, lastProjectID string) (ProjectDecision, error) {
 	if s.Projects == nil {
 		return ProjectDecision{}, nil
 	}
@@ -34,9 +34,28 @@ func (s *Service) ResolveProject(ctx context.Context, orgID uuid.UUID, hint, las
 	}
 	projects := page.Data
 	if len(projects) == 0 {
+		// With no projects, a hint cannot name an existing one — the only
+		// thing it can mean is what to call the first. Create it and carry on
+		// rather than sending the user to Task Manager and losing the task
+		// they were in the middle of.
+		if name := newProjectName(hint); name != "" {
+			created, err := s.Projects.Create(ctx, orgID, userID, model.CreateProjectRequest{
+				Name:     name,
+				Priority: "medium",
+			})
+			if err != nil {
+				return ProjectDecision{}, err
+			}
+			if created != nil {
+				return ProjectDecision{ProjectID: created.ID}, nil
+			}
+		}
 		return ProjectDecision{
 			Missing:  "project",
-			Question: "There is no project yet. Create one in Task Manager first?",
+			Question: "There is no project yet. I can create one and carry straight on — take the default name, or tell me what to call it.",
+			Options: []model.ClarifyOption{
+				{Label: `Create "General" and continue`, Value: NewProjectPrefix + "General"},
+			},
 		}, nil
 	}
 	if len(projects) == 1 {
@@ -92,4 +111,33 @@ func isThatProjectHint(hint string) bool {
 		return true
 	}
 	return false
+}
+
+// NewProjectPrefix marks a clarify answer that means "create a project with
+// this name". The prefix keeps creation explicit: a bare hint that happens to
+// look like a name can still be treated as one, but the option we offer always
+// round-trips unambiguously.
+const NewProjectPrefix = "new:"
+
+// newProjectName is the project name an answer asks us to create, or "" when
+// the answer is not a name at all (a "that project" style reference).
+func newProjectName(hint string) string {
+	hint = strings.TrimSpace(hint)
+	if strings.HasPrefix(strings.ToLower(hint), NewProjectPrefix) {
+		if name := strings.TrimSpace(hint[len(NewProjectPrefix):]); name != "" {
+			return name
+		}
+		return "General"
+	}
+	if hint == "" || isThatProjectHint(hint) {
+		return ""
+	}
+	if _, err := uuid.Parse(hint); err == nil {
+		// A stale id from a previous org/session is not a name.
+		return ""
+	}
+	if len([]rune(hint)) < 2 {
+		return "" // Create validates min=2; re-ask instead of erroring.
+	}
+	return hint
 }

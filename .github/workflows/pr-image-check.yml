@@ -14,8 +14,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The image cross-build takes the best part of an hour on the self-hosted
+  # runner. Compile and test the Go server first so a type error or a broken
+  # test fails in seconds instead of after the build has burned the runner.
+  go-checks:
+    name: Go build, vet & test
+    runs-on: self-hosted
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: Build, vet & test
+        working-directory: server
+        run: |
+          set -euo pipefail
+          go build ./...
+          go vet ./...
+          go test ./...
+
   pr-image-check:
     name: PR image check
+    needs: [go-checks]
     runs-on: self-hosted
     timeout-minutes: 60
     steps:

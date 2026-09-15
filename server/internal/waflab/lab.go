@@ -3,8 +3,10 @@ package waflab
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/jobshout/server/internal/model"
 )
@@ -96,9 +98,17 @@ func RunLab(ctx context.Context, api API, cfg LabConfig, rec StepRecorder) (*Lab
 
 	if doProvision {
 		// 2. Rules + policy
+		//
+		// Seeding asks wslproxy to write its built-in OWASP rules if they are
+		// not already on disk, so it does nothing on a deployment that has
+		// been seeded once. Treat it as best-effort: some wslproxy builds
+		// return 500 from /api/waf_rules/seed for every payload, and aborting
+		// there stranded labs whose rules were all present already. What
+		// actually matters is verified after the imports — that every rule the
+		// policy names exists.
+		seedNote := ""
 		if err := api.SeedWAFRules(ctx, cfg.ProfileID); err != nil {
-			record("rules_policy", "failed", err.Error())
-			return out, err
+			seedNote = "; seed unavailable (" + err.Error() + ")"
 		}
 		modern, err := loadDemoMaps("waf_rules")
 		if err != nil {
@@ -124,7 +134,21 @@ func RunLab(ctx context.Context, api API, cfg LabConfig, rec StepRecorder) (*Lab
 			record("rules_policy", "failed", err.Error())
 			return out, err
 		}
-		record("rules_policy", "completed", fmt.Sprintf("seeded + imported %d modern rules, policy %s", len(modern), cfg.PolicyID))
+		// A policy naming rules wslproxy does not have would grade a WAF that
+		// is quietly weaker than the report claims, so refuse to run rather
+		// than publish a misleading score.
+		present, err := api.ListWAFRules(ctx)
+		if err != nil {
+			record("rules_policy", "failed", "rule coverage check: "+err.Error())
+			return out, err
+		}
+		if missing := missingPolicyRules(pols, present); len(missing) > 0 {
+			msg := fmt.Sprintf("wslproxy is missing %d rule(s) the policy references: %s%s",
+				len(missing), strings.Join(missing, ", "), seedNote)
+			record("rules_policy", "failed", msg)
+			return out, errors.New(msg)
+		}
+		record("rules_policy", "completed", fmt.Sprintf("imported %d modern rules, policy %s, all referenced rules present%s", len(modern), cfg.PolicyID, seedNote))
 
 		// 3. Hosts
 		route, secure, open := buildHostPayloads(cfg)
@@ -173,9 +197,9 @@ func RunLab(ctx context.Context, api API, cfg LabConfig, rec StepRecorder) (*Lab
 		return out, nil
 	}
 
-	// 5. Efficacy
+	// 5. Efficacy — fire the matrix with a small concurrency cap so a full
+	// catalogue does not hammer the edge relay.
 	attacks := FilterBySet(cfg.AttackSet)
-	var results []HostResult
 	hosts := []struct {
 		role string
 		host string
@@ -183,31 +207,49 @@ func RunLab(ctx context.Context, api API, cfg LabConfig, rec StepRecorder) (*Lab
 		{"secure", cfg.SecureHost},
 		{"open", cfg.OpenHost},
 	}
+	type job struct {
+		attack Attack
+		role   string
+		host   string
+	}
+	var jobs []job
 	for _, a := range attacks {
 		for _, h := range hosts {
-			target := h.host
+			jobs = append(jobs, job{attack: a, role: h.role, host: h.host})
+		}
+	}
+	results := make([]HostResult, len(jobs))
+	sem := make(chan struct{}, 4)
+	var wg sync.WaitGroup
+	for i, j := range jobs {
+		wg.Add(1)
+		go func(i int, j job) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			target := j.host
 			if !strings.Contains(target, "://") {
 				target = "https://" + target
 			}
 			resp, err := api.WAFTest(ctx, WAFTestRequest{
 				Target:      target,
-				Method:      a.Method,
-				Path:        a.Path,
-				Headers:     a.Headers,
-				Body:        a.Body,
-				ContentType: a.ContentType,
+				Method:      j.attack.Method,
+				Path:        j.attack.Path,
+				Headers:     j.attack.Headers,
+				Body:        j.attack.Body,
+				ContentType: j.attack.ContentType,
 			})
 			hr := HostResult{
-				AttackID:    a.ID,
-				AttackName:  a.Name,
-				Category:    a.Category,
-				HostRole:    h.role,
-				Host:        h.host,
-				Method:      a.Method,
-				Path:        a.Path,
-				Payload:     a.Body,
-				ExpectBlock: a.ExpectBlock,
-				Notes:       a.Notes,
+				AttackID:    j.attack.ID,
+				AttackName:  j.attack.Name,
+				Category:    j.attack.Category,
+				HostRole:    j.role,
+				Host:        j.host,
+				Method:      j.attack.Method,
+				Path:        j.attack.Path,
+				Payload:     j.attack.Body,
+				ExpectBlock: j.attack.ExpectBlock,
+				Notes:       j.attack.Notes,
 			}
 			if err != nil {
 				hr.Notes = err.Error()
@@ -219,9 +261,10 @@ func RunLab(ctx context.Context, api API, cfg LabConfig, rec StepRecorder) (*Lab
 				hr.SupportID = resp.SupportID
 				hr.LatencyMS = resp.LatencyMS
 			}
-			results = append(results, hr)
-		}
+			results[i] = hr
+		}(i, j)
 	}
+	wg.Wait()
 	out.Results = results
 	out.Score = ScoreMatrix(results)
 	_, _ = api.ListWAFEvents(ctx) // best-effort cross-check
@@ -234,7 +277,7 @@ func RunLab(ctx context.Context, api API, cfg LabConfig, rec StepRecorder) (*Lab
 
 func normalizeLabConfig(cfg LabConfig) LabConfig {
 	if cfg.OriginUpstream == "" {
-		cfg.OriginUpstream = "127.0.0.1:30084"
+		cfg.OriginUpstream = DefaultOriginUpstream()
 	}
 	if cfg.PolicyID == "" {
 		cfg.PolicyID = "waf-policy-payments-hard"
@@ -271,8 +314,8 @@ func buildHostPayloads(cfg LabConfig) (route, secure, open map[string]any) {
 		"match": map[string]any{
 			"response": map[string]any{
 				"strip_path": false, "auto_redirect_https": false, "code": 305, "allow": true,
-				"routing":    map[string]any{"mode": "least_conn"},
-				"is_consul":  false,
+				"routing":      map[string]any{"mode": "least_conn"},
+				"is_consul":    false,
 				"redirect_uri": cfg.OriginUpstream,
 				"backends": []map[string]any{
 					{"address": cfg.OriginUpstream, "weight": 100, "label": "payments-origin"},
@@ -286,11 +329,11 @@ func buildHostPayloads(cfg LabConfig) (route, secure, open map[string]any) {
 		return map[string]any{
 			"id": "host:" + host, "server_name": host, "proxy_server_name": host,
 			"root": "/var/www/html", "index": "index.html",
-			"access_log": "logs/" + host + ".access.log",
-			"error_log":  "logs/" + host + ".error.log",
+			"access_log":    "logs/" + host + ".access.log",
+			"error_log":     "logs/" + host + ".error.log",
 			"config_status": false, "profile_id": cfg.ProfileID,
-			"rules": ruleID,
-			"listens": []map[string]any{{"listen": "80"}},
+			"rules":       ruleID,
+			"listens":     []map[string]any{{"listen": "80"}},
 			"ssl_enabled": true, "ssl_force_https": true, "ssl_staging": false,
 			"ssl_auto_renew": true, "cache_enabled": false,
 			"match_cases": map[string]any{}, "custom_headers": []any{},
@@ -343,3 +386,37 @@ func assertSecureOpenDifferOnlyOnWAF(secure, open map[string]any) error {
 	return nil
 }
 
+// missingPolicyRules reports which rule IDs the given policies reference that
+// are absent from present. Returns nil when every reference resolves.
+func missingPolicyRules(policies, present []map[string]any) []string {
+	var want []string
+	for _, p := range policies {
+		refs, ok := p["waf_rules"].([]any)
+		if !ok {
+			continue
+		}
+		for _, r := range refs {
+			if id, ok := r.(string); ok && id != "" {
+				want = append(want, id)
+			}
+		}
+	}
+	if len(want) == 0 {
+		return nil
+	}
+	have := make(map[string]bool, len(present))
+	for _, r := range present {
+		if id, ok := r["id"].(string); ok {
+			have[id] = true
+		}
+	}
+	var missing []string
+	seen := map[string]bool{}
+	for _, id := range want {
+		if !have[id] && !seen[id] {
+			seen[id] = true
+			missing = append(missing, id)
+		}
+	}
+	return missing
+}

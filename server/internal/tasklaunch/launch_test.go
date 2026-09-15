@@ -47,7 +47,7 @@ func TestResolveProject_OneProject(t *testing.T) {
 	org := uuid.New()
 	p := model.Project{ID: uuid.New(), OrgID: org, Name: "Inbox"}
 	s := &Service{Projects: stubProjects{items: []model.Project{p}}}
-	got, err := s.ResolveProject(context.Background(), org, "", "")
+	got, err := s.ResolveProject(context.Background(), org, uuid.New(), "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestResolveProject_TwoProjectsInterview(t *testing.T) {
 	a := model.Project{ID: uuid.New(), OrgID: org, Name: "Platform"}
 	b := model.Project{ID: uuid.New(), OrgID: org, Name: "Website"}
 	s := &Service{Projects: stubProjects{items: []model.Project{a, b}}}
-	got, err := s.ResolveProject(context.Background(), org, "", "")
+	got, err := s.ResolveProject(context.Background(), org, uuid.New(), "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestResolveProject_TwoProjectsInterview(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 
-	got, err = s.ResolveProject(context.Background(), org, "Website", "")
+	got, err = s.ResolveProject(context.Background(), org, uuid.New(), "Website", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestResolveProject_TwoProjectsInterview(t *testing.T) {
 		t.Fatalf("named project = %s want %s", got.ProjectID, b.ID)
 	}
 
-	got, err = s.ResolveProject(context.Background(), org, "that project", a.ID.String())
+	got, err = s.ResolveProject(context.Background(), org, uuid.New(), "that project", a.ID.String())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,8 +90,8 @@ type stubProjects struct {
 	items []model.Project
 }
 
-func (s stubProjects) Create(context.Context, uuid.UUID, uuid.UUID, model.CreateProjectRequest) (*model.Project, error) {
-	return nil, nil
+func (s stubProjects) Create(_ context.Context, orgID, ownerID uuid.UUID, req model.CreateProjectRequest) (*model.Project, error) {
+	return &model.Project{ID: uuid.New(), OrgID: orgID, OwnerID: &ownerID, Name: req.Name}, nil
 }
 func (s stubProjects) GetByID(_ context.Context, id uuid.UUID) (*model.Project, error) {
 	for i := range s.items {
@@ -108,3 +108,48 @@ func (s stubProjects) Update(context.Context, uuid.UUID, model.UpdateProjectRequ
 	return nil, nil
 }
 func (s stubProjects) Delete(context.Context, uuid.UUID) error { return nil }
+
+func TestResolveProject_NoProjectsOffersCreate(t *testing.T) {
+	org := uuid.New()
+	s := &Service{Projects: stubProjects{}}
+
+	// Nothing to go on: must offer a way forward, not a dead end.
+	got, err := s.ResolveProject(context.Background(), org, uuid.New(), "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Missing != "project" {
+		t.Fatalf("want a clarify, got %+v", got)
+	}
+	if len(got.Options) != 1 || got.Options[0].Value != NewProjectPrefix+"General" {
+		t.Fatalf("want a create option, got %+v", got.Options)
+	}
+
+	// Answering that option creates the project and continues.
+	got, err = s.ResolveProject(context.Background(), org, uuid.New(), NewProjectPrefix+"Acme", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Missing != "" || got.ProjectID == uuid.Nil {
+		t.Fatalf("want a resolved project, got %+v", got)
+	}
+}
+
+func TestNewProjectName(t *testing.T) {
+	cases := map[string]string{
+		"new:Acme":          "Acme",
+		"new:":              "General",
+		"NEW:Acme":          "Acme",
+		"Acme":              "Acme",
+		"":                  "",
+		"that":              "",
+		"it":                "",
+		"x":                 "",
+		uuid.New().String(): "",
+	}
+	for in, want := range cases {
+		if got := newProjectName(in); got != want {
+			t.Errorf("newProjectName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

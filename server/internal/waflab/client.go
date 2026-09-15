@@ -19,10 +19,11 @@ import (
 )
 
 var (
-	reBearer   = regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9\-_\.=]+`)
-	rePassword = regexp.MustCompile(`(?i)"password"\s*:\s*"[^"]*"`)
-	reAccess   = regexp.MustCompile(`(?i)"accessToken"\s*:\s*"[^"]*"`)
-	reAPIToken = regexp.MustCompile(`(?i)"api[_-]?token"\s*:\s*"[^"]*"`)
+	reBearer    = regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9\-_\.=]+`)
+	rePassword  = regexp.MustCompile(`(?i)"password"\s*:\s*"[^"]*"`)
+	reAccess    = regexp.MustCompile(`(?i)"accessToken"\s*:\s*"[^"]*"`)
+	reAPIToken  = regexp.MustCompile(`(?i)"api[_-]?token"\s*:\s*"[^"]*"`)
+	reHTMLTitle = regexp.MustCompile(`(?is)<title>(.*?)</title>`)
 )
 
 // Config is loaded from WSLPROXY_* environment variables.
@@ -89,6 +90,21 @@ func LoadConfig() Config {
 		LabMaxRuntime: maxRT,
 		TargetAllow:   allow,
 	}
+}
+
+// DefaultOriginUpstream is the address the demo hosts proxy to.
+//
+// It must not be a loopback address: wslproxy commonly runs off-cluster, where
+// 127.0.0.1 is the proxy host itself rather than the node holding the
+// NodePort, which yields a 502 on every lab host. A resolvable name also
+// survives the origin node being replaced, which a pinned node IP does not.
+// wslproxy strips the scheme before proxy_pass (execution.lua), so including
+// it here is safe.
+func DefaultOriginUpstream() string {
+	if v := strings.TrimSpace(os.Getenv("WSLPROXY_ORIGIN_UPSTREAM")); v != "" {
+		return v
+	}
+	return "http://origin-uk-001.pop0.uk:30084"
 }
 
 func parseBool(v string, def bool) bool {

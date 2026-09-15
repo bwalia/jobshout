@@ -78,7 +78,7 @@ func schema() agentschema.Schema {
 				Placeholder: "payments-open.fictionally.org",
 				Question:    "What is the open (WAF-off) hostname?"},
 			{Key: "origin_upstream", Label: "Origin upstream", Type: "text", Required: false,
-				Default: "127.0.0.1:30084", Placeholder: "127.0.0.1:30084"},
+				Default: DefaultOriginUpstream(), Placeholder: DefaultOriginUpstream()},
 			{Key: "policy_id", Label: "WAF policy id", Type: "text", Required: false,
 				Default: "waf-policy-payments-hard"},
 			{Key: "mode", Label: "Mode", Type: "select", Required: true, Default: "provision_and_test",
@@ -170,7 +170,7 @@ func launch(run Runner) agentmodule.LaunchFunc {
 			payload.AttackSet = "full"
 		}
 		if payload.OriginUpstream == "" {
-			payload.OriginUpstream = "127.0.0.1:30084"
+			payload.OriginUpstream = DefaultOriginUpstream()
 		}
 		if payload.PolicyID == "" {
 			payload.PolicyID = "waf-policy-payments-hard"
