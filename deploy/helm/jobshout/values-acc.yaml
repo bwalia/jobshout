@@ -5,7 +5,7 @@ logLevel: info
 ai:
   enabled: true
   ollamaBaseURL: "https://ollama.workstation.co.uk"
-  ollamaModel: "llama3:latest"
+  ollamaModel: "llama3.1:8b"
   chatModel: "qwen3-coder:30b"
   chatModelFallback: "llama3.1:8b"
   mailModel: "muse-glimmer:latest"

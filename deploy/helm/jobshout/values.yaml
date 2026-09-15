@@ -106,7 +106,14 @@ ai:
   enabled: true
   provider: ollama
   ollamaBaseURL: "https://ollama.workstation.co.uk"
-  ollamaModel: "llama3:latest"
+  # Worker model: research, article discovery/writing, mail classification.
+  # It must be one the shared host keeps loaded. That host pins models in
+  # memory indefinitely (qwen3-coder:30b, qwen3:30b-a3b, llama3.1:8b), so a
+  # model outside that set never gets loaded: llama3:latest calls waited with no
+  # first token until the edge's 10-minute 504, which failed every scheduled
+  # article at "Choosing topics" from 14 Sep. llama3.1:8b is already loaded as
+  # the chat fallback and answers a full discovery prompt in about two minutes.
+  ollamaModel: "llama3.1:8b"
   # Bounds one Ollama call end-to-end. Article drafts are streamed but still
   # take minutes on the shared CPU host (cold load + queue + 900–1400 words).
   ollamaTimeout: "30m"
@@ -116,8 +123,8 @@ ai:
   # windows big models support; model discovery caps it per model, so a value
   # above what a model can hold is lowered rather than rejected.
   ollamaNumCtx: 8192
-  # Chat is pinned separately from ollamaModel so workers stay on llama3:latest
-  # while the control-desk conversation uses a tool-capable model.
+  # Chat is pinned separately from ollamaModel so workers stay on the small
+  # worker model while the control-desk conversation uses a tool-capable one.
   chatModel: "qwen3-coder:30b"
   chatModelFallback: "llama3.1:8b"
   # Mail reply drafting is pinned separately too: draft quality is worth a
