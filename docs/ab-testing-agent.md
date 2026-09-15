@@ -59,19 +59,74 @@ wslproxy itself are **502** with its message.
 - `rollback` — back to single-backend routing
 - `observe` — N GETs to `https://{host}{observe_path}` (default `/version`); works even when read-only
 
-## abtesting.fictionally.org today
+## abtesting.fictionally.org
 
-`host:abtesting.fictionally.org` uses rule `aws-k3s1-ingress-13.42.188.136`
-(`8f161403-…`), which is shared with seven other hosts and has one backend (the
-k3s1 ingress at 100%). The visible 80/20 split is done behind wslproxy by the
-Traefik IngressRoute `default/webapp-ingress` (`webapp-v1` weight 80,
-`webapp-v2` weight 20). So the tab is read-only for this host and Observe shows
-the real split.
+The host has its own weighted wslproxy rule, so the tab is writable for it.
 
-To manage it from JobShout, give the host its own wslproxy rule with one backend
-per variant (for example the `webapp-v1` and `webapp-v2` services exposed to
-wslproxy), attach only that rule to `host:abtesting.fictionally.org`, and
-optionally pin it with `WSLPROXY_AB_RULE_ID`. Keep the Traefik weights at a
-single variant, or the two splits multiply.
+```
+browser ─► lon1.pop0.uk (wslproxy)
+             host:abtesting.fictionally.org
+               rule abtesting-split (5f281375-14fe-62c2-9b45-ca6689d74ece, weighted)
+                 v1 ─► http://origin-uk-001.pop0.uk:30086 ─► default/webapp-v1-edge (cloud001)
+                 v2 ─► http://origin-uk-001.pop0.uk:30087 ─► default/webapp-v2-edge (cloud001)
+```
+
+| File | What |
+| --- | --- |
+| [`deploy/abtesting/webapp-edge.yaml`](../deploy/abtesting/webapp-edge.yaml) | v1/v2 Deployments + NodePort Services on k3s1 |
+| [`deploy/abtesting/wslproxy-rule-abtesting-split.json`](../deploy/abtesting/wslproxy-rule-abtesting-split.json) | The wslproxy rule (weights as first created: 80/20) |
+
+The live weights are whatever the tab last applied; the JSON is the starting
+point, not a source of truth. `GET /api/v1/ab-testing/experiments/abtesting`
+(or the tab) shows the current values.
+
+### Why it is built this way
+
+- **Own rule, not the shared one.** Before this, the host used
+  `aws-k3s1-ingress-13.42.188.136` (`8f161403-…`), which also serves
+  int.jobshout.co.uk, jenkins, ring-promoter, shop, int-langfuse and others.
+  Changing weights there would move all of them.
+- **Pinned to cloud001.** The edge cannot route to pods on the LAN nodes, so a
+  NodePort only answers from outside when its pod runs on cloud001. The pods
+  tolerate cloud001's `node-role.kubernetes.io/edge=true:NoSchedule` taint.
+- **Traefik is out of the path for this host.** The older IngressRoute
+  `default/webapp-ingress` (80/20 across `webapp-v1`/`webapp-v2`) and those two
+  Deployments still exist but no longer carry abtesting.fictionally.org
+  traffic, so the splits do not multiply.
+
+### Rebuild from scratch
+
+1. `kubectl --kubeconfig ~/.kube/k3s1.yaml apply -f deploy/abtesting/webapp-edge.yaml`,
+   then check `curl http://origin-uk-001.pop0.uk:30086/version` → `v1` and
+   `:30087` → `v2`.
+2. `POST https://lon1.pop0.uk/api/rules` with the rule JSON (without `servers`).
+   wslproxy generates the id; set `WSLPROXY_AB_RULE_ID` to it if you want to pin it.
+3. `GET /api/servers/host%3Aabtesting.fictionally.org`, set `rules` to
+   `["<new id>"]`, and `PUT` it back — with `config` **base64-decoded** (see below).
+4. `GET /api/rules/<new id>`; if `servers` does not list
+   `host:abtesting.fictionally.org`, `PUT` the rule back with it added.
+5. Verify: `curl -sD- https://abtesting.fictionally.org/version` shows
+   `x-wsl-rule: abtesting-split`, and a hundred requests land roughly 80/20.
+
+### wslproxy admin API gotchas
+
+- **`config` round-trip.** `GET /api/servers/{id}` returns `config` base64, but
+  `PUT` expects the plain nginx text and encodes it again. PUT what GET returned
+  and the stored config becomes base64-of-base64; traffic keeps working until
+  the next nginx reload writes that garbage to the host's `.conf`. Always
+  decode `config` before a PUT, then confirm GET returns the original value.
+- **Re-saving a server's current rule unlinks it.** A `PUT` of a server whose
+  `rules` already names a rule removes the host from that rule's `servers` and
+  does not add it back. Routing follows the server's `rules`, but the admin UI
+  and JobShout's shared-rule check read the rule's `servers`, so re-add it
+  (step 4).
+
+### Roll back to the shared rule
+
+`PUT /api/servers/host%3Aabtesting.fictionally.org` with `rules` set to
+`["8f161403-8592-1111-6294-9c57974505b0"]` (config decoded). wslproxy moves the
+host back onto the shared rule's `servers`; the tab then shows the host
+read-only again. The `abtesting-split` rule and the `*-edge` Kubernetes objects
+can be deleted afterwards.
 
 See [wslproxy-mcp.md](./wslproxy-mcp.md) for MCP setup inside and outside JobShout.

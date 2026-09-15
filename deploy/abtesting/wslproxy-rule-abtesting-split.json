@@ -1,0 +1,23 @@
+{
+  "name": "abtesting-split",
+  "profile_id": "prod",
+  "priority": 1,
+  "rules_tags": ["abtesting", "ab-split", "jobshout-ab-testing"],
+  "match": {
+    "response": {
+      "code": 305,
+      "allow": false,
+      "is_consul": false,
+      "strip_path": false,
+      "auto_redirect_https": false,
+      "routing": { "mode": "weighted" },
+      "redirect_uri": "http://origin-uk-001.pop0.uk:30086",
+      "backends": [
+        { "label": "v1", "address": "http://origin-uk-001.pop0.uk:30086", "weight": 80 },
+        { "label": "v2", "address": "http://origin-uk-001.pop0.uk:30087", "weight": 20 }
+      ]
+    },
+    "rules": { "path_key": "starts_with", "path": "/", "jwt_token_validation": "equals" }
+  },
+  "servers": ["host:abtesting.fictionally.org"]
+}
