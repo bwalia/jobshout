@@ -650,3 +650,23 @@ jobs:
           print("::error::timed out waiting for Ring Promoter job (15m)")
           sys.exit(1)
           PY
+
+  # ─── publish + seed the marketplace at the SAME version ────────────
+  # One version line across both Ring Promoter apps. This runs after auto-tag
+  # because RP's k8sjob clones this repo at the seeded tag, so the tag has to
+  # exist on the remote first. The called workflow rebuilds the marketplace
+  # images only when something under jobshout-com/ moved; otherwise it copies
+  # the previous digest onto this version, which costs seconds.
+  #
+  # Deploy-only dispatches skip auto-tag and pin a pre-existing IMAGE_TAG, so
+  # they do not come through here — dispatch deploy-jobshout-com.yml directly
+  # to re-seed the marketplace on its own.
+  marketplace:
+    name: JobShout.com at ${{ needs.compute-version.outputs.next_version }}
+    needs: [compute-version, auto-tag]
+    if: needs.auto-tag.outputs.tag_created == 'true'
+    uses: ./.github/workflows/deploy-jobshout-com.yml
+    with:
+      VERSION: ${{ needs.compute-version.outputs.next_version }}
+      TARGET_ENV: ${{ github.event.inputs.TARGET_ENV || 'int' }}
+    secrets: inherit
