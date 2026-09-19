@@ -273,10 +273,19 @@ jobs:
             echo "::error::WSLPROXY_USER / WSLPROXY_PASSWORD / WSLPROXY_GATEWAY_URL required."
             exit 1
           fi
+          # The vhost and its CNAME outlive any single release, so this step is a
+          # no-op on every run after the first. Losing the admin API (expired
+          # creds, gateway down) must not strand images that already built and
+          # tagged — warn and let the ring get its version. Use
+          # register-edge-vhost.yml to register a genuinely new host.
           TOKEN=$(curl -fsS -X POST "$GW/api/user/login" \
             -H "Content-Type: application/json" \
             -d "$(jq -nc --arg e "$WSLPROXY_USER" --arg p "$WSLPROXY_PASSWORD" '{email:$e,password:$p}')" \
-            | jq -r '.data.accessToken')
+            | jq -r '.data.accessToken // empty') || TOKEN=""
+          if [ -z "$TOKEN" ]; then
+            echo "::warning::wslproxy admin login failed at ${GW} — leaving the ${HOST} vhost as-is."
+            exit 0
+          fi
           existing=$(curl -fsS -X GET "$GW/api/servers" -H "Authorization: Bearer $TOKEN" \
             | jq -r --arg h "$HOST" '.data[]? | select(.server_name==$h) | .id' | head -1)
           if [ -n "$existing" ]; then
@@ -304,10 +313,6 @@ jobs:
       && (
         (github.event_name == 'workflow_dispatch' && inputs.DEPLOYMENT_TYPE == 'deploy')
         || needs.auto-tag.outputs.tag_created == 'true'
-      )
-      && (
-        needs.register-edge.result == 'success'
-        || needs.register-edge.result == 'skipped'
       )
     steps:
       - name: Seed jobshout-com and wait
