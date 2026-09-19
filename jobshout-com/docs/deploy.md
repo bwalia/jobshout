@@ -22,6 +22,21 @@ gh workflow run register-edge-vhost.yml --repo bwalia/jobshout \
   -f cname_target=lon1.pop0.uk
 ```
 
+Edge registration is best-effort: the vhost and CNAME outlive any one release, so
+a dead admin API warns and the ring still gets its version. Register a genuinely
+new host with the manual fallback above.
+
+## Versions — `jsc-v*`, never `v*`
+
+The marketplace has its **own** version line. `jobshout-com/{api,web}` images only
+ever exist at `jsc-vX.Y.Z`; the platform's `v1.0.x` tags are built into the
+`jobshout` registry namespace and belong to Ring Promoter app `jobshout`.
+
+Seeding app `jobshout-com` with a `v1.0.x` version therefore asks for an image
+that was never pushed. The chart rejects that tag at template time — before it
+can become a 15-minute `helm --wait` on `ImagePullBackOff` that surfaces only as
+`UPGRADE FAILED: context deadline exceeded`.
+
 ## Continuous deploy
 Push to `master` under `jobshout-com/**` → builds `jobshout-com/{api,web}:jsc-v…`
 → seeds Ring Promoter int. Promote in the RP UI.
