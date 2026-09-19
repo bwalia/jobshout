@@ -26,20 +26,40 @@ Edge registration is best-effort: the vhost and CNAME outlive any one release, s
 a dead admin API warns and the ring still gets its version. Register a genuinely
 new host with the manual fallback above.
 
-## Versions — `jsc-v*`, never `v*`
+## Versions — one line, shared with the platform
 
-The marketplace has its **own** version line. `jobshout-com/{api,web}` images only
-ever exist at `jsc-vX.Y.Z`; the platform's `v1.0.x` tags are built into the
-`jobshout` registry namespace and belong to Ring Promoter app `jobshout`.
+The marketplace and the platform release on the **same** version. `deploy-k3s.yml`
+owns the number and cuts the `vX.Y.Z` tag, then calls `deploy-jobshout-com.yml`
+with it. That workflow guarantees `jobshout-com/{api,web}:vX.Y.Z` exists:
 
-Seeding app `jobshout-com` with a `v1.0.x` version therefore asks for an image
-that was never pushed. The chart rejects that tag at template time — before it
-can become a 15-minute `helm --wait` on `ImagePullBackOff` that surfaces only as
-`UPGRADE FAILED: context deadline exceeded`.
+- something under `jobshout-com/**` changed → it builds and pushes
+- nothing changed → it copies the previous digest onto the new tag
+  (`docker buildx imagetools create`, a registry-side manifest write — seconds,
+  not the ~11 minutes the emulated web build costs)
+
+So any `vX.Y.Z` is a valid seed for **both** Ring Promoter apps, and seeding one
+app with the other's version is no longer a way to lose a quarter of an hour to
+`ImagePullBackOff`.
+
+`jsc-v*` is the retired marketplace line. Those tags still deploy — the chart
+accepts them — but nothing new is minted on it.
+
+### The floor
+
+Platform versions *older* than `image.unifiedFrom` in `values.yaml` predate this
+arrangement and have no images in the `jobshout-com` namespace. The chart refuses
+them at template time rather than waiting out a pull that cannot succeed, so a
+rollback past the cutover fails in seconds with a message that says why. Raise
+the floor only if the marketplace images for a range are ever pruned.
 
 ## Continuous deploy
-Push to `master` under `jobshout-com/**` → builds `jobshout-com/{api,web}:jsc-v…`
-→ seeds Ring Promoter int. Promote in the RP UI.
+Push to `master` → `deploy-k3s.yml` cuts `vX.Y.Z`, seeds Ring Promoter app
+`jobshout`, and calls the marketplace workflow to publish and seed
+`jobshout-com` at the same version. Promote in the RP UI.
+
+Marketplace-only re-runs: dispatch `deploy-jobshout-com.yml` with a `VERSION`
+(blank = newest release tag) and `DEPLOYMENT_TYPE=deploy` to re-seed without
+rebuilding.
 
 ## Image builds
 

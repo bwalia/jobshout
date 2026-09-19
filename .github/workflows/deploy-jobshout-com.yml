@@ -1,20 +1,43 @@
 name: Build & seed JobShout.com (Ring Promoter)
 
-# Marketplace release path, separate from the Go platform deploy-k3s.yml.
-# Builds api+web images under the jobshout-com registry namespace, tags
-# jsc-vX.Y.Z, and seeds Ring Promoter app `jobshout-com`
-# (https://rp.workstation.co.uk/?app=jobshout-com).
+# Marketplace release path: the jobshout-com registry namespace and Ring
+# Promoter app `jobshout-com` (https://rp.workstation.co.uk/?app=jobshout-com).
+#
+# The platform and the marketplace share ONE version line. deploy-k3s.yml owns
+# the number and cuts the git tag, then calls this workflow with that version.
+# This workflow's contract is that jobshout-com/{api,web}:<version> exists when
+# it finishes: it builds when something under jobshout-com/ moved, and otherwise
+# copies the previous digest onto the new tag — a registry-side manifest write,
+# not a rebuild, so an unchanged marketplace costs seconds rather than the ~11
+# minutes its emulated Next.js build takes.
+#
+# The point is that one v<X.Y.Z> is then valid for BOTH Ring Promoter apps, so
+# seeding one app with the other's version stops being a way to lose a quarter
+# of an hour to ImagePullBackOff.
 #
 # Int edge (beaconpulse-style, every int run, idempotent):
 #   Cloudflare CNAME int.jobshout.com → lon1.pop0.uk
 #   wslproxy vhost from jobshout-com/deploy/edge/wslproxy-server-int.json
 
 on:
-  push:
-    branches: [master]
-    paths:
-      - "jobshout-com/**"
-      - ".github/workflows/deploy-jobshout-com.yml"
+  # Called by deploy-k3s.yml once the release tag exists on the remote — RP
+  # clones this repo at that tag, so it has to be pushed before we seed.
+  workflow_call:
+    inputs:
+      VERSION:
+        type: string
+        description: "Release version to publish and seed (vX.Y.Z)"
+        required: true
+      TARGET_ENV:
+        type: string
+        description: "Target ring"
+        default: "int"
+        required: false
+      DEPLOYMENT_TYPE:
+        type: string
+        description: "Publish images only, seed only, or both"
+        default: "build-and-deploy"
+        required: false
   workflow_dispatch:
     inputs:
       TARGET_ENV:
@@ -25,29 +48,19 @@ on:
         options: [int, test, acc, prod]
       DEPLOYMENT_TYPE:
         type: choice
-        description: "Build only, deploy only, or both"
+        description: "Publish images only, seed only, or both"
         default: "build-and-deploy"
         required: true
         options: [build, deploy, build-and-deploy]
-      IMAGE_TAG:
+      VERSION:
         type: string
-        description: "Image/tag to DEPLOY (deploy-only; e.g. jsc-v0.1.0). Blank = this run's version."
-        default: ""
-        required: false
-      VERSION_TYPE:
-        type: choice
-        description: "Version bump type"
-        default: "patch"
-        required: false
-        options: [patch, minor, major]
-      CUSTOM_VERSION:
-        type: string
-        description: "Custom version (e.g. jsc-v0.2.0) — overrides VERSION_TYPE"
+        description: "Version to publish/seed (vX.Y.Z). Blank = newest release tag."
         default: ""
         required: false
 
+# This workflow no longer cuts tags — deploy-k3s.yml owns the version line.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: jobshout-com-release
@@ -56,64 +69,91 @@ concurrency:
 env:
   IMAGE_REGISTRY: int-spectoncr.diytaxreturn.co.uk
   IMAGE_NAMESPACE: jobshout-com
-  TARGET_ENV: ${{ github.event.inputs.TARGET_ENV || 'int' }}
-  DEPLOYMENT_TYPE: ${{ github.event.inputs.DEPLOYMENT_TYPE || 'build-and-deploy' }}
   RP_APP: jobshout-com
 
 jobs:
-  compute-version:
-    name: Compute next jsc-v* version
+  plan:
+    name: Resolve version & publish mode
     runs-on: self-hosted
-    if: >-
-      github.event_name == 'push'
-      || (github.event_name == 'workflow_dispatch' && inputs.DEPLOYMENT_TYPE != 'deploy')
     permissions:
       contents: read
     outputs:
-      next_version: ${{ steps.calc_version.outputs.next_version }}
-      should_build: ${{ steps.calc_version.outputs.should_build }}
+      version: ${{ steps.plan.outputs.version }}
+      target_env: ${{ steps.plan.outputs.target_env }}
+      mode: ${{ steps.plan.outputs.mode }}
+      deploy: ${{ steps.plan.outputs.deploy }}
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0  # need tags and history to diff against the last release
+          ref: ${{ github.sha }}
 
-      - name: Calculate next version
-        id: calc_version
+      - name: Resolve
+        id: plan
+        env:
+          IN_VERSION: ${{ inputs.VERSION }}
+          IN_TARGET_ENV: ${{ inputs.TARGET_ENV }}
+          IN_DEPLOYMENT_TYPE: ${{ inputs.DEPLOYMENT_TYPE }}
         run: |
           set -euo pipefail
-          LATEST_TAG=$(git tag -l 'jsc-v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)
-          if [ -z "$LATEST_TAG" ]; then
-            LATEST_TAG="jsc-v0.0.0"
-          fi
-          echo "Latest marketplace tag: $LATEST_TAG"
 
-          if [ -n "${{ github.event.inputs.CUSTOM_VERSION }}" ]; then
-            NEXT_VERSION="${{ github.event.inputs.CUSTOM_VERSION }}"
+          VERSION="${IN_VERSION:-}"
+          if [ -z "$VERSION" ]; then
+            VERSION=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)
+          fi
+          case "$VERSION" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::VERSION must look like vX.Y.Z (got '${VERSION}')"; exit 1 ;;
+          esac
+
+          TARGET_ENV="${IN_TARGET_ENV:-int}"
+          DEPLOYMENT_TYPE="${IN_DEPLOYMENT_TYPE:-build-and-deploy}"
+
+          # Previous release = newest v* that is not the one being published.
+          # Excluding VERSION by name keeps this correct whether or not the new
+          # tag has landed on the remote by the time we fetched.
+          PREV=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname \
+                 | grep -vx "$VERSION" | head -1 || true)
+
+          # Anything that changes the images, the chart or this workflow earns a
+          # real build; everything else re-tags what the registry already holds.
+          # A diff that cannot be computed builds rather than re-tagging, so a
+          # bad ref can never quietly ship the previous release's bits.
+          CHANGED=""
+          if [ -n "$PREV" ]; then
+            if ! CHANGED=$(git diff --name-only "$PREV" "$GITHUB_SHA" -- \
+                           jobshout-com/ .github/workflows/deploy-jobshout-com.yml); then
+              echo "::warning::could not diff ${PREV}..${GITHUB_SHA} — building rather than re-tagging"
+              CHANGED="diff-failed"
+            fi
+          fi
+
+          if [ "$DEPLOYMENT_TYPE" = "deploy" ]; then
+            MODE=none
+          elif [ -z "$PREV" ] || [ -n "$CHANGED" ]; then
+            MODE=build
           else
-            BASE="${LATEST_TAG#jsc-v}"
-            IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE"
-            case "${{ github.event.inputs.VERSION_TYPE || 'patch' }}" in
-              major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
-              minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
-              *)     PATCH=$((PATCH + 1)) ;;
-            esac
-            NEXT_VERSION="jsc-v${MAJOR}.${MINOR}.${PATCH}"
+            MODE=retag
           fi
-          case "$NEXT_VERSION" in jsc-v*) ;; *) NEXT_VERSION="jsc-v${NEXT_VERSION#v}" ;; esac
 
-          if git tag -l "$NEXT_VERSION" | grep -q "^$NEXT_VERSION$"; then
-            echo "::warning::Tag $NEXT_VERSION already exists — skipping build."
-            echo "should_build=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          # Not `[ … ] && DEPLOY=false`: under `set -e` a false test there ends
+          # the step.
+          DEPLOY=true
+          if [ "$DEPLOYMENT_TYPE" = "build" ]; then
+            DEPLOY=false
           fi
-          echo "next_version=$NEXT_VERSION" >> "$GITHUB_OUTPUT"
-          echo "Next version: $NEXT_VERSION"
 
-  build:
-    name: Build & push api + web
-    needs: [compute-version]
-    if: needs.compute-version.outputs.should_build == 'true'
+          echo "version=$VERSION"        >> "$GITHUB_OUTPUT"
+          echo "target_env=$TARGET_ENV"  >> "$GITHUB_OUTPUT"
+          echo "mode=$MODE"              >> "$GITHUB_OUTPUT"
+          echo "deploy=$DEPLOY"          >> "$GITHUB_OUTPUT"
+
+          echo "version=$VERSION previous=${PREV:-none} mode=$MODE ring=$TARGET_ENV deploy=$DEPLOY"
+
+  images:
+    name: Publish api + web at ${{ needs.plan.outputs.version }}
+    needs: [plan]
+    if: needs.plan.outputs.mode != 'none'
     runs-on: self-hosted
     timeout-minutes: 90
     permissions:
@@ -168,12 +208,52 @@ jobs:
           p.write_text(json.dumps(cfg, indent=2) + "\n")
           PY
 
-      - name: Buildx linux/amd64 api + web
+      # Nothing under jobshout-com/ moved since the previous release, so the
+      # images for this version are byte-identical to the ones already in the
+      # registry. Point the new tag at the existing digest instead of spending
+      # ~11 minutes rebuilding them — `imagetools create` is a registry-side
+      # manifest write, so no layer is pulled or pushed. :latest always tracks
+      # the newest marketplace build, and this workflow is its only publisher.
+      - name: Re-tag previous digest as ${{ needs.plan.outputs.version }}
+        if: needs.plan.outputs.mode == 'retag'
         env:
           PUSH_REGISTRY: ${{ steps.push_host.outputs.host }}
         run: |
           set -euo pipefail
-          VERSION="${{ needs.compute-version.outputs.next_version }}"
+          VERSION="${{ needs.plan.outputs.version }}"
+
+          # Layer pushes go over the LAN NodePort because big blob PUTs hairpin
+          # and 502. A manifest write is a couple of KB, so prefer the public
+          # HTTPS host, which `docker login` already authenticated and which
+          # needs no insecure-registry handling. Fall back to the NodePorts —
+          # every :30500 fronts the same backend — if it is unreachable.
+          HOSTS="$IMAGE_REGISTRY"
+          for h in ${REGISTRY_HOSTS:-}; do HOSTS="$HOSTS ${h}:30500"; done
+
+          for repo in api web; do
+            copied=""
+            for host in $HOSTS; do
+              ns="$host/$IMAGE_NAMESPACE"
+              if docker buildx imagetools create -t "$ns/$repo:$VERSION" "$ns/$repo:latest"; then
+                echo "re-tagged $ns/$repo:latest -> :$VERSION"
+                copied=1
+                break
+              fi
+              echo "manifest copy via $host failed for $repo — trying next host" >&2
+            done
+            if [ -z "$copied" ]; then
+              echo "::error::could not re-tag $repo:latest as $VERSION on any registry host"
+              exit 1
+            fi
+          done
+
+      - name: Buildx linux/amd64 api + web
+        if: needs.plan.outputs.mode == 'build'
+        env:
+          PUSH_REGISTRY: ${{ steps.push_host.outputs.host }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.plan.outputs.version }}"
           CFG="${RUNNER_TEMP:-/tmp}/jobshout-com-buildkitd.toml"
           python3 - "$CFG" <<'PY'
           from pathlib import Path
@@ -200,52 +280,12 @@ jobs:
             jobshout-com/web/nextjs
           echo "Pushed $NS/{api,web}:$VERSION"
 
-  auto-tag:
-    name: Create jsc-v* tag
-    needs: [compute-version, build]
-    runs-on: self-hosted
-    permissions:
-      contents: write
-    outputs:
-      tag_created: ${{ steps.create_tag.outputs.tag_created }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ github.sha }}
-      - name: Configure Git
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-      - name: Create and push tag
-        id: create_tag
-        run: |
-          NEXT_VERSION="${{ needs.compute-version.outputs.next_version }}"
-          if git ls-remote --exit-code --tags origin "refs/tags/$NEXT_VERSION" >/dev/null 2>&1; then
-            echo "::warning::Tag $NEXT_VERSION already on remote"
-            echo "tag_created=false" >> "$GITHUB_OUTPUT"
-          else
-            git tag -a "$NEXT_VERSION" -m "JobShout.com $NEXT_VERSION"
-            git push origin "$NEXT_VERSION"
-            echo "tag_created=true" >> "$GITHUB_OUTPUT"
-          fi
-      - name: GitHub Release
-        if: steps.create_tag.outputs.tag_created == 'true'
-        uses: softprops/action-gh-release@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ needs.compute-version.outputs.next_version }}
-          name: JobShout.com ${{ needs.compute-version.outputs.next_version }}
-          generate_release_notes: true
-
   register-edge:
     name: Ensure int.jobshout.com DNS + wslproxy
+    needs: [plan]
     runs-on: ubuntu-latest
     # Beaconpulse-style: every int deploy upserts CF CNAME + ensures wslproxy vhost.
-    if: >-
-      (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.DEPLOYMENT_TYPE != 'build'))
-      && (github.event.inputs.TARGET_ENV || 'int') == 'int'
+    if: needs.plan.outputs.deploy == 'true' && needs.plan.outputs.target_env == 'int'
     steps:
       - uses: actions/checkout@v4
       - name: Ensure Cloudflare CNAME
@@ -301,28 +341,27 @@ jobs:
           echo "registered wslproxy vhost ${HOST} (id=$sid)."
 
   deploy:
-    name: Seed Ring Promoter (${{ github.event.inputs.TARGET_ENV || 'int' }})
-    needs: [compute-version, build, auto-tag, register-edge]
+    name: Seed Ring Promoter (${{ needs.plan.outputs.target_env }})
+    needs: [plan, images, register-edge]
     runs-on: self-hosted
     timeout-minutes: 25
     permissions:
       contents: read
+    # Edge registration is best-effort plumbing and must never strand images
+    # that already published, so its verdict is not part of this condition.
     if: >-
       always()
-      && (github.event_name != 'workflow_dispatch' || inputs.DEPLOYMENT_TYPE != 'build')
-      && (
-        (github.event_name == 'workflow_dispatch' && inputs.DEPLOYMENT_TYPE == 'deploy')
-        || needs.auto-tag.outputs.tag_created == 'true'
-      )
+      && needs.plan.outputs.deploy == 'true'
+      && (needs.images.result == 'success' || needs.images.result == 'skipped')
     steps:
       - name: Seed jobshout-com and wait
         env:
           RP_API_TOKEN: ${{ secrets.RP_API_TOKEN }}
           RP_URL: ${{ secrets.RP_URL }}
+          TARGET_ENV: ${{ needs.plan.outputs.target_env }}
         run: |
           set -euo pipefail
-          TAG="${{ github.event.inputs.IMAGE_TAG }}"
-          [ -z "$TAG" ] && TAG="${{ needs.compute-version.outputs.next_version }}"
+          TAG="${{ needs.plan.outputs.version }}"
           RP="${RP_URL:-https://rp.workstation.co.uk}"
           if [ -z "${RP_API_TOKEN:-}" ]; then
             echo "::error::RP_API_TOKEN is not set"; exit 1

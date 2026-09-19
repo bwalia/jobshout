@@ -11,8 +11,13 @@ host: int.jobshout.com
 image:
   registry: int-spectoncr.diytaxreturn.co.uk
   namespace: jobshout-com
-  # Injected by Ring Promoter: --set image.tag=<jsc-vX.Y.Z>
+  # Injected by Ring Promoter: --set image.tag=<vX.Y.Z>
   tag: latest
+  # First version of the unified platform+marketplace line. Every v* release
+  # from here on publishes jobshout-com/{api,web} at the same version as the
+  # platform; anything older only exists under the retired jsc-v* line, so the
+  # chart refuses it rather than waiting out a pull that cannot succeed.
+  unifiedFrom: v1.0.66
   pullPolicy: IfNotPresent
   pullSecret: jobshout-com-registry
 
