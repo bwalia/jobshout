@@ -546,8 +546,10 @@ func main() {
 	// scan survives any deploy and multiple replicas share the work safely.
 	strixConfig := strix.LoadConfig(logger)
 	strixClient := strix.NewClient(strixConfig.BaseURL, strixConfig.JWTSecret, strixConfig.Timeout, logger)
-	pentestSvc := service.NewPentestService(pentestRunRepo, pentestFindingRepo, agentRepo, strixClient, logger)
+	securityFindingEventRepo := repository.NewSecurityFindingEventRepository(pool)
+	pentestSvc := service.NewPentestServiceWithEvents(pentestRunRepo, pentestFindingRepo, securityFindingEventRepo, agentRepo, strixClient, logger)
 	pentestReconciler := service.NewPentestReconciler(pentestRunRepo, strixClient, strixConfig, logger)
+	pentestReconciler.BindVersioning(pentestFindingRepo, securityFindingEventRepo)
 	if strixConfig.Configured() {
 		logger.Info("penetration testing enabled",
 			zap.String("base_url", strixConfig.BaseURL),
@@ -640,7 +642,7 @@ func main() {
 
 	wafLabCfg := waflab.LoadConfig()
 	wafLabClient := waflab.NewClient(wafLabCfg, logger)
-	wafLabSvc := service.NewWAFLabService(wafLabRunRepo, agentRepo, wafLabCfg, wafLabClient, logger)
+	wafLabSvc := service.NewWAFLabServiceWithEvents(wafLabRunRepo, securityFindingEventRepo, agentRepo, wafLabCfg, wafLabClient, logger)
 	logger.Info("waf efficacy lab initialised",
 		zap.Bool("enabled", wafLabClient.Enabled()),
 		zap.String("base_url", wafLabCfg.BaseURL),
@@ -1137,6 +1139,8 @@ func main() {
 				r.Route("/{runID}", func(r chi.Router) {
 					r.Get("/", pentestHandler.GetRun)
 					r.Get("/findings", pentestHandler.ListFindings)
+					r.Get("/finding-events", pentestHandler.ListFindingEvents)
+					r.Get("/report.pdf", pentestHandler.DownloadReport)
 					r.Post("/cancel", pentestHandler.CancelRun)
 				})
 			})
@@ -1241,6 +1245,8 @@ func main() {
 				r.Get("/runs/{runID}", wafLabHandler.GetRun)
 				r.Get("/runs/{runID}/steps", wafLabHandler.ListSteps)
 				r.Get("/runs/{runID}/results", wafLabHandler.ListResults)
+				r.Get("/runs/{runID}/finding-events", wafLabHandler.ListFindingEvents)
+				r.Get("/runs/{runID}/report.pdf", wafLabHandler.DownloadReport)
 				r.Post("/runs/{runID}/cancel", wafLabHandler.CancelRun)
 			})
 

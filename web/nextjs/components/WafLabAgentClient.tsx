@@ -1,12 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, Loader2, Minus, X } from "lucide-react";
+import { Check, FileDown, Loader2, Minus, X } from "lucide-react";
 import { useSearchParams } from "next/navigation";
+import { toast } from "sonner";
 import { apiClient, apiErrorMessage } from "@/lib/api/client";
 import {
   cancelWafLabRun,
+  downloadWafLabReportPDF,
   getWafLabRun,
+  listWafLabFindingEvents,
   listWafLabResults,
   listWafLabSteps,
   wafLabStatus,
@@ -14,6 +17,7 @@ import {
   type WAFLabRun,
   type WAFLabStep,
 } from "@/lib/api/waf-lab";
+import { reportVersionLabel } from "@/lib/security-report";
 import { WafLabMatrix } from "@/components/waflab/WafLabMatrix";
 import { WafLabRunForm } from "@/components/waflab/WafLabRunForm";
 import { WafLabRunsList } from "@/components/waflab/WafLabRunsList";
@@ -51,8 +55,12 @@ export function WafLabAgentClient() {
   const [selected, setSelected] = useState<WAFLabRun | null>(null);
   const [steps, setSteps] = useState<WAFLabStep[]>([]);
   const [results, setResults] = useState<WAFLabResult[]>([]);
+  const [events, setEvents] = useState<
+    Array<{ id: string; event: string; title: string; severity?: string }>
+  >([]);
   const [tab, setTab] = useState<Tab>("run");
   const [detailError, setDetailError] = useState("");
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -103,20 +111,23 @@ export function WafLabAgentClient() {
     if (!selected) {
       setSteps([]);
       setResults([]);
+      setEvents([]);
       return;
     }
     let cancelled = false;
     const load = async () => {
       try {
-        const [run, st, res] = await Promise.all([
+        const [run, st, res, ev] = await Promise.all([
           getWafLabRun(selected.id),
           listWafLabSteps(selected.id),
           listWafLabResults(selected.id),
+          listWafLabFindingEvents(selected.id).catch(() => []),
         ]);
         if (cancelled) return;
         setSelected(run);
         setSteps(st);
         setResults(res);
+        setEvents(ev);
         setDetailError("");
       } catch (err) {
         if (!cancelled) setDetailError(apiErrorMessage(err, "Failed to load run detail"));
@@ -183,18 +194,54 @@ export function WafLabAgentClient() {
               >
                 ← Back to form
               </button>
-              {(selected.status === "queued" || selected.status === "running") && (
-                <button
-                  type="button"
-                  className="text-sm text-destructive hover:underline"
-                  onClick={() => void cancelWafLabRun(selected.id).then(setSelected)}
-                >
-                  Cancel
-                </button>
-              )}
+              <div className="flex flex-wrap items-center gap-3">
+                {["completed", "failed", "cancelled"].includes(selected.status) && (
+                  <button
+                    type="button"
+                    disabled={pdfBusy}
+                    className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline disabled:opacity-50"
+                    onClick={() =>
+                      void (async () => {
+                        setPdfBusy(true);
+                        try {
+                          const blob = await downloadWafLabReportPDF(selected.id);
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement("a");
+                          a.href = url;
+                          a.download = `waf-lab-v${selected.report_seq ?? "r"}.pdf`;
+                          document.body.appendChild(a);
+                          a.click();
+                          a.remove();
+                          URL.revokeObjectURL(url);
+                          toast.success("PDF downloaded");
+                        } catch (err) {
+                          toast.error(apiErrorMessage(err, "PDF download failed"));
+                        } finally {
+                          setPdfBusy(false);
+                        }
+                      })()
+                    }
+                  >
+                    <FileDown className="h-4 w-4" />
+                    {pdfBusy ? "Preparing…" : "Download PDF"}
+                  </button>
+                )}
+                {(selected.status === "queued" || selected.status === "running") && (
+                  <button
+                    type="button"
+                    className="text-sm text-destructive hover:underline"
+                    onClick={() => void cancelWafLabRun(selected.id).then(setSelected)}
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
             </div>
             <div>
               <h2 className="font-semibold">{selected.secure_host}</h2>
+              <p className="text-xs text-muted-foreground">
+                Version {reportVersionLabel(selected)}
+              </p>
               <p className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                 {runActive && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
                 <span className={runActive ? "font-medium text-foreground" : undefined}>
@@ -242,6 +289,31 @@ export function WafLabAgentClient() {
                 );
               })}
             </ol>
+            {events.length > 0 && (
+              <div className="rounded-md border border-border bg-muted/40 p-3 text-xs">
+                <p className="mb-2 font-semibold uppercase tracking-wide text-muted-foreground">
+                  Change log (secure-host leaks vs previous)
+                </p>
+                <ul className="space-y-1">
+                  {events.map((e) => (
+                    <li key={e.id} className="flex flex-wrap gap-2">
+                      <span
+                        className={
+                          e.event === "fixed"
+                            ? "font-medium text-emerald-700 dark:text-emerald-400"
+                            : e.event === "detected"
+                              ? "font-medium text-red-700 dark:text-red-400"
+                              : "font-medium text-muted-foreground"
+                        }
+                      >
+                        {e.event === "detected" ? "NEW" : e.event === "fixed" ? "FIXED" : "STILL OPEN"}
+                      </span>
+                      <span>{e.title}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <WafLabMatrix
               results={results}
               running={runActive}

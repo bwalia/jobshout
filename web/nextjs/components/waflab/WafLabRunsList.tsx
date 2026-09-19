@@ -1,8 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
+import { FileDown } from "lucide-react";
 import { apiErrorMessage } from "@/lib/api/client";
-import { listWafLabRuns, type WAFLabRun, type WAFLabRunStatus } from "@/lib/api/waf-lab";
+import {
+  downloadWafLabReportPDF,
+  listWafLabRuns,
+  type WAFLabRun,
+  type WAFLabRunStatus,
+} from "@/lib/api/waf-lab";
+import { reportVersionLabel } from "@/lib/security-report";
 
 interface WafLabRunsListProps {
   onRunSelected?: (run: WAFLabRun) => void;
@@ -64,7 +72,9 @@ export function WafLabRunsList({ onRunSelected }: WafLabRunsListProps) {
               <th className="px-4 py-2 font-medium">Mode</th>
               <th className="px-4 py-2 font-medium">Status</th>
               <th className="px-4 py-2 font-medium">Score</th>
+              <th className="px-4 py-2 font-medium">Version</th>
               <th className="px-4 py-2 font-medium">Created</th>
+              <th className="px-4 py-2 text-right font-medium">PDF</th>
             </tr>
           </thead>
           <tbody>
@@ -82,8 +92,40 @@ export function WafLabRunsList({ onRunSelected }: WafLabRunsListProps) {
                     ? `${run.score.secure_blocked}/${run.score.secure_expected}`
                     : "—"}
                 </td>
+                <td className="px-4 py-2 text-xs text-muted-foreground">
+                  {reportVersionLabel(run)}
+                </td>
                 <td className="px-4 py-2 text-muted-foreground">
                   {new Date(run.created_at).toLocaleString()}
+                </td>
+                <td className="px-4 py-2 text-right">
+                  {["completed", "failed", "cancelled"].includes(run.status) && (
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void (async () => {
+                          try {
+                            const blob = await downloadWafLabReportPDF(run.id);
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement("a");
+                            a.href = url;
+                            a.download = `waf-lab-v${run.report_seq ?? "r"}.pdf`;
+                            document.body.appendChild(a);
+                            a.click();
+                            a.remove();
+                            URL.revokeObjectURL(url);
+                          } catch (err) {
+                            toast.error(apiErrorMessage(err, "PDF download failed"));
+                          }
+                        })();
+                      }}
+                    >
+                      <FileDown className="h-3.5 w-3.5" />
+                      PDF
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -101,7 +143,7 @@ export function WafLabRunsList({ onRunSelected }: WafLabRunsListProps) {
             Previous
           </button>
           <span className="text-muted-foreground">
-            Page {page} / {totalPages}
+            Page {page} of {totalPages}
           </span>
           <button
             type="button"

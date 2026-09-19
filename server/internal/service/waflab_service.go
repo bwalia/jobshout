@@ -14,6 +14,7 @@ import (
 
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/repository"
+	"github.com/jobshout/server/internal/securityreport"
 	"github.com/jobshout/server/internal/waflab"
 )
 
@@ -36,14 +37,17 @@ type WAFLabService interface {
 	ListResults(ctx context.Context, runID, orgID uuid.UUID) ([]model.WAFLabResult, error)
 	CancelRun(ctx context.Context, runID, orgID uuid.UUID) (*model.WAFLabRun, error)
 	Status() map[string]any
+	ReportPDF(ctx context.Context, runID, orgID uuid.UUID) (pdf []byte, filename string, err error)
+	ListFindingEvents(ctx context.Context, runID, orgID uuid.UUID) ([]model.SecurityFindingEvent, error)
 }
 
 type wafLabService struct {
-	repo      repository.WAFLabRunRepository
-	agentRepo repository.AgentRepository
-	cfg       waflab.Config
-	client    *waflab.Client
-	logger    *zap.Logger
+	repo       repository.WAFLabRunRepository
+	eventsRepo repository.SecurityFindingEventRepository
+	agentRepo  repository.AgentRepository
+	cfg        waflab.Config
+	client     *waflab.Client
+	logger     *zap.Logger
 
 	mu      sync.Mutex
 	cancels map[uuid.UUID]context.CancelFunc
@@ -57,16 +61,29 @@ func NewWAFLabService(
 	client *waflab.Client,
 	logger *zap.Logger,
 ) WAFLabService {
+	return NewWAFLabServiceWithEvents(repo, nil, agentRepo, cfg, client, logger)
+}
+
+// NewWAFLabServiceWithEvents adds finding-event history for PDF changelogs.
+func NewWAFLabServiceWithEvents(
+	repo repository.WAFLabRunRepository,
+	eventsRepo repository.SecurityFindingEventRepository,
+	agentRepo repository.AgentRepository,
+	cfg waflab.Config,
+	client *waflab.Client,
+	logger *zap.Logger,
+) WAFLabService {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 	return &wafLabService{
-		repo:      repo,
-		agentRepo: agentRepo,
-		cfg:       cfg,
-		client:    client,
-		logger:    logger,
-		cancels:   make(map[uuid.UUID]context.CancelFunc),
+		repo:       repo,
+		eventsRepo: eventsRepo,
+		agentRepo:  agentRepo,
+		cfg:        cfg,
+		client:     client,
+		logger:     logger,
+		cancels:    make(map[uuid.UUID]context.CancelFunc),
 	}
 }
 
@@ -252,6 +269,43 @@ func (s *wafLabService) execute(ctx context.Context, cancel context.CancelFunc, 
 	if err := s.repo.Finalize(context.Background(), run, nil, results, score); err != nil {
 		s.logger.Error("waf lab finalize failed", zap.String("runID", run.ID.String()), zap.Error(err))
 		_ = s.repo.Update(context.Background(), run)
+		return
+	}
+	s.stampReportVersion(context.Background(), run, results)
+}
+
+func (s *wafLabService) stampReportVersion(ctx context.Context, run *model.WAFLabRun, results []model.WAFLabResult) {
+	if run.Status != "completed" {
+		return
+	}
+	ver := securityreport.AppVersion()
+	seq, err := s.repo.NextReportSeq(ctx, run.OrgID, run.SecureHost)
+	if err != nil {
+		s.logger.Warn("waf lab report seq failed", zap.Error(err))
+		seq = 1
+	}
+	if err := s.repo.StampVersion(ctx, run.ID, ver, seq); err != nil {
+		s.logger.Warn("waf lab version stamp failed", zap.Error(err))
+		return
+	}
+	run.AppVersion = &ver
+	run.ReportSeq = &seq
+
+	if s.eventsRepo == nil {
+		return
+	}
+	prevRefs := map[string]securityreport.FindingRef{}
+	if prev, err := s.repo.PreviousCompletedForHost(ctx, run.OrgID, run.SecureHost, run.ID); err == nil && prev != nil {
+		if pr, err := s.repo.ListResults(ctx, prev.ID); err == nil {
+			prevRefs = securityreport.WAFLeakRefs(pr)
+		}
+	}
+	events := securityreport.StampEvents(
+		securityreport.Diff(prevRefs, securityreport.WAFLeakRefs(results)),
+		run.OrgID, securityreport.KindWAFLab, run.SecureHost, run.ID, run.ReportSeq, run.AppVersion,
+	)
+	if err := s.eventsRepo.InsertMany(ctx, events); err != nil {
+		s.logger.Warn("waf lab finding events failed", zap.Error(err))
 	}
 }
 
@@ -322,6 +376,32 @@ func (s *wafLabService) CancelRun(ctx context.Context, runID, orgID uuid.UUID) (
 		return nil, fmt.Errorf("failed to cancel waf lab run: %w", err)
 	}
 	return run, nil
+}
+
+func (s *wafLabService) ReportPDF(ctx context.Context, runID, orgID uuid.UUID) ([]byte, string, error) {
+	run, err := s.GetRun(ctx, runID, orgID)
+	if err != nil {
+		return nil, "", err
+	}
+	results, err := s.repo.ListResults(ctx, run.ID)
+	if err != nil {
+		return nil, "", fmt.Errorf("list results: %w", err)
+	}
+	var events []model.SecurityFindingEvent
+	if s.eventsRepo != nil {
+		events, _ = s.eventsRepo.ListByRun(ctx, run.ID)
+	}
+	return securityreport.BuildWAFLabPDF(run, results, events)
+}
+
+func (s *wafLabService) ListFindingEvents(ctx context.Context, runID, orgID uuid.UUID) ([]model.SecurityFindingEvent, error) {
+	if _, err := s.GetRun(ctx, runID, orgID); err != nil {
+		return nil, err
+	}
+	if s.eventsRepo == nil {
+		return []model.SecurityFindingEvent{}, nil
+	}
+	return s.eventsRepo.ListByRun(ctx, runID)
 }
 
 type liveStepRecorder struct {

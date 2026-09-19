@@ -42,6 +42,8 @@ export interface WAFLabRun {
   score?: WAFLabScore | null;
   error_message?: string | null;
   requested_by?: string | null;
+  app_version?: string | null;
+  report_seq?: number | null;
   started_at?: string | null;
   completed_at?: string | null;
   created_at: string;
@@ -139,5 +141,27 @@ export async function listWafLabResults(runID: string) {
 
 export async function cancelWafLabRun(runID: string) {
   const { data } = await apiClient.post<WAFLabRun>(`/waf-lab/runs/${runID}/cancel`);
+  return data;
+}
+
+export async function downloadWafLabReportPDF(runID: string) {
+  const { data } = await apiClient.get<Blob>(`/waf-lab/runs/${runID}/report.pdf`, {
+    responseType: "blob",
+  });
+  return data;
+}
+
+export async function listWafLabFindingEvents(runID: string) {
+  const { data } = await apiClient.get<
+    Array<{
+      id: string;
+      event: string;
+      title: string;
+      severity?: string;
+      report_seq?: number | null;
+      app_version?: string | null;
+      created_at: string;
+    }>
+  >(`/waf-lab/runs/${runID}/finding-events`);
   return data;
 }

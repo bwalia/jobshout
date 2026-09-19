@@ -46,8 +46,12 @@ type WAFLabRun struct {
 	RequestedBy     *uuid.UUID `json:"requested_by"`
 	StartedAt       *time.Time `json:"started_at"`
 	CompletedAt     *time.Time `json:"completed_at"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	// AppVersion is the JobShout deploy tag when the lab finished (version control stamp).
+	AppVersion *string `json:"app_version,omitempty"`
+	// ReportSeq is a per-(org,secure_host) sequence for completed labs (v1, v2, …).
+	ReportSeq *int      `json:"report_seq,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // WAFLabStep is one phase of a lab run.

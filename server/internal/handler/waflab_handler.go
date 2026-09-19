@@ -121,6 +121,37 @@ func (h *WAFLabHandler) ListResults(w http.ResponseWriter, r *http.Request) {
 	RespondJSON(w, http.StatusOK, results)
 }
 
+// DownloadReport GET /api/v1/waf-lab/runs/{runID}/report.pdf
+func (h *WAFLabHandler) DownloadReport(w http.ResponseWriter, r *http.Request) {
+	runID, orgID, ok := h.parseRunOrg(w, r)
+	if !ok {
+		return
+	}
+	pdf, name, err := h.svc.ReportPDF(r.Context(), runID, orgID)
+	if err != nil {
+		RespondError(w, http.StatusNotFound, "run not found")
+		return
+	}
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(pdf)
+}
+
+// ListFindingEvents GET /api/v1/waf-lab/runs/{runID}/finding-events
+func (h *WAFLabHandler) ListFindingEvents(w http.ResponseWriter, r *http.Request) {
+	runID, orgID, ok := h.parseRunOrg(w, r)
+	if !ok {
+		return
+	}
+	events, err := h.svc.ListFindingEvents(r.Context(), runID, orgID)
+	if err != nil {
+		RespondError(w, http.StatusNotFound, "run not found")
+		return
+	}
+	RespondJSON(w, http.StatusOK, events)
+}
+
 // CancelRun POST /api/v1/waf-lab/runs/{runID}/cancel
 func (h *WAFLabHandler) CancelRun(w http.ResponseWriter, r *http.Request) {
 	runID, orgID, ok := h.parseRunOrg(w, r)

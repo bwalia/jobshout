@@ -25,6 +25,9 @@ type WAFLabRunRepository interface {
 	ListResults(ctx context.Context, runID uuid.UUID) ([]model.WAFLabResult, error)
 	// Finalize writes terminal run state plus steps and results in one transaction.
 	Finalize(ctx context.Context, run *model.WAFLabRun, steps []model.WAFLabStep, results []model.WAFLabResult, score *model.WAFLabScore) error
+	NextReportSeq(ctx context.Context, orgID uuid.UUID, secureHost string) (int, error)
+	PreviousCompletedForHost(ctx context.Context, orgID uuid.UUID, secureHost string, excludeID uuid.UUID) (*model.WAFLabRun, error)
+	StampVersion(ctx context.Context, runID uuid.UUID, appVersion string, reportSeq int) error
 }
 
 type wafLabRunRepository struct {
@@ -40,7 +43,7 @@ const wafLabRunColumns = `
 	id, agent_id, task_id, org_id, status, mode, secure_host, open_host,
 	origin_upstream, policy_id, manage_dns, dns_zone, attack_set, instruction,
 	wslproxy_base_url, score, error_message, requested_by, started_at, completed_at,
-	created_at, updated_at`
+	created_at, updated_at, app_version, report_seq`
 
 func scanWAFLabRun(row pgx.Row) (*model.WAFLabRun, error) {
 	run := &model.WAFLabRun{}
@@ -51,6 +54,7 @@ func scanWAFLabRun(row pgx.Row) (*model.WAFLabRun, error) {
 		&run.ManageDNS, &run.DNSZone, &run.AttackSet, &run.Instruction,
 		&run.WSLProxyBaseURL, &scoreJSON, &run.ErrorMessage, &run.RequestedBy,
 		&run.StartedAt, &run.CompletedAt, &run.CreatedAt, &run.UpdatedAt,
+		&run.AppVersion, &run.ReportSeq,
 	); err != nil {
 		return nil, err
 	}
@@ -319,6 +323,47 @@ func (r *wafLabRunRepository) Finalize(ctx context.Context, run *model.WAFLabRun
 	}
 
 	return tx.Commit(ctx)
+}
+
+func (r *wafLabRunRepository) NextReportSeq(ctx context.Context, orgID uuid.UUID, secureHost string) (int, error) {
+	var seq int
+	err := r.pool.QueryRow(ctx, `
+		SELECT COALESCE(MAX(report_seq), 0) + 1
+		FROM waf_lab_runs
+		WHERE org_id = $1 AND lower(trim(secure_host)) = lower(trim($2))
+		  AND status = 'completed' AND report_seq IS NOT NULL`, orgID, secureHost).Scan(&seq)
+	if err != nil {
+		return 1, err
+	}
+	if seq < 1 {
+		seq = 1
+	}
+	return seq, nil
+}
+
+func (r *wafLabRunRepository) PreviousCompletedForHost(ctx context.Context, orgID uuid.UUID, secureHost string, excludeID uuid.UUID) (*model.WAFLabRun, error) {
+	query := `SELECT ` + wafLabRunColumns + `
+		FROM waf_lab_runs
+		WHERE org_id = $1 AND lower(trim(secure_host)) = lower(trim($2))
+		  AND id <> $3 AND status = 'completed'
+		ORDER BY COALESCE(completed_at, created_at) DESC, created_at DESC
+		LIMIT 1`
+	run, err := scanWAFLabRun(r.pool.QueryRow(ctx, query, orgID, secureHost, excludeID))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return run, nil
+}
+
+func (r *wafLabRunRepository) StampVersion(ctx context.Context, runID uuid.UUID, appVersion string, reportSeq int) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE waf_lab_runs
+		SET app_version = $2, report_seq = $3, updated_at = NOW()
+		WHERE id = $1`, runID, appVersion, reportSeq)
+	return err
 }
 
 func marshalScore(score *model.WAFLabScore) ([]byte, error) {
