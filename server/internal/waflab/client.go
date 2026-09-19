@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"go.uber.org/zap"
 )
@@ -540,7 +541,7 @@ func (c *Client) doOnce(ctx context.Context, method, path string, payload []byte
 		return err
 	}
 	if resp.StatusCode >= 300 {
-		msg := redactSecrets(summarizeErrorBody(string(data)))
+		msg := errorBody(resp.Header.Get("Content-Type"), data)
 		return fmt.Errorf("wslproxy %s %s: HTTP %d: %s", method, path, resp.StatusCode, msg)
 	}
 	if dest == nil || len(data) == 0 {
@@ -552,46 +553,59 @@ func (c *Client) doOnce(ctx context.Context, method, path string, payload []byte
 	return nil
 }
 
-// summarizeErrorBody reduces a failed response body to a line a person can
-// read in the run history. wslproxy answers 5xx with a full HTML error page —
-// several KB of inline CSS — and putting that in the error buried the actual
-// failure behind a wall of stylesheet in the task log.
-func summarizeErrorBody(body string) string {
-	body = strings.TrimSpace(body)
-	if body == "" {
-		return "(empty response body)"
+// maxErrBody bounds what a failed response contributes to an error string. The
+// body is read to 8MB because success payloads are large; an error is read by a
+// human in a run step, so it gets one line.
+const maxErrBody = 400
+
+// errorBody reduces a failed response body to something legible. wslproxy answers
+// some 5xx with its full styled HTML error page — inlining that verbatim buried
+// the actual failure under kilobytes of CSS in the run's step detail.
+func errorBody(contentType string, data []byte) string {
+	s := strings.TrimSpace(string(data))
+	if s == "" {
+		return "(empty body)"
 	}
-	// wslproxy's structured errors: {"error":{"message":..,"code":..}}.
-	var probe struct {
-		Error struct {
-			Message string `json:"message"`
-			Code    string `json:"code"`
-		} `json:"error"`
-		Message string `json:"message"`
-	}
-	if json.Unmarshal([]byte(body), &probe) == nil {
-		if m := strings.TrimSpace(probe.Error.Message); m != "" {
-			if probe.Error.Code != "" {
-				return m + " (" + probe.Error.Code + ")"
-			}
-			return m
+	if isHTML(contentType, s) {
+		if title := htmlTitle(s); title != "" {
+			return "HTML error page: " + title
 		}
-		if m := strings.TrimSpace(probe.Message); m != "" {
-			return m
-		}
+		return "HTML error page (no title)"
 	}
-	if lower := strings.ToLower(body); strings.HasPrefix(lower, "<!doctype") || strings.HasPrefix(lower, "<html") {
-		if m := reHTMLTitle.FindStringSubmatch(body); len(m) == 2 {
-			if t := strings.TrimSpace(m[1]); t != "" {
-				return "HTML error page from wslproxy (" + t + ") — check the wslproxy error log for the real cause"
-			}
-		}
-		return "HTML error page from wslproxy — check the wslproxy error log for the real cause"
+	return truncate(redactSecrets(s), maxErrBody)
+}
+
+func isHTML(contentType, body string) bool {
+	if strings.Contains(strings.ToLower(contentType), "text/html") {
+		return true
 	}
-	if len(body) > 400 {
-		return body[:400] + "… (truncated)"
+	head := strings.ToLower(body)
+	if len(head) > 64 {
+		head = head[:64]
 	}
-	return body
+	return strings.HasPrefix(head, "<!doctype html") || strings.HasPrefix(head, "<html")
+}
+
+var reTitle = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
+
+func htmlTitle(body string) string {
+	m := reTitle.FindStringSubmatch(body)
+	if len(m) < 2 {
+		return ""
+	}
+	return truncate(strings.Join(strings.Fields(m[1]), " "), 120)
+}
+
+// truncate cuts on a rune boundary and says how much it dropped.
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	cut := max
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return fmt.Sprintf("%s… (%d more bytes)", s[:cut], len(s)-cut)
 }
 
 // redactSecrets strips bearer tokens and password-like values from error text.
