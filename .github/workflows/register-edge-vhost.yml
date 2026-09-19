@@ -179,7 +179,16 @@ jobs:
           # is presented — that still means the vhost exists. "Host not configured"
           # is the failure.
           for i in $(seq 1 20); do
-            code=$(curl -sS -o /tmp/body -m 10 -w '%{http_code}' "https://${HOST}${HEALTH_PATH}" || echo 000)
+            # Truncate first: curl does not create -o's file when it cannot
+            # resolve the host, and `head` on a missing file ends the whole step
+            # under `set -e` — which is how a freshly created CNAME failed on
+            # attempt 1 instead of retrying for five minutes. Clearing it also
+            # stops a failed attempt from re-reading the previous attempt's body
+            # in the 'Host not configured' check below.
+            : > /tmp/body
+            # `|| echo 000` would CONCATENATE with curl's own %{http_code},
+            # giving 000000; assign on failure instead.
+            code=$(curl -sS -o /tmp/body -m 10 -w '%{http_code}' "https://${HOST}${HEALTH_PATH}") || code=000
             body=$(head -c 160 /tmp/body | tr -d '\n')
             echo "[$i] https://${HOST}${HEALTH_PATH} -> $code :: $body"
             if grep -qi 'Host not configured' /tmp/body; then
