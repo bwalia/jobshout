@@ -94,7 +94,7 @@ gateway:
 
 ingress:
   enabled: true
-  className: wslproxy
+  className: traefik
   clusterIssuer: main-issuer
   tls: true
   annotations: {}
