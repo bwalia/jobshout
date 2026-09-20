@@ -596,12 +596,13 @@ jobs:
           echo "Waiting for Ring Promoter job ${JOB_ID} (version ${TAG})…"
           echo "Track: ${RP}/?app=jobshout"
 
-          python3 - "$RP" "$RP_API_TOKEN" "$JOB_ID" "$TAG" <<'PY'
+          python3 - "$RP" "$RP_API_TOKEN" "$JOB_ID" "$TAG" "$TARGET_ENV" <<'PY'
           import json, sys, time, urllib.error, urllib.request
 
-          rp, token, job_id, tag = sys.argv[1:5]
+          rp, token, job_id, tag, ring = sys.argv[1:6]
           url = f"{rp}/api/apps/jobshout/jobs/{job_id}"
-          deadline = time.time() + 15 * 60
+          rings_url = f"{rp}/api/apps/jobshout/rings"
+          deadline = time.time() + 20 * 60
           last = None
 
           def dump_logs(body):
@@ -609,6 +610,22 @@ jobs:
                   print(f"--- step {step.get('id')} status={step.get('status')} ---")
                   for line in step.get("logs") or []:
                       print(line)
+
+          def seeded_ring():
+              """State of the ring THIS run seeded, or None if unreadable."""
+              req = urllib.request.Request(
+                  rings_url, headers={"Authorization": f"Bearer {token}"}
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as resp:
+                      rings = json.load(resp).get("rings") or []
+              except Exception as e:  # transient edge/API blip: try again next tick
+                  print(f"::warning::rings poll failed: {e}")
+                  return None
+              for r in rings:
+                  if (r.get("ring") or {}).get("name") == ring:
+                      return r
+              return None
 
           while time.time() < deadline:
               req = urllib.request.Request(
@@ -625,6 +642,23 @@ jobs:
               if body != last:
                   print(f"RP job {job_id} status={status}")
                   last = {k: body.get(k) for k in ("status", "finished_at")}
+
+              # A seed with auto-promote on does not finish when OUR ring is
+              # done — RP carries the version on to test and acc, and the job
+              # stays "running" for the whole cascade. This step is responsible
+              # for the ring it seeded; promotion beyond it is RP's business and
+              # visible in the RP UI. So succeed as soon as that ring reports
+              # the seeded version and healthy, instead of timing out mid-chain
+              # and reporting a failure for a deploy that worked.
+              if status not in ("failed", "failure", "error", "cancelled"):
+                  st = seeded_ring()
+                  if st and st.get("current_version") == tag and st.get("healthy"):
+                      print(f"Deployed {tag} to {ring} and healthy.")
+                      if status != "success":
+                          print(f"RP job {job_id} is still {status} — it is promoting "
+                                f"onward from {ring}; follow it at {rp}/?app=jobshout")
+                      sys.exit(0)
+
               if status == "success":
                   result = body.get("result") or {}
                   state = result.get("state") or {}
@@ -634,20 +668,20 @@ jobs:
                       print("::error::RP job marked success but result.success is false")
                       sys.exit(1)
                   if current and current != tag:
-                      print(f"::error::int current_version={current} != seeded {tag}")
+                      print(f"::error::{ring} current_version={current} != seeded {tag}")
                       sys.exit(1)
                   if not current:
                       print("::warning::RP did not return current_version; trusting job success")
                   print(f"Deployed {tag} and healthy (current_version={current or tag})")
                   sys.exit(0)
-              if status in ("failed", "failure", "error"):
+              if status in ("failed", "failure", "error", "cancelled"):
                   dump_logs(body)
                   msg = (body.get("result") or {}).get("message") or status
                   print(f"::error::Ring Promoter deploy failed: {msg}")
                   sys.exit(1)
               time.sleep(15)
 
-          print("::error::timed out waiting for Ring Promoter job (15m)")
+          print(f"::error::{ring} did not reach {tag} and healthy within 20m")
           sys.exit(1)
           PY
 

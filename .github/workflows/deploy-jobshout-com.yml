@@ -379,11 +379,27 @@ jobs:
           if [ -z "$JOB_ID" ]; then
             echo "::error::no job_id"; exit 1
           fi
-          python3 - "$RP" "$RP_API_TOKEN" "$JOB_ID" "$TAG" "$RP_APP" <<'PY'
+          python3 - "$RP" "$RP_API_TOKEN" "$JOB_ID" "$TAG" "$RP_APP" "$TARGET_ENV" <<'PY'
           import json, sys, time, urllib.error, urllib.request
-          rp, token, job_id, tag, app = sys.argv[1:6]
+          rp, token, job_id, tag, app, ring = sys.argv[1:7]
           url = f"{rp}/api/apps/{app}/jobs/{job_id}"
-          deadline = time.time() + 15 * 60
+          rings_url = f"{rp}/api/apps/{app}/rings"
+          deadline = time.time() + 20 * 60
+
+          def seeded_ring():
+              """State of the ring THIS run seeded, or None if unreadable."""
+              req = urllib.request.Request(rings_url, headers={"Authorization": f"Bearer {token}"})
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as resp:
+                      rings = json.load(resp).get("rings") or []
+              except Exception as e:  # transient edge/API blip: try again next tick
+                  print(f"::warning::rings poll failed: {e}")
+                  return None
+              for r in rings:
+                  if (r.get("ring") or {}).get("name") == ring:
+                      return r
+              return None
+
           while time.time() < deadline:
               req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
               try:
@@ -399,12 +415,25 @@ jobs:
                   print(f"--- step {step.get('id')} status={step.get('status')} ---")
                   for line in step.get("logs") or []:
                       print(line)
+              # With auto-promote on, the job stays "running" for the whole
+              # int -> test -> acc cascade. This step owns the ring it seeded;
+              # promotion past it is RP's business. Succeed once that ring
+              # reports the seeded version and healthy, rather than timing out
+              # mid-chain and failing a deploy that worked.
+              if status not in ("failed", "error", "cancelled"):
+                  st = seeded_ring()
+                  if st and st.get("current_version") == tag and st.get("healthy"):
+                      print(f"Deployed {tag} to {ring} and healthy.")
+                      if status != "success":
+                          print(f"RP job {job_id} is still {status} — promoting onward "
+                                f"from {ring}; follow it at {rp}/?app={app}")
+                      sys.exit(0)
               if status == "success":
                   sys.exit(0)
               if status in ("failed", "error", "cancelled"):
                   print(f"::error::RP job {status}")
                   sys.exit(1)
               time.sleep(15)
-          print("::error::timed out waiting for RP job")
+          print(f"::error::{ring} did not reach {tag} and healthy within 20m")
           sys.exit(1)
           PY
