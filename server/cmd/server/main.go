@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -18,7 +19,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/jobshout/server/internal/abtest"
+	"github.com/jobshout/server/internal/agentmodule"
 	"github.com/jobshout/server/internal/agentmodules"
+	"github.com/jobshout/server/internal/agentschema"
 	"github.com/jobshout/server/internal/blog"
 	"github.com/jobshout/server/internal/bridge"
 	"github.com/jobshout/server/internal/chatagent"
@@ -30,6 +33,8 @@ import (
 	"github.com/jobshout/server/internal/waflab"
 	"github.com/jobshout/server/internal/wslproxymcp"
 	"github.com/jobshout/server/internal/scheduler"
+	"github.com/jobshout/server/internal/secretsrot"
+	"github.com/jobshout/server/internal/linuxpatch"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/jobshout/server/internal/database"
@@ -216,6 +221,8 @@ func main() {
 	pentestFindingRepo := repository.NewPentestFindingRepository(pool)
 	wafLabRunRepo := repository.NewWAFLabRunRepository(pool)
 	seoRunRepo := repository.NewSEORunRepository(pool)
+	secretsRotRunRepo := repository.NewSecretsRotationRunRepository(pool)
+	linuxPatchRunRepo := repository.NewLinuxPatchRunRepository(pool)
 	reviewRunRepo := repository.NewReviewRunRepository(pool)
 	taskRunRepo := repository.NewTaskRunRepository(pool)
 	mailRepo := repository.NewMailRepository(pool)
@@ -606,6 +613,46 @@ func main() {
 		Projects: projectSvc,
 		TaskRuns: taskRunSvc,
 	}
+	// Workflow steps for go_native builtins call specialist Launch (Vault → Patch chains).
+	dagEngine.WithBuiltinLauncher(func(ctx context.Context, orgID, userID uuid.UUID, agent *model.Agent, prompt string, globalInput map[string]any) (string, bool, error) {
+		builtin := agentschema.BuiltinOf(agent)
+		if builtin == "" {
+			return "", false, nil
+		}
+		mod, ok := agentmodule.Lookup(builtin)
+		if !ok || mod.Launch == nil {
+			return "", false, nil
+		}
+		vals := wfengine.ParseLaunchValues(prompt, globalInput)
+		if mod.AbsorbPrompt != nil {
+			mod.AbsorbPrompt(prompt, vals)
+		}
+		dec, err := launchSvc.ResolveProject(ctx, orgID, userID, vals["project"], "")
+		if err != nil {
+			return "", true, err
+		}
+		if dec.Missing != "" {
+			return "", true, fmt.Errorf("workflow specialist launch needs a project: %s", dec.Missing)
+		}
+		res, err := launchSvc.Launch(ctx, tasklaunch.Request{
+			OrgID: orgID, UserID: userID, AgentID: agent.ID, ProjectID: dec.ProjectID,
+			Values: vals, Source: "workflow",
+		})
+		if err != nil {
+			return "", true, err
+		}
+		msg := res.Message
+		if msg == "" {
+			msg = "specialist launched"
+		}
+		if res.RunID != nil {
+			msg = msg + " run_id=" + res.RunID.String()
+		}
+		if res.Task != nil {
+			msg = msg + " task_id=" + res.Task.ID.String()
+		}
+		return msg, true, nil
+	})
 	mailReconciler := service.NewMailReconciler(mailSvc, mailCfg.ReconcileInterval, logger)
 	if mailCfg.Configured() {
 		logger.Info("mail agent oauth configured",
@@ -645,6 +692,23 @@ func main() {
 	wafLabClient := waflab.NewClient(wafLabCfg, logger)
 	wafLabSvc := service.NewWAFLabServiceWithEvents(wafLabRunRepo, securityFindingEventRepo, agentRepo, wafLabCfg, wafLabClient, logger)
 	seoSvc := service.NewSEOService(seoRunRepo, agentRepo, logger)
+	secretsRotCfg := secretsrot.LoadConfig()
+	secretsRotSvc := service.NewSecretsRotationService(secretsRotRunRepo, agentRepo, secretsRotCfg, logger)
+	logger.Info("secrets rotation agent initialised",
+		zap.Bool("enabled", secretsRotCfg.Enabled()),
+		zap.String("vault_addr", secretsRotCfg.Addr),
+	)
+	linuxPatchCfg := linuxpatch.LoadConfig()
+	var patchLLM llm.Client
+	if c, err := llmRouter.For(cfg.LLMProvider); err == nil {
+		patchLLM = c
+	}
+	linuxPatchSvc := service.NewLinuxPatchService(linuxPatchRunRepo, agentRepo, linuxPatchCfg, secretsRotCfg, patchLLM, logger)
+	logger.Info("linux patch agent initialised",
+		zap.Bool("ssh_auth", linuxPatchCfg.HasAuth()),
+		zap.Bool("vault", secretsRotCfg.Enabled()),
+		zap.Bool("llm", patchLLM != nil),
+	)
 	logger.Info("waf efficacy lab initialised",
 		zap.Bool("enabled", wafLabClient.Enabled()),
 		zap.String("base_url", wafLabCfg.BaseURL),
@@ -679,6 +743,8 @@ func main() {
 		WAFLab:           wafLabSvc,
 		ABTest:           abTestClient,
 		SEO:              seoSvc,
+		SecretsRotation:  secretsRotSvc,
+		LinuxPatch:       linuxPatchSvc,
 	})
 
 	// ─── Autonomous agent engine ────────────────────────────────────────────
@@ -883,6 +949,8 @@ func main() {
 	simproPaymentsHandler := handler.NewSimproPaymentsHandler(simproPaymentsSvc)
 	wafLabHandler := handler.NewWAFLabHandler(wafLabSvc)
 	seoHandler := handler.NewSEOHandler(seoSvc)
+	secretsRotHandler := handler.NewSecretsRotationHandler(secretsRotSvc)
+	linuxPatchHandler := handler.NewLinuxPatchHandler(linuxPatchSvc)
 	abTestHandler := handler.NewABTestHandler(abTestSvc)
 
 	// Chat, goal, multi-agent, and Telegram handlers
@@ -1259,6 +1327,22 @@ func main() {
 				r.Post("/runs", seoHandler.CreateRun)
 				r.Get("/runs/{runID}", seoHandler.GetRun)
 				r.Post("/runs/{runID}/cancel", seoHandler.CancelRun)
+			})
+
+			r.Route("/secrets-rotation", func(r chi.Router) {
+				r.Get("/status", secretsRotHandler.Status)
+				r.Get("/runs", secretsRotHandler.ListRuns)
+				r.Post("/runs", secretsRotHandler.CreateRun)
+				r.Get("/runs/{runID}", secretsRotHandler.GetRun)
+				r.Post("/runs/{runID}/cancel", secretsRotHandler.CancelRun)
+			})
+
+			r.Route("/linux-patch", func(r chi.Router) {
+				r.Get("/status", linuxPatchHandler.Status)
+				r.Get("/runs", linuxPatchHandler.ListRuns)
+				r.Post("/runs", linuxPatchHandler.CreateRun)
+				r.Get("/runs/{runID}", linuxPatchHandler.GetRun)
+				r.Post("/runs/{runID}/cancel", linuxPatchHandler.CancelRun)
 			})
 
 			r.Route("/ab-testing", func(r chi.Router) {

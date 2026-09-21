@@ -20,6 +20,8 @@ import (
 	"github.com/jobshout/server/internal/pentester"
 	"github.com/jobshout/server/internal/prreview"
 	"github.com/jobshout/server/internal/research"
+	"github.com/jobshout/server/internal/linuxpatch"
+	"github.com/jobshout/server/internal/secretsrot"
 	"github.com/jobshout/server/internal/seo"
 	"github.com/jobshout/server/internal/service"
 	"github.com/jobshout/server/internal/simpro"
@@ -42,6 +44,8 @@ type Deps struct {
 	WAFLab           waflab.Runner
 	ABTest           *abtest.Client
 	SEO              seo.Runner
+	SecretsRotation  secretsrot.Runner
+	LinuxPatch       linuxpatch.Runner
 }
 
 func init() {
@@ -70,6 +74,8 @@ func Register(d Deps) {
 	agentmodule.Register(waflab.Module(d.WAFLab))
 	agentmodule.Register(abtest.Module(d.ABTest))
 	agentmodule.Register(seo.Module(d.SEO))
+	agentmodule.Register(secretsrot.Module(d.SecretsRotation))
+	agentmodule.Register(linuxpatch.Module(d.LinuxPatch))
 }
 
 type imageAdapter struct{ svc *service.ImageService }
