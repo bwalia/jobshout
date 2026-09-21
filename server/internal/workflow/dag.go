@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/jobshout/server/internal/agentschema"
 	"github.com/jobshout/server/internal/engine"
 	"github.com/jobshout/server/internal/executor"
 	"github.com/jobshout/server/internal/model"
@@ -31,6 +32,12 @@ type AgentResolver func(ctx context.Context, agentID uuid.UUID) (*model.Agent, e
 // ToolPermissionResolver returns the list of tool names the agent may use.
 type ToolPermissionResolver func(ctx context.Context, agentID uuid.UUID) ([]string, error)
 
+// BuiltinLauncher runs a registered go_native specialist (agentmodule.Launch)
+// for workflow steps. When handled is false, the DAG falls back to the LLM
+// engine router. This is how Secrets Rotation → Linux Patch (and other
+// specialist chains) orchestrate without special-casing each pair.
+type BuiltinLauncher func(ctx context.Context, orgID, userID uuid.UUID, agent *model.Agent, prompt string, globalInput map[string]any) (output string, handled bool, err error)
+
 // ExecutionPersister persists the start and finish of each agent execution.
 // Returning an error from either method is non-fatal — the DAG continues.
 type ExecutionPersister interface {
@@ -44,6 +51,7 @@ type Engine struct {
 	resolveAgent           AgentResolver
 	resolveToolPermissions ToolPermissionResolver
 	persister              ExecutionPersister
+	builtinLauncher        BuiltinLauncher
 	logger                 *zap.Logger
 }
 
@@ -62,6 +70,12 @@ func NewEngine(
 		persister:              persister,
 		logger:                 logger,
 	}
+}
+
+// WithBuiltinLauncher enables specialist Launch for go_native workflow steps.
+func (e *Engine) WithBuiltinLauncher(fn BuiltinLauncher) *Engine {
+	e.builtinLauncher = fn
+	return e
 }
 
 // Execute runs the workflow steps respecting their dependency graph.
@@ -155,6 +169,34 @@ func (e *Engine) Execute(
 
 				execID := uuid.New()
 				_ = e.persister.RecordStarted(ctx, execID, agent.ID, run.OrgID, run.ID, s.ID, prompt)
+
+				// Prefer registered specialist Launch for go_native builtins
+				// (Secrets Rotation, Linux Patch, SEO, …) so workflows can chain agents.
+				if e.builtinLauncher != nil {
+					var userID uuid.UUID
+					if run.TriggeredBy != nil {
+						userID = *run.TriggeredBy
+					}
+					out, handled, lerr := e.builtinLauncher(ctx, run.OrgID, userID, agent, prompt, globalInput)
+					if handled {
+						res := executor.Result{FinalAnswer: out, Err: lerr}
+						_ = e.persister.RecordCompleted(ctx, execID, res)
+						if lerr != nil {
+							errs <- fmt.Errorf("step %q: specialist launch failed: %w", s.Name, lerr)
+							e.unblockDependents(s.Name, dependents, pending, ready, &mu)
+							return
+						}
+						e.logger.Info("workflow step completed via specialist launch",
+							zap.String("step", s.Name),
+							zap.String("builtin", agentschema.BuiltinOf(agent)),
+						)
+						mu.Lock()
+						outputs[s.Name] = out
+						mu.Unlock()
+						e.unblockDependents(s.Name, dependents, pending, ready, &mu)
+						return
+					}
+				}
 
 				// Resolve engine: step override > agent default > go_native.
 				engineType := engine.ResolveEngine(agent, nil, s.EngineType)
