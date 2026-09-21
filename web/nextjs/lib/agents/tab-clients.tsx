@@ -9,6 +9,7 @@ import { PentestAgentClient } from "@/components/PentestAgentClient";
 import { ReviewAgentClient } from "@/components/ReviewAgentClient";
 import { SimproPaymentsAgentClient } from "@/components/SimproPaymentsAgentClient";
 import { WafLabAgentClient } from "@/components/WafLabAgentClient";
+import { SeoAgentClient } from "@/components/SeoAgentClient";
 import { ArticlesView } from "@/components/articles/ArticlesView";
 import { ImagesView } from "@/components/image/ImagesView";
 
@@ -26,6 +27,7 @@ export const AGENT_CLIENTS: Record<string, ComponentType> = {
   credit_controller: CreditControllerAgentClient,
   simpro_payments: SimproPaymentsAgentClient,
   waf_lab: WafLabAgentClient,
+  seo_analyst: SeoAgentClient,
   ab_testing: AbTestAgentClient,
   article_writer: function ArticleWriterClient() {
     return <ArticlesView hideHeader />;

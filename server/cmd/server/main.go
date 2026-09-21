@@ -215,6 +215,7 @@ func main() {
 	pentestRunRepo := repository.NewPentestRunRepository(pool)
 	pentestFindingRepo := repository.NewPentestFindingRepository(pool)
 	wafLabRunRepo := repository.NewWAFLabRunRepository(pool)
+	seoRunRepo := repository.NewSEORunRepository(pool)
 	reviewRunRepo := repository.NewReviewRunRepository(pool)
 	taskRunRepo := repository.NewTaskRunRepository(pool)
 	mailRepo := repository.NewMailRepository(pool)
@@ -643,6 +644,7 @@ func main() {
 	wafLabCfg := waflab.LoadConfig()
 	wafLabClient := waflab.NewClient(wafLabCfg, logger)
 	wafLabSvc := service.NewWAFLabServiceWithEvents(wafLabRunRepo, securityFindingEventRepo, agentRepo, wafLabCfg, wafLabClient, logger)
+	seoSvc := service.NewSEOService(seoRunRepo, agentRepo, logger)
 	logger.Info("waf efficacy lab initialised",
 		zap.Bool("enabled", wafLabClient.Enabled()),
 		zap.String("base_url", wafLabCfg.BaseURL),
@@ -676,6 +678,7 @@ func main() {
 		Simpro:           simproClient,
 		WAFLab:           wafLabSvc,
 		ABTest:           abTestClient,
+		SEO:              seoSvc,
 	})
 
 	// ─── Autonomous agent engine ────────────────────────────────────────────
@@ -879,6 +882,7 @@ func main() {
 	creditControllerHandler := handler.NewCreditControllerHandler(creditControllerSvc)
 	simproPaymentsHandler := handler.NewSimproPaymentsHandler(simproPaymentsSvc)
 	wafLabHandler := handler.NewWAFLabHandler(wafLabSvc)
+	seoHandler := handler.NewSEOHandler(seoSvc)
 	abTestHandler := handler.NewABTestHandler(abTestSvc)
 
 	// Chat, goal, multi-agent, and Telegram handlers
@@ -1248,6 +1252,13 @@ func main() {
 				r.Get("/runs/{runID}/finding-events", wafLabHandler.ListFindingEvents)
 				r.Get("/runs/{runID}/report.pdf", wafLabHandler.DownloadReport)
 				r.Post("/runs/{runID}/cancel", wafLabHandler.CancelRun)
+			})
+
+			r.Route("/seo", func(r chi.Router) {
+				r.Get("/runs", seoHandler.ListRuns)
+				r.Post("/runs", seoHandler.CreateRun)
+				r.Get("/runs/{runID}", seoHandler.GetRun)
+				r.Post("/runs/{runID}/cancel", seoHandler.CancelRun)
 			})
 
 			r.Route("/ab-testing", func(r chi.Router) {
