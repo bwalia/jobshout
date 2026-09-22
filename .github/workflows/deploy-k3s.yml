@@ -186,10 +186,10 @@ jobs:
   #   :latest    — moving alias, kept for anything that still resolves
   #               images by "latest"
   # ─── smoke-test the Go server before anything is built ─────────────
-  # Runs on every merge to master. The cross-build below takes the best part
-  # of an hour, so a compile error or a failing test should stop the run in
-  # seconds. A red suite skips build -> auto-tag -> deploy, so Ring Promoter
-  # is never seeded with a version whose tests did not pass.
+  # Runs on every merge to master. The cross-build is the expensive step, so a
+  # compile error or a failing test should stop the run in seconds. A red suite
+  # skips build -> auto-tag -> deploy, so Ring Promoter is never seeded with a
+  # version whose tests did not pass.
   go-smoke:
     name: Go build, vet & test
     runs-on: self-hosted
@@ -220,7 +220,10 @@ jobs:
     # already published under that tag.
     if: needs.compute-version.outputs.should_build == 'true'
     runs-on: self-hosted
-    timeout-minutes: 60
+    # Cold cross-builds on the arm64 Mac (QEMU amd64) can still approach an hour;
+    # warm BuildKit/local/registry cache runs finish much sooner. 90m is a
+    # safety net — run 35727230956 was cancelled at the old 60m ceiling mid-push.
+    timeout-minutes: 90
     permissions:
       contents: read  # this job only reads source; tagging happens after it
     steps:
@@ -296,6 +299,8 @@ jobs:
           set -euo pipefail
           VERSION="${{ needs.compute-version.outputs.next_version }}"
           NS="$PUSH_REGISTRY/$IMAGE_NAMESPACE"
+          CACHE_ROOT="${HOME}/.cache/jobshout-buildkit"
+          mkdir -p "$CACHE_ROOT"
 
           # k3s1 nodes are amd64 but this runner is an arm64 Mac, so cross-build
           # for linux/amd64 with buildx (QEMU) and push directly — same as
@@ -311,7 +316,13 @@ jobs:
           #
           # jobshout-lan (not the shared jsbuilder) so HTTP NodePort is allowed
           # without changing other workflows on this Mac.
+          #
+          # Do NOT `buildx rm` on every run — that wiped the BuildKit layer cache
+          # and forced cold QEMU rebuilds (~60m, cancelled by the old timeout on
+          # run 35727230956). Recreate only when the insecure-registry config
+          # changes; otherwise keep the builder so mounts + layer cache warm up.
           CFG="${RUNNER_TEMP:-/tmp}/jobshout-buildkitd.toml"
+          HASH_FILE="$CACHE_ROOT/builder-cfg.sha256"
           python3 - "$CFG" <<'PY'
           from pathlib import Path
           import os, sys
@@ -323,11 +334,38 @@ jobs:
               f'[registry."{h}"]\n  http = true\n  insecure = true\n' for h in hosts
           ))
           PY
-          docker buildx rm jobshout-lan >/dev/null 2>&1 || true
-          docker buildx create --name jobshout-lan --driver docker-container --bootstrap --config "$CFG"
+          CFG_HASH=$(shasum -a 256 "$CFG" | awk '{print $1}')
+          need_create=1
+          if docker buildx inspect jobshout-lan >/dev/null 2>&1; then
+            if [ -f "$HASH_FILE" ] && [ "$(cat "$HASH_FILE")" = "$CFG_HASH" ]; then
+              echo "Reusing existing jobshout-lan builder (config unchanged)"
+              need_create=0
+            else
+              echo "buildkitd.toml changed — recreating jobshout-lan builder"
+              docker buildx rm -f jobshout-lan >/dev/null 2>&1 || true
+            fi
+          fi
+          if [ "$need_create" -eq 1 ]; then
+            docker buildx create --name jobshout-lan --driver docker-container --bootstrap --config "$CFG"
+            echo "$CFG_HASH" > "$HASH_FILE"
+          fi
+
+          # Local cache survives builder recreate; registry cache survives Mac
+          # reboot / builder wipe. mode=max stores intermediate layers (deps,
+          # apt, go mod) so code-only changes rebuild the final stage only.
           bx() {
+            local cache_name="$1"; shift
+            local cache_dir="$CACHE_ROOT/$cache_name"
+            mkdir -p "$cache_dir"
+            # NS is host:30500/jobshout — cache lives beside the release images.
+            local cache_ref="${NS}/buildcache-${cache_name}:latest"
             docker buildx build --builder jobshout-lan --platform linux/amd64 \
-              --provenance=false --sbom=false --push "$@"
+              --provenance=false --sbom=false --push \
+              --cache-from "type=local,src=${cache_dir}" \
+              --cache-from "type=registry,ref=${cache_ref}" \
+              --cache-to "type=local,dest=${cache_dir},mode=max" \
+              --cache-to "type=registry,ref=${cache_ref},mode=max,ignore-error=true" \
+              "$@"
           }
 
           # Every :30500 NodePort fronts the SAME registry backend, so a pushed
@@ -359,19 +397,34 @@ jobs:
           }
 
           # Per-image build+push wrappers read $NS afresh so retry_reg can re-pin
-          # them to a live node between attempts.
-          push_server() { bx --build-arg VERSION="$VERSION" -f server/Dockerfile -t "$NS/server:$VERSION" -t "$NS/server:latest" server; }
+          # them to a live node between attempts. First arg to bx is the cache key.
+          push_server() { bx server --build-arg VERSION="$VERSION" -f server/Dockerfile -t "$NS/server:$VERSION" -t "$NS/server:latest" server; }
           # NEXT_PUBLIC_* are baked at BUILD time, so build same-origin (empty
           # base): the browser calls /api and /ws on whichever host serves it, so
           # ONE image is valid for every ring.
-          push_web() { bx --build-arg NEXT_PUBLIC_API_URL="" --build-arg NEXT_PUBLIC_WS_URL="" -f web/nextjs/Dockerfile -t "$NS/web:$VERSION" -t "$NS/web:latest" web/nextjs; }
-          push_sidecar() { bx -f python-sidecar/Dockerfile -t "$NS/python-sidecar:$VERSION" -t "$NS/python-sidecar:latest" python-sidecar; }
-          push_reviewbot() { bx -f review-bot/Dockerfile -t "$NS/review-bot:$VERSION" -t "$NS/review-bot:latest" review-bot; }
+          push_web() { bx web --build-arg NEXT_PUBLIC_API_URL="" --build-arg NEXT_PUBLIC_WS_URL="" -f web/nextjs/Dockerfile -t "$NS/web:$VERSION" -t "$NS/web:latest" web/nextjs; }
+          push_sidecar() { bx python-sidecar -f python-sidecar/Dockerfile -t "$NS/python-sidecar:$VERSION" -t "$NS/python-sidecar:latest" python-sidecar; }
+          push_reviewbot() { bx review-bot -f review-bot/Dockerfile -t "$NS/review-bot:$VERSION" -t "$NS/review-bot:latest" review-bot; }
 
-          retry_reg push_server
-          retry_reg push_web
-          retry_reg push_sidecar
-          retry_reg push_reviewbot
+          # Build all four in parallel — they share the BuildKit builder but use
+          # independent cache dirs/refs. Wall-clock drops from sum(images) toward
+          # max(images); review-bot (QEMU apt+node) is usually the long pole.
+          fail=0
+          retry_reg push_server &
+          pids="$!"
+          retry_reg push_web &
+          pids="$pids $!"
+          retry_reg push_sidecar &
+          pids="$pids $!"
+          retry_reg push_reviewbot &
+          pids="$pids $!"
+          for pid in $pids; do
+            wait "$pid" || fail=1
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::one or more parallel image builds failed"
+            exit 1
+          fi
 
       - name: Assert pushed images are linux/amd64
         env:

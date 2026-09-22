@@ -4,7 +4,12 @@ FROM --platform=$TARGETPLATFORM python:3.12-slim
 ARG TARGETARCH
 RUN if [ "$TARGETARCH" = "amd64" ]; then uname -m | grep -qx x86_64; fi
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Heavy amd64 (QEMU) install — cache mounts + CI registry/local layer cache are
+# what keep this under the deploy job timeout on the arm64 Mac runner.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    --mount=type=cache,target=/root/.npm \
+    apt-get update && apt-get install -y --no-install-recommends \
         git ca-certificates curl gnupg \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
@@ -16,7 +21,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir -r requirements.txt
 
 COPY app/ ./app/
 

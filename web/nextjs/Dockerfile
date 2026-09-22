@@ -18,7 +18,9 @@ FROM --platform=$BUILDPLATFORM node:20-alpine AS deps
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 COPY package.json package-lock.json* ./
-RUN npm ci || npm install
+# npm cache mount keeps CI rebuilds fast when lockfile is unchanged.
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci || npm install
 
 FROM --platform=$BUILDPLATFORM node:20-alpine AS builder
 WORKDIR /app
@@ -28,7 +30,8 @@ ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 ENV NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL}
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN npm run build
+RUN --mount=type=cache,target=/root/.npm \
+    npm run build
 # `next build` exiting 0 is not proof it wrote anything — that is exactly how
 # the emulated build failed. Assert the outputs here, where the message names
 # the stage that was supposed to produce them, instead of letting the COPY in
