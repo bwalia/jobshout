@@ -12,7 +12,11 @@ COPY certs/ /usr/local/share/ca-certificates/
 RUN update-ca-certificates || true
 
 COPY go.mod go.sum ./
-RUN go mod download
+# Persist the module download cache across builds on the same BuildKit builder
+# (and via registry/local cache-from in CI). go.sum changes still bust the layer.
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod download
 
 COPY . .
 
@@ -31,7 +35,9 @@ RUN echo "building GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-$(go env GOARCH)
 # GOARCH/GOOS must be literal assignment tokens (the shell recognizes
 # assignments before expansion, so ${VAR:+GOARCH=...} would be parsed as a
 # command). Default to the native arch when TARGETARCH is unset (local builds).
-RUN CGO_ENABLED=0 GOOS="${TARGETOS:-linux}" GOARCH="${TARGETARCH:-$(go env GOARCH)}" \
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS="${TARGETOS:-linux}" GOARCH="${TARGETARCH:-$(go env GOARCH)}" \
     go build -ldflags="-s -w -X main.version=${VERSION}" -o /jobshout-server ./cmd/server
 
 # Pin the runtime base to TARGETPLATFORM. Without it, buildx on an arm64 Mac

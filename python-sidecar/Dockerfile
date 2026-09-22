@@ -7,7 +7,9 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then uname -m | grep -qx x86_64; fi
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Keep the pip download cache across builds; still install into the image layer.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir -r requirements.txt
 
 COPY app/ ./app/
 
