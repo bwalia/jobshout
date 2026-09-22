@@ -44,8 +44,9 @@ wafLab:
   enabled: false
   baseURL: ""
 
-# Ollama gateway secret (OLLAMA_JWT_SECRET). The chart renders jobshout-secrets
-# with it empty when externalSecret is off, so without this every LLM call is
-# refused by the gateway (403). Created by hand on k3s1, never in git.
+# Shared workstation gateway secrets: OLLAMA_JWT_SECRET and IMAGE_JWT_SECRET.
+# The chart renders jobshout-secrets with them empty when externalSecret is
+# off, so without this the gateways refuse every LLM and image call (403).
+# Created by hand on k3s1, never in git.
 extraSecretRefs:
-  - jobshout-ollama
+  - jobshout-gateways
