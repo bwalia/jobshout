@@ -28,6 +28,11 @@ type RunOptions struct {
 	RetireOld    bool
 	DryRun       bool
 	NewSecret    map[string]any // optional explicit values
+
+	// Propagate pushes the rotated values past Vault (k8s Secrets,
+	// ExternalSecrets, GitHub Actions, Ring Promoter). Names only.
+	Propagate Propagation
+	RunID     string // included in the Ring Promoter restart reason
 }
 
 // RunOutcome is returned to the service (no secret values).
@@ -50,6 +55,9 @@ func Execute(ctx context.Context, cfg Config, opt RunOptions, onPhase func(model
 	}
 	if opt.Path == "" {
 		return nil, fmt.Errorf("path is required")
+	}
+	if opt.Propagate.Source == "" {
+		opt.Propagate.Source = "vault"
 	}
 
 	runCfg := cfg
@@ -77,7 +85,7 @@ func Execute(ctx context.Context, cfg Config, opt RunOptions, onPhase func(model
 		},
 	}
 
-	phases := defaultPhases(opt.Mode, opt.Engine)
+	phases := buildPhases(opt)
 	setPhase := func(key, status, msg string) {
 		now := time.Now()
 		for i := range phases {
@@ -104,6 +112,50 @@ func Execute(ctx context.Context, cfg Config, opt RunOptions, onPhase func(model
 	}
 
 	// ── preflight ──────────────────────────────────────────────────────────
+	if err := validatePropagation(opt); err != nil {
+		setPhase("preflight", "failed", err.Error())
+		return out, err
+	}
+	var pr *propagator
+	if opt.Propagate.HasTargets() {
+		kube, problems := opt.Propagate.checkCredentials(runCfg)
+		if len(problems) > 0 {
+			if opt.DryRun || opt.Mode == "plan" {
+				for _, p := range problems {
+					out.Result.Warnings = append(out.Result.Warnings, "propagation: "+p)
+				}
+			} else {
+				msg := "Propagation credentials missing: " + strings.Join(problems, "; ")
+				setPhase("preflight", "failed", msg)
+				return out, fmt.Errorf("%s", msg)
+			}
+		}
+		pr = newPropagator(runCfg, opt, kube, out, setPhase)
+		// Read-only cluster checks before any write. Plan / dry-run report
+		// them as warnings; a live run stops here with nothing written.
+		if problems := pr.precheck(ctx); len(problems) > 0 {
+			if opt.DryRun || opt.Mode == "plan" {
+				for _, p := range problems {
+					out.Result.Warnings = append(out.Result.Warnings, "propagation: "+p)
+				}
+			} else {
+				msg := "Propagation precheck failed (nothing written): " + strings.Join(problems, "; ")
+				setPhase("preflight", "failed", msg)
+				return out, fmt.Errorf("%s", msg)
+			}
+		}
+	}
+	if opt.Propagate.Source == "github" {
+		out.DetectedProvider = "github"
+		out.Result.Engine = "github"
+		out.Result.Strategy = "GitHub Actions secrets are the source of truth: generate in memory, seal and PUT; Vault is not read or written."
+		setPhase("preflight", "completed", "Source github · "+opt.Propagate.githubTarget())
+		if opt.Mode == "plan" {
+			return runPlanGitHub(opt, out, setPhase)
+		}
+		return rotateGitHub(ctx, opt, out, setPhase, pr)
+	}
+
 	setPhase("preflight", "active", "Checking vault reachability")
 	health, herr := client.Health(ctx)
 	prov := opt.Provider
@@ -128,11 +180,11 @@ func Execute(ctx context.Context, cfg Config, opt RunOptions, onPhase func(model
 	case "plan":
 		return runPlan(ctx, client, opt, out, setPhase)
 	case "verify":
-		return runVerify(ctx, client, opt, out, setPhase)
+		return runVerify(ctx, client, opt, out, setPhase, pr)
 	case "rollback":
-		return runRollback(ctx, client, opt, out, setPhase)
+		return runRollback(ctx, client, opt, out, setPhase, pr)
 	case "rotate":
-		return runRotate(ctx, client, opt, out, setPhase)
+		return runRotate(ctx, client, opt, out, setPhase, pr)
 	default:
 		return out, fmt.Errorf("unknown mode %q", opt.Mode)
 	}
@@ -241,12 +293,15 @@ func runPlan(ctx context.Context, client *Client, opt RunOptions, out *RunOutcom
 			setPhase("inventory", "completed", fmt.Sprintf("Current version %d", meta.Version))
 		}
 	}
+	if opt.Propagate.HasTargets() {
+		steps = append(steps, opt.Propagate.PlanSteps(opt.Keys)...)
+	}
 	out.Result.PlanSteps = steps
 	setPhase("plan", "completed", fmt.Sprintf("%d steps · %s", len(steps), out.Result.Strategy))
 	return out, nil
 }
 
-func runVerify(ctx context.Context, client *Client, opt RunOptions, out *RunOutcome, setPhase func(string, string, string)) (*RunOutcome, error) {
+func runVerify(ctx context.Context, client *Client, opt RunOptions, out *RunOutcome, setPhase func(string, string, string), pr *propagator) (*RunOutcome, error) {
 	setPhase("read", "active", "Reading secret metadata")
 	if opt.Engine == "transit" {
 		setPhase("read", "skipped", "Transit verify is key-existence only in this agent")
@@ -262,16 +317,26 @@ func runVerify(ctx context.Context, client *Client, opt RunOptions, out *RunOutc
 	out.Result.KeysRotated = meta.Keys
 	setPhase("read", "completed", fmt.Sprintf("Version %d · %d keys", meta.Version, len(data)))
 	setPhase("verify", "completed", "Latest version readable")
+	if pr != nil {
+		// Re-propagate the current version (the recovery path after a failed
+		// propagation). The target Secret may already be current, so an
+		// unchanged resourceVersion is accepted here.
+		keys := keysFor(opt.Keys, data)
+		if err := pr.run(ctx, stringValues(data, keys), meta.Version, false); err != nil {
+			skipPending(out, setPhase, "Not run: propagation failed")
+			return out, err
+		}
+	}
 	return out, nil
 }
 
-func runRollback(ctx context.Context, client *Client, opt RunOptions, out *RunOutcome, setPhase func(string, string, string)) (*RunOutcome, error) {
+func runRollback(ctx context.Context, client *Client, opt RunOptions, out *RunOutcome, setPhase func(string, string, string), pr *propagator) (*RunOutcome, error) {
 	if opt.Engine != "kv2" {
 		setPhase("read", "failed", "Rollback currently supports KV v2 only")
 		return out, fmt.Errorf("rollback supports kv2 only")
 	}
 	setPhase("read", "active", "Reading current version")
-	_, meta, err := client.ReadKV2(ctx, opt.Mount, opt.Path, 0)
+	curData, meta, err := client.ReadKV2(ctx, opt.Mount, opt.Path, 0)
 	if err != nil {
 		setPhase("read", "failed", err.Error())
 		return out, err
@@ -289,6 +354,11 @@ func runRollback(ctx context.Context, client *Client, opt RunOptions, out *RunOu
 		setPhase("rollback", "completed", "Dry-run: would restore version "+fmt.Sprintf("%d", prev))
 		out.Result.RolledBackTo = prev
 		setPhase("verify", "skipped", "Dry-run")
+		if pr != nil {
+			if err := pr.run(ctx, keyOnlyValues(keysFor(opt.Keys, curData)), meta.Version+1, true); err != nil {
+				return out, err
+			}
+		}
 		return out, nil
 	}
 	oldData, _, err := client.ReadKV2(ctx, opt.Mount, opt.Path, prev)
@@ -311,10 +381,16 @@ func runRollback(ctx context.Context, client *Client, opt RunOptions, out *RunOu
 	out.Result.PreviousVersion = meta.Version
 	setPhase("rollback", "completed", fmt.Sprintf("Wrote version %d from contents of %d", newMeta.Version, prev))
 	setPhase("verify", "completed", "Rollback applied as new latest version")
+	if pr != nil {
+		if err := pr.run(ctx, stringValues(oldData, keysFor(opt.Keys, oldData)), out.Result.CurrentVersion, true); err != nil {
+			skipPending(out, setPhase, "Not run: propagation failed")
+			return out, err
+		}
+	}
 	return out, nil
 }
 
-func runRotate(ctx context.Context, client *Client, opt RunOptions, out *RunOutcome, setPhase func(string, string, string)) (*RunOutcome, error) {
+func runRotate(ctx context.Context, client *Client, opt RunOptions, out *RunOutcome, setPhase func(string, string, string), pr *propagator) (*RunOutcome, error) {
 	if opt.Engine == "transit" {
 		return rotateTransit(ctx, client, opt, out, setPhase)
 	}
@@ -331,7 +407,7 @@ func runRotate(ctx context.Context, client *Client, opt RunOptions, out *RunOutc
 		setPhase("audit", "completed", "See plan_steps")
 		return planOut, nil
 	}
-	return rotateKV2(ctx, client, opt, out, setPhase)
+	return rotateKV2(ctx, client, opt, out, setPhase, pr)
 }
 
 func rotateTransit(ctx context.Context, client *Client, opt RunOptions, out *RunOutcome, setPhase func(string, string, string)) (*RunOutcome, error) {
@@ -352,7 +428,7 @@ func rotateTransit(ctx context.Context, client *Client, opt RunOptions, out *Run
 	return out, nil
 }
 
-func rotateKV2(ctx context.Context, client *Client, opt RunOptions, out *RunOutcome, setPhase func(string, string, string)) (*RunOutcome, error) {
+func rotateKV2(ctx context.Context, client *Client, opt RunOptions, out *RunOutcome, setPhase func(string, string, string), pr *propagator) (*RunOutcome, error) {
 	setPhase("read", "active", "Reading current secret")
 	cur, meta, err := client.ReadKV2(ctx, opt.Mount, opt.Path, 0)
 	if err != nil {
@@ -399,6 +475,11 @@ func rotateKV2(ctx context.Context, client *Client, opt RunOptions, out *RunOutc
 		setPhase("write_new", "completed", fmt.Sprintf("Dry-run: would write version %d rotating %s", meta.Version+1, strings.Join(keys, ",")))
 		setPhase("dual_window", "completed", fmt.Sprintf("Dry-run dual window %ds", opt.GraceSeconds))
 		setPhase("verify", "skipped", "Dry-run")
+		if pr != nil {
+			if err := pr.run(ctx, keyOnlyValues(keys), meta.Version+1, true); err != nil {
+				return out, err
+			}
+		}
 		if opt.RetireOld && meta.Version > 0 {
 			setPhase("retire_old", "completed", fmt.Sprintf("Dry-run: would soft-delete version %d", meta.Version))
 		} else {
@@ -443,6 +524,16 @@ func rotateKV2(ctx context.Context, client *Client, opt RunOptions, out *RunOutc
 		out.Result.CurrentVersion = verifyMeta.Version
 	}
 	setPhase("verify", "completed", fmt.Sprintf("Latest version %d OK", out.Result.CurrentVersion))
+
+	if pr != nil {
+		// Old version stays in place (retire_old is not reached) so consumers
+		// that have not picked up N+1 keep working while the operator fixes
+		// the failing target.
+		if err := pr.run(ctx, stringValues(next, keys), out.Result.CurrentVersion, true); err != nil {
+			skipPending(out, setPhase, "Not run: propagation failed")
+			return out, err
+		}
+	}
 
 	if opt.RetireOld && meta.Version > 0 {
 		setPhase("retire_old", "active", fmt.Sprintf("Soft-deleting version %d", meta.Version))

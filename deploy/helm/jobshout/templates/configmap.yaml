@@ -104,3 +104,7 @@ data:
   MAIL_POLL_INTERVAL: {{ .Values.mail.pollInterval | default "5m" | quote }}
   MAIL_RECONCILE_INTERVAL: {{ .Values.mail.reconcileInterval | default "15s" | quote }}
   MAIL_MODEL: {{ .Values.ai.mailModel | default "" | quote }}
+  # Secrets Rotation propagation (non-secret). Tokens live in jobshout-secrets /
+  # extraSecretRefs; kubeconfigs are files under SECRETS_ROT_KUBECONFIG_DIR.
+  SECRETS_ROT_KUBECONFIG_DIR: {{ .Values.secretsRotation.kubeconfig.mountPath | default "/etc/secretsrot/kube" | quote }}
+  RP_URL: {{ .Values.secretsRotation.rpURL | default "https://rp.workstation.co.uk" | quote }}

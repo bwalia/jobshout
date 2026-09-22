@@ -34,6 +34,24 @@ export interface SecretsRotationResult {
   strategy?: string;
   warnings?: string[];
   plan_steps?: string[];
+  propagation?: SecretsRotationPropagation | null;
+}
+
+/** Where rotated values were pushed — names, statuses and ids only, never values. */
+export interface SecretsRotationTarget {
+  kind: "k8s_secret" | "external_secret" | "github_secret" | "ring" | string;
+  name: string;
+  status: "pending" | "completed" | "failed" | "dry_run" | "skipped" | string;
+  resource_version?: string;
+  job_id?: string;
+  message?: string;
+}
+
+export interface SecretsRotationPropagation {
+  source: "vault" | "github" | string;
+  cluster?: string;
+  vault_version?: number;
+  targets?: SecretsRotationTarget[];
 }
 
 export interface SecretsRotationRun {
@@ -54,6 +72,16 @@ export interface SecretsRotationRun {
   retire_old: boolean;
   dry_run: boolean;
   instruction?: string | null;
+  source?: string;
+  cluster?: string;
+  external_secrets?: string;
+  k8s_secrets?: string;
+  github_repo?: string;
+  github_environment?: string;
+  github_secret_names?: string;
+  rp_app?: string;
+  rp_rings?: string;
+  rp_deployments?: string;
   phases?: SecretsRotationPhase[];
   result?: SecretsRotationResult | null;
   error_message?: string | null;
