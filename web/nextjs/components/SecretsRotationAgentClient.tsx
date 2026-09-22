@@ -12,6 +12,7 @@ import {
   listSecretsRotationRuns,
   secretsRotationStatus,
   type SecretsRotationPhase,
+  type SecretsRotationPropagation,
   type SecretsRotationRun,
 } from "@/lib/api/secrets-rotation";
 
@@ -361,7 +362,8 @@ export function SecretsRotationAgentClient() {
             {!selected && (
               <p className="text-sm text-muted-foreground">
                 Prefer <strong>Plan</strong> first, then <strong>Rotate</strong> with a dual-read
-                window so consumers never see a missing secret.
+                window so consumers never see a missing secret. To also propagate to Kubernetes,
+                GitHub Actions or restart rings, launch from New task or chat (Propagate fields).
               </p>
             )}
             {selected && <RunDetail run={selected} onCancel={canCancel(selected) ? async () => {
@@ -490,6 +492,7 @@ function RunDetail({
               </div>
             )}
           </dl>
+          {result.propagation && <PropagationSummary propagation={result.propagation} />}
           {result.plan_steps && result.plan_steps.length > 0 && (
             <ol className="list-decimal space-y-1 pl-4 text-xs text-muted-foreground">
               {result.plan_steps.map((s) => (
@@ -527,6 +530,45 @@ function RunDetail({
             )}
           </div>
         </section>
+      )}
+    </div>
+  );
+}
+
+const TARGET_KIND_LABEL: Record<string, string> = {
+  k8s_secret: "Secret",
+  external_secret: "ExternalSecret",
+  github_secret: "GitHub",
+  ring: "Ring",
+};
+
+function PropagationSummary({ propagation }: { propagation: SecretsRotationPropagation }) {
+  const targets = propagation.targets ?? [];
+  return (
+    <div className="space-y-1">
+      <p className="text-xs text-muted-foreground">
+        Propagation · source {propagation.source}
+        {propagation.cluster ? ` · cluster ${propagation.cluster}` : ""}
+        {propagation.vault_version ? ` · Vault v${propagation.vault_version}` : ""}
+      </p>
+      {targets.length > 0 && (
+        <ul className="space-y-1 text-xs">
+          {targets.map((t) => (
+            <li key={`${t.kind}:${t.name}`} className="flex gap-2">
+              <PhaseIcon status={t.status === "dry_run" ? "skipped" : t.status} />
+              <div className="min-w-0">
+                <p>
+                  <span className="text-muted-foreground">{TARGET_KIND_LABEL[t.kind] ?? t.kind}</span>{" "}
+                  <span className="font-mono">{t.name}</span>
+                  {t.status === "dry_run" ? " · dry-run" : ""}
+                  {t.resource_version ? ` · rv ${t.resource_version}` : ""}
+                  {t.job_id ? ` · job ${t.job_id}` : ""}
+                </p>
+                {t.message && <p className="text-muted-foreground">{t.message}</p>}
+              </div>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

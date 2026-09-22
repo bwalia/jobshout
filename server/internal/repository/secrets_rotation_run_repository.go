@@ -31,7 +31,9 @@ const secretsRotRunColumns = `
 	id, agent_id, task_id, org_id, status, mode, provider, detected_provider,
 	vault_addr, mount, path, engine, keys, grace_seconds, retire_old, dry_run,
 	instruction, phases, result, error_message, requested_by,
-	started_at, completed_at, created_at, updated_at`
+	started_at, completed_at, created_at, updated_at,
+	source, cluster, external_secrets, k8s_secrets, github_repo, github_environment,
+	github_secret_names, rp_app, rp_rings, rp_deployments`
 
 func scanSecretsRotRun(row pgx.Row) (*model.SecretsRotationRun, error) {
 	run := &model.SecretsRotationRun{}
@@ -42,6 +44,8 @@ func scanSecretsRotRun(row pgx.Row) (*model.SecretsRotationRun, error) {
 		&run.Engine, &run.Keys, &run.GraceSeconds, &run.RetireOld, &run.DryRun,
 		&run.Instruction, &phasesJSON, &resultJSON, &run.ErrorMessage, &run.RequestedBy,
 		&run.StartedAt, &run.CompletedAt, &run.CreatedAt, &run.UpdatedAt,
+		&run.Source, &run.Cluster, &run.ExternalSecrets, &run.K8sSecrets, &run.GitHubRepo,
+		&run.GitHubEnvironment, &run.GitHubSecretNames, &run.RPApp, &run.RPRings, &run.RPDeployments,
 	); err != nil {
 		return nil, err
 	}
@@ -67,14 +71,19 @@ func (r *secretsRotationRunRepository) Create(ctx context.Context, run *model.Se
 			id, agent_id, task_id, org_id, status, mode, provider, detected_provider,
 			vault_addr, mount, path, engine, keys, grace_seconds, retire_old, dry_run,
 			instruction, phases, result, error_message, requested_by,
-			started_at, completed_at, created_at, updated_at
+			started_at, completed_at, created_at, updated_at,
+			source, cluster, external_secrets, k8s_secrets, github_repo, github_environment,
+			github_secret_names, rp_app, rp_rings, rp_deployments
 		) VALUES (
-			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,NOW(),NOW()
+			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,NOW(),NOW(),
+			$24,$25,$26,$27,$28,$29,$30,$31,$32,$33
 		) RETURNING created_at, updated_at`,
 		run.ID, run.AgentID, run.TaskID, run.OrgID, run.Status, run.Mode, run.Provider,
 		run.DetectedProv, run.VaultAddr, run.Mount, run.Path, run.Engine, run.Keys,
 		run.GraceSeconds, run.RetireOld, run.DryRun, run.Instruction, phases, result,
 		run.ErrorMessage, run.RequestedBy, run.StartedAt, run.CompletedAt,
+		run.Source, run.Cluster, run.ExternalSecrets, run.K8sSecrets, run.GitHubRepo,
+		run.GitHubEnvironment, run.GitHubSecretNames, run.RPApp, run.RPRings, run.RPDeployments,
 	).Scan(&run.CreatedAt, &run.UpdatedAt)
 }
 

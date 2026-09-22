@@ -25,6 +25,9 @@ extraSecretRefs:
   # wafLab.baseURL below is set, but the client stays disabled until it also has
   # a token (or username+password) — those arrive only through this secret.
   - jobshout-wslproxy
+  # Secrets Rotation credentials: SECRETS_VAULT_ADDR/SECRETS_VAULT_TOKEN and
+  # RP_API_TOKEN. Created by hand on k3s1, never in git.
+  - jobshout-secretsrot
 
 # opsapi CMS — the Article Writer files generated articles there as drafts.
 # The host and namespace slug are not secret; the API key is, and comes from
@@ -115,3 +118,10 @@ storage:
 langfuse:
   enabled: true
   host: int-langfuse.jobshout.co.uk
+
+# Secrets Rotation propagation on int. The kubeconfig in jobshout-secretsrot-kube
+# (key "k3s1") belongs to ServiceAccount int/jobshout-secretsrot, whose Role only
+# allows get/patch secrets + externalsecrets and get/list deployments in int.
+secretsRotation:
+  kubeconfig:
+    enabled: true

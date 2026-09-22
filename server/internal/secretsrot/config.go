@@ -10,6 +10,12 @@ const (
 	DefaultWSLVaultAddr = "https://vault.workstation.co.uk"
 	DefaultUILoginURL   = "https://vault-ui.workstation.co.uk/login"
 	DefaultDocsURL      = "https://www.wslvault.org/"
+
+	// DefaultKubeconfigDir holds one kubeconfig per named cluster
+	// (<dir>/<cluster> or <dir>/<cluster>.yaml).
+	DefaultKubeconfigDir = "/etc/secretsrot/kube"
+	DefaultGitHubAPI     = "https://api.github.com"
+	DefaultRPURL         = "https://rp.workstation.co.uk"
 )
 
 // Config is loaded from the environment (never logged with token).
@@ -20,6 +26,22 @@ type Config struct {
 	UILogin   string
 	DocsURL   string
 	Timeout   time.Duration
+
+	// Propagation credentials. All are server-side and named: a launch only
+	// ever carries the cluster / repo / ring NAME, never a credential, because
+	// launch values are persisted on the task.
+	KubeconfigDir  string // SECRETS_ROT_KUBECONFIG_DIR
+	GitHubToken    string // SECRETS_ROT_GITHUB_TOKEN (dedicated; not the research token)
+	GitHubAPI      string // SECRETS_ROT_GITHUB_API (tests / GHES); default api.github.com
+	RPURL          string // RP_URL
+	RPToken        string // RP_API_TOKEN
+	RPProdPassword string // RP_PROD_PASSWORD (only sent for ring=prod)
+
+	// Propagation timing; zero means the defaults. Tests shrink these.
+	ESOTimeout      time.Duration // ExternalSecret force-sync wait (default 2m)
+	ESOPollInterval time.Duration // default 2s
+	RPTimeout       time.Duration // per-ring restart wait (default 20m)
+	RPPollInterval  time.Duration // default 5s
 }
 
 // LoadConfig reads WSLVault / HashiCorp Vault settings.
@@ -44,6 +66,13 @@ func LoadConfig() Config {
 		UILogin:   DefaultUILoginURL,
 		DocsURL:   DefaultDocsURL,
 		Timeout:   timeout,
+
+		KubeconfigDir:  firstNonEmpty(os.Getenv("SECRETS_ROT_KUBECONFIG_DIR"), DefaultKubeconfigDir),
+		GitHubToken:    strings.TrimSpace(os.Getenv("SECRETS_ROT_GITHUB_TOKEN")),
+		GitHubAPI:      strings.TrimRight(firstNonEmpty(os.Getenv("SECRETS_ROT_GITHUB_API"), DefaultGitHubAPI), "/"),
+		RPURL:          strings.TrimRight(firstNonEmpty(os.Getenv("RP_URL"), DefaultRPURL), "/"),
+		RPToken:        strings.TrimSpace(os.Getenv("RP_API_TOKEN")),
+		RPProdPassword: strings.TrimSpace(os.Getenv("RP_PROD_PASSWORD")),
 	}
 }
 

@@ -69,6 +69,12 @@ func (s *secretsRotationService) Status(ctx context.Context) map[string]any {
 		"namespace":    s.cfg.Namespace != "",
 		"ui_login_url": secretsrot.DefaultUILoginURL,
 		"docs_url":     secretsrot.DefaultDocsURL,
+		// Propagation readiness — presence only, never values.
+		"kubeconfig_dir":    s.cfg.KubeconfigDir,
+		"has_github_token":  s.cfg.GitHubToken != "",
+		"rp_url":            s.cfg.RPURL,
+		"has_rp_token":      s.cfg.RPToken != "",
+		"has_rp_prod_login": s.cfg.RPProdPassword != "",
 		"message": func() string {
 			if s.cfg.Enabled() {
 				return "Vault token configured — ready to plan/rotate"
@@ -110,6 +116,14 @@ func (s *secretsRotationService) CreateRun(ctx context.Context, req model.Create
 	if addr == "" {
 		addr = s.cfg.Addr
 	}
+	prop, err := secretsrot.ParsePropagation(propagationInput(req.Source, req.Cluster, req.ExternalSecrets,
+		req.K8sSecrets, req.GitHubRepo, req.GitHubEnvironment, req.GitHubSecretNames, req.RPApp, req.RPRings, req.RPDeployments))
+	if err != nil {
+		return nil, err
+	}
+	if err := secretsrot.ValidateLaunch(mode, engine, secretsrot.ParseKeys(req.Keys), prop); err != nil {
+		return nil, err
+	}
 	var instruction *string
 	if strings.TrimSpace(req.Instruction) != "" {
 		i := strings.TrimSpace(req.Instruction)
@@ -134,9 +148,20 @@ func (s *secretsRotationService) CreateRun(ctx context.Context, req model.Create
 		DryRun:       req.DryRun,
 		Instruction:  instruction,
 		RequestedBy:  requestedBy,
-		StartedAt:    &now,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+
+		Source:            prop.Source,
+		Cluster:           prop.Cluster,
+		ExternalSecrets:   strings.TrimSpace(req.ExternalSecrets),
+		K8sSecrets:        strings.TrimSpace(req.K8sSecrets),
+		GitHubRepo:        prop.GitHubRepo,
+		GitHubEnvironment: prop.GitHubEnv,
+		GitHubSecretNames: strings.TrimSpace(req.GitHubSecretNames),
+		RPApp:             prop.RPApp,
+		RPRings:           strings.TrimSpace(req.RPRings),
+		RPDeployments:     strings.TrimSpace(req.RPDeployments),
+		StartedAt:         &now,
+		CreatedAt:         now,
+		UpdatedAt:         now,
 	}
 	if err := s.repo.Create(ctx, run); err != nil {
 		return nil, err
@@ -178,6 +203,20 @@ func (s *secretsRotationService) execute(ctx context.Context, run *model.Secrets
 		RetireOld:    run.RetireOld,
 		DryRun:       run.DryRun,
 		NewSecret:    newSecret,
+		RunID:        run.ID.String(),
+	}
+	// Validated in CreateRun; a stored row always parses.
+	if prop, err := secretsrot.ParsePropagation(propagationInput(run.Source, run.Cluster, run.ExternalSecrets,
+		run.K8sSecrets, run.GitHubRepo, run.GitHubEnvironment, run.GitHubSecretNames, run.RPApp, run.RPRings, run.RPDeployments)); err == nil {
+		opt.Propagate = prop
+	} else {
+		msg := err.Error()
+		run.ErrorMessage = &msg
+		run.Status = "failed"
+		now := time.Now()
+		run.CompletedAt = &now
+		_ = s.repo.Update(context.Background(), run)
+		return
 	}
 
 	outcome, err := secretsrot.Execute(ctx, s.cfg, opt, func(p model.SecretsRotationPhase) {
@@ -268,4 +307,19 @@ func (s *secretsRotationService) CancelRun(ctx context.Context, runID, orgID uui
 		return nil, err
 	}
 	return run, nil
+}
+
+func propagationInput(source, cluster, externalSecrets, k8sSecrets, ghRepo, ghEnv, ghNames, rpApp, rpRings, rpDeployments string) secretsrot.PropagationInput {
+	return secretsrot.PropagationInput{
+		Source:            source,
+		Cluster:           cluster,
+		ExternalSecrets:   externalSecrets,
+		K8sSecrets:        k8sSecrets,
+		GitHubRepo:        ghRepo,
+		GitHubEnvironment: ghEnv,
+		GitHubNames:       ghNames,
+		RPApp:             rpApp,
+		RPRings:           rpRings,
+		RPDeployments:     rpDeployments,
+	}
 }

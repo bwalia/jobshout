@@ -268,6 +268,46 @@ reviewBot:
     requests: { cpu: 250m, memory: 512Mi }
     limits: { cpu: "2", memory: 2Gi }
 
+# Secrets Rotation agent — propagation after a Vault rotation (Kubernetes
+# Secrets, ExternalSecret force-sync, GitHub Actions secrets, Ring Promoter
+# restart). Everything here is non-secret. Credentials are NAMED server-side
+# and never entered in a launch form (launch values are stored on the task):
+#
+#   SECRETS_ROT_GITHUB_TOKEN  dedicated fine-grained token, "Secrets: write" on
+#                             the target repos only (NOT the research GITHUB_TOKEN)
+#   RP_API_TOKEN              Ring Promoter bearer token
+#   RP_PROD_PASSWORD          optional; only sent when restarting ring prod
+#
+# Put those keys in Vault at secret/jobshout/<env>/config so the existing
+# jobshout-secrets ExternalSecret materialises them, or — on k3s1, where
+# externalSecret.enabled=false — in an extraSecretRefs secret:
+#
+#   kubectl -n <ring> create secret generic jobshout-secretsrot \
+#     --from-literal=SECRETS_ROT_GITHUB_TOKEN=<token> \
+#     --from-literal=RP_API_TOKEN=<token> \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#
+# Kubeconfigs are mounted as files, one key per cluster name (launch field
+# cluster=k3s1 reads <mountPath>/k3s1). Keep them in Vault and sync them into
+# the Secret below with ESO, or create it out of band:
+#
+#   kubectl -n <ring> create secret generic jobshout-secretsrot-kube \
+#     --from-file=k3s1=./k3s1-secretsrot.kubeconfig
+#
+# Use a dedicated least-privilege ServiceAccount kubeconfig, not cluster-admin.
+# It needs, in the target namespaces only (int/test/acc/prod):
+#   secrets                              get, patch
+#   externalsecrets.external-secrets.io  get, patch   (only if ESO is installed)
+#   deployments.apps                     get, list    (restart consumer lookup)
+# The agent refuses to patch Helm-managed Secrets (a helm upgrade would revert
+# them); target the extraSecretRefs Secrets (jobshout-cms, jobshout-mail, …).
+secretsRotation:
+  rpURL: "https://rp.workstation.co.uk"
+  kubeconfig:
+    enabled: false
+    secretName: jobshout-secretsrot-kube
+    mountPath: /etc/secretsrot/kube
+
 logLevel: info
 
 storage:
