@@ -47,8 +47,13 @@ wafLab:
 # test/jobshout-secretsrot, whose Role only allows get/patch secrets +
 # externalsecrets and get/list deployments in test. Both are created by hand on
 # k3s1, never in git, and must exist before this deploys.
+# Shared workstation gateway secrets: OLLAMA_JWT_SECRET and IMAGE_JWT_SECRET.
+# The chart renders jobshout-secrets with them empty when externalSecret is
+# off, so without this the gateways refuse every LLM and image call (403).
+# Created by hand on k3s1, never in git.
 extraSecretRefs:
   - jobshout-secretsrot
+  - jobshout-gateways
 secretsRotation:
   kubeconfig:
     enabled: true
