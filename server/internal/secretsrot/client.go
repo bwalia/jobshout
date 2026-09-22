@@ -179,7 +179,14 @@ func (c *Client) MetadataKV2(ctx context.Context, mount, path string) (SecretMet
 		return SecretMeta{}, err
 	}
 	if code == 404 {
-		return SecretMeta{}, fmt.Errorf("metadata not found at %s/%s", mount, path)
+		// WSLVault serves KV v2 data but not the metadata endpoint, so a 404
+		// here does not mean the secret is missing. The data read carries the
+		// current version too; its values are dropped unread.
+		_, meta, rerr := c.ReadKV2(ctx, mount, path, 0)
+		if rerr != nil {
+			return SecretMeta{}, fmt.Errorf("metadata not found at %s/%s", mount, path)
+		}
+		return meta, nil
 	}
 	if code >= 300 {
 		return SecretMeta{}, fmt.Errorf("metadata failed: HTTP %d", code)

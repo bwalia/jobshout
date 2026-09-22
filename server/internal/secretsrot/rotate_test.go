@@ -57,6 +57,38 @@ func TestExecute_PlanDryKV2(t *testing.T) {
 	}
 }
 
+// WSLVault answers 404 on /metadata/ but serves /data/; plan must still see
+// the existing version rather than proposing to create the secret.
+func TestExecute_PlanKV2WithoutMetadataEndpoint(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/v1/sys/health"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"initialized": true})
+		case strings.Contains(r.URL.Path, "/data/"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
+				"data":     map[string]any{"TEST_TOKEN": "x"},
+				"metadata": map[string]any{"version": 4},
+			}})
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer srv.Close()
+
+	out, err := Execute(context.Background(), Config{Addr: srv.URL, Token: "t"}, RunOptions{
+		Mode: "plan", Engine: "kv2", Mount: "kv", Path: "jobshout/int/e2e", GraceSeconds: 5, Provider: "wslvault",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Result.CurrentVersion != 4 {
+		t.Fatalf("version %d, steps %#v", out.Result.CurrentVersion, out.Result.PlanSteps)
+	}
+	if strings.Contains(strings.Join(out.Result.PlanSteps, "\n"), "Create KV v2 secret") {
+		t.Fatalf("plan proposes creating an existing secret: %#v", out.Result.PlanSteps)
+	}
+}
+
 func TestExecute_RotateDryRun(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
