@@ -189,6 +189,8 @@ func (r *Runner) writeOne(
 		Topic:   brief.Topic,
 		Context: brief.Context,
 		Model:   req.Model,
+		Seeds:   brief.Seeds,
+		Focus:   brief.Focus,
 	}, func(_, detail string) {
 		// The research agent's own phases are surfaced under the researching
 		// step, so a reader watching a run sees it search and read rather than

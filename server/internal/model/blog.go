@@ -97,6 +97,13 @@ type BlogStep struct {
 // same topic different: who is reading, what angle to take, what to avoid.
 type BlogBrief struct {
 	Topic string `json:"topic"`
+	// Seeds are URLs already known to be on this topic — for a discovered
+	// brief, the trending pages discovery based it on. Research reads them
+	// first, so the article starts from the pages that prompted the subject.
+	Seeds []string `json:"seeds,omitempty"`
+	// Focus is the subject areas the article must stay within, carried from a
+	// trending run's focus list so research cannot drift out of them.
+	Focus []string `json:"focus,omitempty"`
 	// Context is free text and optional. It is passed to the research planner
 	// and to the writer verbatim rather than being parsed into fields — the
 	// useful guidance people actually give ("assume they know Kubernetes",
@@ -315,7 +322,7 @@ func (r *GenerateBlogRequest) Normalize() {
 		if topic == "" {
 			continue
 		}
-		briefs = append(briefs, BlogBrief{Topic: topic, Context: strings.TrimSpace(b.Context)})
+		briefs = append(briefs, BlogBrief{Topic: topic, Context: strings.TrimSpace(b.Context), Seeds: b.Seeds, Focus: b.Focus})
 	}
 	// A legacy topic is folded in only when no brief already covers it.
 	//
