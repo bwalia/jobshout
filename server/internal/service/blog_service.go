@@ -115,7 +115,7 @@ func NewBlogService(
 		orphanTimeout = 45 * time.Minute
 	}
 	if maxRuntime <= 0 {
-		maxRuntime = 25 * time.Minute
+		maxRuntime = 45 * time.Minute
 	}
 	return &blogService{
 		runner:        runner,
@@ -149,6 +149,21 @@ func persistCtx() context.Context {
 // beginGeneration registers the run and starts it, or refuses if this process
 // is already shutting down. Must be called after the row exists so InterruptAll
 // can find it if the goroutine has not started yet.
+// runtimeBudget is the wall-clock cap for one run: maxRuntime per article.
+// A flat per-run cap killed single-article runs on int that finished every
+// step just past 25m, and made a multi-article batch impossible.
+func (s *blogService) runtimeBudget(req model.GenerateBlogRequest) time.Duration {
+	n := len(req.Briefs)
+	if req.Trending {
+		n = req.ResolvedTrendingCount(blog.HardMaxArticles)
+	}
+	if req.MaxArticles > 0 && n > req.MaxArticles {
+		n = req.MaxArticles
+	}
+	n = min(max(n, 1), blog.HardMaxArticles)
+	return s.maxRuntime * time.Duration(n)
+}
+
 func (s *blogService) beginGeneration(run *model.BlogRun, agent *model.Agent, req model.GenerateBlogRequest) error {
 	s.mu.Lock()
 	if s.stopping {
@@ -158,7 +173,7 @@ func (s *blogService) beginGeneration(run *model.BlogRun, agent *model.Agent, re
 	ctx, cancel := context.WithCancel(context.Background())
 	if s.maxRuntime > 0 {
 		var timeoutCancel context.CancelFunc
-		ctx, timeoutCancel = context.WithTimeout(ctx, s.maxRuntime)
+		ctx, timeoutCancel = context.WithTimeout(ctx, s.runtimeBudget(req))
 		prev := cancel
 		cancel = func() {
 			timeoutCancel()
