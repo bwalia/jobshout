@@ -37,11 +37,35 @@ jobs:
           go vet ./...
           go test ./...
 
+  # The web image build type-checks too, but only ~an hour into the cross-build
+  # and after the Go image. tsc + lint on their own take seconds, so a missing
+  # import (PR #187 dropped SeoAgentClient's) fails here instead.
+  web-checks:
+    name: Web typecheck & lint
+    runs-on: self-hosted
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/nextjs/package-lock.json
+
+      - name: Typecheck & lint
+        working-directory: web/nextjs
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run typecheck
+          npm run lint
+
   # Cross-build with the same BuildKit local cache the deploy job uses so PR
   # checks warm (and benefit from) ~/.cache/jobshout-buildkit on this runner.
   pr-image-check:
     name: PR image check
-    needs: [go-checks]
+    needs: [go-checks, web-checks]
     runs-on: self-hosted
     timeout-minutes: 90
     steps:
