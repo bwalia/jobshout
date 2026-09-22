@@ -40,3 +40,15 @@ storage:
 wafLab:
   enabled: false
   baseURL: ""
+
+# Secrets Rotation propagation on test. jobshout-secretsrot holds
+# SECRETS_VAULT_ADDR/SECRETS_VAULT_TOKEN and RP_API_TOKEN; the kubeconfig in
+# jobshout-secretsrot-kube (key "k3s1") belongs to ServiceAccount
+# test/jobshout-secretsrot, whose Role only allows get/patch secrets +
+# externalsecrets and get/list deployments in test. Both are created by hand on
+# k3s1, never in git, and must exist before this deploys.
+extraSecretRefs:
+  - jobshout-secretsrot
+secretsRotation:
+  kubeconfig:
+    enabled: true
