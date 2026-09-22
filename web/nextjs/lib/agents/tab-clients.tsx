@@ -9,6 +9,7 @@ import { PentestAgentClient } from "@/components/PentestAgentClient";
 import { ReviewAgentClient } from "@/components/ReviewAgentClient";
 import { SimproPaymentsAgentClient } from "@/components/SimproPaymentsAgentClient";
 import { WafLabAgentClient } from "@/components/WafLabAgentClient";
+import { SeoAgentClient } from "@/components/SeoAgentClient";
 import { SecretsRotationAgentClient } from "@/components/SecretsRotationAgentClient";
 import { LinuxPatchAgentClient } from "@/components/LinuxPatchAgentClient";
 import { ArticlesView } from "@/components/articles/ArticlesView";

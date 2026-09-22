@@ -212,9 +212,35 @@ jobs:
           go vet ./...
           go test ./...
 
+  # The web image build type-checks too, but only ~an hour into the cross-build
+  # and after the Go image. tsc + lint on their own take seconds, so a missing
+  # import (PR #187 dropped SeoAgentClient's) fails here instead.
+  web-smoke:
+    name: Web typecheck & lint
+    runs-on: self-hosted
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/nextjs/package-lock.json
+
+      - name: Typecheck & lint
+        working-directory: web/nextjs
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run typecheck
+          npm run lint
+
   build:
     name: Build & push images
-    needs: [compute-version, go-smoke]
+    needs: [compute-version, go-smoke, web-smoke]
     # Only fires when the computed version is actually new. Manual dispatches
     # replaying an existing version don't trigger a rebuild — that image is
     # already published under that tag.
