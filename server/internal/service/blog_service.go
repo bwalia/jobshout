@@ -550,6 +550,13 @@ func (s *blogService) discoverBriefs(
 	if len(briefs) == 0 {
 		return nil, fmt.Errorf("blog_svc: discovery returned no topics")
 	}
+	// The pages a topic came from, and the run's focus areas, go to research
+	// with it. Without them research starts from the topic's wording alone,
+	// and wording drifts: an observability brief came back as an article on
+	// efficient inference.
+	for i, t := range topics {
+		briefs[i].Seeds, briefs[i].Focus = t.Seeds, req.Focus
+	}
 
 	// Say so when a focused run had to settle. The articles still get written —
 	// that is the requested behaviour — but "nothing you asked about was

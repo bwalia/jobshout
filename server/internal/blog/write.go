@@ -124,6 +124,7 @@ Decide:
    focal objects (not generic "tools, documents, agents"), and a one-word
    accent note (e.g. "amber", "ice", "copper") that still sits with teal/coral.
 %s
+The title must be about the TOPIC given above; research that wandered off it is not a reason to change subject.
 
 Respond with JSON only, in exactly this shape:
 {"title": "...", "angle": "...", "sections": ["...", "..."], "cover_metaphor": "...", "cover_objects": "...", "cover_accent": "..."%s}`,
