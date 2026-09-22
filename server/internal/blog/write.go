@@ -1,10 +1,10 @@
 package blog
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"go.uber.org/zap"
@@ -44,40 +44,46 @@ type figureBrief struct {
 	Content string `json:"content"`
 }
 
-// flexibleString accepts a JSON string or an array of strings (joined with
-// commas). Models often return cover_objects as ["lighthouse","hull"].
+// flexibleString accepts whatever shape a model gives a cover hint: a string,
+// an array of strings (["lighthouse","hull"]), or objects and arrays of
+// objects ([{"name":"lighthouse"}]). Every string inside is kept, joined with
+// commas. It is a styling hint, so an odd shape must not fail the whole run —
+// that killed int runs on 17 and 20 Sep at the plan step.
 type flexibleString string
 
 func (s *flexibleString) UnmarshalJSON(b []byte) error {
-	b = bytes.TrimSpace(b)
-	if len(b) == 0 || string(b) == "null" {
-		*s = ""
-		return nil
+	var v any
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
 	}
-	if b[0] == '"' {
-		var v string
-		if err := json.Unmarshal(b, &v); err != nil {
-			return err
+	var parts []string
+	collectStrings(v, &parts)
+	*s = flexibleString(strings.Join(parts, ", "))
+	return nil
+}
+
+// collectStrings appends every non-blank string in v, walking object values
+// in key order so the result is stable.
+func collectStrings(v any, out *[]string) {
+	switch t := v.(type) {
+	case string:
+		if t = strings.TrimSpace(t); t != "" {
+			*out = append(*out, t)
 		}
-		*s = flexibleString(strings.TrimSpace(v))
-		return nil
+	case []any:
+		for _, e := range t {
+			collectStrings(e, out)
+		}
+	case map[string]any:
+		keys := make([]string, 0, len(t))
+		for k := range t {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			collectStrings(t[k], out)
+		}
 	}
-	if b[0] == '[' {
-		var v []string
-		if err := json.Unmarshal(b, &v); err != nil {
-			return err
-		}
-		parts := make([]string, 0, len(v))
-		for _, p := range v {
-			p = strings.TrimSpace(p)
-			if p != "" {
-				parts = append(parts, p)
-			}
-		}
-		*s = flexibleString(strings.Join(parts, ", "))
-		return nil
-	}
-	return fmt.Errorf("want string or array of strings")
 }
 
 func (s flexibleString) String() string { return string(s) }

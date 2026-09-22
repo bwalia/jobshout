@@ -165,9 +165,10 @@ ai:
   blogCoverImages: false
   # How long a running row may sit without a heartbeat before the reconciler
   # marks it failed. Must outlast a legitimate long LLM call. Max runtime is
-  # a wall-clock cap on the generation goroutine, kept below ollamaTimeout.
+  # the wall-clock budget PER ARTICLE (a run gets it times its article count);
+  # one article takes ~25m on int, so 25m here failed finished runs.
   blogOrphanTimeout: "45m"
-  blogMaxRuntime: "25m"
+  blogMaxRuntime: "45m"
 
 # Penetration testing. Strix runs on the workstation (needs a real Docker
 # daemon — a k3s pod has none, and privileged DinD is not an acceptable trade).

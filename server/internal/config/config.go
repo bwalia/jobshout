@@ -202,9 +202,10 @@ type Config struct {
 	// BlogOrphanTimeout is how stale a running run's heartbeat may be before
 	// the reconciler marks it failed. Must outlast a legitimate long LLM call.
 	BlogOrphanTimeout time.Duration `mapstructure:"BLOG_ORPHAN_TIMEOUT"`
-	// BlogMaxRuntime is a wall-clock cap on one generation goroutine, below
-	// OLLAMA_TIMEOUT so a hung call is cancelled here rather than sitting
-	// running until the HTTP client gives up.
+	// BlogMaxRuntime is the wall-clock budget per article; a run gets this
+	// times its article count. One article on int takes ~25m end to end, so
+	// the budget must sit well above that. A single hung LLM call is bounded
+	// by OLLAMA_TIMEOUT and a dead run by BLOG_ORPHAN_TIMEOUT.
 	BlogMaxRuntime time.Duration `mapstructure:"BLOG_MAX_RUNTIME"`
 
 	// GitHubToken is optional. The research agent reads GitHub through its
@@ -298,7 +299,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("BLOG_CONTENT_DIR", "content/blogs")
 	viper.SetDefault("BLOG_AUTHOR_NAME", "JobShout Article Writer")
 	viper.SetDefault("BLOG_ORPHAN_TIMEOUT", "45m")
-	viper.SetDefault("BLOG_MAX_RUNTIME", "25m")
+	viper.SetDefault("BLOG_MAX_RUNTIME", "45m")
 
 	cfg := &Config{
 		DatabaseURL:          viper.GetString("DATABASE_URL"),
