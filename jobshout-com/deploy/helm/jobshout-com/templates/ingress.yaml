@@ -15,7 +15,8 @@ metadata:
 spec:
   ingressClassName: {{ .Values.ingress.className }}
   rules:
-    - host: {{ .Values.host }}
+    {{- range (prepend (.Values.hostAliases | default list) .Values.host) }}
+    - host: {{ . }}
       http:
         paths:
           - path: /
@@ -25,10 +26,14 @@ spec:
                 name: jobshout-com-nginx
                 port:
                   number: 80
+    {{- end }}
   {{- if .Values.ingress.tls }}
   tls:
     - hosts:
         - {{ .Values.host }}
+        {{- range .Values.hostAliases | default list }}
+        - {{ . }}
+        {{- end }}
       secretName: jobshout-com-tls
   {{- end }}
 {{- end }}
