@@ -1,5 +1,8 @@
 env: prod
 host: jobshout.co.uk
+# www is a separate Cloudflare CNAME + wslproxy vhost; same Traefik backend.
+hostAliases:
+  - www.jobshout.co.uk
 logLevel: info
 
 ai:
