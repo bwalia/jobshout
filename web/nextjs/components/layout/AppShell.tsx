@@ -3,6 +3,7 @@
 import { Suspense } from "react";
 import { usePathname } from "next/navigation";
 import { Menu } from "lucide-react";
+import { BetaBanner } from "./BetaBanner";
 import { ChatSidebar } from "./ChatSidebar";
 import { CommandPalette } from "./CommandPalette";
 import { PanelFrame } from "./PanelFrame";
@@ -38,6 +39,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           sidebarCollapsed && "lg:ml-[72px]"
         )}
       >
+        <BetaBanner />
         <header className="sticky top-0 z-20 flex h-12 shrink-0 items-center gap-2 border-b border-border bg-background px-3 lg:hidden">
           <button
             type="button"
