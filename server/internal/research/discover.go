@@ -306,7 +306,7 @@ Respond with JSON only, in exactly this shape:
 			InFocus:   t.InFocus,
 		})
 	}
-	return selectByFocus(out, count, len(req.Focus) > 0), nil
+	return selectByFocus(confirmFocus(out, req.Focus), count, len(req.Focus) > 0), nil
 }
 
 // selectByFocus takes up to count topics, preferring ones inside the focus
