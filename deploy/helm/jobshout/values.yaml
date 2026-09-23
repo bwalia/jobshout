@@ -9,6 +9,9 @@ env: int
 # a Cloudflare CNAME -> lon1.pop0.uk plus a wslproxy vhost -> the k3s Traefik
 # edge (see .github/workflows/register-edge-vhost.yml).
 host: int.jobshout.co.uk
+# Extra public hosts that serve the same ingress (e.g. www alongside apex).
+# Each entry still needs its own CNAME + wslproxy vhost via register-edge-vhost.
+hostAliases: []
 
 image:
   # int-spectoncr.diytaxreturn.co.uk (via the pop1 edge) is reachable from the

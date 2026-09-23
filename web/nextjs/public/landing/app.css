@@ -70,6 +70,8 @@
   --js-app-ink:   var(--sc-ink);
 
   --js-bar-h: 64px;
+  --js-beta-h: 36px;
+  --js-chrome-h: calc(var(--js-bar-h) + var(--js-beta-h));
 }
 
 .mono { font-family: var(--sc-font-mono); }
@@ -153,8 +155,30 @@
 .skip:focus-visible { transform: none; }
 
 /* ------------------------------------------------------------- top chrome -- */
+.beta-bar {
+  position: fixed; inset: 0 0 auto 0; height: var(--js-beta-h);
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  padding-inline: var(--sc-gutter);
+  z-index: calc(var(--sc-z-chrome) + 1);
+  font-size: var(--sc-t-xs); font-weight: 500; color: var(--sc-ink);
+  background: color-mix(in oklab, var(--sc-accent) 14%, var(--sc-canvas));
+  border-bottom: 1px solid color-mix(in oklab, var(--sc-accent) 34%, transparent);
+}
+.beta-bar__pill {
+  display: inline-flex; align-items: center;
+  padding: 2px 8px; border-radius: 999px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--sc-accent-ink);
+  background: var(--sc-accent);
+}
+.beta-bar__link {
+  color: inherit; font-weight: 700; text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.beta-bar__link:hover { color: var(--sc-accent); }
+
 .bar {
-  position: fixed; inset: 0 0 auto 0; height: var(--js-bar-h);
+  position: fixed; top: var(--js-beta-h); left: 0; right: 0; height: var(--js-bar-h);
   display: flex; align-items: center; justify-content: space-between;
   padding-inline: var(--sc-gutter);
   z-index: var(--sc-z-chrome);
@@ -172,11 +196,11 @@
 .bar__link:hover { color: var(--sc-ink); }
 
 #what, #how, #pillars, #jobs, #control, #platform, #faq, #shout {
-  scroll-margin-top: calc(var(--js-bar-h) + 8px);
+  scroll-margin-top: calc(var(--js-chrome-h) + 8px);
 }
 
 /* ----------------------------------------------------------------- hero -- */
-.hero { min-height: 100svh; display: grid; align-items: center; padding-top: var(--js-bar-h); padding-bottom: 8vh; }
+.hero { min-height: 100svh; display: grid; align-items: center; padding-top: var(--js-chrome-h); padding-bottom: 8vh; }
 .hero__in { max-width: 52rem; text-align: center; display: grid; justify-items: center; gap: var(--sc-5); }
 .eyebrow {
   margin: 0;
@@ -219,7 +243,7 @@
   grid-template-columns: minmax(18rem, 28rem) minmax(0, 1fr);
   gap: clamp(1.5rem, 3vw, 3.5rem);
   align-items: center;
-  padding: calc(var(--js-bar-h) + 20px) var(--sc-gutter) 28px;
+  padding: calc(var(--js-chrome-h) + 20px) var(--sc-gutter) 28px;
 }
 .demo__copy { position: relative; min-height: 14rem; }
 .feat {
