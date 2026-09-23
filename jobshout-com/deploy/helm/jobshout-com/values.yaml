@@ -43,8 +43,8 @@ postgres:
   port: 5432
   database: jobshout_com
   user: jobshout
-  # Placeholder only — override via --set-string or a Secret in the ring.
-  password: "change-me-in-ring"
+  # Empty: generated on first install and kept from the Secret afterwards.
+  password: ""
   storage: 10Gi
   resources:
     requests: { cpu: 50m, memory: 256Mi }
