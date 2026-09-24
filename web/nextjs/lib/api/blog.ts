@@ -41,6 +41,12 @@ export async function publishBlogRun(id: string): Promise<BlogRun> {
   return data;
 }
 
+/** Files a completed run's articles in the JobShout.com Insights review queue. */
+export async function publishBlogRunToInsights(id: string): Promise<BlogRun> {
+  const { data } = await apiClient.post<BlogRun>(`/blogs/runs/${id}/publish-insights`);
+  return data;
+}
+
 /** Re-runs a failed run's topics on the same run. 202 + poll, like generate. */
 export async function retryBlogRun(id: string): Promise<BlogRun> {
   const { data } = await apiClient.post<BlogRun>(`/blogs/runs/${id}/retry`);

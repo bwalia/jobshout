@@ -37,6 +37,7 @@ data:
           # Blank them on public traffic so they cannot be forged from outside.
           proxy_set_header X-Jobshout-User-Email     "";
           proxy_set_header X-Jobshout-User-Name      "";
+          proxy_set_header X-Jobshout-Agent          "";
           proxy_set_header X-Jobshout-Internal-Token "";
           set $up http://jobshout-com-api.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.api.port }};
           proxy_pass $up;

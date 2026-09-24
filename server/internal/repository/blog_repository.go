@@ -46,6 +46,9 @@ type BlogRepository interface {
 	// MarkArticlesPosted records where each article landed in the CMS, after a
 	// publish has already succeeded.
 	MarkArticlesPosted(ctx context.Context, posts []model.BlogArticlePost) error
+	// MarkArticlesInInsights records which JobShout.com Insights item each
+	// article was filed as, so a retry does not file it twice.
+	MarkArticlesInInsights(ctx context.Context, items []model.BlogArticleInsights) error
 	// DeleteArticlesByRun clears a run's articles so a retry cannot leave the
 	// previous attempt's output alongside the new one.
 	DeleteArticlesByRun(ctx context.Context, runID uuid.UUID) error
@@ -80,7 +83,8 @@ func NewBlogRepository(pool *pgxpool.Pool) BlogRepository {
 const blogRunColumns = `
 	id, org_id, agent_id, triggered_by, source, status, topics, briefs, model,
 	cms_namespace, articles, steps, error_message,
-	started_at, heartbeat_at, completed_at, published_at, created_at, options`
+	started_at, heartbeat_at, completed_at, published_at, created_at, options,
+	insights_published_at`
 
 // scanBlogRun reads one row in blogRunColumns order.
 func scanBlogRun(row pgx.Row) (*model.BlogRun, error) {
@@ -91,7 +95,7 @@ func scanBlogRun(row pgx.Row) (*model.BlogRun, error) {
 		&topicsRaw, &briefsRaw, &run.Model, &run.CMSNamespace,
 		&articlesRaw, &stepsRaw, &run.ErrorMessage,
 		&run.StartedAt, &run.HeartbeatAt, &run.CompletedAt, &run.PublishedAt, &run.CreatedAt,
-		&optionsRaw,
+		&optionsRaw, &run.InsightsPublishedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -121,7 +125,8 @@ func scanBlogRun(row pgx.Row) (*model.BlogRun, error) {
 const blogArticleColumns = `
 	id, run_id, org_id, topic, title, slug, path, references_json, markdown, html,
 	post_uuid, post_status, posted_at, word_count, created_at,
-	cover_image_url, cover_image_prompt, cover_image_meta`
+	cover_image_url, cover_image_prompt, cover_image_meta,
+	insights_item_id, insights_slug, insights_status, insights_posted_at`
 
 // scanBlogArticle reads one row in blogArticleColumns order.
 func scanBlogArticle(row pgx.Row) (*model.BlogArticle, error) {
@@ -140,6 +145,7 @@ func scanBlogArticle(row pgx.Row) (*model.BlogArticle, error) {
 		&a.Markdown, &a.HTML,
 		&a.PostUUID, &a.PostStatus, &a.PostedAt, &a.WordCount, &a.CreatedAt,
 		&coverURL, &coverPrompt, &coverMetaRaw,
+		&a.InsightsItemID, &a.InsightsSlug, &a.InsightsStatus, &a.InsightsPostedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -199,12 +205,14 @@ func (r *blogRepository) Update(ctx context.Context, run *model.BlogRun) error {
 		    steps         = $5,
 		    error_message = $6,
 		    completed_at  = $7,
-		    published_at  = $8
+		    published_at  = $8,
+		    insights_published_at = $9
 		WHERE id = $1`
 
 	_, err := r.pool.Exec(ctx, sql,
 		run.ID, run.Status, run.CMSNamespace,
 		articlesJSON, stepsJSON, run.ErrorMessage, run.CompletedAt, run.PublishedAt,
+		run.InsightsPublishedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("blog_repo: update: %w", err)
@@ -498,6 +506,30 @@ func (r *blogRepository) MarkArticlesPosted(ctx context.Context, posts []model.B
 	for range posts {
 		if _, err := br.Exec(); err != nil {
 			return fmt.Errorf("blog_repo: mark article posted: %w", err)
+		}
+	}
+	return nil
+}
+
+func (r *blogRepository) MarkArticlesInInsights(ctx context.Context, items []model.BlogArticleInsights) error {
+	if len(items) == 0 {
+		return nil
+	}
+
+	batch := &pgx.Batch{}
+	const sql = `
+		UPDATE blog_articles
+		SET insights_item_id = $2, insights_slug = $3, insights_status = $4, insights_posted_at = NOW()
+		WHERE id = $1`
+	for _, it := range items {
+		batch.Queue(sql, it.ArticleID, it.ItemID, it.Slug, it.Status)
+	}
+
+	br := r.pool.SendBatch(ctx, batch)
+	defer br.Close()
+	for range items {
+		if _, err := br.Exec(); err != nil {
+			return fmt.Errorf("blog_repo: mark article in insights: %w", err)
 		}
 	}
 	return nil

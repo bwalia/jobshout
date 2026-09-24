@@ -83,6 +83,28 @@ func (h *BlogHandler) Publish(w http.ResponseWriter, r *http.Request) {
 	RespondJSON(w, http.StatusOK, run)
 }
 
+// PublishInsights handles POST /api/v1/blogs/runs/{runID}/publish-insights —
+// files a completed run's articles in the JobShout.com Insights review queue.
+func (h *BlogHandler) PublishInsights(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "runID"))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid run ID")
+		return
+	}
+	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid org_id in token")
+		return
+	}
+
+	run, err := h.svc.PublishInsights(r.Context(), orgID, id)
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	RespondJSON(w, http.StatusOK, run)
+}
+
 // Delete handles DELETE /api/v1/blogs/runs/{runID} — forgets a run and the
 // articles it produced. Drafts already in the CMS are not touched.
 func (h *BlogHandler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -154,6 +176,8 @@ func (h *BlogHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 func (h *BlogHandler) Config(w http.ResponseWriter, r *http.Request) {
 	RespondJSON(w, http.StatusOK, map[string]any{
 		"can_publish": h.svc.CanPublish(),
+		// Whether JobShout.com Insights is reachable, for "Send to Insights".
+		"can_publish_insights": h.svc.CanPublishInsights(),
 		// The provider the writing pipeline is bound to at startup. The model
 		// picker filters on it: the pipeline sends a bare model name to this one
 		// provider, so offering a model from another provider would save a

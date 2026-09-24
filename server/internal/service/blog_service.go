@@ -35,6 +35,9 @@ type BlogService interface {
 	Generate(ctx context.Context, orgID uuid.UUID, triggeredBy *uuid.UUID, source string, req model.GenerateBlogRequest) (*model.BlogRun, error)
 	// Publish creates one CMS draft per article of a completed run.
 	Publish(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) (*model.BlogRun, error)
+	// PublishInsights files each article of a completed run in the
+	// JobShout.com Insights review queue. Independent of Publish.
+	PublishInsights(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) (*model.BlogRun, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*model.BlogRun, error)
 	// Delete removes a run and everything it produced.
 	Delete(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) error
@@ -60,6 +63,8 @@ type BlogService interface {
 	// CanPublish reports whether the CMS connection is configured, so the UI
 	// can disable the action instead of offering a button that always fails.
 	CanPublish() bool
+	// CanPublishInsights reports whether JobShout.com Insights is reachable.
+	CanPublishInsights() bool
 	// Provider is the LLM provider the writing pipeline is bound to, and
 	// EffectiveModels what each role falls back to. Both are for the model
 	// picker, so it can offer only models that will work and show what an
@@ -137,6 +142,10 @@ func (s *blogService) BindTasks(tasks TaskService) {
 
 func (s *blogService) CanPublish() bool {
 	return s.runner != nil && s.runner.CanPublish()
+}
+
+func (s *blogService) CanPublishInsights() bool {
+	return s.runner != nil && s.runner.CanPublishInsights()
 }
 
 // persistCtx is used for terminal writes after a run is cancelled. The
@@ -336,6 +345,14 @@ func writeSteps(writer, researcher string) []model.BlogStep {
 		{Key: model.BlogStepIllustrating, Label: "Illustrating the article", Agent: writer, Status: model.StepStatusPending},
 		{Key: model.BlogStepConverting, Label: "Converting to HTML", Agent: writer, Status: model.StepStatusPending},
 		{Key: model.BlogStepGenerated, Label: "Articles ready", Agent: writer, Status: model.StepStatusPending},
+	}
+}
+
+// insightsSteps are appended when a run is sent to Insights.
+func insightsSteps() []model.BlogStep {
+	return []model.BlogStep{
+		{Key: model.BlogStepInsightsSending, Label: "Filing in JobShout.com Insights", Status: model.StepStatusPending},
+		{Key: model.BlogStepInsightsSent, Label: "Filed for editor review", Status: model.StepStatusPending},
 	}
 }
 
@@ -749,13 +766,30 @@ func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, age
 	// it. A CMS that is down or misconfigured must not turn articles that were
 	// written, stored and are readable in the UI into a failed run — the work
 	// survives and someone can press the button later.
+	//
+	// Every configured destination gets them, each independently: one being
+	// down does not stop the other.
 	if req.AutoPublish {
-		if _, perr := s.Publish(persistCtx(), run.OrgID, run.ID); perr != nil {
-			log.Warn("blog: automatic filing to the CMS failed, the articles are still here",
-				zap.Error(perr))
-		} else {
-			log.Info("blog: filed articles in the CMS as drafts automatically",
-				zap.Int("articles", len(run.Articles)))
+		if s.CanPublish() {
+			if _, perr := s.Publish(persistCtx(), run.OrgID, run.ID); perr != nil {
+				log.Warn("blog: automatic filing to the CMS failed, the articles are still here",
+					zap.Error(perr))
+			} else {
+				log.Info("blog: filed articles in the CMS as drafts automatically",
+					zap.Int("articles", len(run.Articles)))
+			}
+		}
+		if s.CanPublishInsights() {
+			if _, perr := s.PublishInsights(persistCtx(), run.OrgID, run.ID); perr != nil {
+				log.Warn("blog: automatic filing to Insights failed, the articles are still here",
+					zap.Error(perr))
+			} else {
+				log.Info("blog: filed articles for review in Insights automatically",
+					zap.Int("articles", len(run.Articles)))
+			}
+		}
+		if !s.CanPublish() && !s.CanPublishInsights() {
+			log.Warn("blog: auto-publish was requested but no destination is configured")
 		}
 	}
 }
@@ -944,6 +978,105 @@ func (s *blogService) Publish(ctx context.Context, orgID uuid.UUID, runID uuid.U
 	}
 
 	return s.finalizePublished(ctx, run, result.Namespace, result.PublishedAt)
+}
+
+func (s *blogService) PublishInsights(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) (*model.BlogRun, error) {
+	if !s.CanPublishInsights() {
+		return nil, fmt.Errorf("blog_svc: Insights is not configured (JOBSHOUT_COM_API_URL and JOBSHOUT_INTERNAL_TOKEN must be set)")
+	}
+
+	run, err := s.repo.GetByID(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	if run.OrgID != orgID {
+		return nil, fmt.Errorf("blog_svc: run does not belong to this organization")
+	}
+	if run.Status != model.BlogRunStatusCompleted {
+		return nil, fmt.Errorf("blog_svc: only a completed run can be sent to Insights (status is %q)", run.Status)
+	}
+	if run.InsightsPublishedAt != nil {
+		return nil, fmt.Errorf("blog_svc: run has already been sent to Insights")
+	}
+
+	stored, err := s.repo.ListArticlesByRun(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	if len(stored) == 0 {
+		return nil, fmt.Errorf("blog_svc: run has no articles to send")
+	}
+
+	// Same retry rule as Publish: an article that already has an Insights item
+	// is skipped, so a batch that failed part-way can be retried without
+	// filing the earlier articles twice.
+	articleIDs := make(map[string]uuid.UUID, len(stored))
+	articles := make([]blog.GeneratedArticle, 0, len(stored))
+	for _, a := range stored {
+		if a.InsightsItemID != nil && *a.InsightsItemID != "" {
+			continue
+		}
+		articleIDs[a.Slug] = a.ID
+		articles = append(articles, blog.GeneratedArticle{
+			Topic: a.Topic, Slug: a.Slug, Path: a.Path, Title: a.Title,
+			Markdown: a.Markdown, HTML: a.HTML, WordCount: a.WordCount,
+			CoverImageURL: a.CoverImageURL,
+		})
+	}
+	if len(articles) == 0 {
+		return s.finalizeInsights(ctx, run, time.Now())
+	}
+
+	run.Steps = append(run.Steps, insightsSteps()...)
+	tracker := &stepTracker{runID: run.ID, steps: run.Steps, repo: s.repo, logger: s.logger}
+
+	result, perr := s.runner.PublishInsights(ctx, articles, tracker.advance)
+
+	// Record what was filed before looking at the error: a batch that failed
+	// on its third article still filed the first two.
+	if result != nil {
+		filed := make([]model.BlogArticleInsights, 0, len(result.Posts))
+		for _, p := range result.Posts {
+			id, ok := articleIDs[p.Slug]
+			if !ok {
+				s.logger.Warn("blog_svc: Insights item has no matching article",
+					zap.String("slug", p.Slug), zap.String("item_id", p.ItemID))
+				continue
+			}
+			filed = append(filed, model.BlogArticleInsights{
+				ArticleID: id, ItemID: p.ItemID, Slug: p.ItemSlug, Status: p.Status,
+			})
+		}
+		if err := s.repo.MarkArticlesInInsights(ctx, filed); err != nil {
+			s.logger.Error("blog_svc: failed to record Insights items — a retry would duplicate them",
+				zap.Error(err))
+		}
+	}
+
+	if perr != nil {
+		tracker.fail(perr)
+		run.Steps = tracker.steps
+		msg := perr.Error()
+		run.ErrorMessage = &msg
+		if uerr := s.repo.Update(ctx, run); uerr != nil {
+			s.logger.Error("blog_svc: failed to record Insights failure", zap.Error(uerr))
+		}
+		return nil, perr
+	}
+
+	tracker.finish()
+	run.Steps = tracker.steps
+	return s.finalizeInsights(ctx, run, result.PublishedAt)
+}
+
+// finalizeInsights stamps a run as sent to Insights and persists it.
+func (s *blogService) finalizeInsights(ctx context.Context, run *model.BlogRun, at time.Time) (*model.BlogRun, error) {
+	run.InsightsPublishedAt = &at
+	run.ErrorMessage = nil
+	if err := s.repo.Update(ctx, run); err != nil {
+		return nil, fmt.Errorf("blog_svc: persist Insights publish: %w", err)
+	}
+	return run, nil
 }
 
 // finalizePublished stamps a run as published and persists it. Shared by the

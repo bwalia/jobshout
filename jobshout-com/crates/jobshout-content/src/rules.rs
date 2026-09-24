@@ -16,7 +16,8 @@ pub const MAX_SUMMARY: usize = 300;
 pub const MAX_POST_WORDS: usize = 500;
 pub const MIN_LONGFORM_WORDS: usize = 80;
 pub const MAX_TOPICS: usize = 3;
-/// Items a non-staff author may create per rolling hour.
+/// Items a community author may create per rolling hour. Staff and agents are
+/// exempt: they are trusted callers, and an agent run files a whole batch.
 pub const CREATES_PER_HOUR: i64 = 10;
 
 /// The person behind a request, as vouched for by the web tier.
@@ -25,6 +26,9 @@ pub struct Actor {
     pub email: String,
     pub name: String,
     pub is_staff: bool,
+    /// An automated author (e.g. the Article Writer). Never staff: whatever it
+    /// writes goes through review.
+    pub agent: bool,
 }
 
 impl Actor {
@@ -35,7 +39,9 @@ impl Actor {
     }
 
     pub fn source(&self) -> InsightSource {
-        if self.is_staff {
+        if self.agent {
+            InsightSource::Agent
+        } else if self.is_staff {
             InsightSource::Staff
         } else {
             InsightSource::Community
@@ -344,6 +350,7 @@ pub(crate) mod tests {
             email: email.into(),
             name: "A".into(),
             is_staff: staff,
+            agent: false,
         }
     }
 
@@ -380,6 +387,25 @@ pub(crate) mod tests {
         assert_eq!(
             status_on_save(InsightSource::Staff, true),
             InsightStatus::Published
+        );
+    }
+
+    #[test]
+    fn agents_always_go_to_review() {
+        let bot = Actor {
+            email: "article-writer@agents.jobshout.com".into(),
+            name: "Article Writer".into(),
+            is_staff: false,
+            agent: true,
+        };
+        assert_eq!(bot.source(), InsightSource::Agent);
+        assert_eq!(
+            status_on_save(bot.source(), true),
+            InsightStatus::PendingReview
+        );
+        assert_eq!(
+            status_on_save(bot.source(), false),
+            InsightStatus::PendingReview
         );
     }
 

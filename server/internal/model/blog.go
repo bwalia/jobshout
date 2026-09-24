@@ -45,6 +45,10 @@ const (
 	BlogStepGenerated    = "generated"
 	BlogStepPublishing   = "publishing"
 	BlogStepPublished    = "published"
+	// Filing in JobShout.com Insights: a second destination beside the CMS,
+	// with its own steps so a run's trace shows which one did what.
+	BlogStepInsightsSending = "insights_sending"
+	BlogStepInsightsSent    = "insights_sent"
 )
 
 // Step statuses. A step is pending until it starts, running while it is the
@@ -146,7 +150,10 @@ type BlogRun struct {
 	HeartbeatAt *time.Time `json:"heartbeat_at,omitempty"`
 	CompletedAt *time.Time `json:"completed_at"`
 	PublishedAt *time.Time `json:"published_at"`
-	CreatedAt   time.Time  `json:"created_at"`
+	// InsightsPublishedAt is when the run's articles were filed in JobShout.com
+	// Insights. Independent of PublishedAt (the CMS): either, both or neither.
+	InsightsPublishedAt *time.Time `json:"insights_published_at"`
+	CreatedAt           time.Time  `json:"created_at"`
 }
 
 // BlogRunOptions is the part of a GenerateBlogRequest that is not the briefs
@@ -252,8 +259,14 @@ type BlogArticle struct {
 	PostUUID   *string    `json:"post_uuid"`
 	PostStatus *string    `json:"post_status"`
 	PostedAt   *time.Time `json:"posted_at"`
-	WordCount  int        `json:"word_count"`
-	CreatedAt  time.Time  `json:"created_at"`
+	// InsightsItemID identifies the JobShout.com Insights item this article
+	// was filed as; InsightsSlug builds its URL. Nil until sent there.
+	InsightsItemID   *string    `json:"insights_item_id"`
+	InsightsSlug     *string    `json:"insights_slug"`
+	InsightsStatus   *string    `json:"insights_status"`
+	InsightsPostedAt *time.Time `json:"insights_posted_at"`
+	WordCount        int        `json:"word_count"`
+	CreatedAt        time.Time  `json:"created_at"`
 
 	// CoverImageURL is where the article's cover image is served from, empty
 	// when the run generated none — cover images are opt-in per environment, and
@@ -273,6 +286,15 @@ type BlogArticle struct {
 type BlogArticlePost struct {
 	ArticleID uuid.UUID
 	PostUUID  string
+	Status    string
+}
+
+// BlogArticleInsights is the result of filing one article in Insights,
+// written back to blog_articles.
+type BlogArticleInsights struct {
+	ArticleID uuid.UUID
+	ItemID    string
+	Slug      string
 	Status    string
 }
 
@@ -303,13 +325,15 @@ type GenerateBlogRequest struct {
 	MaxArticles int      `json:"max_articles,omitempty"`
 	// TaskID, when set, is the Task Manager board card this run belongs to.
 	TaskID *uuid.UUID `json:"task_id,omitempty"`
-	// AutoPublish files the finished articles in the CMS without waiting for
-	// someone to press the button.
+	// AutoPublish files the finished articles in every configured destination
+	// — the CMS and JobShout.com Insights — without waiting for someone to
+	// press the button.
 	//
 	// It exists for scheduled runs, where there is nobody at the keyboard at
-	// 2am. It creates drafts, exactly as the manual action does — nothing goes
-	// live without a human approving it in the CMS — so the worst case is a
-	// draft somebody deletes rather than a bad article published to readers.
+	// 2am. It creates drafts and review items, exactly as the manual actions
+	// do — nothing goes live without a human approving it in the CMS or the
+	// Insights review queue — so the worst case is a draft somebody deletes
+	// rather than a bad article published to readers.
 	AutoPublish bool `json:"auto_publish,omitempty"`
 }
 

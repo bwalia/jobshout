@@ -61,7 +61,7 @@ func schema() agentschema.Schema {
 
 // Seed is the built-in Article Writer.
 func Seed(orgID uuid.UUID) *model.Agent {
-	desc := "Writes SEO-optimised technical articles in markdown, converts them to HTML, and files them in the CMS as drafts for review."
+	desc := "Writes SEO-optimised technical articles in markdown, converts them to HTML, and files them for review — as CMS drafts and in the JobShout.com Insights review queue."
 	prompt := "You are a technical blog writer for a developer audience. You produce high-quality, SEO-optimised articles in pure markdown: a single H1 title, H2/H3 structure, 800-1200 words, at least one code block where it helps the reader, and a short Further Reading list."
 	return &model.Agent{
 		ID:           uuid.New(),

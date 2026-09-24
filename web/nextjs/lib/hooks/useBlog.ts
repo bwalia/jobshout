@@ -11,6 +11,7 @@ import {
   getBlogRun,
   getBlogRuns,
   publishBlogRun,
+  publishBlogRunToInsights,
   retryBlogRun,
   cancelBlogRun,
   deleteBlogRun,
@@ -104,6 +105,20 @@ export function usePublishBlogRun() {
       toast.success("Filed in the CMS as a draft");
     },
     onError: (e) => toast.error(apiErrorMessage(e, "Failed to publish")),
+  });
+}
+
+export function usePublishBlogRunToInsights() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => publishBlogRunToInsights(id),
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: blogKeys.detail(id) });
+      qc.invalidateQueries({ queryKey: blogKeys.articles(id) });
+      qc.invalidateQueries({ queryKey: blogKeys.lists() });
+      toast.success("Filed in Insights for editor review");
+    },
+    onError: (e) => toast.error(apiErrorMessage(e, "Failed to send to Insights")),
   });
 }
 

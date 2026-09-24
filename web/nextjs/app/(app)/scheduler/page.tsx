@@ -438,11 +438,12 @@ export default function SchedulerPage() {
                       className="mt-0.5 h-4 w-4 rounded border-input"
                     />
                     <span className="text-sm">
-                      Send to the CMS automatically
+                      Publish for review automatically
                       <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
-                        Files each finished article as a draft, so it is waiting
-                        for you in the morning. Nothing goes live until someone
-                        publishes it in the CMS.
+                        Files each finished article in every destination this
+                        server has — the CMS as a draft, JobShout.com Insights
+                        for editor review — so it is waiting for you in the
+                        morning. Nothing goes live until someone approves it.
                       </span>
                     </span>
                   </label>
@@ -765,7 +766,7 @@ export default function SchedulerPage() {
 /** One-line summary of what an article schedule writes each time it fires. */
 function describeBlogTask(task: ScheduledTask): string {
   const input = task.input_json ?? {};
-  const filed = input.auto_publish === true ? ", filed in the CMS as drafts" : "";
+  const filed = input.auto_publish === true ? ", filed for review" : "";
 
   if (input.trending) {
     const n = Number(input.trending_count) || 1;

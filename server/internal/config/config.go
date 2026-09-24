@@ -160,6 +160,14 @@ type Config struct {
 	OpsAPINamespace string        `mapstructure:"OPSAPI_NAMESPACE"`
 	OpsAPITimeout   time.Duration `mapstructure:"OPSAPI_TIMEOUT"`
 
+	// JobShout.com Insights — a second place the Article Writer can file
+	// articles, for editor review on jobshout.com. Both are needed; either
+	// empty leaves the destination off. The URL is the in-cluster
+	// jobshout-com-api Service of the same ring; the token is JobShout.com's
+	// JOBSHOUT_INTERNAL_TOKEN, mounted from its jobshout-com-internal Secret.
+	JobshoutComAPIURL   string `mapstructure:"JOBSHOUT_COM_API_URL"`
+	JobshoutComAPIToken string `mapstructure:"JOBSHOUT_INTERNAL_TOKEN"`
+
 	// Blog generator — the directory generated markdown is filed under, which
 	// is a label in the UI rather than a path on disk.
 	BlogContentDir string `mapstructure:"BLOG_CONTENT_DIR"`
@@ -357,6 +365,8 @@ func Load() (*Config, error) {
 		OpsAPIKey:            viper.GetString("OPSAPI_API_KEY"),
 		OpsAPINamespace:      viper.GetString("OPSAPI_NAMESPACE"),
 		OpsAPITimeout:        viper.GetDuration("OPSAPI_TIMEOUT"),
+		JobshoutComAPIURL:    viper.GetString("JOBSHOUT_COM_API_URL"),
+		JobshoutComAPIToken:  viper.GetString("JOBSHOUT_INTERNAL_TOKEN"),
 		BlogContentDir:       viper.GetString("BLOG_CONTENT_DIR"),
 		BlogAuthorName:       viper.GetString("BLOG_AUTHOR_NAME"),
 		BlogModel:            viper.GetString("BLOG_MODEL"),
