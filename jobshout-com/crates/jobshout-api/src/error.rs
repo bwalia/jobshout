@@ -33,6 +33,24 @@ impl ApiError {
                 message: msg,
                 request_id,
             },
+            DomainError::Unauthorized(msg) => Self {
+                status: StatusCode::UNAUTHORIZED,
+                code: "UNAUTHORIZED",
+                message: msg,
+                request_id,
+            },
+            DomainError::Forbidden(msg) => Self {
+                status: StatusCode::FORBIDDEN,
+                code: "FORBIDDEN",
+                message: msg,
+                request_id,
+            },
+            DomainError::RateLimited(msg) => Self {
+                status: StatusCode::TOO_MANY_REQUESTS,
+                code: "RATE_LIMITED",
+                message: msg,
+                request_id,
+            },
             DomainError::Other(e) => {
                 tracing::error!(error = %e, "internal error");
                 Self {

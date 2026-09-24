@@ -213,3 +213,63 @@ export const TargetIcon = (p: IconProps) => (
     <circle cx="12" cy="12" r="1" />
   </Icon>
 );
+
+export const NewspaperIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2" />
+    <path d="M18 14h-8M15 18h-5M10 6h8v4h-8z" />
+  </Icon>
+);
+
+export const PenIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 20h9" />
+    <path d="M16.4 3.6a2.1 2.1 0 1 1 3 3L7 19l-4 1 1-4Z" />
+  </Icon>
+);
+
+export const MicIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="9" y="2" width="6" height="12" rx="3" />
+    <path d="M19 10v1a7 7 0 0 1-14 0v-1M12 18v4M8 22h8" />
+  </Icon>
+);
+
+export const PlayIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="10" />
+    <path d="m10 8 6 4-6 4Z" />
+  </Icon>
+);
+
+export const MessageIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+  </Icon>
+);
+
+export const BookIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2zM22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z" />
+  </Icon>
+);
+
+export const MailIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="2" y="4" width="20" height="16" rx="2" />
+    <path d="m22 7-10 6L2 7" />
+  </Icon>
+);
+
+export const RssIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 11a9 9 0 0 1 9 9M4 4a16 16 0 0 1 16 16" />
+    <circle cx="5" cy="19" r="1" />
+  </Icon>
+);
+
+export const StarIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1z" />
+  </Icon>
+);

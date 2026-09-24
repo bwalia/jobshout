@@ -1,0 +1,22 @@
+[package]
+name = "jobshout-content"
+description = "Insights hub: posts, articles, blogs, podcasts, videos and the newsletter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ammonia = "4"
+anyhow = { workspace = true }
+chrono = { workspace = true }
+jobshout-domain = { path = "../jobshout-domain" }
+pulldown-cmark = { version = "0.12", default-features = false, features = ["html"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+tracing = { workspace = true }
+url = "2"
+uuid = { workspace = true }
+
+[dev-dependencies]
+roxmltree = "0.20"

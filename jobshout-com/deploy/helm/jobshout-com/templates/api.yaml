@@ -45,6 +45,16 @@ spec:
                 secretKeyRef:
                   name: jobshout-com-db
                   key: DATABASE_URL
+            - name: PUBLIC_SITE_URL
+              value: {{ printf "https://%s" .Values.host | quote }}
+            - name: INSIGHTS_STAFF_EMAILS
+              value: {{ .Values.insights.staffEmails | default "" | quote }}
+            - name: INSIGHTS_SEED_SAMPLES
+              value: {{ .Values.insights.seedSamples | default false | quote }}
+          # envFrom, not env+valueFrom: see the note in web.yaml.
+          envFrom:
+            - secretRef:
+                name: jobshout-com-internal
           readinessProbe:
             httpGet:
               path: /health

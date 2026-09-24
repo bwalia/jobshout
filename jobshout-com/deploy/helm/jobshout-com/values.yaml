@@ -71,3 +71,14 @@ secrets:
   registryPassword: ""
   # Auth.js / NextAuth production secret. Leave empty to auto-generate on install.
   authSecret: ""
+  # Web -> API identity token (see templates/internal-secret.yaml). Leave empty
+  # to auto-generate on install.
+  internalToken: ""
+
+# Insights hub (/insights).
+insights:
+  # Comma-separated emails that publish without review and moderate the queue.
+  # Stopgap until the marketplace has real roles.
+  staffEmails: "tenthmatrix.mailer@gmail.com"
+  # Fill an empty hub with clearly-labelled sample items. Never in prod.
+  seedSamples: false

@@ -40,6 +40,8 @@ spec:
           envFrom:
             - secretRef:
                 name: jobshout-com-auth
+            - secretRef:
+                name: jobshout-com-internal
           readinessProbe:
             tcpSocket:
               port: http

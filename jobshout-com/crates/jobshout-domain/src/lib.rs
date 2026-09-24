@@ -10,6 +10,9 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
+mod insights;
+pub use insights::*;
+
 pub type OrganisationId = Uuid;
 pub type JobId = Uuid;
 pub type UserId = Uuid;
@@ -303,6 +306,12 @@ pub enum DomainError {
     Validation(String),
     #[error("conflict: {0}")]
     Conflict(String),
+    #[error("unauthorized: {0}")]
+    Unauthorized(String),
+    #[error("forbidden: {0}")]
+    Forbidden(String),
+    #[error("rate limited: {0}")]
+    RateLimited(String),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
