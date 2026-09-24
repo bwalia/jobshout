@@ -1,6 +1,9 @@
 // Shown on every page until launch. JobShout is in beta: still being tested
 // and not yet for sale. Delete this component and its two call sites
 // (AppShell, the auth layout) when sales open.
+//
+// The hard hat is decoration, so it is hidden from screen readers — the
+// sentence already carries the whole message without it.
 export function BetaBanner() {
   return (
     <aside
@@ -10,7 +13,8 @@ export function BetaBanner() {
       <span className="mr-2 rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary-foreground">
         Beta
       </span>
-      JobShout is still being tested. It will be available to buy soon.
+      <span aria-hidden="true">🏗️</span> Mind the scaffolding — JobShout is still being
+      tested. Launching soon, please visit again.
     </aside>
   );
 }
