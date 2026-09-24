@@ -79,6 +79,6 @@ secrets:
 insights:
   # Comma-separated emails that publish without review and moderate the queue.
   # Stopgap until the marketplace has real roles.
-  staffEmails: ""
+  staffEmails: "tenthmatrix.mailer@gmail.com"
   # Fill an empty hub with clearly-labelled sample items. Never in prod.
   seedSamples: false
