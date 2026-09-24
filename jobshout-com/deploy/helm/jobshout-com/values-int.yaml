@@ -15,3 +15,6 @@ postgres:
   storage: 10Gi
   # int proving-ring default; override via helm --set-string for stronger secrets.
   password: jobshout
+
+insights:
+  seedSamples: true

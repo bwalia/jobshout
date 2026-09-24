@@ -4,6 +4,7 @@
 
 mod applications;
 mod error;
+mod insights;
 mod jobs;
 mod profiles;
 mod state;
@@ -29,6 +30,7 @@ pub fn router(state: AppState) -> Router {
         .merge(jobs::routes())
         .merge(profiles::routes())
         .merge(applications::routes())
+        .merge(insights::routes())
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
         .with_state(state)

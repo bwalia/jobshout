@@ -113,6 +113,64 @@ body {
 
   /* Job descriptions arrive as plain text with markdown-ish headings; style
      the container rather than parsing it. */
+  /* Insight bodies arrive as sanitised HTML rendered from Markdown. */
+  .insight-prose {
+    @apply break-words text-[1.0625rem] leading-[1.8] text-body;
+    overflow-wrap: anywhere;
+  }
+  .insight-prose > * + * {
+    @apply mt-5;
+  }
+  .insight-prose h2 {
+    @apply mt-10 font-display text-2xl font-semibold tracking-[-0.02em] text-ink;
+  }
+  .insight-prose h3 {
+    @apply mt-8 font-display text-xl font-semibold text-ink;
+  }
+  .insight-prose h4 {
+    @apply mt-6 font-semibold text-ink;
+  }
+  .insight-prose a {
+    @apply font-medium text-ink underline decoration-shout/60 underline-offset-4 transition-colors duration-200 hover:text-shout;
+  }
+  .insight-prose strong {
+    @apply font-semibold text-ink;
+  }
+  .insight-prose ul {
+    @apply list-disc space-y-2 pl-6 marker:text-shout;
+  }
+  .insight-prose ol {
+    @apply list-decimal space-y-2 pl-6 marker:font-semibold marker:text-mute;
+  }
+  .insight-prose blockquote {
+    @apply border-l-2 border-shout pl-5 italic text-ink;
+  }
+  .insight-prose code {
+    @apply rounded-md bg-raised px-1.5 py-0.5 font-mono text-[0.9em] text-ink;
+  }
+  .insight-prose pre {
+    @apply overflow-x-auto rounded-xl border border-line bg-raised p-4 text-sm leading-relaxed;
+  }
+  .insight-prose pre code {
+    @apply bg-transparent p-0;
+  }
+  .insight-prose img {
+    @apply rounded-xl border border-line;
+  }
+  .insight-prose hr {
+    @apply my-10 border-line;
+  }
+  .insight-prose table {
+    @apply block w-full overflow-x-auto text-sm;
+  }
+  .insight-prose th,
+  .insight-prose td {
+    @apply border-b border-line px-3 py-2 text-left;
+  }
+  .insight-prose th {
+    @apply font-semibold text-ink;
+  }
+
   .job-prose {
     @apply whitespace-pre-wrap break-words text-[1.0625rem] leading-[1.75] text-body;
     overflow-wrap: anywhere;

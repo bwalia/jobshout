@@ -34,6 +34,23 @@ Implemented:
   apply, post a job (with live preview), profile builder, ranked matches, application
   tracking, social login scaffolding, light/dark theming
 - Own `docker-compose.yml` and Helm chart under `deploy/`
+- **Insights** (`/insights`): the news, articles, blogs, podcasts and videos hub, in
+  `jobshout-content`. One `insights_items` table with a `kind` discriminator
+  (post | article | blog | podcast | video), topics, full-text search, and a review
+  queue: community submissions land in `pending_review`, editors approve, reject with a
+  note, feature or archive. Markdown is rendered and sanitised server-side (ammonia);
+  media embeds are built only from allowlisted hosts (YouTube, Vimeo, Spotify, Apple
+  Podcasts) or direct audio/video files. RSS at `/insights/rss.xml`, an iTunes-tagged
+  podcast feed at `/insights/podcast.xml` (file-hosted episodes only), a weekly digest
+  archive at `/newsletter`, and double opt-in newsletter signup.
+  - Editors are `INSIGHTS_STAFF_EMAILS` on the API — a stopgap until real roles exist.
+  - Identity: the web tier forwards the signed-in user as `x-jobshout-user-*` headers,
+    signed with `JOBSHOUT_INTERNAL_TOKEN` (chart-generated `jobshout-com-internal`
+    Secret). The gateway exposes `/api/` publicly, so the API rejects unsigned identity
+    headers and nginx strips them from public traffic. The API refuses to start without
+    the token unless `JOBSHOUT_ALLOW_UNSIGNED_IDENTITY=1`.
+  - No mailer yet: newsletter confirmation links are logged by the API.
+  - `INSIGHTS_SEED_SAMPLES=true` (int, local) fills an empty hub with labelled samples.
 
 Deferred: full auth identity linking, employer-side application review UI, MCP, agents
 runtime, interviews, iOS app screens, billing.

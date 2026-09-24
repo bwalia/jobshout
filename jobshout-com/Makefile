@@ -19,11 +19,15 @@ seed: migrate
 	docker compose exec -T postgres psql -U jobshout -d jobshout_com < scripts/seed.sql
 	@echo "Seeded organisations + jobs"
 
+# Shared web->API identity token; any value works locally as long as both match.
+INTERNAL_TOKEN ?= local-dev-internal-token
+
 api:
-	DATABASE_URL="$(DATABASE_URL)" HOST=0.0.0.0 PORT=8088 cargo run -p jobshout-com-api
+	DATABASE_URL="$(DATABASE_URL)" HOST=0.0.0.0 PORT=8088 JOBSHOUT_INTERNAL_TOKEN="$(INTERNAL_TOKEN)" \
+	  INSIGHTS_SEED_SAMPLES=true INSIGHTS_STAFF_EMAILS="$(INSIGHTS_STAFF_EMAILS)" cargo run -p jobshout-com-api
 
 web:
-	cd web/nextjs && npm install && JOBSHOUT_COM_API_URL=http://127.0.0.1:8088 npm run dev
+	cd web/nextjs && npm install && JOBSHOUT_COM_API_URL=http://127.0.0.1:8088 JOBSHOUT_INTERNAL_TOKEN="$(INTERNAL_TOKEN)" npm run dev
 
 dev:
 	@echo "1) make docker-up && make migrate && make seed"

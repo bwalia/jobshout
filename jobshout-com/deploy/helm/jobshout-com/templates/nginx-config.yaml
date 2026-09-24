@@ -33,6 +33,11 @@ data:
         listen 80;
 
         location /api/ {
+          # Identity headers only ever come from the web tier, in-cluster.
+          # Blank them on public traffic so they cannot be forged from outside.
+          proxy_set_header X-Jobshout-User-Email     "";
+          proxy_set_header X-Jobshout-User-Name      "";
+          proxy_set_header X-Jobshout-Internal-Token "";
           set $up http://jobshout-com-api.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.api.port }};
           proxy_pass $up;
         }
