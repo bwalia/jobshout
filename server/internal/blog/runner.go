@@ -29,6 +29,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/jobshout/server/internal/audience"
 	"github.com/jobshout/server/internal/integration/adapters/opsapi"
 	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/model"
@@ -155,6 +156,22 @@ func (r *Runner) structuredModel(req GenerateRequest) string {
 // HardMaxArticles is the safety ceiling regardless of what the caller asks
 // for. One batch of 25 articles is almost certainly a mistake.
 const HardMaxArticles = 10
+
+// articleTags is what the CMS draft is filed under: the reader's tags, plus
+// the industry when the piece was framed for one.
+//
+// The industry is lowercased and nothing else — it is free text a person typed,
+// and inventing a slugging rule here would only disagree with whatever the CMS
+// does with it.
+func articleTags(a GeneratedArticle) []string {
+	reader := audience.For(a.Audience)
+	tags := make([]string, 0, len(reader.Tags)+1)
+	tags = append(tags, reader.Tags...)
+	if sector := audience.NormalizeIndustry(a.Industry); sector != "" {
+		tags = append(tags, strings.ToLower(sector))
+	}
+	return tags
+}
 
 // PostedArticle records where one article landed in the CMS.
 type PostedArticle struct {
@@ -302,10 +319,20 @@ func (r *Runner) Generate(ctx context.Context, req GenerateRequest, progress Pro
 		return nil, fmt.Errorf("blog: research is not configured — articles are written from verified sources and there are none available")
 	}
 
+	// Copied field by field rather than passed through, so a blank topic is
+	// dropped and the rest is trimmed. Every field of the brief has to be
+	// carried here: the reader and the sector decide how the piece is
+	// researched, planned, written and reviewed, and dropping them at the door
+	// would quietly turn every run back into a developer deep dive.
 	briefs := make([]model.BlogBrief, 0, len(req.Briefs))
 	for _, b := range req.Briefs {
 		if s := strings.TrimSpace(b.Topic); s != "" {
-			briefs = append(briefs, model.BlogBrief{Topic: s, Context: strings.TrimSpace(b.Context)})
+			briefs = append(briefs, model.BlogBrief{
+				Topic:    s,
+				Context:  strings.TrimSpace(b.Context),
+				Audience: strings.TrimSpace(b.Audience),
+				Industry: strings.TrimSpace(b.Industry),
+			})
 		}
 	}
 	if len(briefs) == 0 {
@@ -393,7 +420,12 @@ func (r *Runner) Publish(ctx context.Context, articles []GeneratedArticle, progr
 			// Cover → opsapi Featured image. Absolute so the console <img>
 			// preview (and public sites) can load bytes without a JobShout JWT.
 			FeaturedImageURL: publicImageURL(r.cfg.PublicBaseURL, a.CoverImageURL),
-			SEOTitle:         a.Title,
+			// Tags say who the piece was written for, so an editor opening the
+			// CMS can tell a developer deep dive from a plain-English briefing
+			// without reading either — which is the whole point of running two
+			// schedules into one namespace.
+			Tags:     articleTags(a),
+			SEOTitle: a.Title,
 			// opsapi caps meta descriptions at the same length we trim excerpts
 			// to, so the excerpt serves both without a second derivation.
 			SEODescription: a.Excerpt,

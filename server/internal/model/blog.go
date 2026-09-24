@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/jobshout/server/internal/audience"
 )
 
 // BlogRunStatus values.
@@ -113,6 +115,19 @@ type BlogBrief struct {
 	// useful guidance people actually give ("assume they know Kubernetes",
 	// "don't compare vendors") does not decompose into a schema.
 	Context string `json:"context,omitempty"`
+	// Audience is the audience.Profile key this piece is written for. Empty
+	// means the default developer profile, which is what every article written
+	// before audiences existed was.
+	//
+	// It sits on the brief rather than only on the run so one request can write
+	// the same story twice, once for each reader — which is the thing people
+	// actually want when a subject matters to both.
+	Audience string `json:"audience,omitempty"`
+	// Industry frames the piece for one sector ("NHS trusts", "3PL logistics").
+	// Free text, because the useful values are open-ended, and independent of
+	// Audience: the same sector is briefed differently to an engineer and to a
+	// manager.
+	Industry string `json:"industry,omitempty"`
 }
 
 // BlogRun records a single invocation of the article pipeline.
@@ -164,6 +179,11 @@ type BlogRunOptions struct {
 	Focus         []string `json:"focus,omitempty"`
 	MaxArticles   int      `json:"max_articles,omitempty"`
 	AutoPublish   bool     `json:"auto_publish,omitempty"`
+	// Audience and Industry are the run's defaults, recorded so a retry — and a
+	// trending run, whose briefs do not exist until discovery has run — writes
+	// for the same reader the second time.
+	Audience string `json:"audience,omitempty"`
+	Industry string `json:"industry,omitempty"`
 }
 
 // RunOptions extracts what a run records about how it was asked to work.
@@ -174,6 +194,8 @@ func (r *GenerateBlogRequest) RunOptions() BlogRunOptions {
 		Focus:         r.Focus,
 		MaxArticles:   r.MaxArticles,
 		AutoPublish:   r.AutoPublish,
+		Audience:      r.Audience,
+		Industry:      r.Industry,
 	}
 }
 
@@ -268,6 +290,14 @@ type BlogArticle struct {
 	WordCount        int        `json:"word_count"`
 	CreatedAt        time.Time  `json:"created_at"`
 
+	// Audience and Industry are the reader this piece was written for, stored
+	// rather than re-derived from the run. They are what lets topic discovery
+	// scope "already written about" to one reader — without them, a developer
+	// schedule and a business schedule block each other's subjects, which
+	// defeats the point of running both.
+	Audience string `json:"audience,omitempty"`
+	Industry string `json:"industry,omitempty"`
+
 	// CoverImageURL is where the article's cover image is served from, empty
 	// when the run generated none — cover images are opt-in per environment, and
 	// a run that could not draw one still produces a publishable article.
@@ -335,18 +365,40 @@ type GenerateBlogRequest struct {
 	// Insights review queue — so the worst case is a draft somebody deletes
 	// rather than a bad article published to readers.
 	AutoPublish bool `json:"auto_publish,omitempty"`
+	// Audience is the run's default audience.Profile key — who every brief in
+	// this request is written for unless the brief names its own reader.
+	//
+	// It is a run-level default rather than brief-only because that is how it
+	// is actually set: a schedule says "this one writes for managers", and the
+	// briefs it discovers each night inherit that. Empty means the default
+	// developer profile.
+	Audience string `json:"audience,omitempty"`
+	// Industry is the run's default sector framing, inherited the same way.
+	Industry string `json:"industry,omitempty"`
 }
 
 // Normalize folds the legacy Topics field into Briefs and trims empties, so
 // every consumer can read Briefs alone.
 func (r *GenerateBlogRequest) Normalize() {
+	// The run's reader and sector are settled first, so every brief below can
+	// inherit them and no consumer has to know the precedence.
+	r.Audience = audience.Normalize(r.Audience)
+	r.Industry = audience.NormalizeIndustry(r.Industry)
+
 	briefs := make([]BlogBrief, 0, len(r.Briefs)+len(r.Topics))
 	for _, b := range r.Briefs {
 		topic := strings.TrimSpace(b.Topic)
 		if topic == "" {
 			continue
 		}
-		briefs = append(briefs, BlogBrief{Topic: topic, Context: strings.TrimSpace(b.Context), Seeds: b.Seeds, Focus: b.Focus})
+		briefs = append(briefs, BlogBrief{
+			Topic:    topic,
+			Context:  strings.TrimSpace(b.Context),
+			Audience: r.resolveAudience(b.Audience),
+			Industry: r.resolveIndustry(b.Industry),
+			Seeds:    b.Seeds,
+			Focus:    b.Focus,
+		})
 	}
 	// A legacy topic is folded in only when no brief already covers it.
 	//
@@ -371,7 +423,11 @@ func (r *GenerateBlogRequest) Normalize() {
 			continue
 		}
 		covered[topic] = struct{}{}
-		briefs = append(briefs, BlogBrief{Topic: topic})
+		briefs = append(briefs, BlogBrief{
+			Topic:    topic,
+			Audience: r.Audience,
+			Industry: r.Industry,
+		})
 	}
 	r.Briefs = briefs
 
@@ -405,12 +461,49 @@ func (r *GenerateBlogRequest) Normalize() {
 	}
 }
 
+// resolveAudience is the brief's reader, or the run's when it names none.
+//
+// A brief that names an unknown profile falls back to the run's rather than to
+// the global default: the run's is the nearer statement of intent, and silently
+// writing a developer article for a schedule that asked for managers is the
+// failure worth designing against. Validate rejects the unknown key before this
+// runs on any request that came in over HTTP.
+func (r *GenerateBlogRequest) resolveAudience(brief string) string {
+	if b := audience.Normalize(brief); b != "" {
+		return b
+	}
+	if strings.TrimSpace(brief) != "" {
+		// The brief named the default profile outright, which normalizes to
+		// empty. That is a choice, not silence, so it beats the run's.
+		return ""
+	}
+	return r.Audience
+}
+
+func (r *GenerateBlogRequest) resolveIndustry(brief string) string {
+	if b := audience.NormalizeIndustry(brief); b != "" {
+		return b
+	}
+	return r.Industry
+}
+
 // Validate reports why a request cannot be run, after Normalize.
 //
 // It is a method rather than struct tags because the requirement is
 // conditional: briefs are required unless the run is discovering its own
 // topics, and `validate:"required"` cannot express that.
 func (r *GenerateBlogRequest) Validate() error {
+	// Rejected rather than defaulted. A typo'd audience that quietly wrote a
+	// developer article would look exactly like a schedule working correctly,
+	// and nobody checks a nightly job that is producing articles.
+	if !audience.Known(r.Audience) {
+		return fmt.Errorf("unknown audience %q — one of: %s", r.Audience, audienceKeys())
+	}
+	for i, b := range r.Briefs {
+		if !audience.Known(b.Audience) {
+			return fmt.Errorf("brief %d: unknown audience %q — one of: %s", i+1, b.Audience, audienceKeys())
+		}
+	}
 	if r.Trending {
 		// The topics do not exist yet — discovery finds them when the run
 		// starts — so there is nothing here to require.
@@ -429,6 +522,16 @@ func (r *GenerateBlogRequest) Validate() error {
 		return fmt.Errorf("at least one brief with a topic is required")
 	}
 	return nil
+}
+
+// audienceKeys lists the accepted audience values for an error message.
+func audienceKeys() string {
+	opts := audience.Options()
+	keys := make([]string, 0, len(opts))
+	for _, o := range opts {
+		keys = append(keys, o.Value)
+	}
+	return strings.Join(keys, ", ")
 }
 
 // DefaultTrendingCount is how many articles a trending run writes when the

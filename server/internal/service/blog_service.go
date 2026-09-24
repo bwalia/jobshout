@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/jobshout/server/internal/audience"
 	"github.com/jobshout/server/internal/blog"
 	"github.com/jobshout/server/internal/llmtrace"
 	"github.com/jobshout/server/internal/model"
@@ -540,7 +541,11 @@ func (s *blogService) discoverBriefs(
 	// What this org has published recently is what discovery must not repeat.
 	// A failure here degrades the run to "might repeat itself" rather than
 	// stopping it — losing an article to a database hiccup is the worse trade.
-	avoid, err := s.repo.RecentTopics(ctx, run.OrgID, time.Now().Add(-recentTopicWindow))
+	// Scoped to this run's reader. A developer deep dive and a plain-English
+	// briefing on the same subject are two different articles, and an org
+	// running both schedules wants both — an org-wide list would let whichever
+	// schedule fired first lock the other out for a fortnight.
+	avoid, err := s.repo.RecentTopics(ctx, run.OrgID, time.Now().Add(-recentTopicWindow), req.Audience)
 	if err != nil {
 		s.logger.Warn("blog_svc: could not load recent topics, discovery may repeat itself",
 			zap.Error(err))
@@ -549,10 +554,12 @@ func (s *blogService) discoverBriefs(
 
 	count := req.ResolvedTrendingCount(blog.HardMaxArticles)
 	topics, err := s.research.Discover(ctx, run.OrgID, research.DiscoverRequest{
-		Count: count,
-		Avoid: avoid,
-		Focus: req.Focus,
-		Model: req.Model,
+		Count:    count,
+		Avoid:    avoid,
+		Focus:    req.Focus,
+		Audience: req.Audience,
+		Industry: req.Industry,
+		Model:    req.Model,
 	}, func(_, detail string) {
 		tracker.advance(model.BlogStepDiscovering, detail, model.AgentNameResearcher)
 	})
@@ -560,9 +567,17 @@ func (s *blogService) discoverBriefs(
 		return nil, err
 	}
 
+	// Discovered briefs inherit the run's reader and sector. Without this the
+	// discovery pass would choose topics for managers and the writing pass
+	// would write them up for engineers.
 	briefs := make([]model.BlogBrief, 0, len(topics))
 	for _, t := range topics {
-		briefs = append(briefs, model.BlogBrief{Topic: t.Topic, Context: t.Context})
+		briefs = append(briefs, model.BlogBrief{
+			Topic:    t.Topic,
+			Context:  t.Context,
+			Audience: req.Audience,
+			Industry: req.Industry,
+		})
 	}
 	if len(briefs) == 0 {
 		return nil, fmt.Errorf("blog_svc: discovery returned no topics")
@@ -596,7 +611,9 @@ func (s *blogService) discoverBriefs(
 	s.logger.Info("blog: discovered topics for a trending run",
 		zap.String("blog_run_id", run.ID.String()),
 		zap.Int("count", len(briefs)), zap.Int("avoided", len(avoid)),
-		zap.Strings("focus", req.Focus), zap.Int("off_target", offTarget))
+		zap.Strings("focus", req.Focus), zap.Int("off_target", offTarget),
+		zap.String("audience", audience.Label(req.Audience)),
+		zap.String("industry", req.Industry))
 
 	return briefs, nil
 }
@@ -650,6 +667,7 @@ func (s *blogService) persistArticle(run *model.BlogRun, a blog.GeneratedArticle
 		Topic: a.Topic, Title: a.Title, Slug: a.Slug, Path: a.Path,
 		References: refs,
 		Markdown:   a.Markdown, HTML: a.HTML, WordCount: a.WordCount,
+		Audience: a.Audience, Industry: a.Industry,
 		CoverImageURL:    a.CoverImageURL,
 		CoverImagePrompt: a.CoverImagePrompt,
 		CoverImageMeta: model.CoverImageMeta{
@@ -1197,6 +1215,12 @@ func (s *blogService) Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUI
 		Briefs:      missing,
 		MaxArticles: run.Options.MaxArticles,
 		AutoPublish: run.Options.AutoPublish,
+		// The reader is replayed with the briefs. Each brief already carries
+		// its own, so this only matters for runs stored before briefs did — but
+		// a retry that quietly rewrote a business briefing as a developer
+		// article would be a nasty way to find that out.
+		Audience: run.Options.Audience,
+		Industry: run.Options.Industry,
 	}
 	req.Normalize()
 	if run.Model != nil {
@@ -1248,6 +1272,8 @@ func discoveryRetryRequest(run *model.BlogRun) model.GenerateBlogRequest {
 		Focus:         run.Options.Focus,
 		MaxArticles:   run.Options.MaxArticles,
 		AutoPublish:   run.Options.AutoPublish,
+		Audience:      run.Options.Audience,
+		Industry:      run.Options.Industry,
 	}
 	req.Normalize()
 	if run.Model != nil {

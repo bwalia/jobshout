@@ -3,7 +3,16 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useGenerateBlog } from "@/lib/hooks/useBlog";
+import { useAgentSchemas } from "@/lib/hooks/useAgentSchemas";
+import { fieldDefault, fieldOptions } from "@/lib/agents/input-schemas";
 import type { BlogBrief } from "@/lib/types/blog";
+
+/**
+ * The Article Writer's builtin marker. Its audience choices come from
+ * GET /agent-schemas rather than a list kept here — one schema, in Go, which
+ * the web reads. See .claude/rules/agent-modules.md.
+ */
+const ARTICLE_WRITER = "article_writer";
 
 /** Matches blog.HardMaxArticles on the server, which truncates beyond this. */
 const HARD_MAX_ARTICLES = 10;
@@ -38,6 +47,16 @@ export function GenerateArticleDialog({
   const generate = useGenerateBlog();
   const [rows, setRows] = useState<BriefRow[]>([newRow()]);
   const [model, setModel] = useState("");
+  // The reader and sector apply to the whole run: one dialog writes one kind
+  // of piece, and a per-row picker would be a choice nobody wants to make five
+  // times. A brief can still override it over the API.
+  const [runAudience, setRunAudience] = useState("");
+  const [industry, setIndustry] = useState("");
+
+  const { data: agentCatalog } = useAgentSchemas();
+  const catalog = agentCatalog ?? [];
+  const audiences = fieldOptions(catalog, ARTICLE_WRITER, "audience");
+  const defaultAudience = fieldDefault(catalog, ARTICLE_WRITER, "audience");
 
   const filled = rows.filter((r) => r.topic.trim() !== "");
   const atCap = rows.length >= HARD_MAX_ARTICLES;
@@ -71,11 +90,18 @@ export function GenerateArticleDialog({
     }));
 
     generate.mutate(
-      { briefs, model: model.trim() || undefined },
+      {
+        briefs,
+        model: model.trim() || undefined,
+        audience: runAudience || undefined,
+        industry: industry.trim() || undefined,
+      },
       {
         onSuccess: (run) => {
           setRows([newRow()]);
           setModel("");
+          setRunAudience("");
+          setIndustry("");
           onClose();
           // Go straight to the run so the user watches it work rather than
           // wondering whether anything happened.
@@ -103,6 +129,53 @@ export function GenerateArticleDialog({
         </div>
 
         <div className="flex-1 space-y-4 overflow-y-auto p-6">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label htmlFor="audience" className="text-xs text-muted-foreground">
+                Written for
+              </label>
+              <select
+                id="audience"
+                value={runAudience || defaultAudience}
+                onChange={(e) =>
+                  setRunAudience(
+                    e.target.value === defaultAudience ? "" : e.target.value
+                  )
+                }
+                disabled={audiences.length === 0}
+                className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground disabled:opacity-60"
+              >
+                {audiences.length === 0 ? (
+                  <option value="">Loading audiences…</option>
+                ) : (
+                  audiences.map((a) => (
+                    <option key={a.value} value={a.value}>
+                      {a.label}
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="industry" className="text-xs text-muted-foreground">
+                Industry{" "}
+                <span className="text-muted-foreground/60">(optional)</span>
+              </label>
+              <input
+                id="industry"
+                value={industry}
+                onChange={(e) => setIndustry(e.target.value)}
+                placeholder="NHS trusts, 3PL logistics"
+                className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/60"
+              />
+            </div>
+            <p className="text-2xs text-muted-foreground sm:col-span-2">
+              This applies to every article below. It changes how each one is
+              researched, structured, written and reviewed — a business briefing
+              is not a developer article with simpler words.
+            </p>
+          </div>
+
           {rows.map((row, i) => (
             <div
               key={row.id}
@@ -151,7 +224,7 @@ export function GenerateArticleDialog({
                 rows={2}
                 value={row.context ?? ""}
                 onChange={(e) => updateRow(row.id, { context: e.target.value })}
-                placeholder="Angle, audience, points to cover, things to avoid"
+                placeholder="Angle, points to cover, things to avoid"
                 className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/60"
               />
             </div>

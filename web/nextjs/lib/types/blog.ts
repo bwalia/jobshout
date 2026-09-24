@@ -126,6 +126,9 @@ export interface BlogRunOptions {
   focus?: string[];
   max_articles?: number;
   auto_publish?: boolean;
+  /** The reader and sector the run was asked for; Retry replays these. */
+  audience?: string;
+  industry?: string;
 }
 
 /**
@@ -179,14 +182,29 @@ export interface BlogRun {
  */
 export interface BlogBrief {
   topic: string;
-  /** Optional guidance: angle, audience, points to hit, things to avoid. */
+  /** Optional guidance: angle, points to hit, things to avoid. */
   context?: string;
+  /**
+   * Which reader this piece is written for — an `audience` key from the
+   * Article Writer's schema. Omitted means the run's, and a run that names
+   * none means the server default (a developer deep dive).
+   *
+   * The values are NOT enumerated here on purpose: they live in the Go
+   * audience registry and reach the UI through GET /agent-schemas, so adding a
+   * reader does not mean editing TypeScript.
+   */
+  audience?: string;
+  /** Free-text sector framing, e.g. "NHS trusts". Omitted means none. */
+  industry?: string;
 }
 
 export interface GenerateBlogRequest {
   briefs: BlogBrief[];
   model?: string;
   max_articles?: number;
+  /** The run's default reader and sector; every brief inherits them. */
+  audience?: string;
+  industry?: string;
 }
 
 /**

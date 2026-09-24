@@ -55,7 +55,7 @@ func TestRegisteredModuleContract(t *testing.T) {
 		{model.BuiltinPRReviewer, "review", false, []string{"repo", "pr_number", "dry_run"}},
 		{model.BuiltinMail, "mail", false, []string{"senders", "subject_prefixes", "labels", "knowledge_notes", "knowledge_urls", "research_focus", "reply_instructions"}},
 		{model.BuiltinCareerOps, "career", true, []string{"job_url", "jd_text", "mode", "tailor_cv"}},
-		{model.BuiltinArticleWriter, "articles", false, []string{"topic", "context", "model"}},
+		{model.BuiltinArticleWriter, "articles", false, []string{"topic", "audience", "industry", "context", "model"}},
 		{model.BuiltinImages, "images", false, []string{"prompt"}},
 		{model.BuiltinResearcher, "", false, []string{"topic", "context"}},
 	}

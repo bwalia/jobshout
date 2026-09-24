@@ -50,6 +50,20 @@ func newTestRunnerWith(cms CMSPublisher, researcher Researcher, responses ...scr
 	}, &stubLLM{responses: responses}, cms, researcher, zap.NewNop())
 }
 
+// newRunnerWithStub is newTestRunner for tests that then read back what the
+// model was actually asked, rather than only what it answered.
+func newRunnerWithStub(stub *stubLLM) *Runner {
+	return NewRunner(Config{ContentDir: "content/blogs", AuthorName: "Test Writer"},
+		stub, nil, &fakeResearcher{}, zap.NewNop())
+}
+
+// newRunnerWithResearcher exposes the researcher so a test can inspect the
+// brief the Research Agent was handed.
+func newRunnerWithResearcher(researcher Researcher, responses []scriptedResponse) *Runner {
+	return NewRunner(Config{ContentDir: "content/blogs", AuthorName: "Test Writer"},
+		&stubLLM{responses: responses}, nil, researcher, zap.NewNop())
+}
+
 // briefsFor is shorthand for a request over plain topics.
 func briefsFor(topics ...string) []model.BlogBrief {
 	out := make([]model.BlogBrief, 0, len(topics))
