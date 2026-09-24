@@ -91,6 +91,11 @@ gateway:
   enabled: true
   image: nginx:1.27-alpine
   resolver: "10.43.0.10"   # k3s cluster DNS (kube-dns ClusterIP)
+  # /api/ only. Career scoring keeps one request open for a model call per job,
+  # and the handler budgets 10m for it, so nginx has to outlast that or it
+  # answers 504 while the work is still running. Everything else stays on the
+  # 300s default.
+  apiReadTimeout: "600s"
   resources:
     requests: { cpu: 50m, memory: 64Mi }
     limits: { cpu: 500m, memory: 128Mi }
@@ -126,6 +131,14 @@ ai:
   # windows big models support; model discovery caps it per model, so a value
   # above what a model can hold is lowered rather than rejected.
   ollamaNumCtx: 8192
+  # Career Agent scores each job with one model call. It is pinned off
+  # ollamaModel because Ollama serialises per model: every other agent uses
+  # llama3.1:8b, so scoring queued behind them. Measured on the shared host,
+  # same prompt — llama3.1:8b took 280-377s wall clock of which only 16-22s was
+  # compute, the rest queueing; careerops:32k answered in 78s with no queue at
+  # all. It generates at half the tokens/sec but has the runner to itself, and
+  # it is the model built for this agent. Empty falls back to ollamaModel.
+  careerModel: "careerops:32k"
   # Chat is pinned separately from ollamaModel so workers stay on the small
   # worker model while the control-desk conversation uses a tool-capable one.
   chatModel: "qwen3-coder:30b"

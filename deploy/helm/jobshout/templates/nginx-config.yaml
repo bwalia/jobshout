@@ -42,6 +42,12 @@ data:
         location /api/ {
           set $up http://jobshout-api.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.api.port }};
           proxy_pass $up;
+          # Career scoring holds the request open for one model call per job.
+          # The handler budgets 10m (careerWorkTimeout) and the browser waits
+          # 600s to match, but the 300s default above cut in first and returned
+          # 504 on work that was still running — and still landing, since the
+          # handler detaches from the request context and saves each score.
+          proxy_read_timeout {{ .Values.gateway.apiReadTimeout | default "600s" }};
         }
         location = /health {
           set $up http://jobshout-api.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.api.port }};
