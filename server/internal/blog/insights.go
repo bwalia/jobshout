@@ -115,8 +115,13 @@ func insightFromArticle(a GeneratedArticle, publicBaseURL string) jobshoutcom.Su
 	if title == "" {
 		title = articleTitle(a.Markdown, a.Topic)
 	}
+	// The summary comes from the article as rendered now rather than the HTML
+	// stored when it was written, so articles stored before a rendering fix
+	// (a stray heading underline, say) still file with a clean summary.
 	summary := strings.TrimSpace(a.Excerpt)
-	if summary == "" && a.HTML != "" {
+	if html, err := renderHTML(a.Markdown); err == nil && html != "" {
+		summary = summaryParagraph(html)
+	} else if summary == "" && a.HTML != "" {
 		summary = articleExcerpt(a.HTML)
 	}
 	req := jobshoutcom.SubmitInsightRequest{
@@ -134,6 +139,23 @@ func insightFromArticle(a GeneratedArticle, publicBaseURL string) jobshoutcom.Su
 		req.CoverImageAlt = "Illustration for “" + truncateRunes(title, 120) + "”"
 	}
 	return req
+}
+
+// paragraphRegex matches one rendered paragraph.
+var paragraphRegex = regexp.MustCompile(`(?s)<p>(.*?)</p>`)
+
+// summaryParagraph is the opening prose of the article, for the Insights
+// summary card. articleExcerpt (the CMS's) reads straight through headings,
+// which runs a section title into the sentence after it; a summary reads
+// better as the first real paragraph. Falls back to articleExcerpt when the
+// body opens with nothing but images or headings.
+func summaryParagraph(html string) string {
+	for _, m := range paragraphRegex.FindAllStringSubmatch(html, -1) {
+		if text := articleExcerpt(m[1]); text != "" {
+			return text
+		}
+	}
+	return articleExcerpt(html)
 }
 
 // relativeImage matches a Markdown image whose URL is a path on this host.

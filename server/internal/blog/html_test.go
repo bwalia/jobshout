@@ -105,6 +105,36 @@ func TestArticleTitle(t *testing.T) {
 
 // The whole article being one H1 line leaves nothing to render. It must not
 // take the stripping logic out of bounds.
+func TestStripLeadingH1_DropsUnderlineUnderTheHeading(t *testing.T) {
+	cases := map[string]string{
+		"# Title\n==========\n\n## Intro\n\nBody": "## Intro\n\nBody",
+		"# Title\n  ------  \n\nBody":             "Body",
+		"# Title\n\n========\n\nBody":             "Body",
+		"# Title\n==========":                     "",
+		"# Title\n- a list item\n- another":       "- a list item\n- another",
+		"# Title\n=\nBody":                        "=\nBody",
+		"# Title\n\nParagraph\n=========\n\nMore": "Paragraph\n=========\n\nMore",
+	}
+	for in, want := range cases {
+		if got := stripLeadingH1(in); got != want {
+			t.Errorf("stripLeadingH1(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestRenderHTML_NoStrayUnderlineParagraph(t *testing.T) {
+	html, err := renderHTML("# Title\n==============\n\n## Section\n\nText.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(html, "===") || strings.Contains(html, "<h1") {
+		t.Errorf("rendered HTML kept the heading or its underline: %s", html)
+	}
+	if ex := articleExcerpt(html); strings.HasPrefix(ex, "=") {
+		t.Errorf("excerpt starts with the underline: %q", ex)
+	}
+}
+
 func TestStripLeadingH1_OnlyHeading(t *testing.T) {
 	if got := stripLeadingH1("# Just a title"); got != "" {
 		t.Errorf("stripLeadingH1() = %q, want empty", got)

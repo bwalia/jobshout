@@ -137,6 +137,22 @@ func TestInsightFromArticle(t *testing.T) {
 	}
 }
 
+func TestInsightFromArticle_SummaryIgnoresStaleStoredHTML(t *testing.T) {
+	// Stored before the underline fix: the HTML opens with the stray line.
+	a := GeneratedArticle{
+		Title:    "Hallucination-Free LLMs",
+		Markdown: "# Hallucination-Free LLMs\n==========\n\n## Why\n\nObservability matters for AI agents.",
+		HTML:     "<p>==========</p>\n<h2>Why</h2>\n<p>Observability matters for AI agents.</p>",
+	}
+	req := insightFromArticle(a, "https://x")
+	if req.Summary != "Observability matters for AI agents." {
+		t.Errorf("summary = %q; want the first paragraph, without the underline or the section title", req.Summary)
+	}
+	if strings.Contains(req.BodyMarkdown, "===") {
+		t.Errorf("body kept the underline: %q", req.BodyMarkdown)
+	}
+}
+
 func TestPublishInsights_FilesEachArticle(t *testing.T) {
 	fake := &fakeInsights{}
 	var steps []string

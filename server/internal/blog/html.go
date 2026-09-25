@@ -107,16 +107,40 @@ func articleTitle(markdown, topic string) string {
 
 // stripLeadingH1 removes the article's own H1 heading, and only that one —
 // an H1 used later in the body (rare, but models do it) stays put.
+//
+// Models sometimes underline the "# Title" line with "=====" as well, mixing
+// the two Markdown heading styles. Once the "#" line is gone that underline
+// is a line of its own and renders as a paragraph of equals signs at the top
+// of the post (and becomes the start of its excerpt), so it goes too.
 func stripLeadingH1(markdown string) string {
 	trimmed := strings.TrimLeft(markdown, " \t\r\n")
 	if !strings.HasPrefix(trimmed, "# ") {
 		return markdown
 	}
-	if nl := strings.IndexByte(trimmed, '\n'); nl >= 0 {
-		return strings.TrimLeft(trimmed[nl+1:], "\r\n")
+	nl := strings.IndexByte(trimmed, '\n')
+	if nl < 0 {
+		// The whole article is a single H1 line — nothing left once it goes.
+		return ""
 	}
-	// The whole article is a single H1 line — nothing left once it goes.
-	return ""
+	rest := strings.TrimLeft(trimmed[nl+1:], "\r\n")
+	if line, after, found := strings.Cut(rest, "\n"); isHeadingUnderline(line) {
+		if !found {
+			return ""
+		}
+		rest = strings.TrimLeft(after, "\r\n")
+	}
+	return rest
+}
+
+// isHeadingUnderline reports whether line is a setext underline: only "="
+// characters, or only "-" characters, with optional surrounding spaces.
+// A single "-" or "=" is not one — that is a list item or stray text.
+func isHeadingUnderline(line string) bool {
+	line = strings.TrimSpace(line)
+	if len(line) < 2 {
+		return false
+	}
+	return strings.Trim(line, "=") == "" || strings.Trim(line, "-") == ""
 }
 
 // excerptLimit is the length an excerpt is trimmed to. It also feeds the SEO
