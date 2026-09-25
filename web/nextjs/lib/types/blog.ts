@@ -98,6 +98,11 @@ export interface BlogArticle {
   post_uuid: string | null;
   post_status: string | null;
   posted_at: string | null;
+  /** The JobShout.com Insights item this article was filed as; null until sent. */
+  insights_item_id: string | null;
+  insights_slug: string | null;
+  insights_status: string | null;
+  insights_posted_at: string | null;
   word_count: number;
   created_at: string;
   /** Where the generated cover image lives; absent when the run drew none. */
@@ -163,6 +168,8 @@ export interface BlogRun {
   started_at: string | null;
   completed_at: string | null;
   published_at: string | null;
+  /** When the articles were filed in JobShout.com Insights; independent of the CMS. */
+  insights_published_at: string | null;
   created_at: string;
 }
 
@@ -189,6 +196,8 @@ export interface GenerateBlogRequest {
  */
 export interface BlogConfig {
   can_publish: boolean;
+  /** Whether JobShout.com Insights is reachable, for "Send to Insights". */
+  can_publish_insights: boolean;
   /**
    * The provider the writing pipeline is bound to at startup. The model picker
    * filters on it: the pipeline sends a bare model name to this one provider,

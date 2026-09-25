@@ -55,7 +55,26 @@ impl InsightService {
             is_staff: self.staff.contains(&email.to_ascii_lowercase()),
             name: name.trim().to_string(),
             email,
+            agent: false,
         }
+    }
+
+    /// An automated author, named by the caller (e.g. "Article Writer"). It
+    /// gets a stable synthetic address so its submissions group under one
+    /// author, and it can never be staff whatever the allowlist says.
+    pub fn agent_actor(&self, name: &str) -> Result<Actor, DomainError> {
+        let name = name.trim();
+        if name.is_empty() || name.chars().count() > 60 {
+            return Err(DomainError::Validation(
+                "agent name must be 1-60 characters".into(),
+            ));
+        }
+        Ok(Actor {
+            email: format!("{}@agents.jobshout.com", rules::slugify(name)),
+            name: format!("JobShout {name}"),
+            is_staff: false,
+            agent: true,
+        })
     }
 
     pub async fn topics(&self) -> Result<Vec<InsightTopic>, DomainError> {
@@ -139,7 +158,7 @@ impl InsightService {
     }
 
     pub async fn create(&self, actor: &Actor, input: InsightInput) -> Result<Insight, DomainError> {
-        if !actor.is_staff {
+        if !actor.is_staff && !actor.agent {
             let recent = self
                 .repo
                 .created_since(&actor.email, Utc::now() - Duration::hours(1))
@@ -300,6 +319,7 @@ impl InsightService {
             email: "editors@jobshout.com".into(),
             name: "JobShout Editors".into(),
             is_staff: true,
+            agent: false,
         };
         let samples = seed::samples();
         let n = samples.len();

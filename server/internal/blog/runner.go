@@ -203,6 +203,9 @@ type Runner struct {
 	// but disabled, means a run produces text only — which is the default, and
 	// a complete article either way.
 	images Illustrator
+	// insights files articles in JobShout.com's Insights hub, a destination
+	// beside the CMS. Nil means that destination is not configured.
+	insights InsightsPublisher
 	// clock lets tests inject a deterministic time.
 	clock func() time.Time
 }

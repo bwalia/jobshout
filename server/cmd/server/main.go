@@ -48,6 +48,7 @@ import (
 	emailAdapter "github.com/jobshout/server/internal/integration/adapters/email"
 	githubAdapter "github.com/jobshout/server/internal/integration/adapters/github"
 	jiraAdapter "github.com/jobshout/server/internal/integration/adapters/jira"
+	"github.com/jobshout/server/internal/integration/adapters/jobshoutcom"
 	"github.com/jobshout/server/internal/integration/adapters/opsapi"
 	slackAdapter "github.com/jobshout/server/internal/integration/adapters/slack"
 	teamsAdapter "github.com/jobshout/server/internal/integration/adapters/teams"
@@ -529,12 +530,20 @@ func main() {
 		if cfg.BlogCoverImages && imageSvc.Enabled() {
 			blogRunner = blogRunner.WithIllustrator(&blogIllustrator{images: imageSvc})
 		}
+		// JobShout.com Insights, beside the CMS. NewClient returns nil when the
+		// URL or token is missing, which the runner reads as "not configured".
+		blogRunner = blogRunner.WithInsights(jobshoutcom.NewClient(jobshoutcom.Config{
+			BaseURL: cfg.JobshoutComAPIURL,
+			Token:   cfg.JobshoutComAPIToken,
+			Agent:   model.AgentNameArticleWriter,
+		}))
 		writingModel := firstNonEmptyStr(cfg.BlogModel, cfg.OllamaDefaultModel)
 		logger.Info("article generator initialised",
 			zap.String("prose_model", firstNonEmptyStr(cfg.BlogProseModel, writingModel)),
 			zap.String("structured_model", firstNonEmptyStr(cfg.BlogStructuredModel, writingModel)),
 			zap.String("cms_namespace", cfg.OpsAPINamespace),
 			zap.Bool("can_publish", blogRunner.CanPublish()),
+			zap.Bool("can_publish_insights", blogRunner.CanPublishInsights()),
 		)
 		if !blogRunner.CanPublish() {
 			logger.Info("blog: opsapi CMS not configured — articles can be generated and read, but not published " +
@@ -1181,6 +1190,7 @@ func main() {
 					r.Get("/", blogHandler.GetRun)
 					r.Get("/articles", blogHandler.ListArticles)
 					r.Post("/publish", blogHandler.Publish)
+					r.Post("/publish-insights", blogHandler.PublishInsights)
 					r.Post("/retry", blogHandler.Retry)
 					r.Post("/cancel", blogHandler.Cancel)
 					r.Delete("/", blogHandler.Delete)

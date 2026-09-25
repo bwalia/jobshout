@@ -20,6 +20,7 @@ import {
   useCancelBlogRun,
   useDeleteBlogRun,
   usePublishBlogRun,
+  usePublishBlogRunToInsights,
   useRetryBlogRun,
 } from "@/lib/hooks/useBlog";
 import { useQueryClient } from "@tanstack/react-query";
@@ -39,6 +40,7 @@ export default function ArticleRunPage() {
   const { data: run, isLoading, isError } = useBlogRun(runId);
   const { data: config } = useBlogConfig();
   const publish = usePublishBlogRun();
+  const publishInsights = usePublishBlogRunToInsights();
   const retry = useRetryBlogRun();
   const cancel = useCancelBlogRun();
   const remove = useDeleteBlogRun();
@@ -108,6 +110,14 @@ export default function ArticleRunPage() {
   const isPublished = Boolean(run.published_at);
   const canPublish =
     Boolean(config?.can_publish) && run.status === "completed" && !isPublished;
+  const inInsights = Boolean(run.insights_published_at);
+  const canPublishInsights =
+    Boolean(config?.can_publish_insights) && run.status === "completed" && !inInsights;
+  // Offer the CMS button when the CMS is set up, or when nothing is (so the
+  // disabled button explains why). Where only Insights is configured, a dead
+  // "Send to CMS" would just be noise.
+  const showCmsAction = config?.can_publish !== false || !config?.can_publish_insights;
+  const finished = run.status !== "failed" && run.status !== "cancelled";
 
   return (
     // p-6: this route is deliberately kept outside the /panel/* system
@@ -172,9 +182,34 @@ export default function ArticleRunPage() {
                 {retry.isPending ? "Retrying..." : "Retry"}
               </button>
             )}
-            {run.status !== "failed" &&
-            run.status !== "cancelled" &&
-            isPublished ? (
+            {finished && config?.can_publish_insights ? (
+              inInsights ? (
+                <span className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground">
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-status-done" />
+                  In Insights review
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  disabled={!canPublishInsights || publishInsights.isPending}
+                  onClick={() => publishInsights.mutate(runId)}
+                  title={
+                    run.status !== "completed"
+                      ? "Wait for the articles to finish"
+                      : "File each article in the JobShout.com Insights review queue"
+                  }
+                  className={cn(
+                    "inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors",
+                    "bg-primary text-primary-foreground hover:bg-primary/90",
+                    "disabled:cursor-not-allowed disabled:opacity-50"
+                  )}
+                >
+                  <Newspaper className="h-4 w-4" />
+                  {publishInsights.isPending ? "Sending..." : "Send to Insights"}
+                </button>
+              )
+            ) : null}
+            {!showCmsAction ? null : finished && isPublished ? (
               <span className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground">
                 <CheckCircle2 className="h-4 w-4 shrink-0 text-status-done" />
                 {/* The namespace is server-provided free text; cap it so it
@@ -228,10 +263,20 @@ export default function ArticleRunPage() {
           </div>
         </div>
 
-        {config?.can_publish === false && (
+        {config?.can_publish === false && config?.can_publish_insights === false && (
           <p className="mt-3 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-            Publishing is unavailable — the server has no CMS connection
-            configured. Articles can still be written, read and downloaded.
+            Publishing is unavailable — the server has no CMS or Insights
+            connection configured. Articles can still be written, read and
+            downloaded.
+          </p>
+        )}
+
+        {inInsights && (
+          <p className="mt-3 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            Filed {run.articles.length} article
+            {run.articles.length === 1 ? "" : "s"} in JobShout.com Insights.
+            Nothing is public until an editor approves it in the Insights
+            review queue (/insights/review on jobshout.com).
           </p>
         )}
 

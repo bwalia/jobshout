@@ -84,6 +84,13 @@ cms:
   timeout: "30s"
   authorName: "JobShout Article Writer"
 
+# JobShout.com Insights (jobshout.com/insights). The jobshout-com chart is
+# installed into the same ring namespace, so its API is reachable by Service
+# name and its jobshout-com-internal Secret (JOBSHOUT_INTERNAL_TOKEN) can be
+# mounted here. Empty apiURL turns the destination off.
+insights:
+  apiURL: "http://jobshout-com-api:8088"
+
 # In-cluster nginx gateway. The wslproxy edge routes the whole host to a single
 # backend, so the ingress points at this gateway and nginx fans traffic out by
 # path (/api + /webhooks -> API, everything else -> web), same as beaconpulse.

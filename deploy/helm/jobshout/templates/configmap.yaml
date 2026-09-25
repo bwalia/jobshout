@@ -53,6 +53,10 @@ data:
   OPSAPI_NAMESPACE: {{ .Values.cms.namespace | quote }}
   OPSAPI_TIMEOUT: {{ .Values.cms.timeout | default "30s" | quote }}
   BLOG_AUTHOR_NAME: {{ .Values.cms.authorName | default "JobShout Article Writer" | quote }}
+  # JobShout.com Insights — a second destination for the Article Writer. The
+  # token arrives from jobshout-com's own Secret (see api.yaml); without it
+  # this URL alone enables nothing.
+  JOBSHOUT_COM_API_URL: {{ .Values.insights.apiURL | default "" | quote }}
   # Penetration testing. Empty baseURL disables the feature (same pattern as
   # IMAGE_BASE_URL). The scanner itself lives on the workstation.
   STRIX_ENABLED: {{ .Values.pentest.enabled | default false | quote }}

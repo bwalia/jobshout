@@ -1,8 +1,9 @@
 //! Insights hub routes.
 //!
 //! Identity: the web tier forwards the signed-in user as
-//! `x-jobshout-user-email` / `x-jobshout-user-name`, signed with the shared
-//! `x-jobshout-internal-token`. The gateway also exposes `/api/` publicly, so
+//! `x-jobshout-user-email` / `x-jobshout-user-name`, and platform agents (the
+//! Article Writer) identify as `x-jobshout-agent`; both are signed with the
+//! shared `x-jobshout-internal-token`. The gateway also exposes `/api/` publicly, so
 //! a request without the matching token is treated as a forgery, and the
 //! gateway strips these headers from public traffic as a second line.
 
@@ -67,7 +68,8 @@ fn actor(state: &AppState, headers: &HeaderMap) -> Result<Option<Actor>, ApiErro
             .to_string()
     };
     let email = text("x-jobshout-user-email");
-    if email.is_empty() {
+    let agent = text("x-jobshout-agent");
+    if email.is_empty() && agent.is_empty() {
         return Ok(None);
     }
     if let Some(expected) = &state.internal_token {
@@ -79,6 +81,11 @@ fn actor(state: &AppState, headers: &HeaderMap) -> Result<Option<Actor>, ApiErro
                 "untrusted identity headers".into(),
             )));
         }
+    }
+    // An agent header wins over a user header: a platform agent acts as
+    // itself, never on behalf of whoever launched it.
+    if !agent.is_empty() {
+        return state.insights.agent_actor(&agent).map(Some).map_err(err);
     }
     Ok(Some(
         state.insights.actor(&email, &text("x-jobshout-user-name")),

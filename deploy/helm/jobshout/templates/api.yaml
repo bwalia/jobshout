@@ -73,6 +73,17 @@ spec:
                 name: {{ . }}
                 optional: true
             {{- end }}
+            {{- /*
+              JobShout.com's web->API token, owned by the jobshout-com chart in
+              the same namespace. Sharing it lets the Article Writer file in
+              Insights as an agent. Optional: a ring without jobshout-com starts
+              fine and the Insights destination stays off.
+            */}}
+            {{- if .Values.insights.apiURL }}
+            - secretRef:
+                name: jobshout-com-internal
+                optional: true
+            {{- end }}
           env:
             - name: DATABASE_URL
               value: "postgres://$(DATABASE_USER):$(DATABASE_PASSWORD)@$(DATABASE_HOST):$(DATABASE_PORT)/$(DATABASE_NAME)?sslmode=$(DATABASE_SSLMODE)"
