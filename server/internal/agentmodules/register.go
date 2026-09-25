@@ -14,6 +14,7 @@ import (
 	"github.com/jobshout/server/internal/agentmodule"
 	"github.com/jobshout/server/internal/blog"
 	"github.com/jobshout/server/internal/career"
+	"github.com/jobshout/server/internal/course"
 	"github.com/jobshout/server/internal/creditcontroller"
 	"github.com/jobshout/server/internal/images"
 	"github.com/jobshout/server/internal/mail"
@@ -46,6 +47,7 @@ type Deps struct {
 	SEO              seo.Runner
 	SecretsRotation  secretsrot.Runner
 	LinuxPatch       linuxpatch.Runner
+	Course           course.Runner
 }
 
 func init() {
@@ -76,6 +78,7 @@ func Register(d Deps) {
 	agentmodule.Register(seo.Module(d.SEO))
 	agentmodule.Register(secretsrot.Module(d.SecretsRotation))
 	agentmodule.Register(linuxpatch.Module(d.LinuxPatch))
+	agentmodule.Register(course.Module(d.Course))
 }
 
 type imageAdapter struct{ svc *service.ImageService }

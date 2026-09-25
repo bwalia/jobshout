@@ -17,6 +17,7 @@ import {
   Image as ImageIcon,
   Search,
   Upload,
+  GraduationCap,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -74,6 +75,7 @@ const RAIL_ICONS: Record<string, LucideIcon> = {
   newspaper: Newspaper,
   image: ImageIcon,
   search: Search,
+  "graduation-cap": GraduationCap,
 };
 
 const AGENT_UUID =

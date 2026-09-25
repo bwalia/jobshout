@@ -14,6 +14,7 @@ import { SecretsRotationAgentClient } from "@/components/SecretsRotationAgentCli
 import { LinuxPatchAgentClient } from "@/components/LinuxPatchAgentClient";
 import { ArticlesView } from "@/components/articles/ArticlesView";
 import { ImagesView } from "@/components/image/ImagesView";
+import { CourseGeneratorClient } from "@/components/courses/CourseGeneratorClient";
 
 /**
  * Optional product UI that owns the Task Manager tab (replaces the schema form).
@@ -39,4 +40,5 @@ export const AGENT_CLIENTS: Record<string, ComponentType> = {
   images: function ImageGeneratorClient() {
     return <ImagesView hideHeader />;
   },
+  course_generator: CourseGeneratorClient,
 };
