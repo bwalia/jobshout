@@ -465,9 +465,14 @@ func blogRequestFromInput(in map[string]any) (model.GenerateBlogRequest, error) 
 	// firing without being rewritten.
 	req.Normalize()
 	if err := req.Validate(); err != nil {
+		// The reason leads, because there are now two of them — a schedule with
+		// nothing to write, and one naming an audience that does not exist —
+		// and the fix is different for each. Both pause the task, so the
+		// message is the only thing the owner has to go on.
 		return model.GenerateBlogRequest{}, fmt.Errorf(
-			"%w: this article schedule has nothing to write (%v). Edit it and choose "+
-				"\"Anything trending\", focus areas or a fixed topic, then resume it — it has been paused",
+			"%w: this article schedule cannot run: %v. Edit it and resume it — it has "+
+				"been paused. An article schedule needs \"Anything trending\", focus areas "+
+				"or a fixed topic, and a valid audience",
 			errTaskMisconfigured, err)
 	}
 	return req, nil

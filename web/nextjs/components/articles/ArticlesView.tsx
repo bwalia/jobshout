@@ -22,6 +22,8 @@ import {
   useRetryBlogRun,
 } from "@/lib/hooks/useBlog";
 import { GenerateArticleDialog } from "@/components/blog/GenerateArticleDialog";
+import { useAgentSchemas } from "@/lib/hooks/useAgentSchemas";
+import { fieldOptions } from "@/lib/agents/input-schemas";
 import { SignalDot } from "@/components/ui/signal-dot";
 import { cn } from "@/lib/utils/cn";
 import { blogRunTitle, type BlogRun, type BlogRunStatus } from "@/lib/types/blog";
@@ -78,6 +80,23 @@ function currentStepLabel(run: BlogRun): string | null {
   return run.steps.find((s) => s.status === "running")?.label ?? null;
 }
 
+/**
+ * The reader a run was written for, as a label rather than a key.
+ *
+ * Absent for a developer run — that is the default, and badging the ordinary
+ * case would make every card noisier without telling anyone anything. The
+ * labels come from GET /agent-schemas, so a reader added in Go shows up here
+ * without this file changing.
+ */
+function audienceLabel(run: BlogRun, catalog: ReturnType<typeof useAgentSchemas>["data"]): string {
+  const key = run.options?.audience;
+  if (!key) return "";
+  const match = fieldOptions(catalog ?? [], "article_writer", "audience").find(
+    (o) => o.value === key
+  );
+  return match?.label ?? key;
+}
+
 function RunCard({ run }: { run: BlogRun }) {
   const step = currentStepLabel(run);
   const retry = useRetryBlogRun();
@@ -92,6 +111,8 @@ function RunCard({ run }: { run: BlogRun }) {
     fn();
   };
   const title = blogRunTitle(run);
+  const { data: agentCatalog } = useAgentSchemas();
+  const reader = audienceLabel(run, agentCatalog);
 
   return (
     <Link
@@ -108,6 +129,21 @@ function RunCard({ run }: { run: BlogRun }) {
       {run.topics.length > 1 && (
         <p className="mt-1.5 line-clamp-2 text-xs text-muted-foreground">
           {run.topics.join(" · ")}
+        </p>
+      )}
+
+      {(reader || run.options?.industry) && (
+        <p className="mt-2 flex flex-wrap items-center gap-1.5">
+          {reader && (
+            <span className="rounded bg-muted px-1.5 py-0.5 text-2xs text-muted-foreground">
+              {reader}
+            </span>
+          )}
+          {run.options?.industry && (
+            <span className="rounded bg-muted px-1.5 py-0.5 text-2xs text-muted-foreground">
+              {run.options.industry}
+            </span>
+          )}
         </p>
       )}
 

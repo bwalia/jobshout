@@ -9,6 +9,7 @@ import (
 
 	"github.com/jobshout/server/internal/agentmodule"
 	"github.com/jobshout/server/internal/agentschema"
+	"github.com/jobshout/server/internal/audience"
 	"github.com/jobshout/server/internal/model"
 )
 
@@ -26,8 +27,8 @@ func Module(w Writer) agentmodule.Module {
 		Label:    "Article Writer",
 		Icon:     "newspaper",
 		TabSlug:  "articles",
-		Hint:     "Give a topic to research. The writer picks its own title from sources.",
-		ChatHint: "To write an article, call agent_execute on the Article Writer (or article_generate). Do not invent a topic.",
+		Hint:     "Give a topic and say who is reading. The writer picks its own title from sources.",
+		ChatHint: "To write an article, call agent_execute on the Article Writer (or article_generate). Do not invent a topic. Ask who it is for — developers, a technote, or a business audience — rather than assuming developers.",
 		Schema:   schema(),
 		Seed:     Seed,
 		Launch:   launch(w),
@@ -43,10 +44,18 @@ func schema() agentschema.Schema {
 	return agentschema.Schema{
 		Builtin:        model.BuiltinArticleWriter,
 		SpecialistTool: "article_generate",
-		Hint:           "Give a topic to research. The writer picks its own title from sources.",
+		Hint:           "Give a topic and say who is reading. The writer picks its own title from sources.",
 		Fields: []agentschema.Field{
 			{Key: "topic", Label: "Topic", Type: "text", Required: true, MinLength: 3, Placeholder: "e.g. Edge AI inference in 2026", Question: "What should I write about?"},
-			{Key: "context", Label: "Context (optional)", Type: "textarea", Placeholder: "Audience, angle, points to cover or avoid"},
+			{
+				Key: "audience", Label: "Written for", Type: "select",
+				Question: "Who is reading this — developers, or a business audience?",
+				Default:  audience.DefaultKey,
+				Help:     "Changes how it is researched, planned, written and reviewed, not just the wording.",
+				Options:  audienceOptions(),
+			},
+			{Key: "industry", Label: "Industry (optional)", Type: "text", Placeholder: "e.g. NHS trusts, 3PL logistics, commercial property", Help: "Frames the examples and consequences for one sector."},
+			{Key: "context", Label: "Context (optional)", Type: "textarea", Placeholder: "Angle, points to cover or avoid"},
 			{Key: "model", Label: "Model override (optional)", Type: "text", Placeholder: "agent default"},
 		},
 		TitleRules: []agentschema.TitleRule{
@@ -54,15 +63,34 @@ func schema() agentschema.Schema {
 		},
 		DescRules: []agentschema.DescRule{
 			{Key: "topic", Prefix: "Topic: "},
+			{Key: "audience", Prefix: "For: "},
+			{Key: "industry", Prefix: "Industry: "},
 			{Key: "context"},
 		},
 	}
 }
 
+// audienceOptions is the audience registry as schema picker entries.
+//
+// The mapping lives here rather than in the audience package because that
+// package deliberately imports nothing from the server — it is consumed by
+// model, research and blog, and a dependency on model would be a cycle.
+//
+// Adding a reader is adding a row to audience.profiles: the form, the chat
+// interview and the schedule picker all read this.
+func audienceOptions() []model.ClarifyOption {
+	opts := audience.Options()
+	out := make([]model.ClarifyOption, 0, len(opts))
+	for _, o := range opts {
+		out = append(out, model.ClarifyOption{Label: o.Label, Value: o.Value})
+	}
+	return out
+}
+
 // Seed is the built-in Article Writer.
 func Seed(orgID uuid.UUID) *model.Agent {
-	desc := "Writes SEO-optimised technical articles in markdown, converts them to HTML, and files them for review — as CMS drafts and in the JobShout.com Insights review queue."
-	prompt := "You are a technical blog writer for a developer audience. You produce high-quality, SEO-optimised articles in pure markdown: a single H1 title, H2/H3 structure, 800-1200 words, at least one code block where it helps the reader, and a short Further Reading list."
+	desc := "Writes SEO-optimised articles in markdown for whichever audience a run names — developer deep dives, developer technotes, or plain-English business briefings — converts them to HTML, and files them for review as CMS drafts and in the JobShout.com Insights review queue."
+	prompt := "You are a content writer. Every run tells you who is reading — a developer audience, an engineer who wants the task solved, or a business manager who does not write code — and that decides how you research, structure and write the piece, not just its wording. You produce high-quality, SEO-optimised articles in pure markdown: a single H1 title, H2/H3 structure, and code only where the reader is someone who would run it. You write from verified sources and never invent a citation."
 	return &model.Agent{
 		ID:           uuid.New(),
 		OrgID:        orgID,
@@ -89,8 +117,10 @@ func launch(w Writer) agentmodule.LaunchFunc {
 				Topic:   strings.TrimSpace(in.Values["topic"]),
 				Context: strings.TrimSpace(in.Values["context"]),
 			}},
-			Model:  strings.TrimSpace(in.Values["model"]),
-			TaskID: &tid,
+			Audience: strings.TrimSpace(in.Values["audience"]),
+			Industry: strings.TrimSpace(in.Values["industry"]),
+			Model:    strings.TrimSpace(in.Values["model"]),
+			TaskID:   &tid,
 		})
 		if err != nil {
 			return nil, err

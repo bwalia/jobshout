@@ -255,6 +255,40 @@ export function catalogHasBuiltin(
   return Boolean(builtin && catalog.some((s) => s.builtin === builtin));
 }
 
+/**
+ * One specialist field's picker options, straight from the catalog.
+ *
+ * All specialists are wired this way: one schema, in Go, which the web reads.
+ * A screen that needs a specialist's choices — the scheduler's audience picker,
+ * say — asks for them here rather than keeping a second copy in TypeScript that
+ * has to be edited every time a Go profile is added.
+ *
+ * Returns [] while GET /agent-schemas is in flight or when the field is not a
+ * picker, so a caller renders an empty select rather than inventing entries.
+ */
+export function fieldOptions(
+  catalog: WireSchema[],
+  builtin: string,
+  fieldKey: string
+): AgentFieldOption[] {
+  const field = catalog
+    .find((s) => s.builtin === builtin)
+    ?.fields?.find((f) => f.key === fieldKey);
+  return field?.options ?? [];
+}
+
+/** A specialist field's server-side default, or "" when it has none. */
+export function fieldDefault(
+  catalog: WireSchema[],
+  builtin: string,
+  fieldKey: string
+): string {
+  const field = catalog
+    .find((s) => s.builtin === builtin)
+    ?.fields?.find((f) => f.key === fieldKey);
+  return field?.default != null ? String(field.default) : "";
+}
+
 function pendingSpecialistSchema(builtin: string): AgentInputSchema {
   return {
     kind: builtin,

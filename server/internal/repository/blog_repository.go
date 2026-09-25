@@ -61,7 +61,10 @@ type BlogRepository interface {
 	// this is how that gets filtered. Added with the schema it depends on
 	// (migration 022 creates the supporting index) rather than left to the
 	// feature that will consume it.
-	RecentTopics(ctx context.Context, orgID uuid.UUID, since time.Time) ([]string, error)
+	// audience scopes the answer to one reader — "" is the default developer
+	// profile. Two schedules writing for different readers are meant to cover
+	// the same subject; without this they lock each other out for a fortnight.
+	RecentTopics(ctx context.Context, orgID uuid.UUID, since time.Time, audience string) ([]string, error)
 	// TouchHeartbeat records that this process is still writing the run, so the
 	// orphan reconciler does not fail a healthy long LLM call.
 	TouchHeartbeat(ctx context.Context, runID uuid.UUID) error
@@ -126,7 +129,7 @@ const blogArticleColumns = `
 	id, run_id, org_id, topic, title, slug, path, references_json, markdown, html,
 	post_uuid, post_status, posted_at, word_count, created_at,
 	cover_image_url, cover_image_prompt, cover_image_meta,
-	insights_item_id, insights_slug, insights_status, insights_posted_at`
+	insights_item_id, insights_slug, insights_status, insights_posted_at, audience, industry`
 
 // scanBlogArticle reads one row in blogArticleColumns order.
 func scanBlogArticle(row pgx.Row) (*model.BlogArticle, error) {
@@ -140,15 +143,24 @@ func scanBlogArticle(row pgx.Row) (*model.BlogArticle, error) {
 	// leaves cover images switched off.
 	var coverURL, coverPrompt *string
 	var coverMetaRaw []byte
+	// audience/industry are nullable: every article written before readers
+	// existed is a developer piece, which the audience package spells as empty.
+	var aud, industry *string
 	err := row.Scan(
 		&a.ID, &a.RunID, &a.OrgID, &a.Topic, &title, &a.Slug, &a.Path, &referencesRaw,
 		&a.Markdown, &a.HTML,
 		&a.PostUUID, &a.PostStatus, &a.PostedAt, &a.WordCount, &a.CreatedAt,
 		&coverURL, &coverPrompt, &coverMetaRaw,
-		&a.InsightsItemID, &a.InsightsSlug, &a.InsightsStatus, &a.InsightsPostedAt,
+		&a.InsightsItemID, &a.InsightsSlug, &a.InsightsStatus, &a.InsightsPostedAt, &aud, &industry,
 	)
 	if err != nil {
 		return nil, err
+	}
+	if aud != nil {
+		a.Audience = *aud
+	}
+	if industry != nil {
+		a.Industry = *industry
 	}
 	if title != nil {
 		a.Title = *title
@@ -336,8 +348,8 @@ func (r *blogRepository) CreateArticles(ctx context.Context, articles []model.Bl
 	const sql = `
 		INSERT INTO blog_articles
 		    (id, run_id, org_id, topic, title, slug, path, references_json, markdown, html, word_count,
-		     cover_image_url, cover_image_prompt, cover_image_meta, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, NOW())`
+		     cover_image_url, cover_image_prompt, cover_image_meta, audience, industry, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16, NOW())`
 	for _, a := range articles {
 		refsJSON, err := json.Marshal(a.References)
 		if err != nil {
@@ -349,7 +361,7 @@ func (r *blogRepository) CreateArticles(ctx context.Context, articles []model.Bl
 		}
 		batch.Queue(sql, a.ID, a.RunID, a.OrgID, a.Topic, a.Title, a.Slug, a.Path,
 			refsJSON, a.Markdown, a.HTML, a.WordCount,
-			a.CoverImageURL, a.CoverImagePrompt, coverJSON)
+			a.CoverImageURL, a.CoverImagePrompt, coverJSON, a.Audience, a.Industry)
 	}
 
 	br := r.pool.SendBatch(ctx, batch)
@@ -396,7 +408,7 @@ func (r *blogRepository) GetArticle(ctx context.Context, id uuid.UUID) (*model.B
 	return a, nil
 }
 
-func (r *blogRepository) RecentTopics(ctx context.Context, orgID uuid.UUID, since time.Time) ([]string, error) {
+func (r *blogRepository) RecentTopics(ctx context.Context, orgID uuid.UUID, since time.Time, audience string) ([]string, error) {
 	// Two sources, unioned, because an article is written minutes after the
 	// topic is chosen.
 	//
@@ -415,12 +427,20 @@ func (r *blogRepository) RecentTopics(ctx context.Context, orgID uuid.UUID, sinc
 	// mention, so a subject seen three times contributes one row. The outer
 	// ordering is what the caller asked for; the inner one is what DISTINCT ON
 	// requires to pick which duplicate survives.
+	//
+	// Both halves are scoped to one audience. A developer deep dive and a
+	// plain-English briefing on the same subject are two different articles and
+	// an org running both schedules wants both — so what the developer schedule
+	// wrote on Monday must not lock the business schedule out on Tuesday.
+	// COALESCE against '' is what makes a pre-audience row read as the default
+	// developer profile, which is what it is.
 	const sql = `
 		SELECT topic FROM (
 		    SELECT DISTINCT ON (topic) topic, created_at FROM (
 		        SELECT topic, created_at
 		        FROM blog_articles
 		        WHERE org_id = $1 AND created_at >= $2
+		          AND COALESCE(audience, '') = $3
 
 		        UNION ALL
 
@@ -430,12 +450,13 @@ func (r *blogRepository) RecentTopics(ctx context.Context, orgID uuid.UUID, sinc
 		          AND r.created_at >= $2
 		          AND r.status <> 'failed'
 		          AND COALESCE(b->>'topic', '') <> ''
+		          AND COALESCE(b->>'audience', '') = $3
 		    ) all_topics
 		    ORDER BY topic, created_at DESC
 		) t
 		ORDER BY created_at DESC`
 
-	rows, err := r.pool.Query(ctx, sql, orgID, since)
+	rows, err := r.pool.Query(ctx, sql, orgID, since, audience)
 	if err != nil {
 		return nil, fmt.Errorf("blog_repo: recent topics: %w", err)
 	}

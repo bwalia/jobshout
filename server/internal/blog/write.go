@@ -9,6 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/jobshout/server/internal/audience"
 	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/research"
@@ -100,14 +101,16 @@ func (r *Runner) plan(ctx context.Context, modelName string, brief model.BlogBri
 		extraJSON = `, "figures": [{"kind":"comparison","section":"...","content":"..."}]`
 	}
 
-	prompt := fmt.Sprintf(`You are planning a technical article for a developer audience.
+	reader := audience.For(brief.Audience)
+
+	prompt := fmt.Sprintf(`%s
 
 TOPIC (a subject, not a title):
 %s
 
 GUIDANCE FROM THE REQUESTER:
 %s
-
+%s
 WHAT THE RESEARCH FOUND:
 %s
 
@@ -116,10 +119,10 @@ VERIFIED FINDINGS YOU MAY BUILD ON:
 
 Decide:
 1. A title. Base it on what the research actually found — the specific, current
-   thing worth saying about this topic — not on restating the topic. Make it
-   concrete and under 70 characters. No colons-and-subtitles, no "A Guide To".
+   thing worth saying about this topic — not on restating the topic.
+   %s
 2. One sentence on the angle: what a reader gets from this piece.
-3. Four to six section headings that deliver that angle.
+3. %s section headings that deliver that angle.
 4. A cover brief: one concrete visual metaphor unique to this topic, one or two
    focal objects (not generic "tools, documents, agents"), and a one-word
    accent note (e.g. "amber", "ice", "copper") that still sits with teal/coral.
@@ -128,10 +131,14 @@ The title must be about the TOPIC given above; research that wandered off it is 
 
 Respond with JSON only, in exactly this shape:
 {"title": "...", "angle": "...", "sections": ["...", "..."], "cover_metaphor": "...", "cover_objects": "...", "cover_accent": "..."%s}`,
+		reader.PlanningLine(),
 		brief.Topic,
 		guidanceOrNone(brief.Context),
+		industryBlock(brief),
 		orNone(rb.Summary),
 		formatFindings(rb.Findings),
+		reader.TitleStyle,
+		reader.Sections,
 		figureAsk,
 		extraJSON,
 	)
@@ -156,7 +163,9 @@ Respond with JSON only, in exactly this shape:
 func (r *Runner) draft(
 	ctx context.Context, modelName string, brief model.BlogBrief, rb *research.Brief, plan *writePlan,
 ) (string, error) {
-	prompt := fmt.Sprintf(`You are writing a technical article for a developer audience.
+	reader := audience.For(brief.Audience)
+
+	prompt := fmt.Sprintf(`%s
 
 TITLE: %s
 ANGLE: %s
@@ -166,7 +175,7 @@ SECTIONS TO COVER:
 
 GUIDANCE FROM THE REQUESTER:
 %s
-
+%s
 SOURCES — these are the only facts you may present as established. Each is
 numbered; cite one by putting its number in square brackets, like [2], at the
 end of the sentence that relies on it.
@@ -176,9 +185,7 @@ Requirements:
 - Pure markdown. No code fence around the whole response, no HTML.
 - Start with a single H1 line: # %s
 - Use H2/H3 headings for the sections above.
-- 900-1400 words.
-- Include at least one code block where it genuinely helps.
-- Include a DIAGRAM where one genuinely helps — see the diagram rules below.
+%s
 - When comparing options, versions or trade-offs, write a markdown table.
 - Cite a source with [n] wherever you state a specific fact, version, number or
   quotation drawn from it. Do not cite a number that is not in the list above.
@@ -196,12 +203,15 @@ Requirements:
 %s
 
 Return only the markdown article — no preamble, no meta commentary.`,
+		reader.WritingLine(),
 		plan.Title,
 		plan.Angle,
 		formatSections(plan.Sections),
 		guidanceOrNone(brief.Context),
+		industryBlock(brief),
 		formatSources(rb),
 		plan.Title,
+		reader.DraftRules(),
 		r.visualRules(),
 		r.plannedFiguresNote(plan),
 	)
@@ -232,9 +242,12 @@ type critique struct {
 // defects, then fix those named defects, gives the second pass something
 // concrete to act on — and gives us a record of what it thought was wrong.
 func (r *Runner) review(
-	ctx context.Context, modelName string, rb *research.Brief, plan *writePlan, markdown string,
+	ctx context.Context, modelName string, brief model.BlogBrief,
+	rb *research.Brief, plan *writePlan, markdown string,
 ) (*critique, error) {
-	prompt := fmt.Sprintf(`You are reviewing a draft technical article before publication. Be a harsh critic.
+	reader := audience.For(brief.Audience)
+
+	prompt := fmt.Sprintf(`%s
 
 INTENDED TITLE: %s
 INTENDED ANGLE: %s
@@ -259,7 +272,6 @@ Find concrete problems. Look specifically for:
 - Filler: paragraphs that restate the heading, or that would survive being
   deleted without the reader losing anything.
 - Sections that do not deliver the intended angle.
-- Missing or broken code blocks, or code that would not run.
 - Sections that are too thin to be useful — a heading with one short paragraph
   under it.
 - Diagrams drawn as ASCII art instead of a mermaid fence — boxes made of dashes,
@@ -271,13 +283,16 @@ Find concrete problems. Look specifically for:
   generic office instead of a labeled figure (flow, comparison, architecture,
   process, or annotated concept). Flag it so the revision can rewrite the
   fence as a specific kind with the facts to render.
+%s
 
 List each problem as one specific, actionable sentence naming where it occurs.
 If the draft has no real problems, return an empty list — do not invent work.
 
 Respond with JSON only, in exactly this shape:
 {"issues": ["...", "..."]}`,
-		plan.Title, plan.Angle, formatSources(rb), markdown)
+		reader.ReviewLine(),
+		plan.Title, plan.Angle, formatSources(rb), markdown,
+		reader.ReviewExtras())
 
 	var c critique
 	if err := r.generateJSON(ctx, modelName, "review", prompt, maxPlanTokens, &c); err != nil {
@@ -296,9 +311,13 @@ Respond with JSON only, in exactly this shape:
 
 // revise rewrites the draft to address the critique.
 func (r *Runner) revise(
-	ctx context.Context, modelName string, rb *research.Brief, plan *writePlan, markdown string, c *critique,
+	ctx context.Context, modelName string, brief model.BlogBrief,
+	rb *research.Brief, plan *writePlan, markdown string, c *critique,
 ) (string, error) {
-	prompt := fmt.Sprintf(`You are revising a technical article to fix specific problems a reviewer found.
+	reader := audience.For(brief.Audience)
+
+	prompt := fmt.Sprintf(`You are revising %s to fix specific problems a reviewer found.
+It is written for %s, and every fix has to keep it that way.
 
 TITLE: %s
 
@@ -330,6 +349,7 @@ article's actual labels, rows or steps. Do not add a "Further Reading" or
 
 Return only the revised markdown article — no preamble, no commentary on what
 you changed.`,
+		reader.IndefinitePiece(), reader.Reader,
 		plan.Title, formatSources(rb), formatIssues(c.Issues), markdown)
 
 	resp, err := r.generate(ctx, modelName, prompt)
@@ -501,14 +521,33 @@ func formatFigures(figs []figureBrief) string {
 	return b.String()
 }
 
-// Target article length. The draft prompt asks for this range, but asking is
-// not getting: a live run against a local model produced 382 words against the
-// same instruction. So the floor is checked rather than trusted, which is the
-// same stance this package takes on citations.
+// Target article length for the default developer article. The draft prompt
+// asks for this range, but asking is not getting: a live run against a local
+// model produced 382 words against the same instruction. So the floor is
+// checked rather than trusted, which is the same stance this package takes on
+// citations.
+//
+// Every reader has its own range now — a technote that runs to 1400 words has
+// stopped being a technote — so the pipeline checks audience.Profile.MinWords
+// and these two survive as the developer profile's numbers, which is what
+// callers outside this package (and the tests) mean when they ask.
 const (
 	MinArticleWords = 900
 	MaxArticleWords = 1400
 )
+
+// industryBlock is the sector framing for a brief, as its own prompt block.
+//
+// It returns a trailing newline when there is one and the empty string when
+// there is not, so the prompts splice it in without leaving a stray blank
+// heading on the runs — the overwhelming majority — that name no industry.
+func industryBlock(brief model.BlogBrief) string {
+	s := audience.IndustryBrief(brief.Industry)
+	if s == "" {
+		return ""
+	}
+	return "\n" + s + "\n"
+}
 
 // expand fills out an article that came in under the target length.
 //
@@ -521,14 +560,16 @@ func (r *Runner) expand(
 	ctx context.Context, modelName string, brief model.BlogBrief, rb *research.Brief,
 	plan *writePlan, markdown string, currentWords int,
 ) (string, error) {
-	prompt := fmt.Sprintf(`This article is too short. It is %d words and needs to be %d-%d.
+	reader := audience.For(brief.Audience)
+
+	prompt := fmt.Sprintf(`%s
 
 TITLE: %s
 ANGLE: %s
 
 GUIDANCE FROM THE REQUESTER:
 %s
-
+%s
 SOURCES you may draw on — cite by number, e.g. [2]:
 %s
 
@@ -538,9 +579,7 @@ CURRENT ARTICLE:
 Expand it to at least %d words by adding substance, not padding. Specifically:
 - Develop the sections that are thinnest. A section of one short paragraph is
   the first place to look.
-- Add the practical detail a working engineer needs: what the trade-offs are,
-  what breaks, what to watch for, what the migration actually involves.
-- Add or extend a code block where it earns its place.
+%s
 - Draw on sources you have not used yet, if any are relevant.
 
 Do NOT:
@@ -553,12 +592,14 @@ Do NOT:
 Keep the existing title, structure, every citation that is already there,
 and any mermaid or illustration fences.
 Return only the expanded markdown article — no preamble, no commentary.`,
-		currentWords, MinArticleWords, MaxArticleWords,
+		reader.ExpandLine(currentWords),
 		plan.Title, plan.Angle,
 		guidanceOrNone(brief.Context),
+		industryBlock(brief),
 		formatSources(rb),
 		markdown,
-		MinArticleWords,
+		reader.MinWords,
+		reader.ExpandRules(),
 	)
 
 	resp, err := r.generate(ctx, modelName, prompt)

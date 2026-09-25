@@ -55,7 +55,7 @@ const (
 	promptDraft  = "writing a technical article"
 	promptReview = "reviewing a draft technical article"
 	promptRevise = "revising a technical article"
-	promptExpand = "This article is too short"
+	promptExpand = "is too short. It is"
 )
 
 // writeScript builds the canned responses for a single clean article.
