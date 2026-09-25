@@ -27,6 +27,7 @@ import (
 	"github.com/jobshout/server/internal/chatagent"
 	"github.com/jobshout/server/internal/chatsvc"
 	"github.com/jobshout/server/internal/config"
+	"github.com/jobshout/server/internal/course"
 	"github.com/jobshout/server/internal/costengine"
 	"github.com/jobshout/server/internal/creditcontroller"
 	"github.com/jobshout/server/internal/simpro"
@@ -222,6 +223,7 @@ func main() {
 	pentestFindingRepo := repository.NewPentestFindingRepository(pool)
 	wafLabRunRepo := repository.NewWAFLabRunRepository(pool)
 	seoRunRepo := repository.NewSEORunRepository(pool)
+	courseRepo := repository.NewCourseRepository(pool)
 	secretsRotRunRepo := repository.NewSecretsRotationRunRepository(pool)
 	linuxPatchRunRepo := repository.NewLinuxPatchRunRepository(pool)
 	reviewRunRepo := repository.NewReviewRunRepository(pool)
@@ -701,6 +703,30 @@ func main() {
 	wafLabClient := waflab.NewClient(wafLabCfg, logger)
 	wafLabSvc := service.NewWAFLabServiceWithEvents(wafLabRunRepo, securityFindingEventRepo, agentRepo, wafLabCfg, wafLabClient, logger)
 	seoSvc := service.NewSEOService(seoRunRepo, agentRepo, logger)
+	courseCfg := course.LoadConfig()
+	var courseLLM llm.Client
+	if c, err := llmRouter.For(cfg.LLMProvider); err == nil {
+		courseLLM = c
+	}
+	var courseResearcher course.Researcher
+	if researchAgent != nil {
+		courseResearcher = researchAgent
+	}
+	var courseIllus course.Illustrator
+	if imageSvc.Enabled() {
+		courseIllus = &courseIllustrator{images: imageSvc}
+	}
+	courseSvc := service.NewCourseService(courseRepo, agentRepo,
+		course.NewGenerator(courseLLM, courseResearcher, courseIllus, courseCfg, logger),
+		courseCfg, logger)
+	courseSvc.BindTasks(taskSvc)
+	logger.Info("course generator initialised",
+		zap.Bool("llm", courseLLM != nil),
+		zap.Bool("research", courseResearcher != nil),
+		zap.Bool("images", courseCfg.Images && courseIllus != nil),
+		zap.Int("max_chapters", courseCfg.MaxChapters),
+		zap.Duration("chapter_budget", courseCfg.ChapterBudget),
+	)
 	secretsRotCfg := secretsrot.LoadConfig()
 	secretsRotSvc := service.NewSecretsRotationService(secretsRotRunRepo, agentRepo, secretsRotCfg, logger)
 	logger.Info("secrets rotation agent initialised",
@@ -754,6 +780,7 @@ func main() {
 		SEO:              seoSvc,
 		SecretsRotation:  secretsRotSvc,
 		LinuxPatch:       linuxPatchSvc,
+		Course:           courseSvc,
 	})
 
 	// ─── Autonomous agent engine ────────────────────────────────────────────
@@ -958,6 +985,7 @@ func main() {
 	simproPaymentsHandler := handler.NewSimproPaymentsHandler(simproPaymentsSvc)
 	wafLabHandler := handler.NewWAFLabHandler(wafLabSvc)
 	seoHandler := handler.NewSEOHandler(seoSvc)
+	courseHandler := handler.NewCourseHandler(courseSvc)
 	secretsRotHandler := handler.NewSecretsRotationHandler(secretsRotSvc)
 	linuxPatchHandler := handler.NewLinuxPatchHandler(linuxPatchSvc)
 	abTestHandler := handler.NewABTestHandler(abTestSvc)
@@ -1339,6 +1367,14 @@ func main() {
 				r.Post("/runs/{runID}/cancel", seoHandler.CancelRun)
 			})
 
+			r.Route("/courses", func(r chi.Router) {
+				r.Get("/runs", courseHandler.ListRuns)
+				r.Post("/runs", courseHandler.CreateRun)
+				r.Get("/runs/{runID}", courseHandler.GetRun)
+				r.Get("/runs/{runID}/chapters", courseHandler.ListChapters)
+				r.Post("/runs/{runID}/cancel", courseHandler.CancelRun)
+			})
+
 			r.Route("/secrets-rotation", func(r chi.Router) {
 				r.Get("/status", secretsRotHandler.Status)
 				r.Get("/runs", secretsRotHandler.ListRuns)
@@ -1648,6 +1684,8 @@ func main() {
 	// is handled by InterruptAll below; this loop covers the rest. Does not
 	// restart generation — Retry is the user's action.
 	go blogReconciler.Start(ctx)
+	// Same for course runs: fail rows whose heartbeat stopped.
+	go courseSvc.StartReaper(ctx)
 
 	srv := &http.Server{
 		Addr:    cfg.ServerPort,
@@ -1684,6 +1722,7 @@ func main() {
 	// set first so a Generate that is still inside its HTTP handler cannot
 	// start a new goroutine after we have cancelled the ones we know about.
 	blogSvc.InterruptAll(nil)
+	courseSvc.InterruptAll()
 	cancel()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
