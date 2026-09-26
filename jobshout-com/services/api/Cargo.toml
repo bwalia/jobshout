@@ -19,6 +19,7 @@ jobshout-candidates = { path = "../../crates/jobshout-candidates" }
 jobshout-content = { path = "../../crates/jobshout-content" }
 jobshout-jobs = { path = "../../crates/jobshout-jobs" }
 jobshout-observability = { path = "../../crates/jobshout-observability" }
+jobshout-showcase = { path = "../../crates/jobshout-showcase" }
 jobshout-storage = { path = "../../crates/jobshout-storage" }
 tokio = { workspace = true }
 tracing = { workspace = true }

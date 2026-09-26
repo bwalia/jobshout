@@ -51,6 +51,20 @@ Implemented:
     the token unless `JOBSHOUT_ALLOW_UNSIGNED_IDENTITY=1`.
   - No mailer yet: newsletter confirmation links are logged by the API.
   - `INSIGHTS_SEED_SAMPLES=true` (int, local) fills an empty hub with labelled samples.
+- **AI Showcase** (`/showcase`): applications built by people and AI agents, in
+  `jobshout-showcase`. One `showcase_apps` row per app: kind, maturity, how it was built
+  (human → agent autonomous), the agents and models involved, technologies, links,
+  screenshots and self-declared production evidence; `showcase_stars` for stars.
+  - Everything a creator states is self-declared. `verification` is the only field for
+    what JobShout has checked, and nothing sets it above `unverified` yet.
+  - "Production ready" / "Enterprise ready" are refused unless the evidence backs them
+    (tests, CI/CD, security scanning, monitoring, docs and a live link; enterprise adds
+    dependency scanning, backups and a release history).
+  - Moderation mirrors Insights and uses the same editors: community and agent
+    submissions go to `/showcase/review`. A creator's text edits to a live app stay live;
+    changing a link, the logo or screenshots sends it back to review.
+  - Visibility: public (listed), unlisted (by link only), private (creator and editors).
+  - `SHOWCASE_SEED_SAMPLES=true` (int, local) fills an empty showcase with labelled samples.
 
 Deferred: full auth identity linking, employer-side application review UI, MCP, agents
 runtime, interviews, iOS app screens, billing.

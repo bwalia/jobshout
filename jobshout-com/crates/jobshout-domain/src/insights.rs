@@ -6,34 +6,6 @@ use uuid::Uuid;
 
 pub type InsightId = Uuid;
 
-macro_rules! string_enum {
-    ($(#[$meta:meta])* $name:ident { $($variant:ident => $s:literal),+ $(,)? }) => {
-        $(#[$meta])*
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-        #[serde(rename_all = "snake_case")]
-        pub enum $name {
-            $($variant),+
-        }
-
-        impl $name {
-            pub const ALL: &'static [$name] = &[$($name::$variant),+];
-
-            pub fn as_str(self) -> &'static str {
-                match self {
-                    $($name::$variant => $s),+
-                }
-            }
-
-            pub fn parse(s: &str) -> Option<Self> {
-                match s {
-                    $($s => Some($name::$variant),)+
-                    _ => None,
-                }
-            }
-        }
-    };
-}
-
 string_enum! {
     /// What the item is. Every kind shares one table, feed and review queue.
     InsightKind {

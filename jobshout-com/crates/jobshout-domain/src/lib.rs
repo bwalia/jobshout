@@ -10,8 +10,39 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
+/// A string-backed enum with `as_str`/`parse` and serde in snake_case.
+macro_rules! string_enum {
+    ($(#[$meta:meta])* $name:ident { $($variant:ident => $s:literal),+ $(,)? }) => {
+        $(#[$meta])*
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        #[serde(rename_all = "snake_case")]
+        pub enum $name {
+            $($variant),+
+        }
+
+        impl $name {
+            pub const ALL: &'static [$name] = &[$($name::$variant),+];
+
+            pub fn as_str(self) -> &'static str {
+                match self {
+                    $($name::$variant => $s),+
+                }
+            }
+
+            pub fn parse(s: &str) -> Option<Self> {
+                match s {
+                    $($s => Some($name::$variant),)+
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+
 mod insights;
+mod showcase;
 pub use insights::*;
+pub use showcase::*;
 
 pub type OrganisationId = Uuid;
 pub type JobId = Uuid;
