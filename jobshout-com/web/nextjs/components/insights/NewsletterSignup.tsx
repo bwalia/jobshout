@@ -1,7 +1,7 @@
 "use client";
 
 import { useFormState, useFormStatus } from "react-dom";
-import { EMPTY_FORM_STATE } from "@/app/actions";
+import { EMPTY_FORM_STATE } from "@/lib/form-state";
 import { subscribeAction } from "@/app/insights/actions";
 import { CheckCircleIcon, MailIcon } from "@/components/icons";
 import { Button, cx } from "@/components/ui";

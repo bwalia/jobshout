@@ -25,6 +25,7 @@ pub const MAX_OVERSIGHT: usize = 1_000;
 pub const MAX_TOOLS: usize = 20;
 pub const MAX_MCP: usize = 15;
 pub const MIN_TEAM: usize = 2;
+pub const MAX_JOBS: usize = 10;
 /// Apps a community creator may add per rolling hour. Editors and agents are exempt.
 pub const CREATES_PER_HOUR: i64 = 10;
 
@@ -199,6 +200,8 @@ pub struct Cleaned {
     /// Directory links, de-duplicated by slug, in the order given.
     pub agent_links: Vec<ShowcaseLinkInput>,
     pub team_slug: Option<String>,
+    /// Linked jobs, each once, in the order given.
+    pub job_ids: Vec<uuid::Uuid>,
 }
 
 fn clean_urls(urls: &[String]) -> Vec<String> {
@@ -378,6 +381,15 @@ pub fn validate(kind: ShowcaseKind, input: &ShowcaseAppInput) -> Result<Cleaned,
     {
         return v("agent roles must be 80 characters or fewer");
     }
+    let mut job_ids: Vec<uuid::Uuid> = Vec::new();
+    for id in &input.job_ids {
+        if !job_ids.contains(id) {
+            job_ids.push(*id);
+        }
+    }
+    if job_ids.len() > MAX_JOBS {
+        return v("link at most 10 open roles");
+    }
 
     let cleaned = Cleaned {
         screenshots,
@@ -389,6 +401,7 @@ pub fn validate(kind: ShowcaseKind, input: &ShowcaseAppInput) -> Result<Cleaned,
         capabilities,
         agent_links,
         team_slug,
+        job_ids,
     };
     if !input.submit {
         return Ok(cleaned);
@@ -510,6 +523,7 @@ mod tests {
             linked_agents: vec![],
             linked_team: None,
             used_in: 0,
+            jobs: vec![],
             creator_email: Some(creator.into()),
             creator_display_name: "C".into(),
             visibility: ShowcaseVisibility::Public,
@@ -897,5 +911,20 @@ mod tests {
         let mut i = agent_input();
         i.description_md = "short".into();
         assert!(msg(validate(ShowcaseKind::Agent, &i)).contains("describe the agent"));
+    }
+
+    #[test]
+    fn job_links_are_deduplicated_and_capped() {
+        let a = uuid::Uuid::new_v4();
+        let b = uuid::Uuid::new_v4();
+        let mut i = input();
+        i.job_ids = vec![a, b, a];
+        assert_eq!(validate(ShowcaseKind::App, &i).unwrap().job_ids, vec![a, b]);
+        i.job_ids = (0..11).map(|_| uuid::Uuid::new_v4()).collect();
+        assert!(msg(validate(ShowcaseKind::App, &i)).contains("at most 10"));
+        // Agents and teams can be hiring too.
+        let mut t = agent_input();
+        t.job_ids = vec![a];
+        assert!(validate(ShowcaseKind::Agent, &t).is_ok());
     }
 }

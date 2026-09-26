@@ -68,6 +68,7 @@ impl JobRepository {
         org_id: OrganisationId,
         req: CreateJobRequest,
         status: JobStatus,
+        poster_email: &str,
     ) -> Result<Job, DomainError> {
         let id = Uuid::new_v4();
         let now = Utc::now();
@@ -87,9 +88,10 @@ impl JobRepository {
             r#"
             INSERT INTO jobs (
               id, organisation_id, title, summary, description, employment_type,
-              location, compensation, requirements, status, created_at, updated_at, published_at
+              location, compensation, requirements, status, created_at, updated_at, published_at,
+              poster_email
             ) VALUES (
-              $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13
+              $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14
             )
             "#,
         )
@@ -106,6 +108,7 @@ impl JobRepository {
         .bind(now)
         .bind(now)
         .bind(published_at)
+        .bind(poster_email.trim().to_ascii_lowercase())
         .execute(&self.pool)
         .await
         .map_err(|e| DomainError::Other(e.into()))?;

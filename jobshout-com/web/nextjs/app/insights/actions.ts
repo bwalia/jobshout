@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath, revalidateTag } from "next/cache";
-import type { FormState } from "@/app/actions";
+import type { FormState } from "@/lib/form-state";
 import {
   confirmNewsletter,
   deleteInsight,

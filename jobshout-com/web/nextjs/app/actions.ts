@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import type { FormState } from "@/lib/form-state";
 import {
   applyToJob,
   createJob,
@@ -8,17 +9,9 @@ import {
   type CreateJobInput,
   type EmploymentType,
 } from "@/lib/api";
+import { currentViewer } from "@/lib/session";
 
-/** Shared shape for every form action: one error bag, one success payload. */
-export type FormState = {
-  ok: boolean;
-  message?: string;
-  fieldErrors?: Record<string, string>;
-  /** Set on success so the client can route on or show a receipt. */
-  result?: { id?: string; jobId?: string; profileId?: string; status?: string };
-};
 
-export const EMPTY_FORM_STATE: FormState = { ok: false };
 
 function text(form: FormData, key: string): string {
   return (form.get(key) as string | null)?.trim() ?? "";
@@ -145,7 +138,7 @@ export async function createJobAction(
   };
 
   try {
-    const job = await createJob(input);
+    const job = await createJob(input, await currentViewer());
     revalidatePath("/jobs");
     revalidatePath("/");
     return {

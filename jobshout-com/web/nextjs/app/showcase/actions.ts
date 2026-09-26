@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath, revalidateTag } from "next/cache";
-import type { FormState } from "@/app/actions";
+import type { FormState } from "@/lib/form-state";
 import {
   EVIDENCE,
   deleteApp,
@@ -71,6 +71,7 @@ const URL_FIELDS = ["logo_url", "repo_url", "demo_url", "website_url", "docs_url
 function fieldFor(message: string): string | null {
   const m = message.toLowerCase();
   if (m.includes("needs evidence")) return "evidence";
+  if (m.includes("open jobs you posted") || m.includes("open roles")) return "job_ids";
   if (m.includes("no team called") || m.includes("which team")) return "team_slug";
   if (m.includes("no agent called") || m.includes("at least two agents") || m.includes("link at most") || m.includes("agent roles") || m.includes("link to itself") || m.includes("link other agents")) return "agent_links";
   if (m.includes("capabilit")) return "capabilities";
@@ -174,6 +175,7 @@ export async function saveAppAction(_prev: FormState, form: FormData): Promise<F
         capabilities: form.getAll("capabilities").map(String),
         agent_links: links(form, "agent_links"),
         team_slug: links(form, "team_slug")[0]?.slug ?? "",
+        job_ids: form.getAll("job_ids").map(String),
         submit,
       },
       id,

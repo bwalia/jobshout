@@ -1,4 +1,5 @@
 use axum::extract::{Path, Query, State};
+use axum::http::HeaderMap;
 use axum::routing::get;
 use axum::{Json, Router};
 use jobshout_domain::{CreateJobRequest, Job, JobId, JobStatus};
@@ -6,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::ApiError;
+use crate::insights::actor;
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -71,11 +73,15 @@ async fn get_job(
 
 async fn create_job(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<CreateJobRequest>,
 ) -> Result<(axum::http::StatusCode, Json<Job>), ApiError> {
+    // Posting stays open to anyone; a signed-in poster is recorded so they
+    // can link the job from their showcase entries. Agents never own jobs.
+    let poster = actor(&state, &headers)?.filter(|a| !a.agent);
     let job = state
         .jobs
-        .create(body)
+        .create(body, poster.as_ref().map(|a| a.email.as_str()))
         .await
         .map_err(ApiError::from_domain)?;
     Ok((axum::http::StatusCode::CREATED, Json(job)))

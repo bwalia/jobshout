@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { BotIcon, PlusIcon, RocketIcon, SearchIcon, SparkIcon } from "@/components/icons";
+import { BotIcon, BriefcaseIcon, PlusIcon, RocketIcon, SearchIcon, SparkIcon } from "@/components/icons";
 import { AppCard } from "@/components/showcase/AppCard";
 import { Badge, EmptyState, ErrorNotice, buttonClass, cx } from "@/components/ui";
 import {
@@ -196,26 +196,28 @@ export default async function ShowcasePage({ searchParams }: { searchParams: Sea
   let apps: ShowcaseApp[] = [];
   let total = 0;
   let tags: ShowcaseTag[] = [];
-  let shelves: Record<"featured" | "agents" | "production", ShowcaseApp[]> = {
+  let shelves: Record<"featured" | "agents" | "production" | "hiring", ShowcaseApp[]> = {
     featured: [],
     agents: [],
     production: [],
+    hiring: [],
   };
   let error = "";
   try {
     const shelf = (c: Collection) =>
       front ? listApps({ collection: c, sort: "stars", limit: 3 }, viewer).then((r) => r.data) : Promise.resolve([]);
-    const [list, tagList, featured, agents, production] = await Promise.all([
+    const [list, tagList, featured, agents, production, hiring] = await Promise.all([
       listApps({ ...filters, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }, viewer),
       listTags(16),
       shelf("featured"),
       shelf("built_by_agents"),
       shelf("production_ready"),
+      shelf("hiring"),
     ]);
     apps = list.data;
     total = list.total;
     tags = tagList;
-    shelves = { featured, agents, production };
+    shelves = { featured, agents, production, hiring };
   } catch (e) {
     error = e instanceof Error ? e.message : "Could not load the showcase";
   }
@@ -332,6 +334,14 @@ export default async function ShowcasePage({ searchParams }: { searchParams: Sea
               icon={<RocketIcon className="h-5 w-5" />}
               apps={shelves.production}
               href={showcaseHref({ collection: "production_ready" })}
+            />
+            <Shelf
+              id="hiring-heading"
+              title="Hiring now"
+              lead={COLLECTIONS.hiring.blurb}
+              icon={<BriefcaseIcon className="h-5 w-5" />}
+              apps={shelves.hiring}
+              href={showcaseHref({ collection: "hiring" })}
             />
           </>
         ) : null}

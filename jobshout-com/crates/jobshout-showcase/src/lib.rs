@@ -16,7 +16,7 @@ use jobshout_content::render::markdown_to_html;
 use jobshout_content::rules::{next_free_slug, slugify};
 use jobshout_content::Actor;
 use jobshout_domain::{
-    DomainError, ShowcaseApp, ShowcaseAppId, ShowcaseAppInput, ShowcaseAppType,
+    DomainError, Job, ShowcaseApp, ShowcaseAppId, ShowcaseAppInput, ShowcaseAppType,
     ShowcaseBuildMethod, ShowcaseKind, ShowcaseMaturity, ShowcasePricing, ShowcaseStatus,
     ShowcaseTag, ShowcaseVerification, ShowcaseVisibility,
 };
@@ -264,7 +264,7 @@ impl ShowcaseService {
         }
         let status = rules::status_on_update(actor, &existing, &input);
         let mut rec = self
-            .record(actor, existing.kind, Some(existing.id), &input, status)
+            .record(actor, existing.kind, Some(&existing), &input, status)
             .await?;
         rec.app.id = existing.id;
         rec.app.published_at = match status {
@@ -370,6 +370,21 @@ impl ShowcaseService {
                 self.repo.replace_links(app.id, &resolved).await?;
             }
         }
+        // Once, on an int with jobs on the board: show the sample entries
+        // hiring, so "Open roles" and the Hiring filter have something in them.
+        if self.repo.job_link_count().await? == 0 {
+            let jobs = self.repo.linkable_jobs("", true).await?;
+            for (slug, take) in seed::hiring() {
+                let Ok(entry) = self.repo.get_by_slug(slug, None).await else {
+                    continue;
+                };
+                if !rules::owns(&editor, &entry) || jobs.is_empty() {
+                    continue;
+                }
+                let ids: Vec<Uuid> = jobs.iter().take(take).map(|j| j.id).collect();
+                self.repo.replace_job_links(entry.id, &ids).await?;
+            }
+        }
         Ok(n)
     }
 
@@ -380,10 +395,11 @@ impl ShowcaseService {
         &self,
         actor: &Actor,
         kind: ShowcaseKind,
-        self_id: Option<ShowcaseAppId>,
+        existing: Option<&ShowcaseApp>,
         input: &ShowcaseAppInput,
         status: ShowcaseStatus,
     ) -> Result<AppRecord, DomainError> {
+        let self_id = existing.map(|e| e.id);
         let cleaned = rules::validate(kind, input)?;
         let mut slugs: Vec<String> = cleaned.agent_links.iter().map(|l| l.slug.clone()).collect();
         slugs.extend(cleaned.team_slug.clone());
@@ -397,9 +413,53 @@ impl ShowcaseService {
             let t = linkable(actor, &targets, team, ShowcaseKind::Team, self_id)?;
             links.push((t.id, String::new()));
         }
+        // Jobs: open ones the actor posted (editors: any open job). A job
+        // already on the entry may stay, so the owner can save an entry an
+        // editor linked a job to.
+        let job_targets = self.repo.resolve_jobs(&cleaned.job_ids).await?;
+        for id in &cleaned.job_ids {
+            let kept = existing.is_some_and(|e| e.jobs.iter().any(|j| j.id == *id));
+            let ok = job_targets.iter().find(|j| j.id == *id).is_some_and(|j| {
+                j.published
+                    && (actor.is_staff
+                        || (!j.poster_email.is_empty()
+                            && j.poster_email.eq_ignore_ascii_case(&actor.email)))
+            });
+            if !(ok || kept) {
+                return Err(DomainError::Validation(
+                    "you can only link open jobs you posted on the board".into(),
+                ));
+            }
+        }
+        let job_ids = cleaned.job_ids.clone();
         let mut rec = record(kind, input, cleaned, status);
         rec.links = links;
+        rec.job_ids = job_ids;
         Ok(rec)
+    }
+
+    /// Open jobs this actor may link: their own, or any for editors.
+    pub async fn linkable_jobs(&self, actor: &Actor) -> Result<Vec<Job>, DomainError> {
+        if actor.agent {
+            return Ok(Vec::new());
+        }
+        self.repo.linkable_jobs(&actor.email, actor.is_staff).await
+    }
+
+    /// Public, published entries of any kind hiring for this job.
+    pub async fn entries_for_job(&self, job_id: Uuid) -> Result<Vec<ShowcaseApp>, DomainError> {
+        let (entries, _) = self
+            .repo
+            .list(&ListQuery {
+                status: Some(ShowcaseStatus::Published),
+                public_only: true,
+                for_job: Some(job_id),
+                sort: Sort::Stars,
+                limit: 12,
+                ..Default::default()
+            })
+            .await?;
+        Ok(entries.into_iter().map(public).collect())
     }
 }
 
@@ -484,6 +544,7 @@ fn record(
             linked_agents: Vec::new(),
             linked_team: None,
             used_in: 0,
+            jobs: Vec::new(),
             creator_email: None,
             creator_display_name: String::new(),
             visibility: input.visibility.unwrap_or(ShowcaseVisibility::Public),
@@ -500,6 +561,7 @@ fn record(
         source: jobshout_domain::InsightSource::Community,
         tags_text,
         links: Vec::new(),
+        job_ids: Vec::new(),
     }
 }
 

@@ -75,6 +75,12 @@ Implemented:
   - An agent's "used in" counts public apps that link to it directly or through a team.
   - Samples seed per kind, so an int that already had sample apps gets sample agents and
     a team, and its sample apps are linked to them.
+- **Hiring** (showcase ↔ jobs): any showcase entry can link open jobs from the board
+  (`showcase_job_links`). Jobs now record `poster_email` when posted by a signed-in
+  user — never returned by the jobs API — and a creator may link only open jobs they
+  posted (editors: any open job; a job already on an entry may stay). Closed jobs drop
+  off entries without an edit. Entry pages show "Open roles", job pages show "What
+  you'd work on", and `collection=hiring` lists entries with at least one open role.
 
 Deferred: full auth identity linking, employer-side application review UI, MCP, agents
 runtime, interviews, iOS app screens, billing.

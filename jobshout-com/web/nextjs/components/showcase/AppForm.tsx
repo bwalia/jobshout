@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
 import { useFormState, useFormStatus } from "react-dom";
-import { EMPTY_FORM_STATE } from "@/app/actions";
+import { EMPTY_FORM_STATE } from "@/lib/form-state";
 import { previewAction } from "@/app/insights/actions";
 import { saveAppAction } from "@/app/showcase/actions";
 import { CheckCircleIcon, ShieldIcon } from "@/components/icons";
 import { LinkPicker } from "@/components/showcase/LinkPicker";
+import type { Job } from "@/lib/api";
 import { Button, ErrorNotice, Field, Input, Select, Textarea, buttonClass, cx } from "@/components/ui";
 import {
   APP_TYPES,
@@ -111,9 +112,12 @@ export function AppForm({
   isStaff,
   initial,
   kind: newKind = "app",
+  jobs = [],
 }: {
   isStaff: boolean;
   initial?: ShowcaseApp | null;
+  /** Open jobs the viewer may link (their own; editors: any). */
+  jobs?: Job[];
   /** For a new entry; an existing one keeps its own kind. */
   kind?: Kind;
 }) {
@@ -529,6 +533,47 @@ export function AppForm({
         </div>
       </Section>
       ) : null}
+
+      <Section
+        title="Open roles"
+        lead={`Hiring for this ${noun}? Link roles you have posted on the board; they show on its page and it appears under Hiring.`}
+      >
+        {(() => {
+          // Roles already linked stay listed even if someone else posted them.
+          const options = [...(initial?.jobs ?? []), ...jobs.filter((j) => !initial?.jobs.some((x) => x.id === j.id))];
+          return options.length ? (
+            <div role="group" aria-label="Open roles" className="space-y-2">
+              {options.map((j) => (
+                <label
+                  key={j.id}
+                  className="flex min-h-[44px] cursor-pointer items-center gap-3 rounded-xl border border-line px-3.5 py-2.5 text-sm transition-colors duration-200 hover:border-edge has-[:checked]:border-shout/50 has-[:checked]:bg-shout/[0.06]"
+                >
+                  <input
+                    type="checkbox"
+                    name="job_ids"
+                    value={j.id}
+                    defaultChecked={initial?.jobs.some((x) => x.id === j.id)}
+                    className="h-5 w-5 cursor-pointer rounded-md accent-[rgb(var(--brand))]"
+                  />
+                  <span className="min-w-0">
+                    <span className="block truncate font-semibold text-ink">{j.title}</span>
+                    <span className="block truncate text-xs text-mute">{j.summary || j.location.country}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-mute">
+              You have no open roles on the board.{" "}
+              <Link href="/post-job" className="font-medium text-ink underline decoration-shout/50 underline-offset-4 hover:text-shout">
+                Post a job
+              </Link>{" "}
+              while signed in, then link it here.
+            </p>
+          );
+        })()}
+        <FieldError message={errors.job_ids} />
+      </Section>
 
       <Section title="Details">
         <div className="grid gap-6 sm:grid-cols-3">

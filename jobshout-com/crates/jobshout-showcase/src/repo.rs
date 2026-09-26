@@ -2,10 +2,11 @@ use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, Utc};
 use jobshout_domain::{
-    DomainError, InsightSource, ShowcaseApp, ShowcaseAppId, ShowcaseAppType, ShowcaseBuildMethod,
-    ShowcaseKind, ShowcaseLink, ShowcaseMaturity, ShowcasePricing, ShowcaseStatus, ShowcaseTag,
-    ShowcaseVerification, ShowcaseVisibility,
+    DomainError, InsightSource, Job, ShowcaseApp, ShowcaseAppId, ShowcaseAppType,
+    ShowcaseBuildMethod, ShowcaseKind, ShowcaseLink, ShowcaseMaturity, ShowcasePricing,
+    ShowcaseStatus, ShowcaseTag, ShowcaseVerification, ShowcaseVisibility,
 };
+use jobshout_jobs::job_from_row;
 use sqlx::types::Json;
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
@@ -44,6 +45,16 @@ pub struct AppRecord {
     pub tags_text: String,
     /// Link targets in display order, with the role each played.
     pub links: Vec<(ShowcaseAppId, String)>,
+    /// Linked jobs in display order.
+    pub job_ids: Vec<Uuid>,
+}
+
+/// A job a link points at, as resolved from a submitted id.
+#[derive(Debug, Clone)]
+pub struct JobTarget {
+    pub id: Uuid,
+    pub published: bool,
+    pub poster_email: String,
 }
 
 /// An entry a link points at, as resolved from a submitted slug.
@@ -82,6 +93,10 @@ pub struct ListQuery {
     pub capability: Option<String>,
     /// Entries that link to this one, directly or through a team.
     pub links_to: Option<ShowcaseAppId>,
+    /// Only entries with at least one open (published) linked job.
+    pub hiring: bool,
+    /// Only entries that link this job.
+    pub for_job: Option<Uuid>,
     pub featured: Option<bool>,
     pub exclude: Option<ShowcaseAppId>,
     /// Marks `starred` on each result, and shows this viewer their own
@@ -132,6 +147,11 @@ impl ShowcaseRepository {
                    OR EXISTS (SELECT 1 FROM showcase_links l1
                               JOIN showcase_links l2 ON l2.from_id = l1.to_id
                               WHERE l1.from_id = a.id AND l2.to_id = $17))
+              AND (NOT $18 OR EXISTS (
+                    SELECT 1 FROM showcase_job_links jl JOIN jobs j ON j.id = jl.job_id
+                    WHERE jl.entry_id = a.id AND j.status = 'published'))
+              AND ($19::uuid IS NULL OR EXISTS (
+                    SELECT 1 FROM showcase_job_links jl WHERE jl.entry_id = a.id AND jl.job_id = $19))
             ORDER BY {order}
             LIMIT $13 OFFSET $14
             "#
@@ -159,6 +179,8 @@ impl ShowcaseRepository {
             .bind(q.kind.map(|k| k.as_str()))
             .bind(q.capability.as_deref())
             .bind(q.links_to)
+            .bind(q.hiring)
+            .bind(q.for_job)
             .fetch_all(&self.pool)
             .await
             .map_err(db)?;
@@ -166,6 +188,7 @@ impl ShowcaseRepository {
         let mut apps = rows.iter().map(from_row).collect::<Result<Vec<_>, _>>()?;
         self.attach_links(&mut apps, q.viewer_email.as_deref())
             .await?;
+        self.attach_jobs(&mut apps).await?;
         Ok((apps, total))
     }
 
@@ -212,6 +235,7 @@ impl ShowcaseRepository {
             .ok_or(DomainError::NotFound)?;
         let mut apps = vec![from_row(&row)?];
         self.attach_links(&mut apps, viewer_email).await?;
+        self.attach_jobs(&mut apps).await?;
         Ok(apps.remove(0))
     }
 
@@ -269,6 +293,100 @@ impl ShowcaseRepository {
             }
         }
         Ok(())
+    }
+
+    /// Fill `jobs` with each entry's linked jobs that are still published.
+    async fn attach_jobs(&self, apps: &mut [ShowcaseApp]) -> Result<(), DomainError> {
+        if apps.is_empty() {
+            return Ok(());
+        }
+        let ids: Vec<Uuid> = apps.iter().map(|a| a.id).collect();
+        let rows = sqlx::query(
+            r#"
+            SELECT jl.entry_id, j.id, j.organisation_id, j.title, j.summary, j.description,
+                   j.employment_type, j.location, j.compensation, j.requirements, j.status,
+                   j.created_at, j.updated_at, j.published_at
+            FROM showcase_job_links jl
+            JOIN jobs j ON j.id = jl.job_id
+            WHERE jl.entry_id = ANY($1) AND j.status = 'published'
+            ORDER BY jl.position
+            "#,
+        )
+        .bind(&ids)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db)?;
+        let mut by_entry: HashMap<Uuid, Vec<Job>> = HashMap::new();
+        for r in &rows {
+            by_entry
+                .entry(r.get("entry_id"))
+                .or_default()
+                .push(job_from_row(r)?);
+        }
+        for app in apps {
+            app.jobs = by_entry.remove(&app.id).unwrap_or_default();
+        }
+        Ok(())
+    }
+
+    /// Id, status and poster for each of these job ids that exists.
+    pub async fn resolve_jobs(&self, ids: &[Uuid]) -> Result<Vec<JobTarget>, DomainError> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let rows = sqlx::query("SELECT id, status, poster_email FROM jobs WHERE id = ANY($1)")
+            .bind(ids)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db)?;
+        Ok(rows
+            .iter()
+            .map(|r| JobTarget {
+                id: r.get("id"),
+                published: r.get::<&str, _>("status") == "published",
+                poster_email: r.get("poster_email"),
+            })
+            .collect())
+    }
+
+    /// Published jobs someone may link: the ones they posted, or every
+    /// published job when `any` (editors). Newest first.
+    pub async fn linkable_jobs(&self, email: &str, any: bool) -> Result<Vec<Job>, DomainError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, organisation_id, title, summary, description, employment_type,
+                   location, compensation, requirements, status, created_at, updated_at, published_at
+            FROM jobs
+            WHERE status = 'published'
+              AND ($2 OR (poster_email <> '' AND lower(poster_email) = lower($1)))
+            ORDER BY published_at DESC NULLS LAST
+            LIMIT 50
+            "#,
+        )
+        .bind(email)
+        .bind(any)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db)?;
+        rows.iter().map(job_from_row).collect()
+    }
+
+    /// Replace an entry's job links outside a content edit (sample seeding).
+    pub async fn replace_job_links(
+        &self,
+        entry: ShowcaseAppId,
+        jobs: &[Uuid],
+    ) -> Result<(), DomainError> {
+        let mut tx = self.pool.begin().await.map_err(db)?;
+        set_job_links(&mut tx, entry, jobs).await?;
+        tx.commit().await.map_err(db)
+    }
+
+    pub async fn job_link_count(&self) -> Result<i64, DomainError> {
+        sqlx::query_scalar("SELECT COUNT(*) FROM showcase_job_links")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(db)
     }
 
     /// The entries these slugs name, in any status; the service decides who may link what.
@@ -426,6 +544,7 @@ impl ShowcaseRepository {
         }
         res.map_err(db)?;
         set_links(&mut tx, a.id, &rec.links).await?;
+        set_job_links(&mut tx, a.id, &rec.job_ids).await?;
         tx.commit().await.map_err(db)
     }
 
@@ -484,6 +603,7 @@ impl ShowcaseRepository {
         .await
         .map_err(db)?;
         set_links(&mut tx, a.id, &rec.links).await?;
+        set_job_links(&mut tx, a.id, &rec.job_ids).await?;
         tx.commit().await.map_err(db)
     }
 
@@ -570,6 +690,30 @@ impl ShowcaseRepository {
     }
 }
 
+async fn set_job_links(
+    tx: &mut Transaction<'_, Postgres>,
+    entry: ShowcaseAppId,
+    jobs: &[Uuid],
+) -> Result<(), DomainError> {
+    sqlx::query("DELETE FROM showcase_job_links WHERE entry_id = $1")
+        .bind(entry)
+        .execute(&mut **tx)
+        .await
+        .map_err(db)?;
+    for (position, job) in jobs.iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO showcase_job_links (entry_id, job_id, position) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+        )
+        .bind(entry)
+        .bind(job)
+        .bind(position as i32)
+        .execute(&mut **tx)
+        .await
+        .map_err(db)?;
+    }
+    Ok(())
+}
+
 async fn set_links(
     tx: &mut Transaction<'_, Postgres>,
     from: ShowcaseAppId,
@@ -646,6 +790,7 @@ fn from_row(r: &sqlx::postgres::PgRow) -> Result<ShowcaseApp, DomainError> {
         linked_agents: Vec::new(),
         linked_team: None,
         used_in: r.get("used_in"),
+        jobs: Vec::new(),
         creator_email: Some(r.get("creator_email")),
         creator_display_name: r.get("creator_display_name"),
         visibility: ShowcaseVisibility::parse(text("visibility"))

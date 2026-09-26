@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
 import { useFormState, useFormStatus } from "react-dom";
-import { EMPTY_FORM_STATE } from "@/app/actions";
+import { EMPTY_FORM_STATE } from "@/lib/form-state";
 import { previewAction, saveInsightAction } from "@/app/insights/actions";
 import { CheckCircleIcon } from "@/components/icons";
 import { KindIcon } from "@/components/insights/KindIcon";

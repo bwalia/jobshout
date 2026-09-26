@@ -255,7 +255,9 @@ export default async function ShowcaseAppPage({ params }: Params) {
   const owner = Boolean(viewer && app.creator_email?.toLowerCase() === viewer.email.toLowerCase());
   const canEdit = editor || (owner && app.status !== "archived");
   const url = `${siteUrl()}/showcase/${app.slug}`;
-  const roles = pickJobs(jobs, app.technologies);
+  // The creator's own open roles first; otherwise roles that match the stack.
+  const hiring = app.jobs.length > 0;
+  const roles = hiring ? app.jobs : pickJobs(jobs, app.technologies);
   const details: Array<[string, string]> = (
     [
       ["Kind", APP_TYPES[app.app_type]],
@@ -460,9 +462,13 @@ export default async function ShowcaseAppPage({ params }: Params) {
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
               <h2 id="roles-heading" className="font-display text-2xl font-semibold tracking-[-0.02em] text-ink">
-                Work with this stack
+                {hiring ? "Open roles on this project" : "Work with this stack"}
               </h2>
-              <p className="mt-1.5 text-sm text-mute">Open roles on the JobShout board right now.</p>
+              <p className="mt-1.5 text-sm text-mute">
+                {hiring
+                  ? `${app.team_name || app.creator_display_name} is hiring for ${app.name}.`
+                  : "Open roles on the JobShout board right now."}
+              </p>
             </div>
             <Link href="/jobs" className={buttonClass("secondary", "md")}>
               See all jobs
