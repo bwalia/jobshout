@@ -87,3 +87,9 @@ insights:
 showcase:
   # Fill an empty showcase with clearly-labelled sample apps. Never in prod.
   seedSamples: false
+
+# Pin stateless pods (web, api, gateway, workers) to nodes with these labels,
+# e.g. {kubernetes.io/hostname: debian004}. Databases and PVC-backed pods are
+# never pinned: forcing them onto another node can strand their volume. Empty
+# means schedule anywhere.
+nodeSelector: {}

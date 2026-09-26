@@ -41,6 +41,10 @@ spec:
             requests: { cpu: 10m, memory: 16Mi }
             limits: { cpu: 100m, memory: 32Mi }
       {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: api
           image: {{ include "jobshout.image" (dict "ctx" . "repo" "server") }}

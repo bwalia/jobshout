@@ -20,6 +20,10 @@ spec:
         prometheus.io/path: "/health"
     spec:
       {{- include "jobshout.imagePullSecrets" . | nindent 6 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: python-runtime
           image: {{ include "jobshout.image" (dict "ctx" . "repo" "python-sidecar") }}

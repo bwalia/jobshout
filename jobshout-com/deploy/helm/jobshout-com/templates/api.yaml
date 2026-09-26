@@ -28,6 +28,10 @@ spec:
                 echo waiting for postgres; sleep 2;
               done
         {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: api
           image: {{ include "jobshout-com.image" (dict "ctx" . "repo" "api") }}

@@ -21,3 +21,9 @@ insights:
 
 showcase:
   seedSamples: true
+
+# int's stateless pods landed on bwalia-latitude7300, a laptop that drops out of
+# the cluster when it sleeps (26 Sep 2026: every int page returned 502). Keep
+# them on a LAN worker with headroom.
+nodeSelector:
+  kubernetes.io/hostname: debian004

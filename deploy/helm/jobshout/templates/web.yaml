@@ -16,6 +16,10 @@ spec:
         {{- include "jobshout.selector" (dict "name" "web") | nindent 8 }}
     spec:
       {{- include "jobshout.imagePullSecrets" . | nindent 6 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: web
           image: {{ include "jobshout.image" (dict "ctx" . "repo" "web") }}
