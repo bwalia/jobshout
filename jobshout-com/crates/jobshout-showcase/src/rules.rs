@@ -7,7 +7,8 @@ use jobshout_content::render::word_count;
 use jobshout_content::Actor;
 use jobshout_domain::{
     DomainError, InsightSource, ProductionEvidence, ShowcaseAgent, ShowcaseApp, ShowcaseAppInput,
-    ShowcaseMaturity, ShowcaseStatus, ShowcaseVisibility,
+    ShowcaseKind, ShowcaseLinkInput, ShowcaseMaturity, ShowcaseStatus, ShowcaseVisibility,
+    AGENT_CAPABILITIES,
 };
 
 pub const MAX_NAME: usize = 80;
@@ -21,8 +22,20 @@ pub const MAX_MODELS: usize = 10;
 pub const MAX_AGENTS: usize = 12;
 pub const MAX_SHORT: usize = 80;
 pub const MAX_OVERSIGHT: usize = 1_000;
+pub const MAX_TOOLS: usize = 20;
+pub const MAX_MCP: usize = 15;
+pub const MIN_TEAM: usize = 2;
 /// Apps a community creator may add per rolling hour. Editors and agents are exempt.
 pub const CREATES_PER_HOUR: i64 = 10;
+
+/// The word for an entry of this kind, for messages.
+pub fn noun(kind: ShowcaseKind) -> &'static str {
+    match kind {
+        ShowcaseKind::App => "app",
+        ShowcaseKind::Agent => "agent",
+        ShowcaseKind::Team => "team",
+    }
+}
 
 pub fn owns(actor: &Actor, app: &ShowcaseApp) -> bool {
     app.creator_email
@@ -78,14 +91,16 @@ pub fn check_can_edit(actor: &Actor, app: &ShowcaseApp) -> Result<(), DomainErro
         return Ok(());
     }
     if !owns(actor, app) {
-        return Err(DomainError::Forbidden(
-            "you can only edit your own apps".into(),
-        ));
+        return Err(DomainError::Forbidden(format!(
+            "you can only edit your own {}s",
+            noun(app.kind)
+        )));
     }
     if app.status == ShowcaseStatus::Archived {
-        return Err(DomainError::Forbidden(
-            "this app was archived by the editors".into(),
-        ));
+        return Err(DomainError::Forbidden(format!(
+            "this {} was archived by the editors",
+            noun(app.kind)
+        )));
     }
     Ok(())
 }
@@ -178,6 +193,12 @@ pub struct Cleaned {
     pub technologies: Vec<String>,
     pub ai_models: Vec<String>,
     pub agents: Vec<ShowcaseAgent>,
+    pub tools: Vec<String>,
+    pub mcp_servers: Vec<String>,
+    pub capabilities: Vec<String>,
+    /// Directory links, de-duplicated by slug, in the order given.
+    pub agent_links: Vec<ShowcaseLinkInput>,
+    pub team_slug: Option<String>,
 }
 
 fn clean_urls(urls: &[String]) -> Vec<String> {
@@ -200,8 +221,24 @@ pub fn clean_tags(tags: &[String]) -> Vec<String> {
     out
 }
 
-/// Check an input. Drafts only need a name; submitting needs a complete app.
-pub fn validate(input: &ShowcaseAppInput) -> Result<Cleaned, DomainError> {
+/// Trimmed, lower-cased slug links with each slug kept once.
+fn clean_links(links: &[ShowcaseLinkInput]) -> Vec<ShowcaseLinkInput> {
+    let mut out: Vec<ShowcaseLinkInput> = Vec::new();
+    for l in links {
+        let slug = l.slug.trim().to_ascii_lowercase();
+        if !slug.is_empty() && !out.iter().any(|o| o.slug == slug) {
+            out.push(ShowcaseLinkInput {
+                slug,
+                role: l.role.trim().to_string(),
+            });
+        }
+    }
+    out
+}
+
+/// Check an input for an entry of `kind`. Drafts only need a name;
+/// submitting needs a complete entry.
+pub fn validate(kind: ShowcaseKind, input: &ShowcaseAppInput) -> Result<Cleaned, DomainError> {
     let v = |m: &str| Err(DomainError::Validation(m.to_string()));
     let name = input.name.trim();
     if name.is_empty() {
@@ -288,11 +325,70 @@ pub fn validate(input: &ShowcaseAppInput) -> Result<Cleaned, DomainError> {
         return v("agent names must be 60 characters or fewer, and roles 80");
     }
 
+    let tools = clean_tags(&input.tools);
+    let mcp_servers = clean_tags(&input.mcp_servers);
+    let capabilities: Vec<String> = clean_tags(&input.capabilities)
+        .into_iter()
+        .map(|c| c.to_ascii_lowercase())
+        .collect();
+    let agent_links = clean_links(&input.agent_links);
+    let team_slug = Some(input.team_slug.trim().to_ascii_lowercase()).filter(|s| !s.is_empty());
+    if kind != ShowcaseKind::Agent
+        && (!tools.is_empty()
+            || !mcp_servers.is_empty()
+            || !capabilities.is_empty()
+            || !input.model_provider.trim().is_empty())
+    {
+        return v("tools, MCP servers, capabilities and a model provider are for agents");
+    }
+    if kind == ShowcaseKind::Agent && !agent_links.is_empty() {
+        return v("an agent cannot link other agents — put them in a team");
+    }
+    if kind != ShowcaseKind::App && team_slug.is_some() {
+        return v("only apps can say which team built them");
+    }
+    if tools.len() > MAX_TOOLS {
+        return v("list at most 20 tools");
+    }
+    if mcp_servers.len() > MAX_MCP {
+        return v("list at most 15 MCP servers");
+    }
+    if tools
+        .iter()
+        .chain(&mcp_servers)
+        .any(|t| t.chars().count() > MAX_TAG_LEN)
+    {
+        return v("tool and MCP server names must be 32 characters or fewer");
+    }
+    if let Some(c) = capabilities
+        .iter()
+        .find(|c| !AGENT_CAPABILITIES.contains(&c.as_str()))
+    {
+        return Err(DomainError::Validation(format!("unknown capability: {c}")));
+    }
+    if input.model_provider.trim().chars().count() > MAX_SHORT {
+        return v("model provider must be 80 characters or fewer");
+    }
+    if agent_links.len() > MAX_AGENTS {
+        return v("link at most 12 agents");
+    }
+    if agent_links
+        .iter()
+        .any(|l| l.role.chars().count() > MAX_SHORT)
+    {
+        return v("agent roles must be 80 characters or fewer");
+    }
+
     let cleaned = Cleaned {
         screenshots,
         technologies,
         ai_models,
         agents,
+        tools,
+        mcp_servers,
+        capabilities,
+        agent_links,
+        team_slug,
     };
     if !input.submit {
         return Ok(cleaned);
@@ -304,8 +400,27 @@ pub fn validate(input: &ShowcaseAppInput) -> Result<Cleaned, DomainError> {
     let words = word_count(&input.description_md);
     if words < MIN_DESCRIPTION_WORDS {
         return Err(DomainError::Validation(format!(
-            "describe the app in at least {MIN_DESCRIPTION_WORDS} words — this has {words}"
+            "describe the {} in at least {MIN_DESCRIPTION_WORDS} words — this has {words}",
+            noun(kind)
         )));
+    }
+    match kind {
+        ShowcaseKind::App => {}
+        ShowcaseKind::Agent => {
+            if cleaned.capabilities.is_empty() {
+                return v("pick at least one capability");
+            }
+            if cleaned.ai_models.is_empty() {
+                return v("name the model the agent runs on");
+            }
+            return Ok(cleaned);
+        }
+        ShowcaseKind::Team => {
+            if cleaned.agent_links.len() < MIN_TEAM {
+                return v("a team needs at least two agents from the directory");
+            }
+            return Ok(cleaned);
+        }
     }
     if input.app_type.is_none() {
         return v("pick what kind of app this is");
@@ -320,7 +435,11 @@ pub fn validate(input: &ShowcaseAppInput) -> Result<Cleaned, DomainError> {
     if !live && input.repo_url.trim().is_empty() {
         return v("add a link to a repository, a demo or a website");
     }
-    if build.is_agent_built() && cleaned.agents.is_empty() {
+    if build.is_agent_built()
+        && cleaned.agents.is_empty()
+        && cleaned.agent_links.is_empty()
+        && cleaned.team_slug.is_none()
+    {
         return v("name at least one agent that built it");
     }
     let missing = missing_evidence(maturity, &input.evidence, live);
@@ -340,6 +459,8 @@ pub fn tags_text(cleaned: &Cleaned) -> String {
         .technologies
         .iter()
         .chain(&cleaned.ai_models)
+        .chain(&cleaned.tools)
+        .chain(&cleaned.mcp_servers)
         .chain(cleaned.agents.iter().map(|a| &a.name))
         .map(String::as_str)
         .collect::<Vec<_>>()
@@ -358,6 +479,7 @@ mod tests {
     fn app(status: ShowcaseStatus, creator: &str) -> ShowcaseApp {
         ShowcaseApp {
             id: Uuid::new_v4(),
+            kind: ShowcaseKind::App,
             slug: "x".into(),
             name: "X".into(),
             tagline: String::new(),
@@ -381,6 +503,13 @@ mod tests {
             human_oversight: String::new(),
             evidence: ProductionEvidence::default(),
             team_name: String::new(),
+            model_provider: String::new(),
+            tools: vec![],
+            mcp_servers: vec![],
+            capabilities: vec![],
+            linked_agents: vec![],
+            linked_team: None,
+            used_in: 0,
             creator_email: Some(creator.into()),
             creator_display_name: "C".into(),
             visibility: ShowcaseVisibility::Public,
@@ -564,36 +693,36 @@ mod tests {
             name: "Idea".into(),
             ..Default::default()
         };
-        assert!(validate(&draft).is_ok());
-        assert!(msg(validate(&ShowcaseAppInput::default())).contains("name"));
+        assert!(validate(ShowcaseKind::App, &draft).is_ok());
+        assert!(msg(validate(ShowcaseKind::App, &ShowcaseAppInput::default())).contains("name"));
     }
 
     #[test]
     fn submitting_needs_a_complete_app() {
-        assert!(validate(&input()).is_ok());
+        assert!(validate(ShowcaseKind::App, &input()).is_ok());
 
         let mut i = input();
         i.tagline.clear();
-        assert!(msg(validate(&i)).contains("tagline"));
+        assert!(msg(validate(ShowcaseKind::App, &i)).contains("tagline"));
 
         let mut i = input();
         i.description_md = "too short".into();
-        assert!(msg(validate(&i)).contains("20 words"));
+        assert!(msg(validate(ShowcaseKind::App, &i)).contains("20 words"));
 
         let mut i = input();
         i.repo_url.clear();
-        assert!(msg(validate(&i)).contains("repository, a demo or a website"));
+        assert!(msg(validate(ShowcaseKind::App, &i)).contains("repository, a demo or a website"));
 
         let mut i = input();
         i.maturity = None;
-        assert!(msg(validate(&i)).contains("mature"));
+        assert!(msg(validate(ShowcaseKind::App, &i)).contains("mature"));
     }
 
     #[test]
     fn production_ready_must_be_backed() {
         let mut i = input();
         i.maturity = Some(ShowcaseMaturity::ProductionReady);
-        let m = msg(validate(&i));
+        let m = msg(validate(ShowcaseKind::App, &i));
         assert!(m.starts_with("production ready needs evidence"), "{m}");
         assert!(m.contains("automated tests") && m.contains("a live demo or website"));
 
@@ -606,10 +735,10 @@ mod tests {
             documentation: true,
             ..Default::default()
         };
-        assert!(validate(&i).is_ok());
+        assert!(validate(ShowcaseKind::App, &i).is_ok());
 
         i.maturity = Some(ShowcaseMaturity::EnterpriseReady);
-        let m = msg(validate(&i));
+        let m = msg(validate(ShowcaseKind::App, &i));
         assert!(
             m.contains("dependency scanning") && m.contains("backups"),
             "{m}"
@@ -620,25 +749,25 @@ mod tests {
     fn agent_built_apps_name_their_agents() {
         let mut i = input();
         i.build_method = Some(ShowcaseBuildMethod::AgentBuilt);
-        assert!(msg(validate(&i)).contains("agent"));
+        assert!(msg(validate(ShowcaseKind::App, &i)).contains("agent"));
         i.agents = vec![ShowcaseAgent {
             name: "Rust Agent".into(),
             role: "Backend".into(),
         }];
-        assert!(validate(&i).is_ok());
+        assert!(validate(ShowcaseKind::App, &i).is_ok());
     }
 
     #[test]
     fn links_must_be_web_urls() {
         let mut i = input();
         i.demo_url = "javascript:alert(1)".into();
-        assert!(msg(validate(&i)).contains("demo link"));
+        assert!(msg(validate(ShowcaseKind::App, &i)).contains("demo link"));
         let mut i = input();
         i.screenshots = vec!["ftp://x/y.png".into()];
-        assert!(msg(validate(&i)).contains("screenshot"));
+        assert!(msg(validate(ShowcaseKind::App, &i)).contains("screenshot"));
         let mut i = input();
         i.screenshots = vec!["https://img.example/a.png".into(); 9];
-        assert!(msg(validate(&i)).contains("eight"));
+        assert!(msg(validate(ShowcaseKind::App, &i)).contains("eight"));
     }
 
     #[test]
@@ -661,8 +790,112 @@ mod tests {
                 role: "dropped".into(),
             },
         ];
-        let c = validate(&i).unwrap();
+        let c = validate(ShowcaseKind::App, &i).unwrap();
         assert_eq!(c.agents.len(), 1);
         assert_eq!(tags_text(&c), "Rust Postgre SQL MCP Claude Rust Agent");
+    }
+
+    fn agent_input() -> ShowcaseAppInput {
+        ShowcaseAppInput {
+            kind: Some(ShowcaseKind::Agent),
+            name: "Rust Backend Agent".into(),
+            tagline: "Builds Axum services with tests".into(),
+            description_md: "word ".repeat(25),
+            ai_models: vec!["Claude".into()],
+            capabilities: vec!["code_generation".into(), "Testing".into()],
+            tools: vec!["GitHub".into(), "Docker".into()],
+            submit: true,
+            ..Default::default()
+        }
+    }
+
+    fn link(slug: &str) -> ShowcaseLinkInput {
+        ShowcaseLinkInput {
+            slug: slug.into(),
+            role: String::new(),
+        }
+    }
+
+    #[test]
+    fn agents_need_capabilities_and_a_model() {
+        let c = validate(ShowcaseKind::Agent, &agent_input()).unwrap();
+        assert_eq!(c.capabilities, vec!["code_generation", "testing"]);
+
+        let mut i = agent_input();
+        i.capabilities = vec![];
+        assert!(msg(validate(ShowcaseKind::Agent, &i)).contains("capability"));
+        let mut i = agent_input();
+        i.capabilities = vec!["mind_reading".into()];
+        assert!(msg(validate(ShowcaseKind::Agent, &i)).contains("unknown capability"));
+        let mut i = agent_input();
+        i.ai_models.clear();
+        assert!(msg(validate(ShowcaseKind::Agent, &i)).contains("model"));
+        // App-only rules do not apply to agents.
+        let i = agent_input();
+        assert!(i.repo_url.is_empty() && i.maturity.is_none());
+        assert!(validate(ShowcaseKind::Agent, &i).is_ok());
+    }
+
+    #[test]
+    fn agent_fields_are_for_agents_only() {
+        let mut i = input();
+        i.tools = vec!["Docker".into()];
+        assert!(msg(validate(ShowcaseKind::App, &i)).contains("for agents"));
+        let mut i = agent_input();
+        i.agent_links = vec![link("other-agent")];
+        assert!(msg(validate(ShowcaseKind::Agent, &i)).contains("team"));
+        let mut i = agent_input();
+        i.team_slug = "some-team".into();
+        assert!(msg(validate(ShowcaseKind::Agent, &i)).contains("only apps"));
+    }
+
+    #[test]
+    fn teams_need_two_directory_agents() {
+        let mut t = ShowcaseAppInput {
+            kind: Some(ShowcaseKind::Team),
+            name: "AI Startup Factory".into(),
+            tagline: "Product to production".into(),
+            description_md: "word ".repeat(25),
+            agent_links: vec![link(" Product-Agent "), link("product-agent")],
+            submit: true,
+            ..Default::default()
+        };
+        assert!(msg(validate(ShowcaseKind::Team, &t)).contains("at least two"));
+        t.agent_links.push(link("qa-agent"));
+        let c = validate(ShowcaseKind::Team, &t).unwrap();
+        let slugs: Vec<_> = c.agent_links.iter().map(|l| l.slug.as_str()).collect();
+        assert_eq!(slugs, vec!["product-agent", "qa-agent"]);
+    }
+
+    #[test]
+    fn a_linked_agent_or_team_counts_as_naming_one() {
+        let mut i = input();
+        i.build_method = Some(ShowcaseBuildMethod::AgentBuilt);
+        assert!(msg(validate(ShowcaseKind::App, &i)).contains("agent"));
+        i.agent_links = vec![link("rust-agent")];
+        assert!(validate(ShowcaseKind::App, &i).is_ok());
+        i.agent_links.clear();
+        i.team_slug = "startup-factory".into();
+        assert_eq!(
+            validate(ShowcaseKind::App, &i)
+                .unwrap()
+                .team_slug
+                .as_deref(),
+            Some("startup-factory")
+        );
+    }
+
+    #[test]
+    fn messages_name_the_kind() {
+        let me = actor("me@example.com", false);
+        let mut a = app(ShowcaseStatus::Draft, "you@example.com");
+        a.kind = ShowcaseKind::Agent;
+        match check_can_edit(&me, &a) {
+            Err(DomainError::Forbidden(m)) => assert!(m.contains("agents"), "{m}"),
+            other => panic!("{other:?}"),
+        }
+        let mut i = agent_input();
+        i.description_md = "short".into();
+        assert!(msg(validate(ShowcaseKind::Agent, &i)).contains("describe the agent"));
     }
 }

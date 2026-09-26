@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 
 const LINKS = [
   { href: "/showcase", label: "AI Showcase" },
+  { href: "/agents", label: "Agents" },
   { href: "/insights", label: "Insights" },
   { href: "/jobs", label: "Find jobs" },
   { href: "/post-job", label: "Post a job" },
@@ -25,7 +26,7 @@ export function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
             href={link.href}
             onClick={onNavigate}
             aria-current={active ? "page" : undefined}
-            className={`relative rounded-pill px-3 py-2 text-sm transition-colors duration-200 ${
+            className={`relative whitespace-nowrap rounded-pill px-3 py-2 text-sm transition-colors duration-200 ${
               active ? "font-semibold text-ink" : "font-medium text-mute hover:text-ink"
             }`}
           >

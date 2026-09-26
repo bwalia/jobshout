@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { JobCard } from "@/components/JobCard";
 import {
   ArrowLeftIcon,
@@ -10,6 +10,7 @@ import {
   CheckIcon,
   CodeIcon,
   GlobeIcon,
+  LayersIcon,
   PenIcon,
   PlayIcon,
   ShieldIcon,
@@ -130,10 +131,11 @@ function LinkButton({
 
 function BuiltBy({ app }: { app: ShowcaseApp }) {
   const human = app.build_method !== "agent_autonomous" || app.human_oversight;
-  const steps: Array<{ name: string; role: string; agent: boolean }> = [
+  const steps: Array<{ name: string; role: string; agent: boolean; href?: string }> = [
     ...(human
       ? [{ name: app.team_name || app.creator_display_name || "Creator", role: app.build_method === "human" ? "Built it" : "Steered and approved", agent: false }]
       : []),
+    ...app.linked_agents.map((a) => ({ name: a.name, role: a.role, agent: true, href: `/agents/${a.slug}` })),
     ...app.agents.map((a) => ({ name: a.name, role: a.role, agent: true })),
   ];
   return (
@@ -158,12 +160,32 @@ function BuiltBy({ app }: { app: ShowcaseApp }) {
               {s.agent ? <BotIcon className="h-4 w-4" /> : <UserIcon className="h-4 w-4" />}
             </span>
             <div className="min-w-0 pt-1">
-              <p className="break-words text-sm font-semibold text-ink">{s.name}</p>
+              <p className="break-words text-sm font-semibold text-ink">
+                {s.href ? (
+                  <Link href={s.href} className="underline decoration-line underline-offset-4 hover:text-shout">
+                    {s.name}
+                  </Link>
+                ) : (
+                  s.name
+                )}
+              </p>
               {s.role ? <p className="text-xs text-mute">{s.role}</p> : null}
             </div>
           </li>
         ))}
       </ol>
+      {app.linked_team ? (
+        <Link
+          href={`/agents/${app.linked_team.slug}`}
+          className="mt-4 flex items-center gap-3 rounded-xl border border-line p-3 transition-colors duration-200 hover:border-edge"
+        >
+          <LayersIcon className="h-5 w-5 shrink-0 text-signal" />
+          <span className="min-w-0">
+            <span className="block text-xs text-mute">Built with the agent team</span>
+            <span className="block truncate text-sm font-semibold text-ink">{app.linked_team.name}</span>
+          </span>
+        </Link>
+      ) : null}
       {app.ai_models.length ? (
         <p className="mt-4 border-t border-line pt-3 text-xs text-mute">
           <span className="font-semibold text-body">Models:</span> {app.ai_models.join(" · ")}
@@ -222,6 +244,7 @@ export default async function ShowcaseAppPage({ params }: Params) {
   const viewer = await currentViewer();
   const app = await getApp(params.slug, viewer);
   if (!app) notFound();
+  if (app.kind !== "app") redirect(`/agents/${app.slug}`);
 
   const live = app.status === "published";
   const [editor, related, jobs] = await Promise.all([

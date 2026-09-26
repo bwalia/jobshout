@@ -5,6 +5,31 @@
 
 import { API_BASE, failure, headers, type Viewer } from "@/lib/insights";
 
+export type Kind = "app" | "agent" | "team";
+
+export const KINDS: Record<Kind, { label: string; plural: string }> = {
+  app: { label: "App", plural: "Apps" },
+  agent: { label: "Agent", plural: "Agents" },
+  team: { label: "Agent team", plural: "Agent teams" },
+};
+
+/** Mirrors AGENT_CAPABILITIES in jobshout-domain; the API rejects anything else. */
+export const CAPABILITIES = {
+  code_generation: "Code generation",
+  code_review: "Code review",
+  testing: "Testing",
+  debugging: "Debugging",
+  security: "Security",
+  deployment: "Deployment",
+  documentation: "Documentation",
+  research: "Research",
+  data_analysis: "Data analysis",
+  design: "Design",
+  planning: "Planning",
+  operations: "Operations",
+} as const;
+export type Capability = keyof typeof CAPABILITIES;
+
 export type AppType =
   | "web_application"
   | "mobile_application"
@@ -165,8 +190,24 @@ export interface ShowcaseAgent {
   role: string;
 }
 
+/** A directory agent or team another entry links to. */
+export interface ShowcaseLink {
+  slug: string;
+  kind: Kind;
+  name: string;
+  tagline: string;
+  logo_url: string;
+  role: string;
+}
+
+export interface LinkInput {
+  slug: string;
+  role: string;
+}
+
 export interface ShowcaseApp {
   id: string;
+  kind: Kind;
   slug: string;
   name: string;
   tagline: string;
@@ -190,6 +231,13 @@ export interface ShowcaseApp {
   human_oversight: string;
   evidence: Evidence;
   team_name: string;
+  model_provider: string;
+  tools: string[];
+  mcp_servers: string[];
+  capabilities: string[];
+  linked_agents: ShowcaseLink[];
+  linked_team: ShowcaseLink | null;
+  used_in: number;
   creator_email?: string;
   creator_display_name: string;
   visibility: Visibility;
@@ -220,7 +268,10 @@ export type ShowcaseAppInput = Omit<
   | "published_at"
   | "created_at"
   | "updated_at"
-> & { submit: boolean };
+  | "linked_agents"
+  | "linked_team"
+  | "used_in"
+> & { submit: boolean; agent_links: LinkInput[]; team_slug: string };
 
 export interface ShowcaseTag {
   name: string;
@@ -228,6 +279,8 @@ export interface ShowcaseTag {
 }
 
 export type ShowcaseQuery = {
+  kind?: Kind | null;
+  capability?: Capability | null;
   q?: string | null;
   type?: AppType | null;
   collection?: Collection | null;
@@ -248,6 +301,8 @@ export const isBuildMethod = is(BUILD_METHODS);
 export const isPricing = is(PRICING);
 export const isVisibility = is(VISIBILITY);
 export const isCollection = is(COLLECTIONS);
+export const isKind = is(KINDS);
+export const isCapability = is(CAPABILITIES);
 export const isSortKey = (v: unknown): v is SortKey => v === "new" || v === "stars" || v === "updated";
 
 export async function listApps(
@@ -255,6 +310,8 @@ export async function listApps(
   viewer?: Viewer | null,
 ): Promise<{ data: ShowcaseApp[]; total: number }> {
   const params = new URLSearchParams();
+  if (query.kind) params.set("kind", query.kind);
+  if (query.capability) params.set("capability", query.capability);
   if (query.q) params.set("q", query.q);
   if (query.type) params.set("type", query.type);
   if (query.collection) params.set("collection", query.collection);
@@ -271,8 +328,8 @@ export async function listApps(
   return (await res.json()) as { data: ShowcaseApp[]; total: number };
 }
 
-export async function listTags(limit = 24): Promise<ShowcaseTag[]> {
-  const res = await fetch(`${API_BASE}/api/v1/showcase/tags?limit=${limit}`, {
+export async function listTags(limit = 24, kind: Kind = "app"): Promise<ShowcaseTag[]> {
+  const res = await fetch(`${API_BASE}/api/v1/showcase/tags?limit=${limit}&kind=${kind}`, {
     next: { revalidate: 300, tags: ["showcase"] },
   });
   if (!res.ok) throw await failure(res, "Failed to load technologies");
@@ -294,6 +351,35 @@ export async function relatedApps(slug: string): Promise<ShowcaseApp[]> {
     next: { revalidate: 60, tags: ["showcase"] },
   });
   if (!res.ok) return [];
+  return ((await res.json()) as { data: ShowcaseApp[] }).data;
+}
+
+/** Public apps (and, for an agent, teams) that link to an agent or team. */
+export async function usedIn(
+  slug: string,
+  viewer?: Viewer | null,
+): Promise<{ apps: ShowcaseApp[]; teams: ShowcaseApp[] }> {
+  const res = await fetch(`${API_BASE}/api/v1/showcase/apps/${encodeURIComponent(slug)}/used-in`, {
+    headers: headers(viewer),
+    cache: "no-store",
+  });
+  if (!res.ok) return { apps: [], teams: [] };
+  return (await res.json()) as { apps: ShowcaseApp[]; teams: ShowcaseApp[] };
+}
+
+/** Agents or teams the viewer may link: public ones plus their own. */
+export async function linkCandidates(
+  viewer: Viewer,
+  kind: "agent" | "team",
+  q: string,
+): Promise<ShowcaseApp[]> {
+  const params = new URLSearchParams({ kind });
+  if (q.trim()) params.set("q", q.trim());
+  const res = await fetch(`${API_BASE}/api/v1/showcase/link-candidates?${params}`, {
+    headers: headers(viewer),
+    cache: "no-store",
+  });
+  if (!res.ok) throw await failure(res, "Could not search the directory");
   return ((await res.json()) as { data: ShowcaseApp[] }).data;
 }
 
@@ -371,6 +457,23 @@ export async function setStar(
   });
   if (!res.ok) throw await failure(res, "Failed to update the star");
   return (await res.json()) as { starred: boolean; star_count: number };
+}
+
+/** Where an entry lives: apps in the showcase, agents and teams in the directory. */
+export function entryHref(e: { kind: Kind; slug: string }): string {
+  return e.kind === "app" ? `/showcase/${e.slug}` : `/agents/${e.slug}`;
+}
+
+export function directoryHref(f: { kind?: Kind | null; capability?: Capability | null; q?: string | null; tech?: string | null; sort?: SortKey | null; page?: number }): string {
+  const p = new URLSearchParams();
+  if (f.kind === "team") p.set("kind", "team");
+  if (f.capability) p.set("capability", f.capability);
+  if (f.tech) p.set("tech", f.tech);
+  if (f.q) p.set("q", f.q);
+  if (f.sort && f.sort !== "new") p.set("sort", f.sort);
+  if (f.page && f.page > 1) p.set("page", String(f.page));
+  const s = p.toString();
+  return s ? `/agents?${s}` : "/agents";
 }
 
 /** "github.com/acme/app" — a link's host and path, for display. */

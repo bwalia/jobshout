@@ -8,6 +8,8 @@ import { Badge, EmptyState, ErrorNotice } from "@/components/ui";
 import { formatDate } from "@/lib/insights";
 import {
   APP_TYPES,
+  KINDS,
+  entryHref,
   VISIBILITY,
   displayUrl,
   listApps,
@@ -28,14 +30,20 @@ function QueueItem({ app }: { app: ShowcaseApp }) {
         <AppLogo app={app} size="sm" />
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <MaturityBadge app={app} />
-            <BuildBadge app={app} />
-            <Badge>{APP_TYPES[app.app_type]}</Badge>
+            {app.kind === "app" ? (
+              <>
+                <MaturityBadge app={app} />
+                <BuildBadge app={app} />
+                <Badge>{APP_TYPES[app.app_type]}</Badge>
+              </>
+            ) : (
+              <Badge tone="signal">{KINDS[app.kind].label}</Badge>
+            )}
             <Badge>{VISIBILITY[app.visibility].label}</Badge>
             {app.featured ? <Badge tone="solid">Featured</Badge> : null}
           </div>
           <h2 className="mt-3 break-words font-display text-xl font-semibold text-ink">
-            <Link href={`/showcase/${app.slug}`} className="hover:text-shout">
+            <Link href={entryHref(app)} className="hover:text-shout">
               {app.name}
             </Link>
           </h2>
@@ -72,7 +80,7 @@ export default async function ShowcaseReviewPage() {
   if (!viewer) {
     return (
       <div className="mx-auto max-w-4xl px-5 pb-24 pt-14 sm:px-8">
-        <SignInPrompt next="/showcase/review" title="Editors only" body="Sign in with an editor account to review apps." />
+        <SignInPrompt next="/showcase/review" title="Editors only" body="Sign in with an editor account to review the showcase." />
       </div>
     );
   }

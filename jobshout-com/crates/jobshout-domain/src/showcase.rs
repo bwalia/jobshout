@@ -12,6 +12,32 @@ use uuid::Uuid;
 pub type ShowcaseAppId = Uuid;
 
 string_enum! {
+    /// What a showcase entry is. One table, like Insights: every kind shares
+    /// review, stars, search, visibility and "Your apps".
+    ShowcaseKind {
+        App => "app",
+        Agent => "agent",
+        Team => "team",
+    }
+}
+
+/// What an agent can do, as the directory filters by it. Stored as strings.
+pub const AGENT_CAPABILITIES: &[&str] = &[
+    "code_generation",
+    "code_review",
+    "testing",
+    "debugging",
+    "security",
+    "deployment",
+    "documentation",
+    "research",
+    "data_analysis",
+    "design",
+    "planning",
+    "operations",
+];
+
+string_enum! {
     ShowcaseAppType {
         WebApplication => "web_application",
         MobileApplication => "mobile_application",
@@ -145,9 +171,31 @@ pub struct ProductionEvidence {
     pub status_page_url: String,
 }
 
+/// Another showcase entry this one links to: an agent that built an app, the
+/// team that did, or a team's member. Only entries the viewer may see appear.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShowcaseLink {
+    pub slug: String,
+    pub kind: ShowcaseKind,
+    pub name: String,
+    pub tagline: String,
+    pub logo_url: String,
+    /// What it did here ("Backend", "Reviewed the auth flow").
+    pub role: String,
+}
+
+/// A link as a creator submits it: the target's slug and its role.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+pub struct ShowcaseLinkInput {
+    pub slug: String,
+    #[serde(default)]
+    pub role: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShowcaseApp {
     pub id: ShowcaseAppId,
+    pub kind: ShowcaseKind,
     pub slug: String,
     pub name: String,
     pub tagline: String,
@@ -168,11 +216,27 @@ pub struct ShowcaseApp {
     pub docs_url: String,
     pub technologies: Vec<String>,
     pub ai_models: Vec<String>,
+    /// Agents named in free text (not in the directory).
     pub agents: Vec<ShowcaseAgent>,
     /// Where humans reviewed or approved the agents' work.
     pub human_oversight: String,
     pub evidence: ProductionEvidence,
     pub team_name: String,
+    /// Agents only: who serves the model(s) in `ai_models`.
+    pub model_provider: String,
+    /// Agents only: tools it can call.
+    pub tools: Vec<String>,
+    /// Agents only: MCP servers it uses.
+    pub mcp_servers: Vec<String>,
+    /// Agents only: values from [`AGENT_CAPABILITIES`].
+    pub capabilities: Vec<String>,
+    /// Apps: directory agents that built it. Teams: members, in workflow order.
+    pub linked_agents: Vec<ShowcaseLink>,
+    /// Apps only: the directory team that built it.
+    pub linked_team: Option<ShowcaseLink>,
+    /// Agents and teams: public, published apps that link to it (directly,
+    /// or through a team for agents).
+    pub used_in: i64,
     /// Only returned to the creator and editors; public responses blank it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub creator_email: Option<String>,
@@ -193,6 +257,8 @@ pub struct ShowcaseApp {
 /// Create and update share one body: an edit sends the whole app again.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct ShowcaseAppInput {
+    /// Required on create; an entry never changes kind.
+    pub kind: Option<ShowcaseKind>,
     #[serde(default)]
     pub name: String,
     #[serde(default)]
@@ -232,6 +298,20 @@ pub struct ShowcaseAppInput {
     pub evidence: ProductionEvidence,
     #[serde(default)]
     pub team_name: String,
+    #[serde(default)]
+    pub model_provider: String,
+    #[serde(default)]
+    pub tools: Vec<String>,
+    #[serde(default)]
+    pub mcp_servers: Vec<String>,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+    /// Apps: directory agents that built it. Teams: members, in order.
+    #[serde(default)]
+    pub agent_links: Vec<ShowcaseLinkInput>,
+    /// Apps only: slug of the directory team that built it, or empty.
+    #[serde(default)]
+    pub team_slug: String,
     /// false saves a draft; true submits (community) or publishes (editors).
     #[serde(default)]
     pub submit: bool,

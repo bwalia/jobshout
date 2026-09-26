@@ -5,16 +5,21 @@ import type { FormState } from "@/app/actions";
 import {
   EVIDENCE,
   deleteApp,
+  entryHref,
   isAppType,
   isBuildMethod,
+  isKind,
   isMaturity,
   isPricing,
   isVisibility,
+  linkCandidates,
   moderateApp,
   saveApp,
   setStar,
   type Evidence,
+  type LinkInput,
   type ShowcaseAgent,
+  type ShowcaseLink,
   type ShowcaseModeration,
 } from "@/lib/showcase";
 import { currentViewer } from "@/lib/session";
@@ -43,6 +48,19 @@ function agents(form: FormData): ShowcaseAgent[] {
     });
 }
 
+/** Directory links the picker serialised as JSON: [{slug, role}]. */
+function links(form: FormData, key: string): LinkInput[] {
+  try {
+    const raw = JSON.parse(text(form, key) || "[]") as unknown;
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .filter((l): l is LinkInput => typeof l?.slug === "string")
+      .map((l) => ({ slug: l.slug, role: typeof l.role === "string" ? l.role : "" }));
+  } catch {
+    return [];
+  }
+}
+
 function isHttpUrl(value: string): boolean {
   return /^https?:\/\/\S+$/i.test(value);
 }
@@ -53,9 +71,16 @@ const URL_FIELDS = ["logo_url", "repo_url", "demo_url", "website_url", "docs_url
 function fieldFor(message: string): string | null {
   const m = message.toLowerCase();
   if (m.includes("needs evidence")) return "evidence";
+  if (m.includes("no team called") || m.includes("which team")) return "team_slug";
+  if (m.includes("no agent called") || m.includes("at least two agents") || m.includes("link at most") || m.includes("agent roles") || m.includes("link to itself") || m.includes("link other agents")) return "agent_links";
+  if (m.includes("capabilit")) return "capabilities";
+  if (m.includes("model provider")) return "model_provider";
+  if (m.includes("model the agent")) return "ai_models";
+  if (m.includes("mcp")) return "mcp_servers";
+  if (m.includes("tool")) return "tools";
   if (m.startsWith("name")) return "name";
   if (m.includes("tagline")) return "tagline";
-  if (m.includes("describe the app") || m.includes("description")) return "description_md";
+  if (m.includes("describe the") || m.includes("description")) return "description_md";
   if (m.includes("kind of app")) return "app_type";
   if (m.includes("mature")) return "maturity";
   if (m.includes("how the app was built")) return "build_method";
@@ -77,21 +102,22 @@ function fieldFor(message: string): string | null {
   return null;
 }
 
-function refresh(slug?: string) {
+function refresh(entry?: { kind: ShowcaseLink["kind"]; slug: string }) {
   revalidateTag("showcase");
   revalidatePath("/showcase");
+  revalidatePath("/agents");
   revalidatePath("/showcase/mine");
-  if (slug) revalidatePath(`/showcase/${slug}`);
+  if (entry) revalidatePath(entryHref(entry));
 }
 
 export async function saveAppAction(_prev: FormState, form: FormData): Promise<FormState> {
   const viewer = await currentViewer();
-  if (!viewer) return { ok: false, message: "Sign in to add an app." };
+  if (!viewer) return { ok: false, message: "Sign in to add to the showcase." };
 
   const name = text(form, "name");
   const submit = form.get("intent") !== "draft";
   const fieldErrors: Record<string, string> = {};
-  if (!name) fieldErrors.name = "Give the app a name.";
+  if (!name) fieldErrors.name = "Give it a name.";
   for (const key of URL_FIELDS) {
     const v = text(form, key);
     if (v && !isHttpUrl(v)) fieldErrors[key] = "Links need to start with https://";
@@ -114,9 +140,11 @@ export async function saveAppAction(_prev: FormState, form: FormData): Promise<F
 
   const id = text(form, "id") || undefined;
   try {
+    const kind = pick("kind", isKind) ?? "app";
     const app = await saveApp(
       viewer,
       {
+        kind,
         name,
         tagline: text(form, "tagline"),
         description_md: text(form, "description_md"),
@@ -140,11 +168,17 @@ export async function saveAppAction(_prev: FormState, form: FormData): Promise<F
         human_oversight: text(form, "human_oversight"),
         evidence: { ...evidence, status_page_url: text(form, "status_page_url") },
         team_name: text(form, "team_name"),
+        model_provider: text(form, "model_provider"),
+        tools: list(form, "tools"),
+        mcp_servers: list(form, "mcp_servers"),
+        capabilities: form.getAll("capabilities").map(String),
+        agent_links: links(form, "agent_links"),
+        team_slug: links(form, "team_slug")[0]?.slug ?? "",
         submit,
       },
       id,
     );
-    refresh(app.slug);
+    refresh(app);
     return {
       ok: true,
       message:
@@ -153,7 +187,7 @@ export async function saveAppAction(_prev: FormState, form: FormData): Promise<F
           : app.status === "pending_review"
             ? "Submitted for review."
             : "Draft saved.",
-      result: { id: app.slug, status: app.status },
+      result: { id: entryHref(app), status: app.status },
     };
   } catch (e) {
     const message = e instanceof Error ? e.message : "Could not save.";
@@ -189,7 +223,7 @@ export async function moderateAppAction(_prev: FormState, form: FormData): Promi
   }
   try {
     const app = await moderateApp(viewer, text(form, "id"), action, note);
-    refresh(app.slug);
+    refresh(app);
     revalidatePath("/showcase/review");
     const done: Record<ShowcaseModeration, string> = {
       approve: "Published.",
@@ -217,4 +251,22 @@ export async function toggleStarAction(
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "Could not update the star." };
   }
+}
+
+/** Directory search for the link picker: public entries plus the viewer's own. */
+export async function linkCandidatesAction(
+  kind: "agent" | "team",
+  q: string,
+): Promise<ShowcaseLink[]> {
+  const viewer = await currentViewer();
+  if (!viewer) return [];
+  const found = await linkCandidates(viewer, kind, q.slice(0, 100)).catch(() => []);
+  return found.map((e) => ({
+    slug: e.slug,
+    kind: e.kind,
+    name: e.name,
+    tagline: e.tagline,
+    logo_url: e.logo_url,
+    role: "",
+  }));
 }

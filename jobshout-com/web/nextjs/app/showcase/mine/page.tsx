@@ -8,6 +8,8 @@ import { deleteAppAction } from "@/app/showcase/actions";
 import { formatDate } from "@/lib/insights";
 import {
   APP_TYPES,
+  KINDS,
+  entryHref,
   STATUS_LABELS,
   VISIBILITY,
   myApps,
@@ -18,7 +20,7 @@ import { currentViewer } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = { title: "Your apps", robots: { index: false } };
+export const metadata: Metadata = { title: "Your showcase", robots: { index: false } };
 
 const TONE: Record<AppStatus, "neutral" | "brand" | "good" | "warn" | "signal"> = {
   draft: "neutral",
@@ -44,20 +46,20 @@ export default async function MyAppsPage() {
     <div className="mx-auto max-w-4xl px-5 pb-24 pt-10 sm:px-8 sm:pt-14">
       <header className="flex flex-wrap items-end justify-between gap-5">
         <div>
-          <h1 className="font-display text-4xl font-semibold tracking-[-0.03em] text-ink sm:text-5xl">Your apps</h1>
-          <p className="mt-3 text-base text-mute">Drafts, submissions and what is live in the AI Showcase.</p>
+          <h1 className="font-display text-4xl font-semibold tracking-[-0.03em] text-ink sm:text-5xl">Your showcase</h1>
+          <p className="mt-3 text-base text-mute">Your apps, agents and teams: drafts, submissions and what is live.</p>
         </div>
         {viewer ? (
           <Link href="/showcase/new" className={buttonClass("primary", "md")}>
             <PlusIcon className="h-4 w-4" />
-            Add an app
+            Add something
           </Link>
         ) : null}
       </header>
 
       <div className="mt-10">
         {!viewer ? (
-          <SignInPrompt next="/showcase/mine" title="Sign in to see your apps" body="Your apps are tied to your account." />
+          <SignInPrompt next="/showcase/mine" title="Sign in to see your showcase" body="Your listings are tied to your account." />
         ) : error ? (
           <ErrorNotice title={error} />
         ) : apps.length === 0 ? (
@@ -82,7 +84,7 @@ export default async function MyAppsPage() {
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge tone={TONE[app.status]}>{STATUS_LABELS[app.status]}</Badge>
                         <span className="text-xs text-mute">
-                          {APP_TYPES[app.app_type]} · {VISIBILITY[app.visibility].label} · updated{" "}
+                          {app.kind === "app" ? APP_TYPES[app.app_type] : KINDS[app.kind].label} · {VISIBILITY[app.visibility].label} · updated{" "}
                           {formatDate(app.updated_at)}
                         </span>
                         {app.status === "published" ? (
@@ -92,7 +94,7 @@ export default async function MyAppsPage() {
                         ) : null}
                       </div>
                       <h2 className="mt-2 break-words font-display text-lg font-semibold text-ink">
-                        <Link href={`/showcase/${app.slug}`} className="hover:text-shout">
+                        <Link href={entryHref(app)} className="hover:text-shout">
                           {app.name}
                         </Link>
                       </h2>

@@ -6,19 +6,19 @@ import { SignInPrompt } from "@/components/insights/SignInPrompt";
 import { AppForm } from "@/components/showcase/AppForm";
 import { ErrorNotice } from "@/components/ui";
 import { isEditor } from "@/lib/insights";
-import { STATUS_LABELS, getApp } from "@/lib/showcase";
+import { KINDS, STATUS_LABELS, entryHref, getApp } from "@/lib/showcase";
 import { currentViewer } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = { title: "Edit app", robots: { index: false } };
+export const metadata: Metadata = { title: "Edit listing", robots: { index: false } };
 
 export default async function EditAppPage({ params }: { params: { slug: string } }) {
   const viewer = await currentViewer();
   if (!viewer) {
     return (
       <div className="mx-auto max-w-3xl px-5 pb-24 pt-14 sm:px-8">
-        <SignInPrompt next={`/showcase/${params.slug}/edit`} title="Sign in to edit" body="Only the creator and the editors can change an app." />
+        <SignInPrompt next={`/showcase/${params.slug}/edit`} title="Sign in to edit" body="Only the creator and the editors can change a listing." />
       </div>
     );
   }
@@ -29,11 +29,11 @@ export default async function EditAppPage({ params }: { params: { slug: string }
   return (
     <div className="mx-auto max-w-3xl px-5 pb-24 pt-8 sm:px-8 sm:pt-12">
       <Link
-        href={`/showcase/${app.slug}`}
+        href={entryHref(app)}
         className="inline-flex min-h-[44px] items-center gap-2 text-sm font-medium text-mute transition-colors duration-200 hover:text-ink"
       >
         <ArrowLeftIcon className="h-4 w-4" />
-        Back to the app
+        Back to the {KINDS[app.kind].label.toLowerCase()}
       </Link>
       <h1 className="mt-4 font-display text-3xl font-semibold tracking-[-0.03em] text-ink sm:text-4xl">
         Edit: {app.name}
@@ -47,9 +47,9 @@ export default async function EditAppPage({ params }: { params: { slug: string }
 
       <div className="mt-8">
         {!owner && !editor ? (
-          <ErrorNotice title="You can only edit your own apps." />
+          <ErrorNotice title="You can only edit your own listings." />
         ) : app.status === "archived" && !editor ? (
-          <ErrorNotice title="This app was archived" body="Archived apps can only be changed by the editors." />
+          <ErrorNotice title="This was archived" body="Archived listings can only be changed by the editors." />
         ) : (
           <AppForm isStaff={editor} initial={app} />
         )}
