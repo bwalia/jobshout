@@ -51,6 +51,8 @@ spec:
               value: {{ .Values.insights.staffEmails | default "" | quote }}
             - name: INSIGHTS_SEED_SAMPLES
               value: {{ .Values.insights.seedSamples | default false | quote }}
+            - name: SHOWCASE_SEED_SAMPLES
+              value: {{ (.Values.showcase).seedSamples | default false | quote }}
           # envFrom, not env+valueFrom: see the note in web.yaml.
           envFrom:
             - secretRef:

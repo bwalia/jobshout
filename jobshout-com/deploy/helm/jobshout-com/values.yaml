@@ -82,3 +82,8 @@ insights:
   staffEmails: "tenthmatrix.mailer@gmail.com"
   # Fill an empty hub with clearly-labelled sample items. Never in prod.
   seedSamples: false
+
+# AI Showcase (/showcase). Moderated by the Insights staffEmails above.
+showcase:
+  # Fill an empty showcase with clearly-labelled sample apps. Never in prod.
+  seedSamples: false

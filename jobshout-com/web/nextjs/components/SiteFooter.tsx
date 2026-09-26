@@ -19,6 +19,15 @@ const COLUMNS = [
     ],
   },
   {
+    title: "AI Showcase",
+    links: [
+      { href: "/showcase", label: "See what AI is building" },
+      { href: "/showcase?collection=built_by_agents", label: "Built by agents" },
+      { href: "/showcase?collection=production_ready", label: "Production ready" },
+      { href: "/showcase/new", label: "Showcase your app" },
+    ],
+  },
+  {
     title: "Insights",
     links: [
       { href: "/insights", label: "Latest on AI & work" },
@@ -32,7 +41,7 @@ const COLUMNS = [
 export function SiteFooter() {
   return (
     <footer className="mt-24 border-t border-line bg-subtle">
-      <div className="mx-auto grid max-w-board gap-10 px-5 py-14 sm:px-8 md:grid-cols-[1.4fr_1fr_1fr_1fr]">
+      <div className="mx-auto grid max-w-board gap-10 px-5 py-14 sm:px-8 md:grid-cols-2 lg:grid-cols-[1.4fr_1fr_1fr_1fr_1fr]">
         <div className="max-w-sm">
           <Logo />
           <p className="mt-4 text-sm leading-relaxed text-mute">

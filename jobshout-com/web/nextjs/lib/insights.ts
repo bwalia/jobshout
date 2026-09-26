@@ -100,9 +100,10 @@ export type InsightQuery = {
   offset?: number;
 };
 
-const API_BASE = process.env.JOBSHOUT_COM_API_URL ?? "http://127.0.0.1:8088";
+export const API_BASE = process.env.JOBSHOUT_COM_API_URL ?? "http://127.0.0.1:8088";
 
-function headers(viewer?: Viewer | null): HeadersInit {
+/** Identity headers for the API, signed with the web tier's shared token. */
+export function headers(viewer?: Viewer | null): HeadersInit {
   const h: Record<string, string> = { "content-type": "application/json" };
   if (viewer?.email) {
     h["x-jobshout-user-email"] = viewer.email;
@@ -113,7 +114,7 @@ function headers(viewer?: Viewer | null): HeadersInit {
   return h;
 }
 
-async function failure(res: Response, fallback: string): Promise<Error> {
+export async function failure(res: Response, fallback: string): Promise<Error> {
   const body = (await res.json().catch(() => null)) as {
     error?: { message?: string };
   } | null;

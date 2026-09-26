@@ -58,7 +58,7 @@ fn same(a: &[u8], b: &[u8]) -> bool {
 }
 
 /// The signed-in user, if the web tier forwarded one.
-fn actor(state: &AppState, headers: &HeaderMap) -> Result<Option<Actor>, ApiError> {
+pub(crate) fn actor(state: &AppState, headers: &HeaderMap) -> Result<Option<Actor>, ApiError> {
     let text = |name: &str| {
         headers
             .get(name)
@@ -92,7 +92,7 @@ fn actor(state: &AppState, headers: &HeaderMap) -> Result<Option<Actor>, ApiErro
     ))
 }
 
-fn signed_in(state: &AppState, headers: &HeaderMap) -> Result<Actor, ApiError> {
+pub(crate) fn signed_in(state: &AppState, headers: &HeaderMap) -> Result<Actor, ApiError> {
     actor(state, headers)?
         .ok_or_else(|| err(DomainError::Unauthorized("sign in to do that".into())))
 }

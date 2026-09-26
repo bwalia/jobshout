@@ -4,6 +4,7 @@ use jobshout_applications::ApplicationService;
 use jobshout_candidates::CandidateService;
 use jobshout_content::InsightService;
 use jobshout_jobs::{seed_organisation_id, JobService};
+use jobshout_showcase::ShowcaseService;
 use std::net::SocketAddr;
 
 #[tokio::main]
@@ -31,6 +32,16 @@ async fn main() -> anyhow::Result<()> {
             .context("seed sample insights")?;
         if n > 0 {
             tracing::info!(count = n, "seeded sample insights");
+        }
+    }
+    let showcase = ShowcaseService::new(pool.clone());
+    if env_flag("SHOWCASE_SEED_SAMPLES") {
+        let n = showcase
+            .seed_samples()
+            .await
+            .context("seed sample showcase apps")?;
+        if n > 0 {
+            tracing::info!(count = n, "seeded sample showcase apps");
         }
     }
     let site_url = std::env::var("PUBLIC_SITE_URL")
@@ -61,6 +72,7 @@ async fn main() -> anyhow::Result<()> {
         candidates: CandidateService::new(pool.clone()),
         applications: ApplicationService::new(pool),
         insights,
+        showcase,
         site_url: site_url.trim_end_matches('/').into(),
         internal_token: internal_token.map(Into::into),
     };

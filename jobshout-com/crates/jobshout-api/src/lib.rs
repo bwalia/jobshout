@@ -7,6 +7,7 @@ mod error;
 mod insights;
 mod jobs;
 mod profiles;
+mod showcase;
 mod state;
 
 use axum::{routing::get, Json, Router};
@@ -31,6 +32,7 @@ pub fn router(state: AppState) -> Router {
         .merge(profiles::routes())
         .merge(applications::routes())
         .merge(insights::routes())
+        .merge(showcase::routes())
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
         .with_state(state)

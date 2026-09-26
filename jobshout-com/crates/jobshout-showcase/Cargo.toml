@@ -1,0 +1,15 @@
+[package]
+name = "jobshout-showcase"
+description = "AI Showcase: applications built by people and AI agents"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+chrono = { workspace = true }
+jobshout-content = { path = "../jobshout-content" }
+jobshout-domain = { path = "../jobshout-domain" }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+uuid = { workspace = true }

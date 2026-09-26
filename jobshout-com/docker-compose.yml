@@ -50,6 +50,7 @@ services:
       JOBSHOUT_INTERNAL_TOKEN: local-dev-internal-token
       INSIGHTS_STAFF_EMAILS: ${INSIGHTS_STAFF_EMAILS:-}
       INSIGHTS_SEED_SAMPLES: "true"
+      SHOWCASE_SEED_SAMPLES: "true"
       PUBLIC_SITE_URL: http://localhost:3010
     ports:
       - "8088:8088"

@@ -842,6 +842,7 @@ dependencies = [
  "jobshout-domain",
  "jobshout-jobs",
  "jobshout-matching",
+ "jobshout-showcase",
  "serde",
  "serde_json",
  "tower-http",
@@ -909,6 +910,7 @@ dependencies = [
  "jobshout-content",
  "jobshout-jobs",
  "jobshout-observability",
+ "jobshout-showcase",
  "jobshout-storage",
  "tokio",
  "tracing",
@@ -1075,6 +1077,19 @@ version = "0.1.0"
 [[package]]
 name = "jobshout-search"
 version = "0.1.0"
+
+[[package]]
+name = "jobshout-showcase"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "jobshout-content",
+ "jobshout-domain",
+ "serde_json",
+ "sqlx",
+ "uuid",
+]
 
 [[package]]
 name = "jobshout-speech"
