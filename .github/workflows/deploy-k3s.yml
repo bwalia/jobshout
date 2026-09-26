@@ -274,8 +274,19 @@ jobs:
           # these hosts when one drops off the LAN mid-run (node .23 flaps, which
           # is what killed the #141 and #143 deploys at the post-push inspect).
           REGISTRY_HOSTS="192.168.1.23 192.168.1.140 192.168.1.104 192.168.1.47 192.168.1.36"
+          # The runner's Docker VM (Colima) can lose its route to the LAN while
+          # the Mac keeps one; the builder container then gets "connection
+          # refused" from every NodePort (runs 36204498143, 36202354483). Relay
+          # through the host when that happens and push via the relay first.
+          RELAY_HOST=$(.github/scripts/registry-relay.sh "$REGISTRY_HOSTS" || true)
+          echo "RELAY_HOST=$RELAY_HOST" >> "$GITHUB_ENV"
           PUSH=""
+          if [ -n "$RELAY_HOST" ]; then
+            PUSH="${RELAY_HOST}:30500"
+            REGISTRY_HOSTS="$RELAY_HOST $REGISTRY_HOSTS"
+          fi
           for h in $REGISTRY_HOSTS; do
+            [ -n "$PUSH" ] && break
             code=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 5 \
               "http://${h}:30500/v2/" || echo 000)
             if [ "$code" = "401" ] || [ "$code" = "200" ]; then
@@ -323,6 +334,8 @@ jobs:
           PUSH_REGISTRY: ${{ steps.push_host.outputs.host }}
         run: |
           set -euo pipefail
+          # Fresh host relay for this step (no-op when containers reach the LAN).
+          [ -n "${RELAY_HOST:-}" ] && .github/scripts/registry-relay.sh "192.168.1.23 192.168.1.140 192.168.1.104 192.168.1.47 192.168.1.36" >/dev/null || true
           VERSION="${{ needs.compute-version.outputs.next_version }}"
           NS="$PUSH_REGISTRY/$IMAGE_NAMESPACE"
           CACHE_ROOT="${HOME}/.cache/jobshout-buildkit"
@@ -356,8 +369,12 @@ jobs:
           # Trust every candidate NodePort host over HTTP so the push and the
           # post-push inspect/load can fail over between them when one node drops.
           hosts = [f"{h}:30500" for h in os.environ["REGISTRY_HOSTS"].split()]
+          # The host relay is plain HTTP only: with `insecure` BuildKit tries
+          # HTTPS first and the relay's upstream answers that with EOF.
+          relay = f'{os.environ.get("RELAY_HOST", "")}:30500'
           Path(cfg).write_text("".join(
-              f'[registry."{h}"]\n  http = true\n  insecure = true\n' for h in hosts
+              f'[registry."{h}"]\n  http = true\n' + ("" if h == relay else "  insecure = true\n")
+              for h in hosts
           ))
           PY
           CFG_HASH=$(shasum -a 256 "$CFG" | awk '{print $1}')
@@ -457,6 +474,8 @@ jobs:
           PUSH_REGISTRY: ${{ steps.push_host.outputs.host }}
         run: |
           set -euo pipefail
+          # Fresh host relay for this step (no-op when containers reach the LAN).
+          [ -n "${RELAY_HOST:-}" ] && .github/scripts/registry-relay.sh "192.168.1.23 192.168.1.140 192.168.1.104 192.168.1.47 192.168.1.36" >/dev/null || true
           VERSION="${{ needs.compute-version.outputs.next_version }}"
           NS="$PUSH_REGISTRY/$IMAGE_NAMESPACE"
 
