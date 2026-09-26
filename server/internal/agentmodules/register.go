@@ -17,6 +17,7 @@ import (
 	"github.com/jobshout/server/internal/course"
 	"github.com/jobshout/server/internal/creditcontroller"
 	"github.com/jobshout/server/internal/images"
+	"github.com/jobshout/server/internal/jobshoutcomwriter"
 	"github.com/jobshout/server/internal/mail"
 	"github.com/jobshout/server/internal/pentester"
 	"github.com/jobshout/server/internal/prreview"
@@ -69,6 +70,7 @@ func Register(d Deps) {
 	agentmodule.Register(mail.Module(d.Mail))
 	agentmodule.Register(career.Module(d.Career))
 	agentmodule.Register(blog.Module(d.Blog))
+	agentmodule.Register(jobshoutcomwriter.Module(d.Blog))
 	agentmodule.Register(images.Module(imageAdapter{d.Images}))
 	agentmodule.Register(research.Module(d.Research))
 	agentmodule.Register(creditcontroller.Module(d.CreditController))

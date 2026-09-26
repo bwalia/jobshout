@@ -176,3 +176,26 @@ func TestATypoSurvivesNormalizeAndIsRejected(t *testing.T) {
 		t.Fatal("a typo'd audience survived Normalize and then Validate accepted it")
 	}
 }
+
+func TestGenerateBlogRequest_Writer(t *testing.T) {
+	r := GenerateBlogRequest{Writer: " JobShout_Com_Writer ", Trending: true}
+	r.Normalize()
+	if err := r.Validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if r.Writer != BuiltinJobShoutComWriter || r.Audience != "insights" {
+		t.Fatalf("want the Content Writer writing for Insights, got writer=%q audience=%q", r.Writer, r.Audience)
+	}
+
+	aw := GenerateBlogRequest{Writer: BuiltinArticleWriter, Topics: []string{"x"}}
+	aw.Normalize()
+	if aw.Writer != "" || aw.Audience != "" {
+		t.Fatalf("the Article Writer is stored as empty and keeps the default reader, got %q %q", aw.Writer, aw.Audience)
+	}
+
+	bad := GenerateBlogRequest{Writer: "someone_else", Topics: []string{"x"}}
+	bad.Normalize()
+	if err := bad.Validate(); err == nil {
+		t.Fatal("an unknown writer must be rejected")
+	}
+}

@@ -53,6 +53,10 @@ spec:
               value: {{ printf "https://%s" .Values.host | quote }}
             - name: INSIGHTS_STAFF_EMAILS
               value: {{ .Values.insights.staffEmails | default "" | quote }}
+            # Agents whose submissions publish without review — only those whose
+            # platform has a person approve each item before sending it.
+            - name: INSIGHTS_TRUSTED_AGENTS
+              value: {{ .Values.insights.trustedAgents | default "" | quote }}
             - name: INSIGHTS_SEED_SAMPLES
               value: {{ .Values.insights.seedSamples | default false | quote }}
             - name: SHOWCASE_SEED_SAMPLES

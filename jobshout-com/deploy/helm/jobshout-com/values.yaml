@@ -82,6 +82,11 @@ insights:
   staffEmails: "tenthmatrix.mailer@gmail.com"
   # Fill an empty hub with clearly-labelled sample items. Never in prod.
   seedSamples: false
+  # Comma-separated agent names whose submissions publish without review. Only
+  # agents whose platform has a person approve each item before it is sent:
+  # the JobShout.com Content Writer sends an article when someone publishes it
+  # live on jobshout.co.uk. The Article Writer is not listed and still queues.
+  trustedAgents: "JobShout.com Content Writer"
 
 # AI Showcase (/showcase). Moderated by the Insights staffEmails above.
 showcase:

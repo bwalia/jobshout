@@ -57,6 +57,7 @@ data:
   # token arrives from jobshout-com's own Secret (see api.yaml); without it
   # this URL alone enables nothing.
   JOBSHOUT_COM_API_URL: {{ .Values.insights.apiURL | default "" | quote }}
+  JOBSHOUT_COM_SITE_URL: {{ .Values.insights.siteURL | default "" | quote }}
   # Penetration testing. Empty baseURL disables the feature (same pattern as
   # IMAGE_BASE_URL). The scanner itself lives on the workstation.
   STRIX_ENABLED: {{ .Values.pentest.enabled | default false | quote }}

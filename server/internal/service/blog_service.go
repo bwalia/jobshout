@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/jobshout/server/internal/agentmodule"
 	"github.com/jobshout/server/internal/audience"
 	"github.com/jobshout/server/internal/blog"
 	"github.com/jobshout/server/internal/llmtrace"
@@ -57,6 +58,14 @@ type BlogService interface {
 	// than BLOG_ORPHAN_TIMEOUT). It does not restart them.
 	ReapOrphans(ctx context.Context) (int, error)
 	ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.BlogRun], error)
+	// ListByWriter lists one writer builtin's runs (a key of model.BlogWriters).
+	ListByWriter(ctx context.Context, orgID uuid.UUID, builtin string, params model.PaginationParams) (*model.PaginatedResponse[model.BlogRun], error)
+	// PublishLive makes a completed run's CMS drafts public and publishes its
+	// articles on jobshout.com, for writers whose articles go live on a
+	// person's say-so (the JobShout.com Content Writer).
+	PublishLive(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) (*model.BlogRun, error)
+	// CanPublishLive reports whether both halves of PublishLive are configured.
+	CanPublishLive() bool
 	ListArticles(ctx context.Context, runID uuid.UUID) ([]model.BlogArticle, error)
 	GetArticle(ctx context.Context, id uuid.UUID) (*model.BlogArticle, error)
 	// BindTasks updates the Task Manager card when a launched run finishes.
@@ -292,12 +301,30 @@ func agentModels(agent *model.Agent) (prose, structured string) {
 }
 
 func (s *blogService) EnsureArticleWriter(ctx context.Context, orgID uuid.UUID) (*model.Agent, error) {
-	existing, err := s.agentRepo.FindBuiltin(ctx, orgID, model.BuiltinArticleWriter)
+	return s.ensureWriter(ctx, orgID, model.BuiltinArticleWriter)
+}
+
+// ensureWriter resolves the org's agent for a blog writer builtin, seeding it
+// when missing. Writers other than the Article Writer are seeded from their
+// registered module, so this package needs no knowledge of them.
+func (s *blogService) ensureWriter(ctx context.Context, orgID uuid.UUID, builtin string) (*model.Agent, error) {
+	existing, err := s.agentRepo.FindBuiltin(ctx, orgID, builtin)
 	if err != nil {
 		return nil, err
 	}
 	if existing != nil {
 		return existing, nil
+	}
+	if builtin != model.BuiltinArticleWriter {
+		m, ok := agentmodule.Lookup(builtin)
+		if !ok || m.Seed == nil {
+			return nil, fmt.Errorf("blog_svc: writer %q is not registered", builtin)
+		}
+		agent := m.Seed(orgID)
+		if err := s.agentRepo.Create(ctx, agent); err != nil {
+			return nil, fmt.Errorf("blog_svc: seed %s: %w", builtin, err)
+		}
+		return agent, nil
 	}
 
 	agent := articleWriterSeed(orgID)
@@ -374,9 +401,45 @@ type stepTracker struct {
 	steps  []model.BlogStep
 	repo   repository.BlogRepository
 	logger *zap.Logger
+	// writer is the agent the run belongs to. The pipeline attributes its
+	// writing steps to the Article Writer by name; a run of another writer
+	// shows that writer instead. Empty keeps the pipeline's name.
+	writer string
+}
+
+// newTracker is a stepTracker for run, attributed to the run's writer.
+func (s *blogService) newTracker(run *model.BlogRun) *stepTracker {
+	return &stepTracker{runID: run.ID, steps: run.Steps, repo: s.repo, logger: s.logger, writer: runWriterName(run)}
+}
+
+// runWriterName is the display name of the agent a run belongs to.
+func runWriterName(run *model.BlogRun) string {
+	if run == nil {
+		return model.AgentNameArticleWriter
+	}
+	if name, ok := model.BlogWriters[model.BlogWriterBuiltin(run.Options.Writer)]; ok {
+		return name
+	}
+	return model.AgentNameArticleWriter
+}
+
+// attributeSteps renames the Article Writer on seeded steps to writer.
+func attributeSteps(steps []model.BlogStep, writer string) []model.BlogStep {
+	if writer == "" || writer == model.AgentNameArticleWriter {
+		return steps
+	}
+	for i := range steps {
+		if steps[i].Agent == model.AgentNameArticleWriter {
+			steps[i].Agent = writer
+		}
+	}
+	return steps
 }
 
 func (t *stepTracker) advance(key, label, agent string) {
+	if agent == model.AgentNameArticleWriter && t.writer != "" {
+		agent = t.writer
+	}
 	now := time.Now()
 	for i := range t.steps {
 		if t.steps[i].Status == model.StepStatusRunning {
@@ -469,17 +532,17 @@ func (s *blogService) Generate(
 		return nil, fmt.Errorf("blog_svc: generator not configured")
 	}
 
-	agent, err := s.EnsureArticleWriter(ctx, orgID)
-	if err != nil {
-		return nil, err
-	}
-
 	// Normalize is idempotent, so calling it here costs nothing when the
 	// handler already did — and guarantees the briefs are populated for callers
 	// that build the request directly, like the scheduler.
 	req.Normalize()
 	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("blog_svc: %w", err)
+	}
+
+	agent, err := s.ensureWriter(ctx, orgID, model.BlogWriterBuiltin(req.Writer))
+	if err != nil {
+		return nil, err
 	}
 
 	startedAt := time.Now()
@@ -493,7 +556,7 @@ func (s *blogService) Generate(
 		Briefs:      req.Briefs,
 		Topics:      req.Topics,
 		Options:     req.RunOptions(),
-		Steps:       initialSteps(req.Trending),
+		Steps:       attributeSteps(initialSteps(req.Trending), model.BlogWriters[model.BlogWriterBuiltin(req.Writer)]),
 		Articles:    []model.BlogRunArticle{},
 		StartedAt:   &startedAt,
 	}
@@ -689,7 +752,7 @@ func (s *blogService) persistArticle(run *model.BlogRun, a blog.GeneratedArticle
 }
 
 func (s *blogService) failCreatedRun(run *model.BlogRun, cause error) {
-	tracker := &stepTracker{runID: run.ID, steps: run.Steps, repo: s.repo, logger: s.logger}
+	tracker := s.newTracker(run)
 	s.failRun(run, tracker, cause, s.logger, nil)
 }
 
@@ -709,7 +772,7 @@ func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, age
 	defer close(stopHB)
 	go s.heartbeatLoop(run.ID, stopHB)
 
-	tracker := &stepTracker{runID: run.ID, steps: run.Steps, repo: s.repo, logger: s.logger}
+	tracker := s.newTracker(run)
 	s.setAgentStatus(persistCtx(), agent.ID, "active")
 
 	taskID := s.resolveLaunchTaskID(persistCtx(), req.TaskID, run.ID)
@@ -797,7 +860,9 @@ func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, age
 					zap.Int("articles", len(run.Articles)))
 			}
 		}
-		if s.CanPublishInsights() {
+		// Other writers reach jobshout.com only when someone publishes live, so
+		// their drafts are not filed for review here.
+		if s.CanPublishInsights() && req.Writer == "" {
 			if _, perr := s.PublishInsights(persistCtx(), run.OrgID, run.ID); perr != nil {
 				log.Warn("blog: automatic filing to Insights failed, the articles are still here",
 					zap.Error(perr))
@@ -955,7 +1020,7 @@ func (s *blogService) Publish(ctx context.Context, orgID uuid.UUID, runID uuid.U
 	}
 
 	run.Steps = append(run.Steps, publishSteps()...)
-	tracker := &stepTracker{runID: run.ID, steps: run.Steps, repo: s.repo, logger: s.logger}
+	tracker := s.newTracker(run)
 
 	result, err := s.runner.Publish(ctx, articles, tracker.advance)
 	if err != nil {
@@ -1046,7 +1111,7 @@ func (s *blogService) PublishInsights(ctx context.Context, orgID uuid.UUID, runI
 	}
 
 	run.Steps = append(run.Steps, insightsSteps()...)
-	tracker := &stepTracker{runID: run.ID, steps: run.Steps, repo: s.repo, logger: s.logger}
+	tracker := s.newTracker(run)
 
 	result, perr := s.runner.PublishInsights(ctx, articles, tracker.advance)
 
@@ -1185,7 +1250,7 @@ func (s *blogService) Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUI
 		return nil, fmt.Errorf("blog_svc: every topic already has an article")
 	}
 
-	agent, err := s.EnsureArticleWriter(ctx, orgID)
+	agent, err := s.ensureWriter(ctx, orgID, model.BlogWriterBuiltin(run.Options.Writer))
 	if err != nil {
 		return nil, err
 	}
@@ -1193,7 +1258,7 @@ func (s *blogService) Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUI
 	startedAt := time.Now()
 	run.Status = model.BlogRunStatusRunning
 	run.AgentID = &agent.ID
-	run.Steps = initialSteps(false)
+	run.Steps = attributeSteps(initialSteps(false), runWriterName(run))
 	run.Articles = summaries
 	run.ErrorMessage = nil
 	run.StartedAt = &startedAt
@@ -1221,6 +1286,7 @@ func (s *blogService) Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUI
 		// article would be a nasty way to find that out.
 		Audience: run.Options.Audience,
 		Industry: run.Options.Industry,
+		Writer:   run.Options.Writer,
 	}
 	req.Normalize()
 	if run.Model != nil {
@@ -1235,7 +1301,7 @@ func (s *blogService) Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUI
 // retryDiscovery restarts a trending run that never got as far as choosing a
 // topic. Nothing was written, so the run starts over from discovery.
 func (s *blogService) retryDiscovery(ctx context.Context, run *model.BlogRun) (*model.BlogRun, error) {
-	agent, err := s.EnsureArticleWriter(ctx, run.OrgID)
+	agent, err := s.ensureWriter(ctx, run.OrgID, model.BlogWriterBuiltin(run.Options.Writer))
 	if err != nil {
 		return nil, err
 	}
@@ -1243,7 +1309,7 @@ func (s *blogService) retryDiscovery(ctx context.Context, run *model.BlogRun) (*
 	startedAt := time.Now()
 	run.Status = model.BlogRunStatusRunning
 	run.AgentID = &agent.ID
-	run.Steps = initialSteps(true)
+	run.Steps = attributeSteps(initialSteps(true), runWriterName(run))
 	run.Articles = []model.BlogRunArticle{}
 	run.ErrorMessage = nil
 	run.StartedAt = &startedAt
@@ -1274,6 +1340,7 @@ func discoveryRetryRequest(run *model.BlogRun) model.GenerateBlogRequest {
 		AutoPublish:   run.Options.AutoPublish,
 		Audience:      run.Options.Audience,
 		Industry:      run.Options.Industry,
+		Writer:        run.Options.Writer,
 	}
 	req.Normalize()
 	if run.Model != nil {
@@ -1423,7 +1490,28 @@ func (s *blogService) GetByID(ctx context.Context, id uuid.UUID) (*model.BlogRun
 }
 
 func (s *blogService) ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.BlogRun], error) {
-	return s.repo.ListByOrg(ctx, orgID, params)
+	return s.ListByWriter(ctx, orgID, model.BuiltinArticleWriter, params)
+}
+
+// ListByWriter lists the runs of one writer. The Article Writer's list also
+// holds runs stored before runs were attributed to an agent.
+func (s *blogService) ListByWriter(ctx context.Context, orgID uuid.UUID, builtin string, params model.PaginationParams) (*model.PaginatedResponse[model.BlogRun], error) {
+	if _, ok := model.BlogWriters[builtin]; !ok {
+		return nil, fmt.Errorf("blog_svc: unknown writer %q", builtin)
+	}
+	agent, err := s.agentRepo.FindBuiltin(ctx, orgID, builtin)
+	if err != nil {
+		return nil, err
+	}
+	var agentID *uuid.UUID
+	if agent != nil {
+		agentID = &agent.ID
+	} else if builtin != model.BuiltinArticleWriter {
+		// No agent yet means no runs yet.
+		params.Normalize()
+		return &model.PaginatedResponse[model.BlogRun]{Data: []model.BlogRun{}, Page: params.Page, PerPage: params.PerPage}, nil
+	}
+	return s.repo.ListByAgent(ctx, orgID, agentID, builtin == model.BuiltinArticleWriter, params)
 }
 
 func (s *blogService) ListArticles(ctx context.Context, runID uuid.UUID) ([]model.BlogArticle, error) {

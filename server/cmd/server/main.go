@@ -539,6 +539,14 @@ func main() {
 			Token:   cfg.JobshoutComAPIToken,
 			Agent:   model.AgentNameArticleWriter,
 		}))
+		// The Content Writer's articles are published straight to readers:
+		// jobshout.com trusts this agent (INSIGHTS_TRUSTED_AGENTS there) because
+		// a person has already approved the article by publishing it live.
+		blogRunner = blogRunner.WithLiveInsights(jobshoutcom.NewClient(jobshoutcom.Config{
+			BaseURL: cfg.JobshoutComAPIURL,
+			Token:   cfg.JobshoutComAPIToken,
+			Agent:   model.AgentNameJobShoutComWriter,
+		}))
 		writingModel := firstNonEmptyStr(cfg.BlogModel, cfg.OllamaDefaultModel)
 		logger.Info("article generator initialised",
 			zap.String("prose_model", firstNonEmptyStr(cfg.BlogProseModel, writingModel)),
@@ -975,7 +983,7 @@ func main() {
 	auditHandler := handler.NewAuditHandler(auditRepo)
 	pricingHandler := handler.NewPricingHandler(pricingRepo)
 	leaderboardHandler := handler.NewLeaderboardHandler(leaderboardSvc)
-	blogHandler := handler.NewBlogHandler(blogSvc)
+	blogHandler := handler.NewBlogHandler(blogSvc).WithInsightsSiteURL(cfg.JobshoutComSiteURL)
 	researchHandler := handler.NewResearchHandler(researchSvc)
 	pentestHandler := handler.NewPentestHandler(pentestSvc)
 	reviewHandler := handler.NewReviewHandler(reviewSvc)
@@ -1219,6 +1227,7 @@ func main() {
 					r.Get("/articles", blogHandler.ListArticles)
 					r.Post("/publish", blogHandler.Publish)
 					r.Post("/publish-insights", blogHandler.PublishInsights)
+					r.Post("/publish-live", blogHandler.PublishLive)
 					r.Post("/retry", blogHandler.Retry)
 					r.Post("/cancel", blogHandler.Cancel)
 					r.Delete("/", blogHandler.Delete)

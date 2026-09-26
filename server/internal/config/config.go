@@ -167,6 +167,9 @@ type Config struct {
 	// JOBSHOUT_INTERNAL_TOKEN, mounted from its jobshout-com-internal Secret.
 	JobshoutComAPIURL   string `mapstructure:"JOBSHOUT_COM_API_URL"`
 	JobshoutComAPIToken string `mapstructure:"JOBSHOUT_INTERNAL_TOKEN"`
+	// JobshoutComSiteURL is the public jobshout.com site for this ring, for
+	// links to published Insights articles. Empty hides the links.
+	JobshoutComSiteURL string `mapstructure:"JOBSHOUT_COM_SITE_URL"`
 
 	// Blog generator — the directory generated markdown is filed under, which
 	// is a label in the UI rather than a path on disk.
@@ -367,6 +370,7 @@ func Load() (*Config, error) {
 		OpsAPITimeout:        viper.GetDuration("OPSAPI_TIMEOUT"),
 		JobshoutComAPIURL:    viper.GetString("JOBSHOUT_COM_API_URL"),
 		JobshoutComAPIToken:  viper.GetString("JOBSHOUT_INTERNAL_TOKEN"),
+		JobshoutComSiteURL:   viper.GetString("JOBSHOUT_COM_SITE_URL"),
 		BlogContentDir:       viper.GetString("BLOG_CONTENT_DIR"),
 		BlogAuthorName:       viper.GetString("BLOG_AUTHOR_NAME"),
 		BlogModel:            viper.GetString("BLOG_MODEL"),

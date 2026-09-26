@@ -33,6 +33,10 @@ type BlogRepository interface {
 	UpdateBriefs(ctx context.Context, runID uuid.UUID, briefs []model.BlogBrief, topics []string) error
 	GetByID(ctx context.Context, id uuid.UUID) (*model.BlogRun, error)
 	ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.BlogRun], error)
+	// ListByAgent lists the runs attributed to agentID. includeUnowned adds
+	// runs with no agent, which predate attribution. A nil agentID with
+	// includeUnowned lists only those.
+	ListByAgent(ctx context.Context, orgID uuid.UUID, agentID *uuid.UUID, includeUnowned bool, params model.PaginationParams) (*model.PaginatedResponse[model.BlogRun], error)
 	// Delete removes a run. Its articles go with it via ON DELETE CASCADE.
 	Delete(ctx context.Context, id uuid.UUID) error
 
@@ -321,6 +325,43 @@ func (r *blogRepository) ListByOrg(ctx context.Context, orgID uuid.UUID, params 
 	rows, err := r.pool.Query(ctx, sql, orgID, params.PerPage, params.Offset())
 	if err != nil {
 		return nil, fmt.Errorf("blog_repo: list: %w", err)
+	}
+	defer rows.Close()
+
+	runs := make([]model.BlogRun, 0)
+	for rows.Next() {
+		run, err := scanBlogRun(rows)
+		if err != nil {
+			return nil, fmt.Errorf("blog_repo: scan: %w", err)
+		}
+		runs = append(runs, *run)
+	}
+
+	totalPages := (total + params.PerPage - 1) / params.PerPage
+	return &model.PaginatedResponse[model.BlogRun]{
+		Data: runs, Total: total, Page: params.Page, PerPage: params.PerPage, TotalPages: totalPages,
+	}, rows.Err()
+}
+
+func (r *blogRepository) ListByAgent(ctx context.Context, orgID uuid.UUID, agentID *uuid.UUID, includeUnowned bool, params model.PaginationParams) (*model.PaginatedResponse[model.BlogRun], error) {
+	params.Normalize()
+
+	// $2 may be NULL: "agent_id = NULL" matches nothing, leaving the unowned
+	// clause to decide.
+	const where = `org_id = $1 AND (agent_id = $2 OR ($3 AND agent_id IS NULL))`
+
+	var total int
+	if err := r.pool.QueryRow(ctx, "SELECT COUNT(*) FROM blog_runs WHERE "+where,
+		orgID, agentID, includeUnowned).Scan(&total); err != nil {
+		return nil, fmt.Errorf("blog_repo: count by agent: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, `SELECT `+blogRunColumns+`
+		FROM blog_runs WHERE `+where+`
+		ORDER BY created_at DESC LIMIT $4 OFFSET $5`,
+		orgID, agentID, includeUnowned, params.PerPage, params.Offset())
+	if err != nil {
+		return nil, fmt.Errorf("blog_repo: list by agent: %w", err)
 	}
 	defer rows.Close()
 

@@ -15,6 +15,7 @@ import { LinuxPatchAgentClient } from "@/components/LinuxPatchAgentClient";
 import { ArticlesView } from "@/components/articles/ArticlesView";
 import { ImagesView } from "@/components/image/ImagesView";
 import { CourseGeneratorClient } from "@/components/courses/CourseGeneratorClient";
+import { InsightsWriterClient } from "@/components/insights-writer/InsightsWriterClient";
 
 /**
  * Optional product UI that owns the Task Manager tab (replaces the schema form).
@@ -41,4 +42,5 @@ export const AGENT_CLIENTS: Record<string, ComponentType> = {
     return <ImagesView hideHeader />;
   },
   course_generator: CourseGeneratorClient,
+  jobshout_com_writer: InsightsWriterClient,
 };

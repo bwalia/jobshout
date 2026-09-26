@@ -2,7 +2,6 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import type { PaginationParams } from "@/lib/types/common";
 import type { GenerateBlogRequest } from "@/lib/types/blog";
 import {
   generateBlog,
@@ -12,6 +11,8 @@ import {
   getBlogRuns,
   publishBlogRun,
   publishBlogRunToInsights,
+  publishBlogRunLive,
+  type BlogRunListParams,
   retryBlogRun,
   cancelBlogRun,
   deleteBlogRun,
@@ -22,7 +23,7 @@ export const blogKeys = {
   all: ["blogs"] as const,
   config: () => [...blogKeys.all, "config"] as const,
   lists: () => [...blogKeys.all, "list"] as const,
-  list: (params: PaginationParams) => [...blogKeys.lists(), params] as const,
+  list: (params: BlogRunListParams) => [...blogKeys.lists(), params] as const,
   details: () => [...blogKeys.all, "detail"] as const,
   detail: (id: string) => [...blogKeys.details(), id] as const,
   articles: (runId: string) => [...blogKeys.all, "articles", runId] as const,
@@ -42,7 +43,7 @@ export function useBlogConfig() {
  * The run list, polled while any run is still working so the list reflects
  * progress without the user refreshing.
  */
-export function useBlogRuns(params: PaginationParams = {}) {
+export function useBlogRuns(params: BlogRunListParams = {}) {
   return useQuery({
     queryKey: blogKeys.list(params),
     queryFn: () => getBlogRuns(params),
@@ -119,6 +120,21 @@ export function usePublishBlogRunToInsights() {
       toast.success("Filed in Insights for editor review");
     },
     onError: (e) => toast.error(apiErrorMessage(e, "Failed to send to Insights")),
+  });
+}
+
+/** Publishes a Content Writer run live: CMS post public + jobshout.com. */
+export function usePublishBlogRunLive() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => publishBlogRunLive(id),
+    onSuccess: (_run, id) => {
+      qc.invalidateQueries({ queryKey: blogKeys.detail(id) });
+      qc.invalidateQueries({ queryKey: blogKeys.articles(id) });
+      qc.invalidateQueries({ queryKey: blogKeys.lists() });
+      toast.success("Published on jobshout.com");
+    },
+    onError: (err) => toast.error(apiErrorMessage(err, "Could not publish live")),
   });
 }
 
