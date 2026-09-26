@@ -22,6 +22,7 @@ const COLUMNS = [
     title: "AI Showcase",
     links: [
       { href: "/showcase", label: "See what AI is building" },
+      { href: "/agents", label: "Agent directory" },
       { href: "/showcase?collection=built_by_agents", label: "Built by agents" },
       { href: "/showcase?collection=production_ready", label: "Production ready" },
       { href: "/showcase/new", label: "Showcase your app" },

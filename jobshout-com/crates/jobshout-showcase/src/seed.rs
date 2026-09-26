@@ -4,12 +4,15 @@
 
 use jobshout_domain::{
     ProductionEvidence, ShowcaseAgent, ShowcaseAppInput, ShowcaseAppType, ShowcaseBuildMethod,
-    ShowcaseMaturity, ShowcasePricing,
+    ShowcaseKind, ShowcaseLinkInput, ShowcaseMaturity, ShowcasePricing,
 };
+
+/// Who the samples belong to; linking only touches apps this account owns.
+pub const EDITOR: &str = "editors@jobshout.com";
 
 const NOTE: &str = "_This is a sample listing seeded for development. It is not a real product._";
 
-fn agents(list: &[(&str, &str)]) -> Vec<ShowcaseAgent> {
+fn named_agents(list: &[(&str, &str)]) -> Vec<ShowcaseAgent> {
     list.iter()
         .map(|(name, role)| ShowcaseAgent {
             name: name.to_string(),
@@ -55,7 +58,7 @@ fn app(s: Sample) -> ShowcaseAppInput {
         demo_url: format!("https://example.com/{slug}/demo"),
         technologies: tags(s.technologies),
         ai_models: tags(s.models),
-        agents: agents(s.agents),
+        agents: named_agents(s.agents),
         human_oversight:
             "A maintainer reviews every change before it is merged and approves each release."
                 .into(),
@@ -145,6 +148,138 @@ pub fn samples() -> Vec<(ShowcaseAppInput, bool)> {
     ]
 }
 
+struct AgentSample<'a> {
+    name: &'a str,
+    tagline: &'a str,
+    body: &'a str,
+    provider: &'a str,
+    models: &'a [&'a str],
+    skills: &'a [&'a str],
+    tools: &'a [&'a str],
+    mcp: &'a [&'a str],
+    capabilities: &'a [&'a str],
+}
+
+fn agent(s: AgentSample) -> ShowcaseAppInput {
+    ShowcaseAppInput {
+        kind: Some(ShowcaseKind::Agent),
+        name: format!("Sample: {}", s.name),
+        tagline: s.tagline.into(),
+        description_md: format!("{}\n\n{NOTE}", s.body),
+        pricing: Some(ShowcasePricing::OpenSource),
+        license: "MIT".into(),
+        version: "0.1.0".into(),
+        repo_url: format!(
+            "https://example.com/{}/source",
+            s.name.to_ascii_lowercase().replace(' ', "-")
+        ),
+        model_provider: s.provider.into(),
+        ai_models: tags(s.models),
+        technologies: tags(s.skills),
+        tools: tags(s.tools),
+        mcp_servers: tags(s.mcp),
+        capabilities: tags(s.capabilities),
+        submit: true,
+        ..Default::default()
+    }
+}
+
+/// Sample agents. Slugs are "sample-<name>", which the team and app links use.
+pub fn agents() -> Vec<ShowcaseAppInput> {
+    vec![
+        agent(AgentSample {
+            name: "Architecture Agent",
+            tagline: "Sample agent. Turns a product brief into a service design and a build plan.",
+            body: "## What it does\n\nReads a brief, proposes the services, data model and interfaces, and writes a build plan other agents can pick up.\n\n## Where people come in\n\nA maintainer approves the design before any code is written.",
+            provider: "Anthropic",
+            models: &["Claude"],
+            skills: &["System design", "APIs", "PostgreSQL"],
+            tools: &["GitHub"],
+            mcp: &["Filesystem"],
+            capabilities: &["planning", "design"],
+        }),
+        agent(AgentSample {
+            name: "Rust Backend Agent",
+            tagline: "Sample agent. Writes Axum services with tests, from a design it is given.",
+            body: "## What it does\n\nImplements endpoints, persistence and tests in Rust, and opens a pull request per change.\n\n## Where people come in\n\nEvery pull request is reviewed by a person before it merges.",
+            provider: "Anthropic",
+            models: &["Claude"],
+            skills: &["Rust", "Axum", "Tokio", "SQLx"],
+            tools: &["GitHub", "Docker"],
+            mcp: &["GitHub"],
+            capabilities: &["code_generation", "testing", "debugging"],
+        }),
+        agent(AgentSample {
+            name: "Security Review Agent",
+            tagline: "Sample agent. Reviews changes for injection, auth and secrets problems.",
+            body: "## What it does\n\nReads each pull request, flags risky patterns with the line and the reason, and suggests a fix.\n\n## Where people come in\n\nFindings are advice: a person decides what to change.",
+            provider: "Anthropic",
+            models: &["Claude"],
+            skills: &["Application security", "Kubernetes"],
+            tools: &["GitHub", "Semgrep"],
+            mcp: &[],
+            capabilities: &["security", "code_review"],
+        }),
+        agent(AgentSample {
+            name: "Docs Agent",
+            tagline: "Sample agent. Keeps READMEs and API docs in step with the code.",
+            body: "## What it does\n\nWatches merged changes and proposes documentation updates, including examples that are run to check they still work.\n\n## Where people come in\n\nA maintainer merges the proposed docs.",
+            provider: "Open-weight model",
+            models: &["Open-weight model"],
+            skills: &["Technical writing", "OpenAPI"],
+            tools: &["GitHub"],
+            mcp: &["Filesystem"],
+            capabilities: &["documentation"],
+        }),
+    ]
+}
+
+fn link(slug: &str, role: &str) -> ShowcaseLinkInput {
+    ShowcaseLinkInput {
+        slug: slug.into(),
+        role: role.into(),
+    }
+}
+
+pub fn teams() -> Vec<ShowcaseAppInput> {
+    vec![ShowcaseAppInput {
+        kind: Some(ShowcaseKind::Team),
+        name: "Sample: Service Factory".into(),
+        tagline: "Sample team. Design, build, review and document a backend service.".into(),
+        description_md: format!(
+            "## How the team works\n\nThe architecture agent writes the plan, the backend agent builds it, the security agent reviews every change, and the docs agent writes it up. A person approves the plan and every merge.\n\n{NOTE}"
+        ),
+        agent_links: vec![
+            link("sample-architecture-agent", "Plans the service"),
+            link("sample-rust-backend-agent", "Builds it"),
+            link("sample-security-review-agent", "Reviews every change"),
+            link("sample-docs-agent", "Documents it"),
+        ],
+        submit: true,
+        ..Default::default()
+    }]
+}
+
+/// (sample app slug, links to set on it). The team slug is linked as the team.
+pub fn app_links() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
+    vec![
+        (
+            "sample-vector-notebook",
+            vec![
+                (
+                    "sample-architecture-agent",
+                    "Designed the retrieval pipeline",
+                ),
+                ("sample-rust-backend-agent", "Wrote the ingestion service"),
+            ],
+        ),
+        (
+            "sample-incident-scribe",
+            vec![("sample-service-factory", "")],
+        ),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,10 +287,37 @@ mod tests {
 
     #[test]
     fn every_sample_is_valid_and_labelled() {
-        for (input, _) in samples() {
+        let all = samples()
+            .into_iter()
+            .map(|(i, _)| i)
+            .chain(agents())
+            .chain(teams());
+        for input in all {
             assert!(input.name.starts_with("Sample: "), "{}", input.name);
             assert!(input.description_md.contains("sample listing"));
-            validate(&input).unwrap_or_else(|e| panic!("{}: {e}", input.name));
+            let kind = input.kind.unwrap_or(ShowcaseKind::App);
+            validate(kind, &input).unwrap_or_else(|e| panic!("{}: {e}", input.name));
+        }
+    }
+
+    #[test]
+    fn team_and_app_links_name_sample_agents() {
+        use jobshout_content::rules::slugify;
+        let agent_slugs: Vec<String> = agents().iter().map(|a| slugify(&a.name)).collect();
+        for team in teams() {
+            for l in &team.agent_links {
+                assert!(agent_slugs.contains(&l.slug), "{}", l.slug);
+            }
+        }
+        let team_slugs: Vec<String> = teams().iter().map(|t| slugify(&t.name)).collect();
+        for (_, links) in app_links() {
+            for (slug, _) in links {
+                let s = slug.to_string();
+                assert!(
+                    agent_slugs.contains(&s) || team_slugs.contains(&s),
+                    "{slug}"
+                );
+            }
         }
     }
 }

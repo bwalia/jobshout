@@ -28,13 +28,13 @@ export function MobileMenu({ children }: { children?: React.ReactNode }) {
         onClick={() => setOpen(true)}
         aria-label="Open menu"
         aria-expanded={open}
-        className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-pill border border-line text-mute transition-colors duration-200 hover:border-edge hover:text-ink lg:hidden"
+        className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-pill border border-line text-mute transition-colors duration-200 hover:border-edge hover:text-ink xl:hidden"
       >
         <MenuIcon className="h-5 w-5" />
       </button>
 
       {open ? (
-        <div className="fixed inset-0 z-50 lg:hidden">
+        <div className="fixed inset-0 z-50 xl:hidden">
           <button
             type="button"
             aria-label="Close menu"

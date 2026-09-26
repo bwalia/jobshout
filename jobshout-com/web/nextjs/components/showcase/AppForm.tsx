@@ -7,23 +7,28 @@ import { EMPTY_FORM_STATE } from "@/app/actions";
 import { previewAction } from "@/app/insights/actions";
 import { saveAppAction } from "@/app/showcase/actions";
 import { CheckCircleIcon, ShieldIcon } from "@/components/icons";
+import { LinkPicker } from "@/components/showcase/LinkPicker";
 import { Button, ErrorNotice, Field, Input, Select, Textarea, buttonClass, cx } from "@/components/ui";
 import {
   APP_TYPES,
   BUILD_METHODS,
+  CAPABILITIES,
   EVIDENCE,
+  KINDS,
   MATURITY,
   PRICING,
   VISIBILITY,
   type AppType,
   type BuildMethod,
+  type Capability,
+  type Kind,
   type Maturity,
   type Pricing,
   type ShowcaseApp,
   type Visibility,
 } from "@/lib/showcase";
 
-function SubmitButtons({ isStaff, live }: { isStaff: boolean; live: boolean }) {
+function SubmitButtons({ isStaff, live, noun }: { isStaff: boolean; live: boolean; noun: string }) {
   const { pending } = useFormStatus();
   return (
     <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
@@ -33,7 +38,7 @@ function SubmitButtons({ isStaff, live }: { isStaff: boolean; live: boolean }) {
         </Button>
       )}
       <Button type="submit" name="intent" value="submit" size="lg" disabled={pending}>
-        {pending ? "Saving…" : live ? "Save changes" : isStaff ? "Publish app" : "Submit for review"}
+        {pending ? "Saving…" : live ? "Save changes" : isStaff ? `Publish ${noun}` : "Submit for review"}
       </Button>
     </div>
   );
@@ -102,7 +107,18 @@ function FieldError({ message }: { message?: string }) {
   ) : null;
 }
 
-export function AppForm({ isStaff, initial }: { isStaff: boolean; initial?: ShowcaseApp | null }) {
+export function AppForm({
+  isStaff,
+  initial,
+  kind: newKind = "app",
+}: {
+  isStaff: boolean;
+  initial?: ShowcaseApp | null;
+  /** For a new entry; an existing one keeps its own kind. */
+  kind?: Kind;
+}) {
+  const kind: Kind = initial?.kind ?? newKind;
+  const noun = kind === "team" ? "team" : KINDS[kind].label.toLowerCase();
   const [state, action] = useFormState(saveAppAction, EMPTY_FORM_STATE);
   const [build, setBuild] = useState<BuildMethod | "">(initial?.build_method ?? "");
   const [maturity, setMaturity] = useState<Maturity | "">(initial?.maturity ?? "");
@@ -145,17 +161,19 @@ export function AppForm({ isStaff, initial }: { isStaff: boolean; initial?: Show
         </h2>
         <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-mute">
           {status === "published"
-            ? "It is in the AI Showcase now."
+            ? kind === "app"
+              ? "It is in the AI Showcase now."
+              : "It is in the agent directory now."
             : status === "pending_review"
-              ? "An editor checks every app and its links before it goes live. Track it, and any requested changes, under Your apps."
+              ? `An editor checks every ${noun} and its links before it goes live. Track it, and any requested changes, under Your showcase.`
               : "Only you can see it. Come back and submit it when it is ready."}
         </p>
         <div className="mt-7 flex flex-wrap justify-center gap-3">
-          <Link href={`/showcase/${state.result.id}`} className={buttonClass("primary", "md")}>
+          <Link href={state.result.id} className={buttonClass("primary", "md")}>
             {status === "published" ? "View it" : "Preview it"}
           </Link>
           <Link href="/showcase/mine" className={buttonClass("secondary", "md")}>
-            Your apps
+            Your showcase
           </Link>
         </div>
       </div>
@@ -165,13 +183,15 @@ export function AppForm({ isStaff, initial }: { isStaff: boolean; initial?: Show
   return (
     <form action={action} className="space-y-8" noValidate>
       {initial ? <input type="hidden" name="id" value={initial.id} /> : null}
+      <input type="hidden" name="kind" value={kind} />
       {state.message && !state.ok ? <ErrorNotice title={state.message} /> : null}
 
-      <Section title="The app">
-        <div className="grid gap-6 sm:grid-cols-[1fr_14rem]">
+      <Section title={`The ${noun}`}>
+        <div className={cx("grid gap-6", kind === "app" && "sm:grid-cols-[1fr_14rem]")}>
           <Field label="Name" htmlFor="name" required error={errors.name}>
             <Input id="name" name="name" defaultValue={initial?.name} maxLength={80} aria-invalid={Boolean(errors.name)} />
           </Field>
+          {kind === "app" ? (
           <Field label="Kind of app" htmlFor="app_type" required error={errors.app_type}>
             <Select id="app_type" name="app_type" defaultValue={initial?.app_type ?? ""} aria-invalid={Boolean(errors.app_type)}>
               <option value="" disabled>
@@ -184,6 +204,7 @@ export function AppForm({ isStaff, initial }: { isStaff: boolean; initial?: Show
               ))}
             </Select>
           </Field>
+          ) : null}
         </div>
         <Field
           label="Tagline"
@@ -258,8 +279,10 @@ export function AppForm({ isStaff, initial }: { isStaff: boolean; initial?: Show
         title="Links"
         lead={
           live
-            ? "Changing a link, the logo or screenshots sends the app back to an editor before the change goes live."
-            : "At least one of repository, demo or website. Visitors leave JobShout through these, so an editor checks them."
+            ? `Changing a link, the logo or screenshots sends the ${noun} back to an editor before the change goes live.`
+            : kind === "app"
+              ? "At least one of repository, demo or website. Visitors leave JobShout through these, so an editor checks them."
+              : "Visitors leave JobShout through these, so an editor checks them."
         }
       >
         <div className="grid gap-6 sm:grid-cols-2">
@@ -284,9 +307,10 @@ export function AppForm({ isStaff, initial }: { isStaff: boolean; initial?: Show
             </Field>
           ))}
         </div>
-        <Field label="Logo URL" htmlFor="logo_url" hint="Square works best. Leave empty for a lettered tile." error={errors.logo_url}>
+        <Field label={kind === "app" ? "Logo URL" : "Avatar URL"} htmlFor="logo_url" hint="Square works best. Leave empty for a lettered tile." error={errors.logo_url}>
           <Input id="logo_url" name="logo_url" type="url" inputMode="url" placeholder="https://" defaultValue={initial?.logo_url} />
         </Field>
+        {kind === "app" ? (
         <Field label="Screenshots" htmlFor="screenshots" hint="Up to eight image links, one per line." error={errors.screenshots}>
           <Textarea
             id="screenshots"
@@ -297,8 +321,80 @@ export function AppForm({ isStaff, initial }: { isStaff: boolean; initial?: Show
             className="font-mono text-[0.85rem]"
           />
         </Field>
+        ) : null}
       </Section>
 
+      {kind === "agent" ? (
+        <Section title="What it runs on and can do">
+          <div className="grid gap-6 sm:grid-cols-2">
+            <Field label="Model" htmlFor="ai_models" required hint="Comma-separated if it uses more than one." error={errors.ai_models}>
+              <Input id="ai_models" name="ai_models" defaultValue={initial?.ai_models.join(", ")} placeholder="Claude" />
+            </Field>
+            <Field label="Model provider" htmlFor="model_provider" error={errors.model_provider}>
+              <Input id="model_provider" name="model_provider" defaultValue={initial?.model_provider} maxLength={80} placeholder="Anthropic" />
+            </Field>
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-ink" id="capabilities-label">
+              Capabilities<span className="ml-1 text-shout" aria-hidden>*</span>
+            </p>
+            <div role="group" aria-labelledby="capabilities-label" className="mt-3 flex flex-wrap gap-2">
+              {(Object.keys(CAPABILITIES) as Capability[]).map((c) => (
+                <label
+                  key={c}
+                  className="inline-flex min-h-[40px] cursor-pointer items-center gap-2 rounded-pill border border-line px-3.5 text-sm text-body transition-colors duration-200 hover:border-edge has-[:checked]:border-shout/50 has-[:checked]:bg-shout/10 has-[:checked]:font-semibold has-[:checked]:text-ink has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-shout"
+                >
+                  <input type="checkbox" name="capabilities" value={c} defaultChecked={initial?.capabilities.includes(c)} className="sr-only" />
+                  {CAPABILITIES[c]}
+                </label>
+              ))}
+            </div>
+            <FieldError message={errors.capabilities} />
+          </div>
+          <Field label="Skills" htmlFor="technologies" hint="Languages, frameworks and domains. Comma-separated, up to 15." error={errors.technologies}>
+            <Input id="technologies" name="technologies" defaultValue={initial?.technologies.join(", ")} placeholder="Rust, Axum, Kubernetes" />
+          </Field>
+          <div className="grid gap-6 sm:grid-cols-2">
+            <Field label="Tools" htmlFor="tools" hint="Comma-separated, up to 20." error={errors.tools}>
+              <Input id="tools" name="tools" defaultValue={initial?.tools.join(", ")} placeholder="GitHub, Docker" />
+            </Field>
+            <Field label="MCP servers" htmlFor="mcp_servers" hint="Comma-separated, up to 15." error={errors.mcp_servers}>
+              <Input id="mcp_servers" name="mcp_servers" defaultValue={initial?.mcp_servers.join(", ")} placeholder="GitHub, Filesystem" />
+            </Field>
+          </div>
+          <Field
+            label="Human oversight"
+            htmlFor="human_oversight"
+            hint="Where people review or approve its work. No prompts or secrets needed."
+            error={errors.human_oversight}
+          >
+            <Textarea id="human_oversight" name="human_oversight" rows={2} maxLength={1000} defaultValue={initial?.human_oversight} />
+          </Field>
+        </Section>
+      ) : null}
+
+      {kind === "team" ? (
+        <Section title="Members" lead="At least two agents from the directory, in the order the work flows between them.">
+          <LinkPicker
+            name="agent_links"
+            kind="agent"
+            label="Agents"
+            hint="Give each one its role in the team."
+            initial={initial?.linked_agents ?? []}
+            error={errors.agent_links}
+          />
+          <Field
+            label="Human oversight"
+            htmlFor="human_oversight"
+            hint="Where people review or approve the team's work."
+            error={errors.human_oversight}
+          >
+            <Textarea id="human_oversight" name="human_oversight" rows={2} maxLength={1000} defaultValue={initial?.human_oversight} />
+          </Field>
+        </Section>
+      ) : null}
+
+      {kind === "app" ? (
       <Section title="How it was built" lead="Say who did the work. JobShout shows this as the creator's account, not as something it has checked.">
         <div>
           <p className="text-sm font-semibold text-ink">
@@ -319,11 +415,27 @@ export function AppForm({ isStaff, initial }: { isStaff: boolean; initial?: Show
           </div>
           <FieldError message={errors.build_method} />
         </div>
+        <LinkPicker
+          name="agent_links"
+          kind="agent"
+          label="Agents from the directory"
+          hint={`${agentBuilt ? "Name at least one agent here, a team, or below. " : ""}Their profiles link back to this app.`}
+          initial={initial?.linked_agents ?? []}
+          error={errors.agent_links}
+        />
+        <LinkPicker
+          name="team_slug"
+          kind="team"
+          label="Agent team"
+          single
+          roles={false}
+          initial={initial?.linked_team ? [initial.linked_team] : []}
+          error={errors.team_slug}
+        />
         <Field
-          label="Agents involved"
+          label="Other agents"
           htmlFor="agents"
-          required={agentBuilt}
-          hint="One per line: name — what it did. For example: Security Agent — reviewed the auth flow."
+          hint="Agents not in the directory. One per line: name — what it did."
           error={errors.agents}
         >
           <Textarea
@@ -351,7 +463,9 @@ export function AppForm({ isStaff, initial }: { isStaff: boolean; initial?: Show
           <Textarea id="human_oversight" name="human_oversight" rows={2} maxLength={1000} defaultValue={initial?.human_oversight} />
         </Field>
       </Section>
+      ) : null}
 
+      {kind === "app" ? (
       <Section title="Maturity">
         <div>
           <p className="text-sm font-semibold text-ink">
@@ -414,6 +528,7 @@ export function AppForm({ isStaff, initial }: { isStaff: boolean; initial?: Show
           <FieldError message={errors.evidence} />
         </div>
       </Section>
+      ) : null}
 
       <Section title="Details">
         <div className="grid gap-6 sm:grid-cols-3">
@@ -433,9 +548,11 @@ export function AppForm({ isStaff, initial }: { isStaff: boolean; initial?: Show
             <Input id="version" name="version" defaultValue={initial?.version} maxLength={80} placeholder="1.0.0" />
           </Field>
         </div>
-        <Field label="Team or organisation" htmlFor="team_name" hint="Shown instead of your name on cards." error={errors.team_name}>
-          <Input id="team_name" name="team_name" defaultValue={initial?.team_name} maxLength={80} />
-        </Field>
+        {kind !== "team" ? (
+          <Field label="Team or organisation" htmlFor="team_name" hint="Shown instead of your name on cards." error={errors.team_name}>
+            <Input id="team_name" name="team_name" defaultValue={initial?.team_name} maxLength={80} />
+          </Field>
+        ) : null}
         <div>
           <p className="text-sm font-semibold text-ink">Who can see it</p>
           <div className="mt-3">
@@ -456,12 +573,12 @@ export function AppForm({ isStaff, initial }: { isStaff: boolean; initial?: Show
 
       {!isStaff ? (
         <p className="text-sm leading-relaxed text-mute">
-          An editor reviews every app before it goes live. Only list work you have the right to show, and do not
+          An editor reviews every {noun} before it goes live. Only list work you have the right to show, and do not
           paste credentials, private prompts or customer data.
         </p>
       ) : null}
 
-      <SubmitButtons isStaff={isStaff} live={live} />
+      <SubmitButtons isStaff={isStaff} live={live} noun={noun} />
     </form>
   );
 }

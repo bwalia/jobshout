@@ -6,8 +6,8 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use jobshout_domain::{
-    DomainError, ShowcaseApp, ShowcaseAppInput, ShowcaseAppType, ShowcaseBuildMethod,
-    ShowcaseMaturity, ShowcasePricing, ShowcaseTag,
+    DomainError, ShowcaseApp, ShowcaseAppInput, ShowcaseAppType, ShowcaseBuildMethod, ShowcaseKind,
+    ShowcaseMaturity, ShowcasePricing, ShowcaseTag, AGENT_CAPABILITIES,
 };
 use jobshout_showcase::{ListQuery, Moderation, Sort};
 use serde::{Deserialize, Serialize};
@@ -23,11 +23,13 @@ pub fn routes() -> Router<AppState> {
         .route("/api/v1/showcase/apps/mine", get(mine))
         .route("/api/v1/showcase/tags", get(tags))
         .route("/api/v1/showcase/review-queue", get(review_queue))
+        .route("/api/v1/showcase/link-candidates", get(link_candidates))
         .route(
             "/api/v1/showcase/apps/{key}",
             get(get_one).patch(update).delete(remove),
         )
         .route("/api/v1/showcase/apps/{key}/related", get(related))
+        .route("/api/v1/showcase/apps/{key}/used-in", get(used_in))
         .route("/api/v1/showcase/apps/{key}/moderate", post(moderate))
         .route("/api/v1/showcase/apps/{key}/star", put(star).delete(unstar))
 }
@@ -58,8 +60,17 @@ fn parse_opt<T>(
     }
 }
 
+/// `kind` query parameter: apps unless asked otherwise.
+fn parse_kind(raw: Option<&str>) -> Result<ShowcaseKind, ApiError> {
+    Ok(parse_opt("kind", raw, ShowcaseKind::parse)?.unwrap_or(ShowcaseKind::App))
+}
+
 #[derive(Debug, Deserialize)]
 struct ListParams {
+    /// app (default) | agent | team
+    kind: Option<String>,
+    /// agents only: one of AGENT_CAPABILITIES
+    capability: Option<String>,
     q: Option<String>,
     #[serde(rename = "type")]
     app_type: Option<String>,
@@ -101,7 +112,19 @@ async fn list(
     Query(p): Query<ListParams>,
 ) -> Result<Json<ListResponse>, ApiError> {
     let who = actor(&state, &headers)?;
+    let capability = p
+        .capability
+        .map(|c| c.trim().to_ascii_lowercase())
+        .filter(|c| !c.is_empty() && c != "all");
+    if let Some(c) = capability
+        .as_deref()
+        .filter(|c| !AGENT_CAPABILITIES.contains(c))
+    {
+        return Err(bad_request(format!("invalid capability: {c}")));
+    }
     let mut q = ListQuery {
+        kind: Some(parse_kind(p.kind.as_deref())?),
+        capability,
         q: p.q,
         app_type: parse_opt("type", p.app_type.as_deref(), ShowcaseAppType::parse)?,
         maturities: parse_opt("maturity", p.maturity.as_deref(), ShowcaseMaturity::parse)?
@@ -157,6 +180,7 @@ async fn list(
 #[derive(Debug, Deserialize)]
 struct LimitParams {
     limit: Option<i64>,
+    kind: Option<String>,
 }
 
 async fn tags(
@@ -166,7 +190,7 @@ async fn tags(
     Ok(Json(DataResponse {
         data: state
             .showcase
-            .tags(p.limit.unwrap_or(24))
+            .tags(parse_kind(p.kind.as_deref())?, p.limit.unwrap_or(24))
             .await
             .map_err(err)?,
     }))
@@ -196,6 +220,51 @@ async fn related(
         data: state
             .showcase
             .related(&key, p.limit.unwrap_or(3).clamp(1, 12))
+            .await
+            .map_err(err)?,
+    }))
+}
+
+#[derive(Serialize)]
+struct UsedInResponse {
+    apps: Vec<ShowcaseApp>,
+    teams: Vec<ShowcaseApp>,
+}
+
+async fn used_in(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(key): Path<String>,
+) -> Result<Json<UsedInResponse>, ApiError> {
+    let who = actor(&state, &headers)?;
+    let (apps, teams) = state
+        .showcase
+        .used_in(&key, who.as_ref())
+        .await
+        .map_err(err)?;
+    Ok(Json(UsedInResponse { apps, teams }))
+}
+
+#[derive(Debug, Deserialize)]
+struct CandidateParams {
+    kind: Option<String>,
+    q: Option<String>,
+}
+
+async fn link_candidates(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(p): Query<CandidateParams>,
+) -> Result<Json<DataResponse<Vec<ShowcaseApp>>>, ApiError> {
+    let who = signed_in(&state, &headers)?;
+    let kind = parse_kind(p.kind.as_deref())?;
+    if kind == ShowcaseKind::App {
+        return Err(bad_request("only agents and teams can be linked"));
+    }
+    Ok(Json(DataResponse {
+        data: state
+            .showcase
+            .link_candidates(&who, kind, p.q)
             .await
             .map_err(err)?,
     }))

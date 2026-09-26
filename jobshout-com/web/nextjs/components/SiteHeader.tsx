@@ -15,12 +15,12 @@ export async function SiteHeader() {
   const authControl = session ? (
     <Link
       href="/api/auth/signout"
-      className={buttonClass("secondary", "sm", "w-full lg:w-auto")}
+      className={buttonClass("secondary", "sm", "w-full xl:w-auto")}
     >
       Sign out
     </Link>
   ) : (
-    <Link href="/login" className={buttonClass("secondary", "sm", "w-full lg:w-auto")}>
+    <Link href="/login" className={buttonClass("secondary", "sm", "w-full xl:w-auto")}>
       Sign in
     </Link>
   );
@@ -30,19 +30,19 @@ export async function SiteHeader() {
       <div className="mx-auto flex h-[4.25rem] max-w-board items-center gap-4 px-5 sm:px-8">
         <Logo />
 
-        <nav aria-label="Main" className="ml-6 hidden items-center gap-1 lg:flex">
+        <nav aria-label="Main" className="ml-6 hidden items-center gap-1 xl:flex">
           <NavLinks />
         </nav>
 
         <div className="ml-auto flex items-center gap-2">
           {who ? (
-            <span className="hidden items-center gap-2 rounded-pill border border-line py-1.5 pl-2 pr-3.5 text-sm text-body xl:flex">
+            <span className="hidden items-center gap-2 rounded-pill border border-line py-1.5 pl-2 pr-3.5 text-sm text-body 2xl:flex">
               <UserIcon className="h-4 w-4 text-mute" />
               <span className="max-w-[10rem] truncate">{who}</span>
             </span>
           ) : null}
           <ThemeToggle />
-          <div className="hidden lg:block">{authControl}</div>
+          <div className="hidden xl:block">{authControl}</div>
           <Link href="/post-job" className={buttonClass("primary", "sm", "hidden sm:inline-flex")}>
             Post a job
           </Link>

@@ -65,6 +65,16 @@ Implemented:
     changing a link, the logo or screenshots sends it back to review.
   - Visibility: public (listed), unlisted (by link only), private (creator and editors).
   - `SHOWCASE_SEED_SAMPLES=true` (int, local) fills an empty showcase with labelled samples.
+- **Agent directory** (`/agents`): agents and agent teams are showcase entries too,
+  with `kind` = `agent` | `team` in `showcase_apps`, so they share review, stars, search,
+  visibility and "Your showcase". Agents add a model and provider, capabilities (a fixed
+  list in `AGENT_CAPABILITIES`), skills, tools and MCP servers.
+  - `showcase_links` records who built what: app → agent, app → team, team → member agent
+    (ordered, with a role). A link target must be public and published, or the creator's
+    own; the public only ever sees published targets.
+  - An agent's "used in" counts public apps that link to it directly or through a team.
+  - Samples seed per kind, so an int that already had sample apps gets sample agents and
+    a team, and its sample apps are linked to them.
 
 Deferred: full auth identity linking, employer-side application review UI, MCP, agents
 runtime, interviews, iOS app screens, billing.
