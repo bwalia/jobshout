@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useFormState, useFormStatus } from "react-dom";
-import { EMPTY_FORM_STATE, saveProfileAction } from "@/app/actions";
+import { saveProfileAction } from "@/app/actions";
+import { EMPTY_FORM_STATE } from "@/lib/form-state";
 import {
   Button,
   Checkbox,

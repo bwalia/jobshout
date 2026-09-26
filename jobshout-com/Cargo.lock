@@ -1086,6 +1086,7 @@ dependencies = [
  "chrono",
  "jobshout-content",
  "jobshout-domain",
+ "jobshout-jobs",
  "serde_json",
  "sqlx",
  "uuid",

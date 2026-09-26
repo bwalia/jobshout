@@ -3,6 +3,7 @@
  * shares the signed identity headers with Insights.
  */
 
+import type { Job } from "@/lib/api";
 import { API_BASE, failure, headers, type Viewer } from "@/lib/insights";
 
 export type Kind = "app" | "agent" | "team";
@@ -68,7 +69,7 @@ export type Verification =
   | "build_verified"
   | "security_scanned"
   | "production_verified";
-export type Collection = "featured" | "production_ready" | "built_by_agents" | "open_source";
+export type Collection = "featured" | "production_ready" | "built_by_agents" | "open_source" | "hiring";
 export type SortKey = "new" | "stars" | "updated";
 
 export const APP_TYPES: Record<AppType, string> = {
@@ -160,6 +161,7 @@ export const COLLECTIONS: Record<Collection, { label: string; blurb: string }> =
     blurb: "Apps where AI agents did most of the building.",
   },
   open_source: { label: "Open source", blurb: "Read the code, run it yourself." },
+  hiring: { label: "Hiring", blurb: "Projects with open roles on the JobShout board." },
 };
 
 export const EVIDENCE: Array<{ key: EvidenceFlag; label: string }> = [
@@ -238,6 +240,8 @@ export interface ShowcaseApp {
   linked_agents: ShowcaseLink[];
   linked_team: ShowcaseLink | null;
   used_in: number;
+  /** Open roles on the board this entry is hiring for (published jobs only). */
+  jobs: Job[];
   creator_email?: string;
   creator_display_name: string;
   visibility: Visibility;
@@ -271,7 +275,8 @@ export type ShowcaseAppInput = Omit<
   | "linked_agents"
   | "linked_team"
   | "used_in"
-> & { submit: boolean; agent_links: LinkInput[]; team_slug: string };
+  | "jobs"
+> & { submit: boolean; agent_links: LinkInput[]; team_slug: string; job_ids: string[] };
 
 export interface ShowcaseTag {
   name: string;
@@ -380,6 +385,25 @@ export async function linkCandidates(
     cache: "no-store",
   });
   if (!res.ok) throw await failure(res, "Could not search the directory");
+  return ((await res.json()) as { data: ShowcaseApp[] }).data;
+}
+
+/** Open jobs the viewer may link: the ones they posted (editors: any). */
+export async function linkableJobs(viewer: Viewer): Promise<Job[]> {
+  const res = await fetch(`${API_BASE}/api/v1/showcase/linkable-jobs`, {
+    headers: headers(viewer),
+    cache: "no-store",
+  });
+  if (!res.ok) return [];
+  return ((await res.json()) as { data: Job[] }).data;
+}
+
+/** Public showcase entries (any kind) hiring for this job. */
+export async function entriesForJob(jobId: string): Promise<ShowcaseApp[]> {
+  const res = await fetch(`${API_BASE}/api/v1/showcase/by-job/${encodeURIComponent(jobId)}`, {
+    next: { revalidate: 60, tags: ["showcase"] },
+  });
+  if (!res.ok) return [];
   return ((await res.json()) as { data: ShowcaseApp[] }).data;
 }
 

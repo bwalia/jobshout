@@ -260,6 +260,11 @@ pub fn teams() -> Vec<ShowcaseAppInput> {
     }]
 }
 
+/// (sample entry slug, how many open jobs to link) for int.
+pub fn hiring() -> Vec<(&'static str, usize)> {
+    vec![("sample-vector-notebook", 2), ("sample-service-factory", 1)]
+}
+
 /// (sample app slug, links to set on it). The team slug is linked as the team.
 pub fn app_links() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
     vec![

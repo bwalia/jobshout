@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useFormState, useFormStatus } from "react-dom";
-import { EMPTY_FORM_STATE } from "@/app/actions";
+import { EMPTY_FORM_STATE } from "@/lib/form-state";
 import { confirmSubscriptionAction } from "@/app/insights/actions";
 import { CheckCircleIcon, MailIcon } from "@/components/icons";
 import { Button, ErrorNotice, buttonClass } from "@/components/ui";

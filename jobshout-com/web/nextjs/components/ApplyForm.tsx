@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useFormState, useFormStatus } from "react-dom";
 import { useState } from "react";
-import { applyAction, EMPTY_FORM_STATE } from "@/app/actions";
+import { applyAction } from "@/app/actions";
+import { EMPTY_FORM_STATE } from "@/lib/form-state";
 import { Button, ErrorNotice, Field, Input, Textarea, buttonClass } from "@/components/ui";
 import { CheckCircleIcon, SendIcon } from "@/components/icons";
 import type { Job } from "@/lib/api";

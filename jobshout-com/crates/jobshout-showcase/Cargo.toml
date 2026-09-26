@@ -10,6 +10,7 @@ anyhow = { workspace = true }
 chrono = { workspace = true }
 jobshout-content = { path = "../jobshout-content" }
 jobshout-domain = { path = "../jobshout-domain" }
+jobshout-jobs = { path = "../jobshout-jobs" }
 serde_json = { workspace = true }
 sqlx = { workspace = true }
 uuid = { workspace = true }

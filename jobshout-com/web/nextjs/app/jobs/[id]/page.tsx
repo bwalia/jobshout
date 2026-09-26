@@ -2,6 +2,8 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { JobCard } from "@/components/JobCard";
+import { AgentCard, AppCard } from "@/components/showcase/AppCard";
+import { entriesForJob, type ShowcaseApp } from "@/lib/showcase";
 import { Badge, buttonClass } from "@/components/ui";
 import {
   ArrowLeftIcon,
@@ -47,8 +49,12 @@ export default async function JobDetailPage({ params }: { params: { id: string }
   if (!job) notFound();
 
   let related: Job[] = [];
+  let projects: ShowcaseApp[] = [];
   try {
-    related = similarJobs(await listJobs(60), job);
+    [related, projects] = await Promise.all([
+      listJobs(60).then((jobs) => similarJobs(jobs, job)),
+      entriesForJob(job.id),
+    ]);
   } catch {
     related = [];
   }
@@ -141,6 +147,26 @@ export default async function JobDetailPage({ params }: { params: { id: string }
                     <CheckIcon className="mt-0.5 h-4 w-4 shrink-0 text-good" />
                     <span className="text-sm text-body">{r}</span>
                   </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+
+          {projects.length > 0 ? (
+            <section aria-labelledby="projects-heading" className="mt-12 border-t border-line pt-10">
+              <h2 id="projects-heading" className="font-display text-2xl font-semibold tracking-[-0.02em] text-ink">
+                What you&apos;d work on
+              </h2>
+              <p className="mt-1.5 text-sm text-mute">
+                From the{" "}
+                <Link href="/showcase?collection=hiring" className="font-medium text-ink underline decoration-shout/50 underline-offset-4 hover:text-shout">
+                  AI Showcase
+                </Link>
+                : what this team has built, and the agents they build with.
+              </p>
+              <ul className="mt-6 grid gap-4 sm:grid-cols-2">
+                {projects.map((p) => (
+                  <li key={p.id}>{p.kind === "app" ? <AppCard app={p} /> : <AgentCard app={p} />}</li>
                 ))}
               </ul>
             </section>

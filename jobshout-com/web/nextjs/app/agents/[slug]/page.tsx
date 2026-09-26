@@ -12,6 +12,7 @@ import {
   PenIcon,
   ShieldIcon,
 } from "@/components/icons";
+import { JobCard } from "@/components/JobCard";
 import { ShareLinks } from "@/components/insights/ShareLinks";
 import { AgentCard, AppCard, AppLogo } from "@/components/showcase/AppCard";
 import { ShowcaseReviewActions } from "@/components/showcase/ShowcaseReviewActions";
@@ -311,6 +312,24 @@ export default async function AgentPage({ params }: Params) {
           </section>
         </aside>
       </div>
+
+      {e.jobs.length ? (
+        <section aria-labelledby="roles-heading" className="mt-16 border-t border-line pt-10">
+          <h2 id="roles-heading" className="font-display text-2xl font-semibold tracking-[-0.02em] text-ink">
+            Open roles
+          </h2>
+          <p className="mt-1.5 text-sm text-mute">
+            {e.team_name || e.creator_display_name} is hiring to work with this {team ? "team" : "agent"}.
+          </p>
+          <ul className="mt-6 grid gap-4 md:grid-cols-2">
+            {e.jobs.map((job) => (
+              <li key={job.id}>
+                <JobCard job={job} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {used.apps.length ? (
         <section aria-labelledby="used-heading" className="mt-16 border-t border-line pt-10">

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useFormState, useFormStatus } from "react-dom";
-import { EMPTY_FORM_STATE } from "@/app/actions";
+import { EMPTY_FORM_STATE } from "@/lib/form-state";
 import { moderateAction } from "@/app/insights/actions";
 import { Button, Textarea } from "@/components/ui";
 import type { InsightStatus } from "@/lib/insights";

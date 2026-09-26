@@ -102,6 +102,7 @@ export function AppCard({ app }: { app: ShowcaseApp }) {
           <MaturityBadge app={app} />
           <BuildBadge app={app} />
           {app.pricing === "open_source" ? <Badge>{PRICING.open_source}</Badge> : null}
+          {app.jobs.length ? <Badge tone="good">Hiring</Badge> : null}
         </div>
         {tech.length ? (
           <p className="mt-auto pt-4 text-xs text-mute">
@@ -169,6 +170,7 @@ export function AgentCard({ app }: { app: ShowcaseApp }) {
                   {CAPABILITIES[c]}
                 </Badge>
               ))}
+          {app.jobs.length ? <Badge tone="good">Hiring</Badge> : null}
         </div>
         <p className="mt-auto pt-4 text-xs text-mute">
           Used in {app.used_in} {app.used_in === 1 ? "app" : "apps"}

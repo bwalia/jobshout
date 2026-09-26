@@ -40,14 +40,27 @@ impl JobService {
         self.repo.get(id).await
     }
 
-    pub async fn create(&self, req: CreateJobRequest) -> Result<Job, DomainError> {
+    /// `poster_email` is the signed-in user posting it, if any. It decides
+    /// who may link the job from the AI Showcase and is never shown.
+    pub async fn create(
+        &self,
+        req: CreateJobRequest,
+        poster_email: Option<&str>,
+    ) -> Result<Job, DomainError> {
         validate_create(&req)?;
         let status = if req.publish {
             JobStatus::Published
         } else {
             JobStatus::Draft
         };
-        self.repo.create(self.default_org_id, req, status).await
+        self.repo
+            .create(
+                self.default_org_id,
+                req,
+                status,
+                poster_email.unwrap_or_default(),
+            )
+            .await
     }
 
     pub fn default_org_id(&self) -> OrganisationId {

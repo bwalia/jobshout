@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useFormState, useFormStatus } from "react-dom";
-import { createJobAction, EMPTY_FORM_STATE } from "@/app/actions";
+import { createJobAction } from "@/app/actions";
+import { EMPTY_FORM_STATE } from "@/lib/form-state";
 import { JobCard } from "@/components/JobCard";
 import {
   Button,
@@ -91,6 +92,15 @@ export function PostJobForm() {
             Post another
           </Link>
         </div>
+        {published ? (
+          <p className="mx-auto mt-6 max-w-md text-sm leading-relaxed text-mute">
+            Building something with AI? Link this role from your app or agent in the{" "}
+            <Link href="/showcase/mine" className="font-medium text-ink underline decoration-shout/50 underline-offset-4 hover:text-shout">
+              AI Showcase
+            </Link>{" "}
+            so people who find the project can apply.
+          </p>
+        ) : null}
       </div>
     );
   }

@@ -1,3 +1,5 @@
+import { headers as identityHeaders, type Viewer } from "@/lib/insights";
+
 export type EmploymentType =
   | "permanent"
   | "contract"
@@ -174,10 +176,12 @@ export async function getJob(id: string): Promise<Job | null> {
   return (await res.json()) as Job;
 }
 
-export async function createJob(input: CreateJobInput): Promise<Job> {
+/** Posting is open to anyone; a signed-in poster is recorded (never shown) so
+ * they can link the job from their AI Showcase entries. */
+export async function createJob(input: CreateJobInput, viewer?: Viewer | null): Promise<Job> {
   const res = await fetch(`${API_BASE}/api/v1/jobs`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: identityHeaders(viewer),
     body: JSON.stringify(input),
     cache: "no-store",
   });

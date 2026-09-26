@@ -9,6 +9,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::Job;
+
 pub type ShowcaseAppId = Uuid;
 
 string_enum! {
@@ -237,6 +239,9 @@ pub struct ShowcaseApp {
     /// Agents and teams: public, published apps that link to it (directly,
     /// or through a team for agents).
     pub used_in: i64,
+    /// Open roles on the board this entry is hiring for. Only published
+    /// jobs appear; a closed job drops off without an edit.
+    pub jobs: Vec<Job>,
     /// Only returned to the creator and editors; public responses blank it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub creator_email: Option<String>,
@@ -312,6 +317,10 @@ pub struct ShowcaseAppInput {
     /// Apps only: slug of the directory team that built it, or empty.
     #[serde(default)]
     pub team_slug: String,
+    /// Jobs on the board to show as open roles: ones the creator posted
+    /// (editors may link any published job).
+    #[serde(default)]
+    pub job_ids: Vec<Uuid>,
     /// false saves a draft; true submits (community) or publishes (editors).
     #[serde(default)]
     pub submit: bool,

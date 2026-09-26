@@ -6,8 +6,8 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use jobshout_domain::{
-    DomainError, ShowcaseApp, ShowcaseAppInput, ShowcaseAppType, ShowcaseBuildMethod, ShowcaseKind,
-    ShowcaseMaturity, ShowcasePricing, ShowcaseTag, AGENT_CAPABILITIES,
+    DomainError, Job, ShowcaseApp, ShowcaseAppInput, ShowcaseAppType, ShowcaseBuildMethod,
+    ShowcaseKind, ShowcaseMaturity, ShowcasePricing, ShowcaseTag, AGENT_CAPABILITIES,
 };
 use jobshout_showcase::{ListQuery, Moderation, Sort};
 use serde::{Deserialize, Serialize};
@@ -24,6 +24,8 @@ pub fn routes() -> Router<AppState> {
         .route("/api/v1/showcase/tags", get(tags))
         .route("/api/v1/showcase/review-queue", get(review_queue))
         .route("/api/v1/showcase/link-candidates", get(link_candidates))
+        .route("/api/v1/showcase/linkable-jobs", get(linkable_jobs))
+        .route("/api/v1/showcase/by-job/{job_id}", get(by_job))
         .route(
             "/api/v1/showcase/apps/{key}",
             get(get_one).patch(update).delete(remove),
@@ -78,7 +80,7 @@ struct ListParams {
     build: Option<String>,
     pricing: Option<String>,
     tech: Option<String>,
-    /// featured | production_ready | built_by_agents | open_source
+    /// featured | production_ready | built_by_agents | open_source | hiring
     collection: Option<String>,
     featured: Option<bool>,
     /// new (default) | stars | updated
@@ -165,6 +167,7 @@ async fn list(
             ]
         }
         "open_source" => q.pricing = Some(ShowcasePricing::OpenSource),
+        "hiring" => q.hiring = true,
         "production_ready" | "built_by_agents" => {}
         other => return Err(bad_request(format!("invalid collection: {other}"))),
     }
@@ -267,6 +270,25 @@ async fn link_candidates(
             .link_candidates(&who, kind, p.q)
             .await
             .map_err(err)?,
+    }))
+}
+
+async fn linkable_jobs(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<DataResponse<Vec<Job>>>, ApiError> {
+    let who = signed_in(&state, &headers)?;
+    Ok(Json(DataResponse {
+        data: state.showcase.linkable_jobs(&who).await.map_err(err)?,
+    }))
+}
+
+async fn by_job(
+    State(state): State<AppState>,
+    Path(job_id): Path<Uuid>,
+) -> Result<Json<DataResponse<Vec<ShowcaseApp>>>, ApiError> {
+    Ok(Json(DataResponse {
+        data: state.showcase.entries_for_job(job_id).await.map_err(err)?,
     }))
 }
 
