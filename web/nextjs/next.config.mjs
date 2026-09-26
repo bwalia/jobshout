@@ -1,6 +1,34 @@
+const apiBase = (process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8080").replace(
+  /\/$/,
+  ""
+);
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
+  // Build output directory. Overridable so a second dev server can run against
+  // the same checkout without fighting the first one over .next — which is
+  // exactly what happens when a stray root-owned dev server is still holding
+  // it and every fresh start dies on EACCES. Defaults to the usual .next.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
+  async rewrites() {
+    return {
+      // "/" is the marketing page, not the app. It is static HTML in
+      // public/landing, and beforeFiles is the only phase that can claim "/"
+      // ahead of the app router. Its asset paths are absolute (/landing/...)
+      // so they resolve straight from public/ with no second rewrite.
+      beforeFiles: [{ source: "/", destination: "/landing/index.html" }],
+      afterFiles: [
+        // Article markdown uses /api/v1/images/file/… — without this, a plain
+        // <img> on the Next origin 404s and the prompt shows as alt text.
+        {
+          source: "/api/v1/images/file/:path*",
+          destination: `${apiBase}/api/v1/images/file/:path*`,
+        },
+      ],
+      fallback: [],
+    };
+  },
   images: {
     remotePatterns: [
       {
@@ -16,6 +44,69 @@ const nextConfig = {
         pathname: "/**",
       },
     ],
+  },
+  async redirects() {
+    return [
+      // The landing page is "/" now. Keep the old URL working, but send it to
+      // the canonical one so the two do not serve the same page. Exact match,
+      // so /landing/app.css and friends still load from public/.
+      { source: "/landing", destination: "/", permanent: false },
+      { source: "/dashboard", destination: "/panel/dashboard", permanent: false },
+      { source: "/metrics", destination: "/panel/dashboard", permanent: false },
+      { source: "/agent-board", destination: "/panel/task-board", permanent: false },
+      { source: "/tasks", destination: "/panel/task-board", permanent: false },
+      { source: "/task-manager", destination: "/panel/task-manager", permanent: false },
+      { source: "/projects", destination: "/panel/projects", permanent: false },
+      {
+        source: "/projects/:id",
+        destination: "/panel/projects?project=:id",
+        permanent: false,
+      },
+      { source: "/agents", destination: "/panel/task-manager", permanent: false },
+      {
+        source: "/agents/pentest",
+        destination: "/panel/task-manager?agent=pentest",
+        permanent: false,
+      },
+      {
+        source: "/agents/review",
+        destination: "/panel/task-manager?agent=review",
+        permanent: false,
+      },
+      {
+        source: "/agents/mail",
+        destination: "/panel/task-manager?agent=mail",
+        permanent: false,
+      },
+      // /agents/:id and /agents/:id/knowledge stay routable — the rich agent
+      // profile (edit, knowledge, skills, metrics) is linked from Task Manager.
+      {
+        source: "/articles",
+        destination: "/panel/task-manager?agent=articles",
+        permanent: false,
+      },
+      // Keep /articles/:runId for article detail (linked from Articles list)
+      { source: "/artifacts", destination: "/panel/artifacts", permanent: false },
+      {
+        source: "/images",
+        destination: "/panel/task-manager?agent=images",
+        permanent: false,
+      },
+      { source: "/sessions", destination: "/panel/sessions", permanent: false },
+      { source: "/scheduler", destination: "/panel/scheduler", permanent: false },
+      { source: "/sprints", destination: "/panel/sprints", permanent: false },
+      { source: "/workflows", destination: "/panel/workflows", permanent: false },
+      { source: "/org-builder", destination: "/panel/org-builder", permanent: false },
+      { source: "/marketplace", destination: "/panel/marketplace", permanent: false },
+      { source: "/plugins", destination: "/panel/plugins-skills", permanent: false },
+      { source: "/skills", destination: "/panel/plugins-skills", permanent: false },
+      {
+        source: "/llm-providers",
+        destination: "/panel/llm-providers",
+        permanent: false,
+      },
+      { source: "/settings", destination: "/panel/settings", permanent: false },
+    ];
   },
 };
 

@@ -20,6 +20,7 @@ import signal
 from pathlib import Path
 
 from app import config, store as store_module
+from app.engagement import compose_instruction, read_report_markdown, target_engaged
 from app.store import BUDGET_EXCEEDED, CANCELLED, COMPLETED, FAILED, RUNNING, Finding, Run
 
 logger = logging.getLogger(__name__)
@@ -120,6 +121,9 @@ class Runner:
         self._tasks: set[asyncio.Task] = set()
         self._processes: dict[str, asyncio.subprocess.Process] = {}
         self._cancelled: set[str] = set()
+        # Logged once, on the first scan: whether the tool-call patch directory
+        # actually reached the subprocess env (the launchd PATH/PYTHONPATH trap).
+        self._logged_scan_env = False
 
     # ─── admission ──────────────────────────────────────────────────────────
 
@@ -164,14 +168,14 @@ class Runner:
             self._cancelled.discard(run.run_id)
 
     def build_args(self, run: Run) -> list[str]:
-        # Only flags the Go client already used against a real Strix. The
-        # instruction is deliberately not passed: this service has no verified
-        # flag for it, and an invented one would fail every scan rather than
-        # just ignoring the field. It is kept on the run record for the audit
-        # trail, and STRIX_EXTRA_ARGS exists for operators who know better.
+        # Flags confirmed by `strix --help` on the workstation. --instruction is
+        # real; we always pass a standing engagement prompt so the model cannot
+        # "finish" after only listing the sandbox.
         args = [config.BIN, "-n", "--target", run.target, "--scan-mode", run.scan_mode]
         if run.max_budget:
             args += ["--max-budget", str(run.max_budget)]
+        instruction = compose_instruction(run.target, run.instruction)
+        args += ["--instruction", instruction]
         args += config.EXTRA_ARGS
         return args
 
@@ -184,22 +188,46 @@ class Runner:
         # endpoint instead of being pointed at an empty string.
         if config.LLM_API_BASE:
             env["LLM_API_BASE"] = config.LLM_API_BASE
+        # sitecustomize.py: qwen3-coder concatenates tool-call JSON; LiteLLM
+        # 1.97 json.loads that and kills the scan. See patches/sitecustomize.py.
+        patch_dir = str(Path(__file__).resolve().parent.parent / "patches")
+        existing = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = patch_dir if not existing else patch_dir + os.pathsep + existing
         return env
+
+    def _runtime_for(self, run: Run) -> int:
+        """The wall-clock ceiling for this run, by scan mode.
+
+        The per-mode cap applies within this runner's absolute ceiling: a mode
+        never runs longer than its own bound, and never longer than
+        self.max_runtime — so lowering the overall ceiling (or a test setting it)
+        still clamps every mode. An unknown mode falls back to the ceiling.
+        """
+        mode_cap = config.RUNTIME_BY_MODE.get(run.scan_mode, self.max_runtime)
+        return min(mode_cap, self.max_runtime)
 
     async def _execute(self, run: Run) -> None:
         run_dir = self.store.run_dir(run.run_id)
         run_dir.mkdir(parents=True, exist_ok=True)
         log_path = run_dir / "strix.log"
 
+        runtime = self._runtime_for(run)
         args = self.build_args(run)
+        env = self.build_env()
+        # Confirm, once, that the tool-call patch directory made it onto the
+        # subprocess PYTHONPATH. Under launchd this is the value most likely to be
+        # silently wrong, and without it every qwen3-coder scan dies mid-run.
+        if not self._logged_scan_env:
+            logger.info("scan subprocess PYTHONPATH=%s", env.get("PYTHONPATH", ""))
+            self._logged_scan_env = True
         self.store.update(run, status=RUNNING, started_at=store_module.now())
-        logger.info("scan %s starting: %s", run.run_id, " ".join(args))
+        logger.info("scan %s starting (%s, cap %ss): %s", run.run_id, run.scan_mode, runtime, " ".join(args))
 
         try:
             proc = await asyncio.create_subprocess_exec(
                 *args,
                 cwd=run_dir,
-                env=self.build_env(),
+                env=env,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 # Its own process group, so a timeout can take down Strix and
@@ -224,10 +252,10 @@ class Runner:
 
         timed_out = False
         try:
-            await asyncio.wait_for(proc.wait(), timeout=self.max_runtime)
+            await asyncio.wait_for(proc.wait(), timeout=runtime)
         except asyncio.TimeoutError:
             timed_out = True
-            logger.warning("scan %s exceeded %ss — terminating", run.run_id, self.max_runtime)
+            logger.warning("scan %s exceeded %ss (%s) — terminating", run.run_id, runtime, run.scan_mode)
             await self._terminate(proc)
 
         tail = await pump
@@ -242,15 +270,17 @@ class Runner:
             self.store.finish(
                 run, FAILED, exit_code=exit_code, log_tail=tail,
                 error=(
-                    f"scan exceeded the {self.max_runtime}s runtime limit and was "
-                    f"terminated; any containers Strix left behind may need "
+                    f"scan exceeded the {runtime}s runtime limit for {run.scan_mode} mode "
+                    f"and was terminated; any containers Strix left behind may need "
                     f"clearing with `docker ps`"
                 ),
             )
             return
 
         findings = parse_findings(run_dir)
-        status, error = self._classify(exit_code, tail, findings)
+        report = read_report_markdown(run_dir)
+        engaged = target_engaged(run_dir, run.target, tail)
+        status, error = self._classify(exit_code, tail, findings, engaged)
         self.store.finish(
             run, status,
             exit_code=exit_code,
@@ -258,21 +288,32 @@ class Runner:
             finding_count=len(findings),
             log_tail=tail,
             error=error,
+            report_markdown=report,
+            target_engaged=engaged,
         )
         logger.info(
-            "scan %s finished: status=%s exit=%s findings=%d",
-            run.run_id, status, exit_code, len(findings),
+            "scan %s finished: status=%s exit=%s findings=%d engaged=%s",
+            run.run_id, status, exit_code, len(findings), engaged,
         )
 
     def _classify(self, exit_code: int | None, output: str,
-                  findings: list[Finding]) -> tuple[str, str | None]:
+                  findings: list[Finding], engaged: bool) -> tuple[str, str | None]:
         """Turn an exit code into a status.
 
         Strix documents 0 as a clean scan and 2 as "vulnerabilities found" —
         both are successful scans, and conflating 2 with failure would report
         every scan that actually found something as broken.
+
+        A clean exit with zero findings and no evidence the target was reached
+        is a hollow run — fail closed so History never shows fake "Clean".
         """
         if exit_code in (0, 2):
+            if not engaged and not findings:
+                return FAILED, (
+                    "scanner did not engage the target: no HTTP (or equivalent) "
+                    "interaction with the host was recorded. Re-run the scan; if "
+                    "this persists, check Docker networking and the model."
+                )
             return COMPLETED, None
 
         lowered = output.lower()

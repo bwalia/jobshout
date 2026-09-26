@@ -1,0 +1,100 @@
+# Base defaults for the JobShout.com marketplace chart.
+# Per-environment overlays: values-<env>.yaml. Deployed into shared ring
+# namespaces (int/test/acc/prod) with jobshout-com-prefixed resources so it
+# coexists with the Go platform chart.
+
+env: int
+# Public host. jobshout.com has no wildcard — each host needs a Cloudflare
+# CNAME -> lon1.pop0.uk plus a wslproxy vhost (register-edge-vhost workflow).
+host: int.jobshout.com
+
+image:
+  registry: int-spectoncr.diytaxreturn.co.uk
+  namespace: jobshout-com
+  # Injected by Ring Promoter: --set image.tag=<vX.Y.Z>
+  tag: latest
+  # First version of the unified platform+marketplace line. Every v* release
+  # from here on publishes jobshout-com/{api,web} at the same version as the
+  # platform; anything older only exists under the retired jsc-v* line, so the
+  # chart refuses it rather than waiting out a pull that cannot succeed.
+  unifiedFrom: v1.0.66
+  pullPolicy: IfNotPresent
+  pullSecret: jobshout-com-registry
+
+api:
+  replicas: 1
+  port: 8088
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 1Gi }
+
+web:
+  replicas: 1
+  port: 3010
+  # In-cluster URL used by Next.js SSR. Browsers call same-origin /api via nginx.
+  apiURL: "http://jobshout-com-api:8088"
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+
+postgres:
+  enabled: true
+  image: postgres:16-alpine
+  port: 5432
+  database: jobshout_com
+  user: jobshout
+  # Empty: generated on first install and kept from the Secret afterwards.
+  password: ""
+  storage: 10Gi
+  resources:
+    requests: { cpu: 50m, memory: 256Mi }
+    limits: { cpu: 500m, memory: 1Gi }
+
+# wslproxy edge routes the whole host to ONE backend; nginx fans out by path.
+gateway:
+  enabled: true
+  image: nginx:1.27-alpine
+  resolver: "10.43.0.10"
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 128Mi }
+
+ingress:
+  enabled: true
+  className: traefik
+  clusterIssuer: main-issuer
+  tls: true
+  annotations: {}
+
+secrets:
+  registryUsername: ""
+  registryPassword: ""
+  # Auth.js / NextAuth production secret. Leave empty to auto-generate on install.
+  authSecret: ""
+  # Web -> API identity token (see templates/internal-secret.yaml). Leave empty
+  # to auto-generate on install.
+  internalToken: ""
+
+# Insights hub (/insights).
+insights:
+  # Comma-separated emails that publish without review and moderate the queue.
+  # Stopgap until the marketplace has real roles.
+  staffEmails: "tenthmatrix.mailer@gmail.com"
+  # Fill an empty hub with clearly-labelled sample items. Never in prod.
+  seedSamples: false
+  # Comma-separated agent names whose submissions publish without review. Only
+  # agents whose platform has a person approve each item before it is sent:
+  # the JobShout.com Content Writer sends an article when someone publishes it
+  # live on jobshout.co.uk. The Article Writer is not listed and still queues.
+  trustedAgents: "JobShout.com Content Writer"
+
+# AI Showcase (/showcase). Moderated by the Insights staffEmails above.
+showcase:
+  # Fill an empty showcase with clearly-labelled sample apps. Never in prod.
+  seedSamples: false
+
+# Pin stateless pods (web, api, gateway, workers) to nodes with these labels,
+# e.g. {kubernetes.io/hostname: debian004}. Databases and PVC-backed pods are
+# never pinned: forcing them onto another node can strand their volume. Empty
+# means schedule anywhere.
+nodeSelector: {}

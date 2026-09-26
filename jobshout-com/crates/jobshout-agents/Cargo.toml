@@ -1,0 +1,8 @@
+[package]
+name = "jobshout-agents"
+description = "Agent registry and runtime types"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

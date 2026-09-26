@@ -8,9 +8,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"sync/atomic"
 	"time"
 )
@@ -28,7 +30,8 @@ type Tool struct {
 // Client is a JSON-RPC 2.0 client for one MCP server's Streamable HTTP endpoint.
 type Client struct {
 	url        string
-	authHeader string
+	authHeader string            // Authorization value when set (e.g. "Bearer …")
+	extraHdr   map[string]string // additional headers (e.g. X-MCP-API-Key for wslproxy)
 	httpClient *http.Client
 	nextID     atomic.Int64
 }
@@ -42,6 +45,51 @@ func NewClient(url, authHeader string) *Client {
 		authHeader: authHeader,
 		httpClient: &http.Client{Timeout: 30 * time.Second},
 	}
+}
+
+// NewClientWithHeaders creates a client that sends the given extra HTTP headers
+// on every request. Use this for MCP servers that authenticate with a custom
+// header (e.g. wslproxy's X-MCP-API-Key) instead of Authorization.
+func NewClientWithHeaders(url string, headers map[string]string) *Client {
+	c := NewClient(url, "")
+	if len(headers) > 0 {
+		c.extraHdr = make(map[string]string, len(headers))
+		for k, v := range headers {
+			c.extraHdr[k] = v
+		}
+	}
+	return c
+}
+
+// WithTimeout overrides the default 30s HTTP timeout.
+func (c *Client) WithTimeout(d time.Duration) *Client {
+	if c != nil && d > 0 && c.httpClient != nil {
+		c.httpClient = &http.Client{
+			Timeout:       d,
+			CheckRedirect: c.httpClient.CheckRedirect,
+		}
+	}
+	return c
+}
+
+// DisallowRedirects stops the HTTP client from following redirects. Use this
+// for MCP servers that must not bounce to a browser login page (a followed
+// POST → /login often surfaces as HTTP 405).
+func (c *Client) DisallowRedirects() *Client {
+	if c == nil || c.httpClient == nil {
+		return c
+	}
+	c.httpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		loc := ""
+		if len(via) > 0 && via[0].Response != nil {
+			loc = via[0].Response.Header.Get("Location")
+		}
+		if loc == "" {
+			loc = req.URL.String()
+		}
+		return fmt.Errorf("refusing redirect to %s (MCP path may be proxied to a login UI — ensure /mcp is served by OpenResty, not Next.js)", loc)
+	}
+	return c
 }
 
 // rpcRequest is a JSON-RPC 2.0 request envelope.
@@ -93,6 +141,11 @@ func (c *Client) call(ctx context.Context, method string, params any, out any) e
 	if c.authHeader != "" {
 		httpReq.Header.Set("Authorization", c.authHeader)
 	}
+	for k, v := range c.extraHdr {
+		if k != "" && v != "" {
+			httpReq.Header.Set(k, v)
+		}
+	}
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -104,8 +157,19 @@ func (c *Client) call(ctx context.Context, method string, params any, out any) e
 	if err != nil {
 		return fmt.Errorf("mcp: %s: read response: %w", method, err)
 	}
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		loc := resp.Header.Get("Location")
+		return fmt.Errorf("mcp: %s: unexpected redirect %d to %s (OpenResty /mcp location missing on this host?)", method, resp.StatusCode, loc)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("mcp: %s: unexpected status %d: %s", method, resp.StatusCode, string(raw))
+		snippet := string(raw)
+		if len(snippet) > 200 {
+			snippet = snippet[:200] + "…"
+		}
+		if resp.StatusCode == http.StatusMethodNotAllowed {
+			return fmt.Errorf("mcp: %s: unexpected status 405 Method Not Allowed (often a login redirect followed as POST — check /mcp is not proxied to Next.js): %s", method, snippet)
+		}
+		return fmt.Errorf("mcp: %s: unexpected status %d: %s", method, resp.StatusCode, snippet)
 	}
 
 	payload := extractJSONPayload(raw)
@@ -163,12 +227,61 @@ func (c *Client) Initialize(ctx context.Context) error {
 // ListTools returns the tools advertised by the server via tools/list.
 func (c *Client) ListTools(ctx context.Context) ([]Tool, error) {
 	var result struct {
-		Tools []Tool `json:"tools"`
+		Tools json.RawMessage `json:"tools"`
 	}
 	if err := c.call(ctx, "tools/list", map[string]any{}, &result); err != nil {
 		return nil, err
 	}
-	return result.Tools, nil
+	tools, err := decodeTools(result.Tools)
+	if err != nil {
+		return nil, fmt.Errorf("mcp: tools/list: decode tools: %w", err)
+	}
+	return tools, nil
+}
+
+// decodeTools accepts the spec's array, and also the shapes Lua servers emit
+// for it: an empty table encodes as {} (wslproxy with tools disabled), and a
+// name-keyed object is read as one tool per key.
+func decodeTools(raw json.RawMessage) ([]Tool, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return []Tool{}, nil
+	}
+	if trimmed[0] == '[' {
+		var tools []Tool
+		if err := json.Unmarshal(trimmed, &tools); err != nil {
+			return nil, err
+		}
+		return tools, nil
+	}
+	var byName map[string]Tool
+	if err := json.Unmarshal(trimmed, &byName); err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(byName))
+	for name := range byName {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	tools := make([]Tool, 0, len(names))
+	for _, name := range names {
+		t := byName[name]
+		if t.Name == "" {
+			t.Name = name
+		}
+		tools = append(tools, t)
+	}
+	return tools, nil
+}
+
+// ErrorCode returns the JSON-RPC error code carried by err, if the server
+// answered with a JSON-RPC error object.
+func ErrorCode(err error) (int, bool) {
+	var rpcErr *rpcError
+	if errors.As(err, &rpcErr) {
+		return rpcErr.Code, true
+	}
+	return 0, false
 }
 
 // contentBlock is one entry of a tools/call result's content array.

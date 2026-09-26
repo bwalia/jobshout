@@ -23,12 +23,13 @@ func NewMetricsHandler(pool *pgxpool.Pool, logger *zap.Logger) *MetricsHandler {
 }
 
 type dashboardSummary struct {
-	TotalAgents    int `json:"total_agents"`
-	ActiveAgents   int `json:"active_agents"`
-	TotalProjects  int `json:"total_projects"`
-	TotalTasks     int `json:"total_tasks"`
-	TasksCompleted int `json:"tasks_completed"`
-	TasksInProgress int `json:"tasks_in_progress"`
+	TotalAgents     int            `json:"total_agents"`
+	ActiveAgents    int            `json:"active_agents"`
+	TotalProjects   int            `json:"total_projects"`
+	TotalTasks      int            `json:"total_tasks"`
+	TasksCompleted  int            `json:"tasks_completed"`
+	TasksInProgress int            `json:"tasks_in_progress"`
+	TasksByStatus   map[string]int `json:"tasks_by_status"`
 }
 
 // Summary returns high-level dashboard metrics for the user's org.
@@ -83,15 +84,35 @@ func (h *MetricsHandler) Summary(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("failed to count in-progress tasks", zap.Error(err))
 	}
 
+	summary.TasksByStatus = map[string]int{}
+	statusRows, err := h.pool.Query(r.Context(),
+		`SELECT status, COUNT(*) FROM tasks
+			WHERE project_id IN (SELECT id FROM projects WHERE org_id = $1)
+			GROUP BY status`, orgID)
+	if err != nil {
+		h.logger.Error("failed to count tasks by status", zap.Error(err))
+	} else {
+		defer statusRows.Close()
+		for statusRows.Next() {
+			var status string
+			var n int
+			if err := statusRows.Scan(&status, &n); err != nil {
+				h.logger.Error("failed to scan task status count", zap.Error(err))
+				continue
+			}
+			summary.TasksByStatus[status] = n
+		}
+	}
+
 	RespondJSON(w, http.StatusOK, summary)
 }
 
 type agentMetricRow struct {
-	ID             string    `json:"id"`
-	AgentID        string    `json:"agent_id"`
-	MetricType     string    `json:"metric_type"`
-	Value          float64   `json:"value"`
-	RecordedAt     time.Time `json:"recorded_at"`
+	ID         string    `json:"id"`
+	AgentID    string    `json:"agent_id"`
+	MetricType string    `json:"metric_type"`
+	Value      float64   `json:"value"`
+	RecordedAt time.Time `json:"recorded_at"`
 }
 
 // AgentMetrics returns metrics for a specific agent with optional date range.

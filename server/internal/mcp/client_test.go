@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -129,6 +130,23 @@ func TestClientAuthHeader(t *testing.T) {
 	}
 }
 
+func TestClientCustomHeaders(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-MCP-API-Key") != "k" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18"}}`)
+	}))
+	defer srv.Close()
+
+	c := NewClientWithHeaders(srv.URL, map[string]string{"X-MCP-API-Key": "k"})
+	if err := c.Initialize(context.Background()); err != nil {
+		t.Fatalf("custom header initialize: %v", err)
+	}
+}
+
 func TestClientRPCError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -156,5 +174,59 @@ func TestClientSSEResponse(t *testing.T) {
 	}
 	if len(tools) != 1 || tools[0].Name != "sse_tool" {
 		t.Fatalf("unexpected sse tools: %+v", tools)
+	}
+}
+
+func TestClientListToolsLuaShapes(t *testing.T) {
+	cases := map[string]struct {
+		result string
+		want   []string
+	}{
+		"empty object (wslproxy tools disabled)": {`{"tools":{}}`, nil},
+		"null":                                   {`{"tools":null}`, nil},
+		"missing":                                {`{}`, nil},
+		"name-keyed object":                      {`{"tools":{"b":{"description":"x"},"a":{"name":"a"}}}`, []string{"a", "b"}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":`+tc.result+`}`)
+			}))
+			defer srv.Close()
+
+			tools, err := NewClient(srv.URL, "").ListTools(context.Background())
+			if err != nil {
+				t.Fatalf("list tools: %v", err)
+			}
+			if tools == nil {
+				t.Fatal("want empty slice, got nil")
+			}
+			if len(tools) != len(tc.want) {
+				t.Fatalf("tools = %+v, want %v", tools, tc.want)
+			}
+			for i, n := range tc.want {
+				if tools[i].Name != n {
+					t.Fatalf("tools[%d] = %q, want %q", i, tools[i].Name, n)
+				}
+			}
+		})
+	}
+}
+
+func TestErrorCode(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":1,"error":{"code":-32002,"message":"MCP tools are disabled"}}`)
+	}))
+	defer srv.Close()
+
+	_, err := NewClient(srv.URL, "").CallTool(context.Background(), "x", nil)
+	code, ok := ErrorCode(fmt.Errorf("wrapped: %w", err))
+	if !ok || code != -32002 {
+		t.Fatalf("ErrorCode = %d, %v (err %v)", code, ok, err)
+	}
+	if _, ok := ErrorCode(fmt.Errorf("plain")); ok {
+		t.Fatal("plain error should carry no code")
 	}
 }

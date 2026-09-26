@@ -11,6 +11,8 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/jobshout/server/internal/agentmodule"
+	"github.com/jobshout/server/internal/googleauth"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/repository"
 )
@@ -22,6 +24,11 @@ type AuthService interface {
 	RefreshToken(ctx context.Context, refreshToken string) (*model.AuthResponse, error)
 	GetMe(ctx context.Context, userID uuid.UUID) (*model.User, error)
 	UpdateProfile(ctx context.Context, userID uuid.UUID, req model.UpdateProfileRequest) (*model.User, error)
+	GoogleEnabled() bool
+	StartGoogle(ctx context.Context, intent, orgName string) (authURL string, err error)
+	AbandonGoogle(ctx context.Context, state string) (intent string)
+	CompleteGoogle(ctx context.Context, state, code string) (ticket, intent string, err error)
+	ExchangeGoogleTicket(ctx context.Context, ticket string) (*model.AuthResponse, error)
 }
 
 type authService struct {
@@ -29,18 +36,26 @@ type authService struct {
 	tokenRepo repository.TokenRepository
 	orgRepo   repository.OrganizationRepository
 	agentRepo repository.AgentRepository
+	rbacRepo  repository.RBACRepository
 	jwtSvc    JWTService
+	google    googleauth.Identity
+	googleCfg googleauth.Config
 	logger    *zap.Logger
 }
 
 // NewAuthService creates a new AuthService. agentRepo is used to give each new
-// organization its built-in agents; pass nil to skip that seeding.
+// organization its built-in agents; rbacRepo to seed its system roles and make
+// the creator an admin. Pass nil to skip either seeding. google may be nil when
+// Google login is not configured.
 func NewAuthService(
 	userRepo repository.UserRepository,
 	tokenRepo repository.TokenRepository,
 	orgRepo repository.OrganizationRepository,
 	agentRepo repository.AgentRepository,
+	rbacRepo repository.RBACRepository,
 	jwtSvc JWTService,
+	google googleauth.Identity,
+	googleCfg googleauth.Config,
 	logger *zap.Logger,
 ) AuthService {
 	return &authService{
@@ -48,7 +63,10 @@ func NewAuthService(
 		tokenRepo: tokenRepo,
 		orgRepo:   orgRepo,
 		agentRepo: agentRepo,
+		rbacRepo:  rbacRepo,
 		jwtSvc:    jwtSvc,
+		google:    google,
+		googleCfg: googleCfg,
 		logger:    logger,
 	}
 }
@@ -93,15 +111,46 @@ func (s *authService) Register(ctx context.Context, req model.RegisterRequest) (
 	// Set the org owner to this user
 	org.OwnerID = &user.ID
 
+	s.seedOwnerRole(ctx, org.ID, user.ID)
 	s.seedBuiltinAgents(ctx, org.ID, user.ID)
 
 	return s.generateAuthResponse(ctx, user)
 }
 
+// seedOwnerRole creates the organization's system roles and grants the
+// creating user the admin one. Without it a fresh org has no RBAC rows at all,
+// so every permission-guarded surface — most visibly the chat agent's tool
+// guard — denies its own owner. Failures are logged and swallowed for the same
+// reason seedBuiltinAgents' are: the org and user already exist.
+func (s *authService) seedOwnerRole(ctx context.Context, orgID, userID uuid.UUID) {
+	if s.rbacRepo == nil {
+		return
+	}
+	if err := s.rbacRepo.EnsureSystemRoles(ctx, orgID); err != nil {
+		s.logger.Warn("auth: failed to seed system roles",
+			zap.String("org_id", orgID.String()), zap.Error(err))
+		return
+	}
+	role, err := s.rbacRepo.GetRoleByName(ctx, orgID, model.RoleAdmin)
+	if err != nil || role == nil {
+		s.logger.Warn("auth: admin role missing after seeding",
+			zap.String("org_id", orgID.String()), zap.Error(err))
+		return
+	}
+	if err := s.rbacRepo.AssignRole(ctx, &model.UserRole{
+		UserID: userID, RoleID: role.ID, OrgID: orgID, GrantedBy: &userID,
+	}); err != nil {
+		s.logger.Warn("auth: failed to grant admin role",
+			zap.String("org_id", orgID.String()), zap.Error(err))
+	}
+}
+
 // seedBuiltinAgents gives a brand-new organization the platform's built-in
 // agents, so the dashboard is not empty on first login.
 //
-// Migration 000019 seeds the same agents for organizations that already
+// All specialists are wired this way: Seed lives on the module. Iterate the
+// registry. A new agent does not need a row here — register it, do not add a
+// switch. Migration 000019 seeds the same agents for organizations that already
 // existed; this covers everything created since the last boot. Failures are
 // logged and swallowed — a missing built-in is a degraded experience, not a
 // reason to fail a registration that has already created the org and user.
@@ -110,19 +159,19 @@ func (s *authService) seedBuiltinAgents(ctx context.Context, orgID, createdBy uu
 		return
 	}
 
-	// Each built-in is seeded independently so one failing does not deprive the
-	// organization of the others.
-	seeds := map[string]*model.Agent{
-		"Article Writer":     articleWriterSeed(orgID),
-		"Research Agent":     researcherSeed(orgID),
-		"Security Tester":    pentestSeed(orgID),
-	}
 	seeded := 0
-	for name, agent := range seeds {
+	for _, m := range agentmodule.All() {
+		if m.Seed == nil {
+			continue
+		}
+		agent := m.Seed(orgID)
+		if agent == nil {
+			continue
+		}
 		agent.CreatedBy = &createdBy
 		if err := s.agentRepo.Create(ctx, agent); err != nil {
 			s.logger.Warn("auth: failed to seed built-in agent",
-				zap.String("agent", name),
+				zap.String("agent", agent.Name),
 				zap.String("org_id", orgID.String()), zap.Error(err))
 			continue
 		}
@@ -138,6 +187,11 @@ func (s *authService) Login(ctx context.Context, req model.LoginRequest) (*model
 		return nil, fmt.Errorf("finding user: %w", err)
 	}
 	if user == nil {
+		return nil, ErrInvalidCredentials
+	}
+
+	// Google-only accounts have no password hash. Do not bcrypt an empty string.
+	if user.Password == "" {
 		return nil, ErrInvalidCredentials
 	}
 
@@ -249,30 +303,17 @@ func slugify(name string) string {
 	return slug
 }
 
-func pentestSeed(orgID uuid.UUID) *model.Agent {
-	desc := "Autonomous security testing agent powered by Strix. Tests live APIs, applications, and codebases for vulnerabilities including OWASP Top 10 and beyond."
-	prompt := "You are a security expert assisting with penetration testing. Use the Strix tool to run security scans against applications and APIs. Report findings clearly with severity levels and proof-of-concepts."
-	return &model.Agent{
-		ID:           uuid.New(),
-		OrgID:        orgID,
-		Name:         "Security Tester",
-		Role:         "Penetration Testing Agent",
-		Description:  &desc,
-		SystemPrompt: &prompt,
-		Status:       "active",
-		EngineType:   model.EngineGoNative,
-		EngineConfig: map[string]any{},
-		Metadata:     map[string]any{model.MetadataKeyBuiltin: model.BuiltinPentester},
-	}
-}
-
 // Sentinel errors for auth operations.
 var (
-	ErrEmailAlreadyExists  = authError("email already exists")
-	ErrInvalidCredentials  = authError("invalid email or password")
-	ErrInvalidRefreshToken = authError("invalid refresh token")
-	ErrRefreshTokenExpired = authError("refresh token expired")
-	ErrUserNotFound        = authError("user not found")
+	ErrEmailAlreadyExists      = authError("email already exists")
+	ErrInvalidCredentials      = authError("invalid email or password")
+	ErrInvalidRefreshToken     = authError("invalid refresh token")
+	ErrRefreshTokenExpired     = authError("refresh token expired")
+	ErrUserNotFound            = authError("user not found")
+	ErrGoogleAuthNotConfigured = authError("google sign-in is not configured")
+	ErrInvalidGoogleState      = authError("invalid or expired google sign-in state")
+	ErrInvalidGoogleTicket     = authError("invalid or expired google sign-in ticket")
+	ErrGoogleEmailNotVerified  = authError("google email is not verified")
 )
 
 type authError string

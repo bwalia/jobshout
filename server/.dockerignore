@@ -1,0 +1,9 @@
+# Keep the build context small — bin/ alone is ~40MB of local go build output
+# that must never invalidate or bloat the Docker layer cache.
+bin/
+.git/
+.gitignore
+*.md
+**/*_test.go
+**/testdata/
+.DS_Store

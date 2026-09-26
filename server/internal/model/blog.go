@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/jobshout/server/internal/audience"
 )
 
 // BlogRunStatus values.
@@ -14,6 +16,7 @@ const (
 	BlogRunStatusRunning   = "running"
 	BlogRunStatusCompleted = "completed"
 	BlogRunStatusFailed    = "failed"
+	BlogRunStatusCancelled = "cancelled"
 )
 
 // Blog step keys. These name the phases of a run in order, and are what the
@@ -42,8 +45,16 @@ const (
 	BlogStepIllustrating = "illustrating"
 	BlogStepConverting   = "converting"
 	BlogStepGenerated    = "generated"
-	BlogStepPublishing = "publishing"
-	BlogStepPublished  = "published"
+	BlogStepPublishing   = "publishing"
+	BlogStepPublished    = "published"
+	// Filing in JobShout.com Insights: a second destination beside the CMS,
+	// with its own steps so a run's trace shows which one did what.
+	BlogStepInsightsSending = "insights_sending"
+	BlogStepInsightsSent    = "insights_sent"
+	// Publishing live: the CMS draft goes public and the article is published
+	// on jobshout.com in the same action (JobShout.com Content Writer).
+	BlogStepGoingLive = "going_live"
+	BlogStepLive      = "live"
 )
 
 // Step statuses. A step is pending until it starts, running while it is the
@@ -96,11 +107,31 @@ type BlogStep struct {
 // same topic different: who is reading, what angle to take, what to avoid.
 type BlogBrief struct {
 	Topic string `json:"topic"`
+	// Seeds are URLs already known to be on this topic — for a discovered
+	// brief, the trending pages discovery based it on. Research reads them
+	// first, so the article starts from the pages that prompted the subject.
+	Seeds []string `json:"seeds,omitempty"`
+	// Focus is the subject areas the article must stay within, carried from a
+	// trending run's focus list so research cannot drift out of them.
+	Focus []string `json:"focus,omitempty"`
 	// Context is free text and optional. It is passed to the research planner
 	// and to the writer verbatim rather than being parsed into fields — the
 	// useful guidance people actually give ("assume they know Kubernetes",
 	// "don't compare vendors") does not decompose into a schema.
 	Context string `json:"context,omitempty"`
+	// Audience is the audience.Profile key this piece is written for. Empty
+	// means the default developer profile, which is what every article written
+	// before audiences existed was.
+	//
+	// It sits on the brief rather than only on the run so one request can write
+	// the same story twice, once for each reader — which is the thing people
+	// actually want when a subject matters to both.
+	Audience string `json:"audience,omitempty"`
+	// Industry frames the piece for one sector ("NHS trusts", "3PL logistics").
+	// Free text, because the useful values are open-ended, and independent of
+	// Audience: the same sector is briefed differently to an engineer and to a
+	// manager.
+	Industry string `json:"industry,omitempty"`
 }
 
 // BlogRun records a single invocation of the article pipeline.
@@ -118,6 +149,11 @@ type BlogRun struct {
 	Briefs []BlogBrief `json:"briefs"`
 	Topics []string    `json:"topics"`
 	Model  *string     `json:"model"`
+	// Options is how the run was asked to work beyond its subjects, kept so a
+	// retry replays the same request. A trending run that fails while choosing
+	// its topic has no briefs, and only this says it should discover again —
+	// and with which focus areas.
+	Options BlogRunOptions `json:"options"`
 	// CMSNamespace is the opsapi namespace the run's drafts were created in.
 	// Nil until the run is published.
 	CMSNamespace *string `json:"cms_namespace"`
@@ -127,9 +163,64 @@ type BlogRun struct {
 	Steps        []BlogStep       `json:"steps"`
 	ErrorMessage *string          `json:"error_message"`
 	StartedAt    *time.Time       `json:"started_at"`
-	CompletedAt  *time.Time       `json:"completed_at"`
-	PublishedAt  *time.Time       `json:"published_at"`
-	CreatedAt    time.Time        `json:"created_at"`
+	// HeartbeatAt is refreshed while this process is still writing, so a
+	// reconciler can fail a run whose writer died (deploy SIGKILL, OOM)
+	// without false-positiving a healthy long Ollama call.
+	HeartbeatAt *time.Time `json:"heartbeat_at,omitempty"`
+	CompletedAt *time.Time `json:"completed_at"`
+	PublishedAt *time.Time `json:"published_at"`
+	// InsightsPublishedAt is when the run's articles were filed in JobShout.com
+	// Insights. Independent of PublishedAt (the CMS): either, both or neither.
+	InsightsPublishedAt *time.Time `json:"insights_published_at"`
+	CreatedAt           time.Time  `json:"created_at"`
+}
+
+// BlogRunOptions is the part of a GenerateBlogRequest that is not the briefs
+// or the model, persisted on the run.
+type BlogRunOptions struct {
+	Trending      bool     `json:"trending,omitempty"`
+	TrendingCount int      `json:"trending_count,omitempty"`
+	Focus         []string `json:"focus,omitempty"`
+	MaxArticles   int      `json:"max_articles,omitempty"`
+	AutoPublish   bool     `json:"auto_publish,omitempty"`
+	// Audience and Industry are the run's defaults, recorded so a retry — and a
+	// trending run, whose briefs do not exist until discovery has run — writes
+	// for the same reader the second time.
+	Audience string `json:"audience,omitempty"`
+	Industry string `json:"industry,omitempty"`
+	// Writer is the builtin the run belongs to, so a retry is attributed to the
+	// same agent. Empty is the Article Writer.
+	Writer string `json:"writer,omitempty"`
+}
+
+// RunOptions extracts what a run records about how it was asked to work.
+func (r *GenerateBlogRequest) RunOptions() BlogRunOptions {
+	return BlogRunOptions{
+		Trending:      r.Trending,
+		TrendingCount: r.TrendingCount,
+		Focus:         r.Focus,
+		MaxArticles:   r.MaxArticles,
+		AutoPublish:   r.AutoPublish,
+		Audience:      r.Audience,
+		Industry:      r.Industry,
+		Writer:        r.Writer,
+	}
+}
+
+// Discovers reports whether the run finds its own topics.
+//
+// Runs created before options were stored have none recorded, so the trace is
+// the fallback: only a trending run is seeded with the discovery step.
+func (r *BlogRun) Discovers() bool {
+	if r.Options.Trending {
+		return true
+	}
+	for _, s := range r.Steps {
+		if s.Key == BlogStepDiscovering {
+			return true
+		}
+	}
+	return false
 }
 
 // CurrentStep returns the step the run is on, or nil when nothing is running.
@@ -198,8 +289,22 @@ type BlogArticle struct {
 	PostUUID   *string    `json:"post_uuid"`
 	PostStatus *string    `json:"post_status"`
 	PostedAt   *time.Time `json:"posted_at"`
-	WordCount  int        `json:"word_count"`
-	CreatedAt  time.Time  `json:"created_at"`
+	// InsightsItemID identifies the JobShout.com Insights item this article
+	// was filed as; InsightsSlug builds its URL. Nil until sent there.
+	InsightsItemID   *string    `json:"insights_item_id"`
+	InsightsSlug     *string    `json:"insights_slug"`
+	InsightsStatus   *string    `json:"insights_status"`
+	InsightsPostedAt *time.Time `json:"insights_posted_at"`
+	WordCount        int        `json:"word_count"`
+	CreatedAt        time.Time  `json:"created_at"`
+
+	// Audience and Industry are the reader this piece was written for, stored
+	// rather than re-derived from the run. They are what lets topic discovery
+	// scope "already written about" to one reader — without them, a developer
+	// schedule and a business schedule block each other's subjects, which
+	// defeats the point of running both.
+	Audience string `json:"audience,omitempty"`
+	Industry string `json:"industry,omitempty"`
 
 	// CoverImageURL is where the article's cover image is served from, empty
 	// when the run generated none — cover images are opt-in per environment, and
@@ -219,6 +324,15 @@ type BlogArticle struct {
 type BlogArticlePost struct {
 	ArticleID uuid.UUID
 	PostUUID  string
+	Status    string
+}
+
+// BlogArticleInsights is the result of filing one article in Insights,
+// written back to blog_articles.
+type BlogArticleInsights struct {
+	ArticleID uuid.UUID
+	ItemID    string
+	Slug      string
 	Status    string
 }
 
@@ -247,26 +361,67 @@ type GenerateBlogRequest struct {
 	// and rejected in that combination rather than quietly ignored.
 	Focus       []string `json:"focus,omitempty"`
 	MaxArticles int      `json:"max_articles,omitempty"`
-	// AutoPublish files the finished articles in the CMS without waiting for
-	// someone to press the button.
+	// TaskID, when set, is the Task Manager board card this run belongs to.
+	TaskID *uuid.UUID `json:"task_id,omitempty"`
+	// AutoPublish files the finished articles in every configured destination
+	// — the CMS and JobShout.com Insights — without waiting for someone to
+	// press the button.
 	//
 	// It exists for scheduled runs, where there is nobody at the keyboard at
-	// 2am. It creates drafts, exactly as the manual action does — nothing goes
-	// live without a human approving it in the CMS — so the worst case is a
-	// draft somebody deletes rather than a bad article published to readers.
+	// 2am. It creates drafts and review items, exactly as the manual actions
+	// do — nothing goes live without a human approving it in the CMS or the
+	// Insights review queue — so the worst case is a draft somebody deletes
+	// rather than a bad article published to readers.
 	AutoPublish bool `json:"auto_publish,omitempty"`
+	// Audience is the run's default audience.Profile key — who every brief in
+	// this request is written for unless the brief names its own reader.
+	//
+	// It is a run-level default rather than brief-only because that is how it
+	// is actually set: a schedule says "this one writes for managers", and the
+	// briefs it discovers each night inherit that. Empty means the default
+	// developer profile.
+	Audience string `json:"audience,omitempty"`
+	// Industry is the run's default sector framing, inherited the same way.
+	Industry string `json:"industry,omitempty"`
+	// Writer is which builtin agent the run belongs to — a key of BlogWriters.
+	// Empty is the Article Writer. It decides whose tab the run appears on and
+	// what happens after writing, so an unknown value is rejected rather than
+	// quietly filed under the Article Writer.
+	Writer string `json:"writer,omitempty"`
 }
 
 // Normalize folds the legacy Topics field into Briefs and trims empties, so
 // every consumer can read Briefs alone.
 func (r *GenerateBlogRequest) Normalize() {
+	// The run's reader and sector are settled first, so every brief below can
+	// inherit them and no consumer has to know the precedence.
+	r.Writer = strings.ToLower(strings.TrimSpace(r.Writer))
+	if r.Writer == BuiltinArticleWriter {
+		r.Writer = ""
+	}
+	r.Audience = audience.Normalize(r.Audience)
+	// The Content Writer writes for one reader. A request that names no
+	// audience — a schedule, a chat launch — gets that one rather than the
+	// developer default, which would be the wrong piece for jobshout.com.
+	if r.Writer == BuiltinJobShoutComWriter && r.Audience == "" {
+		r.Audience = audience.InsightsKey
+	}
+	r.Industry = audience.NormalizeIndustry(r.Industry)
+
 	briefs := make([]BlogBrief, 0, len(r.Briefs)+len(r.Topics))
 	for _, b := range r.Briefs {
 		topic := strings.TrimSpace(b.Topic)
 		if topic == "" {
 			continue
 		}
-		briefs = append(briefs, BlogBrief{Topic: topic, Context: strings.TrimSpace(b.Context)})
+		briefs = append(briefs, BlogBrief{
+			Topic:    topic,
+			Context:  strings.TrimSpace(b.Context),
+			Audience: r.resolveAudience(b.Audience),
+			Industry: r.resolveIndustry(b.Industry),
+			Seeds:    b.Seeds,
+			Focus:    b.Focus,
+		})
 	}
 	// A legacy topic is folded in only when no brief already covers it.
 	//
@@ -291,7 +446,11 @@ func (r *GenerateBlogRequest) Normalize() {
 			continue
 		}
 		covered[topic] = struct{}{}
-		briefs = append(briefs, BlogBrief{Topic: topic})
+		briefs = append(briefs, BlogBrief{
+			Topic:    topic,
+			Audience: r.Audience,
+			Industry: r.Industry,
+		})
 	}
 	r.Briefs = briefs
 
@@ -325,12 +484,54 @@ func (r *GenerateBlogRequest) Normalize() {
 	}
 }
 
+// resolveAudience is the brief's reader, or the run's when it names none.
+//
+// A brief that names an unknown profile falls back to the run's rather than to
+// the global default: the run's is the nearer statement of intent, and silently
+// writing a developer article for a schedule that asked for managers is the
+// failure worth designing against. Validate rejects the unknown key before this
+// runs on any request that came in over HTTP.
+func (r *GenerateBlogRequest) resolveAudience(brief string) string {
+	if b := audience.Normalize(brief); b != "" {
+		return b
+	}
+	if strings.TrimSpace(brief) != "" {
+		// The brief named the default profile outright, which normalizes to
+		// empty. That is a choice, not silence, so it beats the run's.
+		return ""
+	}
+	return r.Audience
+}
+
+func (r *GenerateBlogRequest) resolveIndustry(brief string) string {
+	if b := audience.NormalizeIndustry(brief); b != "" {
+		return b
+	}
+	return r.Industry
+}
+
 // Validate reports why a request cannot be run, after Normalize.
 //
 // It is a method rather than struct tags because the requirement is
 // conditional: briefs are required unless the run is discovering its own
 // topics, and `validate:"required"` cannot express that.
 func (r *GenerateBlogRequest) Validate() error {
+	if r.Writer != "" {
+		if _, ok := BlogWriters[r.Writer]; !ok {
+			return fmt.Errorf("unknown writer %q", r.Writer)
+		}
+	}
+	// Rejected rather than defaulted. A typo'd audience that quietly wrote a
+	// developer article would look exactly like a schedule working correctly,
+	// and nobody checks a nightly job that is producing articles.
+	if !audience.Known(r.Audience) {
+		return fmt.Errorf("unknown audience %q — one of: %s", r.Audience, audienceKeys())
+	}
+	for i, b := range r.Briefs {
+		if !audience.Known(b.Audience) {
+			return fmt.Errorf("brief %d: unknown audience %q — one of: %s", i+1, b.Audience, audienceKeys())
+		}
+	}
 	if r.Trending {
 		// The topics do not exist yet — discovery finds them when the run
 		// starts — so there is nothing here to require.
@@ -349,6 +550,16 @@ func (r *GenerateBlogRequest) Validate() error {
 		return fmt.Errorf("at least one brief with a topic is required")
 	}
 	return nil
+}
+
+// audienceKeys lists the accepted audience values for an error message.
+func audienceKeys() string {
+	opts := audience.Options()
+	keys := make([]string, 0, len(opts))
+	for _, o := range opts {
+		keys = append(keys, o.Value)
+	}
+	return strings.Join(keys, ", ")
 }
 
 // DefaultTrendingCount is how many articles a trending run writes when the

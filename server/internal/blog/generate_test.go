@@ -44,9 +44,24 @@ func newTestRunner(cms CMSPublisher, responses ...scriptedResponse) *Runner {
 // happens when research fails or comes back thin.
 func newTestRunnerWith(cms CMSPublisher, researcher Researcher, responses ...scriptedResponse) *Runner {
 	return NewRunner(Config{
-		ContentDir: "content/blogs",
-		AuthorName: "Test Writer",
+		ContentDir:    "content/blogs",
+		AuthorName:    "Test Writer",
+		PublicBaseURL: "https://jobshout.test",
 	}, &stubLLM{responses: responses}, cms, researcher, zap.NewNop())
+}
+
+// newRunnerWithStub is newTestRunner for tests that then read back what the
+// model was actually asked, rather than only what it answered.
+func newRunnerWithStub(stub *stubLLM) *Runner {
+	return NewRunner(Config{ContentDir: "content/blogs", AuthorName: "Test Writer"},
+		stub, nil, &fakeResearcher{}, zap.NewNop())
+}
+
+// newRunnerWithResearcher exposes the researcher so a test can inspect the
+// brief the Research Agent was handed.
+func newRunnerWithResearcher(researcher Researcher, responses []scriptedResponse) *Runner {
+	return NewRunner(Config{ContentDir: "content/blogs", AuthorName: "Test Writer"},
+		&stubLLM{responses: responses}, nil, researcher, zap.NewNop())
 }
 
 // briefsFor is shorthand for a request over plain topics.
@@ -182,6 +197,30 @@ func TestPublish_AlwaysCreatesDrafts(t *testing.T) {
 	}
 }
 
+// A cover on the article must land in opsapi's featured_image_url as an
+// absolute URL, so the console Featured image preview can load it.
+func TestPublish_SendsFeaturedImageURL(t *testing.T) {
+	cms := &fakeCMS{}
+	r := newTestRunner(cms)
+
+	_, err := r.Publish(context.Background(), []GeneratedArticle{{
+		Topic: "covered", Slug: "covered",
+		Title: "Covered", Excerpt: "Has a cover.",
+		HTML:          "<p>Body</p>",
+		CoverImageURL: "/api/v1/images/file/org/2026/08/cover.png",
+	}}, nil)
+	if err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if len(cms.posts) != 1 {
+		t.Fatalf("sent %d posts, want 1", len(cms.posts))
+	}
+	want := "https://jobshout.test/api/v1/images/file/org/2026/08/cover.png"
+	if cms.posts[0].FeaturedImageURL != want {
+		t.Errorf("featured_image_url = %q, want %q", cms.posts[0].FeaturedImageURL, want)
+	}
+}
+
 // Articles stored before HTML rendering existed have markdown and nothing else.
 // Publishing them must work rather than refusing on a missing field.
 func TestPublish_RendersArticlesWithoutHTML(t *testing.T) {
@@ -291,5 +330,35 @@ func TestPublish_RecomputesDerivedFieldsFromStoredArticle(t *testing.T) {
 	// The stored HTML is what was reviewed, so it must be sent verbatim.
 	if got.ContentHTML != stored.HTML {
 		t.Errorf("ContentHTML = %q, want the stored HTML %q", got.ContentHTML, stored.HTML)
+	}
+}
+
+func TestGenerate_ContinuesAfterBriefFailure(t *testing.T) {
+	r := newTestRunnerWith(nil, &fakeResearcher{failAfter: 2}, writeScript("One", "# One\n\nBody.")...)
+	var persisted []string
+	arts, err := r.Generate(context.Background(), GenerateRequest{
+		Briefs: briefsFor("alpha", "beta"),
+		OnArticle: func(a GeneratedArticle) error {
+			persisted = append(persisted, a.Topic)
+			return nil
+		},
+	}, nil)
+	if err == nil {
+		t.Fatal("expected the second brief's failure to be returned")
+	}
+	if !strings.Contains(err.Error(), "beta") {
+		t.Errorf("error should name the failed brief, got: %v", err)
+	}
+	if len(arts) != 1 {
+		t.Fatalf("got %d articles, want the first brief only", len(arts))
+	}
+	if arts[0].Topic != "alpha" {
+		t.Errorf("kept topic = %q, want alpha", arts[0].Topic)
+	}
+	if arts[0].HTML == "" {
+		t.Error("the stored article should already be rendered to HTML")
+	}
+	if len(persisted) != 1 || persisted[0] != "alpha" {
+		t.Errorf("OnArticle = %v, want alpha persisted before the failure", persisted)
 	}
 }

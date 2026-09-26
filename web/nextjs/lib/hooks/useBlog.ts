@@ -2,7 +2,6 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import type { PaginationParams } from "@/lib/types/common";
 import type { GenerateBlogRequest } from "@/lib/types/blog";
 import {
   generateBlog,
@@ -11,7 +10,11 @@ import {
   getBlogRun,
   getBlogRuns,
   publishBlogRun,
+  publishBlogRunToInsights,
+  publishBlogRunLive,
+  type BlogRunListParams,
   retryBlogRun,
+  cancelBlogRun,
   deleteBlogRun,
 } from "@/lib/api/blog";
 import { apiErrorMessage } from "@/lib/api/client";
@@ -20,7 +23,7 @@ export const blogKeys = {
   all: ["blogs"] as const,
   config: () => [...blogKeys.all, "config"] as const,
   lists: () => [...blogKeys.all, "list"] as const,
-  list: (params: PaginationParams) => [...blogKeys.lists(), params] as const,
+  list: (params: BlogRunListParams) => [...blogKeys.lists(), params] as const,
   details: () => [...blogKeys.all, "detail"] as const,
   detail: (id: string) => [...blogKeys.details(), id] as const,
   articles: (runId: string) => [...blogKeys.all, "articles", runId] as const,
@@ -40,7 +43,7 @@ export function useBlogConfig() {
  * The run list, polled while any run is still working so the list reflects
  * progress without the user refreshing.
  */
-export function useBlogRuns(params: PaginationParams = {}) {
+export function useBlogRuns(params: BlogRunListParams = {}) {
   return useQuery({
     queryKey: blogKeys.list(params),
     queryFn: () => getBlogRuns(params),
@@ -68,14 +71,15 @@ export function useBlogRun(id: string) {
 }
 
 /**
- * Article bodies for a run. Only fetched once the run has produced them —
- * there is nothing to load while it is still writing.
+ * Article bodies for a run. Fetched while writing once any row exists, and
+ * after a failed/partial run so work that did land is still readable.
  */
-export function useBlogArticles(runId: string, enabled = true) {
+export function useBlogArticles(runId: string, enabled = true, poll = false) {
   return useQuery({
     queryKey: blogKeys.articles(runId),
     queryFn: () => getBlogArticles(runId),
     enabled: Boolean(runId) && enabled,
+    refetchInterval: poll ? 2000 : false,
   });
 }
 
@@ -105,12 +109,42 @@ export function usePublishBlogRun() {
   });
 }
 
+export function usePublishBlogRunToInsights() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => publishBlogRunToInsights(id),
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: blogKeys.detail(id) });
+      qc.invalidateQueries({ queryKey: blogKeys.articles(id) });
+      qc.invalidateQueries({ queryKey: blogKeys.lists() });
+      toast.success("Filed in Insights for editor review");
+    },
+    onError: (e) => toast.error(apiErrorMessage(e, "Failed to send to Insights")),
+  });
+}
+
+/** Publishes a Content Writer run live: CMS post public + jobshout.com. */
+export function usePublishBlogRunLive() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => publishBlogRunLive(id),
+    onSuccess: (_run, id) => {
+      qc.invalidateQueries({ queryKey: blogKeys.detail(id) });
+      qc.invalidateQueries({ queryKey: blogKeys.articles(id) });
+      qc.invalidateQueries({ queryKey: blogKeys.lists() });
+      toast.success("Published on jobshout.com");
+    },
+    onError: (err) => toast.error(apiErrorMessage(err, "Could not publish live")),
+  });
+}
+
 export function useRetryBlogRun() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => retryBlogRun(id),
     onSuccess: (_, id) => {
       qc.invalidateQueries({ queryKey: blogKeys.detail(id) });
+      qc.invalidateQueries({ queryKey: blogKeys.articles(id) });
       qc.invalidateQueries({ queryKey: blogKeys.lists() });
       toast.success("Article Writer is trying again");
     },
@@ -118,11 +152,27 @@ export function useRetryBlogRun() {
   });
 }
 
+export function useCancelBlogRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => cancelBlogRun(id),
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: blogKeys.detail(id) });
+      qc.invalidateQueries({ queryKey: blogKeys.articles(id) });
+      qc.invalidateQueries({ queryKey: blogKeys.lists() });
+      toast.success("Run cancelled");
+    },
+    onError: (e) => toast.error(apiErrorMessage(e, "Failed to cancel")),
+  });
+}
+
 export function useDeleteBlogRun() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => deleteBlogRun(id),
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
+      qc.removeQueries({ queryKey: blogKeys.detail(id) });
+      qc.removeQueries({ queryKey: blogKeys.articles(id) });
       qc.invalidateQueries({ queryKey: blogKeys.lists() });
       toast.success("Run deleted");
     },

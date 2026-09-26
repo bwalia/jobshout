@@ -15,7 +15,8 @@ metadata:
 spec:
   ingressClassName: {{ .Values.ingress.className }}
   rules:
-    - host: {{ .Values.host }}
+    {{- range (prepend (.Values.hostAliases | default list) .Values.host) }}
+    - host: {{ . }}
       http:
         paths:
           # Single backend: the wslproxy edge forwards the whole host to one
@@ -28,10 +29,14 @@ spec:
                 name: jobshout-nginx
                 port:
                   number: 80
+    {{- end }}
   {{- if .Values.ingress.tls }}
   tls:
     - hosts:
         - {{ .Values.host }}
+        {{- range .Values.hostAliases | default list }}
+        - {{ . }}
+        {{- end }}
       secretName: jobshout-tls
   {{- end }}
 {{- end }}

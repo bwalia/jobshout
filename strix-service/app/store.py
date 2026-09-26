@@ -59,7 +59,8 @@ class Run:
     target: str
     scan_mode: str
     max_budget: int | None = None
-    # Recorded for the audit trail, not passed to the scanner — see runner.py.
+    # Operator scope note. Combined with a standing engagement prompt and passed
+    # to Strix as --instruction (see engagement.py / runner.build_args).
     instruction: str = ""
     requested_by: str = ""
     addresses: list[str] = field(default_factory=list)
@@ -74,6 +75,8 @@ class Run:
     findings: list[Finding] = field(default_factory=list)
     error: str | None = None
     log_tail: str = ""
+    report_markdown: str = ""
+    target_engaged: bool | None = None
 
     @property
     def is_terminal(self) -> bool:

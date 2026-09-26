@@ -57,3 +57,27 @@ func TestOllamaGenerate_StreamThinkingOnlyIsNamed(t *testing.T) {
 		t.Errorf("error %q should name the thinking-only failure", err)
 	}
 }
+
+func TestOllamaGenerate_OnTokenReceivesEachChunk(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"Hel"},"done":false}` + "\n"))
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"lo"},"done":false}` + "\n"))
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":""},"done":true}` + "\n"))
+	}))
+	defer srv.Close()
+
+	var chunks []string
+	resp, err := NewOllamaClient(srv.URL, "llama3").Generate(context.Background(), GenerateRequest{
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+		OnToken:  func(s string) { chunks = append(chunks, s) },
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(chunks) != 2 || chunks[0] != "Hel" || chunks[1] != "lo" {
+		t.Fatalf("chunks = %#v, want [Hel lo]", chunks)
+	}
+	if resp.Content != "Hello" {
+		t.Errorf("content = %q, want Hello", resp.Content)
+	}
+}

@@ -50,6 +50,12 @@ var (
 	// problem, not a scan problem: retrying with the same secret produces the
 	// same verdict.
 	ErrUnauthorized = errors.New("strix: pentest gateway rejected the request")
+
+	// ErrGateway is the edge in front of the service returning 502/504 (or an
+	// HTML 503) — typically WSL Proxy while the Mac is still scanning. Transient:
+	// the reconciler must keep polling, not fail the run after a handful of
+	// flaps. Distinct from ErrBusy, which is the FastAPI queue being full.
+	ErrGateway = errors.New("strix: edge gateway temporarily unavailable")
 )
 
 // Finding mirrors the service's FindingOut, in the field names the Go side
@@ -90,19 +96,21 @@ type RunHandle struct {
 
 // RunResult is one poll of a scan. The reconciler finalises a run from it.
 type RunResult struct {
-	RemoteRunID  string
-	RunRef       string
-	Status       string // queued|running|completed|failed|budget_exceeded|cancelled
-	Target       string
-	ScanMode     string
-	StartedAt    *time.Time
-	CompletedAt  *time.Time
-	DurationMS   int
-	ExitCode     *int
-	FindingCount int
-	Findings     []Finding
-	Error        string
-	LogTail      string
+	RemoteRunID    string
+	RunRef         string
+	Status         string // queued|running|completed|failed|budget_exceeded|cancelled
+	Target         string
+	ScanMode       string
+	StartedAt      *time.Time
+	CompletedAt    *time.Time
+	DurationMS     int
+	ExitCode       *int
+	FindingCount   int
+	Findings       []Finding
+	Error          string
+	LogTail        string
+	ReportMarkdown string
+	TargetEngaged  *bool
 }
 
 // Terminal reports whether the run has reached a state that will not change.
@@ -130,6 +138,10 @@ type Capabilities struct {
 		Model     string `json:"model"`
 		APIBase   string `json:"api_base"`
 		Reachable *bool  `json:"reachable"`
+		// ModelPresent is nil for a hosted provider (no local /api/tags to check);
+		// for local Ollama it says whether the wanted model is actually pulled, the
+		// difference between "Ollama is up" and "the scan can start".
+		ModelPresent *bool `json:"model_present"`
 	} `json:"llm"`
 	Scope struct {
 		RuleCount     int  `json:"rule_count"`
@@ -225,19 +237,21 @@ func (c *Client) Status(ctx context.Context, remoteRunID string) (*RunResult, er
 		return nil, fmt.Errorf("strix: decode scan status: %w", err)
 	}
 	return &RunResult{
-		RemoteRunID:  parsed.RunID,
-		RunRef:       parsed.RunRef,
-		Status:       parsed.Status,
-		Target:       parsed.Target,
-		ScanMode:     parsed.ScanMode,
-		StartedAt:    parseTime(parsed.StartedAt),
-		CompletedAt:  parseTime(parsed.CompletedAt),
-		DurationMS:   parsed.DurationMS,
-		ExitCode:     parsed.ExitCode,
-		FindingCount: parsed.FindingCount,
-		Findings:     parsed.Findings,
-		Error:        parsed.Error,
-		LogTail:      parsed.LogTail,
+		RemoteRunID:    parsed.RunID,
+		RunRef:         parsed.RunRef,
+		Status:         parsed.Status,
+		Target:         parsed.Target,
+		ScanMode:       parsed.ScanMode,
+		StartedAt:      parseTime(parsed.StartedAt),
+		CompletedAt:    parseTime(parsed.CompletedAt),
+		DurationMS:     parsed.DurationMS,
+		ExitCode:       parsed.ExitCode,
+		FindingCount:   parsed.FindingCount,
+		Findings:       parsed.Findings,
+		Error:          parsed.Error,
+		LogTail:        parsed.LogTail,
+		ReportMarkdown: parsed.ReportMarkdown,
+		TargetEngaged:  parsed.TargetEngaged,
 	}, nil
 }
 
@@ -289,19 +303,21 @@ type scanAcceptedWire struct {
 }
 
 type scanStatusWire struct {
-	RunID        string    `json:"run_id"`
-	RunRef       string    `json:"run_ref"`
-	Status       string    `json:"status"`
-	Target       string    `json:"target"`
-	ScanMode     string    `json:"scan_mode"`
-	StartedAt    *string   `json:"started_at"`
-	CompletedAt  *string   `json:"completed_at"`
-	DurationMS   int       `json:"duration_ms"`
-	ExitCode     *int      `json:"exit_code"`
-	FindingCount int       `json:"finding_count"`
-	Findings     []Finding `json:"findings"`
-	Error        string    `json:"error"`
-	LogTail      string    `json:"log_tail"`
+	RunID          string    `json:"run_id"`
+	RunRef         string    `json:"run_ref"`
+	Status         string    `json:"status"`
+	Target         string    `json:"target"`
+	ScanMode       string    `json:"scan_mode"`
+	StartedAt      *string   `json:"started_at"`
+	CompletedAt    *string   `json:"completed_at"`
+	DurationMS     int       `json:"duration_ms"`
+	ExitCode       *int      `json:"exit_code"`
+	FindingCount   int       `json:"finding_count"`
+	Findings       []Finding `json:"findings"`
+	Error          string    `json:"error"`
+	LogTail        string    `json:"log_tail"`
+	ReportMarkdown string    `json:"report_markdown"`
+	TargetEngaged  *bool     `json:"target_engaged"`
 }
 
 // ─── transport ──────────────────────────────────────────────────────────────
@@ -350,7 +366,14 @@ func (c *Client) do(ctx context.Context, method, path string, body any) ([]byte,
 // reconciler branches on.
 func classifyError(status int, body []byte) error {
 	switch status {
+	case http.StatusBadGateway, http.StatusGatewayTimeout:
+		return fmt.Errorf("%w (status %d): %s", ErrGateway, status, gatewaySnippet(body))
 	case http.StatusServiceUnavailable:
+		// FastAPI's queue-full 503 is JSON. An HTML 503 is the edge in front of
+		// it (WSL Proxy), which is a flap, not a full queue.
+		if isGatewayBody(body) {
+			return fmt.Errorf("%w (status 503): %s", ErrGateway, gatewaySnippet(body))
+		}
 		return fmt.Errorf("%w: %s", ErrBusy, snippet(body))
 	case http.StatusUnauthorized:
 		return fmt.Errorf(
@@ -374,8 +397,29 @@ func classifyError(status int, body []byte) error {
 		}
 		return fmt.Errorf("%w: %s", ErrOutOfScope, snippet(body))
 	default:
+		if isGatewayBody(body) {
+			return fmt.Errorf("%w (status %d): %s", ErrGateway, status, gatewaySnippet(body))
+		}
 		return fmt.Errorf("strix: pentest service returned %d: %s", status, snippet(body))
 	}
+}
+
+// isGatewayBody is true when the response is an HTML error page from the edge
+// (WSL Proxy / nginx) rather than JSON from FastAPI.
+func isGatewayBody(body []byte) bool {
+	lower := strings.ToLower(string(body))
+	return strings.Contains(lower, "wsl proxy") ||
+		strings.Contains(lower, "<!doctype html") ||
+		strings.Contains(lower, "<html")
+}
+
+// gatewaySnippet keeps HTML error pages out of the UI. Operators need to know
+// it was the edge, not a 240-character dump of <!DOCTYPE html>.
+func gatewaySnippet(body []byte) string {
+	if isGatewayBody(body) {
+		return "WSL Proxy / edge returned an HTML error page (the scanner on the workstation is likely still running)"
+	}
+	return snippet(body)
 }
 
 // isAuthBody distinguishes an auth rejection from a scope rejection when both

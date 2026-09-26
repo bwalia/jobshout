@@ -1,0 +1,10 @@
+[package]
+name = "jobshout-observability"
+description = "Tracing and metrics bootstrap"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

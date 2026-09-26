@@ -57,6 +57,21 @@ def test_empty_allowlist_refuses_even_a_plain_public_host():
         scope.enforce("example.com", parse(""))
 
 
+def test_star_allows_any_public_host():
+    target = scope.enforce("https://example.com", parse("*"))
+    assert target.host == "example.com"
+
+
+def test_star_still_refuses_private_addresses():
+    with pytest.raises(scope.OutOfScope, match="internal address"):
+        scope.enforce("https://internal.example.com", parse("*"))
+
+
+def test_star_still_refuses_metadata():
+    with pytest.raises(scope.OutOfScope, match="metadata"):
+        scope.enforce("https://sneaky.example.com", parse("*"))
+
+
 # ─── host rules ─────────────────────────────────────────────────────────────
 
 def test_exact_host_allowed():

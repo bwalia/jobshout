@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/jobshout/server/internal/chatstream"
 	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/llmtrace"
 	"github.com/jobshout/server/internal/model"
@@ -71,11 +72,78 @@ type Result struct {
 // injects as context before a run's loop starts.
 const knowledgeTopK = 5
 
-// SkillProvider yields the skills currently enabled for an agent. It is
-// satisfied by repository.SkillRepository; the executor depends on this narrow
-// interface so it never imports the repository package directly.
+// SkillProvider yields the skills for an agent. It is satisfied by
+// repository.SkillRepository; the executor depends on this narrow interface so
+// it never imports the repository package directly.
 type SkillProvider interface {
+	// ListForAgent returns the skills persistently enabled for an agent.
 	ListForAgent(ctx context.Context, agentID uuid.UUID) ([]model.Skill, error)
+	// ListBySlugs resolves skills by slug within an org (plus built-in skills),
+	// for per-run overrides that load a skill without enabling it on the agent.
+	ListBySlugs(ctx context.Context, orgID uuid.UUID, slugs []string) ([]model.Skill, error)
+}
+
+// RunOptions are per-run overrides carried on the context into a run. They let a
+// single invocation load extra skills without mutating the agent record. Absent
+// options (the zero value) leave a run unchanged.
+type RunOptions struct {
+	// SkillSlugs are extra skills to fold into this run, on top of the agent's
+	// enabled skills. Resolved by slug; unknown slugs are ignored.
+	SkillSlugs []string
+
+	// MaxTokens caps the response length of every model call in this run. It
+	// carries the resolved agent_policies.max_tokens_per_exec, which until now
+	// was stored and exposed through the API but never enforced. Zero means no
+	// policy cap, leaving each call site's own default in place; a cap only
+	// ever tightens that default, never raises it.
+	MaxTokens int
+
+	// MaxCostUSD caps what one run may spend, carrying the resolved
+	// agent_policies.max_cost_per_exec. Zero means no cap.
+	//
+	// Unlike MaxTokens this cannot be applied to a single call: cost is only
+	// known after a call returns, and a run is a loop of them. It is checked
+	// between iterations instead, against the spend accumulated so far, so the
+	// worst case is one iteration of overshoot — the alternative, refusing to
+	// start on a guess at what a run might cost, blocks legitimate work to
+	// avoid a cost nobody has incurred yet.
+	MaxCostUSD float64
+}
+
+// CostEstimator prices the tokens a run has spent so far. Satisfied by
+// *costengine.Engine, and kept as a narrow interface here so the executor does
+// not depend on the cost engine package — and so the cap is priced by exactly
+// the same function that later produces the bill, rather than a second opinion
+// that could disagree with it.
+type CostEstimator interface {
+	Calculate(provider, model string, inputTokens, outputTokens, latencyMs int) float64
+}
+
+// capTokens returns the token limit to send for one model call: the call site's
+// own default, tightened by the run's policy cap when one is set. A policy that
+// asks for more than the call site budgets is ignored — the cap is a ceiling,
+// not an allowance.
+func capTokens(ctx context.Context, def int) int {
+	limit := runOptionsFrom(ctx).MaxTokens
+	if limit > 0 && limit < def {
+		return limit
+	}
+	return def
+}
+
+type runOptionsKey struct{}
+
+// WithRunOptions returns a context carrying per-run overrides for the executor.
+func WithRunOptions(ctx context.Context, opts RunOptions) context.Context {
+	return context.WithValue(ctx, runOptionsKey{}, opts)
+}
+
+// runOptionsFrom extracts per-run overrides from the context, or the zero value.
+func runOptionsFrom(ctx context.Context) RunOptions {
+	if opts, ok := ctx.Value(runOptionsKey{}).(RunOptions); ok {
+		return opts
+	}
+	return RunOptions{}
 }
 
 // Executor runs the ReAct loop for a single agent against a given task prompt.
@@ -87,6 +155,7 @@ type Executor struct {
 	embedder  tools.Embedder
 	gate      ApprovalGate
 	selector  *modelselect.Selector
+	cost      CostEstimator
 	logger    *zap.Logger
 }
 
@@ -138,6 +207,44 @@ func (e *Executor) WithAutoSelect(s *modelselect.Selector) *Executor {
 	return e
 }
 
+// WithCostEstimator attaches the pricing used to enforce a run's cost cap.
+// Returns the receiver for fluent wiring. When no estimator is set,
+// RunOptions.MaxCostUSD is not enforced and runs proceed unchanged — the same
+// stance every other optional dependency here takes.
+func (e *Executor) WithCostEstimator(c CostEstimator) *Executor {
+	e.cost = c
+	return e
+}
+
+// costCapExceeded returns the error to fail a run with when the spend so far
+// has reached the run's cost cap, or nil to carry on.
+//
+// Called between iterations, never mid-call: a model call that has started
+// cannot be un-spent, so the cap stops the next one rather than the current
+// one. A run whose very first iteration blows the cap therefore still costs
+// that iteration — the ceiling is one iteration of overshoot, not zero.
+func (e *Executor) costCapExceeded(
+	ctx context.Context,
+	provider, modelName string,
+	inputTokens, outputTokens int,
+	runStart time.Time,
+) error {
+	limit := runOptionsFrom(ctx).MaxCostUSD
+	if limit <= 0 || e.cost == nil {
+		return nil
+	}
+
+	latencyMs := int(time.Since(runStart).Milliseconds())
+	spent := e.cost.Calculate(provider, modelName, inputTokens, outputTokens, latencyMs)
+	if spent < limit {
+		return nil
+	}
+	return fmt.Errorf(
+		"executor: execution cost cap reached (spent $%.6f of $%.6f limit)",
+		spent, limit,
+	)
+}
+
 // Run executes the ReAct loop for agent against taskPrompt.
 // agentTools is the subset of tool names the agent is permitted to use.
 // The execution ID is used only for structured logging correlation.
@@ -168,6 +275,13 @@ func (e *Executor) Run(
 		OrgID:     agent.OrgID.String(),
 	})
 
+	// Stream a safe "executing" signal for any listening SSE handler (chat).
+	// No-op when no emitter is on the context.
+	chatstream.Status(ctx, "executing", map[string]any{
+		"agent_id":   agent.ID.String(),
+		"agent_name": agent.Name,
+	})
+
 	// The LLM client is resolved further down, once the tool set is known:
 	// auto-selection needs to know whether this run requires native
 	// tool-calling before it can rule models in or out.
@@ -193,6 +307,28 @@ func (e *Executor) Run(
 			}
 			log.Info("applied agent skills",
 				zap.Int("skills", len(skills)),
+				zap.Int("effective_tools", len(agentTools)),
+			)
+		}
+	}
+
+	// Fold in any per-run skill overrides: skills named for THIS run only, on
+	// top of the agent's enabled skills, resolved by slug. Same non-fatal
+	// contract as the enabled skills above — a bad slug or a registry hiccup
+	// must never break the run.
+	if opts := runOptionsFrom(ctx); len(opts.SkillSlugs) > 0 && e.skills != nil {
+		overrides, oerr := e.skills.ListBySlugs(ctx, agent.OrgID, opts.SkillSlugs)
+		if oerr != nil {
+			log.Warn("failed to load run-scoped skill overrides; continuing without them", zap.Error(oerr))
+		} else if len(overrides) > 0 {
+			var promptPatch string
+			agentTools, promptPatch = applySkills(agentTools, overrides)
+			if promptPatch != "" {
+				systemPromptText = strings.TrimSpace(systemPromptText + "\n\n" + promptPatch)
+			}
+			log.Info("applied run-scoped skill overrides",
+				zap.Strings("requested", opts.SkillSlugs),
+				zap.Int("resolved", len(overrides)),
 				zap.Int("effective_tools", len(agentTools)),
 			)
 		}
@@ -266,10 +402,17 @@ func (e *Executor) reactLoop(ctx context.Context, st *reactLoopState) Result {
 	for iteration := st.iteration + 1; iteration <= MaxIterations; iteration++ {
 		st.log.Info("ReAct iteration", zap.Int("iteration", iteration))
 
+		if err := e.costCapExceeded(ctx, st.provider, st.modelName,
+			st.inputTokens, st.outputTokens, st.runStart); err != nil {
+			st.log.Warn("stopping run: cost cap reached", zap.Error(err))
+			return buildResult("", iteration-1, st.totalTokens, st.inputTokens, st.outputTokens,
+				st.runStart, st.provider, st.modelName, st.toolCalls, err)
+		}
+
 		llmResp, err := st.client.Generate(ctx, llm.GenerateRequest{
 			Messages:    st.messages,
 			Model:       st.modelName,
-			MaxTokens:   4096,
+			MaxTokens:   capTokens(ctx, 4096),
 			Temperature: 0.2,
 		})
 		if err != nil {
@@ -353,11 +496,13 @@ func (e *Executor) reactLoop(ctx context.Context, st *reactLoopState) Result {
 		}
 
 		// Execute the tool with a 60-second timeout.
+		chatstream.Emit(ctx, chatstream.Event{Type: chatstream.EventTool, Data: map[string]any{"name": toolName, "state": "start"}})
 		toolCtx, toolCancel := context.WithTimeout(ctx, 60*time.Second)
 		start := time.Now()
 		toolOutput, toolErr := tool.Execute(toolCtx, toolInput)
 		toolCancel()
 		durationMs := int(time.Since(start).Milliseconds())
+		chatstream.Emit(ctx, chatstream.Event{Type: chatstream.EventTool, Data: map[string]any{"name": toolName, "state": "end", "duration_ms": durationMs, "ok": toolErr == nil}})
 
 		record := ToolCallRecord{
 			ToolName:   toolName,
@@ -634,10 +779,17 @@ func (e *Executor) runNative(
 	for iteration := 1; iteration <= MaxIterations; iteration++ {
 		log.Info("native tool-calling iteration", zap.Int("iteration", iteration))
 
+		if err := e.costCapExceeded(ctx, resolvedProvider, modelName,
+			inputTokens, outputTokens, runStart); err != nil {
+			log.Warn("stopping run: cost cap reached", zap.Error(err))
+			return buildResult("", iteration-1, totalTokens, inputTokens, outputTokens,
+				runStart, resolvedProvider, modelName, toolCalls, err)
+		}
+
 		llmResp, err := client.Generate(ctx, llm.GenerateRequest{
 			Messages:    messages,
 			Model:       modelName,
-			MaxTokens:   4096,
+			MaxTokens:   capTokens(ctx, 4096),
 			Temperature: 0.2,
 			ToolDefs:    toolDefs,
 		})
@@ -700,11 +852,13 @@ func (e *Executor) runNative(
 			}
 
 			// Execute the tool with a 60-second timeout.
+			chatstream.Emit(ctx, chatstream.Event{Type: chatstream.EventTool, Data: map[string]any{"name": tc.Name, "state": "start"}})
 			toolCtx, toolCancel := context.WithTimeout(ctx, 60*time.Second)
 			start := time.Now()
 			toolOutput, toolErr := tool.Execute(toolCtx, input)
 			toolCancel()
 			durationMs := int(time.Since(start).Milliseconds())
+			chatstream.Emit(ctx, chatstream.Event{Type: chatstream.EventTool, Data: map[string]any{"name": tc.Name, "state": "end", "duration_ms": durationMs, "ok": toolErr == nil}})
 
 			toolCalls = append(toolCalls, ToolCallRecord{
 				ToolName:   tc.Name,

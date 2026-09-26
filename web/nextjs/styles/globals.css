@@ -3,123 +3,157 @@
 @tailwind utilities;
 
 @layer base {
-  /*
-   * "Signal Room" — mission control for autonomous AI agents.
-   *
-   *   - Warm ink surfaces (a violet-brown near-black), NOT cold slate — so the
-   *     product doesn't read as a generic dark dashboard.
-   *   - Signal Amber (#FFB020) is the ONE brand accent (primary + the live
-   *     pulse). Green/red/blue appear ONLY as agent status, never as brand.
-   *   - Dark is the identity (default); light is a warm-paper companion.
-   *
-   * Variable names are unchanged from the previous palette, so this is a
-   * drop-in reskin: every screen picks it up through the token cascade.
-   */
+  /* ═══════════════════════════════════════════════════════════════════════
+     BRAND — the whole palette is these four colours and nothing else.
+
+       #F9F0E0  beige      the page ground
+       #FFF7EB  cream      panels, cards, and text that sits on a colour
+       #A2AB73  sage       success / "done"
+       #CC3A63  raspberry  every primary action
+
+     There is deliberately no white: cards are cream and lift off a beige
+     ground, which is the way round this palette wants. The only colour not
+     in the four is a warm charcoal for text, because the palette has no dark.
+
+     To lighten or darken everything, change --brand-canvas-l alone.
+     ═══════════════════════════════════════════════════════════════════════ */
   :root {
-    /* Surfaces — warm paper */
-    --background: 40 30% 97%;
-    --foreground: 250 18% 12%;
+    /* ── Brand ───────────────────────────────────────────────────────────── */
+    --brand-canvas-h: 38.4;
+    --brand-canvas-s: 67.6%;
+    --brand-canvas-l: 92.7%;        /* #F9F0E0 beige — the ground */
 
-    --card: 0 0% 100%;
-    --card-foreground: 250 18% 12%;
+    --brand-card-h: 36;
+    --brand-card-s: 100%;
+    --brand-card-l: 96.1%;          /* #FFF7EB cream — panels sit above it */
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 250 18% 12%;
+    /* Warm charcoal, biased to the cream so text never looks blue on it. */
+    --brand-ink-h: 32;
+    --brand-ink-s: 16%;
+    --brand-ink-l: 15%;             /* 13.9:1 on cream, 13.1:1 on beige */
 
-    /* Brand — Signal Amber (dark text sits on it) */
-    --primary: 39 96% 50%;
-    --primary-foreground: 32 45% 12%;
+    --brand-accent-h: 343.2;
+    --brand-accent-s: 58.9%;
+    --brand-accent-l: 51%;          /* #CC3A63 — cream text on it is 4.58:1 */
 
-    --secondary: 40 16% 93%;
-    --secondary-foreground: 250 18% 12%;
+    --brand-success-h: 69.6;
+    --brand-success-s: 25%;
+    --brand-success-l: 56.1%;       /* #A2AB73 — text on it uses -19% */
 
-    --muted: 40 16% 93%;
-    --muted-foreground: 250 8% 42%;
+    /* A deeper, browner red than the accent so Delete never reads as Save. */
+    --brand-danger-h: 4;
+    --brand-danger-s: 58%;
+    --brand-danger-l: 38%;
 
-    --accent: 39 90% 94%;
-    --accent-foreground: 32 80% 34%;
+    /* ── Derived — do not edit; change the brand block above ─────────────── */
+    --background: var(--brand-canvas-h) var(--brand-canvas-s) var(--brand-canvas-l);
+    --foreground: var(--brand-ink-h) var(--brand-ink-s) var(--brand-ink-l);
 
-    --destructive: 2 78% 52%;
-    --destructive-foreground: 0 0% 100%;
+    --card: var(--brand-card-h) var(--brand-card-s) var(--brand-card-l);
+    --card-foreground: var(--brand-ink-h) var(--brand-ink-s) var(--brand-ink-l);
 
-    --border: 40 14% 87%;
-    --input: 40 14% 87%;
-    --ring: 39 96% 50%;
+    --popover: var(--brand-card-h) var(--brand-card-s) var(--brand-card-l);
+    --popover-foreground: var(--brand-ink-h) var(--brand-ink-s) var(--brand-ink-l);
 
-    --radius: 0.625rem;
+    /* Cream, not white, on every coloured surface. */
+    --primary: var(--brand-accent-h) var(--brand-accent-s) var(--brand-accent-l);
+    --primary-foreground: var(--brand-card-h) var(--brand-card-s) var(--brand-card-l);
 
-    /* Sidebar — warm ink even in light mode (the console rail is always dark) */
-    --sidebar: 249 20% 8%;
-    --sidebar-foreground: 250 8% 62%;
-    --sidebar-accent: 39 100% 56%;
-    --sidebar-muted: 247 16% 13%;
-    --sidebar-border: 251 14% 16%;
+    --secondary: var(--brand-canvas-h) var(--brand-canvas-s) calc(var(--brand-canvas-l) - 3%);
+    --secondary-foreground: var(--brand-ink-h) var(--brand-ink-s) var(--brand-ink-l);
 
-    /* Agent status hues (semantic — never used as brand) */
-    --status-todo:     250 6% 52%;   /* idle / queued  */
-    --status-progress: 39 96% 50%;   /* broadcasting   → amber */
-    --status-review:   39 96% 50%;   /* awaiting appr. → amber */
-    --status-done:     151 62% 42%;  /* completed      → green */
-    --status-blocked:  2 82% 58%;    /* failed         → red   */
-    --status-idle:     250 6% 60%;
+    --muted: var(--brand-canvas-h) var(--brand-canvas-s) calc(var(--brand-canvas-l) - 2%);
+    /* 6.9:1 on cream and 6.5:1 on beige — secondary text you can actually read. */
+    --muted-foreground: var(--brand-ink-h) calc(var(--brand-ink-s) - 4%) calc(var(--brand-ink-l) + 18%);
 
-    /* Named signal tokens (used by SignalDot + charts) */
-    --signal:      39 100% 56%;
-    --signal-live: 151 64% 54%;
-    --signal-warn: 39 100% 56%;
-    --signal-error: 0 100% 68%;
-    --signal-info: 228 100% 72%;
+    --accent: var(--brand-accent-h) calc(var(--brand-accent-s) - 20%) 92%;
+    --accent-foreground: var(--brand-accent-h) var(--brand-accent-s) 32%;
+
+    --destructive: var(--brand-danger-h) var(--brand-danger-s) var(--brand-danger-l);
+    --destructive-foreground: var(--brand-card-h) var(--brand-card-s) var(--brand-card-l);
+
+    /* Cards lift off the ground by only 1.07, so the border is what actually
+       draws the layout. Kept at ~3:1 against the ground for that reason. */
+    --border: var(--brand-ink-h) 18% 51%;
+    --input: var(--brand-ink-h) 18% 49%;
+    --ring: var(--brand-accent-h) var(--brand-accent-s) var(--brand-accent-l);
+
+    --radius: 0.5rem;
+
+    /* Sidebar recedes below the ground; cards advance above it. */
+    --sidebar: var(--brand-canvas-h) var(--brand-canvas-s) calc(var(--brand-canvas-l) - 4%);
+    --sidebar-foreground: var(--brand-ink-h) calc(var(--brand-ink-s) - 4%) calc(var(--brand-ink-l) + 16%);
+    --sidebar-accent: var(--brand-accent-h) var(--brand-accent-s) var(--brand-accent-l);
+    --sidebar-muted: var(--brand-canvas-h) var(--brand-canvas-s) calc(var(--brand-canvas-l) - 8%);
+    --sidebar-border: var(--brand-ink-h) 18% 58%;
+
+    --status-todo: var(--brand-ink-h) 12% 38%;
+    --status-progress: 210 55% 36%;
+    --status-review: 275 42% 42%;
+    --status-done: var(--brand-success-h) calc(var(--brand-success-s) + 6%) calc(var(--brand-success-l) - 21%);
+    --status-blocked: var(--brand-danger-h) var(--brand-danger-s) var(--brand-danger-l);
+    --status-idle: var(--brand-ink-h) 12% 52%;
+
+    --signal: var(--brand-success-h) calc(var(--brand-success-s) + 6%) calc(var(--brand-success-l) - 21%);
+    --signal-live: var(--brand-success-h) calc(var(--brand-success-s) + 4%) calc(var(--brand-success-l) - 13%);
+    --signal-warn: 25 72% 34%;
+    --signal-error: var(--brand-danger-h) var(--brand-danger-s) var(--brand-danger-l);
+    --signal-info: 210 55% 36%;
   }
 
+  /* Dark mode: the same four hues with the neutrals inverted — a warm
+     near-black ground carrying the cream into the text, so both themes read
+     as one product. Driven by the same brand block. */
   .dark {
-    /* Surfaces — warm ink (violet-brown near-black, not slate) */
-    --background: 249 16% 8%;
-    --foreground: 250 20% 94%;
+    --brand-canvas-l: 9%;
+    --brand-card-l: 13%;
 
-    --card: 250 15% 11%;
-    --card-foreground: 250 20% 94%;
+    --background: var(--brand-ink-h) 12% var(--brand-canvas-l);
+    --foreground: var(--brand-card-h) 45% 93%;
 
-    --popover: 250 16% 10%;
-    --popover-foreground: 250 20% 94%;
+    --card: var(--brand-ink-h) 11% var(--brand-card-l);
+    --card-foreground: var(--brand-card-h) 45% 93%;
 
-    /* Brand — Signal Amber, dark text */
-    --primary: 39 100% 56%;
-    --primary-foreground: 30 40% 9%;
+    --popover: var(--brand-ink-h) 11% var(--brand-card-l);
+    --popover-foreground: var(--brand-card-h) 45% 93%;
 
-    --secondary: 250 12% 16%;
-    --secondary-foreground: 250 16% 90%;
+    --primary: var(--brand-accent-h) 62% 57%;
+    --primary-foreground: var(--brand-ink-h) 30% 10%;
 
-    --muted: 250 12% 16%;
-    --muted-foreground: 250 8% 60%;
+    --secondary: var(--brand-ink-h) 10% 18%;
+    --secondary-foreground: var(--brand-card-h) 30% 90%;
 
-    --accent: 39 44% 16%;
-    --accent-foreground: 39 100% 70%;
+    --muted: var(--brand-ink-h) 10% 18%;
+    --muted-foreground: var(--brand-card-h) 14% 70%;
 
-    --destructive: 0 84% 64%;
-    --destructive-foreground: 250 20% 96%;
+    --accent: var(--brand-accent-h) 30% 22%;
+    --accent-foreground: var(--brand-accent-h) 62% 74%;
 
-    --border: 251 13% 18%;
-    --input: 251 13% 20%;
-    --ring: 39 100% 56%;
+    --destructive: var(--brand-danger-h) 60% 55%;
+    --destructive-foreground: var(--brand-card-h) 45% 95%;
 
-    --sidebar: 249 20% 6%;
-    --sidebar-foreground: 250 8% 60%;
-    --sidebar-accent: 39 100% 56%;
-    --sidebar-muted: 250 15% 11%;
-    --sidebar-border: 251 14% 13%;
+    --border: var(--brand-ink-h) 10% 26%;
+    --input: var(--brand-ink-h) 10% 28%;
+    --ring: var(--brand-accent-h) 62% 57%;
 
-    --status-todo:     250 6% 58%;
-    --status-progress: 39 100% 56%;
-    --status-review:   39 100% 56%;
-    --status-done:     151 64% 54%;
-    --status-blocked:  0 84% 64%;
-    --status-idle:     250 6% 48%;
+    --sidebar: var(--brand-ink-h) 12% 11%;
+    --sidebar-foreground: var(--brand-card-h) 12% 68%;
+    --sidebar-accent: var(--brand-accent-h) 62% 57%;
+    --sidebar-muted: var(--brand-ink-h) 11% 16%;
+    --sidebar-border: var(--brand-ink-h) 10% 24%;
 
-    --signal:      39 100% 56%;
-    --signal-live: 151 64% 54%;
-    --signal-warn: 39 100% 56%;
-    --signal-error: 0 100% 68%;
-    --signal-info: 228 100% 72%;
+    --status-todo: var(--brand-card-h) 10% 64%;
+    --status-progress: 210 62% 64%;
+    --status-review: 275 50% 72%;
+    --status-done: var(--brand-success-h) 34% 64%;
+    --status-blocked: var(--brand-danger-h) 60% 55%;
+    --status-idle: var(--brand-ink-h) 8% 44%;
+
+    --signal: var(--brand-success-h) 34% 64%;
+    --signal-live: var(--brand-success-h) 36% 66%;
+    --signal-warn: 30 70% 60%;
+    --signal-error: var(--brand-danger-h) 60% 55%;
+    --signal-info: 210 62% 64%;
   }
 }
 
@@ -130,8 +164,19 @@
   body {
     @apply bg-background text-foreground antialiased;
   }
-  /* Telemetry: numerics / ids / timestamps read as mono + tabular when tagged
-     .tabular — used across KPI tiles, tables and the live feed. */
+  /* Headings default to the display face at a real weight. Utilities still
+     win (Tailwind sits above @layer base), so a component asking for
+     font-semibold keeps it — this is the floor, not a ceiling. */
+  h1, h2, h3, h4 {
+    font-family: var(--font-display), var(--font-sans), system-ui, sans-serif;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+  }
+  h1 { @apply text-3xl; }
+  h2 { @apply text-2xl; }
+  h3 { @apply text-xl; }
+  h4 { @apply text-lg; }
   .tabular {
     font-family: var(--font-mono), ui-monospace, monospace;
     font-variant-numeric: tabular-nums;
@@ -139,9 +184,7 @@
   }
 }
 
-/* ─── Signal pulse — the signature motif ─────────────────────────────────── */
 @layer utilities {
-  /* Concentric broadcast ripple emitted by a "live" agent. */
   @keyframes signal-ping {
     0% {
       transform: scale(1);
@@ -184,12 +227,103 @@
     background-color: hsl(var(--border));
     border-radius: 3px;
   }
+
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Directional panel slide (~300ms ease-out + slight fade).
+     The end frame must be `transform: none` — not translateY(0) — because
+     animation-fill-mode: both retains it forever, and any non-none transform
+     turns the wrapper into the containing block for every position: fixed
+     descendant, which broke all dialogs opened inside a panel. */
+  @keyframes panel-in-from-bottom {
+    from {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes panel-in-from-top {
+    from {
+      opacity: 0;
+      transform: translateY(-12px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  /* ── Chat surface motion ──────────────────────────────────────────────
+     Kept in the 150-300ms band except the deliberate ambient loops
+     (shimmer/pulse), which signal an ongoing wait rather than a
+     state change. All of them are disabled under reduced-motion below. */
+  @keyframes chat-bounce {
+    0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
+    30% { transform: translateY(-3px); opacity: 1; }
+  }
+  @keyframes chat-shimmer {
+    0%, 100% { opacity: 0.35; }
+    50% { opacity: 0.8; }
+  }
+  @keyframes chat-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.6; transform: scale(0.92); }
+  }
+  @keyframes chat-message-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+  }
+  .animate-chat-bounce {
+    animation: chat-bounce 1.1s ease-in-out infinite;
+  }
+  .animate-chat-shimmer {
+    animation: chat-shimmer 1.6s ease-in-out infinite;
+  }
+  .animate-chat-pulse {
+    animation: chat-pulse 1.8s ease-in-out infinite;
+  }
+  .animate-chat-message-in {
+    animation: chat-message-in 220ms ease-out both;
+  }
+
+  /* Caret trailing the streamed reply, so a paused stream still reads
+     as "connected" rather than "finished". */
+  .chat-caret::after {
+    content: "";
+    display: inline-block;
+    width: 2px;
+    height: 1em;
+    margin-left: 2px;
+    vertical-align: text-bottom;
+    background-color: hsl(var(--primary));
+    animation: chat-shimmer 1s steps(2, start) infinite;
+  }
+
+  .animate-panel-from-bottom {
+    animation: panel-in-from-bottom 300ms ease-out both;
+  }
+  .animate-panel-from-top {
+    animation: panel-in-from-top 300ms ease-out both;
+  }
 }
 
-/* Quality floor: respect reduced motion for every signal / animation. */
 @media (prefers-reduced-motion: reduce) {
+  .animate-panel-from-bottom,
+  .animate-panel-from-top,
   .animate-signal-ping,
-  .animate-signal-breathe {
+  .animate-signal-breathe,
+  .animate-chat-bounce,
+  .animate-chat-shimmer,
+  .animate-chat-pulse,
+  .animate-chat-message-in,
+  .chat-caret::after {
     animation: none !important;
   }
 }

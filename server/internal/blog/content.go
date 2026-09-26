@@ -2,12 +2,14 @@ package blog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
 
 	"go.uber.org/zap"
 
+	"github.com/jobshout/server/internal/audience"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/research"
 )
@@ -48,6 +50,17 @@ type GeneratedArticle struct {
 	CoverImageSeed     int64
 	CoverImageWidth    int
 	CoverImageHeight   int
+
+	// Cover brief from the plan step — unique metaphor, shared house style.
+	CoverMetaphor string
+	CoverObjects  string
+	CoverAccent   string
+
+	// Audience and Industry are the reader this was written for, carried out of
+	// the pipeline so the caller can store them on the article and the CMS
+	// draft can be tagged without anyone re-deriving them from the run.
+	Audience string
+	Industry string
 }
 
 // render fills HTML and Excerpt from Markdown. Separate from generation so the
@@ -68,12 +81,9 @@ func (a *GeneratedArticle) render() error {
 
 // writeArticles produces one article per brief, in order.
 //
-// Any single brief failing aborts the batch — we prefer an all-or-nothing run
-// over silently publishing half of what was asked for.
-//
-// progress fires at each phase of each article, so a long batch reports which
-// article it is on and what it is doing rather than sitting on a single opaque
-// "generating" step for several minutes.
+// A brief that fails is recorded and skipped; the rest of the batch still
+// runs. Cancel (ctx.Err) stops remaining briefs immediately and returns
+// whatever was already written. progress fires at each phase of each article.
 func (r *Runner) writeArticles(
 	ctx context.Context,
 	req GenerateRequest,
@@ -83,13 +93,18 @@ func (r *Runner) writeArticles(
 	now := r.clock()
 	out := make([]GeneratedArticle, 0, len(briefs))
 	seenSlugs := map[string]int{}
+	var errs []error
 
 	for i, brief := range briefs {
+		if err := ctx.Err(); err != nil {
+			return out, err
+		}
 		label := fmt.Sprintf("%d/%d — %s", i+1, len(briefs), brief.Topic)
 
 		article, err := r.writeOne(ctx, req, brief, label, progress)
 		if err != nil {
-			return nil, fmt.Errorf("blog: %q: %w", brief.Topic, err)
+			errs = append(errs, fmt.Errorf("blog: %q: %w", brief.Topic, err))
+			continue
 		}
 
 		// Slugs come from the agent's title rather than the topic now: the
@@ -108,10 +123,56 @@ func (r *Runner) writeArticles(
 		article.Slug = slug
 		article.Path = strings.TrimRight(r.cfg.ContentDir, "/") + "/" + filename
 
+		if ferr := r.finalizeArticle(ctx, req, article, progress); ferr != nil {
+			errs = append(errs, fmt.Errorf("blog: %q: %w", brief.Topic, ferr))
+			continue
+		}
+
+		if req.OnArticle != nil {
+			if perr := req.OnArticle(*article); perr != nil {
+				errs = append(errs, fmt.Errorf("blog: store %q: %w", brief.Topic, perr))
+				continue
+			}
+		}
+
 		out = append(out, *article)
 	}
 
-	return out, nil
+	return out, errors.Join(errs...)
+}
+
+// finalizeArticle draws optional covers and converts markdown to HTML so a
+// brief can be persisted as a finished article before the next one starts.
+func (r *Runner) finalizeArticle(
+	ctx context.Context,
+	req GenerateRequest,
+	article *GeneratedArticle,
+	progress ProgressFunc,
+) error {
+	// Illustration cannot fail the article: a piece without a picture is
+	// still complete; throwing it away because a GPU was busy is not.
+	if r.canIllustrate() {
+		report(progress, model.BlogStepIllustrating,
+			fmt.Sprintf("Illustrating %s", article.Title), model.AgentNameArticleWriter)
+
+		body, notes := r.illustrateBody(ctx, req.OrgID, article.Markdown)
+		article.Markdown = body
+		for _, note := range notes {
+			r.logger.Info("blog: "+note, zap.String("title", article.Title))
+		}
+
+		if err := r.generateCover(ctx, req.OrgID, article); err != nil {
+			r.logger.Warn("blog: could not draw a cover image",
+				zap.String("title", article.Title), zap.Error(err))
+			report(progress, model.BlogStepIllustrating,
+				fmt.Sprintf("No cover image for %q: %v", article.Title, err),
+				model.AgentNameArticleWriter)
+		}
+	}
+
+	report(progress, model.BlogStepConverting,
+		fmt.Sprintf("Converting %s to HTML", article.Title), model.AgentNameArticleWriter)
+	return article.render()
 }
 
 // writeOne runs the full agent loop for a single brief:
@@ -132,9 +193,14 @@ func (r *Runner) writeOne(
 	// 1. Research. Everything downstream is written from what this returns.
 	report(progress, model.BlogStepResearching, "Researching "+label, model.AgentNameResearcher)
 	rb, err := r.research.Research(ctx, req.OrgID, research.Request{
-		Topic:   brief.Topic,
-		Context: brief.Context,
+		Topic: brief.Topic,
+		// The reader goes to research as guidance rather than as a parameter,
+		// because that is what it is: research returns facts, and who is
+		// reading decides which facts are worth going and getting.
+		Context: researchContext(brief),
 		Model:   req.Model,
+		Seeds:   brief.Seeds,
+		Focus:   brief.Focus,
 	}, func(_, detail string) {
 		// The research agent's own phases are surfaced under the researching
 		// step, so a reader watching a run sees it search and read rather than
@@ -164,7 +230,7 @@ func (r *Runner) writeOne(
 
 	// 4. Review, then 5. revise — but only when there is something to fix.
 	report(progress, model.BlogStepReviewing, "Reviewing "+plan.Title, model.AgentNameArticleWriter)
-	c, err := r.review(ctx, r.structuredModel(req), rb, plan, markdown)
+	c, err := r.review(ctx, r.structuredModel(req), brief, rb, plan, markdown)
 	switch {
 	case err != nil:
 		// A failed review costs the revision pass, not the article. The draft
@@ -179,7 +245,7 @@ func (r *Runner) writeOne(
 		report(progress, model.BlogStepRevising,
 			fmt.Sprintf("Revising %s (%d issue(s))", plan.Title, len(c.Issues)),
 			model.AgentNameArticleWriter)
-		revised, rerr := r.revise(ctx, r.proseModel(req), rb, plan, markdown, c)
+		revised, rerr := r.revise(ctx, r.proseModel(req), brief, rb, plan, markdown, c)
 		if rerr != nil {
 			r.logger.Warn("blog: revision failed, keeping the reviewed draft",
 				zap.String("title", plan.Title), zap.Error(rerr))
@@ -195,9 +261,14 @@ func (r *Runner) writeOne(
 	// also legitimately cut filler and take an already-brief article below the
 	// floor, so the check belongs here, after revision, on whatever text
 	// actually survived.
-	if words := wordCount(markdown); words < MinArticleWords {
+	//
+	// The floor is the reader's rather than the pipeline's: 900 words is right
+	// for a developer deep dive and wrong for a technote, which is finished
+	// when the task is done.
+	minWords := audience.For(brief.Audience).MinWords
+	if words := wordCount(markdown); words < minWords {
 		report(progress, model.BlogStepExpanding,
-			fmt.Sprintf("Expanding %s (%d words, target %d)", plan.Title, words, MinArticleWords),
+			fmt.Sprintf("Expanding %s (%d words, target %d)", plan.Title, words, minWords),
 			model.AgentNameArticleWriter)
 
 		expanded, eerr := r.expand(ctx, r.proseModel(req), brief, rb, plan, markdown, words)
@@ -218,10 +289,10 @@ func (r *Runner) writeOne(
 		// One pass only. A second rarely adds substance, and each one costs a
 		// full generation on a pipeline that already makes ten calls per
 		// article. Still short is reported rather than retried into padding.
-		if final := wordCount(markdown); final < MinArticleWords {
+		if final := wordCount(markdown); final < minWords {
 			r.logger.Warn("blog: article is below the target length",
 				zap.String("title", plan.Title),
-				zap.Int("words", final), zap.Int("target", MinArticleWords))
+				zap.Int("words", final), zap.Int("target", minWords))
 		}
 	}
 
@@ -251,13 +322,45 @@ func (r *Runner) writeOne(
 			zap.Int("sources_available", len(rb.Findings)))
 	}
 
+	if r.canLetterFigures() {
+		markdown = ensureIllustrationFences(markdown, plan)
+	}
+
 	return &GeneratedArticle{
-		Topic:      brief.Topic,
-		Title:      plan.Title,
-		Markdown:   markdown,
-		References: refs,
-		WordCount:  len(strings.Fields(markdown)),
+		Topic:         brief.Topic,
+		Title:         plan.Title,
+		Markdown:      markdown,
+		References:    refs,
+		WordCount:     len(strings.Fields(markdown)),
+		CoverMetaphor: plan.CoverMetaphor,
+		CoverObjects:  plan.CoverObjects.String(),
+		CoverAccent:   plan.CoverAccent,
+		Audience:      brief.Audience,
+		Industry:      brief.Industry,
 	}, nil
+}
+
+// researchContext is the guidance handed to the Research Agent: what the
+// requester asked for, plus who will read the result.
+//
+// The reader is spelled out rather than assumed because research is where the
+// difference starts. Asked about the same subject, a deep dive wants the
+// specification and the benchmark, and a business briefing wants who has
+// adopted it, what it cost them and what went wrong — and the agent only knows
+// to go looking for the second kind if it is told who it is looking for.
+func researchContext(brief model.BlogBrief) string {
+	parts := make([]string, 0, 3)
+	if g := strings.TrimSpace(brief.Context); g != "" {
+		parts = append(parts, g)
+	}
+	reader := audience.For(brief.Audience)
+	parts = append(parts, "This research will be written up as "+reader.IndefinitePiece()+
+		" for "+reader.Reader+", so prioritise sources that serve that reader.")
+	if sector := audience.NormalizeIndustry(brief.Industry); sector != "" {
+		parts = append(parts, "The readers work in "+sector+
+			"; sources about that sector specifically are worth more than general ones.")
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 var slugRegex = regexp.MustCompile(`[^a-z0-9]+`)

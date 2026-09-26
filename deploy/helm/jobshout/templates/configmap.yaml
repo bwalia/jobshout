@@ -22,21 +22,29 @@ data:
   OLLAMA_DEFAULT_MODEL: {{ .Values.ai.ollamaModel | quote }}
   OLLAMA_TIMEOUT: {{ .Values.ai.ollamaTimeout | default "10m" | quote }}
   OLLAMA_NUM_CTX: {{ .Values.ai.ollamaNumCtx | default 8192 | quote }}
+  CAREER_MODEL: {{ .Values.ai.careerModel | default "" | quote }}
+  CHAT_MODEL: {{ .Values.ai.chatModel | default "qwen3-coder:30b" | quote }}
+  CHAT_MODEL_FALLBACK: {{ .Values.ai.chatModelFallback | default "llama3.1:8b" | quote }}
+  CHAT_NUM_CTX: {{ .Values.ai.chatNumCtx | default 16384 | quote }}
   OPENAI_BASE_URL: {{ .Values.ai.openaiBaseURL | quote }}
   OPENAI_DEFAULT_MODEL: {{ .Values.ai.openaiModel | quote }}
   # Image generation. Like Ollama, the local image model runs OUTSIDE the
   # cluster — mflux needs Apple MLX and the nodes are amd64 Linux — so every
-  # ring points at the one workstation service. An empty imageBaseURL disables
-  # the local path; the server then falls back to OpenAI images if a key is set,
-  # and to no image generation at all if not.
+  # ring points at the one workstation service. Gemini is tried first when
+  # GEMINI_API_KEY is set (from extraSecretRefs / jobshout-secrets); mflux is
+  # the fallback. An empty imageBaseURL disables the local path.
   IMAGE_PROVIDER: {{ .Values.ai.imageProvider | default "mflux" | quote }}
   IMAGE_BASE_URL: {{ .Values.ai.imageBaseURL | default "" | quote }}
   IMAGE_DEFAULT_MODEL: {{ .Values.ai.imageModel | default "z-image-turbo" | quote }}
   IMAGE_TIMEOUT: {{ .Values.ai.imageTimeout | default "10m" | quote }}
   IMAGE_OPENAI_MODEL: {{ .Values.ai.imageOpenaiModel | default "gpt-image-1" | quote }}
+  IMAGE_GEMINI_MODEL: {{ .Values.ai.imageGeminiModel | default "gemini-3.1-flash-lite-image" | quote }}
+  GEMINI_BASE_URL: {{ .Values.ai.geminiBaseURL | default "https://generativelanguage.googleapis.com" | quote }}
   # Whether every article run pays for a cover image. Off leaves generation
   # available on demand through the API and the generate_image tool.
   BLOG_COVER_IMAGES: {{ .Values.ai.blogCoverImages | default false | quote }}
+  BLOG_ORPHAN_TIMEOUT: {{ .Values.ai.blogOrphanTimeout | default "45m" | quote }}
+  BLOG_MAX_RUNTIME: {{ .Values.ai.blogMaxRuntime | default "45m" | quote }}
   MINIO_BUCKET_IMAGES: {{ .Values.ai.imageBucket | default "images" | quote }}
   PYTHON_SIDECAR_URL: "http://python-runtime:8001"
   # opsapi CMS — where the Article Writer files generated posts as drafts. The
@@ -45,6 +53,11 @@ data:
   OPSAPI_NAMESPACE: {{ .Values.cms.namespace | quote }}
   OPSAPI_TIMEOUT: {{ .Values.cms.timeout | default "30s" | quote }}
   BLOG_AUTHOR_NAME: {{ .Values.cms.authorName | default "JobShout Article Writer" | quote }}
+  # JobShout.com Insights — a second destination for the Article Writer. The
+  # token arrives from jobshout-com's own Secret (see api.yaml); without it
+  # this URL alone enables nothing.
+  JOBSHOUT_COM_API_URL: {{ .Values.insights.apiURL | default "" | quote }}
+  JOBSHOUT_COM_SITE_URL: {{ .Values.insights.siteURL | default "" | quote }}
   # Penetration testing. Empty baseURL disables the feature (same pattern as
   # IMAGE_BASE_URL). The scanner itself lives on the workstation.
   STRIX_ENABLED: {{ .Values.pentest.enabled | default false | quote }}
@@ -52,4 +65,52 @@ data:
   STRIX_TIMEOUT: {{ .Values.pentest.timeout | default "60s" | quote }}
   STRIX_POLL_INTERVAL: {{ .Values.pentest.pollInterval | default "15s" | quote }}
   STRIX_MAX_RUNTIME: {{ .Values.pentest.maxRuntime | default "2h" | quote }}
+  STRIX_ENGAGEMENT_RETRIES: {{ .Values.pentest.engagementRetries | default 1 | quote }}
   STRIX_TARGET_ALLOWLIST: {{ .Values.pentest.targetAllowlist | default "" | quote }}
+  # WAF Efficacy Lab → wslproxy. Empty baseURL disables. Token/password live in
+  # extraSecretRefs (same pattern as AIVC / STRIX secrets), never here.
+  WSLPROXY_ENABLED: {{ .Values.wafLab.enabled | default false | quote }}
+  WSLPROXY_BASE_URL: {{ .Values.wafLab.baseURL | default "" | quote }}
+  WSLPROXY_PLATFORM: {{ .Values.wafLab.platform | default "openresty-admin-next" | quote }}
+  WSLPROXY_PROFILE: {{ .Values.wafLab.profile | default "prod" | quote }}
+  WSLPROXY_TIMEOUT: {{ .Values.wafLab.timeout | default "30s" | quote }}
+  WSLPROXY_LAB_MAX_RUNTIME: {{ .Values.wafLab.labMaxRuntime | default "10m" | quote }}
+  WSLPROXY_TARGET_ALLOWLIST: {{ .Values.wafLab.targetAllowlist | default "" | quote }}
+  WSLPROXY_MCP_ENABLED: {{ .Values.wafLab.mcpEnabled | default true | quote }}
+  WSLPROXY_MCP_JSONRPC_PATH: {{ .Values.wafLab.mcpJSONRPCPath | default "/mcp/jsonrpc" | quote }}
+  WSLPROXY_AB_DEMO_HOST: {{ .Values.wafLab.abDemoHost | default "abtesting.fictionally.org" | quote }}
+  WSLPROXY_AB_RULE_ID: {{ .Values.wafLab.abRuleID | default "" | quote }}
+  WSLPROXY_AB_OBSERVE_PATH: {{ .Values.wafLab.abObservePath | default "/version" | quote }}
+  # In-cluster PR reviewer sidecar. Empty base URL disables the feature (same
+  # pattern as STRIX_BASE_URL). The sidecar is ClusterIP-only; the API talks
+  # to it with REVIEW_BOT_TOKEN from extraSecretRefs, not a workstation JWT.
+  REVIEW_BOT_ENABLED: {{ .Values.reviewBot.enabled | default false | quote }}
+  {{- if .Values.reviewBot.enabled }}
+  REVIEW_BOT_BASE_URL: "http://jobshout-review-bot:{{ .Values.reviewBot.port }}"
+  {{- else }}
+  REVIEW_BOT_BASE_URL: ""
+  {{- end }}
+  REVIEW_BOT_TIMEOUT: {{ .Values.reviewBot.timeout | default "60s" | quote }}
+  REVIEW_BOT_POLL_INTERVAL: {{ .Values.reviewBot.pollInterval | default "15s" | quote }}
+  REVIEW_BOT_MAX_RUNTIME: {{ .Values.reviewBot.maxRuntime | default "40m" | quote }}
+  REVIEW_BOT_ALLOWED_REPOS: {{ join "," (.Values.reviewBot.allowedRepos | default list) | quote }}
+  # Public origin of this ring — OAuth return and Telegram links. Secrets for
+  # Gmail (GMAIL_CLIENT_ID / GMAIL_CLIENT_SECRET / GMAIL_TOKEN_KEY) and Google
+  # login (GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET) live in an
+  # extraSecretRefs secret, never here.
+  # Sidebar build stamp. image.tag is the git release RP deploys (v1.0.8), not
+  # a SHA — that is the version the UI must show. APP_DEPLOYED_AT is when this
+  # helm render ran, so a rollout reports the last deploy rather than boot time.
+  APP_VERSION: {{ .Values.image.tag | quote }}
+  APP_ENV: {{ .Values.env | quote }}
+  APP_DEPLOYED_AT: {{ now | date "2006-01-02T15:04:05Z07:00" | quote }}
+  FRONTEND_BASE_URL: {{ printf "https://%s" .Values.host | quote }}
+  GMAIL_OAUTH_REDIRECT_URL: {{ printf "https://%s/api/v1/mail/connection/oauth/callback" .Values.host | quote }}
+  GOOGLE_OAUTH_REDIRECT_URL: {{ printf "https://%s/api/v1/auth/google/callback" .Values.host | quote }}
+  MAIL_POLL_INTERVAL: {{ .Values.mail.pollInterval | default "5m" | quote }}
+  MAIL_RECONCILE_INTERVAL: {{ .Values.mail.reconcileInterval | default "15s" | quote }}
+  MAIL_MODEL: {{ .Values.ai.mailModel | default "" | quote }}
+  # Secrets Rotation propagation (non-secret). Tokens live in jobshout-secrets /
+  # extraSecretRefs; kubeconfigs are files under SECRETS_ROT_KUBECONFIG_DIR.
+  SECRETS_ROT_KUBECONFIG_DIR: {{ .Values.secretsRotation.kubeconfig.mountPath | default "/etc/secretsrot/kube" | quote }}
+  RP_URL: {{ .Values.secretsRotation.rpURL | default "https://rp.workstation.co.uk" | quote }}

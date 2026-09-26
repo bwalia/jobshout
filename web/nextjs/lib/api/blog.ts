@@ -12,8 +12,11 @@ export async function getBlogConfig(): Promise<BlogConfig> {
   return data;
 }
 
+/** List params; `writer` lists another writer's runs instead of the Article Writer's. */
+export type BlogRunListParams = PaginationParams & { writer?: string };
+
 export async function getBlogRuns(
-  params: PaginationParams = {}
+  params: BlogRunListParams = {}
 ): Promise<PaginatedResponse<BlogRun>> {
   const { data } = await apiClient.get("/blogs/runs", { params });
   return data;
@@ -41,9 +44,31 @@ export async function publishBlogRun(id: string): Promise<BlogRun> {
   return data;
 }
 
+/** Files a completed run's articles in the JobShout.com Insights review queue. */
+export async function publishBlogRunToInsights(id: string): Promise<BlogRun> {
+  const { data } = await apiClient.post<BlogRun>(`/blogs/runs/${id}/publish-insights`);
+  return data;
+}
+
+/**
+ * Takes a JobShout.com Content Writer run live: its CMS drafts become public
+ * and its articles are published on jobshout.com. Safe to press again after a
+ * partial failure — only what is left is sent.
+ */
+export async function publishBlogRunLive(id: string): Promise<BlogRun> {
+  const { data } = await apiClient.post<BlogRun>(`/blogs/runs/${id}/publish-live`);
+  return data;
+}
+
 /** Re-runs a failed run's topics on the same run. 202 + poll, like generate. */
 export async function retryBlogRun(id: string): Promise<BlogRun> {
   const { data } = await apiClient.post<BlogRun>(`/blogs/runs/${id}/retry`);
+  return data;
+}
+
+/** Stops a run that is still writing. The run is marked failed so it can be retried or deleted. */
+export async function cancelBlogRun(id: string): Promise<BlogRun> {
+  const { data } = await apiClient.post<BlogRun>(`/blogs/runs/${id}/cancel`);
   return data;
 }
 

@@ -1,9 +1,15 @@
-FROM python:3.12-slim
+# Pin TARGETPLATFORM so buildx on an arm64 Mac cannot tag an arm64 python
+# image as linux/amd64 (same class of bug as jobshout-web / jobshout-server).
+FROM --platform=$TARGETPLATFORM python:3.12-slim
+ARG TARGETARCH
+RUN if [ "$TARGETARCH" = "amd64" ]; then uname -m | grep -qx x86_64; fi
 
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Keep the pip download cache across builds; still install into the image layer.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir -r requirements.txt
 
 COPY app/ ./app/
 

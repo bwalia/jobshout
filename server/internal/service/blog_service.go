@@ -2,18 +2,32 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/jobshout/server/internal/agentmodule"
+	"github.com/jobshout/server/internal/audience"
 	"github.com/jobshout/server/internal/blog"
 	"github.com/jobshout/server/internal/llmtrace"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/repository"
 	"github.com/jobshout/server/internal/research"
+)
+
+// Terminal reasons written onto a run that did not fail on its own. Shown in
+// the UI as error_message, so they are written for a person, not a log line.
+var (
+	errRunCancelled   = errors.New("cancelled")
+	errRunInterrupted = errors.New("interrupted: server shutting down")
+	errRunOrphaned    = errors.New("interrupted: timed out or server restarted")
+	errRunTimedOut    = errors.New("interrupted: run exceeded maximum runtime")
+	errRunStopping    = errors.New("blog_svc: server is shutting down")
 )
 
 // BlogService orchestrates blog.Runner invocations and persists each run.
@@ -23,18 +37,44 @@ type BlogService interface {
 	Generate(ctx context.Context, orgID uuid.UUID, triggeredBy *uuid.UUID, source string, req model.GenerateBlogRequest) (*model.BlogRun, error)
 	// Publish creates one CMS draft per article of a completed run.
 	Publish(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) (*model.BlogRun, error)
+	// PublishInsights files each article of a completed run in the
+	// JobShout.com Insights review queue. Independent of Publish.
+	PublishInsights(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) (*model.BlogRun, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*model.BlogRun, error)
 	// Delete removes a run and everything it produced.
 	Delete(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) error
 	// Retry re-runs a failed run's original topics in place, so a transient
 	// failure does not leave a dead card the user has to clean up by hand.
 	Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) (*model.BlogRun, error)
+	// Cancel stops an in-flight run and marks it failed so Retry and Delete
+	// work. A run left `running` by a previous process (a deploy killed the
+	// goroutine) has no writer to abort; Cancel still marks it failed.
+	Cancel(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) (*model.BlogRun, error)
+	// InterruptAll cancels every generation this process is writing and marks
+	// those runs failed. Called on SIGTERM so a deploy does not leave rows
+	// stuck at running.
+	InterruptAll(reason error)
+	// ReapOrphans fails in-flight runs whose writer is gone (heartbeat older
+	// than BLOG_ORPHAN_TIMEOUT). It does not restart them.
+	ReapOrphans(ctx context.Context) (int, error)
 	ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.BlogRun], error)
+	// ListByWriter lists one writer builtin's runs (a key of model.BlogWriters).
+	ListByWriter(ctx context.Context, orgID uuid.UUID, builtin string, params model.PaginationParams) (*model.PaginatedResponse[model.BlogRun], error)
+	// PublishLive makes a completed run's CMS drafts public and publishes its
+	// articles on jobshout.com, for writers whose articles go live on a
+	// person's say-so (the JobShout.com Content Writer).
+	PublishLive(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) (*model.BlogRun, error)
+	// CanPublishLive reports whether both halves of PublishLive are configured.
+	CanPublishLive() bool
 	ListArticles(ctx context.Context, runID uuid.UUID) ([]model.BlogArticle, error)
 	GetArticle(ctx context.Context, id uuid.UUID) (*model.BlogArticle, error)
+	// BindTasks updates the Task Manager card when a launched run finishes.
+	BindTasks(tasks TaskService)
 	// CanPublish reports whether the CMS connection is configured, so the UI
 	// can disable the action instead of offering a button that always fails.
 	CanPublish() bool
+	// CanPublishInsights reports whether JobShout.com Insights is reachable.
+	CanPublishInsights() bool
 	// Provider is the LLM provider the writing pipeline is bound to, and
 	// EffectiveModels what each role falls back to. Both are for the model
 	// picker, so it can offer only models that will work and show what an
@@ -46,6 +86,14 @@ type BlogService interface {
 	EnsureArticleWriter(ctx context.Context, orgID uuid.UUID) (*model.Agent, error)
 }
 
+// trackedRun is one in-process generation. The cancel func aborts LLM/HTTP
+// work; reason is why, so the goroutine can write that onto the run rather
+// than a generic context.Canceled.
+type trackedRun struct {
+	cancel context.CancelFunc
+	reason error
+}
+
 type blogService struct {
 	runner *blog.Runner
 	repo   repository.BlogRepository
@@ -54,7 +102,18 @@ type blogService struct {
 	// arrive without a subject at all.
 	research  ResearchService
 	agentRepo repository.AgentRepository
+	tasks     TaskService
 	logger    *zap.Logger
+
+	mu       sync.Mutex
+	active   map[uuid.UUID]*trackedRun
+	stopping bool
+	// finishMu serialises the terminal write (failed vs completed) so Cancel,
+	// SIGTERM and the generation goroutine cannot overwrite each other.
+	finishMu sync.Mutex
+
+	orphanTimeout time.Duration
+	maxRuntime    time.Duration
 }
 
 // NewBlogService creates a BlogService.
@@ -64,18 +123,137 @@ func NewBlogService(
 	research ResearchService,
 	agentRepo repository.AgentRepository,
 	logger *zap.Logger,
+	orphanTimeout time.Duration,
+	maxRuntime time.Duration,
 ) BlogService {
+	if orphanTimeout <= 0 {
+		orphanTimeout = 45 * time.Minute
+	}
+	if maxRuntime <= 0 {
+		maxRuntime = 45 * time.Minute
+	}
 	return &blogService{
-		runner:    runner,
-		repo:      repo,
-		research:  research,
-		agentRepo: agentRepo,
-		logger:    logger,
+		runner:        runner,
+		repo:          repo,
+		research:      research,
+		agentRepo:     agentRepo,
+		logger:        logger,
+		active:        make(map[uuid.UUID]*trackedRun),
+		orphanTimeout: orphanTimeout,
+		maxRuntime:    maxRuntime,
+	}
+}
+
+func (s *blogService) BindTasks(tasks TaskService) {
+	if s != nil {
+		s.tasks = tasks
 	}
 }
 
 func (s *blogService) CanPublish() bool {
 	return s.runner != nil && s.runner.CanPublish()
+}
+
+func (s *blogService) CanPublishInsights() bool {
+	return s.runner != nil && s.runner.CanPublishInsights()
+}
+
+// persistCtx is used for terminal writes after a run is cancelled. The
+// generation ctx is dead by then, and a cancelled ctx would leave the row
+// stuck at running — the failure we are trying to record.
+func persistCtx() context.Context {
+	return context.Background()
+}
+
+// beginGeneration registers the run and starts it, or refuses if this process
+// is already shutting down. Must be called after the row exists so InterruptAll
+// can find it if the goroutine has not started yet.
+// runtimeBudget is the wall-clock cap for one run: maxRuntime per article.
+// A flat per-run cap killed single-article runs on int that finished every
+// step just past 25m, and made a multi-article batch impossible.
+func (s *blogService) runtimeBudget(req model.GenerateBlogRequest) time.Duration {
+	n := len(req.Briefs)
+	if req.Trending {
+		n = req.ResolvedTrendingCount(blog.HardMaxArticles)
+	}
+	if req.MaxArticles > 0 && n > req.MaxArticles {
+		n = req.MaxArticles
+	}
+	n = min(max(n, 1), blog.HardMaxArticles)
+	return s.maxRuntime * time.Duration(n)
+}
+
+func (s *blogService) beginGeneration(run *model.BlogRun, agent *model.Agent, req model.GenerateBlogRequest) error {
+	s.mu.Lock()
+	if s.stopping {
+		s.mu.Unlock()
+		return errRunStopping
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	if s.maxRuntime > 0 {
+		var timeoutCancel context.CancelFunc
+		ctx, timeoutCancel = context.WithTimeout(ctx, s.runtimeBudget(req))
+		prev := cancel
+		cancel = func() {
+			timeoutCancel()
+			prev()
+		}
+	}
+	if s.active == nil {
+		s.active = make(map[uuid.UUID]*trackedRun)
+	}
+	s.active[run.ID] = &trackedRun{cancel: cancel}
+	s.mu.Unlock()
+
+	go func() {
+		defer s.untrack(run.ID)
+		s.runGeneration(ctx, run, agent, req)
+	}()
+	return nil
+}
+
+func (s *blogService) untrack(id uuid.UUID) {
+	s.mu.Lock()
+	delete(s.active, id)
+	s.mu.Unlock()
+}
+
+func (s *blogService) signalCancel(id uuid.UUID, reason error) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t, ok := s.active[id]
+	if !ok {
+		return false
+	}
+	t.reason = reason
+	t.cancel()
+	return true
+}
+
+func (s *blogService) consumeReason(id uuid.UUID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if t, ok := s.active[id]; ok && t.reason != nil {
+		return t.reason
+	}
+	return nil
+}
+
+// settle serialises the terminal write so Cancel, shutdown and the generation
+// goroutine cannot flip a completed run back to failed, or a cancelled run
+// back to completed.
+func (s *blogService) settle(runID uuid.UUID, write func()) bool {
+	s.finishMu.Lock()
+	defer s.finishMu.Unlock()
+	current, err := s.repo.GetByID(persistCtx(), runID)
+	if err == nil && current != nil {
+		switch current.Status {
+		case model.BlogRunStatusCompleted, model.BlogRunStatusFailed, model.BlogRunStatusCancelled:
+			return false
+		}
+	}
+	write()
+	return true
 }
 
 func (s *blogService) Provider() string {
@@ -98,24 +276,7 @@ func (s *blogService) EffectiveModels() map[string]string {
 // articleWriterSeed is the built-in agent definition. It must stay in step with
 // the backfill in migration 000019 — that covers organizations which already
 // existed, this covers everything created since.
-func articleWriterSeed(orgID uuid.UUID) *model.Agent {
-	desc := "Writes SEO-optimised technical articles in markdown, converts them to HTML, and files them in the CMS as drafts for review."
-	prompt := "You are a technical blog writer for a developer audience. You produce high-quality, SEO-optimised articles in pure markdown: a single H1 title, H2/H3 structure, 800-1200 words, at least one code block where it helps the reader, and a short Further Reading list."
-	return &model.Agent{
-		ID:           uuid.New(),
-		OrgID:        orgID,
-		Name:         "Article Writer",
-		Role:         "Content Writer",
-		Description:  &desc,
-		SystemPrompt: &prompt,
-		// 'active' rather than 'idle': the dashboard's Active Agents grid
-		// filters on status = 'active', and this agent is always available.
-		Status:       "active",
-		EngineType:   model.EngineGoNative,
-		EngineConfig: map[string]any{},
-		Metadata:     map[string]any{model.MetadataKeyBuiltin: model.BuiltinArticleWriter},
-	}
-}
+func articleWriterSeed(orgID uuid.UUID) *model.Agent { return blog.Seed(orgID) }
 
 // agentModels reads the model choices set on the Article Writer in the UI.
 //
@@ -140,12 +301,30 @@ func agentModels(agent *model.Agent) (prose, structured string) {
 }
 
 func (s *blogService) EnsureArticleWriter(ctx context.Context, orgID uuid.UUID) (*model.Agent, error) {
-	existing, err := s.agentRepo.FindBuiltin(ctx, orgID, model.BuiltinArticleWriter)
+	return s.ensureWriter(ctx, orgID, model.BuiltinArticleWriter)
+}
+
+// ensureWriter resolves the org's agent for a blog writer builtin, seeding it
+// when missing. Writers other than the Article Writer are seeded from their
+// registered module, so this package needs no knowledge of them.
+func (s *blogService) ensureWriter(ctx context.Context, orgID uuid.UUID, builtin string) (*model.Agent, error) {
+	existing, err := s.agentRepo.FindBuiltin(ctx, orgID, builtin)
 	if err != nil {
 		return nil, err
 	}
 	if existing != nil {
 		return existing, nil
+	}
+	if builtin != model.BuiltinArticleWriter {
+		m, ok := agentmodule.Lookup(builtin)
+		if !ok || m.Seed == nil {
+			return nil, fmt.Errorf("blog_svc: writer %q is not registered", builtin)
+		}
+		agent := m.Seed(orgID)
+		if err := s.agentRepo.Create(ctx, agent); err != nil {
+			return nil, fmt.Errorf("blog_svc: seed %s: %w", builtin, err)
+		}
+		return agent, nil
 	}
 
 	agent := articleWriterSeed(orgID)
@@ -191,8 +370,17 @@ func writeSteps(writer, researcher string) []model.BlogStep {
 		{Key: model.BlogStepReviewing, Label: "Reviewing the draft", Agent: writer, Status: model.StepStatusPending},
 		{Key: model.BlogStepRevising, Label: "Revising", Agent: writer, Status: model.StepStatusPending},
 		{Key: model.BlogStepExpanding, Label: "Expanding to full length", Agent: writer, Status: model.StepStatusPending},
+		{Key: model.BlogStepIllustrating, Label: "Illustrating the article", Agent: writer, Status: model.StepStatusPending},
 		{Key: model.BlogStepConverting, Label: "Converting to HTML", Agent: writer, Status: model.StepStatusPending},
 		{Key: model.BlogStepGenerated, Label: "Articles ready", Agent: writer, Status: model.StepStatusPending},
+	}
+}
+
+// insightsSteps are appended when a run is sent to Insights.
+func insightsSteps() []model.BlogStep {
+	return []model.BlogStep{
+		{Key: model.BlogStepInsightsSending, Label: "Filing in JobShout.com Insights", Status: model.StepStatusPending},
+		{Key: model.BlogStepInsightsSent, Label: "Filed for editor review", Status: model.StepStatusPending},
 	}
 }
 
@@ -213,9 +401,45 @@ type stepTracker struct {
 	steps  []model.BlogStep
 	repo   repository.BlogRepository
 	logger *zap.Logger
+	// writer is the agent the run belongs to. The pipeline attributes its
+	// writing steps to the Article Writer by name; a run of another writer
+	// shows that writer instead. Empty keeps the pipeline's name.
+	writer string
+}
+
+// newTracker is a stepTracker for run, attributed to the run's writer.
+func (s *blogService) newTracker(run *model.BlogRun) *stepTracker {
+	return &stepTracker{runID: run.ID, steps: run.Steps, repo: s.repo, logger: s.logger, writer: runWriterName(run)}
+}
+
+// runWriterName is the display name of the agent a run belongs to.
+func runWriterName(run *model.BlogRun) string {
+	if run == nil {
+		return model.AgentNameArticleWriter
+	}
+	if name, ok := model.BlogWriters[model.BlogWriterBuiltin(run.Options.Writer)]; ok {
+		return name
+	}
+	return model.AgentNameArticleWriter
+}
+
+// attributeSteps renames the Article Writer on seeded steps to writer.
+func attributeSteps(steps []model.BlogStep, writer string) []model.BlogStep {
+	if writer == "" || writer == model.AgentNameArticleWriter {
+		return steps
+	}
+	for i := range steps {
+		if steps[i].Agent == model.AgentNameArticleWriter {
+			steps[i].Agent = writer
+		}
+	}
+	return steps
 }
 
 func (t *stepTracker) advance(key, label, agent string) {
+	if agent == model.AgentNameArticleWriter && t.writer != "" {
+		agent = t.writer
+	}
 	now := time.Now()
 	for i := range t.steps {
 		if t.steps[i].Status == model.StepStatusRunning {
@@ -279,7 +503,7 @@ func (t *stepTracker) finish() {
 // stay pending, so the trace shows how far the run got.
 func (t *stepTracker) fail(err error) {
 	now := time.Now()
-	msg := err.Error()
+	msg := readableRunError(err)
 	for i := range t.steps {
 		if t.steps[i].Status == model.StepStatusRunning {
 			t.steps[i].Status = model.StepStatusFailed
@@ -308,17 +532,17 @@ func (s *blogService) Generate(
 		return nil, fmt.Errorf("blog_svc: generator not configured")
 	}
 
-	agent, err := s.EnsureArticleWriter(ctx, orgID)
-	if err != nil {
-		return nil, err
-	}
-
 	// Normalize is idempotent, so calling it here costs nothing when the
 	// handler already did — and guarantees the briefs are populated for callers
 	// that build the request directly, like the scheduler.
 	req.Normalize()
 	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("blog_svc: %w", err)
+	}
+
+	agent, err := s.ensureWriter(ctx, orgID, model.BlogWriterBuiltin(req.Writer))
+	if err != nil {
+		return nil, err
 	}
 
 	startedAt := time.Now()
@@ -331,7 +555,8 @@ func (s *blogService) Generate(
 		Status:      model.BlogRunStatusRunning,
 		Briefs:      req.Briefs,
 		Topics:      req.Topics,
-		Steps:       initialSteps(req.Trending),
+		Options:     req.RunOptions(),
+		Steps:       attributeSteps(initialSteps(req.Trending), model.BlogWriters[model.BlogWriterBuiltin(req.Writer)]),
 		Articles:    []model.BlogRunArticle{},
 		StartedAt:   &startedAt,
 	}
@@ -347,7 +572,11 @@ func (s *blogService) Generate(
 	// Run in the background. Generation is 10-30s per topic on a warm host and
 	// the request budget is 120s, so a full batch cannot fit in the response
 	// — the caller polls the run instead.
-	go s.runGeneration(run, agent, req)
+	if err := s.beginGeneration(run, agent, req); err != nil {
+		s.failCreatedRun(run, errRunInterrupted)
+		s.notifyBoard(req.TaskID, "Article run failed to start.", "")
+		return nil, err
+	}
 
 	return run, nil
 }
@@ -375,7 +604,11 @@ func (s *blogService) discoverBriefs(
 	// What this org has published recently is what discovery must not repeat.
 	// A failure here degrades the run to "might repeat itself" rather than
 	// stopping it — losing an article to a database hiccup is the worse trade.
-	avoid, err := s.repo.RecentTopics(ctx, run.OrgID, time.Now().Add(-recentTopicWindow))
+	// Scoped to this run's reader. A developer deep dive and a plain-English
+	// briefing on the same subject are two different articles, and an org
+	// running both schedules wants both — an org-wide list would let whichever
+	// schedule fired first lock the other out for a fortnight.
+	avoid, err := s.repo.RecentTopics(ctx, run.OrgID, time.Now().Add(-recentTopicWindow), req.Audience)
 	if err != nil {
 		s.logger.Warn("blog_svc: could not load recent topics, discovery may repeat itself",
 			zap.Error(err))
@@ -384,10 +617,12 @@ func (s *blogService) discoverBriefs(
 
 	count := req.ResolvedTrendingCount(blog.HardMaxArticles)
 	topics, err := s.research.Discover(ctx, run.OrgID, research.DiscoverRequest{
-		Count: count,
-		Avoid: avoid,
-		Focus: req.Focus,
-		Model: req.Model,
+		Count:    count,
+		Avoid:    avoid,
+		Focus:    req.Focus,
+		Audience: req.Audience,
+		Industry: req.Industry,
+		Model:    req.Model,
 	}, func(_, detail string) {
 		tracker.advance(model.BlogStepDiscovering, detail, model.AgentNameResearcher)
 	})
@@ -395,12 +630,27 @@ func (s *blogService) discoverBriefs(
 		return nil, err
 	}
 
+	// Discovered briefs inherit the run's reader and sector. Without this the
+	// discovery pass would choose topics for managers and the writing pass
+	// would write them up for engineers.
 	briefs := make([]model.BlogBrief, 0, len(topics))
 	for _, t := range topics {
-		briefs = append(briefs, model.BlogBrief{Topic: t.Topic, Context: t.Context})
+		briefs = append(briefs, model.BlogBrief{
+			Topic:    t.Topic,
+			Context:  t.Context,
+			Audience: req.Audience,
+			Industry: req.Industry,
+		})
 	}
 	if len(briefs) == 0 {
 		return nil, fmt.Errorf("blog_svc: discovery returned no topics")
+	}
+	// The pages a topic came from, and the run's focus areas, go to research
+	// with it. Without them research starts from the topic's wording alone,
+	// and wording drifts: an observability brief came back as an article on
+	// efficient inference.
+	for i, t := range topics {
+		briefs[i].Seeds, briefs[i].Focus = t.Seeds, req.Focus
 	}
 
 	// Say so when a focused run had to settle. The articles still get written —
@@ -424,7 +674,9 @@ func (s *blogService) discoverBriefs(
 	s.logger.Info("blog: discovered topics for a trending run",
 		zap.String("blog_run_id", run.ID.String()),
 		zap.Int("count", len(briefs)), zap.Int("avoided", len(avoid)),
-		zap.Strings("focus", req.Focus), zap.Int("off_target", offTarget))
+		zap.Strings("focus", req.Focus), zap.Int("off_target", offTarget),
+		zap.String("audience", audience.Label(req.Audience)),
+		zap.String("industry", req.Industry))
 
 	return briefs, nil
 }
@@ -432,34 +684,83 @@ func (s *blogService) discoverBriefs(
 // failRun records a terminal failure on a run. Shared by the discovery and
 // generation paths so the two cannot record it differently.
 func (s *blogService) failRun(
-	ctx context.Context,
 	run *model.BlogRun,
 	tracker *stepTracker,
 	cause error,
 	log *zap.Logger,
 	agent *model.Agent,
 ) {
-	tracker.fail(cause)
-	run.Steps = tracker.steps
-	completedAt := time.Now()
-	run.CompletedAt = &completedAt
-	msg := cause.Error()
-	run.Status = model.BlogRunStatusFailed
-	run.ErrorMessage = &msg
-	if uerr := s.repo.Update(ctx, run); uerr != nil {
-		log.Error("blog_svc: failed to record failure", zap.Error(uerr))
-	}
+	s.settle(run.ID, func() {
+		tracker.fail(cause)
+		run.Steps = tracker.steps
+		completedAt := time.Now()
+		run.CompletedAt = &completedAt
+		msg := readableRunError(cause)
+		if errors.Is(cause, errRunCancelled) {
+			run.Status = model.BlogRunStatusCancelled
+		} else {
+			run.Status = model.BlogRunStatusFailed
+		}
+		run.ErrorMessage = &msg
+		if uerr := s.repo.Update(persistCtx(), run); uerr != nil {
+			log.Error("blog_svc: failed to record failure", zap.Error(uerr))
+		}
+	})
 	// Leave the agent active — 'failed' is a property of the run, and the
 	// board reads the run, not the agent row.
-	s.setAgentStatus(ctx, agent.ID, "active")
+	if agent != nil {
+		s.setAgentStatus(persistCtx(), agent.ID, "active")
+	}
+	if errors.Is(cause, errRunCancelled) || errors.Is(cause, errRunInterrupted) ||
+		errors.Is(cause, errRunOrphaned) || errors.Is(cause, errRunTimedOut) {
+		log.Info("blog: run interrupted", zap.Error(cause))
+		return
+	}
 	log.Error("blog: run failed", zap.Error(cause))
 }
 
-func (s *blogService) runGeneration(run *model.BlogRun, agent *model.Agent, req model.GenerateBlogRequest) {
+func (s *blogService) persistArticle(run *model.BlogRun, a blog.GeneratedArticle) error {
+	id := uuid.New()
+	refs := a.References
+	if refs == nil {
+		refs = []model.BlogReference{}
+	}
+	row := model.BlogArticle{
+		ID: id, RunID: run.ID, OrgID: run.OrgID,
+		Topic: a.Topic, Title: a.Title, Slug: a.Slug, Path: a.Path,
+		References: refs,
+		Markdown:   a.Markdown, HTML: a.HTML, WordCount: a.WordCount,
+		Audience: a.Audience, Industry: a.Industry,
+		CoverImageURL:    a.CoverImageURL,
+		CoverImagePrompt: a.CoverImagePrompt,
+		CoverImageMeta: model.CoverImageMeta{
+			Provider: a.CoverImageProvider,
+			Model:    a.CoverImageModel,
+			Seed:     a.CoverImageSeed,
+			Width:    a.CoverImageWidth,
+			Height:   a.CoverImageHeight,
+		},
+	}
+	if err := s.repo.CreateArticles(persistCtx(), []model.BlogArticle{row}); err != nil {
+		return err
+	}
+	run.Articles = append(run.Articles, model.BlogRunArticle{
+		ID: id, Topic: a.Topic, Title: a.Title, Slug: a.Slug, Path: a.Path,
+		WordCount: a.WordCount, ReferenceCount: len(refs),
+	})
+	return s.repo.UpdateArticles(persistCtx(), run.ID, run.Articles)
+}
+
+func (s *blogService) failCreatedRun(run *model.BlogRun, cause error) {
+	tracker := s.newTracker(run)
+	s.failRun(run, tracker, cause, s.logger, nil)
+}
+
+func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, agent *model.Agent, req model.GenerateBlogRequest) {
 	// Label the run's LLM calls for Langfuse: the blog run is the session, so
 	// every drafting/planning call (and the research nested inside) groups
 	// under it in the tracing view.
-	ctx := llmtrace.WithTrace(context.Background(), llmtrace.TraceInfo{
+	ctx = llmtrace.WithTrace(ctx, llmtrace.TraceInfo{
 		TraceName: "go-blog-run",
 		SessionID: run.ID.String(),
 		AgentID:   agent.ID.String(),
@@ -467,8 +768,20 @@ func (s *blogService) runGeneration(run *model.BlogRun, agent *model.Agent, req 
 	})
 	log := s.logger.With(zap.String("blog_run_id", run.ID.String()))
 
-	tracker := &stepTracker{runID: run.ID, steps: run.Steps, repo: s.repo, logger: s.logger}
-	s.setAgentStatus(ctx, agent.ID, "active")
+	stopHB := make(chan struct{})
+	defer close(stopHB)
+	go s.heartbeatLoop(run.ID, stopHB)
+
+	tracker := s.newTracker(run)
+	s.setAgentStatus(persistCtx(), agent.ID, "active")
+
+	taskID := s.resolveLaunchTaskID(persistCtx(), req.TaskID, run.ID)
+
+	if ctx.Err() != nil {
+		s.failRun(run, tracker, s.interruptCause(run.ID, ctx.Err()), log, agent)
+		s.notifyBoard(taskID, "Article run was interrupted.", "")
+		return
+	}
 
 	// A trending run has no subject yet — find one before anything else, and
 	// record it on the run so what it chose is visible while it writes rather
@@ -476,7 +789,8 @@ func (s *blogService) runGeneration(run *model.BlogRun, agent *model.Agent, req 
 	if req.Trending {
 		briefs, derr := s.discoverBriefs(ctx, run, req, tracker)
 		if derr != nil {
-			s.failRun(ctx, run, tracker, derr, log, agent)
+			s.failRun(run, tracker, s.interruptCause(run.ID, derr), log, agent)
+			s.notifyBoard(taskID, "Article run failed while discovering a topic.", "")
 			return
 		}
 		req.Briefs = briefs
@@ -486,7 +800,7 @@ func (s *blogService) runGeneration(run *model.BlogRun, agent *model.Agent, req 
 		// discovered subject needs its own narrow one. Without it the run
 		// finishes with an empty topic list, which leaves the page headerless
 		// and makes Retry refuse the run for having nothing to retry.
-		if uerr := s.repo.UpdateBriefs(ctx, run.ID, run.Briefs, run.Topics); uerr != nil {
+		if uerr := s.repo.UpdateBriefs(persistCtx(), run.ID, run.Briefs, run.Topics); uerr != nil {
 			log.Warn("blog_svc: failed to record discovered topics", zap.Error(uerr))
 		}
 	}
@@ -495,101 +809,150 @@ func (s *blogService) runGeneration(run *model.BlogRun, agent *model.Agent, req 
 	// particular run still wins; see blog.GenerateRequest for the full order.
 	agentProse, agentStructured := agentModels(agent)
 
-	articles, err := s.runner.Generate(ctx, blog.GenerateRequest{
+	_, err := s.runner.Generate(ctx, blog.GenerateRequest{
 		OrgID:                run.OrgID,
 		Briefs:               req.Briefs,
 		Model:                req.Model,
 		MaxArticles:          req.MaxArticles,
 		AgentProseModel:      agentProse,
 		AgentStructuredModel: agentStructured,
+		OnArticle:            func(a blog.GeneratedArticle) error { return s.persistArticle(run, a) },
 	}, tracker.advance)
 
-	completedAt := time.Now()
-	run.CompletedAt = &completedAt
-
-	if err != nil {
-		tracker.fail(err)
-		run.Steps = tracker.steps
-		msg := err.Error()
-		run.Status = model.BlogRunStatusFailed
-		run.ErrorMessage = &msg
-		if uerr := s.repo.Update(ctx, run); uerr != nil {
-			log.Error("blog_svc: failed to record failure", zap.Error(uerr))
-		}
-		// Leave the agent active — 'failed' is a property of the run, and the
-		// board reads the run, not the agent row.
-		s.setAgentStatus(ctx, agent.ID, "active")
-		log.Error("blog: generation failed", zap.Error(err))
+	if ctx.Err() != nil {
+		s.failRun(run, tracker, s.interruptCause(run.ID, ctx.Err()), log, agent)
+		s.notifyBoard(taskID, "Article run was interrupted.", "")
 		return
 	}
 
-	tracker.finish()
-	run.Steps = tracker.steps
-
-	persisted := make([]model.BlogArticle, 0, len(articles))
-	summaries := make([]model.BlogRunArticle, 0, len(articles))
-	for _, a := range articles {
-		id := uuid.New()
-		refs := a.References
-		if refs == nil {
-			refs = []model.BlogReference{}
+	if len(run.Articles) == 0 {
+		if err == nil {
+			err = fmt.Errorf("blog: no articles produced")
 		}
-		persisted = append(persisted, model.BlogArticle{
-			ID: id, RunID: run.ID, OrgID: run.OrgID,
-			Topic: a.Topic, Title: a.Title, Slug: a.Slug, Path: a.Path,
-			References: refs,
-			Markdown:   a.Markdown, HTML: a.HTML, WordCount: a.WordCount,
-			CoverImageURL:    a.CoverImageURL,
-			CoverImagePrompt: a.CoverImagePrompt,
-			CoverImageMeta: model.CoverImageMeta{
-				Provider: a.CoverImageProvider,
-				Model:    a.CoverImageModel,
-				Seed:     a.CoverImageSeed,
-				Width:    a.CoverImageWidth,
-				Height:   a.CoverImageHeight,
-			},
-		})
-		summaries = append(summaries, model.BlogRunArticle{
-			ID: id, Topic: a.Topic, Title: a.Title, Slug: a.Slug, Path: a.Path,
-			WordCount: a.WordCount, ReferenceCount: len(refs),
-		})
-	}
-
-	if err := s.repo.CreateArticles(ctx, persisted); err != nil {
-		// The articles are the whole point of the run — if they cannot be
-		// stored the run has not succeeded, however well generation went.
-		msg := err.Error()
-		run.Status = model.BlogRunStatusFailed
-		run.ErrorMessage = &msg
-		if uerr := s.repo.Update(ctx, run); uerr != nil {
-			log.Error("blog_svc: failed to record failure", zap.Error(uerr))
-		}
-		log.Error("blog: storing articles failed", zap.Error(err))
-		s.setAgentStatus(ctx, agent.ID, "active")
+		s.failRun(run, tracker, err, log, agent)
+		s.notifyBoard(taskID, "Article run failed: "+err.Error(), "")
 		return
 	}
 
-	run.Status = model.BlogRunStatusCompleted
-	run.Articles = summaries
-	if err := s.repo.Update(ctx, run); err != nil {
-		log.Error("blog_svc: failed to persist success", zap.Error(err))
+	if !s.finishSuccessfulRun(run, tracker, err, log, agent) {
+		return
 	}
-	s.setAgentStatus(ctx, agent.ID, "active")
-	log.Info("blog: generation complete", zap.Int("articles", len(articles)))
+	title := run.ID.String()
+	if len(run.Articles) > 0 && run.Articles[0].Title != "" {
+		title = run.Articles[0].Title
+	}
+	s.notifyBoard(taskID, "Article ready: "+title+"\n\nOpen /articles/"+run.ID.String(), "done")
 
 	// Filing happens after the run is recorded as completed, never instead of
 	// it. A CMS that is down or misconfigured must not turn articles that were
 	// written, stored and are readable in the UI into a failed run — the work
 	// survives and someone can press the button later.
+	//
+	// Every configured destination gets them, each independently: one being
+	// down does not stop the other.
 	if req.AutoPublish {
-		if _, perr := s.Publish(ctx, run.OrgID, run.ID); perr != nil {
-			log.Warn("blog: automatic filing to the CMS failed, the articles are still here",
-				zap.Error(perr))
-		} else {
-			log.Info("blog: filed articles in the CMS as drafts automatically",
-				zap.Int("articles", len(articles)))
+		if s.CanPublish() {
+			if _, perr := s.Publish(persistCtx(), run.OrgID, run.ID); perr != nil {
+				log.Warn("blog: automatic filing to the CMS failed, the articles are still here",
+					zap.Error(perr))
+			} else {
+				log.Info("blog: filed articles in the CMS as drafts automatically",
+					zap.Int("articles", len(run.Articles)))
+			}
+		}
+		// Other writers reach jobshout.com only when someone publishes live, so
+		// their drafts are not filed for review here.
+		if s.CanPublishInsights() && req.Writer == "" {
+			if _, perr := s.PublishInsights(persistCtx(), run.OrgID, run.ID); perr != nil {
+				log.Warn("blog: automatic filing to Insights failed, the articles are still here",
+					zap.Error(perr))
+			} else {
+				log.Info("blog: filed articles for review in Insights automatically",
+					zap.Int("articles", len(run.Articles)))
+			}
+		}
+		if !s.CanPublish() && !s.CanPublishInsights() {
+			log.Warn("blog: auto-publish was requested but no destination is configured")
 		}
 	}
+}
+
+func (s *blogService) finishSuccessfulRun(
+	run *model.BlogRun,
+	tracker *stepTracker,
+	partialErr error,
+	log *zap.Logger,
+	agent *model.Agent,
+) bool {
+	wrote := false
+	s.settle(run.ID, func() {
+		tracker.finish()
+		run.Steps = tracker.steps
+		completedAt := time.Now()
+		run.CompletedAt = &completedAt
+		run.Status = model.BlogRunStatusCompleted
+		if partialErr != nil {
+			msg := partialErr.Error()
+			run.ErrorMessage = &msg
+		}
+		if uerr := s.repo.Update(persistCtx(), run); uerr != nil {
+			log.Error("blog_svc: failed to persist success", zap.Error(uerr))
+			return
+		}
+		wrote = true
+	})
+	if !wrote {
+		return false
+	}
+	if agent != nil {
+		s.setAgentStatus(persistCtx(), agent.ID, "active")
+	}
+	log.Info("blog: generation complete", zap.Int("articles", len(run.Articles)))
+	return true
+}
+
+func (s *blogService) resolveLaunchTaskID(ctx context.Context, known *uuid.UUID, runID uuid.UUID) *uuid.UUID {
+	if known != nil {
+		return known
+	}
+	if s == nil || s.tasks == nil || runID == uuid.Nil {
+		return nil
+	}
+	t, err := s.tasks.FindByLaunchRunID(ctx, runID)
+	if err != nil || t == nil {
+		return nil
+	}
+	return &t.ID
+}
+
+func (s *blogService) notifyBoard(taskID *uuid.UUID, note, status string) {
+	if s == nil || s.tasks == nil || taskID == nil {
+		return
+	}
+	ctx := persistCtx()
+	if strings.TrimSpace(note) != "" {
+		n := note
+		if task, err := s.tasks.GetByID(ctx, *taskID); err == nil && task != nil && task.Description != nil && strings.TrimSpace(*task.Description) != "" {
+			n = strings.TrimSpace(*task.Description) + "\n\n" + note
+		}
+		_, _ = s.tasks.Update(ctx, *taskID, model.UpdateTaskRequest{Description: &n})
+	}
+	if status != "" {
+		_ = s.tasks.Transition(ctx, *taskID, status, nil)
+	}
+}
+
+func (s *blogService) interruptCause(runID uuid.UUID, err error) error {
+	if reason := s.consumeReason(runID); reason != nil {
+		return reason
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return errRunTimedOut
+	}
+	if errors.Is(err, context.Canceled) {
+		return errRunCancelled
+	}
+	return err
 }
 
 func (s *blogService) Publish(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) (*model.BlogRun, error) {
@@ -641,6 +1004,9 @@ func (s *blogService) Publish(ctx context.Context, orgID uuid.UUID, runID uuid.U
 		articles = append(articles, blog.GeneratedArticle{
 			Topic: a.Topic, Slug: a.Slug, Path: a.Path,
 			Markdown: a.Markdown, HTML: a.HTML, WordCount: a.WordCount,
+			// Cover must travel with the article or Publish cannot fill
+			// opsapi's featured_image_url and the CMS draft has no cover.
+			CoverImageURL: a.CoverImageURL,
 		})
 	}
 
@@ -654,7 +1020,7 @@ func (s *blogService) Publish(ctx context.Context, orgID uuid.UUID, runID uuid.U
 	}
 
 	run.Steps = append(run.Steps, publishSteps()...)
-	tracker := &stepTracker{runID: run.ID, steps: run.Steps, repo: s.repo, logger: s.logger}
+	tracker := s.newTracker(run)
 
 	result, err := s.runner.Publish(ctx, articles, tracker.advance)
 	if err != nil {
@@ -697,6 +1063,105 @@ func (s *blogService) Publish(ctx context.Context, orgID uuid.UUID, runID uuid.U
 	return s.finalizePublished(ctx, run, result.Namespace, result.PublishedAt)
 }
 
+func (s *blogService) PublishInsights(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) (*model.BlogRun, error) {
+	if !s.CanPublishInsights() {
+		return nil, fmt.Errorf("blog_svc: Insights is not configured (JOBSHOUT_COM_API_URL and JOBSHOUT_INTERNAL_TOKEN must be set)")
+	}
+
+	run, err := s.repo.GetByID(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	if run.OrgID != orgID {
+		return nil, fmt.Errorf("blog_svc: run does not belong to this organization")
+	}
+	if run.Status != model.BlogRunStatusCompleted {
+		return nil, fmt.Errorf("blog_svc: only a completed run can be sent to Insights (status is %q)", run.Status)
+	}
+	if run.InsightsPublishedAt != nil {
+		return nil, fmt.Errorf("blog_svc: run has already been sent to Insights")
+	}
+
+	stored, err := s.repo.ListArticlesByRun(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	if len(stored) == 0 {
+		return nil, fmt.Errorf("blog_svc: run has no articles to send")
+	}
+
+	// Same retry rule as Publish: an article that already has an Insights item
+	// is skipped, so a batch that failed part-way can be retried without
+	// filing the earlier articles twice.
+	articleIDs := make(map[string]uuid.UUID, len(stored))
+	articles := make([]blog.GeneratedArticle, 0, len(stored))
+	for _, a := range stored {
+		if a.InsightsItemID != nil && *a.InsightsItemID != "" {
+			continue
+		}
+		articleIDs[a.Slug] = a.ID
+		articles = append(articles, blog.GeneratedArticle{
+			Topic: a.Topic, Slug: a.Slug, Path: a.Path, Title: a.Title,
+			Markdown: a.Markdown, HTML: a.HTML, WordCount: a.WordCount,
+			CoverImageURL: a.CoverImageURL,
+		})
+	}
+	if len(articles) == 0 {
+		return s.finalizeInsights(ctx, run, time.Now())
+	}
+
+	run.Steps = append(run.Steps, insightsSteps()...)
+	tracker := s.newTracker(run)
+
+	result, perr := s.runner.PublishInsights(ctx, articles, tracker.advance)
+
+	// Record what was filed before looking at the error: a batch that failed
+	// on its third article still filed the first two.
+	if result != nil {
+		filed := make([]model.BlogArticleInsights, 0, len(result.Posts))
+		for _, p := range result.Posts {
+			id, ok := articleIDs[p.Slug]
+			if !ok {
+				s.logger.Warn("blog_svc: Insights item has no matching article",
+					zap.String("slug", p.Slug), zap.String("item_id", p.ItemID))
+				continue
+			}
+			filed = append(filed, model.BlogArticleInsights{
+				ArticleID: id, ItemID: p.ItemID, Slug: p.ItemSlug, Status: p.Status,
+			})
+		}
+		if err := s.repo.MarkArticlesInInsights(ctx, filed); err != nil {
+			s.logger.Error("blog_svc: failed to record Insights items — a retry would duplicate them",
+				zap.Error(err))
+		}
+	}
+
+	if perr != nil {
+		tracker.fail(perr)
+		run.Steps = tracker.steps
+		msg := perr.Error()
+		run.ErrorMessage = &msg
+		if uerr := s.repo.Update(ctx, run); uerr != nil {
+			s.logger.Error("blog_svc: failed to record Insights failure", zap.Error(uerr))
+		}
+		return nil, perr
+	}
+
+	tracker.finish()
+	run.Steps = tracker.steps
+	return s.finalizeInsights(ctx, run, result.PublishedAt)
+}
+
+// finalizeInsights stamps a run as sent to Insights and persists it.
+func (s *blogService) finalizeInsights(ctx context.Context, run *model.BlogRun, at time.Time) (*model.BlogRun, error) {
+	run.InsightsPublishedAt = &at
+	run.ErrorMessage = nil
+	if err := s.repo.Update(ctx, run); err != nil {
+		return nil, fmt.Errorf("blog_svc: persist Insights publish: %w", err)
+	}
+	return run, nil
+}
+
 // finalizePublished stamps a run as published and persists it. Shared by the
 // normal path and the already-posted path so the two cannot drift.
 func (s *blogService) finalizePublished(
@@ -735,6 +1200,9 @@ func (s *blogService) Delete(ctx context.Context, orgID uuid.UUID, runID uuid.UU
 // attempt at the same request, and spawning a new card per attempt would leave
 // the failures behind as litter — which is what made deletion necessary in the
 // first place.
+//
+// A trending run that failed before it chose a topic has no briefs to replay,
+// so it discovers again, with the focus areas it was created with.
 func (s *blogService) Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) (*model.BlogRun, error) {
 	if s.runner == nil {
 		return nil, fmt.Errorf("blog_svc: generator not configured")
@@ -747,33 +1215,51 @@ func (s *blogService) Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUI
 	if run.OrgID != orgID {
 		return nil, fmt.Errorf("blog_svc: run does not belong to this organization")
 	}
-	if run.Status != model.BlogRunStatusFailed {
-		return nil, fmt.Errorf("blog_svc: only a failed run can be retried (status is %q)", run.Status)
+	if run.Status != model.BlogRunStatusFailed && run.Status != model.BlogRunStatusCancelled {
+		return nil, fmt.Errorf("blog_svc: only a failed or cancelled run can be retried (status is %q)", run.Status)
 	}
 	if len(run.Briefs) == 0 {
-		return nil, fmt.Errorf("blog_svc: run has no topics to retry")
+		if !run.Discovers() {
+			return nil, fmt.Errorf("blog_svc: run has no topics to retry")
+		}
+		return s.retryDiscovery(ctx, run)
 	}
 
-	agent, err := s.EnsureArticleWriter(ctx, orgID)
+	existing, err := s.repo.ListArticlesByRun(ctx, runID)
 	if err != nil {
 		return nil, err
 	}
+	have := make(map[string]struct{}, len(existing))
+	summaries := make([]model.BlogRunArticle, 0, len(existing))
+	for _, a := range existing {
+		have[strings.ToLower(strings.TrimSpace(a.Topic))] = struct{}{}
+		refs := len(a.References)
+		summaries = append(summaries, model.BlogRunArticle{
+			ID: a.ID, Topic: a.Topic, Title: a.Title, Slug: a.Slug, Path: a.Path,
+			WordCount: a.WordCount, ReferenceCount: refs,
+		})
+	}
+	missing := make([]model.BlogBrief, 0, len(run.Briefs))
+	for _, b := range run.Briefs {
+		if _, ok := have[strings.ToLower(strings.TrimSpace(b.Topic))]; ok {
+			continue
+		}
+		missing = append(missing, b)
+	}
+	if len(missing) == 0 {
+		return nil, fmt.Errorf("blog_svc: every topic already has an article")
+	}
 
-	// A run can fail after its articles were written — storing them is a
-	// separate step that can fail on its own. Clear them so a retry cannot
-	// leave two attempts' output on the same run.
-	if err := s.repo.DeleteArticlesByRun(ctx, runID); err != nil {
+	agent, err := s.ensureWriter(ctx, orgID, model.BlogWriterBuiltin(run.Options.Writer))
+	if err != nil {
 		return nil, err
 	}
 
 	startedAt := time.Now()
 	run.Status = model.BlogRunStatusRunning
 	run.AgentID = &agent.ID
-	// A retry replays the topics the run already settled on, so it never
-	// rediscovers — even if the original run found them by discovery. Retrying
-	// into a different subject would make the button mean something else.
-	run.Steps = initialSteps(false)
-	run.Articles = []model.BlogRunArticle{}
+	run.Steps = attributeSteps(initialSteps(false), runWriterName(run))
+	run.Articles = summaries
 	run.ErrorMessage = nil
 	run.StartedAt = &startedAt
 	run.CompletedAt = nil
@@ -790,18 +1276,210 @@ func (s *blogService) Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUI
 	// Retry replays the briefs, not just the topics: the context is half the
 	// instruction, and a retry that dropped it would write a different article
 	// than the one that was asked for.
-	req := model.GenerateBlogRequest{Briefs: run.Briefs}
+	req := model.GenerateBlogRequest{
+		Briefs:      missing,
+		MaxArticles: run.Options.MaxArticles,
+		AutoPublish: run.Options.AutoPublish,
+		// The reader is replayed with the briefs. Each brief already carries
+		// its own, so this only matters for runs stored before briefs did — but
+		// a retry that quietly rewrote a business briefing as a developer
+		// article would be a nasty way to find that out.
+		Audience: run.Options.Audience,
+		Industry: run.Options.Industry,
+		Writer:   run.Options.Writer,
+	}
 	req.Normalize()
 	if run.Model != nil {
 		req.Model = *run.Model
 	}
-	go s.runGeneration(run, agent, req)
-
+	if err := s.restart(ctx, run, agent, req); err != nil {
+		return nil, err
+	}
 	return run, nil
+}
+
+// retryDiscovery restarts a trending run that never got as far as choosing a
+// topic. Nothing was written, so the run starts over from discovery.
+func (s *blogService) retryDiscovery(ctx context.Context, run *model.BlogRun) (*model.BlogRun, error) {
+	agent, err := s.ensureWriter(ctx, run.OrgID, model.BlogWriterBuiltin(run.Options.Writer))
+	if err != nil {
+		return nil, err
+	}
+
+	startedAt := time.Now()
+	run.Status = model.BlogRunStatusRunning
+	run.AgentID = &agent.ID
+	run.Steps = attributeSteps(initialSteps(true), runWriterName(run))
+	run.Articles = []model.BlogRunArticle{}
+	run.ErrorMessage = nil
+	run.StartedAt = &startedAt
+	run.CompletedAt = nil
+	if err := s.repo.Update(ctx, run); err != nil {
+		return nil, fmt.Errorf("blog_svc: reset run for retry: %w", err)
+	}
+	if err := s.repo.UpdateSteps(ctx, run.ID, run.Steps); err != nil {
+		return nil, fmt.Errorf("blog_svc: reset steps for retry: %w", err)
+	}
+
+	if err := s.restart(ctx, run, agent, discoveryRetryRequest(run)); err != nil {
+		return nil, err
+	}
+	return run, nil
+}
+
+// discoveryRetryRequest rebuilds the request a trending run was created with.
+//
+// Runs from before options were recorded fall back to the defaults — one
+// article on anything trending — which is better than refusing the retry.
+func discoveryRetryRequest(run *model.BlogRun) model.GenerateBlogRequest {
+	req := model.GenerateBlogRequest{
+		Trending:      true,
+		TrendingCount: run.Options.TrendingCount,
+		Focus:         run.Options.Focus,
+		MaxArticles:   run.Options.MaxArticles,
+		AutoPublish:   run.Options.AutoPublish,
+		Audience:      run.Options.Audience,
+		Industry:      run.Options.Industry,
+		Writer:        run.Options.Writer,
+	}
+	req.Normalize()
+	if run.Model != nil {
+		req.Model = *run.Model
+	}
+	return req
+}
+
+// restart links the retried run back to its board card and starts generation.
+func (s *blogService) restart(ctx context.Context, run *model.BlogRun, agent *model.Agent, req model.GenerateBlogRequest) error {
+	if tid := s.resolveLaunchTaskID(ctx, nil, run.ID); tid != nil {
+		req.TaskID = tid
+		_ = s.tasks.Transition(ctx, *tid, "in_progress", nil)
+	}
+	if err := s.beginGeneration(run, agent, req); err != nil {
+		s.failCreatedRun(run, errRunInterrupted)
+		return err
+	}
+	return nil
+}
+
+// Cancel stops an in-flight run. The row is marked cancelled immediately so the
+// UI stops polling; the generation goroutine is then aborted if this process
+// is the one writing it. A run stuck at running after a deploy has no
+// goroutine here — it is still marked cancelled, which is what unlocks Retry.
+func (s *blogService) Cancel(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) (*model.BlogRun, error) {
+	run, err := s.repo.GetByID(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	if run.OrgID != orgID {
+		return nil, fmt.Errorf("blog_svc: run does not belong to this organization")
+	}
+	if run.Status != model.BlogRunStatusRunning && run.Status != model.BlogRunStatusPending {
+		return nil, fmt.Errorf("blog_svc: only a running run can be cancelled (status is %q)", run.Status)
+	}
+
+	s.signalCancel(runID, errRunCancelled)
+	s.failCreatedRun(run, errRunCancelled)
+
+	updated, err := s.repo.GetByID(persistCtx(), runID)
+	if err != nil {
+		return run, nil
+	}
+	return updated, nil
+}
+
+// InterruptAll is the deploy path: refuse new generations, abort the ones this
+// process is writing, and persist them as failed before the process exits.
+func (s *blogService) InterruptAll(reason error) {
+	if reason == nil {
+		reason = errRunInterrupted
+	}
+	s.mu.Lock()
+	s.stopping = true
+	ids := make([]uuid.UUID, 0, len(s.active))
+	for id, t := range s.active {
+		t.reason = reason
+		t.cancel()
+		ids = append(ids, id)
+	}
+	s.mu.Unlock()
+
+	for _, id := range ids {
+		run, err := s.repo.GetByID(persistCtx(), id)
+		if err != nil || run == nil {
+			continue
+		}
+		if run.Status != model.BlogRunStatusRunning && run.Status != model.BlogRunStatusPending {
+			continue
+		}
+		s.failCreatedRun(run, reason)
+	}
+}
+
+const heartbeatInterval = 30 * time.Second
+
+func (s *blogService) heartbeatLoop(runID uuid.UUID, stop <-chan struct{}) {
+	if s.repo == nil {
+		return
+	}
+	_ = s.repo.TouchHeartbeat(persistCtx(), runID)
+	t := time.NewTicker(heartbeatInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-t.C:
+			if err := s.repo.TouchHeartbeat(persistCtx(), runID); err != nil {
+				s.logger.Warn("blog: heartbeat failed", zap.String("blog_run_id", runID.String()), zap.Error(err))
+			}
+		}
+	}
+}
+
+func (s *blogService) isActive(id uuid.UUID) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.active[id]
+	return ok
+}
+
+// ReapOrphans fails running rows whose writer is gone. Live goroutines in
+// this process are skipped — their heartbeat may have just missed a tick.
+func (s *blogService) ReapOrphans(ctx context.Context) (int, error) {
+	if s.repo == nil {
+		return 0, nil
+	}
+	olderThan := s.orphanTimeout
+	if olderThan <= 0 {
+		olderThan = 45 * time.Minute
+	}
+	stale, err := s.repo.ListStaleRunning(ctx, time.Now().Add(-olderThan))
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, run := range stale {
+		if run == nil {
+			continue
+		}
+		if run.Status != model.BlogRunStatusRunning && run.Status != model.BlogRunStatusPending {
+			continue
+		}
+		if s.isActive(run.ID) {
+			continue
+		}
+		s.failCreatedRun(run, errRunOrphaned)
+		n++
+	}
+	return n, nil
 }
 
 // setAgentStatus is best-effort: a status write failing must not fail the run.
 func (s *blogService) setAgentStatus(ctx context.Context, agentID uuid.UUID, status string) {
+	if s.agentRepo == nil {
+		return
+	}
 	if err := s.agentRepo.UpdateStatus(ctx, agentID, status); err != nil {
 		s.logger.Warn("blog: failed to update agent status", zap.Error(err))
 	}
@@ -812,7 +1490,28 @@ func (s *blogService) GetByID(ctx context.Context, id uuid.UUID) (*model.BlogRun
 }
 
 func (s *blogService) ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.BlogRun], error) {
-	return s.repo.ListByOrg(ctx, orgID, params)
+	return s.ListByWriter(ctx, orgID, model.BuiltinArticleWriter, params)
+}
+
+// ListByWriter lists the runs of one writer. The Article Writer's list also
+// holds runs stored before runs were attributed to an agent.
+func (s *blogService) ListByWriter(ctx context.Context, orgID uuid.UUID, builtin string, params model.PaginationParams) (*model.PaginatedResponse[model.BlogRun], error) {
+	if _, ok := model.BlogWriters[builtin]; !ok {
+		return nil, fmt.Errorf("blog_svc: unknown writer %q", builtin)
+	}
+	agent, err := s.agentRepo.FindBuiltin(ctx, orgID, builtin)
+	if err != nil {
+		return nil, err
+	}
+	var agentID *uuid.UUID
+	if agent != nil {
+		agentID = &agent.ID
+	} else if builtin != model.BuiltinArticleWriter {
+		// No agent yet means no runs yet.
+		params.Normalize()
+		return &model.PaginatedResponse[model.BlogRun]{Data: []model.BlogRun{}, Page: params.Page, PerPage: params.PerPage}, nil
+	}
+	return s.repo.ListByAgent(ctx, orgID, agentID, builtin == model.BuiltinArticleWriter, params)
 }
 
 func (s *blogService) ListArticles(ctx context.Context, runID uuid.UUID) ([]model.BlogArticle, error) {

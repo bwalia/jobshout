@@ -1,15 +1,39 @@
-name: Build & deploy JobShout to k3s
+name: Build, tag & deploy JobShout to k3s
 
-# Build the three JobShout images (server, web, python-sidecar) to the SpectonCR
-# registry, then hand deployment to Ring Promoter (https://rp.workstation.co.uk).
-# Seeding a ring makes RP run the actual deploy as a short-lived k8s Job in the
-# ring-exec namespace (git-clone this repo at the seeded tag + helm upgrade into
-# the ring's namespace) — the DTAP control plane owns the deploy, not this CI.
+# Release pipeline, ported from diy-tax-return-uk's auto-tag-main.yml:
+# every push to master computes the next semantic version, builds the four
+# JobShout images (server, web, python-sidecar, review-bot) tagged with it,
+# pushes the git tag + GitHub Release, and only THEN seeds Ring Promoter
+# (https://rp.workstation.co.uk) with that version. Seeding a ring makes RP
+# run the actual deploy as a short-lived k8s Job in the ring-exec namespace
+# (git-clone this repo at the seeded tag + helm upgrade into the ring's
+# namespace) — the DTAP control plane owns the deploy, not this CI.
 #
-# Continuous deployment: every push to master builds the images and seeds the
-# int ring. Promotion int -> test -> acc -> prod is done from the Ring Promoter
-# UI (rp.workstation.co.uk/?app=jobshout). workflow_dispatch can build-only, or
-# seed a chosen ring / pinned tag.
+# Version scheme: v<MAJOR>.<MINOR>.<PATCH> (v1.0.1, v1.0.2, ...).
+# The repo's one pre-existing tag is bare `1.0.0`; the lookup accepts both
+# bare and v-prefixed semver so the line continues as v1.0.1 instead of
+# forking a second tag line next to it.
+#   - PATCH increments automatically on every push to master
+#   - MINOR/MAJOR (or an exact CUSTOM_VERSION) via workflow_dispatch
+#
+# ─── Job order: compute-version → build → auto-tag → deploy ────────────
+# The tag is pushed only AFTER every image is in the registry: a failed
+# build leaves no tag and no release, and the next push retries the SAME
+# version number. Never push the tag first — Ring Promoter's k8sjob
+# git-clones this repo at the seeded version, so a tag naming images that
+# were never published leaves the promoter deploying from a commit whose
+# images don't exist.
+#
+# Why versions, not SHAs: the seed used to carry the commit's short SHA.
+# RP's deploy Job resolves the seeded value with `git clone --branch`,
+# which cannot resolve a raw SHA — and a tag is simultaneously the clonable
+# ref AND the image tag, so the version RP promotes IS the code that built
+# the images.
+#
+# Continuous deployment: every push to master builds, tags and seeds the
+# int ring. Promotion int -> test -> acc -> prod is done from the Ring
+# Promoter UI (rp.workstation.co.uk/?app=jobshout). workflow_dispatch can
+# build-only, deploy-only a pinned IMAGE_TAG, or cut a manual version bump.
 
 on:
   push:
@@ -30,43 +54,292 @@ on:
         options: [build, deploy, build-and-deploy]
       IMAGE_TAG:
         type: string
-        description: "Image tag to DEPLOY (deploy-only). Blank = this commit's short SHA."
+        description: "Image tag to DEPLOY (deploy-only; e.g. v1.0.1). Blank = this run's computed version."
+        default: ""
+        required: false
+      VERSION_TYPE:
+        type: choice
+        description: "Version bump type (for manual major/minor bumps)"
+        default: "patch"
+        required: false
+        options: [patch, minor, major]
+      CUSTOM_VERSION:
+        type: string
+        description: "Custom version (e.g. v1.2.0) - overrides VERSION_TYPE"
         default: ""
         required: false
 
+permissions:
+  contents: write  # auto-tag pushes tags; read-only jobs override below
+
 concurrency:
-  group: jobshout-k3s-${{ github.event.inputs.TARGET_ENV || 'int' }}
+  # Serialize the whole release: two quick pushes must not race to the same
+  # version number. This is workflow-level, so run #2 waits for run #1's
+  # builds to finish before it computes anything — which is what makes it
+  # safe to compute the version in the first job and not claim it until
+  # the tag job.
+  group: jobshout-release
   cancel-in-progress: false
 
 env:
-  # int-spectoncr.diytaxreturn.co.uk (pop1 edge) is reachable from the jobshout
-  # self-hosted runner; spectoncr.workstation.co.uk (pop0) is not. Same registry.
+  # Helm / k3s pull name. Do not change: nodes already mirror this host to
+  # http://127.0.0.1:30500. CI *pushes* over that NodePort on the LAN (see
+  # build job) so blob PUTs do not hairpin Mac → lon1 → k3s and 502 at 180s.
   IMAGE_REGISTRY: int-spectoncr.diytaxreturn.co.uk
   IMAGE_NAMESPACE: jobshout
   TARGET_ENV: ${{ github.event.inputs.TARGET_ENV || 'int' }}
   DEPLOYMENT_TYPE: ${{ github.event.inputs.DEPLOYMENT_TYPE || 'build-and-deploy' }}
 
 jobs:
-  build:
-    name: Build & push images
+  # ─── work out the next version (does NOT push the tag) ─────────────
+  compute-version:
+    name: Compute Next Version
     runs-on: self-hosted
+    # Deploy-only dispatches seed a pinned IMAGE_TAG and have nothing to
+    # compute; everything else (pushes, build/bump dispatches) computes.
+    if: >-
+      github.event_name == 'push'
+      || (github.event_name == 'workflow_dispatch' && inputs.DEPLOYMENT_TYPE != 'deploy')
+    permissions:
+      contents: read  # resolves a number; tagging happens after the build
+    outputs:
+      next_version: ${{ steps.calc_version.outputs.next_version }}
+      should_build: ${{ steps.calc_version.outputs.should_build }}
+    steps:
+      - name: Checkout repository with full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # need the tags
+
+      - name: Get latest tag
+        id: get_latest_tag
+        run: |
+          # Accept BOTH v-prefixed and bare semver: the repo's first tag is
+          # bare 1.0.0, and the line continues v-prefixed from v1.0.1.
+          LATEST_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' -l '[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)
+
+          if [ -z "$LATEST_TAG" ]; then
+            LATEST_TAG="v1.0.0"
+            echo "No existing tags found, starting from $LATEST_TAG"
+          else
+            echo "Latest tag: $LATEST_TAG"
+          fi
+
+          echo "latest_tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Calculate next version
+        id: calc_version
+        run: |
+          LATEST_TAG="${{ steps.get_latest_tag.outputs.latest_tag }}"
+
+          # Handle manual overrides from workflow_dispatch
+          if [ -n "${{ github.event.inputs.CUSTOM_VERSION }}" ]; then
+            NEXT_VERSION="${{ github.event.inputs.CUSTOM_VERSION }}"
+            echo "Using custom version: $NEXT_VERSION"
+          elif [ "${{ github.event.inputs.VERSION_TYPE }}" != "patch" ] && [ -n "${{ github.event.inputs.VERSION_TYPE }}" ]; then
+            # Manual minor/major bump via workflow_dispatch
+            VERSION_TYPE="${{ github.event.inputs.VERSION_TYPE }}"
+            # Strip 'v' prefix if present
+            BASE_VERSION="${LATEST_TAG#v}"
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE_VERSION"
+
+            if [ "$VERSION_TYPE" = "major" ]; then
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+            elif [ "$VERSION_TYPE" = "minor" ]; then
+              MINOR=$((MINOR + 1))
+              PATCH=0
+            fi
+
+            NEXT_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+            echo "Manual $VERSION_TYPE bump: $LATEST_TAG -> $NEXT_VERSION"
+          else
+            # Auto patch bump on push to master
+            BASE_VERSION="${LATEST_TAG#v}"
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE_VERSION"
+            PATCH=$((PATCH + 1))
+            NEXT_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+            echo "Auto patch bump: $LATEST_TAG -> $NEXT_VERSION"
+          fi
+
+          # Normalize: a custom version typed without the prefix still tags v-style.
+          case "$NEXT_VERSION" in v*) ;; *) NEXT_VERSION="v$NEXT_VERSION" ;; esac
+
+          # Collision check runs HERE rather than at tag-push time: if the
+          # version is already taken (a workflow_dispatch replaying an
+          # existing CUSTOM_VERSION, mostly) there is nothing to build
+          # either, so bail before spending build time on images that would
+          # overwrite a released tag. The tag job re-checks defensively.
+          if git tag -l "$NEXT_VERSION" | grep -q "^$NEXT_VERSION$"; then
+            echo "::warning::Tag $NEXT_VERSION already exists — skipping build and tag."
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "next_version=$NEXT_VERSION" >> "$GITHUB_OUTPUT"
+
+  # ─── build + push all four release images ──────────────────────────
+  # One build per image, pushed as two tags:
+  #   :v<X.Y.Z>  — immutable, what Ring Promoter seeds and the k8sjob clones
+  #   :latest    — moving alias, kept for anything that still resolves
+  #               images by "latest"
+  # ─── smoke-test the Go server before anything is built ─────────────
+  # Runs on every merge to master. The cross-build is the expensive step, so a
+  # compile error or a failing test should stop the run in seconds. A red suite
+  # skips build -> auto-tag -> deploy, so Ring Promoter is never seeded with a
+  # version whose tests did not pass.
+  go-smoke:
+    name: Go build, vet & test
+    runs-on: self-hosted
+    timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
-      - name: Compute image tag (short SHA)
-        id: tag
-        run: echo "sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
 
-      - name: Registry login (SpectonCR)
-        if: ${{ env.DEPLOYMENT_TYPE == 'build' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
-        run: docker login "$IMAGE_REGISTRY" -u "${{ secrets.REGISTRY_USERNAME }}" -p "${{ secrets.REGISTRY_PASSWORD }}"
-
-      - name: Build & push server, web, python-sidecar (linux/amd64)
-        if: ${{ env.DEPLOYMENT_TYPE == 'build' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+      - name: Build, vet & test
+        working-directory: server
         run: |
           set -euo pipefail
-          SHA="${{ steps.tag.outputs.sha }}"
-          NS="$IMAGE_REGISTRY/$IMAGE_NAMESPACE"
+          go build ./...
+          go vet ./...
+          go test ./...
+
+  # The web image build type-checks too, but only ~an hour into the cross-build
+  # and after the Go image. tsc + lint on their own take seconds, so a missing
+  # import (PR #187 dropped SeoAgentClient's) fails here instead.
+  web-smoke:
+    name: Web typecheck & lint
+    runs-on: self-hosted
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/nextjs/package-lock.json
+
+      - name: Typecheck & lint
+        working-directory: web/nextjs
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run typecheck
+          npm run lint
+
+  build:
+    name: Build & push images
+    needs: [compute-version, go-smoke, web-smoke]
+    # Only fires when the computed version is actually new. Manual dispatches
+    # replaying an existing version don't trigger a rebuild — that image is
+    # already published under that tag.
+    if: needs.compute-version.outputs.should_build == 'true'
+    runs-on: self-hosted
+    # Cold cross-builds on the arm64 Mac (QEMU amd64) can still approach an hour;
+    # warm BuildKit/local/registry cache runs finish much sooner. 90m is a
+    # safety net — run 35727230956 was cancelled at the old 60m ceiling mid-push.
+    timeout-minutes: 90
+    permissions:
+      contents: read  # this job only reads source; tagging happens after it
+    steps:
+      - name: Checkout at the triggering commit
+        uses: actions/checkout@v4
+        with:
+          # The exact commit that triggered this run, not HEAD of master
+          # (which may have advanced by the time this job schedules). This is
+          # precisely the commit the auto-tag job will tag once every image
+          # here has been pushed.
+          ref: ${{ github.sha }}
+
+      - name: Pick LAN SpectonCR NodePort
+        id: push_host
+        run: |
+          set -euo pipefail
+          # Same registry k3s pulls as int-spectoncr.diytaxreturn.co.uk (repo is
+          # jobshout/<img>; hostname is only the client endpoint). debian007
+          # :30500 is connection-refused from this LAN; other workers answer.
+          # Every worker's :30500 NodePort fronts the SAME registry, so the push
+          # host is interchangeable — the build/assert steps fail over between
+          # these hosts when one drops off the LAN mid-run (node .23 flaps, which
+          # is what killed the #141 and #143 deploys at the post-push inspect).
+          REGISTRY_HOSTS="192.168.1.23 192.168.1.140 192.168.1.104 192.168.1.47 192.168.1.36"
+          # The runner's Docker VM (Colima) can lose its route to the LAN while
+          # the Mac keeps one; the builder container then gets "connection
+          # refused" from every NodePort (runs 36204498143, 36202354483). Relay
+          # through the host when that happens and push via the relay first.
+          RELAY_HOST=$(.github/scripts/registry-relay.sh "$REGISTRY_HOSTS" || true)
+          echo "RELAY_HOST=$RELAY_HOST" >> "$GITHUB_ENV"
+          PUSH=""
+          if [ -n "$RELAY_HOST" ]; then
+            PUSH="${RELAY_HOST}:30500"
+            REGISTRY_HOSTS="$RELAY_HOST $REGISTRY_HOSTS"
+          fi
+          for h in $REGISTRY_HOSTS; do
+            [ -n "$PUSH" ] && break
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 5 \
+              "http://${h}:30500/v2/" || echo 000)
+            if [ "$code" = "401" ] || [ "$code" = "200" ]; then
+              PUSH="${h}:30500"
+              break
+            fi
+          done
+          if [ -z "$PUSH" ]; then
+            echo "::error::SpectonCR NodePort :30500 not reachable on the LAN. Do not fall back to lon1 — blob PUTs 502 at 180s on that path."
+            exit 1
+          fi
+          echo "host=$PUSH" >> "$GITHUB_OUTPUT"
+          echo "PUSH_REGISTRY=$PUSH" >> "$GITHUB_ENV"
+          echo "REGISTRY_HOSTS=$REGISTRY_HOSTS" >> "$GITHUB_ENV"
+          echo "Pushing via http://$PUSH (k8s still pulls $IMAGE_REGISTRY)"
+
+      - name: Registry login (SpectonCR)
+        env:
+          PUSH_REGISTRY: ${{ steps.push_host.outputs.host }}
+        run: |
+          set -euo pipefail
+          docker login "$IMAGE_REGISTRY" -u "${{ secrets.REGISTRY_USERNAME }}" -p "${{ secrets.REGISTRY_PASSWORD }}"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          p = Path.home() / ".docker" / "config.json"
+          cfg = json.loads(p.read_text()) if p.exists() else {}
+          auths = cfg.setdefault("auths", {})
+          want = os.environ["IMAGE_REGISTRY"]
+          src = next((v for k, v in auths.items() if want in k), None)
+          if not src:
+              raise SystemExit(f"docker login did not store auth for {want}")
+          # Every candidate NodePort host reuses the same registry credentials so
+          # the build/assert steps can fail over between them without re-login.
+          hosts = [f"{h}:30500" for h in os.environ["REGISTRY_HOSTS"].split()]
+          for host in hosts:
+              auths[host] = src
+              auths[f"http://{host}"] = src
+          p.write_text(json.dumps(cfg, indent=2) + "\n")
+          print(f"reused {want} credentials for {', '.join(hosts)}")
+          PY
+
+      - name: Build & push server, web, python-sidecar, review-bot (linux/amd64)
+        env:
+          PUSH_REGISTRY: ${{ steps.push_host.outputs.host }}
+        run: |
+          set -euo pipefail
+          # Fresh host relay for this step (no-op when containers reach the LAN).
+          [ -n "${RELAY_HOST:-}" ] && .github/scripts/registry-relay.sh "192.168.1.23 192.168.1.140 192.168.1.104 192.168.1.47 192.168.1.36" >/dev/null || true
+          VERSION="${{ needs.compute-version.outputs.next_version }}"
+          NS="$PUSH_REGISTRY/$IMAGE_NAMESPACE"
+          CACHE_ROOT="${HOME}/.cache/jobshout-buildkit"
+          mkdir -p "$CACHE_ROOT"
 
           # k3s1 nodes are amd64 but this runner is an arm64 Mac, so cross-build
           # for linux/amd64 with buildx (QEMU) and push directly — same as
@@ -74,35 +347,324 @@ jobs:
           # failed on the cluster with "no match for platform in manifest"
           # (ImagePullBackOff). A docker-container builder is required for
           # --platform cross-builds; create it once (idempotent).
-          docker buildx inspect jsbuilder >/dev/null 2>&1 \
-            || docker buildx create --name jsbuilder --driver docker-container --bootstrap
-          bx() { docker buildx build --builder jsbuilder --platform linux/amd64 --push "$@"; }
+          #
+          # Provenance/SBOM attestations are off on purpose. buildx otherwise
+          # pushes an OCI index with an unknown/unknown attestation that k3s
+          # containerd rejects with the same "no match for platform" error —
+          # which is what happened to web/server:40e5c53 on int.
+          #
+          # jobshout-lan (not the shared jsbuilder) so HTTP NodePort is allowed
+          # without changing other workflows on this Mac.
+          #
+          # Do NOT `buildx rm` on every run — that wiped the BuildKit layer cache
+          # and forced cold QEMU rebuilds (~60m, cancelled by the old timeout on
+          # run 35727230956). Recreate only when the insecure-registry config
+          # changes; otherwise keep the builder so mounts + layer cache warm up.
+          CFG="${RUNNER_TEMP:-/tmp}/jobshout-buildkitd.toml"
+          HASH_FILE="$CACHE_ROOT/builder-cfg.sha256"
+          python3 - "$CFG" <<'PY'
+          from pathlib import Path
+          import os, sys
+          cfg = sys.argv[1]
+          # Trust every candidate NodePort host over HTTP so the push and the
+          # post-push inspect/load can fail over between them when one node drops.
+          hosts = [f"{h}:30500" for h in os.environ["REGISTRY_HOSTS"].split()]
+          # The host relay is plain HTTP only: with `insecure` BuildKit tries
+          # HTTPS first and the relay's upstream answers that with EOF.
+          relay = f'{os.environ.get("RELAY_HOST", "")}:30500'
+          Path(cfg).write_text("".join(
+              f'[registry."{h}"]\n  http = true\n' + ("" if h == relay else "  insecure = true\n")
+              for h in hosts
+          ))
+          PY
+          CFG_HASH=$(shasum -a 256 "$CFG" | awk '{print $1}')
+          need_create=1
+          if docker buildx inspect jobshout-lan >/dev/null 2>&1; then
+            if [ -f "$HASH_FILE" ] && [ "$(cat "$HASH_FILE")" = "$CFG_HASH" ]; then
+              echo "Reusing existing jobshout-lan builder (config unchanged)"
+              need_create=0
+            else
+              echo "buildkitd.toml changed — recreating jobshout-lan builder"
+              docker buildx rm -f jobshout-lan >/dev/null 2>&1 || true
+            fi
+          fi
+          if [ "$need_create" -eq 1 ]; then
+            docker buildx create --name jobshout-lan --driver docker-container --bootstrap --config "$CFG"
+            echo "$CFG_HASH" > "$HASH_FILE"
+          fi
 
-          bx -f server/Dockerfile -t "$NS/server:$SHA" -t "$NS/server:latest" server
+          # Local cache survives builder recreate; registry cache survives Mac
+          # reboot / builder wipe. mode=max stores intermediate layers (deps,
+          # apt, go mod) so code-only changes rebuild the final stage only.
+          bx() {
+            local cache_name="$1"; shift
+            local cache_dir="$CACHE_ROOT/$cache_name"
+            mkdir -p "$cache_dir"
+            # NS is host:30500/jobshout — cache lives beside the release images.
+            local cache_ref="${NS}/buildcache-${cache_name}:latest"
+            docker buildx build --builder jobshout-lan --platform linux/amd64 \
+              --provenance=false --sbom=false --push \
+              --cache-from "type=local,src=${cache_dir}" \
+              --cache-from "type=registry,ref=${cache_ref}" \
+              --cache-to "type=local,dest=${cache_dir},mode=max" \
+              --cache-to "type=registry,ref=${cache_ref},mode=max,ignore-error=true" \
+              "$@"
+          }
 
+          # Every :30500 NodePort fronts the SAME registry backend, so a pushed
+          # image resolves through any live node — and a node that drops off the
+          # LAN mid-run (node .23 flaps: this killed the #141/#143/#144 deploys at
+          # the post-push inspect) is recoverable. Run a shell FUNCTION against
+          # EACH host in turn (it reads $NS afresh) and let the operation itself be
+          # the health test — do NOT trust a separate curl probe, which returned no
+          # host on the runner and left #144 pinned to the dead .23 for all 8
+          # tries. Retry the whole rotation with backoff so the release rides out a
+          # flap. A genuine build error still fails, after every pass.
+          REGISTRY_HOSTS="${REGISTRY_HOSTS:-192.168.1.23 192.168.1.140 192.168.1.104 192.168.1.47 192.168.1.36}"
+          retry_reg() {
+            local max="${RETRY_MAX:-12}" nap="${RETRY_SLEEP:-10}" pass=1 h
+            while [ "$pass" -le "$max" ]; do
+              for h in ${REGISTRY_HOSTS}; do
+                NS="${h}:30500/$IMAGE_NAMESPACE"
+                if "$@"; then return 0; fi
+                echo "pass ${pass}/${max}: ${h}:30500 failed for: $*" >&2
+              done
+              if [ "$pass" -lt "$max" ]; then
+                echo "pass ${pass}/${max}: all hosts failed for: $* — retrying in ${nap}s" >&2
+                sleep "$nap"
+              fi
+              pass=$((pass + 1))
+            done
+            echo "::error::still failing after ${max} passes over [$REGISTRY_HOSTS]: $*" >&2
+            return 1
+          }
+
+          # Per-image build+push wrappers read $NS afresh so retry_reg can re-pin
+          # them to a live node between attempts. First arg to bx is the cache key.
+          push_server() { bx server --build-arg VERSION="$VERSION" -f server/Dockerfile -t "$NS/server:$VERSION" -t "$NS/server:latest" server; }
           # NEXT_PUBLIC_* are baked at BUILD time, so build same-origin (empty
           # base): the browser calls /api and /ws on whichever host serves it, so
           # ONE image is valid for every ring.
-          bx --build-arg NEXT_PUBLIC_API_URL="" --build-arg NEXT_PUBLIC_WS_URL="" \
-            -f web/nextjs/Dockerfile -t "$NS/web:$SHA" -t "$NS/web:latest" web/nextjs
+          push_web() { bx web --build-arg NEXT_PUBLIC_API_URL="" --build-arg NEXT_PUBLIC_WS_URL="" -f web/nextjs/Dockerfile -t "$NS/web:$VERSION" -t "$NS/web:latest" web/nextjs; }
+          push_sidecar() { bx python-sidecar -f python-sidecar/Dockerfile -t "$NS/python-sidecar:$VERSION" -t "$NS/python-sidecar:latest" python-sidecar; }
+          push_reviewbot() { bx review-bot -f review-bot/Dockerfile -t "$NS/review-bot:$VERSION" -t "$NS/review-bot:latest" review-bot; }
 
-          bx -f python-sidecar/Dockerfile \
-            -t "$NS/python-sidecar:$SHA" -t "$NS/python-sidecar:latest" python-sidecar
+          # Build all four in parallel — they share the BuildKit builder but use
+          # independent cache dirs/refs. Wall-clock drops from sum(images) toward
+          # max(images); review-bot (QEMU apt+node) is usually the long pole.
+          fail=0
+          retry_reg push_server &
+          pids="$!"
+          retry_reg push_web &
+          pids="$pids $!"
+          retry_reg push_sidecar &
+          pids="$pids $!"
+          retry_reg push_reviewbot &
+          pids="$pids $!"
+          for pid in $pids; do
+            wait "$pid" || fail=1
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::one or more parallel image builds failed"
+            exit 1
+          fi
 
+      - name: Assert pushed images are linux/amd64
+        env:
+          PUSH_REGISTRY: ${{ steps.push_host.outputs.host }}
+        run: |
+          set -euo pipefail
+          # Fresh host relay for this step (no-op when containers reach the LAN).
+          [ -n "${RELAY_HOST:-}" ] && .github/scripts/registry-relay.sh "192.168.1.23 192.168.1.140 192.168.1.104 192.168.1.47 192.168.1.36" >/dev/null || true
+          VERSION="${{ needs.compute-version.outputs.next_version }}"
+          NS="$PUSH_REGISTRY/$IMAGE_NAMESPACE"
+
+          # Every :30500 NodePort fronts the SAME registry backend, so an image
+          # pushed via a node that has since dropped off the LAN is still
+          # resolvable via a live one. Run a shell FUNCTION against EACH host in
+          # turn (it reads $NS afresh) and let the operation itself be the health
+          # test — the #141/#143/#144 deploys failed here because the run stayed
+          # pinned to the dead node .23 through the whole retry window. Retry the
+          # rotation with backoff so a flap is ridden out.
+          REGISTRY_HOSTS="${REGISTRY_HOSTS:-192.168.1.23 192.168.1.140 192.168.1.104 192.168.1.47 192.168.1.36}"
+          retry_reg() {
+            local max="${RETRY_MAX:-12}" nap="${RETRY_SLEEP:-10}" pass=1 h
+            while [ "$pass" -le "$max" ]; do
+              for h in ${REGISTRY_HOSTS}; do
+                NS="${h}:30500/$IMAGE_NAMESPACE"
+                if "$@"; then return 0; fi
+                echo "pass ${pass}/${max}: ${h}:30500 failed for: $*" >&2
+              done
+              if [ "$pass" -lt "$max" ]; then
+                echo "pass ${pass}/${max}: all hosts failed for: $* — retrying in ${nap}s" >&2
+                sleep "$nap"
+              fi
+              pass=$((pass + 1))
+            done
+            echo "::error::still failing after ${max} passes over [$REGISTRY_HOSTS]: $*" >&2
+            return 1
+          }
+
+          # A single-platform OCI manifest does not print "linux/amd64" in
+          # `imagetools inspect` text — only indexes do. Reject attestation
+          # indexes / arm64 lists; prove amd64 by running the image.
+          # Inspect/load through jobshout-lan so HTTP NodePort is allowed.
+          assert_not_multiarch_junk() {
+            local img="$NS/$1"
+            echo "Inspecting $img"
+            docker buildx imagetools inspect --builder jobshout-lan "$img"
+            python3 - "$img" <<'PY'
+          import json, subprocess, sys
+          img = sys.argv[1]
+          raw = subprocess.check_output(
+              ["docker", "buildx", "imagetools", "inspect", "--builder", "jobshout-lan", "--raw", img]
+          )
+          m = json.loads(raw)
+          mt = m.get("mediaType") or ""
+          if "index" not in mt and "manifest.list" not in mt:
+              print(f"OK {img} is a single manifest (runtime smoke checks arch)")
+              sys.exit(0)
+          plats = []
+          for e in m.get("manifests") or []:
+              p = e.get("platform") or {}
+              os_, arch = p.get("os") or "", p.get("architecture") or ""
+              if os_ == "unknown" or arch == "unknown":
+                  print(f"::error::{img}: attestation/unknown platform in index: {p}", file=sys.stderr)
+                  sys.exit(1)
+              if arch == "arm64":
+                  print(f"::error::{img}: index includes linux/arm64", file=sys.stderr)
+                  sys.exit(1)
+              plats.append(f"{os_}/{arch}")
+          if "linux/amd64" not in plats:
+              print(f"::error::{img}: index has no linux/amd64 ({plats})", file=sys.stderr)
+              sys.exit(1)
+          print(f"OK {img} index platforms={plats}")
+          PY
+          }
+
+          # Runtime arch smoke is the AUTHORITATIVE amd64 proof: pull each image
+          # back THROUGH the buildkit builder (the network path that just pushed
+          # it) and run it under --platform=linux/amd64. This does not depend on a
+          # curl to :30500 from the runner host, the path that flaked in #144.
+          echo "Runtime arch smoke (uname -m must be x86_64 under --platform=linux/amd64)"
+          load_lan() {
+            local src="$NS/$1" local_tag="$2"
+            printf 'FROM %s\n' "$src" | docker buildx build --builder jobshout-lan \
+              --platform linux/amd64 --provenance=false --load -t "$local_tag" -
+          }
+          retry_reg load_lan "server:$VERSION" jobshout/server:smoke
+          retry_reg load_lan "web:$VERSION" jobshout/web:smoke
+          retry_reg load_lan "python-sidecar:$VERSION" jobshout/python-sidecar:smoke
+          retry_reg load_lan "review-bot:$VERSION" jobshout/review-bot:smoke
+          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh jobshout/server:smoke \
+            -c 'test -x /app/jobshout-server && uname -m | grep -qx x86_64'
+          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh jobshout/web:smoke \
+            -c 'uname -m | grep -qx x86_64'
+          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh jobshout/python-sidecar:smoke \
+            -c 'uname -m | grep -qx x86_64'
+          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh jobshout/review-bot:smoke \
+            -c 'uname -m | grep -qx x86_64 && command -v opencode >/dev/null && command -v git >/dev/null'
+
+          # Best-effort belt-and-suspenders: reject an accidental multi-arch /
+          # attestation index. One rotation over the hosts (no long retry) — the
+          # runtime smoke above already proved amd64, so a registry blip on the
+          # host-network inspect path is a warning, not a release blocker.
+          for img in "server:$VERSION" "web:$VERSION" "python-sidecar:$VERSION" "review-bot:$VERSION"; do
+            RETRY_MAX=1 retry_reg assert_not_multiarch_junk "$img" \
+              || echo "::warning::index check skipped for $img (registry unreachable over host network); runtime smoke already proved linux/amd64"
+          done
+
+  # ─── claim the version: push the tag + cut the release ─────────────
+  # Runs only when build succeeded (the default `needs` semantics, no
+  # always() here — that is the whole point of the ordering). A red build
+  # therefore leaves no tag and no release, and the same version number is
+  # retried on the next push.
+  auto-tag:
+    name: Create Incremental Tag
+    needs: [compute-version, build]
+    runs-on: self-hosted
+    permissions:
+      contents: write  # the only job that writes to the repo
+    outputs:
+      tag_created: ${{ steps.create_tag.outputs.tag_created }}
+    steps:
+      - name: Checkout the built commit with full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Tag exactly what was built, not HEAD of master.
+          ref: ${{ github.sha }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create and push tag
+        id: create_tag
+        run: |
+          NEXT_VERSION="${{ needs.compute-version.outputs.next_version }}"
+
+          # compute-version already checked this and would have skipped the
+          # build; re-check because the build takes a while and a manual tag
+          # push in that window must not be clobbered.
+          #
+          # ls-remote, not `git tag -l`: the race being guarded against is a
+          # tag appearing ON THE REMOTE during the build, which the local
+          # clone (taken before that push) cannot see.
+          if git ls-remote --exit-code --tags origin "refs/tags/$NEXT_VERSION" >/dev/null 2>&1; then
+            echo "::warning::Tag $NEXT_VERSION appeared during the build, skipping creation"
+            echo "tag_created=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Creating tag: $NEXT_VERSION"
+            git tag -a "$NEXT_VERSION" -m "Release $NEXT_VERSION"
+            git push origin "$NEXT_VERSION"
+            echo "tag_created=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        if: steps.create_tag.outputs.tag_created == 'true'
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ needs.compute-version.outputs.next_version }}
+          name: Release ${{ needs.compute-version.outputs.next_version }}
+          generate_release_notes: true
+
+  # ─── seed Ring Promoter with the tagged version ────────────────────
+  # The seed carries the v<X.Y.Z> tag, never a commit SHA: RP's k8sjob
+  # git-clones this repo at the seeded value with `git clone --branch`,
+  # which resolves tags but not raw SHAs.
   deploy:
     name: Seed Ring Promoter (${{ github.event.inputs.TARGET_ENV || 'int' }})
-    needs: [build]
+    needs: [compute-version, build, auto-tag]
     runs-on: self-hosted
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    # Two entry points:
+    #   - deploy-only dispatch (pinned IMAGE_TAG): its needs are all skipped,
+    #     so always() + the first arm below lets it run standalone.
+    #   - pushes and build-and-deploy dispatches: seed only once the tag is
+    #     live, so RP never records a version it cannot git-clone. A failed
+    #     build/tag therefore seeds nothing.
+    if: >-
+      always()
+      && (github.event_name != 'workflow_dispatch' || inputs.DEPLOYMENT_TYPE != 'build')
+      && (
+        (github.event_name == 'workflow_dispatch' && inputs.DEPLOYMENT_TYPE == 'deploy')
+        || needs.auto-tag.outputs.tag_created == 'true'
+      )
     steps:
-      - name: Seed Ring Promoter — RP runs the k8sjob deploy
-        if: ${{ env.DEPLOYMENT_TYPE == 'deploy' || env.DEPLOYMENT_TYPE == 'build-and-deploy' }}
+      - name: Seed Ring Promoter and wait until the ring is healthy
         env:
           RP_API_TOKEN: ${{ secrets.RP_API_TOKEN }}
           RP_URL: ${{ secrets.RP_URL }}
         run: |
           set -euo pipefail
           TAG="${{ github.event.inputs.IMAGE_TAG }}"
-          [ -z "$TAG" ] && TAG="${GITHUB_SHA::7}"
+          [ -z "$TAG" ] && TAG="${{ needs.compute-version.outputs.next_version }}"
           RP="${RP_URL:-https://rp.workstation.co.uk}"
           if [ -z "${RP_API_TOKEN:-}" ]; then
             echo "::error::RP_API_TOKEN is not set — cannot seed Ring Promoter."
@@ -120,6 +682,123 @@ jobs:
             -d "$(printf '{"ring":"%s","version":"%s"}' "$TARGET_ENV" "$TAG")" || echo 000)
           echo "seed -> HTTP ${code} :: $(cat /tmp/seed.out)"
           case "${code}" in
-            200|202) echo "Seeded — Ring Promoter is running the deploy. Track: ${RP}/?app=jobshout" ;;
+            200|202) ;;
             *) echo "::error::Ring Promoter seed failed (HTTP ${code})"; exit 1 ;;
           esac
+
+          JOB_ID=$(python3 -c 'import json,sys; print(json.load(open("/tmp/seed.out")).get("job_id") or "")')
+          if [ -z "$JOB_ID" ]; then
+            echo "::error::seed response had no job_id — cannot wait for rollout"
+            exit 1
+          fi
+          echo "Waiting for Ring Promoter job ${JOB_ID} (version ${TAG})…"
+          echo "Track: ${RP}/?app=jobshout"
+
+          python3 - "$RP" "$RP_API_TOKEN" "$JOB_ID" "$TAG" "$TARGET_ENV" <<'PY'
+          import json, sys, time, urllib.error, urllib.request
+
+          rp, token, job_id, tag, ring = sys.argv[1:6]
+          url = f"{rp}/api/apps/jobshout/jobs/{job_id}"
+          rings_url = f"{rp}/api/apps/jobshout/rings"
+          deadline = time.time() + 20 * 60
+          last = None
+
+          def dump_logs(body):
+              for step in body.get("steps") or []:
+                  print(f"--- step {step.get('id')} status={step.get('status')} ---")
+                  for line in step.get("logs") or []:
+                      print(line)
+
+          def seeded_ring():
+              """State of the ring THIS run seeded, or None if unreadable."""
+              req = urllib.request.Request(
+                  rings_url, headers={"Authorization": f"Bearer {token}"}
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as resp:
+                      rings = json.load(resp).get("rings") or []
+              except Exception as e:  # transient edge/API blip: try again next tick
+                  print(f"::warning::rings poll failed: {e}")
+                  return None
+              for r in rings:
+                  if (r.get("ring") or {}).get("name") == ring:
+                      return r
+              return None
+
+          while time.time() < deadline:
+              req = urllib.request.Request(
+                  url, headers={"Authorization": f"Bearer {token}"}
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as resp:
+                      body = json.load(resp)
+              except urllib.error.HTTPError as e:
+                  print(f"::warning::job poll HTTP {e.code}")
+                  time.sleep(15)
+                  continue
+              status = (body.get("status") or "").lower()
+              if body != last:
+                  print(f"RP job {job_id} status={status}")
+                  last = {k: body.get(k) for k in ("status", "finished_at")}
+
+              # A seed with auto-promote on does not finish when OUR ring is
+              # done — RP carries the version on to test and acc, and the job
+              # stays "running" for the whole cascade. This step is responsible
+              # for the ring it seeded; promotion beyond it is RP's business and
+              # visible in the RP UI. So succeed as soon as that ring reports
+              # the seeded version and healthy, instead of timing out mid-chain
+              # and reporting a failure for a deploy that worked.
+              if status not in ("failed", "failure", "error", "cancelled"):
+                  st = seeded_ring()
+                  if st and st.get("current_version") == tag and st.get("healthy"):
+                      print(f"Deployed {tag} to {ring} and healthy.")
+                      if status != "success":
+                          print(f"RP job {job_id} is still {status} — it is promoting "
+                                f"onward from {ring}; follow it at {rp}/?app=jobshout")
+                      sys.exit(0)
+
+              if status == "success":
+                  result = body.get("result") or {}
+                  state = result.get("state") or {}
+                  current = state.get("current_version") or ""
+                  dump_logs(body)
+                  if result.get("success") is False:
+                      print("::error::RP job marked success but result.success is false")
+                      sys.exit(1)
+                  if current and current != tag:
+                      print(f"::error::{ring} current_version={current} != seeded {tag}")
+                      sys.exit(1)
+                  if not current:
+                      print("::warning::RP did not return current_version; trusting job success")
+                  print(f"Deployed {tag} and healthy (current_version={current or tag})")
+                  sys.exit(0)
+              if status in ("failed", "failure", "error", "cancelled"):
+                  dump_logs(body)
+                  msg = (body.get("result") or {}).get("message") or status
+                  print(f"::error::Ring Promoter deploy failed: {msg}")
+                  sys.exit(1)
+              time.sleep(15)
+
+          print(f"::error::{ring} did not reach {tag} and healthy within 20m")
+          sys.exit(1)
+          PY
+
+  # ─── publish + seed the marketplace at the SAME version ────────────
+  # One version line across both Ring Promoter apps. This runs after auto-tag
+  # because RP's k8sjob clones this repo at the seeded tag, so the tag has to
+  # exist on the remote first. The called workflow rebuilds the marketplace
+  # images only when something under jobshout-com/ moved; otherwise it copies
+  # the previous digest onto this version, which costs seconds.
+  #
+  # Deploy-only dispatches skip auto-tag and pin a pre-existing IMAGE_TAG, so
+  # they do not come through here — dispatch deploy-jobshout-com.yml directly
+  # to re-seed the marketplace on its own.
+  marketplace:
+    name: JobShout.com at ${{ needs.compute-version.outputs.next_version }}
+    needs: [compute-version, auto-tag]
+    if: needs.auto-tag.outputs.tag_created == 'true'
+    uses: ./.github/workflows/deploy-jobshout-com.yml
+    with:
+      VERSION: ${{ needs.compute-version.outputs.next_version }}
+      TARGET_ENV: ${{ github.event.inputs.TARGET_ENV || 'int' }}
+    secrets: inherit

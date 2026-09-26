@@ -7,7 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/jobshout/server/internal/llm"
+	"github.com/jobshout/server/internal/audience"
 )
 
 // Topic is a subject worth writing about, discovered rather than supplied.
@@ -57,6 +57,17 @@ type DiscoverRequest struct {
 	// sweep would return nothing nearly every time. Each area is therefore also
 	// searched directly, and the results merged into the pool.
 	Focus []string
+	// Audience is the audience.Profile key the discovered topics will be
+	// written up for. Empty is the default developer profile.
+	//
+	// It steers selection, not just phrasing. The candidate filter for a
+	// developer blog rejects anything that is not "genuinely about software, AI
+	// or infrastructure" — which is exactly the filter that would throw away
+	// every subject a business briefing wants. A reader that cannot steer
+	// discovery only gets to rewrite topics somebody else chose.
+	Audience string
+	// Industry narrows discovery to a sector, alongside Focus. Free text.
+	Industry string
 	// Model optionally overrides the LLM.
 	Model string
 }
@@ -147,7 +158,7 @@ func (a *Agent) gatherCandidates(ctx context.Context, req DiscoverRequest) ([]Tr
 	if err != nil {
 		// With focus areas there is another way to fill the pool, so a failed
 		// sweep is survivable. Without them there is nothing else to try.
-		if len(req.Focus) == 0 {
+		if len(searchAreas(req)) == 0 {
 			return nil, err
 		}
 		a.logger.Warn("research: trending sweep failed, falling back to focus searches",
@@ -155,11 +166,7 @@ func (a *Agent) gatherCandidates(ctx context.Context, req DiscoverRequest) ([]Tr
 		items = nil
 	}
 
-	for _, area := range req.Focus {
-		area = strings.TrimSpace(area)
-		if area == "" {
-			continue
-		}
+	for _, area := range searchAreas(req) {
 		found, serr := a.sources.Search(ctx, area, focusSearchLimit)
 		if serr != nil {
 			a.logger.Warn("research: focus search failed",
@@ -176,8 +183,58 @@ func (a *Agent) gatherCandidates(ctx context.Context, req DiscoverRequest) ([]Tr
 	return dedupeTrending(items), nil
 }
 
+// searchAreas are the subjects searched directly, on top of the trending sweep.
+//
+// The focus areas, plus the industry crossed with each of them. An industry
+// alone is too broad to search usefully — "logistics" returns the trade press —
+// and a focus area alone finds the general story rather than the one that
+// matters to the sector, so the useful query is the pair. With no focus areas
+// the industry is searched on its own, because something on-sector beats a
+// generic sweep for a reader who was promised their sector.
+func searchAreas(req DiscoverRequest) []string {
+	sector := audience.NormalizeIndustry(req.Industry)
+
+	out := make([]string, 0, len(req.Focus)*2+1)
+	seen := map[string]struct{}{}
+	add := func(q string) {
+		q = strings.TrimSpace(q)
+		if q == "" {
+			return
+		}
+		key := strings.ToLower(q)
+		if _, dup := seen[key]; dup {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, q)
+	}
+
+	for _, area := range req.Focus {
+		add(area)
+		if sector != "" {
+			add(strings.TrimSpace(area) + " " + sector)
+		}
+	}
+	if len(req.Focus) == 0 {
+		add(sector)
+	}
+	return out
+}
+
+// discoverSpare is how many proposals beyond the requested count the model is
+// asked for.
+//
+// Proposals that repeat something already written are dropped after the model
+// answers. Asked for exactly one, a daily schedule with narrow focus areas got
+// back one subject close to last week's article, dropped it, and failed with
+// "found nothing worth writing about" on most days. The spares are what is left
+// to choose from when that happens; selectByFocus still returns only count.
+const discoverSpare = 3
+
 // chooseTopics asks the model to turn trending items into writable subjects.
 func (a *Agent) chooseTopics(ctx context.Context, req DiscoverRequest, items []TrendingItem, count int) ([]Topic, error) {
+	reader := audience.For(req.Audience)
+
 	var b strings.Builder
 	for i, it := range items {
 		published := "unknown date"
@@ -206,8 +263,15 @@ func (a *Agent) chooseTopics(ctx context.Context, req DiscoverRequest, items []T
 		focus = "- " + strings.Join(req.Focus, "\n- ")
 	}
 
-	prompt := fmt.Sprintf(`You are choosing what a technical blog should write about this week. The blog
-covers software engineering, AI and infrastructure, for a developer audience.
+	// The sector block is its own paragraph when there is one and nothing at
+	// all when there is not, rather than an empty heading the model has to
+	// interpret — the same treatment the focus areas get above.
+	sector := audience.IndustryDiscoveryBrief(req.Industry)
+	if sector != "" {
+		sector = "\n" + sector + "\n"
+	}
+
+	prompt := fmt.Sprintf(`%s
 
 WHAT IS TRENDING RIGHT NOW:
 %s
@@ -217,8 +281,8 @@ ALREADY WRITTEN ABOUT RECENTLY — do not propose these again, or close variants
 
 FOCUS AREAS — what this blog wants to cover:
 %s
-
-Choose the %d best subjects to write about.
+%s
+Choose the %d best subjects to write about, best first.
 
 Prefer subjects that sit squarely inside the focus areas above, and mark those
 with "in_focus": true. If nothing in the candidates is really about those areas,
@@ -227,35 +291,27 @@ pretend something is on-subject when it is not. The honesty of that flag matters
 more than filling the quota.
 
 Turn each into a TOPIC, not a headline. A trending item is one event; a topic is
-something an engineer can read 1000 words about and come away more capable.
-"Cilium 1.18 released" is an event. "What a kube-proxy-free datapath changes for
-cluster operators" is a topic.
+something %s can read about and come away more capable.
+%s
 
 Choose subjects that:
-- Are genuinely about software, AI or infrastructure. Trending lists carry
-  politics, business and general news — ignore all of it.
-- Have enough substance for a technical article, not just an announcement.
-- A working engineer would actually benefit from understanding.
+%s
 
 Avoid:
-- Pure funding, acquisition and company-drama stories.
-- Anything you cannot imagine a code example or a concrete trade-off in.
+%s
 - Subjects too close to the already-written list above.
 
-For each, also write the CONTEXT: who it is for and what angle to take, in the
-form you would brief a writer. And a one-line RATIONALE for why it is worth
-writing now.
+For each, also write the CONTEXT: what angle to take for %s, in the form you
+would brief a writer. And a one-line RATIONALE for why it is worth writing now.
 
 Reference the candidate numbers you drew on in "seeds".
 
 Respond with JSON only, in exactly this shape:
 {"topics": [{"topic": "...", "context": "...", "rationale": "...", "seeds": [0, 4], "in_focus": true}]}`,
-		b.String(), avoid, focus, count)
-
-	resp, err := a.generate(ctx, req.Model, prompt)
-	if err != nil {
-		return nil, fmt.Errorf("research: discover: %w", err)
-	}
+		reader.DiscoveryLine(),
+		b.String(), avoid, focus, sector, count+discoverSpare,
+		reader.Reader, reader.TopicExample,
+		reader.PreferBullets(), reader.RejectBullets(), reader.Reader)
 
 	var parsed struct {
 		Topics []struct {
@@ -266,8 +322,11 @@ Respond with JSON only, in exactly this shape:
 			InFocus   bool   `json:"in_focus"`
 		} `json:"topics"`
 	}
-	if err := llm.DecodeJSON(resp, &parsed); err != nil {
-		return nil, fmt.Errorf("research: discover: parse response: %w", err)
+	// generateJSON repairs what it can and asks once more when it cannot: a
+	// reply that is almost JSON was failing a whole scheduled run with
+	// "parse response: invalid character".
+	if err := a.generateJSON(ctx, req.Model, "choosing topics", prompt, maxResearchTokens, &parsed); err != nil {
+		return nil, fmt.Errorf("research: discover: %w", err)
 	}
 
 	out := make([]Topic, 0, len(parsed.Topics))
@@ -300,7 +359,7 @@ Respond with JSON only, in exactly this shape:
 			InFocus:   t.InFocus,
 		})
 	}
-	return selectByFocus(out, count, len(req.Focus) > 0), nil
+	return selectByFocus(confirmFocus(out, req.Focus), count, len(req.Focus) > 0), nil
 }
 
 // selectByFocus takes up to count topics, preferring ones inside the focus

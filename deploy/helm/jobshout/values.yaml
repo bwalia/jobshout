@@ -6,9 +6,12 @@
 
 env: int
 # Public host per environment. jobshout.co.uk has no wildcard, so each host needs
-# a Cloudflare CNAME -> pop0.wslproxy.com plus a wslproxy vhost -> the k3s Traefik
+# a Cloudflare CNAME -> lon1.pop0.uk plus a wslproxy vhost -> the k3s Traefik
 # edge (see .github/workflows/register-edge-vhost.yml).
 host: int.jobshout.co.uk
+# Extra public hosts that serve the same ingress (e.g. www alongside apex).
+# Each entry still needs its own CNAME + wslproxy vhost via register-edge-vhost.
+hostAliases: []
 
 image:
   # int-spectoncr.diytaxreturn.co.uk (via the pop1 edge) is reachable from the
@@ -17,8 +20,8 @@ image:
   # the NodePort's auth realm is int-spectoncr.diytaxreturn.co.uk.
   registry: int-spectoncr.diytaxreturn.co.uk
   namespace: jobshout
-  # server / web / python-sidecar images share this tag (git SHA), injected at
-  # deploy time via --set image.tag=<sha>.
+  # server / web / python-sidecar / review-bot images share this tag (git
+  # release like v1.0.8), injected at deploy time via --set image.tag=<version>.
   tag: latest
   pullPolicy: IfNotPresent
   pullSecret: jobshout-registry
@@ -59,6 +62,8 @@ secrets:
   databasePassword: ""
   jwtSecret: ""
   openaiApiKey: ""
+  # Set via extraSecretRefs or --set-string; never committed here.
+  geminiApiKey: ""
   # Set via --set-string or Vault; never committed here.
   ollamaJwtSecret: ""
   # Gateway secret for strix-service. Distinct from ollama/image on purpose.
@@ -79,6 +84,16 @@ cms:
   timeout: "30s"
   authorName: "JobShout Article Writer"
 
+# JobShout.com Insights (jobshout.com/insights). The jobshout-com chart is
+# installed into the same ring namespace, so its API is reachable by Service
+# name and its jobshout-com-internal Secret (JOBSHOUT_INTERNAL_TOKEN) can be
+# mounted here. Empty apiURL turns the destination off.
+insights:
+  apiURL: "http://jobshout-com-api:8088"
+  # The public jobshout.com site for this ring, for "View on jobshout.com"
+  # links on published articles. Set per ring.
+  siteURL: ""
+
 # In-cluster nginx gateway. The wslproxy edge routes the whole host to a single
 # backend, so the ingress points at this gateway and nginx fans traffic out by
 # path (/api + /webhooks -> API, everything else -> web), same as beaconpulse.
@@ -86,13 +101,18 @@ gateway:
   enabled: true
   image: nginx:1.27-alpine
   resolver: "10.43.0.10"   # k3s cluster DNS (kube-dns ClusterIP)
+  # /api/ only. Career scoring keeps one request open for a model call per job,
+  # and the handler budgets 10m for it, so nginx has to outlast that or it
+  # answers 504 while the work is still running. Everything else stays on the
+  # 300s default.
+  apiReadTimeout: "600s"
   resources:
     requests: { cpu: 50m, memory: 64Mi }
     limits: { cpu: 500m, memory: 128Mi }
 
 ingress:
   enabled: true
-  className: wslproxy
+  className: traefik
   clusterIssuer: main-issuer
   tls: true
   annotations: {}
@@ -104,7 +124,14 @@ ai:
   enabled: true
   provider: ollama
   ollamaBaseURL: "https://ollama.workstation.co.uk"
-  ollamaModel: "llama3:latest"
+  # Worker model: research, article discovery/writing, mail classification.
+  # It must be one the shared host keeps loaded. That host pins models in
+  # memory indefinitely (qwen3-coder:30b, qwen3:30b-a3b, llama3.1:8b), so a
+  # model outside that set never gets loaded: llama3:latest calls waited with no
+  # first token until the edge's 10-minute 504, which failed every scheduled
+  # article at "Choosing topics" from 14 Sep. llama3.1:8b is already loaded as
+  # the chat fallback and answers a full discovery prompt in about two minutes.
+  ollamaModel: "llama3.1:8b"
   # Bounds one Ollama call end-to-end. Article drafts are streamed but still
   # take minutes on the shared CPU host (cold load + queue + 900–1400 words).
   ollamaTimeout: "30m"
@@ -114,6 +141,23 @@ ai:
   # windows big models support; model discovery caps it per model, so a value
   # above what a model can hold is lowered rather than rejected.
   ollamaNumCtx: 8192
+  # Career Agent scores each job with one model call. It is pinned off
+  # ollamaModel because Ollama serialises per model: every other agent uses
+  # llama3.1:8b, so scoring queued behind them. Measured on the shared host,
+  # same prompt — llama3.1:8b took 280-377s wall clock of which only 16-22s was
+  # compute, the rest queueing; careerops:32k answered in 78s with no queue at
+  # all. It generates at half the tokens/sec but has the runner to itself, and
+  # it is the model built for this agent. Empty falls back to ollamaModel.
+  careerModel: "careerops:32k"
+  # Chat is pinned separately from ollamaModel so workers stay on the small
+  # worker model while the control-desk conversation uses a tool-capable one.
+  chatModel: "qwen3-coder:30b"
+  chatModelFallback: "llama3.1:8b"
+  # Mail reply drafting is pinned separately too: draft quality is worth a
+  # slow reasoning model (its thinking phase engages automatically), while
+  # classification stays on the fast worker model. Empty keeps ollamaModel.
+  mailModel: "muse-glimmer:latest"
+  chatNumCtx: 16384
   openaiBaseURL: "https://api.openai.com"
   openaiModel: "gpt-4o-mini"
   # Per-task model selection. When true, an agent whose modelProvider is "auto"
@@ -137,11 +181,20 @@ ai:
   # Covers at 1536×864 / 28 steps need headroom past a cold qwen load.
   imageTimeout: "30m"
   imageOpenaiModel: "gpt-image-1"
+  # Tried first when GEMINI_API_KEY is set; mflux (imageBaseURL) is the fallback.
+  imageGeminiModel: "gemini-3.1-flash-lite-image"
+  geminiBaseURL: "https://generativelanguage.googleapis.com"
   imageBucket: "images"
   # Off by default: a cover costs roughly 25 seconds of a single shared GPU per
   # article, and that is a cost an operator should choose to pay. Image
   # generation stays available on demand either way.
   blogCoverImages: false
+  # How long a running row may sit without a heartbeat before the reconciler
+  # marks it failed. Must outlast a legitimate long LLM call. Max runtime is
+  # the wall-clock budget PER ARTICLE (a run gets it times its article count);
+  # one article takes ~25m on int, so 25m here failed finished runs.
+  blogOrphanTimeout: "45m"
+  blogMaxRuntime: "45m"
 
 # Penetration testing. Strix runs on the workstation (needs a real Docker
 # daemon — a k3s pod has none, and privileged DinD is not an acceptable trade).
@@ -158,6 +211,128 @@ pentest:
   # Defence in depth. scope.py on the workstation is the real boundary.
   # Comma-separated hosts, wildcards, CIDRs or URL prefixes.
   targetAllowlist: ""
+
+# WAF Efficacy Lab — talks to wslproxy. Empty baseURL disables the feature.
+# Token / username / password belong in extraSecretRefs (never committed).
+#
+#   kubectl -n <ring> create secret generic jobshout-wslproxy \
+#     --from-literal=WSLPROXY_API_TOKEN=<token> \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#
+wafLab:
+  enabled: true
+  baseURL: ""
+  platform: "openresty-admin-next"
+  profile: "prod"
+  timeout: "30s"
+  labMaxRuntime: "10m"
+  targetAllowlist: ""
+  # MCP (AB Testing agent writes when wslproxy's MCP tools are on). API key via
+  # secret WSLPROXY_MCP_API_KEY on the same jobshout-wslproxy secret. The AB
+  # Testing agent always reads rules — and writes when MCP tools are off —
+  # over the admin API with the token / username / password above.
+  mcpEnabled: true
+  mcpJSONRPCPath: "/mcp/jsonrpc"
+  abDemoHost: "abtesting.fictionally.org"
+  # Empty: use the rule attached to abDemoHost. Shared or single-backend rules
+  # are shown read-only and never written.
+  abRuleID: ""
+  abObservePath: "/version"
+
+# Mail Agent — one shared org Gmail. OAuth client id/secret and GMAIL_TOKEN_KEY
+# are secrets (extraSecretRefs), not chart values. Empty client id leaves Connect
+# disabled; the builtin agent still seeds.
+#
+#   kubectl -n <ring> create secret generic jobshout-mail \
+#     --from-literal=GMAIL_CLIENT_ID=<google-oauth-client-id> \
+#     --from-literal=GMAIL_CLIENT_SECRET=<google-oauth-client-secret> \
+#     --from-literal=GMAIL_TOKEN_KEY=$(openssl rand -hex 32) \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#
+mail:
+  pollInterval: "5m"
+  reconcileInterval: "15s"
+
+# Google sign-in / sign-up (platform login, not Gmail). Client id/secret live in
+# an extraSecretRefs secret. Empty client id hides the button; email/password
+# still works. Helm sets GOOGLE_OAUTH_REDIRECT_URL from .Values.host.
+#
+#   kubectl -n <ring> create secret generic jobshout-google \
+#     --from-literal=GOOGLE_OAUTH_CLIENT_ID=<id> \
+#     --from-literal=GOOGLE_OAUTH_CLIENT_SECRET=<secret> \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#
+# Name that secret in extraSecretRefs. You may instead add those two keys to
+# jobshout-mail if the ring already mounts it.
+
+# In-cluster PR reviewer (OpenCode + git clones in the pod; Ollama on the Mac
+# via ollama.workstation.co.uk). Off by default — int opts in. No public URL:
+# the API reaches it at http://jobshout-review-bot:8765. Create the operator
+# secret once per ring that enables this:
+#
+#   kubectl -n <ring> create secret generic jobshout-review \
+#     --from-literal=GITHUB_TOKEN=<repo-scope-bot> \
+#     --from-literal=REVIEW_BOT_TOKEN=$(openssl rand -hex 32) \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#
+# and name it in extraSecretRefs. The sidecar also needs OLLAMA_JWT_SECRET from
+# jobshout-secrets (same gateway as articles).
+reviewBot:
+  enabled: false
+  port: 8765
+  # MCP (Streamable HTTP) port, served by the same pod/process as the REST API.
+  # nginx exposes this at /mcp; the REST port stays cluster-internal.
+  mcpPort: 8766
+  model: "qwen3-coder:30b"
+  ollamaHost: "https://ollama.workstation.co.uk"
+  timeout: "60s"
+  pollInterval: "15s"
+  maxRuntime: "40m"
+  storage: 20Gi
+  allowedRepos: []
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { cpu: "2", memory: 2Gi }
+
+# Secrets Rotation agent — propagation after a Vault rotation (Kubernetes
+# Secrets, ExternalSecret force-sync, GitHub Actions secrets, Ring Promoter
+# restart). Everything here is non-secret. Credentials are NAMED server-side
+# and never entered in a launch form (launch values are stored on the task):
+#
+#   SECRETS_ROT_GITHUB_TOKEN  dedicated fine-grained token, "Secrets: write" on
+#                             the target repos only (NOT the research GITHUB_TOKEN)
+#   RP_API_TOKEN              Ring Promoter bearer token
+#   RP_PROD_PASSWORD          optional; only sent when restarting ring prod
+#
+# Put those keys in Vault at secret/jobshout/<env>/config so the existing
+# jobshout-secrets ExternalSecret materialises them, or — on k3s1, where
+# externalSecret.enabled=false — in an extraSecretRefs secret:
+#
+#   kubectl -n <ring> create secret generic jobshout-secretsrot \
+#     --from-literal=SECRETS_ROT_GITHUB_TOKEN=<token> \
+#     --from-literal=RP_API_TOKEN=<token> \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#
+# Kubeconfigs are mounted as files, one key per cluster name (launch field
+# cluster=k3s1 reads <mountPath>/k3s1). Keep them in Vault and sync them into
+# the Secret below with ESO, or create it out of band:
+#
+#   kubectl -n <ring> create secret generic jobshout-secretsrot-kube \
+#     --from-file=k3s1=./k3s1-secretsrot.kubeconfig
+#
+# Use a dedicated least-privilege ServiceAccount kubeconfig, not cluster-admin.
+# It needs, in the target namespaces only (int/test/acc/prod):
+#   secrets                              get, patch
+#   externalsecrets.external-secrets.io  get, patch   (only if ESO is installed)
+#   deployments.apps                     get, list    (restart consumer lookup)
+# The agent refuses to patch Helm-managed Secrets (a helm upgrade would revert
+# them); target the extraSecretRefs Secrets (jobshout-cms, jobshout-mail, …).
+secretsRotation:
+  rpURL: "https://rp.workstation.co.uk"
+  kubeconfig:
+    enabled: false
+    secretName: jobshout-secretsrot-kube
+    mountPath: /etc/secretsrot/kube
 
 logLevel: info
 
@@ -320,3 +495,9 @@ langfuse:
     resources:
       requests: { cpu: 50m, memory: 128Mi }
       limits: { cpu: 250m, memory: 512Mi }
+
+# Pin stateless pods (web, api, gateway, workers) to nodes with these labels,
+# e.g. {kubernetes.io/hostname: debian004}. Databases and PVC-backed pods are
+# never pinned: forcing them onto another node can strand their volume. Empty
+# means schedule anywhere.
+nodeSelector: {}

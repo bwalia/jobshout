@@ -1,0 +1,8 @@
+[package]
+name = "jobshout-core"
+description = "Shared platform helpers and config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

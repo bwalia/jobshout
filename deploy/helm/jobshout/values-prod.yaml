@@ -1,11 +1,16 @@
 env: prod
 host: jobshout.co.uk
+# www is a separate Cloudflare CNAME + wslproxy vhost; same Traefik backend.
+hostAliases:
+  - www.jobshout.co.uk
 logLevel: info
 
 ai:
   enabled: true
   ollamaBaseURL: "https://ollama.workstation.co.uk"
-  ollamaModel: "llama3:latest"
+  ollamaModel: "llama3.1:8b"
+  chatModel: "qwen3-coder:30b"
+  chatModelFallback: "llama3.1:8b"
   imageBaseURL: "https://images.workstation.co.uk"
   imageModel: "z-image-turbo"
   blogCoverImages: false
@@ -29,3 +34,27 @@ pythonRuntime:
 
 storage:
   postgres: 20Gi
+
+# WAF Efficacy Lab — off in this ring. int is the proving ring: a run is watched
+# end-to-end there before any other ring points the agent at live traffic.
+#
+# To enable here, all three parts are needed — baseURL alone leaves the client
+# disabled, and so does the secret alone:
+#   1. set enabled: true and a baseURL below
+#   2. kubectl -n prod create secret generic jobshout-wslproxy \
+#        --from-literal=WSLPROXY_API_TOKEN=<token>
+#   3. add an extraSecretRefs list to this file naming jobshout-wslproxy
+#      (this ring has none yet, so it inherits the empty default)
+wafLab:
+  enabled: false
+  baseURL: ""
+
+# Shared workstation gateway secrets: OLLAMA_JWT_SECRET and IMAGE_JWT_SECRET.
+# The chart renders jobshout-secrets with them empty when externalSecret is
+# off, so without this the gateways refuse every LLM and image call (403).
+# Created by hand on k3s1, never in git.
+extraSecretRefs:
+  - jobshout-gateways
+
+insights:
+  siteURL: "https://www.jobshout.com"

@@ -423,7 +423,10 @@ function SprintStatusBadge({ status }: { status: SprintStatus }) {
     completed: { label: "Completed", cls: "bg-status-done/15 text-status-done" },
     cancelled: { label: "Cancelled", cls: "bg-status-blocked/15 text-status-blocked" },
   };
-  const { label, cls } = map[status];
+  const { label, cls } = map[status] ?? {
+    label: status,
+    cls: "bg-muted text-muted-foreground",
+  };
   return (
     <span
       className={cn(

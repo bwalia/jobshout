@@ -206,3 +206,154 @@ func canonicalURL(rawURL string) string {
 	}
 	return u.String()
 }
+
+// withoutSeeds drops search results that are seeds already read, compared by
+// canonical URL so a tracking parameter or trailing slash does not let the
+// same page be read — and cited — twice.
+func withoutSeeds(searched []Source, seeds []Document) []Source {
+	if len(seeds) == 0 {
+		return searched
+	}
+	read := make(map[string]struct{}, len(seeds))
+	for _, d := range seeds {
+		read[canonicalURL(d.URL)] = struct{}{}
+	}
+	out := make([]Source, 0, len(searched))
+	for _, s := range searched {
+		if _, ok := read[canonicalURL(s.URL)]; ok {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// cleanFocus trims the caller's focus areas and drops empty ones.
+func cleanFocus(focus []string) []string {
+	out := make([]string, 0, len(focus))
+	for _, f := range focus {
+		if s := strings.TrimSpace(f); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// focusPlanBlock is the planner prompt's focus section. Empty when there are
+// no focus areas, so an unfocused request sees exactly the prompt it always did.
+func focusPlanBlock(focus []string) string {
+	focus = cleanFocus(focus)
+	if len(focus) == 0 {
+		return ""
+	}
+	return "\n\nFOCUS AREAS (the subject area this article must stay within):\n- " +
+		strings.Join(focus, "\n- ") +
+		"\n\nEvery query must stay inside the topic's subject area as defined by these focus\n" +
+		"areas. A query that would find material sharing the topic's words but not its\n" +
+		"subject — a different field, product or problem — is a wasted search. Leave it out."
+}
+
+// focusSelectBlock is the source-selection prompt's focus section, empty when
+// there are no focus areas for the same reason as focusPlanBlock.
+func focusSelectBlock(focus []string) string {
+	focus = cleanFocus(focus)
+	if len(focus) == 0 {
+		return ""
+	}
+	return "\n\nFOCUS AREAS (the article must stay within these):\n- " +
+		strings.Join(focus, "\n- ") +
+		"\n\nJudge each source against the topic AS PART OF these focus areas. A source\n" +
+		"that is not about them is off-subject however many words it shares with the\n" +
+		"topic — reject it."
+}
+
+// focusWords reduces a phrase to its meaningful lowercase words, in order.
+// Unlike significantWords it keeps two-letter words, because "AI" is often the
+// whole point of a focus area.
+func focusWords(s string) []string {
+	var out []string
+	for _, w := range strings.Fields(normaliseForCompare(s)) {
+		if len(w) < 2 {
+			continue
+		}
+		if _, skip := stopWords[w]; skip {
+			continue
+		}
+		out = append(out, w)
+	}
+	return out
+}
+
+// focusQueryTerms caps how much of a focus area goes into the added query. The
+// planner is told to write two-to-four-word queries because long ones match
+// nothing, and the added query should follow the same rule.
+const focusQueryTerms = 3
+
+// ensureFocusQuery guarantees that at least one query touches the focus areas.
+//
+// The planner is told to stay inside them, but a model can still turn a topic
+// into queries about a neighbouring field — "Efficiently Observing AI Agents
+// with Prompt Caching" became efficient-inference searches that never said
+// "observability". So the check is deterministic and deliberately crude: if no
+// query shares a word with any focus area, one query is added, built from the
+// topic's key noun (its last meaningful word, which in an English noun phrase
+// is usually the head) and the focus area that shares the most words with the
+// topic (the first one on a tie). With no focus areas, queries pass unchanged.
+func ensureFocusQuery(topic string, queries []string, focus []string) []string {
+	focus = cleanFocus(focus)
+	if len(focus) == 0 {
+		return queries
+	}
+
+	terms := make(map[string]struct{})
+	for _, area := range focus {
+		for _, w := range focusWords(area) {
+			terms[w] = struct{}{}
+		}
+	}
+	if len(terms) == 0 {
+		return queries
+	}
+	for _, q := range queries {
+		for _, w := range focusWords(q) {
+			if _, ok := terms[w]; ok {
+				return queries
+			}
+		}
+	}
+
+	topicWords := focusWords(topic)
+	inTopic := make(map[string]struct{}, len(topicWords))
+	for _, w := range topicWords {
+		inTopic[w] = struct{}{}
+	}
+	var closest []string
+	best := -1
+	for _, area := range focus {
+		words := focusWords(area)
+		if len(words) == 0 {
+			continue
+		}
+		shared := 0
+		for _, w := range words {
+			if _, ok := inTopic[w]; ok {
+				shared++
+			}
+		}
+		if shared > best {
+			best, closest = shared, words
+		}
+	}
+
+	parts := make([]string, 0, focusQueryTerms+1)
+	if len(topicWords) > 0 {
+		parts = append(parts, topicWords[len(topicWords)-1])
+	}
+	for _, w := range closest[:min(len(closest), focusQueryTerms)] {
+		if len(parts) > 0 && w == parts[0] {
+			continue
+		}
+		parts = append(parts, w)
+	}
+	return append(append([]string{}, queries...), strings.Join(parts, " "))
+}

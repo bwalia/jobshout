@@ -18,7 +18,9 @@ FROM --platform=$BUILDPLATFORM node:20-alpine AS deps
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 COPY package.json package-lock.json* ./
-RUN npm ci || npm install
+# npm cache mount keeps CI rebuilds fast when lockfile is unchanged.
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci || npm install
 
 FROM --platform=$BUILDPLATFORM node:20-alpine AS builder
 WORKDIR /app
@@ -28,17 +30,24 @@ ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 ENV NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL}
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN npm run build
+RUN --mount=type=cache,target=/root/.npm \
+    npm run build
 # `next build` exiting 0 is not proof it wrote anything — that is exactly how
 # the emulated build failed. Assert the outputs here, where the message names
 # the stage that was supposed to produce them, instead of letting the COPY in
 # the next stage report a missing path and leave the cause to guesswork.
 RUN test -d .next/standalone && test -d .next/static
 
-# Runtime: the target architecture. Pulled, never built.
-FROM node:20-alpine AS runner
+# Runtime: the TARGET architecture. Pulled, never built. Pinning
+# $TARGETPLATFORM is required — without it, buildx on an arm64 Mac has
+# shipped an arm64 node image tagged as linux/amd64. k3s then CrashLoops
+# with `exec docker-entrypoint.sh: no such file or directory` (the musl
+# loader for aarch64 is missing on the node).
+FROM --platform=$TARGETPLATFORM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
+ARG TARGETARCH
+RUN if [ "$TARGETARCH" = "amd64" ]; then uname -m | grep -qx x86_64; fi
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 

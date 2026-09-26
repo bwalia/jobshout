@@ -19,9 +19,11 @@ type discoveryRepo struct {
 	repository.BlogRepository
 	recent    []string
 	recentErr error
-	// since records the cutoff RecentTopics was called with.
-	since time.Time
-	steps []model.BlogStep
+	// since records the cutoff RecentTopics was called with, and audience the
+	// reader it was scoped to.
+	since    time.Time
+	audience string
+	steps    []model.BlogStep
 	// briefs records what UpdateBriefs was asked to persist.
 	briefs        []model.BlogBrief
 	briefsWritten bool
@@ -35,8 +37,9 @@ func (r *discoveryRepo) UpdateBriefs(
 	return nil
 }
 
-func (r *discoveryRepo) RecentTopics(_ context.Context, _ uuid.UUID, since time.Time) ([]string, error) {
+func (r *discoveryRepo) RecentTopics(_ context.Context, _ uuid.UUID, since time.Time, audience string) ([]string, error) {
 	r.since = since
+	r.audience = audience
 	return r.recent, r.recentErr
 }
 
@@ -238,5 +241,55 @@ func TestGenerate_PersistsDiscoveredTopics(t *testing.T) {
 	}
 	if repo.briefs[0].Context != "For engineers." {
 		t.Errorf("the discovered context was lost: %q", repo.briefs[0].Context)
+	}
+}
+
+// Two schedules for two readers must not block each other. The developer
+// schedule writing about Gateway API on Monday is not a reason the business
+// schedule cannot brief managers on it on Tuesday — that is the point of
+// running both — so "already written about" is scoped to one reader.
+func TestDiscoverBriefs_ScopesRecentTopicsToTheReader(t *testing.T) {
+	repo := &discoveryRepo{recent: []string{"Gateway API goes GA"}}
+	rs := &discoveryResearch{topics: []research.Topic{{Topic: "Something new"}}}
+	svc, tracker := newDiscoverySvc(repo, rs)
+	run := &model.BlogRun{ID: uuid.New(), OrgID: uuid.New()}
+
+	req := model.GenerateBlogRequest{Trending: true, Audience: "business", Industry: "NHS trusts"}
+	if _, err := svc.discoverBriefs(context.Background(), run, req, tracker); err != nil {
+		t.Fatalf("discoverBriefs: %v", err)
+	}
+
+	if repo.audience != "business" {
+		t.Errorf("recent topics were looked up for %q; want the run's reader", repo.audience)
+	}
+}
+
+// Discovery has to be told who it is choosing for, or it applies the developer
+// candidate filter — which rejects every subject a business briefing wants.
+func TestDiscoverBriefs_PassesTheReaderToDiscovery(t *testing.T) {
+	repo := &discoveryRepo{}
+	rs := &discoveryResearch{topics: []research.Topic{{Topic: "Something new", Context: "angle"}}}
+	svc, tracker := newDiscoverySvc(repo, rs)
+	run := &model.BlogRun{ID: uuid.New(), OrgID: uuid.New()}
+
+	req := model.GenerateBlogRequest{
+		Trending: true, Audience: "business", Industry: "NHS trusts", Focus: []string{"AI"},
+	}
+	got, err := svc.discoverBriefs(context.Background(), run, req, tracker)
+	if err != nil {
+		t.Fatalf("discoverBriefs: %v", err)
+	}
+
+	if rs.got.Audience != "business" || rs.got.Industry != "NHS trusts" {
+		t.Errorf("discovery asked for audience=%q industry=%q; want the run's",
+			rs.got.Audience, rs.got.Industry)
+	}
+	// And the discovered briefs inherit it, or discovery chooses for managers
+	// and the writer writes for engineers.
+	if len(got) != 1 {
+		t.Fatalf("got %d briefs, want 1", len(got))
+	}
+	if got[0].Audience != "business" || got[0].Industry != "NHS trusts" {
+		t.Errorf("discovered brief did not inherit the reader: %+v", got[0])
 	}
 }

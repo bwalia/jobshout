@@ -74,17 +74,23 @@ def test_non_numeric_cvss_becomes_zero(tmp_path):
 # ─── exit-code classification ───────────────────────────────────────────────
 
 def test_exit_zero_is_a_clean_completed_scan(runner):
-    assert runner._classify(0, "", [])[0] == COMPLETED
+    assert runner._classify(0, "", [], engaged=True)[0] == COMPLETED
 
 
 def test_exit_two_is_completed_not_failed(runner):
     # Strix uses 2 for "vulnerabilities found". Treating it as failure would
     # report every scan that actually found something as broken.
-    assert runner._classify(2, "", [])[0] == COMPLETED
+    assert runner._classify(2, "", [], engaged=True)[0] == COMPLETED
+
+
+def test_hollow_exit_zero_fails_closed(runner):
+    status, error = runner._classify(0, "", [], engaged=False)
+    assert status == FAILED
+    assert "did not engage" in error
 
 
 def test_budget_stop_is_its_own_status(runner):
-    status, error = runner._classify(1, "LLM budget of $10 exceeded, stopping", [])
+    status, error = runner._classify(1, "LLM budget of $10 exceeded, stopping", [], engaged=False)
     assert status == BUDGET_EXCEEDED
     assert "budget" in error
 
@@ -92,12 +98,12 @@ def test_budget_stop_is_its_own_status(runner):
 def test_a_rate_limit_message_is_not_mistaken_for_a_budget_stop(runner):
     # The Go client tested for "budget" OR "exceeded", so this exact message was
     # mislabelled as a budget stop rather than a failure.
-    status, _ = runner._classify(1, "rate limit exceeded", [])
+    status, _ = runner._classify(1, "rate limit exceeded", [], engaged=False)
     assert status == FAILED
 
 
 def test_plain_failure_carries_the_output(runner):
-    status, error = runner._classify(1, "docker: daemon not running", [])
+    status, error = runner._classify(1, "docker: daemon not running", [], engaged=False)
     assert status == FAILED
     assert "daemon not running" in error
 
@@ -197,6 +203,12 @@ async def test_budget_is_passed_through_to_the_scanner(runner, store):
 
 async def test_no_budget_flag_when_none_was_asked_for(runner, store):
     assert "--max-budget" not in runner.build_args(make_run(store))
+
+
+def test_instruction_is_always_passed_to_strix(runner, store):
+    args = runner.build_args(make_run(store, target="https://int.jobshout.co.uk"))
+    assert "--instruction" in args
+    assert "HTTP reconnaissance" in args[args.index("--instruction") + 1]
 
 
 def test_the_local_model_endpoint_is_passed_to_strix(runner, monkeypatch):

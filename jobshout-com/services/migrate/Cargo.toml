@@ -1,0 +1,18 @@
+[package]
+name = "jobshout-com-migrate"
+description = "Run SQLx migrations for JobShout.com"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "jobshout-migrate"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+dotenvy = { workspace = true }
+jobshout-observability = { path = "../../crates/jobshout-observability" }
+jobshout-storage = { path = "../../crates/jobshout-storage" }
+tokio = { workspace = true }
+tracing = { workspace = true }

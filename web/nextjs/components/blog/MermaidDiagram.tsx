@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useTheme } from "next-themes";
 
 /** Counter for unique render ids — mermaid requires one per diagram. */
 let diagramSeq = 0;
@@ -20,6 +21,7 @@ export function MermaidDiagram({ chart }: { chart: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const [svg, setSvg] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const { resolvedTheme } = useTheme();
 
   useEffect(() => {
     let cancelled = false;
@@ -28,14 +30,9 @@ export function MermaidDiagram({ chart }: { chart: string }) {
       try {
         const mermaid = (await import("mermaid")).default;
 
-        // Mermaid reads CSS custom properties at init, not per render, so the
-        // theme is chosen from the document's current state. `base` plus
-        // explicit variables rather than the built-in dark theme: the app's
-        // palette is its own, and mermaid's dark green does not belong in it.
         const isDark =
-          document.documentElement.dataset.theme === "dark" ||
-          (!document.documentElement.dataset.theme &&
-            window.matchMedia("(prefers-color-scheme: dark)").matches);
+          resolvedTheme === "dark" ||
+          document.documentElement.classList.contains("dark");
 
         mermaid.initialize({
           startOnLoad: false,
@@ -76,7 +73,7 @@ export function MermaidDiagram({ chart }: { chart: string }) {
     return () => {
       cancelled = true;
     };
-  }, [chart]);
+  }, [chart, resolvedTheme]);
 
   if (failed) {
     return (

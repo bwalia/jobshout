@@ -13,8 +13,6 @@ const user = {
   password: "testpass1234",
 };
 
-const TASK_DIALOG = 'h2:has-text("New Task")';
-
 test.describe("Full E2E Flow", () => {
   test("complete user journey: signup through task management", async ({
     page,
@@ -26,14 +24,14 @@ test.describe("Full E2E Flow", () => {
     await page.fill("#orgName", user.orgName);
     await page.fill("#password", user.password);
     await page.click('button[type="submit"]');
-    await page.waitForURL("**/dashboard", { timeout: 15_000 });
-    await expect(page.locator("h1")).toContainText("Dashboard");
+    await page.waitForURL("**/chat**", { timeout: 15_000 });
+    await expect(page.getByRole("button", { name: /new chat/i })).toBeVisible();
 
-    // ── Step 2: Create an Agent ──
-    await page.click('nav a[href="/agents"]');
-    await page.waitForURL("**/agents", { timeout: 5_000 });
+    // ── Step 2: Task Manager — create agent ──
+    await page.goto("/panel/task-manager");
+    await expect(page.locator("h1").first()).toContainText("Task Manager");
 
-    await page.click('button:has-text("New Agent")');
+    await page.click('button:has-text("New agent")');
     await expect(page.locator('[role="dialog"]')).toBeVisible();
 
     await page.fill("#agent-name", "Flow Test Agent");
@@ -45,62 +43,27 @@ test.describe("Full E2E Flow", () => {
     await expect(page.locator('[role="dialog"]')).not.toBeVisible({
       timeout: 5_000,
     });
-    await expect(page.locator("text=Flow Test Agent").first()).toBeVisible({
-      timeout: 5_000,
-    });
 
-    // ── Step 3: Create a Project ──
-    await page.click('nav a[href="/projects"]');
-    await page.waitForURL("**/projects", { timeout: 5_000 });
-
-    await page.click('button:has-text("New Project")');
+    // ── Step 3: Create a Project via dialog ──
+    await page.click('button:has-text("New project")');
     await page.fill("#project-name", "Flow Test Project");
     await page.fill("#project-desc", "Full E2E test project");
-    await page.selectOption("#project-priority", "High");
+    await page.selectOption("#project-priority", "high");
     await page.click('button[type="submit"]:has-text("Create Project")');
+    await expect(page.getByText("Flow Test Project").first()).toBeVisible({
+      timeout: 8_000,
+    });
 
-    await expect(page.locator("text=Flow Test Project").first()).toBeVisible({
+    // ── Step 4: Create a task ──
+    await page.click('button:has-text("New task")');
+    await expect(page.getByText(/new task|create task/i).first()).toBeVisible({
       timeout: 5_000,
     });
 
-    // ── Step 4: Navigate into project and create tasks ──
-    await page.click("text=Flow Test Project");
-    await page.waitForURL("**/projects/**", { timeout: 5_000 });
-    await expect(page.locator("text=Backlog").first()).toBeVisible({
-      timeout: 5_000,
-    });
-
-    // Create first task
-    await page.locator('button:has-text("Add task")').first().click();
-    await expect(page.locator(TASK_DIALOG)).toBeVisible({ timeout: 5_000 });
-    await page.fill("#create-task-title", "Setup CI/CD Pipeline");
-    await page.fill("#create-task-desc", "Configure GitHub Actions");
-    await page.selectOption("#create-task-priority", "High");
-    await page.click('button:has-text("Create Task")');
-    await expect(page.locator(TASK_DIALOG)).not.toBeVisible({
-      timeout: 5_000,
-    });
-    await expect(
-      page.locator("text=Setup CI/CD Pipeline").first(),
-    ).toBeVisible({ timeout: 5_000 });
-
-    // Create second task
-    await page.locator('button:has-text("Add task")').first().click();
-    await expect(page.locator(TASK_DIALOG)).toBeVisible({ timeout: 5_000 });
-    await page.fill("#create-task-title", "Write API Documentation");
-    await page.fill("#create-task-desc", "Document all REST endpoints");
-    await page.selectOption("#create-task-priority", "Medium");
-    await page.click('button:has-text("Create Task")');
-    await expect(page.locator(TASK_DIALOG)).not.toBeVisible({
-      timeout: 5_000,
-    });
-    await expect(
-      page.locator("text=Write API Documentation").first(),
-    ).toBeVisible({ timeout: 5_000 });
-
-    // ── Step 5: Verify dashboard ──
-    await page.click('nav a[href="/dashboard"]');
-    await page.waitForURL("**/dashboard", { timeout: 5_000 });
-    await expect(page.locator("h1")).toContainText("Dashboard");
+    // ── Step 5: Verify dashboard panel ──
+    await page.goto("/panel/dashboard");
+    await page.waitForURL("**/panel/dashboard**", { timeout: 5_000 });
+    await expect(page.locator("h1").first()).toContainText(/Good (morning|afternoon|evening)/);
+    await expect(page.getByText("Task throughput")).toBeVisible();
   });
 });

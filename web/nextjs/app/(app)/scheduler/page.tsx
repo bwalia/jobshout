@@ -9,6 +9,8 @@ import {
   useScheduledTaskRuns,
 } from "@/lib/hooks/useScheduler";
 import { useAgents } from "@/lib/hooks/useAgents";
+import { useAgentSchemas } from "@/lib/hooks/useAgentSchemas";
+import { fieldDefault, fieldOptions } from "@/lib/agents/input-schemas";
 import { useLLMProviders } from "@/lib/hooks/useLLMProviders";
 import Link from "next/link";
 import type {
@@ -55,6 +57,16 @@ const BLOG_MODES: { value: BlogMode; label: string; hint: string }[] = [
   },
 ];
 
+/**
+ * The Article Writer's builtin marker, used to pull its audience choices out
+ * of GET /agent-schemas.
+ *
+ * The readers themselves are NOT listed here. They live in one place — the Go
+ * audience registry — and this screen reads them, so adding a reader does not
+ * mean editing TypeScript. See .claude/rules/agent-modules.md.
+ */
+const ARTICLE_WRITER = "article_writer";
+
 /** Splits the focus-areas box on commas and newlines. */
 function parseFocusAreas(raw: string): string[] {
   return raw
@@ -72,7 +84,7 @@ const PRIORITY_COLORS: Record<string, string> = {
 
 const STATUS_COLORS: Record<string, string> = {
   active: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
-  paused: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
+  paused: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
   completed: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
   failed: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
 };
@@ -81,6 +93,7 @@ export default function SchedulerPage() {
   const { data: tasksResponse, isLoading } = useScheduledTasks();
   const { data: agentsResponse } = useAgents();
   const { data: providers } = useLLMProviders();
+  const { data: agentCatalog } = useAgentSchemas();
   const createMutation = useCreateScheduledTask();
   const updateMutation = useUpdateScheduledTask();
   const deleteMutation = useDeleteScheduledTask();
@@ -94,6 +107,11 @@ export default function SchedulerPage() {
   const [blogTopic, setBlogTopic] = useState("");
   const [blogContext, setBlogContext] = useState("");
   const [focusAreas, setFocusAreas] = useState("");
+  // Who the schedule writes for, and the sector it frames everything in. These
+  // are what make two article schedules different things rather than two copies
+  // of the same one.
+  const [blogAudience, setBlogAudience] = useState("");
+  const [blogIndustry, setBlogIndustry] = useState("");
   const [autoPublish, setAutoPublish] = useState(false);
   // Set while editing an existing schedule; null means the form creates one.
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -112,6 +130,12 @@ export default function SchedulerPage() {
 
   const agents = agentsResponse?.data ?? [];
   const tasks = tasksResponse?.data ?? [];
+  const catalog = agentCatalog ?? [];
+  const audiences = fieldOptions(catalog, ARTICLE_WRITER, "audience");
+  // "" is the server's default reader. Showing the catalog's default keeps the
+  // picker honest while the form's own value stays empty, which is how the
+  // default is stored.
+  const defaultAudience = fieldDefault(catalog, ARTICLE_WRITER, "audience");
 
   // Each article mode needs its own thing filled in; without it every fire
   // would fail, so it is refused here rather than at dispatch time.
@@ -123,7 +147,13 @@ export default function SchedulerPage() {
 
   /** The generate request a fire will decode. */
   function buildBlogInput(): Record<string, unknown> {
-    const base = { auto_publish: autoPublish };
+    // The reader and the sector are run-level: every brief a fire produces
+    // inherits them, including the ones a trending run discovers for itself.
+    const base = {
+      auto_publish: autoPublish,
+      ...(blogAudience ? { audience: blogAudience } : {}),
+      ...(blogIndustry.trim() ? { industry: blogIndustry.trim() } : {}),
+    };
     if (blogMode === "fixed") {
       return {
         ...base,
@@ -152,6 +182,8 @@ export default function SchedulerPage() {
     setBlogTopic("");
     setBlogContext("");
     setFocusAreas("");
+    setBlogAudience("");
+    setBlogIndustry("");
     setAutoPublish(false);
     setCronPreset("0 * * * *");
     setForm({
@@ -198,6 +230,8 @@ export default function SchedulerPage() {
     setCronPreset(preset ? preset.value : "");
 
     setAutoPublish(input.auto_publish === true);
+    setBlogAudience(typeof input.audience === "string" ? input.audience : "");
+    setBlogIndustry(typeof input.industry === "string" ? input.industry : "");
     if (input.trending === true) {
       setBlogMode(focus.length > 0 ? "focused" : "trending");
       setTrendingCount(
@@ -341,7 +375,53 @@ export default function SchedulerPage() {
 
               {form.task_type === "blog" && (
                 <div className="space-y-2 sm:col-span-2">
-                  <label className="text-sm font-medium">What to write about</label>
+                  <label className="text-sm font-medium">Written for</label>
+                  <select
+                    value={blogAudience || defaultAudience}
+                    onChange={(e) =>
+                      setBlogAudience(
+                        e.target.value === defaultAudience ? "" : e.target.value
+                      )
+                    }
+                    disabled={audiences.length === 0}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+                  >
+                    {audiences.length === 0 ? (
+                      <option value="">Loading audiences…</option>
+                    ) : (
+                      audiences.map((a) => (
+                        <option key={a.value} value={a.value}>
+                          {a.label}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                  <p className="text-xs text-muted-foreground">
+                    Changes how each article is researched, planned, written and
+                    reviewed — not just its wording. Run one schedule for
+                    developers and another for the business side, and each
+                    picks its own subjects without blocking the other.
+                  </p>
+
+                  <label className="text-sm font-medium">
+                    Industry{" "}
+                    <span className="font-normal text-muted-foreground">
+                      (optional)
+                    </span>
+                  </label>
+                  <input
+                    type="text"
+                    value={blogIndustry}
+                    onChange={(e) => setBlogIndustry(e.target.value)}
+                    placeholder="NHS trusts, 3PL logistics, commercial property"
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Frames the examples and consequences for one sector, and
+                    steers what the researcher goes looking for.
+                  </p>
+
+                  <label className="pt-2 text-sm font-medium">What to write about</label>
                   <select
                     value={blogMode}
                     onChange={(e) => setBlogMode(e.target.value as BlogMode)}
@@ -420,7 +500,7 @@ export default function SchedulerPage() {
                         rows={2}
                         value={blogContext}
                         onChange={(e) => setBlogContext(e.target.value)}
-                        placeholder="Angle, audience, points to cover, things to avoid"
+                        placeholder="Angle, points to cover, things to avoid"
                         className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       />
                       <p className="text-xs text-muted-foreground">
@@ -438,11 +518,12 @@ export default function SchedulerPage() {
                       className="mt-0.5 h-4 w-4 rounded border-input"
                     />
                     <span className="text-sm">
-                      Send to the CMS automatically
+                      Publish for review automatically
                       <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
-                        Files each finished article as a draft, so it is waiting
-                        for you in the morning. Nothing goes live until someone
-                        publishes it in the CMS.
+                        Files each finished article in every destination this
+                        server has — the CMS as a draft, JobShout.com Insights
+                        for editor review — so it is waiting for you in the
+                        morning. Nothing goes live until someone approves it.
                       </span>
                     </span>
                   </label>
@@ -507,9 +588,13 @@ export default function SchedulerPage() {
                   <input
                     type="number"
                     value={form.interval_seconds ?? 3600}
-                    onChange={(e) =>
-                      setForm({ ...form, interval_seconds: parseInt(e.target.value) })
-                    }
+                    onChange={(e) => {
+                      const n = parseInt(e.target.value, 10);
+                      setForm({
+                        ...form,
+                        interval_seconds: Number.isFinite(n) ? n : undefined,
+                      });
+                    }}
                     min={60}
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   />
@@ -600,8 +685,14 @@ export default function SchedulerPage() {
                   <label className="text-sm">Max retries:</label>
                   <input
                     type="number"
-                    value={form.max_retries}
-                    onChange={(e) => setForm({ ...form, max_retries: parseInt(e.target.value) })}
+                    value={form.max_retries ?? ""}
+                    onChange={(e) => {
+                      const n = parseInt(e.target.value, 10);
+                      setForm({
+                        ...form,
+                        max_retries: Number.isFinite(n) ? n : undefined,
+                      });
+                    }}
                     min={1}
                     max={10}
                     className="flex h-8 w-16 rounded-md border border-input bg-background px-2 text-sm"
@@ -755,7 +846,7 @@ export default function SchedulerPage() {
 /** One-line summary of what an article schedule writes each time it fires. */
 function describeBlogTask(task: ScheduledTask): string {
   const input = task.input_json ?? {};
-  const filed = input.auto_publish === true ? ", filed in the CMS as drafts" : "";
+  const filed = input.auto_publish === true ? ", filed for review" : "";
 
   if (input.trending) {
     const n = Number(input.trending_count) || 1;

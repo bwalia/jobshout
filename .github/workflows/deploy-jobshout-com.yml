@@ -1,0 +1,453 @@
+name: Build & seed JobShout.com (Ring Promoter)
+
+# Marketplace release path: the jobshout-com registry namespace and Ring
+# Promoter app `jobshout-com` (https://rp.workstation.co.uk/?app=jobshout-com).
+#
+# The platform and the marketplace share ONE version line. deploy-k3s.yml owns
+# the number and cuts the git tag, then calls this workflow with that version.
+# This workflow's contract is that jobshout-com/{api,web}:<version> exists when
+# it finishes: it builds when something under jobshout-com/ moved, and otherwise
+# copies the previous digest onto the new tag — a registry-side manifest write,
+# not a rebuild, so an unchanged marketplace costs seconds rather than the ~11
+# minutes its emulated Next.js build takes.
+#
+# The point is that one v<X.Y.Z> is then valid for BOTH Ring Promoter apps, so
+# seeding one app with the other's version stops being a way to lose a quarter
+# of an hour to ImagePullBackOff.
+#
+# Int edge (beaconpulse-style, every int run, idempotent):
+#   Cloudflare CNAME int.jobshout.com → lon1.pop0.uk
+#   wslproxy vhost from jobshout-com/deploy/edge/wslproxy-server-int.json
+
+on:
+  # Called by deploy-k3s.yml once the release tag exists on the remote — RP
+  # clones this repo at that tag, so it has to be pushed before we seed.
+  workflow_call:
+    inputs:
+      VERSION:
+        type: string
+        description: "Release version to publish and seed (vX.Y.Z)"
+        required: true
+      TARGET_ENV:
+        type: string
+        description: "Target ring"
+        default: "int"
+        required: false
+      DEPLOYMENT_TYPE:
+        type: string
+        description: "Publish images only, seed only, or both"
+        default: "build-and-deploy"
+        required: false
+  workflow_dispatch:
+    inputs:
+      TARGET_ENV:
+        type: choice
+        description: "Target ring"
+        default: "int"
+        required: true
+        options: [int, test, acc, prod]
+      DEPLOYMENT_TYPE:
+        type: choice
+        description: "Publish images only, seed only, or both"
+        default: "build-and-deploy"
+        required: true
+        options: [build, deploy, build-and-deploy]
+      VERSION:
+        type: string
+        description: "Version to publish/seed (vX.Y.Z). Blank = newest release tag."
+        default: ""
+        required: false
+
+# This workflow no longer cuts tags — deploy-k3s.yml owns the version line.
+permissions:
+  contents: read
+
+concurrency:
+  group: jobshout-com-release
+  cancel-in-progress: false
+
+env:
+  IMAGE_REGISTRY: int-spectoncr.diytaxreturn.co.uk
+  IMAGE_NAMESPACE: jobshout-com
+  RP_APP: jobshout-com
+
+jobs:
+  plan:
+    name: Resolve version & publish mode
+    runs-on: self-hosted
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      target_env: ${{ steps.plan.outputs.target_env }}
+      mode: ${{ steps.plan.outputs.mode }}
+      deploy: ${{ steps.plan.outputs.deploy }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # need tags and history to diff against the last release
+          ref: ${{ github.sha }}
+
+      - name: Resolve
+        id: plan
+        env:
+          IN_VERSION: ${{ inputs.VERSION }}
+          IN_TARGET_ENV: ${{ inputs.TARGET_ENV }}
+          IN_DEPLOYMENT_TYPE: ${{ inputs.DEPLOYMENT_TYPE }}
+        run: |
+          set -euo pipefail
+
+          VERSION="${IN_VERSION:-}"
+          if [ -z "$VERSION" ]; then
+            VERSION=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)
+          fi
+          case "$VERSION" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::VERSION must look like vX.Y.Z (got '${VERSION}')"; exit 1 ;;
+          esac
+
+          TARGET_ENV="${IN_TARGET_ENV:-int}"
+          DEPLOYMENT_TYPE="${IN_DEPLOYMENT_TYPE:-build-and-deploy}"
+
+          # Previous release = newest v* that is not the one being published.
+          # Excluding VERSION by name keeps this correct whether or not the new
+          # tag has landed on the remote by the time we fetched.
+          PREV=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname \
+                 | grep -vx "$VERSION" | head -1 || true)
+
+          # Anything that changes the images, the chart or this workflow earns a
+          # real build; everything else re-tags what the registry already holds.
+          # A diff that cannot be computed builds rather than re-tagging, so a
+          # bad ref can never quietly ship the previous release's bits.
+          CHANGED=""
+          if [ -n "$PREV" ]; then
+            if ! CHANGED=$(git diff --name-only "$PREV" "$GITHUB_SHA" -- \
+                           jobshout-com/ .github/workflows/deploy-jobshout-com.yml); then
+              echo "::warning::could not diff ${PREV}..${GITHUB_SHA} — building rather than re-tagging"
+              CHANGED="diff-failed"
+            fi
+          fi
+
+          if [ "$DEPLOYMENT_TYPE" = "deploy" ]; then
+            MODE=none
+          elif [ -z "$PREV" ] || [ -n "$CHANGED" ]; then
+            MODE=build
+          else
+            MODE=retag
+          fi
+
+          # Not `[ … ] && DEPLOY=false`: under `set -e` a false test there ends
+          # the step.
+          DEPLOY=true
+          if [ "$DEPLOYMENT_TYPE" = "build" ]; then
+            DEPLOY=false
+          fi
+
+          echo "version=$VERSION"        >> "$GITHUB_OUTPUT"
+          echo "target_env=$TARGET_ENV"  >> "$GITHUB_OUTPUT"
+          echo "mode=$MODE"              >> "$GITHUB_OUTPUT"
+          echo "deploy=$DEPLOY"          >> "$GITHUB_OUTPUT"
+
+          echo "version=$VERSION previous=${PREV:-none} mode=$MODE ring=$TARGET_ENV deploy=$DEPLOY"
+
+  images:
+    name: Publish api + web at ${{ needs.plan.outputs.version }}
+    needs: [plan]
+    if: needs.plan.outputs.mode != 'none'
+    runs-on: self-hosted
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Pick LAN SpectonCR NodePort
+        id: push_host
+        run: |
+          set -euo pipefail
+          REGISTRY_HOSTS="192.168.1.23 192.168.1.140 192.168.1.104 192.168.1.47 192.168.1.36"
+          # Relay through the runner host when its Docker VM cannot reach the
+          # LAN; see .github/scripts/registry-relay.sh and deploy-k3s.yml.
+          RELAY_HOST=$(.github/scripts/registry-relay.sh "$REGISTRY_HOSTS" || true)
+          echo "RELAY_HOST=$RELAY_HOST" >> "$GITHUB_ENV"
+          PUSH=""
+          if [ -n "$RELAY_HOST" ]; then
+            PUSH="${RELAY_HOST}:30500"
+            REGISTRY_HOSTS="$RELAY_HOST $REGISTRY_HOSTS"
+          fi
+          for h in $REGISTRY_HOSTS; do
+            [ -n "$PUSH" ] && break
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 5 \
+              "http://${h}:30500/v2/" || echo 000)
+            if [ "$code" = "401" ] || [ "$code" = "200" ]; then
+              PUSH="${h}:30500"
+              break
+            fi
+          done
+          if [ -z "$PUSH" ]; then
+            echo "::error::SpectonCR NodePort :30500 not reachable on the LAN."
+            exit 1
+          fi
+          echo "host=$PUSH" >> "$GITHUB_OUTPUT"
+          echo "PUSH_REGISTRY=$PUSH" >> "$GITHUB_ENV"
+          echo "REGISTRY_HOSTS=$REGISTRY_HOSTS" >> "$GITHUB_ENV"
+
+      - name: Registry login
+        env:
+          PUSH_REGISTRY: ${{ steps.push_host.outputs.host }}
+        run: |
+          set -euo pipefail
+          docker login "$IMAGE_REGISTRY" -u "${{ secrets.REGISTRY_USERNAME }}" -p "${{ secrets.REGISTRY_PASSWORD }}"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          p = Path.home() / ".docker" / "config.json"
+          cfg = json.loads(p.read_text()) if p.exists() else {}
+          auths = cfg.setdefault("auths", {})
+          want = os.environ["IMAGE_REGISTRY"]
+          src = next((v for k, v in auths.items() if want in k), None)
+          if not src:
+              raise SystemExit(f"docker login did not store auth for {want}")
+          hosts = [f"{h}:30500" for h in os.environ["REGISTRY_HOSTS"].split()]
+          for host in hosts:
+              auths[host] = src
+              auths[f"http://{host}"] = src
+          p.write_text(json.dumps(cfg, indent=2) + "\n")
+          PY
+
+      # Nothing under jobshout-com/ moved since the previous release, so the
+      # images for this version are byte-identical to the ones already in the
+      # registry. Point the new tag at the existing digest instead of spending
+      # ~11 minutes rebuilding them — `imagetools create` is a registry-side
+      # manifest write, so no layer is pulled or pushed. :latest always tracks
+      # the newest marketplace build, and this workflow is its only publisher.
+      - name: Re-tag previous digest as ${{ needs.plan.outputs.version }}
+        if: needs.plan.outputs.mode == 'retag'
+        env:
+          PUSH_REGISTRY: ${{ steps.push_host.outputs.host }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.plan.outputs.version }}"
+
+          # Layer pushes go over the LAN NodePort because big blob PUTs hairpin
+          # and 502. A manifest write is a couple of KB, so prefer the public
+          # HTTPS host, which `docker login` already authenticated and which
+          # needs no insecure-registry handling. Fall back to the NodePorts —
+          # every :30500 fronts the same backend — if it is unreachable.
+          HOSTS="$IMAGE_REGISTRY"
+          for h in ${REGISTRY_HOSTS:-}; do HOSTS="$HOSTS ${h}:30500"; done
+
+          for repo in api web; do
+            copied=""
+            for host in $HOSTS; do
+              ns="$host/$IMAGE_NAMESPACE"
+              if docker buildx imagetools create -t "$ns/$repo:$VERSION" "$ns/$repo:latest"; then
+                echo "re-tagged $ns/$repo:latest -> :$VERSION"
+                copied=1
+                break
+              fi
+              echo "manifest copy via $host failed for $repo — trying next host" >&2
+            done
+            if [ -z "$copied" ]; then
+              echo "::error::could not re-tag $repo:latest as $VERSION on any registry host"
+              exit 1
+            fi
+          done
+
+      - name: Buildx linux/amd64 api + web
+        if: needs.plan.outputs.mode == 'build'
+        env:
+          PUSH_REGISTRY: ${{ steps.push_host.outputs.host }}
+        run: |
+          set -euo pipefail
+          # Fresh host relay for this step (no-op when containers reach the LAN).
+          [ -n "${RELAY_HOST:-}" ] && .github/scripts/registry-relay.sh "192.168.1.23 192.168.1.140 192.168.1.104 192.168.1.47 192.168.1.36" >/dev/null || true
+          VERSION="${{ needs.plan.outputs.version }}"
+          CFG="${RUNNER_TEMP:-/tmp}/jobshout-com-buildkitd.toml"
+          python3 - "$CFG" <<'PY'
+          from pathlib import Path
+          import os, sys
+          hosts = [f"{h}:30500" for h in os.environ["REGISTRY_HOSTS"].split()]
+          # The host relay is plain HTTP only (see deploy-k3s.yml).
+          relay = f'{os.environ.get("RELAY_HOST", "")}:30500'
+          Path(sys.argv[1]).write_text("".join(
+              f'[registry."{h}"]\n  http = true\n' + ("" if h == relay else "  insecure = true\n")
+              for h in hosts
+          ))
+          PY
+          docker buildx rm jobshout-com-lan >/dev/null 2>&1 || true
+          docker buildx create --name jobshout-com-lan --driver docker-container --bootstrap --config "$CFG"
+          NS="$PUSH_REGISTRY/$IMAGE_NAMESPACE"
+          bx() {
+            docker buildx build --builder jobshout-com-lan --platform linux/amd64 \
+              --provenance=false --sbom=false --push "$@"
+          }
+          bx -f jobshout-com/deploy/docker/Dockerfile.api \
+            -t "$NS/api:$VERSION" -t "$NS/api:latest" \
+            jobshout-com
+          bx -f jobshout-com/deploy/docker/Dockerfile.web \
+            --build-arg NEXT_PUBLIC_JOBSHOUT_COM_API_URL="" \
+            --build-arg JOBSHOUT_COM_API_URL=http://jobshout-com-api:8088 \
+            -t "$NS/web:$VERSION" -t "$NS/web:latest" \
+            jobshout-com/web/nextjs
+          echo "Pushed $NS/{api,web}:$VERSION"
+
+  register-edge:
+    name: Ensure int.jobshout.com DNS + wslproxy
+    needs: [plan]
+    runs-on: ubuntu-latest
+    # Beaconpulse-style: every int deploy upserts CF CNAME + ensures wslproxy vhost.
+    if: needs.plan.outputs.deploy == 'true' && needs.plan.outputs.target_env == 'int'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure Cloudflare CNAME
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          chmod +x jobshout-com/deploy/scripts/cloudflare-dns.sh
+          jobshout-com/deploy/scripts/cloudflare-dns.sh \
+            --name int.jobshout.com \
+            --content lon1.pop0.uk \
+            --zone jobshout.com \
+            --proxied false
+      - name: Register wslproxy vhost
+        env:
+          WSLPROXY_USER: ${{ secrets.WSLPROXY_USER }}
+          WSLPROXY_PASSWORD: ${{ secrets.WSLPROXY_PASSWORD }}
+          WSLPROXY_GATEWAY_URL: ${{ secrets.WSLPROXY_GATEWAY_URL }}
+          HOST: int.jobshout.com
+          SPEC: jobshout-com/deploy/edge/wslproxy-server-int.json
+        run: |
+          set -euo pipefail
+          GW="${WSLPROXY_GATEWAY_URL:-}"
+          if [ -z "${WSLPROXY_USER:-}" ] || [ -z "${WSLPROXY_PASSWORD:-}" ] || [ -z "$GW" ]; then
+            echo "::error::WSLPROXY_USER / WSLPROXY_PASSWORD / WSLPROXY_GATEWAY_URL required."
+            exit 1
+          fi
+          # The vhost and its CNAME outlive any single release, so this step is a
+          # no-op on every run after the first. Losing the admin API (expired
+          # creds, gateway down) must not strand images that already built and
+          # tagged — warn and let the ring get its version. Use
+          # register-edge-vhost.yml to register a genuinely new host.
+          TOKEN=$(curl -fsS -X POST "$GW/api/user/login" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -nc --arg e "$WSLPROXY_USER" --arg p "$WSLPROXY_PASSWORD" '{email:$e,password:$p}')" \
+            | jq -r '.data.accessToken // empty') || TOKEN=""
+          if [ -z "$TOKEN" ]; then
+            echo "::warning::wslproxy admin login failed at ${GW} — leaving the ${HOST} vhost as-is."
+            exit 0
+          fi
+          existing=$(curl -fsS -X GET "$GW/api/servers" -H "Authorization: Bearer $TOKEN" \
+            | jq -r --arg h "$HOST" '.data[]? | select(.server_name==$h) | .id' | head -1)
+          if [ -n "$existing" ]; then
+            echo "wslproxy vhost for ${HOST} already exists (id=$existing)"; exit 0
+          fi
+          resp=$(curl -fsS -X POST "$GW/api/servers" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            -d @"$SPEC")
+          sid=$(echo "$resp" | jq -r '.data.id // .id // empty')
+          if [ -z "$sid" ]; then
+            echo "::error::wslproxy create failed: $resp"; exit 1
+          fi
+          echo "registered wslproxy vhost ${HOST} (id=$sid)."
+
+  deploy:
+    name: Seed Ring Promoter (${{ needs.plan.outputs.target_env }})
+    needs: [plan, images, register-edge]
+    runs-on: self-hosted
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    # Edge registration is best-effort plumbing and must never strand images
+    # that already published, so its verdict is not part of this condition.
+    if: >-
+      always()
+      && needs.plan.outputs.deploy == 'true'
+      && (needs.images.result == 'success' || needs.images.result == 'skipped')
+    steps:
+      - name: Seed jobshout-com and wait
+        env:
+          RP_API_TOKEN: ${{ secrets.RP_API_TOKEN }}
+          RP_URL: ${{ secrets.RP_URL }}
+          TARGET_ENV: ${{ needs.plan.outputs.target_env }}
+        run: |
+          set -euo pipefail
+          TAG="${{ needs.plan.outputs.version }}"
+          RP="${RP_URL:-https://rp.workstation.co.uk}"
+          if [ -z "${RP_API_TOKEN:-}" ]; then
+            echo "::error::RP_API_TOKEN is not set"; exit 1
+          fi
+          echo "Seeding ${RP_APP} '${TARGET_ENV}' @ ${TAG}"
+          echo "Track: ${RP}/?app=${RP_APP}"
+          code=$(curl -sS -o /tmp/seed.out -w '%{http_code}' \
+            -X POST "${RP}/api/apps/${RP_APP}/seed?async=1" \
+            -H "Authorization: Bearer ${RP_API_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            -d "$(printf '{"ring":"%s","version":"%s"}' "$TARGET_ENV" "$TAG")" || echo 000)
+          echo "seed -> HTTP ${code} :: $(cat /tmp/seed.out)"
+          case "${code}" in 200|202) ;; *) echo "::error::seed failed"; exit 1 ;; esac
+          JOB_ID=$(python3 -c 'import json; print(json.load(open("/tmp/seed.out")).get("job_id") or "")')
+          if [ -z "$JOB_ID" ]; then
+            echo "::error::no job_id"; exit 1
+          fi
+          python3 - "$RP" "$RP_API_TOKEN" "$JOB_ID" "$TAG" "$RP_APP" "$TARGET_ENV" <<'PY'
+          import json, sys, time, urllib.error, urllib.request
+          rp, token, job_id, tag, app, ring = sys.argv[1:7]
+          url = f"{rp}/api/apps/{app}/jobs/{job_id}"
+          rings_url = f"{rp}/api/apps/{app}/rings"
+          deadline = time.time() + 20 * 60
+
+          def seeded_ring():
+              """State of the ring THIS run seeded, or None if unreadable."""
+              req = urllib.request.Request(rings_url, headers={"Authorization": f"Bearer {token}"})
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as resp:
+                      rings = json.load(resp).get("rings") or []
+              except Exception as e:  # transient edge/API blip: try again next tick
+                  print(f"::warning::rings poll failed: {e}")
+                  return None
+              for r in rings:
+                  if (r.get("ring") or {}).get("name") == ring:
+                      return r
+              return None
+
+          while time.time() < deadline:
+              req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as resp:
+                      body = json.load(resp)
+              except urllib.error.HTTPError as e:
+                  print(f"::warning::poll HTTP {e.code}")
+                  time.sleep(15)
+                  continue
+              status = (body.get("status") or "").lower()
+              print(f"RP job {job_id} status={status}")
+              for step in body.get("steps") or []:
+                  print(f"--- step {step.get('id')} status={step.get('status')} ---")
+                  for line in step.get("logs") or []:
+                      print(line)
+              # With auto-promote on, the job stays "running" for the whole
+              # int -> test -> acc cascade. This step owns the ring it seeded;
+              # promotion past it is RP's business. Succeed once that ring
+              # reports the seeded version and healthy, rather than timing out
+              # mid-chain and failing a deploy that worked.
+              if status not in ("failed", "error", "cancelled"):
+                  st = seeded_ring()
+                  if st and st.get("current_version") == tag and st.get("healthy"):
+                      print(f"Deployed {tag} to {ring} and healthy.")
+                      if status != "success":
+                          print(f"RP job {job_id} is still {status} — promoting onward "
+                                f"from {ring}; follow it at {rp}/?app={app}")
+                      sys.exit(0)
+              if status == "success":
+                  sys.exit(0)
+              if status in ("failed", "error", "cancelled"):
+                  print(f"::error::RP job {status}")
+                  sys.exit(1)
+              time.sleep(15)
+          print(f"::error::{ring} did not reach {tag} and healthy within 20m")
+          sys.exit(1)
+          PY

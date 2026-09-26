@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -139,6 +140,39 @@ func TestStartOutOfScopeIsPermanent(t *testing.T) {
 	}
 }
 
+func TestGatewayHTML502IsErrGatewayNotHTMLDump(t *testing.T) {
+	html := `<!DOCTYPE html><html lang="en"><head><title>Server Error | WSL Proxy</title></head><body>502</body></html>`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(html))
+	}))
+	defer srv.Close()
+
+	_, err := testClient(t, srv).Status(context.Background(), "remote-1")
+	if !errors.Is(err, ErrGateway) {
+		t.Fatalf("expected ErrGateway, got %v", err)
+	}
+	if strings.Contains(err.Error(), "<!DOCTYPE") {
+		t.Errorf("gateway error must not dump HTML into the UI: %v", err)
+	}
+}
+
+func TestHTML503IsGatewayNotBusy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`<!DOCTYPE html><html><title>Server Error | WSL Proxy</title></html>`))
+	}))
+	defer srv.Close()
+
+	_, err := testClient(t, srv).Start(context.Background(), StartRequest{Target: "https://ok.local"})
+	if !errors.Is(err, ErrGateway) {
+		t.Fatalf("HTML 503 should be ErrGateway, got %v", err)
+	}
+	if errors.Is(err, ErrBusy) {
+		t.Fatal("an edge HTML 503 must not be read as queue-full")
+	}
+}
+
 func TestStartBusyIsTransient(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Retry-After", "60")
@@ -196,7 +230,7 @@ func TestNetworkFailureIsPlainError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error reaching a closed server")
 	}
-	if errors.Is(err, ErrOutOfScope) || errors.Is(err, ErrBusy) || errors.Is(err, ErrUnauthorized) {
+	if errors.Is(err, ErrOutOfScope) || errors.Is(err, ErrBusy) || errors.Is(err, ErrUnauthorized) || errors.Is(err, ErrGateway) {
 		t.Fatalf("network failure misclassified as a typed error: %v", err)
 	}
 }
@@ -213,3 +247,4 @@ func TestTimeoutBoundsOneCall(t *testing.T) {
 		t.Fatal("expected the per-call timeout to fire")
 	}
 }
+

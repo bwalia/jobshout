@@ -31,6 +31,18 @@ type GovernanceService interface {
 	// RecordUsage calculates cost and persists usage data after execution completes.
 	RecordUsage(ctx context.Context, exec *model.AgentExecution) error
 
+	// MaxTokensPerExec returns the resolved per-execution token cap for an agent,
+	// or 0 when no policy sets one. EnforcePolicy cannot apply this limit itself:
+	// it runs before the first model call, when no tokens have been spent yet, so
+	// the cap has to travel into the run and bound each call instead.
+	MaxTokensPerExec(ctx context.Context, orgID, agentID uuid.UUID) int
+
+	// MaxCostPerExec returns the resolved per-execution spend cap in USD for an
+	// agent, or 0 when no policy sets one. Enforced between iterations inside a
+	// run, for the same reason as the token cap: nothing has been spent yet at
+	// the point EnforcePolicy runs.
+	MaxCostPerExec(ctx context.Context, orgID, agentID uuid.UUID) float64
+
 	// Budget CRUD
 	UpsertBudget(ctx context.Context, orgID uuid.UUID, req model.CreateBudgetRequest) (*model.OrgBudget, error)
 	ListBudgets(ctx context.Context, orgID uuid.UUID) ([]model.OrgBudget, error)
@@ -136,6 +148,27 @@ func (s *governanceService) EnforcePolicy(ctx context.Context, orgID, agentID uu
 	}
 
 	return nil
+}
+
+// MaxTokensPerExec resolves the per-execution token cap for an agent. Returns 0
+// when no policy applies or the policy leaves the cap unset, which callers read
+// as "no cap" and fall back to their own default budget.
+func (s *governanceService) MaxTokensPerExec(ctx context.Context, orgID, agentID uuid.UUID) int {
+	policy := s.resolvePolicy(ctx, orgID, agentID)
+	if policy == nil || policy.MaxTokensPerExec == nil || *policy.MaxTokensPerExec <= 0 {
+		return 0
+	}
+	return *policy.MaxTokensPerExec
+}
+
+// MaxCostPerExec resolves the per-execution spend cap for an agent. Returns 0
+// when no policy applies or the policy leaves the cap unset.
+func (s *governanceService) MaxCostPerExec(ctx context.Context, orgID, agentID uuid.UUID) float64 {
+	policy := s.resolvePolicy(ctx, orgID, agentID)
+	if policy == nil || policy.MaxCostPerExec == nil || *policy.MaxCostPerExec <= 0 {
+		return 0
+	}
+	return *policy.MaxCostPerExec
 }
 
 // resolvePolicy merges agent-specific + org-wide default policies. Agent-specific wins.

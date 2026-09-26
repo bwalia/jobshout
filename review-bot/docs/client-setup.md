@@ -1,10 +1,42 @@
 # `/custom-review` client setup (~2 minutes)
 
 Get an AI PR review from any machine — no Python, no Ollama, no checkout of
-review-bot needed. The reviews run centrally on the Mac Studio; your editor
-just talks to it over MCP.
+review-bot needed. The reviews run centrally; your editor just talks to it over
+MCP.
 
-## What you need
+## k3s (int) — recommended
+
+The reviewer runs in the cluster and is reachable over HTTPS at a stable URL —
+no LAN, no mDNS, no tunnel.
+
+- **Server address**: `https://int.jobshout.co.uk/mcp`
+- **Access token**: the `REVIEW_BOT_TOKEN` value from the `jobshout-review`
+  secret in the `int` namespace. Never commit this token.
+
+**Claude Code**
+
+```sh
+claude mcp add --transport http review-bot https://int.jobshout.co.uk/mcp \
+  --header "Authorization: Bearer <token>" --scope user
+```
+
+**Cursor** — add to `~/.cursor/mcp.json` (remote servers use `url`, no `type`):
+
+```json
+{
+  "mcpServers": {
+    "review-bot": {
+      "url": "https://int.jobshout.co.uk/mcp",
+      "headers": { "Authorization": "Bearer ${env:REVIEW_BOT_TOKEN}" }
+    }
+  }
+}
+```
+
+Then `export REVIEW_BOT_TOKEN=<token>` in your shell profile and restart Cursor
+fully. Allowed repos are whatever `list_repos` returns. Skip to "Using it".
+
+## What you need (Mac Studio — legacy)
 
 - **Server address**: `http://Balinders-Mac-Studio.local:8765/mcp`
   (LAN/mDNS name — see "If the .local name does not resolve" below).

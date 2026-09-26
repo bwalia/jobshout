@@ -62,24 +62,7 @@ func (s *researchService) Available() bool {
 }
 
 // researcherSeed is the built-in agent definition, mirroring articleWriterSeed.
-func researcherSeed(orgID uuid.UUID) *model.Agent {
-	desc := "Searches the internet, reads the sources it finds, and returns verified findings with citations that have been checked against the pages they came from."
-	prompt := "You are a research agent. You plan searches, read sources in full, and extract only claims the source text actually states — each with the verbatim passage supporting it. You never cite a page you have not read, and you reject a citation when you are unsure it supports the claim."
-	return &model.Agent{
-		ID:           uuid.New(),
-		OrgID:        orgID,
-		Name:         "Research Agent",
-		Role:         "Researcher",
-		Description:  &desc,
-		SystemPrompt: &prompt,
-		// 'active' for the same reason as the Article Writer: the dashboard's
-		// Active Agents grid filters on this and the agent is always available.
-		Status:       "active",
-		EngineType:   model.EngineGoNative,
-		EngineConfig: map[string]any{},
-		Metadata:     map[string]any{model.MetadataKeyBuiltin: model.BuiltinResearcher},
-	}
-}
+func researcherSeed(orgID uuid.UUID) *model.Agent { return research.Seed(orgID) }
 
 func (s *researchService) EnsureResearcher(ctx context.Context, orgID uuid.UUID) (*model.Agent, error) {
 	existing, err := s.agentRepo.FindBuiltin(ctx, orgID, model.BuiltinResearcher)

@@ -259,14 +259,18 @@ func TestSelect_BudgetCapRejectsExpensiveModels(t *testing.T) {
 func TestSelect_ContextWindowMustHoldPromptPlusHeadroom(t *testing.T) {
 	s := newSelector(allProviders())
 
-	// 20k tokens overflows llama3 (8k) and gpt-3.5-turbo (16k), so a
-	// low-bar task has to move up to a wide-context model.
+	// 20k tokens overflows llama3:latest (8k) and gpt-3.5-turbo (16k).
+	// Wide-context local models (llama3.1:8b, qwen3-coder:30b) are eligible.
 	got, err := s.Select(TaskSignals{Kind: KindSummarize, PromptTokens: 20_000}, Constraints{})
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
-	if got.Provider == "ollama" || got.Model == "gpt-3.5-turbo" {
+	if got.Model == "llama3:latest" || got.Model == "gpt-3.5-turbo" {
 		t.Errorf("selected %s/%s, which cannot hold 20k tokens plus headroom", got.Provider, got.Model)
+	}
+	if got.Chosen.ContextTokens < 20_000+responseHeadroomTokens {
+		t.Errorf("selected %s/%s context %d cannot hold 20k tokens plus headroom",
+			got.Provider, got.Model, got.Chosen.ContextTokens)
 	}
 
 	// Nothing in the catalog holds a million tokens.

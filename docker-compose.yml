@@ -95,6 +95,9 @@ services:
       OLLAMA_DEFAULT_MODEL: ${OLLAMA_DEFAULT_MODEL:-llama3:latest}
       OLLAMA_JWT_SECRET: ${OLLAMA_JWT_SECRET:-}
       OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-10m}
+      CHAT_MODEL: ${CHAT_MODEL:-qwen3-coder:30b}
+      CHAT_MODEL_FALLBACK: ${CHAT_MODEL_FALLBACK:-llama3.1:8b}
+      CHAT_NUM_CTX: ${CHAT_NUM_CTX:-16384}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       PYTHON_SIDECAR_URL: ${PYTHON_SIDECAR_URL:-http://python-sidecar:8001}
       PYTHON_SIDECAR_SECRET: ${PYTHON_SIDECAR_SECRET:-change-me-sidecar-secret}
@@ -113,12 +116,17 @@ services:
       OPSAPI_TIMEOUT: ${OPSAPI_TIMEOUT:-30s}
       BLOG_AUTHOR_NAME: ${BLOG_AUTHOR_NAME:-JobShout Article Writer}
       BLOG_CONTENT_DIR: ${BLOG_CONTENT_DIR:-content/blogs}
+      BLOG_ORPHAN_TIMEOUT: ${BLOG_ORPHAN_TIMEOUT:-45m}
+      BLOG_MAX_RUNTIME: ${BLOG_MAX_RUNTIME:-25m}
       # Image generation on the workstation (port 11435). Empty URL disables it.
       IMAGE_PROVIDER: ${IMAGE_PROVIDER:-mflux}
       IMAGE_BASE_URL: ${IMAGE_BASE_URL:-http://host.docker.internal:11435}
       IMAGE_JWT_SECRET: ${IMAGE_JWT_SECRET:-}
       IMAGE_DEFAULT_MODEL: ${IMAGE_DEFAULT_MODEL:-z-image-turbo}
       IMAGE_TIMEOUT: ${IMAGE_TIMEOUT:-30m}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_BASE_URL: ${GEMINI_BASE_URL:-https://generativelanguage.googleapis.com}
+      IMAGE_GEMINI_MODEL: ${IMAGE_GEMINI_MODEL:-gemini-3.1-flash-lite-image}
       # Pentest: workstation strix-service on 11436. Empty URL disables it.
       STRIX_ENABLED: ${STRIX_ENABLED:-true}
       STRIX_BASE_URL: ${STRIX_BASE_URL:-http://host.docker.internal:11436}
@@ -126,7 +134,22 @@ services:
       STRIX_TIMEOUT: ${STRIX_TIMEOUT:-60s}
       STRIX_POLL_INTERVAL: ${STRIX_POLL_INTERVAL:-15s}
       STRIX_MAX_RUNTIME: ${STRIX_MAX_RUNTIME:-2h}
+      STRIX_ENGAGEMENT_RETRIES: ${STRIX_ENGAGEMENT_RETRIES:-1}
       STRIX_TARGET_ALLOWLIST: ${STRIX_TARGET_ALLOWLIST:-}
+      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:3001}
+      APP_VERSION: ${APP_VERSION:-dev}
+      APP_ENV: ${APP_ENV:-local}
+      GMAIL_CLIENT_ID: ${GMAIL_CLIENT_ID:-}
+      GMAIL_CLIENT_SECRET: ${GMAIL_CLIENT_SECRET:-}
+      GMAIL_TOKEN_KEY: ${GMAIL_TOKEN_KEY:-}
+      GMAIL_OAUTH_REDIRECT_URL: ${GMAIL_OAUTH_REDIRECT_URL:-http://localhost:8190/api/v1/mail/connection/oauth/callback}
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
+      GOOGLE_OAUTH_REDIRECT_URL: ${GOOGLE_OAUTH_REDIRECT_URL:-http://localhost:8190/api/v1/auth/google/callback}
+      MAIL_POLL_INTERVAL: ${MAIL_POLL_INTERVAL:-5m}
+      MAIL_RECONCILE_INTERVAL: ${MAIL_RECONCILE_INTERVAL:-15s}
+      MAIL_SIMULATE: ${MAIL_SIMULATE:-0}
+      MAIL_MODEL: ${MAIL_MODEL:-}
     ports:
       - "${SERVER_HOST_PORT:-8190}:8080"
     depends_on:

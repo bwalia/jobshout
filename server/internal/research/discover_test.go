@@ -2,13 +2,16 @@ package research
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
 	"go.uber.org/zap"
+
+	"github.com/jobshout/server/internal/llm"
 )
 
-const promptDiscover = "choosing what a technical blog should write about"
+const promptDiscover = "choosing what a blog should write about"
 
 // trendingBackend serves canned trending items.
 type trendingBackend struct {
@@ -257,5 +260,163 @@ func TestSignificantWords(t *testing.T) {
 		if _, ok := got[unwanted]; ok {
 			t.Errorf("kept stop word %q", unwanted)
 		}
+	}
+}
+
+// sequenceLLM answers prompts in order, for exercising a re-ask.
+type sequenceLLM struct {
+	replies []string
+	prompts []string
+}
+
+func (s *sequenceLLM) ProviderName() string { return "sequence" }
+
+func (s *sequenceLLM) Generate(_ context.Context, req llm.GenerateRequest) (*llm.GenerateResponse, error) {
+	s.prompts = append(s.prompts, req.Messages[len(req.Messages)-1].Content)
+	if len(s.replies) == 0 {
+		return nil, fmt.Errorf("sequenceLLM: no replies left")
+	}
+	reply := s.replies[0]
+	s.replies = s.replies[1:]
+	return &llm.GenerateResponse{Content: reply}, nil
+}
+
+// A reply that is not JSON used to fail the whole run with "parse response:
+// invalid character". Discovery must ask again instead.
+func TestDiscover_AsksAgainWhenTheReplyIsNotJSON(t *testing.T) {
+	model := &sequenceLLM{replies: []string{
+		`{topics: [{"topic": "unquoted key, not JSON"`,
+		`{"topics":[{"topic":"Operating Thanos at scale","context":"c","rationale":"r","seeds":[]}]}`,
+	}}
+	client := NewWith(nil, nil, []Lister{&trendingBackend{items: sampleTrending()}}, zap.NewNop())
+	agent := NewAgent(client, model, DefaultAgentConfig(), zap.NewNop())
+
+	got, err := agent.Discover(context.Background(), DiscoverRequest{Count: 1}, nil)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(got) != 1 || got[0].Topic != "Operating Thanos at scale" {
+		t.Errorf("got %+v, want the topic from the second reply", got)
+	}
+	if len(model.prompts) != 2 {
+		t.Errorf("model asked %d times, want 2", len(model.prompts))
+	}
+}
+
+// Asked for exactly one subject, a model that proposed one already covered left
+// discovery with nothing. Spares give the de-duplication something to fall back
+// on, while the run still gets only the count it asked for.
+func TestDiscover_SparesSurviveDeduplication(t *testing.T) {
+	model := &scriptedLLM{responses: []scriptedResponse{
+		{trigger: promptDiscover, content: `{"topics":[
+			{"topic":"Observability for AI agents and LLMs","context":"c","rationale":"r","seeds":[]},
+			{"topic":"Downsampling Prometheus metrics with Thanos","context":"c","rationale":"r","seeds":[]},
+			{"topic":"Tracing agent tool calls with AWS X-Ray","context":"c","rationale":"r","seeds":[]}
+		]}`},
+	}}
+	agent := newDiscoverAgent(t, sampleTrending(), model)
+
+	got, err := agent.Discover(context.Background(), DiscoverRequest{
+		Count: 1,
+		Avoid: []string{"Observability for AI Agents and LLMs"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(got) != 1 || got[0].Topic != "Downsampling Prometheus metrics with Thanos" {
+		t.Errorf("got %+v, want the first proposal not already covered", got)
+	}
+	if !strings.Contains(model.prompts[0], fmt.Sprintf("Choose the %d best subjects", 1+discoverSpare)) {
+		t.Error("the model was not asked for spare subjects")
+	}
+}
+
+// Discovery chooses for a reader. The developer candidate filter rejects
+// anything that is not "genuinely about software, AI or infrastructure" —
+// which is every subject a business briefing wants — so a reader that cannot
+// steer selection only gets to rewrite topics somebody else chose.
+func TestDiscover_ChoosesForTheRequestedReader(t *testing.T) {
+	model := &scriptedLLM{responses: []scriptedResponse{
+		{trigger: promptDiscover, content: `{"topics":[{"topic":"A decision worth making","seeds":[0]}]}`},
+	}}
+	agent := newDiscoverAgent(t, sampleTrending(), model)
+
+	if _, err := agent.Discover(context.Background(),
+		DiscoverRequest{Count: 1, Audience: "business"}, nil); err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+
+	prompt := model.prompts[len(model.prompts)-1]
+	for _, want := range []string{
+		"what it costs and what it risks",        // the business remit
+		"a business manager who is accountable",  // who the context is written for
+		"Change a decision somebody has to make", // the business preference
+		"Release notes, version bumps",           // the business rejection
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("the discovery prompt is missing %q:\n%s", want, prompt)
+		}
+	}
+	// And it must not still be applying the developer filter underneath.
+	if strings.Contains(prompt, "Trending lists carry\n  politics, business and general news") {
+		t.Errorf("the developer candidate filter survived into a business run:\n%s", prompt)
+	}
+}
+
+// With no audience named, discovery must behave exactly as it did before
+// readers existed — every schedule that predates this feature is that run.
+func TestDiscover_DefaultsToTheDeveloperRemit(t *testing.T) {
+	model := &scriptedLLM{responses: []scriptedResponse{
+		{trigger: promptDiscover, content: `{"topics":[{"topic":"Something","seeds":[0]}]}`},
+	}}
+	agent := newDiscoverAgent(t, sampleTrending(), model)
+
+	if _, err := agent.Discover(context.Background(), DiscoverRequest{Count: 1}, nil); err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	prompt := model.prompts[len(model.prompts)-1]
+	if !strings.Contains(prompt, "software engineering, AI and infrastructure, for a developer audience") {
+		t.Errorf("an unspecified reader is not the developer remit:\n%s", prompt)
+	}
+}
+
+// A sector is searched alongside the focus areas, not instead of them: the
+// trending sweep on any given night carries nothing about one narrow sector,
+// and the useful query is the pair.
+func TestSearchAreas_CrossesFocusWithIndustry(t *testing.T) {
+	got := searchAreas(DiscoverRequest{
+		Focus:    []string{"Kubernetes", " Postgres "},
+		Industry: "NHS trusts",
+	})
+	want := []string{
+		"Kubernetes", "Kubernetes NHS trusts",
+		"Postgres", "Postgres NHS trusts",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("searchAreas = %v; want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("searchAreas[%d] = %q; want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// With no focus areas the sector is searched on its own — something
+// on-sector beats a generic sweep for a reader who was promised their sector.
+func TestSearchAreas_IndustryAloneIsSearched(t *testing.T) {
+	if got := searchAreas(DiscoverRequest{Industry: "3PL logistics"}); len(got) != 1 || got[0] != "3PL logistics" {
+		t.Errorf("searchAreas = %v; want just the sector", got)
+	}
+	if got := searchAreas(DiscoverRequest{}); len(got) != 0 {
+		t.Errorf("searchAreas = %v; want nothing to search", got)
+	}
+}
+
+// Repeats cost a search round trip and a slot in the candidate pool.
+func TestSearchAreas_Deduplicates(t *testing.T) {
+	got := searchAreas(DiscoverRequest{Focus: []string{"Kubernetes", "kubernetes", ""}})
+	if len(got) != 1 {
+		t.Errorf("searchAreas = %v; want one area", got)
 	}
 }

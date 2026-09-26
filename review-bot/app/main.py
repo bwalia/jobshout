@@ -110,6 +110,9 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         settings = load_settings()
+        if settings.local_repo_path is None:
+            print("error: LOCAL_REPO_PATH is not set.", file=sys.stderr)
+            return 1
         if args.command == "prime":
             return _cmd_prime(settings, args)
         if args.command == "watch":

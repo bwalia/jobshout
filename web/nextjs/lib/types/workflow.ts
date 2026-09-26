@@ -57,6 +57,8 @@ export interface UpdateWorkflowRequest {
   name?: string;
   description?: string;
   status?: string;
+  /** When present, replaces the workflow's entire step set. */
+  steps?: CreateWorkflowStepRequest[];
 }
 
 export interface ExecuteWorkflowRequest {

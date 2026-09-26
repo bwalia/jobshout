@@ -1,0 +1,135 @@
+name: PR image check
+
+# Cross-build the k3s images and the JobShout.com marketplace images for
+# linux/amd64 without pushing or seeding Ring Promoter. Auto-merge is not used;
+# this is the pre-merge gate so a broken Dockerfile fails on the PR instead of
+# after it hits master.
+
+on:
+  pull_request:
+    branches: [master]
+
+concurrency:
+  group: pr-image-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  # The image cross-build is expensive on the self-hosted arm64 Mac (QEMU).
+  # Compile and test the Go server first so a type error or a broken test fails
+  # in seconds instead of after the build has burned the runner.
+  go-checks:
+    name: Go build, vet & test
+    runs-on: self-hosted
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: Build, vet & test
+        working-directory: server
+        run: |
+          set -euo pipefail
+          go build ./...
+          go vet ./...
+          go test ./...
+
+  # The web image build type-checks too, but only ~an hour into the cross-build
+  # and after the Go image. tsc + lint on their own take seconds, so a missing
+  # import (PR #187 dropped SeoAgentClient's) fails here instead.
+  web-checks:
+    name: Web typecheck & lint
+    runs-on: self-hosted
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/nextjs/package-lock.json
+
+      - name: Typecheck & lint
+        working-directory: web/nextjs
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run typecheck
+          npm run lint
+
+  # Cross-build with the same BuildKit local cache the deploy job uses so PR
+  # checks warm (and benefit from) ~/.cache/jobshout-buildkit on this runner.
+  pr-image-check:
+    name: PR image check
+    needs: [go-checks, web-checks]
+    runs-on: self-hosted
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cross-build linux/amd64 (no push)
+        run: |
+          set -euo pipefail
+          CACHE_ROOT="${HOME}/.cache/jobshout-buildkit"
+          mkdir -p "$CACHE_ROOT"
+          docker buildx inspect jsbuilder >/dev/null 2>&1 \
+            || docker buildx create --name jsbuilder --driver docker-container --bootstrap
+          bx() {
+            local cache_name="$1"; shift
+            local cache_dir="$CACHE_ROOT/$cache_name"
+            mkdir -p "$cache_dir"
+            docker buildx build --builder jsbuilder --platform linux/amd64 \
+              --provenance=false --sbom=false --load \
+              --cache-from "type=local,src=${cache_dir}" \
+              --cache-to "type=local,dest=${cache_dir},mode=max" \
+              "$@"
+          }
+
+          fail=0
+          bx server -t jobshout/server:pr -f server/Dockerfile server &
+          pids="$!"
+          bx web --build-arg NEXT_PUBLIC_API_URL="" --build-arg NEXT_PUBLIC_WS_URL="" \
+            -t jobshout/web:pr -f web/nextjs/Dockerfile web/nextjs &
+          pids="$pids $!"
+          bx python-sidecar -t jobshout/python-sidecar:pr -f python-sidecar/Dockerfile python-sidecar &
+          pids="$pids $!"
+          bx review-bot -t jobshout/review-bot:pr -f review-bot/Dockerfile review-bot &
+          pids="$pids $!"
+          # JobShout.com marketplace — same images deploy-jobshout-com.yml pushes.
+          bx jobshout-com-api -t jobshout-com/api:pr -f jobshout-com/deploy/docker/Dockerfile.api jobshout-com &
+          pids="$pids $!"
+          bx jobshout-com-web --build-arg NEXT_PUBLIC_JOBSHOUT_COM_API_URL="" \
+            --build-arg JOBSHOUT_COM_API_URL=http://jobshout-com-api:8088 \
+            -t jobshout-com/web:pr -f jobshout-com/deploy/docker/Dockerfile.web jobshout-com/web/nextjs &
+          pids="$pids $!"
+          for pid in $pids; do
+            wait "$pid" || fail=1
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::one or more parallel PR image builds failed"
+            exit 1
+          fi
+
+          for img in jobshout/server:pr jobshout/web:pr jobshout/python-sidecar:pr jobshout/review-bot:pr \
+                     jobshout-com/api:pr jobshout-com/web:pr; do
+            arch=$(docker image inspect --format '{{.Architecture}}' "$img")
+            echo "$img architecture=$arch"
+            [ "$arch" = "amd64" ]
+          done
+
+          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh jobshout/server:pr \
+            -c 'test -x /app/jobshout-server && uname -m | grep -qx x86_64'
+          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh jobshout/web:pr \
+            -c 'uname -m | grep -qx x86_64'
+          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh jobshout/python-sidecar:pr \
+            -c 'uname -m | grep -qx x86_64'
+          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh jobshout/review-bot:pr \
+            -c 'uname -m | grep -qx x86_64 && command -v opencode >/dev/null && command -v git >/dev/null'
+          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh jobshout-com/api:pr \
+            -c 'test -x /usr/local/bin/jobshout-api && uname -m | grep -qx x86_64'
+          docker run --rm --platform=linux/amd64 --entrypoint /bin/sh jobshout-com/web:pr \
+            -c 'uname -m | grep -qx x86_64 && test -d /app/.next'

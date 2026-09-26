@@ -34,9 +34,10 @@ type TelegramChat struct {
 
 // CallbackQuery represents an incoming callback query from an inline keyboard button press.
 type CallbackQuery struct {
-	ID   string        `json:"id"`
-	From *TelegramUser `json:"from"`
-	Data string        `json:"data"`
+	ID      string           `json:"id"`
+	From    *TelegramUser    `json:"from"`
+	Data    string           `json:"data"`
+	Message *TelegramMessage `json:"message,omitempty"`
 }
 
 // InlineKeyboard represents a Telegram inline keyboard markup.

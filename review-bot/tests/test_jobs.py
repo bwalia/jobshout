@@ -197,6 +197,14 @@ def test_unknown_job_id_snapshot_is_none(runner):
     assert runner.snapshot("nope") is None
 
 
+def test_run_ref_returns_the_same_job(runner, monkeypatch):
+    monkeypatch.setattr(jobs, "review_pull_request", lambda **kw: make_result(kw["pr_number"]))
+    first = runner.submit_review("acme/widgets", 1, dry_run=True, force=True, run_ref="run-1")
+    second = runner.submit_review("acme/widgets", 1, dry_run=True, force=True, run_ref="run-1")
+    assert first.id == second.id
+    wait(first)
+
+
 def test_timeout_fails_job_and_sticks(settings, monkeypatch):
     StubGitHubClient.created = []
     StubGitHubClient.bodies = []

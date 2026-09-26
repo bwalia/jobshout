@@ -2,12 +2,20 @@
 
 Mission control center for AI teams. Create agents, build teams, assign projects, track work, and automate workflows.
 
+## Products
+
+| Path | Product |
+| --- | --- |
+| `server/`, `web/nextjs/` | Agent orchestration platform (Go + Next.js) |
+| [`jobshout-com/`](jobshout-com/) | JobShout.com employment marketplace (Rust + Next.js; separate Helm) |
+
 ## Architecture
 
 ```
 jobshout/
   server/          Go API backend (chi, pgx, JWT)
   web/nextjs/      Next.js 14+ frontend (ShadCN, React Flow, dnd-kit)
+  jobshout-com/    Job board marketplace (own compose / Helm)
   docker-compose.yml
 ```
 

@@ -79,4 +79,7 @@ type UpdateWorkflowRequest struct {
 	Name        *string `json:"name"`
 	Description *string `json:"description"`
 	Status      *string `json:"status" validate:"omitempty,oneof=draft active archived"`
+	// Steps, when present, replaces the workflow's entire step set. Omit (or
+	// send null) to leave the existing steps untouched.
+	Steps []CreateWorkflowStepRequest `json:"steps,omitempty" validate:"omitempty,min=1,dive"`
 }

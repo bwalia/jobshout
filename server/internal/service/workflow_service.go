@@ -65,14 +65,29 @@ func (s *workflowService) Create(ctx context.Context, orgID uuid.UUID, createdBy
 		CreatedBy:   &createdBy,
 	}
 
-	for i, sr := range req.Steps {
+	steps, err := buildSteps(wf.ID, req.Steps)
+	if err != nil {
+		return nil, err
+	}
+	wf.Steps = steps
+
+	if err := s.wfRepo.Create(ctx, wf); err != nil {
+		return nil, fmt.Errorf("workflow_svc: create: %w", err)
+	}
+	return wf, nil
+}
+
+// buildSteps converts step requests into model steps with fresh IDs.
+func buildSteps(workflowID uuid.UUID, reqs []model.CreateWorkflowStepRequest) ([]model.WorkflowStep, error) {
+	var steps []model.WorkflowStep
+	for i, sr := range reqs {
 		agentID, err := uuid.Parse(sr.AgentID)
 		if err != nil {
 			return nil, fmt.Errorf("workflow_svc: invalid agent_id in step %d: %w", i, err)
 		}
-		wf.Steps = append(wf.Steps, model.WorkflowStep{
+		steps = append(steps, model.WorkflowStep{
 			ID:            uuid.New(),
-			WorkflowID:    wf.ID,
+			WorkflowID:    workflowID,
 			Name:          sr.Name,
 			AgentID:       agentID,
 			InputTemplate: sr.InputTemplate,
@@ -81,11 +96,7 @@ func (s *workflowService) Create(ctx context.Context, orgID uuid.UUID, createdBy
 			EngineType:    sr.EngineType,
 		})
 	}
-
-	if err := s.wfRepo.Create(ctx, wf); err != nil {
-		return nil, fmt.Errorf("workflow_svc: create: %w", err)
-	}
-	return wf, nil
+	return steps, nil
 }
 
 func (s *workflowService) GetByID(ctx context.Context, id uuid.UUID) (*model.Workflow, error) {
@@ -118,6 +129,19 @@ func (s *workflowService) Update(ctx context.Context, id uuid.UUID, req model.Up
 
 	if err := s.wfRepo.Update(ctx, wf); err != nil {
 		return nil, fmt.Errorf("workflow_svc: update: %w", err)
+	}
+
+	// A steps payload replaces the whole DAG — this is how the visual builder
+	// persists canvas edits.
+	if req.Steps != nil {
+		steps, err := buildSteps(wf.ID, req.Steps)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.wfRepo.ReplaceSteps(ctx, wf.ID, steps); err != nil {
+			return nil, fmt.Errorf("workflow_svc: replace steps: %w", err)
+		}
+		wf.Steps = steps
 	}
 	return wf, nil
 }

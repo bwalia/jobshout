@@ -4,27 +4,18 @@ import { useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { updateTask, getTaskComments, addTaskComment } from "@/lib/api/tasks";
+import { useAgents } from "@/lib/hooks/useAgents";
+import { taskKeys } from "@/lib/hooks/useTasks";
+import { useAuthStore } from "@/lib/store/auth-store";
+import { PRIORITY_OPTIONS, STATUS_OPTIONS } from "@/lib/task-labels";
 import type { Task, UpdateTaskRequest, TaskComment } from "@/lib/types/project";
 import type { TaskStatus, Priority } from "@/lib/types/common";
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const STATUS_OPTIONS: { value: TaskStatus; label: string }[] = [
-  { value: "backlog", label: "Backlog" },
-  { value: "todo", label: "Todo" },
-  { value: "in_progress", label: "In Progress" },
-  { value: "review", label: "Review" },
-  { value: "done", label: "Done" },
-];
-
-const PRIORITY_OPTIONS: { value: Priority; label: string }[] = [
-  { value: "low", label: "Low" },
-  { value: "medium", label: "Medium" },
-  { value: "high", label: "High" },
-  { value: "critical", label: "Critical" },
-];
+import type { LaunchResult } from "@/lib/agents/launch";
+import type { TaskRun } from "@/lib/types/task-run";
+import { TaskActions } from "@/components/task-manager/TaskActions";
+import { TaskHistoryPanel } from "@/components/task-manager/TaskHistoryPanel";
+import { RunTaskDialog } from "@/components/task-manager/RunTaskDialog";
+import { formatCompletedAt } from "@/components/task-manager/TaskProgressChip";
 
 // ---------------------------------------------------------------------------
 // TaskDetailModal
@@ -36,6 +27,7 @@ interface TaskDetailModalProps {
   onClose: () => void;
   /** Called after a successful save so the parent can update its list */
   onUpdated?: (updatedTask: Task) => void;
+  initialFocusRunId?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -52,8 +44,26 @@ function formatRelativeTime(isoTimestamp: string): string {
   return `${Math.floor(diffSeconds / 86_400)}d ago`;
 }
 
-export function TaskDetailModal({ task, onClose, onUpdated }: TaskDetailModalProps) {
+export function TaskDetailModal({
+  task,
+  onClose,
+  onUpdated,
+  initialFocusRunId,
+}: TaskDetailModalProps) {
   const queryClient = useQueryClient();
+  const { data: agentsResp } = useAgents({ per_page: 100 });
+  const agents = agentsResp?.data ?? [];
+  const currentUserId = useAuthStore((s) => s.user?.id ?? null);
+
+  // Comments only carry ids; resolve what we can rather than rendering every
+  // comment anonymously.
+  function commentAuthor(comment: TaskComment): string {
+    if (comment.agent_id) {
+      return agents.find((a) => a.id === comment.agent_id)?.name ?? "Agent";
+    }
+    if (comment.author_id && comment.author_id === currentUserId) return "You";
+    return "Team member";
+  }
 
   // Local form state initialised from the task prop
   const [title, setTitle] = useState(task.title);
@@ -69,6 +79,17 @@ export function TaskDetailModal({ task, onClose, onUpdated }: TaskDetailModalPro
 
   // Comment input state
   const [commentBody, setCommentBody] = useState("");
+  const [runOpen, setRunOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(Boolean(initialFocusRunId));
+  const [focusRunId, setFocusRunId] = useState<string | null>(
+    initialFocusRunId ?? null
+  );
+
+  useEffect(() => {
+    if (!initialFocusRunId) return;
+    setFocusRunId(initialFocusRunId);
+    setHistoryOpen(true);
+  }, [task.id, initialFocusRunId]);
 
   // Keep local state fresh if the task prop changes (e.g. external update)
   useEffect(() => {
@@ -92,9 +113,10 @@ export function TaskDetailModal({ task, onClose, onUpdated }: TaskDetailModalPro
   const updateMutation = useMutation({
     mutationFn: (payload: UpdateTaskRequest) => updateTask(task.id, payload),
     onSuccess: (updatedTask) => {
-      queryClient.invalidateQueries({
-        queryKey: ["tasks", task.project_id],
-      });
+      // This modal is opened from both the per-project board and the
+      // all-projects Task Board (a flat list under a different key), so
+      // invalidate every task query rather than guessing which one fed it.
+      queryClient.invalidateQueries({ queryKey: taskKeys.all });
       toast.success("Task updated.");
       onUpdated?.(updatedTask);
       onClose();
@@ -240,20 +262,39 @@ export function TaskDetailModal({ task, onClose, onUpdated }: TaskDetailModalPro
             </div>
           </div>
 
-          {/* Assignee picker (simplified — shows agent ID input) */}
+          {/* Assignee picker */}
           <div className="space-y-1.5">
             <label htmlFor="task-assignee" className="text-sm font-medium">
-              Assigned Agent ID
+              Assigned Agent
             </label>
-            <input
+            <select
               id="task-assignee"
-              type="text"
               value={assignedAgentId}
               onChange={(e) => setAssignedAgentId(e.target.value)}
-              placeholder="Paste agent ID or leave blank"
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            />
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <option value="">Unassigned</option>
+              {/* Keep an unknown current assignee selectable rather than
+                  silently rendering a blank control. */}
+              {assignedAgentId &&
+                !agents.some((a) => a.id === assignedAgentId) && (
+                  <option value={assignedAgentId}>
+                    Unknown agent ({assignedAgentId.slice(0, 8)}…)
+                  </option>
+                )}
+              {agents.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
           </div>
+
+          {formatCompletedAt(task.completed_at) && (
+            <p className="text-sm text-muted-foreground">
+              Completed {formatCompletedAt(task.completed_at)}
+            </p>
+          )}
 
           {/* Due date */}
           <div className="space-y-1.5">
@@ -298,6 +339,7 @@ export function TaskDetailModal({ task, onClose, onUpdated }: TaskDetailModalPro
                       {comment.body}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
+                      {commentAuthor(comment)} ·{" "}
                       {formatRelativeTime(comment.created_at)}
                     </p>
                   </li>
@@ -329,24 +371,61 @@ export function TaskDetailModal({ task, onClose, onUpdated }: TaskDetailModalPro
         </div>
 
         {/* Footer actions */}
-        <div className="flex justify-end gap-2 border-t border-border px-6 py-4">
-          <button
-            type="button"
-            onClick={onClose}
-            className="inline-flex h-9 items-center rounded-md border border-border bg-background px-4 text-sm font-medium hover:bg-accent"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={updateMutation.isPending || !title.trim()}
-            className="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
-          >
-            {updateMutation.isPending ? "Saving…" : "Save"}
-          </button>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-6 py-4">
+          <TaskActions
+            task={task}
+            onShowHistory={() => setHistoryOpen(true)}
+            onRun={() => setRunOpen(true)}
+          />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex h-9 items-center rounded-md border border-border bg-background px-4 text-sm font-medium hover:bg-accent"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={updateMutation.isPending || !title.trim()}
+              className="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+            >
+              {updateMutation.isPending ? "Saving…" : "Save"}
+            </button>
+          </div>
         </div>
       </div>
+      {runOpen && (
+        <RunTaskDialog
+          task={task}
+          agents={agents}
+          onClose={() => setRunOpen(false)}
+          onLaunched={(run: TaskRun) => {
+            setFocusRunId(run.id);
+            setHistoryOpen(true);
+            void queryClient.invalidateQueries({ queryKey: taskKeys.all });
+          }}
+          onSpecialistLaunched={(result: LaunchResult) => {
+            if (result.run_id) setFocusRunId(result.run_id);
+            setHistoryOpen(true);
+            void queryClient.invalidateQueries({ queryKey: taskKeys.all });
+            if (result.task) onUpdated?.(result.task);
+          }}
+        />
+      )}
+      {historyOpen && (
+        <TaskHistoryPanel
+          task={task}
+          agents={agents}
+          focusRunId={focusRunId}
+          onClose={() => setHistoryOpen(false)}
+          onReRun={() => {
+            setHistoryOpen(false);
+            setRunOpen(true);
+          }}
+        />
+      )}
     </div>
   );
 }

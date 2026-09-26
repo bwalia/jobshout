@@ -2,6 +2,7 @@ package blog
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"regexp"
 	"strings"
@@ -40,29 +41,42 @@ func renderHTML(markdown string) (string, error) {
 	if err := markdownConverter.Convert([]byte(stripLeadingH1(markdown)), &buf); err != nil {
 		return "", fmt.Errorf("blog: render markdown to html: %w", err)
 	}
-	return strings.TrimSpace(mermaidToDiv(buf.String())), nil
+	return strings.TrimSpace(mermaidToImg(buf.String())), nil
 }
 
 // mermaidCodeBlock matches the HTML goldmark emits for a ```mermaid fence.
 var mermaidCodeBlock = regexp.MustCompile(
 	`(?s)<pre><code class="language-mermaid">(.*?)</code></pre>`)
 
-// mermaidToDiv rewrites a fenced mermaid block into the markup mermaid.js
-// looks for.
+// mermaidInkSVG is the public Mermaid renderer used for CMS HTML. The opsapi
+// TipTap editor and consumer sites that inject content_html do not run
+// mermaid.js, so a bare <div class="mermaid"> never becomes a diagram there.
+// An <img> pointing at mermaid.ink does: TipTap keeps images, and a plain
+// HTML page paints them without any client-side Mermaid runtime.
+const mermaidInkSVG = "https://mermaid.ink/svg/"
+
+// mermaidToImg rewrites a fenced mermaid block into a self-rendering <img>.
 //
 // goldmark has no idea what mermaid is, so it renders the fence as a code
-// block — which publishes the diagram's source as literal text on the page.
-// `<div class="mermaid">` is the convention mermaid.js scans for, so a CMS
-// theme that loads the library renders a diagram, and one that does not shows
-// the same text it would have shown anyway. Nothing gets worse; it can only
-// get better.
+// block — which would publish the diagram's source as literal text. The
+// previous <div class="mermaid"> convention only helps a theme that loads
+// mermaid.js; the CMS path JobShout publishes to does not.
 //
-// The source is left HTML-escaped. goldmark escaped it on the way in, and
-// mermaid reads the element's text content, which the browser unescapes.
-// Unescaping here would instead let a label containing a < become markup.
-func mermaidToDiv(html string) string {
-	return mermaidCodeBlock.ReplaceAllString(html,
-		`<div class="mermaid">$1</div>`)
+// The diagram source is URL-safe base64 in the image path (not HTML body
+// text), so characters like < and > cannot become markup.
+func mermaidToImg(html string) string {
+	return mermaidCodeBlock.ReplaceAllStringFunc(html, func(block string) string {
+		m := mermaidCodeBlock.FindStringSubmatch(block)
+		if m == nil {
+			return block
+		}
+		source := strings.TrimSpace(unescapeEntities(m[1]))
+		if source == "" {
+			return block
+		}
+		enc := base64.RawURLEncoding.EncodeToString([]byte(source))
+		return `<img class="mermaid-diagram" alt="Diagram" src="` + mermaidInkSVG + enc + `" />`
+	})
 }
 
 var (
@@ -93,16 +107,40 @@ func articleTitle(markdown, topic string) string {
 
 // stripLeadingH1 removes the article's own H1 heading, and only that one —
 // an H1 used later in the body (rare, but models do it) stays put.
+//
+// Models sometimes underline the "# Title" line with "=====" as well, mixing
+// the two Markdown heading styles. Once the "#" line is gone that underline
+// is a line of its own and renders as a paragraph of equals signs at the top
+// of the post (and becomes the start of its excerpt), so it goes too.
 func stripLeadingH1(markdown string) string {
 	trimmed := strings.TrimLeft(markdown, " \t\r\n")
 	if !strings.HasPrefix(trimmed, "# ") {
 		return markdown
 	}
-	if nl := strings.IndexByte(trimmed, '\n'); nl >= 0 {
-		return strings.TrimLeft(trimmed[nl+1:], "\r\n")
+	nl := strings.IndexByte(trimmed, '\n')
+	if nl < 0 {
+		// The whole article is a single H1 line — nothing left once it goes.
+		return ""
 	}
-	// The whole article is a single H1 line — nothing left once it goes.
-	return ""
+	rest := strings.TrimLeft(trimmed[nl+1:], "\r\n")
+	if line, after, found := strings.Cut(rest, "\n"); isHeadingUnderline(line) {
+		if !found {
+			return ""
+		}
+		rest = strings.TrimLeft(after, "\r\n")
+	}
+	return rest
+}
+
+// isHeadingUnderline reports whether line is a setext underline: only "="
+// characters, or only "-" characters, with optional surrounding spaces.
+// A single "-" or "=" is not one — that is a list item or stray text.
+func isHeadingUnderline(line string) bool {
+	line = strings.TrimSpace(line)
+	if len(line) < 2 {
+		return false
+	}
+	return strings.Trim(line, "=") == "" || strings.Trim(line, "-") == ""
 }
 
 // excerptLimit is the length an excerpt is trimmed to. It also feeds the SEO

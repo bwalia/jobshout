@@ -9,17 +9,11 @@ module.exports = {
   theme: {
     extend: {
       fontFamily: {
-        // JIRA / Confluence-style: Inter for body, Inter Tight for display
-        // (headings, big numerics). Falls back to system stack if Google
-        // Fonts is unreachable.
         sans: [
           "var(--font-sans)",
           "-apple-system",
           "BlinkMacSystemFont",
           "Segoe UI",
-          "Roboto",
-          "Helvetica",
-          "Arial",
           "sans-serif",
         ],
         display: [
@@ -27,11 +21,8 @@ module.exports = {
           "var(--font-sans)",
           "-apple-system",
           "BlinkMacSystemFont",
-          "Segoe UI",
-          "Roboto",
           "sans-serif",
         ],
-        // Telemetry voice — agent ids, timestamps, metrics.
         mono: [
           "var(--font-mono)",
           "ui-monospace",
@@ -42,16 +33,21 @@ module.exports = {
           "monospace",
         ],
       },
-      // JIRA's tighter type scale: smaller, denser, more lines per screen.
+      // Every size moved up a step. `base` was 14px, so anything written as
+      // text-base — which is most of the app — rendered below the 16px that
+      // browsers and iOS treat as normal body text. That single number was
+      // why the dashboard and chat read small no matter what the components
+      // asked for; fixing it here fixes every page at once.
       fontSize: {
-        "2xs": ["10px", { lineHeight: "14px", letterSpacing: "0.02em" }],
-        xs: ["11px", { lineHeight: "16px", letterSpacing: "0.005em" }],
-        sm: ["13px", { lineHeight: "20px" }],
-        base: ["14px", { lineHeight: "22px" }],
-        lg: ["16px", { lineHeight: "24px" }],
-        xl: ["18px", { lineHeight: "28px", letterSpacing: "-0.01em" }],
-        "2xl": ["22px", { lineHeight: "30px", letterSpacing: "-0.015em" }],
-        "3xl": ["28px", { lineHeight: "36px", letterSpacing: "-0.02em" }],
+        "2xs": ["11px", { lineHeight: "15px", letterSpacing: "0.02em" }],
+        xs: ["13px", { lineHeight: "18px" }],
+        sm: ["14px", { lineHeight: "21px" }],
+        base: ["16px", { lineHeight: "25px" }],
+        lg: ["18px", { lineHeight: "27px" }],
+        xl: ["20px", { lineHeight: "29px", letterSpacing: "-0.01em" }],
+        "2xl": ["25px", { lineHeight: "33px", letterSpacing: "-0.015em" }],
+        "3xl": ["32px", { lineHeight: "40px", letterSpacing: "-0.02em" }],
+        "4xl": ["40px", { lineHeight: "47px", letterSpacing: "-0.022em" }],
       },
       colors: {
         border: "hsl(var(--border))",
@@ -120,12 +116,11 @@ module.exports = {
         sm: "calc(var(--radius) - 6px)",
       },
       boxShadow: {
-        "card": "0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px -1px rgba(0, 0, 0, 0.04)",
-        "card-hover": "0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.05)",
-        // Amber signal glow for the primary CTA / focused control.
-        "signal": "0 0 0 1px hsl(var(--signal) / 0.35), 0 4px 20px -4px hsl(var(--signal) / 0.4)",
-        // Soft green glow for a live/broadcasting element.
-        "glow-live": "0 0 16px -2px hsl(var(--signal-live) / 0.55)",
+        card: "0 1px 2px 0 rgba(0, 0, 0, 0.04)",
+        "card-hover": "0 2px 8px -2px rgba(0, 0, 0, 0.08)",
+        // Kept as no-ops so existing class names don't break; glows removed.
+        signal: "none",
+        "glow-live": "none",
       },
     },
   },

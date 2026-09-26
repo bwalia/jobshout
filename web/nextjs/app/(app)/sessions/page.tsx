@@ -192,7 +192,7 @@ export default function SessionsPage() {
           <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-lg">
             <h3 className="text-base font-semibold">Copy Context From Another Session</h3>
             <p className="mt-1 text-xs text-muted-foreground">
-              This will append the source session's messages to the target session.
+              This will append the source session&apos;s messages to the target session.
             </p>
             <div className="mt-4 space-y-3">
               <select

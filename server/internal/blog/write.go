@@ -2,11 +2,14 @@ package blog
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"go.uber.org/zap"
 
+	"github.com/jobshout/server/internal/audience"
 	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/research"
@@ -24,18 +27,90 @@ type writePlan struct {
 	// into the draft prompt to keep a long article pointed the same way.
 	Angle    string   `json:"angle"`
 	Sections []string `json:"sections"`
+	// Cover fields keep the house style (charcoal navy, teal/coral) while
+	// giving each article its own metaphor so covers do not look identical.
+	CoverMetaphor string         `json:"cover_metaphor"`
+	CoverObjects  flexibleString `json:"cover_objects"`
+	CoverAccent   string         `json:"cover_accent"`
+	// Figures are in-body informational images (flow, comparison, …), planned
+	// only when this run can actually draw. Omitted or empty is fine.
+	Figures []figureBrief `json:"figures"`
 }
+
+// figureBrief is one planned in-body figure: a kind, the section it belongs
+// under, and the facts the picture must show.
+type figureBrief struct {
+	Kind    string `json:"kind"`
+	Section string `json:"section"`
+	Content string `json:"content"`
+}
+
+// flexibleString accepts whatever shape a model gives a cover hint: a string,
+// an array of strings (["lighthouse","hull"]), or objects and arrays of
+// objects ([{"name":"lighthouse"}]). Every string inside is kept, joined with
+// commas. It is a styling hint, so an odd shape must not fail the whole run —
+// that killed int runs on 17 and 20 Sep at the plan step.
+type flexibleString string
+
+func (s *flexibleString) UnmarshalJSON(b []byte) error {
+	var v any
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	var parts []string
+	collectStrings(v, &parts)
+	*s = flexibleString(strings.Join(parts, ", "))
+	return nil
+}
+
+// collectStrings appends every non-blank string in v, walking object values
+// in key order so the result is stable.
+func collectStrings(v any, out *[]string) {
+	switch t := v.(type) {
+	case string:
+		if t = strings.TrimSpace(t); t != "" {
+			*out = append(*out, t)
+		}
+	case []any:
+		for _, e := range t {
+			collectStrings(e, out)
+		}
+	case map[string]any:
+		keys := make([]string, 0, len(t))
+		for k := range t {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			collectStrings(t[k], out)
+		}
+	}
+}
+
+func (s flexibleString) String() string { return string(s) }
 
 // plan chooses a title and an outline from the research brief.
 func (r *Runner) plan(ctx context.Context, modelName string, brief model.BlogBrief, rb *research.Brief) (*writePlan, error) {
-	prompt := fmt.Sprintf(`You are planning a technical article for a developer audience.
+	figureAsk, extraJSON := "", ""
+	if r.canLetterFigures() {
+		figureAsk = `
+5. One or two in-article figures that would teach something. Each names a
+   kind (flow, comparison, architecture, process, or concept), the section
+   it belongs under, and the facts to put on the figure — labels, rows or
+   steps, not a decorative scene.`
+		extraJSON = `, "figures": [{"kind":"comparison","section":"...","content":"..."}]`
+	}
+
+	reader := audience.For(brief.Audience)
+
+	prompt := fmt.Sprintf(`%s
 
 TOPIC (a subject, not a title):
 %s
 
 GUIDANCE FROM THE REQUESTER:
 %s
-
+%s
 WHAT THE RESEARCH FOUND:
 %s
 
@@ -44,17 +119,28 @@ VERIFIED FINDINGS YOU MAY BUILD ON:
 
 Decide:
 1. A title. Base it on what the research actually found — the specific, current
-   thing worth saying about this topic — not on restating the topic. Make it
-   concrete and under 70 characters. No colons-and-subtitles, no "A Guide To".
+   thing worth saying about this topic — not on restating the topic.
+   %s
 2. One sentence on the angle: what a reader gets from this piece.
-3. Four to six section headings that deliver that angle.
+3. %s section headings that deliver that angle.
+4. A cover brief: one concrete visual metaphor unique to this topic, one or two
+   focal objects (not generic "tools, documents, agents"), and a one-word
+   accent note (e.g. "amber", "ice", "copper") that still sits with teal/coral.
+%s
+The title must be about the TOPIC given above; research that wandered off it is not a reason to change subject.
 
 Respond with JSON only, in exactly this shape:
-{"title": "...", "angle": "...", "sections": ["...", "..."]}`,
+{"title": "...", "angle": "...", "sections": ["...", "..."], "cover_metaphor": "...", "cover_objects": "...", "cover_accent": "..."%s}`,
+		reader.PlanningLine(),
 		brief.Topic,
 		guidanceOrNone(brief.Context),
+		industryBlock(brief),
 		orNone(rb.Summary),
 		formatFindings(rb.Findings),
+		reader.TitleStyle,
+		reader.Sections,
+		figureAsk,
+		extraJSON,
 	)
 
 	var plan writePlan
@@ -77,7 +163,9 @@ Respond with JSON only, in exactly this shape:
 func (r *Runner) draft(
 	ctx context.Context, modelName string, brief model.BlogBrief, rb *research.Brief, plan *writePlan,
 ) (string, error) {
-	prompt := fmt.Sprintf(`You are writing a technical article for a developer audience.
+	reader := audience.For(brief.Audience)
+
+	prompt := fmt.Sprintf(`%s
 
 TITLE: %s
 ANGLE: %s
@@ -87,7 +175,7 @@ SECTIONS TO COVER:
 
 GUIDANCE FROM THE REQUESTER:
 %s
-
+%s
 SOURCES — these are the only facts you may present as established. Each is
 numbered; cite one by putting its number in square brackets, like [2], at the
 end of the sentence that relies on it.
@@ -97,9 +185,8 @@ Requirements:
 - Pure markdown. No code fence around the whole response, no HTML.
 - Start with a single H1 line: # %s
 - Use H2/H3 headings for the sections above.
-- 900-1400 words.
-- Include at least one code block where it genuinely helps.
-- Include a DIAGRAM where one genuinely helps — see the diagram rules below.
+%s
+- When comparing options, versions or trade-offs, write a markdown table.
 - Cite a source with [n] wherever you state a specific fact, version, number or
   quotation drawn from it. Do not cite a number that is not in the list above.
 - Anything describing HOW A TECHNOLOGY WORKS is a factual claim and needs a
@@ -113,15 +200,20 @@ Requirements:
   is generated separately from the citations you use.
 
 %s
+%s
 
 Return only the markdown article — no preamble, no meta commentary.`,
+		reader.WritingLine(),
 		plan.Title,
 		plan.Angle,
 		formatSections(plan.Sections),
 		guidanceOrNone(brief.Context),
+		industryBlock(brief),
 		formatSources(rb),
 		plan.Title,
+		reader.DraftRules(),
 		r.visualRules(),
+		r.plannedFiguresNote(plan),
 	)
 
 	resp, err := r.generate(ctx, modelName, prompt)
@@ -150,9 +242,12 @@ type critique struct {
 // defects, then fix those named defects, gives the second pass something
 // concrete to act on — and gives us a record of what it thought was wrong.
 func (r *Runner) review(
-	ctx context.Context, modelName string, rb *research.Brief, plan *writePlan, markdown string,
+	ctx context.Context, modelName string, brief model.BlogBrief,
+	rb *research.Brief, plan *writePlan, markdown string,
 ) (*critique, error) {
-	prompt := fmt.Sprintf(`You are reviewing a draft technical article before publication. Be a harsh critic.
+	reader := audience.For(brief.Audience)
+
+	prompt := fmt.Sprintf(`%s
 
 INTENDED TITLE: %s
 INTENDED ANGLE: %s
@@ -177,7 +272,6 @@ Find concrete problems. Look specifically for:
 - Filler: paragraphs that restate the heading, or that would survive being
   deleted without the reader losing anything.
 - Sections that do not deliver the intended angle.
-- Missing or broken code blocks, or code that would not run.
 - Sections that are too thin to be useful — a heading with one short paragraph
   under it.
 - Diagrams drawn as ASCII art instead of a mermaid fence — boxes made of dashes,
@@ -185,13 +279,20 @@ Find concrete problems. Look specifically for:
 - Decision nodes in a diagram whose branches all lead to the same place, which
   makes the decision meaningless.
 - A diagram that contradicts the prose around it, or that no sentence refers to.
+- An illustration fence that describes a decorative scene, animation, or
+  generic office instead of a labeled figure (flow, comparison, architecture,
+  process, or annotated concept). Flag it so the revision can rewrite the
+  fence as a specific kind with the facts to render.
+%s
 
 List each problem as one specific, actionable sentence naming where it occurs.
 If the draft has no real problems, return an empty list — do not invent work.
 
 Respond with JSON only, in exactly this shape:
 {"issues": ["...", "..."]}`,
-		plan.Title, plan.Angle, formatSources(rb), markdown)
+		reader.ReviewLine(),
+		plan.Title, plan.Angle, formatSources(rb), markdown,
+		reader.ReviewExtras())
 
 	var c critique
 	if err := r.generateJSON(ctx, modelName, "review", prompt, maxPlanTokens, &c); err != nil {
@@ -210,9 +311,13 @@ Respond with JSON only, in exactly this shape:
 
 // revise rewrites the draft to address the critique.
 func (r *Runner) revise(
-	ctx context.Context, modelName string, rb *research.Brief, plan *writePlan, markdown string, c *critique,
+	ctx context.Context, modelName string, brief model.BlogBrief,
+	rb *research.Brief, plan *writePlan, markdown string, c *critique,
 ) (string, error) {
-	prompt := fmt.Sprintf(`You are revising a technical article to fix specific problems a reviewer found.
+	reader := audience.For(brief.Audience)
+
+	prompt := fmt.Sprintf(`You are revising %s to fix specific problems a reviewer found.
+It is written for %s, and every fix has to keep it that way.
 
 TITLE: %s
 
@@ -234,13 +339,17 @@ claim into vagueness to avoid having to support it — a sentence that survives 
 saying nothing is worse than one that is gone.
 
 Keep everything that was already working. Preserve the H1 title, the markdown
-structure, the length, and any mermaid diagrams that were fine. If a diagram was
-flagged, fix it in place — redraw it as a mermaid fence if it was ASCII art, or
-delete it if it was not earning its space. Never convert a mermaid fence back
-into text. Do not add a "Further Reading" or "References" section.
+structure, the length, and any mermaid diagrams and illustration fences that
+were fine. If a diagram was flagged, fix it in place — redraw it as a mermaid
+fence if it was ASCII art, or delete it if it was not earning its space. Never
+convert a mermaid fence back into text. If an illustration was flagged as
+decorative, rewrite it as `+"```"+`illustration <kind> whose body lists the
+article's actual labels, rows or steps. Do not add a "Further Reading" or
+"References" section.
 
 Return only the revised markdown article — no preamble, no commentary on what
 you changed.`,
+		reader.IndefinitePiece(), reader.Reader,
 		plan.Title, formatSources(rb), formatIssues(c.Issues), markdown)
 
 	resp, err := r.generate(ctx, modelName, prompt)
@@ -278,10 +387,11 @@ you changed.`,
 const diagramRules = `
 DIAGRAMS:
 
-Include one or two Mermaid diagrams where a diagram genuinely explains
-something faster than a paragraph — a request path, a protocol exchange, a
-lifecycle, a data model. Do not add one to every section, and do not add one
-that merely restates a list.
+Include one Mermaid diagram where a diagram genuinely explains something
+faster than a paragraph — a request path, a protocol exchange, a lifecycle,
+a data model. Do not add one to every section, and do not add one that
+merely restates a list. A second visual idea belongs in an illustration
+of the right kind, not another flowchart.
 
 Write them as a mermaid code fence:
 
@@ -321,50 +431,123 @@ Rules:
 //
 // It is deliberately stingier than the diagram rules. A diagram costs the model
 // a few hundred tokens; an illustration costs tens of seconds of a single
-// shared GPU, and an article does not need three of them.
-const illustrationRules = `
+// shared GPU, and one picture that explains the argument is enough.
+var illustrationRules = fmt.Sprintf(`
 ILLUSTRATIONS:
 
-You may request AT MOST ONE generated illustration, and only where a picture
-genuinely sets up the subject — an opening image for a long piece, or a single
-concrete scene the prose then unpacks. Most articles need none. A diagram is
-almost always the better choice: a diagram carries information, an illustration
-carries atmosphere.
+You may request up to %d generated figures, and should use 1–2 in a
+long piece. Place each after the H2 it belongs to. The pipeline will add
+1–2 if you forget.
 
-Request one by writing an illustration fence whose body describes the picture:
+These are informational figures — a reader should learn something by
+looking at them. They are not decorative art, animations, or metaphorical
+scenes of people in offices.
 
-  ` + "```" + `illustration
-  A lighthouse on a rocky shore at dawn, seen from the water
-  ` + "```" + `
+Keep mermaid for a precise sequence, state or ER diagram. Do not replace a
+mermaid fence with an illustration. A second visual idea that is a
+comparison, architecture or process belongs in an illustration fence.
+
+Pick a kind and write a fence whose body lists the facts to put on the
+figure (labels, rows, steps, parties). Do not describe a scene.
+
+Kinds:
+  flow           a labeled path: request route, data flow, handoff
+  comparison     a side-by-side table or matrix of options
+  architecture   named components and how they connect
+  process        numbered steps in order
+  concept        an annotated diagram of a mechanism
+
+Examples:
+
+  `+"```"+`illustration comparison
+  Polling vs webhooks: latency, operational cost, failure modes, and when each wins
+  `+"```"+`
+
+  `+"```"+`illustration flow
+  Client → API gateway → auth service → three workers writing to Postgres
+  `+"```"+`
 
 Rules:
-- Describe a CONCRETE SCENE — a thing that could be photographed. "A lighthouse
-  at dawn" works. "The concept of reliability" does not, and produces a muddle.
-- Do not ask for text, labels, diagrams, charts or UI in an illustration. Image
-  models render lettering badly, and a diagram belongs in a mermaid fence.
-- Do not use one to replace a diagram, and never to illustrate a claim that
-  needs a source.
+- The figure must encode THIS article's facts. "Polling vs webhooks on
+  latency and cost" works. "A modern server room" does not.
+- Name the actual labels the picture should show. A vague theme produces
+  a decorative animation; a list of terms produces a useful figure.
+- Readable text on the figure is required — labels, headers, step numbers.
+- Never request more than %d. The pipeline drops extras.
 - The description becomes the image's alt text, so write it as a sentence a
   screen-reader user would find useful.
+`, maxInlineIllustrations, maxInlineIllustrations)
+
+// tableRules is always on: a comparison the reader can scan does not need
+// an image generator, and goldmark already renders GFM tables.
+const tableRules = `
+TABLES:
+
+When the article compares options, versions, or trade-offs, write a
+GitHub-flavored markdown table in the prose — real columns the reader can
+scan. A generated comparison figure can sit next to a table; it does not
+replace one that has numbers.
 `
 
-// visualRules is the visual half of the drafting prompt: diagrams always, plus
-// illustrations when this run has a generator behind it.
+// visualRules is the visual half of the drafting prompt: diagrams and
+// tables always, plus illustrations when this run has a generator behind it.
 func (r *Runner) visualRules() string {
-	if !r.canIllustrate() {
-		return diagramRules
+	rules := diagramRules + tableRules
+	if r.canLetterFigures() {
+		rules += illustrationRules
 	}
-	return diagramRules + illustrationRules
+	return rules
 }
 
-// Target article length. The draft prompt asks for this range, but asking is
-// not getting: a live run against a local model produced 382 words against the
-// same instruction. So the floor is checked rather than trusted, which is the
-// same stance this package takes on citations.
+// plannedFiguresNote reminds the writer of figures the planner already
+// chose, so the draft emits typed fences instead of inventing scenes.
+func (r *Runner) plannedFiguresNote(plan *writePlan) string {
+	if !r.canLetterFigures() || plan == nil || len(plan.Figures) == 0 {
+		return ""
+	}
+	return "PLANNED FIGURES — emit an illustration fence for each, using that kind and these facts:\n" +
+		formatFigures(plan.Figures)
+}
+
+func formatFigures(figs []figureBrief) string {
+	var b strings.Builder
+	for _, f := range figs {
+		kind := strings.TrimSpace(f.Kind)
+		if kind == "" {
+			kind = string(kindConcept)
+		}
+		fmt.Fprintf(&b, "- [%s] %s: %s\n", kind, orNone(f.Section), strings.TrimSpace(f.Content))
+	}
+	return b.String()
+}
+
+// Target article length for the default developer article. The draft prompt
+// asks for this range, but asking is not getting: a live run against a local
+// model produced 382 words against the same instruction. So the floor is
+// checked rather than trusted, which is the same stance this package takes on
+// citations.
+//
+// Every reader has its own range now — a technote that runs to 1400 words has
+// stopped being a technote — so the pipeline checks audience.Profile.MinWords
+// and these two survive as the developer profile's numbers, which is what
+// callers outside this package (and the tests) mean when they ask.
 const (
 	MinArticleWords = 900
 	MaxArticleWords = 1400
 )
+
+// industryBlock is the sector framing for a brief, as its own prompt block.
+//
+// It returns a trailing newline when there is one and the empty string when
+// there is not, so the prompts splice it in without leaving a stray blank
+// heading on the runs — the overwhelming majority — that name no industry.
+func industryBlock(brief model.BlogBrief) string {
+	s := audience.IndustryBrief(brief.Industry)
+	if s == "" {
+		return ""
+	}
+	return "\n" + s + "\n"
+}
 
 // expand fills out an article that came in under the target length.
 //
@@ -377,14 +560,16 @@ func (r *Runner) expand(
 	ctx context.Context, modelName string, brief model.BlogBrief, rb *research.Brief,
 	plan *writePlan, markdown string, currentWords int,
 ) (string, error) {
-	prompt := fmt.Sprintf(`This article is too short. It is %d words and needs to be %d-%d.
+	reader := audience.For(brief.Audience)
+
+	prompt := fmt.Sprintf(`%s
 
 TITLE: %s
 ANGLE: %s
 
 GUIDANCE FROM THE REQUESTER:
 %s
-
+%s
 SOURCES you may draw on — cite by number, e.g. [2]:
 %s
 
@@ -394,9 +579,7 @@ CURRENT ARTICLE:
 Expand it to at least %d words by adding substance, not padding. Specifically:
 - Develop the sections that are thinnest. A section of one short paragraph is
   the first place to look.
-- Add the practical detail a working engineer needs: what the trade-offs are,
-  what breaks, what to watch for, what the migration actually involves.
-- Add or extend a code block where it earns its place.
+%s
 - Draw on sources you have not used yet, if any are relevant.
 
 Do NOT:
@@ -406,14 +589,17 @@ Do NOT:
 - Introduce facts no source supports. If you cannot support it, do not add it.
 - Add a "Further Reading" or "References" section.
 
-Keep the existing title, structure and every citation that is already there.
+Keep the existing title, structure, every citation that is already there,
+and any mermaid or illustration fences.
 Return only the expanded markdown article — no preamble, no commentary.`,
-		currentWords, MinArticleWords, MaxArticleWords,
+		reader.ExpandLine(currentWords),
 		plan.Title, plan.Angle,
 		guidanceOrNone(brief.Context),
+		industryBlock(brief),
 		formatSources(rb),
 		markdown,
-		MinArticleWords,
+		reader.MinWords,
+		reader.ExpandRules(),
 	)
 
 	resp, err := r.generate(ctx, modelName, prompt)

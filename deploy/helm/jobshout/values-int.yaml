@@ -2,15 +2,32 @@ env: int
 host: int.jobshout.co.uk
 logLevel: debug
 
-image:
-  tag: 89f91ac  # Pinned: working web image after jobshout-web build regression (beba970)
+# image.tag is injected by Ring Promoter (--set image.tag=<sha>). Do not pin a
+# stale SHA here; a forgotten --set would roll int back to that commit.
 
-# Cluster-side secret holding OPSAPI_API_KEY (and any other real credential)
-# for this ring. Only the name lives here; create it with:
-#   kubectl -n int create secret generic jobshout-cms \
-#     --from-literal=OPSAPI_API_KEY=<key> --dry-run=client -o yaml | kubectl apply -f -
+# Cluster-side secrets this chart does not manage. Only the names live here.
+# Create them on k3s1; helm leaves the Secret objects alone across redeploys.
+#   kubectl -n int create secret generic jobshout-cms ...
+#   kubectl -n int create secret generic jobshout-mail \
+#     --from-literal=GMAIL_CLIENT_ID=... \
+#     --from-literal=GMAIL_CLIENT_SECRET=... \
+#     --from-literal=GMAIL_TOKEN_KEY=$(openssl rand -hex 32)
+#   kubectl -n int create secret generic jobshout-google \
+#     --from-literal=GOOGLE_OAUTH_CLIENT_ID=... \
+#     --from-literal=GOOGLE_OAUTH_CLIENT_SECRET=...
+#   kubectl -n int create secret generic jobshout-wslproxy \
+#     --from-literal=WSLPROXY_API_TOKEN=...
 extraSecretRefs:
   - jobshout-cms
+  - jobshout-review
+  - jobshout-mail
+  - jobshout-google
+  # wafLab.baseURL below is set, but the client stays disabled until it also has
+  # a token (or username+password) — those arrive only through this secret.
+  - jobshout-wslproxy
+  # Secrets Rotation credentials: SECRETS_VAULT_ADDR/SECRETS_VAULT_TOKEN and
+  # RP_API_TOKEN. Created by hand on k3s1, never in git.
+  - jobshout-secretsrot
 
 # opsapi CMS — the Article Writer files generated articles there as drafts.
 # The host and namespace slug are not secret; the API key is, and comes from
@@ -23,7 +40,10 @@ cms:
 ai:
   enabled: true
   ollamaBaseURL: "https://ollama.workstation.co.uk"
-  ollamaModel: "llama3:latest"
+  ollamaModel: "llama3.1:8b"
+  chatModel: "qwen3-coder:30b"
+  chatModelFallback: "llama3.1:8b"
+  mailModel: "muse-glimmer:latest"
   # Shared workstation Ollama is CPU-heavy and often queued; research/draft
   # calls were dying at 10m with "awaiting headers". Match imageTimeout headroom.
   ollamaTimeout: "30m"
@@ -52,6 +72,29 @@ pentest:
   # Example once Juice Shop is up: "juice.local,127.0.0.1"
   targetAllowlist: ""
 
+# WAF Efficacy Lab against lon1 wslproxy. Credentials via extraSecretRefs
+# (WSLPROXY_API_TOKEN); keep chart values empty of secrets.
+wafLab:
+  enabled: true
+  baseURL: "https://lon1.pop0.uk"
+  platform: "openresty-admin-next"
+  profile: "prod"
+  timeout: "30s"
+  labMaxRuntime: "10m"
+  targetAllowlist: ""
+
+# int is the proving ring for PR review. Other rings stay off until a dry-run
+# has been watched end-to-end here, including an API-pod restart mid-review.
+reviewBot:
+  enabled: true
+  allowedRepos:
+    - bwalia/jobshout
+    - bwalia/diy-tax-return-uk
+    - bwalia/diy-tax-return-infra
+    - bwalia/opsapi
+    - bwalia/ring-promoter
+    - bwalia/wslproxy
+
 api:
   replicas: 1
 
@@ -75,3 +118,19 @@ storage:
 langfuse:
   enabled: true
   host: int-langfuse.jobshout.co.uk
+
+# Secrets Rotation propagation on int. The kubeconfig in jobshout-secretsrot-kube
+# (key "k3s1") belongs to ServiceAccount int/jobshout-secretsrot, whose Role only
+# allows get/patch secrets + externalsecrets and get/list deployments in int.
+secretsRotation:
+  kubeconfig:
+    enabled: true
+
+# int's stateless pods landed on bwalia-latitude7300, a laptop that drops out of
+# the cluster when it sleeps (26 Sep 2026: every int page returned 502). Keep
+# them on a LAN worker with headroom.
+nodeSelector:
+  kubernetes.io/hostname: debian004
+
+insights:
+  siteURL: "https://int.jobshout.com"

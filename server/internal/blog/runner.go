@@ -29,6 +29,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/jobshout/server/internal/audience"
 	"github.com/jobshout/server/internal/integration/adapters/opsapi"
 	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/model"
@@ -43,6 +44,12 @@ type Config struct {
 	ContentDir string
 	// AuthorName is the byline attached to posts created in the CMS.
 	AuthorName string
+	// PublicBaseURL is this ring's public origin (e.g. https://int.jobshout.co.uk).
+	// Cover images are stored as relative /api/v1/images/file/… paths; opsapi's
+	// Featured image field needs an absolute URL a browser can load, so Publish
+	// prefixes relative covers with this base. Empty means covers are omitted
+	// from the CMS payload rather than sending a path another host cannot resolve.
+	PublicBaseURL string
 	// Model is the LLM used for writing — planning, drafting, reviewing,
 	// revising and expanding. Empty means the provider's default.
 	//
@@ -104,6 +111,11 @@ type GenerateRequest struct {
 	// read, which is worse than not offering the control at all.
 	AgentProseModel      string
 	AgentStructuredModel string
+
+	// OnArticle is invoked after each brief is fully written (markdown, HTML,
+	// optional cover) so the caller can persist it before the next brief
+	// starts. A later failure then cannot throw away work already done.
+	OnArticle func(GeneratedArticle) error
 }
 
 // Researcher is the slice of service.ResearchService this package consumes.
@@ -144,6 +156,22 @@ func (r *Runner) structuredModel(req GenerateRequest) string {
 // HardMaxArticles is the safety ceiling regardless of what the caller asks
 // for. One batch of 25 articles is almost certainly a mistake.
 const HardMaxArticles = 10
+
+// articleTags is what the CMS draft is filed under: the reader's tags, plus
+// the industry when the piece was framed for one.
+//
+// The industry is lowercased and nothing else — it is free text a person typed,
+// and inventing a slugging rule here would only disagree with whatever the CMS
+// does with it.
+func articleTags(a GeneratedArticle) []string {
+	reader := audience.For(a.Audience)
+	tags := make([]string, 0, len(reader.Tags)+1)
+	tags = append(tags, reader.Tags...)
+	if sector := audience.NormalizeIndustry(a.Industry); sector != "" {
+		tags = append(tags, strings.ToLower(sector))
+	}
+	return tags
+}
 
 // PostedArticle records where one article landed in the CMS.
 type PostedArticle struct {
@@ -192,6 +220,12 @@ type Runner struct {
 	// but disabled, means a run produces text only — which is the default, and
 	// a complete article either way.
 	images Illustrator
+	// insights files articles in JobShout.com's Insights hub, a destination
+	// beside the CMS. Nil means that destination is not configured.
+	insights InsightsPublisher
+	// liveInsights publishes straight to readers on jobshout.com — a client
+	// for an agent jobshout.com trusts. Nil unless WithLiveInsights was called.
+	liveInsights InsightsPublisher
 	// clock lets tests inject a deterministic time.
 	clock func() time.Time
 }
@@ -207,9 +241,28 @@ func (r *Runner) WithIllustrator(images Illustrator) *Runner {
 	return r
 }
 
-// canIllustrate reports whether this run can draw.
+// canIllustrate reports whether this run can draw covers or body figures.
 func (r *Runner) canIllustrate() bool {
 	return r.images != nil && r.images.Enabled()
+}
+
+// letteringIllustrator is implemented by the production adapter when a
+// configured provider can render readable on-image text. Test fakes omit it;
+// canLetterFigures then assumes a working fake can letter.
+type letteringIllustrator interface {
+	Letters() bool
+}
+
+// canLetterFigures reports whether in-body labeled figures are worth asking
+// for. Covers can still use workstation diffusion; comparison tables cannot.
+func (r *Runner) canLetterFigures() bool {
+	if !r.canIllustrate() {
+		return false
+	}
+	if l, ok := r.images.(letteringIllustrator); ok {
+		return l.Letters()
+	}
+	return true
 }
 
 // NewRunner wires the Runner with its dependencies. cms may be nil — generation
@@ -258,8 +311,9 @@ func (r *Runner) CMSNamespace() string {
 // Generate produces markdown for every requested topic, renders each to HTML,
 // and returns both. It needs no CMS credentials.
 //
-// Any single topic failing aborts the batch — we prefer an all-or-nothing run
-// over silently publishing half of what was asked for.
+// A brief that fails is skipped; remaining briefs still run. The returned
+// error is a join of those failures. Zero successes is the only total failure
+// (aside from cancel, which stops the rest immediately).
 func (r *Runner) Generate(ctx context.Context, req GenerateRequest, progress ProgressFunc) ([]GeneratedArticle, error) {
 	if r.llm == nil {
 		return nil, fmt.Errorf("blog: llm client is nil")
@@ -268,10 +322,20 @@ func (r *Runner) Generate(ctx context.Context, req GenerateRequest, progress Pro
 		return nil, fmt.Errorf("blog: research is not configured — articles are written from verified sources and there are none available")
 	}
 
+	// Copied field by field rather than passed through, so a blank topic is
+	// dropped and the rest is trimmed. Every field of the brief has to be
+	// carried here: the reader and the sector decide how the piece is
+	// researched, planned, written and reviewed, and dropping them at the door
+	// would quietly turn every run back into a developer deep dive.
 	briefs := make([]model.BlogBrief, 0, len(req.Briefs))
 	for _, b := range req.Briefs {
 		if s := strings.TrimSpace(b.Topic); s != "" {
-			briefs = append(briefs, model.BlogBrief{Topic: s, Context: strings.TrimSpace(b.Context)})
+			briefs = append(briefs, model.BlogBrief{
+				Topic:    s,
+				Context:  strings.TrimSpace(b.Context),
+				Audience: strings.TrimSpace(b.Audience),
+				Industry: strings.TrimSpace(b.Industry),
+			})
 		}
 	}
 	if len(briefs) == 0 {
@@ -291,51 +355,17 @@ func (r *Runner) Generate(ctx context.Context, req GenerateRequest, progress Pro
 	}
 
 	articles, err := r.writeArticles(ctx, req, briefs, progress)
-	if err != nil {
-		return nil, err
+	if len(articles) > 0 {
+		report(progress, model.BlogStepGenerated,
+			fmt.Sprintf("Generated %d article(s)", len(articles)), model.AgentNameArticleWriter)
 	}
-
-	// Illustration runs before conversion so the generated images are part of
-	// the markdown that gets rendered, rather than something bolted onto the
-	// HTML afterwards.
-	//
-	// Nothing here can fail the run. An article without a picture is a complete
-	// article; an article that was thrown away because a GPU was busy is not.
-	// So every failure is reported into the trace and the run carries on — the
-	// reader can see what happened without losing the writing.
-	if r.canIllustrate() {
-		report(progress, model.BlogStepIllustrating,
-			fmt.Sprintf("Illustrating %d article(s)", len(articles)), model.AgentNameArticleWriter)
-
-		for i := range articles {
-			body, notes := r.illustrateBody(ctx, req.OrgID, articles[i].Markdown)
-			articles[i].Markdown = body
-			for _, note := range notes {
-				r.logger.Info("blog: "+note, zap.String("title", articles[i].Title))
-			}
-
-			if err := r.generateCover(ctx, req.OrgID, &articles[i]); err != nil {
-				r.logger.Warn("blog: could not draw a cover image",
-					zap.String("title", articles[i].Title), zap.Error(err))
-				report(progress, model.BlogStepIllustrating,
-					fmt.Sprintf("No cover image for %q: %v", articles[i].Title, err),
-					model.AgentNameArticleWriter)
-			}
-		}
-	}
-
-	// Rendering is its own step rather than part of generation: it is the point
-	// where a malformed article stops being the LLM's problem and starts being
-	// ours, and a reader watching the trace should see which one failed.
-	report(progress, model.BlogStepConverting, fmt.Sprintf("Converting %d article(s) to HTML", len(articles)), model.AgentNameArticleWriter)
-	for i := range articles {
-		if err := articles[i].render(); err != nil {
+	if len(articles) == 0 {
+		if err != nil {
 			return nil, err
 		}
+		return nil, fmt.Errorf("blog: no articles produced")
 	}
-
-	report(progress, model.BlogStepGenerated, fmt.Sprintf("Generated %d article(s)", len(articles)), model.AgentNameArticleWriter)
-	return articles, nil
+	return articles, err
 }
 
 // Publish creates one CMS draft per article.
@@ -390,7 +420,15 @@ func (r *Runner) Publish(ctx context.Context, articles []GeneratedArticle, progr
 			ContentHTML: a.HTML,
 			Status:      opsapi.StatusDraft,
 			AuthorName:  r.cfg.AuthorName,
-			SEOTitle:    a.Title,
+			// Cover → opsapi Featured image. Absolute so the console <img>
+			// preview (and public sites) can load bytes without a JobShout JWT.
+			FeaturedImageURL: publicImageURL(r.cfg.PublicBaseURL, a.CoverImageURL),
+			// Tags say who the piece was written for, so an editor opening the
+			// CMS can tell a developer deep dive from a plain-English briefing
+			// without reading either — which is the whole point of running two
+			// schedules into one namespace.
+			Tags:     articleTags(a),
+			SEOTitle: a.Title,
 			// opsapi caps meta descriptions at the same length we trim excerpts
 			// to, so the excerpt serves both without a second derivation.
 			SEODescription: a.Excerpt,

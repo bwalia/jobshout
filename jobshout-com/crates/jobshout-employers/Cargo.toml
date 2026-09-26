@@ -1,0 +1,8 @@
+[package]
+name = "jobshout-employers"
+description = "Employer profiles"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

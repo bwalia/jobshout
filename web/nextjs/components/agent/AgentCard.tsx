@@ -11,7 +11,7 @@ const AVATAR_COLOURS = [
   "bg-violet-600",
   "bg-blue-600",
   "bg-emerald-600",
-  "bg-amber-600",
+  "bg-orange-600",
   "bg-rose-600",
   "bg-cyan-600",
   "bg-indigo-600",
@@ -19,28 +19,29 @@ const AVATAR_COLOURS = [
 ];
 
 function getAvatarColour(name: string): string {
-  const index = name.charCodeAt(0) % AVATAR_COLOURS.length;
-  return AVATAR_COLOURS[index];
+  const ch = name.trim().charCodeAt(0);
+  if (!Number.isFinite(ch)) return AVATAR_COLOURS[0];
+  return AVATAR_COLOURS[ch % AVATAR_COLOURS.length] ?? AVATAR_COLOURS[0];
 }
 
 function getInitials(name: string): string {
-  return name
+  const parts = name
     .split(" ")
     .filter(Boolean)
     .slice(0, 2)
-    .map((part) => part[0].toUpperCase())
-    .join("");
+    .map((part) => part[0].toUpperCase());
+  return parts.join("") || "?";
 }
 
 function performanceColour(score: number): string {
   if (score >= 80) return "text-emerald-600 dark:text-emerald-400";
-  if (score >= 50) return "text-amber-600 dark:text-amber-400";
+  if (score >= 50) return "text-orange-600 dark:text-orange-400";
   return "text-red-600 dark:text-red-400";
 }
 
 function performanceBgColour(score: number): string {
   if (score >= 80) return "bg-emerald-500";
-  if (score >= 50) return "bg-amber-500";
+  if (score >= 50) return "bg-orange-500";
   return "bg-red-500";
 }
 
@@ -50,7 +51,7 @@ export function AgentCard({ agent, currentTask }: AgentCardProps) {
 
   return (
     <Link
-      href={`/agents/${agent.id}`}
+      href={`/panel/task-manager?agent=${agent.id}`}
       className="group flex flex-col gap-4 rounded-xl border border-border bg-card p-5 shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:shadow-card-hover"
     >
       {/* Top row: avatar + status */}
@@ -91,7 +92,7 @@ export function AgentCard({ agent, currentTask }: AgentCardProps) {
         <span
           className={`text-sm font-semibold ${performanceColour(agent.performance_score)}`}
         >
-          {agent.performance_score}%
+          {Math.round(agent.performance_score)}%
         </span>
       </div>
 

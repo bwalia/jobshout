@@ -19,6 +19,7 @@ type ExecutionRepository interface {
 	MarkStarted(ctx context.Context, id uuid.UUID) error
 	MarkCompleted(ctx context.Context, id uuid.UUID, output string, totalTokens int, iterations int) error
 	MarkFailed(ctx context.Context, id uuid.UUID, errMsg string, totalTokens int, iterations int) error
+	MarkCancelled(ctx context.Context, id uuid.UUID) error
 	RecordToolCall(ctx context.Context, call *model.ExecutionToolCall) error
 	GetByID(ctx context.Context, id uuid.UUID) (*model.AgentExecution, error)
 	ListByAgent(ctx context.Context, agentID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.AgentExecution], error)
@@ -93,6 +94,19 @@ func (r *executionRepository) MarkFailed(ctx context.Context, id uuid.UUID, errM
 	_, err := r.pool.Exec(ctx, sql, id, model.ExecutionStatusFailed, errMsg, totalTokens, iterations, time.Now())
 	if err != nil {
 		return fmt.Errorf("execution_repo: mark failed: %w", err)
+	}
+	return nil
+}
+
+func (r *executionRepository) MarkCancelled(ctx context.Context, id uuid.UUID) error {
+	const sql = `
+		UPDATE agent_executions
+		SET status = $2, error_message = $3, completed_at = $4
+		WHERE id = $1 AND status IN ($5, $6)`
+	_, err := r.pool.Exec(ctx, sql, id, model.ExecutionStatusCancelled, "cancelled by user", time.Now(),
+		model.ExecutionStatusPending, model.ExecutionStatusRunning)
+	if err != nil {
+		return fmt.Errorf("execution_repo: mark cancelled: %w", err)
 	}
 	return nil
 }

@@ -1,0 +1,13 @@
+[package]
+name = "jobshout-matching"
+description = "Job ↔ candidate matching"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+chrono = { workspace = true }
+jobshout-domain = { path = "../jobshout-domain" }
+uuid = { workspace = true }
+
+[dev-dependencies]

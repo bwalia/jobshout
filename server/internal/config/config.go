@@ -58,6 +58,13 @@ type Config struct {
 	// long prompts rather than refusing them, so it is always sent explicitly.
 	OllamaNumCtx int `mapstructure:"OLLAMA_NUM_CTX"`
 
+	// Chat model is pinned separately from worker OLLAMA_DEFAULT_MODEL so
+	// the conversational control surface can use a tool-capable model
+	// without changing article/research/pentest workers.
+	ChatModel         string `mapstructure:"CHAT_MODEL"`
+	ChatModelFallback string `mapstructure:"CHAT_MODEL_FALLBACK"`
+	ChatNumCtx        int    `mapstructure:"CHAT_NUM_CTX"`
+
 	// OpenAI (or OpenAI-compatible) configuration.
 	// When LLM_PROVIDER=openai, OPENAI_API_KEY must be set.
 	OpenAIAPIKey       string `mapstructure:"OPENAI_API_KEY"`
@@ -76,9 +83,10 @@ type Config struct {
 	// image-service/, which runs on Apple MLX and therefore cannot be scheduled
 	// onto the cluster — every ring reaches one instance of it over the network,
 	// exactly as every ring reaches one Ollama. Leaving IMAGE_BASE_URL empty
-	// disables the local path; leaving both it and OPENAI_API_KEY empty disables
-	// image generation altogether, which callers handle by skipping the work
-	// rather than failing.
+	// disables the local path. Gemini is tried first when GEMINI_API_KEY is
+	// set, and falls back to mflux. Leaving Gemini, IMAGE_BASE_URL and
+	// OPENAI_API_KEY all empty disables image generation altogether, which
+	// callers handle by skipping the work rather than failing.
 	ImageProvider     string `mapstructure:"IMAGE_PROVIDER"`
 	ImageBaseURL      string `mapstructure:"IMAGE_BASE_URL"`
 	ImageDefaultModel string `mapstructure:"IMAGE_DEFAULT_MODEL"`
@@ -93,6 +101,13 @@ type Config struct {
 	// OPENAI_DEFAULT_MODEL because a chat model name in an image request is an
 	// error that is hard to read.
 	ImageOpenAIModel string `mapstructure:"IMAGE_OPENAI_MODEL"`
+	// GeminiAPIKey enables the Gemini image provider. Unset skips it so the
+	// workstation remains the only path. The key is never defaulted.
+	GeminiAPIKey string `mapstructure:"GEMINI_API_KEY"`
+	// GeminiBaseURL is the Gemini API root. Empty means Google's public host.
+	GeminiBaseURL string `mapstructure:"GEMINI_BASE_URL"`
+	// ImageGeminiModel is the Gemini image model used when a request names none.
+	ImageGeminiModel string `mapstructure:"IMAGE_GEMINI_MODEL"`
 	// BlogCoverImages turns on cover-image generation inside article runs. Off
 	// leaves the rest of image generation available on demand — the toggle is
 	// about whether every article pays for a picture, not about whether the
@@ -145,6 +160,17 @@ type Config struct {
 	OpsAPINamespace string        `mapstructure:"OPSAPI_NAMESPACE"`
 	OpsAPITimeout   time.Duration `mapstructure:"OPSAPI_TIMEOUT"`
 
+	// JobShout.com Insights — a second place the Article Writer can file
+	// articles, for editor review on jobshout.com. Both are needed; either
+	// empty leaves the destination off. The URL is the in-cluster
+	// jobshout-com-api Service of the same ring; the token is JobShout.com's
+	// JOBSHOUT_INTERNAL_TOKEN, mounted from its jobshout-com-internal Secret.
+	JobshoutComAPIURL   string `mapstructure:"JOBSHOUT_COM_API_URL"`
+	JobshoutComAPIToken string `mapstructure:"JOBSHOUT_INTERNAL_TOKEN"`
+	// JobshoutComSiteURL is the public jobshout.com site for this ring, for
+	// links to published Insights articles. Empty hides the links.
+	JobshoutComSiteURL string `mapstructure:"JOBSHOUT_COM_SITE_URL"`
+
 	// Blog generator — the directory generated markdown is filed under, which
 	// is a label in the UI rather than a path on disk.
 	BlogContentDir string `mapstructure:"BLOG_CONTENT_DIR"`
@@ -170,6 +196,28 @@ type Config struct {
 	// this, using it at all meant accepting the failures.
 	BlogProseModel      string `mapstructure:"BLOG_PROSE_MODEL"`
 	BlogStructuredModel string `mapstructure:"BLOG_STRUCTURED_MODEL"`
+
+	// CareerModel pins the model behind Career Agent, separately from the
+	// worker OLLAMA_DEFAULT_MODEL, for the same reason CHAT_MODEL and
+	// BLOG_MODEL are pinned: the work is different.
+	//
+	// Career's hardest call is CV tailoring, which must return JSON whose
+	// "from" values are exact substrings of the CV. A small model answers with
+	// one trivial replacement and the tailored CV comes back identical to the
+	// stored one. Empty falls back to the provider default.
+	//
+	// A stronger model here also rewrites more freely, including inventing
+	// experience the CV does not contain — that is what the grounding check in
+	// package career refuses, so raising this must not be done without it.
+	CareerModel string `mapstructure:"CAREER_MODEL"`
+	// BlogOrphanTimeout is how stale a running run's heartbeat may be before
+	// the reconciler marks it failed. Must outlast a legitimate long LLM call.
+	BlogOrphanTimeout time.Duration `mapstructure:"BLOG_ORPHAN_TIMEOUT"`
+	// BlogMaxRuntime is the wall-clock budget per article; a run gets this
+	// times its article count. One article on int takes ~25m end to end, so
+	// the budget must sit well above that. A single hung LLM call is bounded
+	// by OLLAMA_TIMEOUT and a dead run by BLOG_ORPHAN_TIMEOUT.
+	BlogMaxRuntime time.Duration `mapstructure:"BLOG_MAX_RUNTIME"`
 
 	// GitHubToken is optional. The research agent reads GitHub through its
 	// public API, which allows 60 requests an hour unauthenticated — enough to
@@ -210,6 +258,9 @@ func Load() (*Config, error) {
 	// No OLLAMA_JWT_SECRET default on purpose — see the field comment.
 	viper.SetDefault("OLLAMA_TIMEOUT", "30m")
 	viper.SetDefault("OLLAMA_NUM_CTX", 8192)
+	viper.SetDefault("CHAT_MODEL", DefaultChatModel)
+	viper.SetDefault("CHAT_MODEL_FALLBACK", DefaultChatModelFallback)
+	viper.SetDefault("CHAT_NUM_CTX", DefaultChatNumCtx)
 	viper.SetDefault("OPENAI_BASE_URL", "https://api.openai.com")
 	viper.SetDefault("OPENAI_DEFAULT_MODEL", "gpt-4o-mini")
 	viper.SetDefault("CLAUDE_BASE_URL", "https://api.anthropic.com")
@@ -229,6 +280,8 @@ func Load() (*Config, error) {
 	// Covers at 1536×864 / 28 steps routinely exceed 10m on a cold qwen load.
 	viper.SetDefault("IMAGE_TIMEOUT", "30m")
 	viper.SetDefault("IMAGE_OPENAI_MODEL", "gpt-image-1")
+	viper.SetDefault("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com")
+	viper.SetDefault("IMAGE_GEMINI_MODEL", "gemini-3.1-flash-lite-image")
 	// Off by default: a cover image costs 25 seconds of a shared GPU per
 	// article, and an operator should opt into spending that on every run.
 	viper.SetDefault("BLOG_COVER_IMAGES", false)
@@ -256,6 +309,8 @@ func Load() (*Config, error) {
 	viper.SetDefault("OPSAPI_TIMEOUT", "30s")
 	viper.SetDefault("BLOG_CONTENT_DIR", "content/blogs")
 	viper.SetDefault("BLOG_AUTHOR_NAME", "JobShout Article Writer")
+	viper.SetDefault("BLOG_ORPHAN_TIMEOUT", "45m")
+	viper.SetDefault("BLOG_MAX_RUNTIME", "45m")
 
 	cfg := &Config{
 		DatabaseURL:          viper.GetString("DATABASE_URL"),
@@ -276,6 +331,9 @@ func Load() (*Config, error) {
 		OllamaJWTSecret:      viper.GetString("OLLAMA_JWT_SECRET"),
 		OllamaTimeout:        viper.GetDuration("OLLAMA_TIMEOUT"),
 		OllamaNumCtx:         viper.GetInt("OLLAMA_NUM_CTX"),
+		ChatModel:            viper.GetString("CHAT_MODEL"),
+		ChatModelFallback:    viper.GetString("CHAT_MODEL_FALLBACK"),
+		ChatNumCtx:           viper.GetInt("CHAT_NUM_CTX"),
 		OpenAIAPIKey:         viper.GetString("OPENAI_API_KEY"),
 		OpenAIBaseURL:        viper.GetString("OPENAI_BASE_URL"),
 		OpenAIDefaultModel:   viper.GetString("OPENAI_DEFAULT_MODEL"),
@@ -288,6 +346,9 @@ func Load() (*Config, error) {
 		ImageJWTSecret:       viper.GetString("IMAGE_JWT_SECRET"),
 		ImageTimeout:         viper.GetDuration("IMAGE_TIMEOUT"),
 		ImageOpenAIModel:     viper.GetString("IMAGE_OPENAI_MODEL"),
+		GeminiAPIKey:         viper.GetString("GEMINI_API_KEY"),
+		GeminiBaseURL:        viper.GetString("GEMINI_BASE_URL"),
+		ImageGeminiModel:     viper.GetString("IMAGE_GEMINI_MODEL"),
 		BlogCoverImages:      viper.GetBool("BLOG_COVER_IMAGES"),
 		EmbeddingProvider:    viper.GetString("EMBEDDING_PROVIDER"),
 		EmbeddingModel:       viper.GetString("EMBEDDING_MODEL"),
@@ -307,11 +368,17 @@ func Load() (*Config, error) {
 		OpsAPIKey:            viper.GetString("OPSAPI_API_KEY"),
 		OpsAPINamespace:      viper.GetString("OPSAPI_NAMESPACE"),
 		OpsAPITimeout:        viper.GetDuration("OPSAPI_TIMEOUT"),
+		JobshoutComAPIURL:    viper.GetString("JOBSHOUT_COM_API_URL"),
+		JobshoutComAPIToken:  viper.GetString("JOBSHOUT_INTERNAL_TOKEN"),
+		JobshoutComSiteURL:   viper.GetString("JOBSHOUT_COM_SITE_URL"),
 		BlogContentDir:       viper.GetString("BLOG_CONTENT_DIR"),
 		BlogAuthorName:       viper.GetString("BLOG_AUTHOR_NAME"),
 		BlogModel:            viper.GetString("BLOG_MODEL"),
 		BlogProseModel:       viper.GetString("BLOG_PROSE_MODEL"),
+		CareerModel:          viper.GetString("CAREER_MODEL"),
 		BlogStructuredModel:  viper.GetString("BLOG_STRUCTURED_MODEL"),
+		BlogOrphanTimeout:    viper.GetDuration("BLOG_ORPHAN_TIMEOUT"),
+		BlogMaxRuntime:       viper.GetDuration("BLOG_MAX_RUNTIME"),
 		GitHubToken:          viper.GetString("GITHUB_TOKEN"),
 
 		DatabaseConnectTimeout: viper.GetDuration("DATABASE_CONNECT_TIMEOUT"),
@@ -345,3 +412,9 @@ type configError string
 func (e configError) Error() string {
 	return string(e)
 }
+
+const (
+	DefaultChatModel         = "qwen3-coder:30b"
+	DefaultChatModelFallback = "llama3.1:8b"
+	DefaultChatNumCtx        = 16384
+)

@@ -1,0 +1,14 @@
+[package]
+name = "jobshout-com-scheduler"
+description = "JobShout.com scheduler (Phase 1 stub)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "jobshout-scheduler"
+path = "src/main.rs"
+
+[dependencies]
+tracing = { workspace = true }
+jobshout-observability = { path = "../../crates/jobshout-observability" }

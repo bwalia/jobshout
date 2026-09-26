@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -84,18 +85,21 @@ func (c *Client) BaseURL() string { return c.cfg.BaseURL }
 
 // CreatePostRequest is the body of POST /api/v2/cms/posts.
 //
-// Fields opsapi accepts but JobShout has no opinion on — category, featured
-// image, scheduling, visibility — are left out so opsapi's defaults apply.
+// Fields opsapi accepts but JobShout has no opinion on — category, scheduling,
+// visibility — are left out so opsapi's defaults apply. FeaturedImageURL is
+// set when the article has a cover, so the opsapi console Featured image field
+// (and public CMS consumers) show the same picture JobShout generated.
 type CreatePostRequest struct {
-	Title          string   `json:"title"`
-	Slug           string   `json:"slug,omitempty"`
-	Excerpt        string   `json:"excerpt,omitempty"`
-	ContentHTML    string   `json:"content_html"`
-	Status         string   `json:"status"`
-	AuthorName     string   `json:"author_name,omitempty"`
-	Tags           []string `json:"tags,omitempty"`
-	SEOTitle       string   `json:"seo_title,omitempty"`
-	SEODescription string   `json:"seo_description,omitempty"`
+	Title            string   `json:"title"`
+	Slug             string   `json:"slug,omitempty"`
+	Excerpt          string   `json:"excerpt,omitempty"`
+	ContentHTML      string   `json:"content_html"`
+	Status           string   `json:"status"`
+	AuthorName       string   `json:"author_name,omitempty"`
+	FeaturedImageURL string   `json:"featured_image_url,omitempty"`
+	Tags             []string `json:"tags,omitempty"`
+	SEOTitle         string   `json:"seo_title,omitempty"`
+	SEODescription   string   `json:"seo_description,omitempty"`
 }
 
 // Post is the subset of opsapi's created-post row that JobShout stores. The
@@ -155,6 +159,62 @@ func (c *Client) CreatePost(ctx context.Context, req CreatePostRequest) (*Post, 
 	}
 	if !env.Success {
 		return nil, fmt.Errorf("opsapi: create post %q: %s", req.Title, env.Error)
+	}
+	return &env.Data, nil
+}
+
+// SetPostStatus changes one post's status — used to take a draft live — via
+// opsapi's PUT /api/v2/cms/posts/{uuid}, which applies only the fields sent.
+// opsapi stamps published_at the first time a post goes live.
+//
+// The key needs the cms:update (or cms:manage) scope as well as cms:create; a
+// key minted for drafting alone is refused with a 403 that says so.
+func (c *Client) SetPostStatus(ctx context.Context, postUUID, status string) (*Post, error) {
+	postUUID = strings.TrimSpace(postUUID)
+	if postUUID == "" {
+		return nil, fmt.Errorf("opsapi: set post status: no post uuid")
+	}
+	body, err := json.Marshal(map[string]string{"status": status})
+	if err != nil {
+		return nil, fmt.Errorf("opsapi: encode status: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPut,
+		c.cfg.BaseURL+"/api/v2/cms/posts/"+url.PathEscape(postUUID), bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("opsapi: build status request: %w", err)
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "application/json")
+	httpReq.Header.Set("X-Namespace-Slug", c.cfg.Namespace)
+
+	resp, err := c.http.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("opsapi: set post %s to %s: %w", postUUID, status, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		b := readBodySnippet(resp)
+		switch resp.StatusCode {
+		case http.StatusForbidden:
+			return nil, fmt.Errorf(
+				"opsapi: set post %s to %s forbidden (403) — the API key needs the cms:update scope "+
+					"in namespace %q. Response: %s", postUUID, status, c.cfg.Namespace, b)
+		case http.StatusNotFound:
+			return nil, fmt.Errorf("opsapi: post %s not found in namespace %q — was the draft deleted? Response: %s",
+				postUUID, c.cfg.Namespace, b)
+		default:
+			return nil, fmt.Errorf("opsapi: set post %s to %s failed (status %d): %s",
+				postUUID, status, resp.StatusCode, b)
+		}
+	}
+	var env postEnvelope
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		return nil, fmt.Errorf("opsapi: decode status response: %w", err)
+	}
+	if !env.Success {
+		return nil, fmt.Errorf("opsapi: set post %s to %s: %s", postUUID, status, env.Error)
 	}
 	return &env.Data, nil
 }

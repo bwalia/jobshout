@@ -72,6 +72,21 @@ type Request struct {
 	// Context is the caller's extra guidance: angle, audience, points to hit,
 	// things to avoid. Free text, passed to the planner verbatim.
 	Context string
+	// URLs, when non-empty, skip plan and search. Each URL is Fetch'd and
+	// extracted; there is no web search, HN/arxiv, or search-pool recovery.
+	URLs []string
+	// Focus is the subject areas the result must stay within — a trending
+	// run's focus list ("SRE", "Grafana"). Empty means no restriction. It
+	// steers the search plan and the source selection, so research on a topic
+	// worded one way cannot wander into a neighbouring field that shares its
+	// vocabulary.
+	Focus []string
+	// Seeds are URLs already known to be on the topic — the pages topic
+	// discovery based the subject on. They are read first, as sources in their
+	// own right: they go through extraction and verification like anything
+	// else, but not through search relevance, and they count toward MaxSources
+	// ahead of search results. Unlike URLs, search still runs to fill the rest.
+	Seeds []string
 	// Model optionally overrides the LLM used.
 	Model string
 }
@@ -164,51 +179,75 @@ func (a *Agent) Research(ctx context.Context, req Request, progress ProgressFunc
 
 	brief := &Brief{Topic: topic}
 
-	// 1. Plan — turn the topic and the caller's guidance into search queries.
-	progress.report(PhasePlanning, fmt.Sprintf("Planning research for %q", topic))
-	queries, err := a.plan(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	brief.Queries = queries
-
-	// 2. Search — gather candidates across every backend.
-	progress.report(PhaseSearching, fmt.Sprintf("Searching %d queries", len(queries)))
-	searched := a.gather(ctx, queries, brief)
-	if len(searched) == 0 {
-		return nil, fmt.Errorf("research: no sources found for %q", topic)
+	if len(req.URLs) > 0 {
+		return a.researchPinned(ctx, req, brief, progress)
 	}
 
-	// 3. Select — decide which candidates are actually about this topic.
-	//
-	// Search relevance is not topic relevance. Queries get relaxed when a
-	// strict match finds nothing, and technical vocabulary is ambiguous — a
-	// search for the Kubernetes Gateway API returns API-gateway vendors, which
-	// share every keyword and none of the subject. Reading whichever URL ranked
-	// highest is how an article ends up citing a real, well-written page about
-	// something else entirely.
-	candidates := a.selectSources(ctx, req, searched, brief)
-	if len(candidates) == 0 {
-		// An empty selection is often the model being too strict (or wrong) on a
-		// niche topic, not proof that nothing exists — live runs of
-		// "ai agents for tax return" failed here after a broader research call
-		// on the same subject had already found sources. Broaden once, then
-		// fall back to search order and let extraction/verification drop
-		// anything that is not actually about the topic.
-		candidates = a.recoverEmptySelection(ctx, req, searched, brief, progress)
-	}
-	if len(candidates) == 0 {
-		return nil, fmt.Errorf("research: no sources found that are actually about %q", topic)
+	// tried tracks every URL already attempted so later reads — and recovery
+	// walking the wider search pool — never refetch the same page.
+	tried := make(map[string]struct{})
+
+	// 0. Seeds — pages already known to be on the topic are read before any
+	// searching. A trending run's topic came from them, and research that
+	// starts from them cannot drift as far as research that starts from the
+	// topic's wording alone.
+	seedDocs := a.readSeeds(ctx, req, brief, progress, tried)
+	budget := a.cfg.MaxSources - len(seedDocs)
+
+	var searched, candidates []Source
+	if budget > 0 {
+		// 1. Plan — turn the topic and the caller's guidance into search queries.
+		progress.report(PhasePlanning, fmt.Sprintf("Planning research for %q", topic))
+		queries, err := a.plan(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		brief.Queries = queries
+
+		// 2. Search — gather candidates across every backend.
+		progress.report(PhaseSearching, fmt.Sprintf("Searching %d queries", len(queries)))
+		searched = withoutSeeds(a.gather(ctx, queries, brief), seedDocs)
+		if len(searched) == 0 && len(seedDocs) == 0 {
+			return nil, fmt.Errorf("research: no sources found for %q", topic)
+		}
+
+		// 3. Select — decide which candidates are actually about this topic.
+		//
+		// Search relevance is not topic relevance. Queries get relaxed when a
+		// strict match finds nothing, and technical vocabulary is ambiguous — a
+		// search for the Kubernetes Gateway API returns API-gateway vendors, which
+		// share every keyword and none of the subject. Reading whichever URL ranked
+		// highest is how an article ends up citing a real, well-written page about
+		// something else entirely.
+		if len(searched) > 0 {
+			candidates = a.selectSources(ctx, req, searched, brief)
+		}
+		if len(candidates) == 0 && len(seedDocs) == 0 {
+			// An empty selection is often the model being too strict (or wrong) on a
+			// niche topic, not proof that nothing exists — live runs of
+			// "ai agents for tax return" failed here after a broader research call
+			// on the same subject had already found sources. Broaden once, then
+			// fall back to search order and let extraction/verification drop
+			// anything that is not actually about the topic.
+			//
+			// Not when seeds were read: they are already on-topic material, and
+			// falling back to unfiltered search order is how research drifts.
+			candidates = a.recoverEmptySelection(ctx, req, searched, brief, progress)
+		}
+		if len(candidates) == 0 && len(seedDocs) == 0 {
+			return nil, fmt.Errorf("research: no sources found that are actually about %q", topic)
+		}
 	}
 
 	// 4. Read — retrieve the most promising candidates.
 	//
 	// Retrieval failure is routine (dead blogs, paywalls, HN item pages Jina
-	// cannot render). tried tracks every URL already attempted so recovery can
-	// walk the wider search pool without refetching the same dead links.
-	tried := make(map[string]struct{})
-	progress.report(PhaseReading, fmt.Sprintf("Reading %d of %d sources", min(len(candidates), a.cfg.MaxSources), len(candidates)))
-	docs := a.read(ctx, candidates, brief, a.cfg.MaxSources, tried)
+	// cannot render).
+	docs := seedDocs
+	if len(candidates) > 0 {
+		progress.report(PhaseReading, fmt.Sprintf("Reading %d of %d sources", min(len(candidates), budget), len(candidates)))
+		docs = append(docs, a.read(ctx, candidates, brief, budget, tried)...)
+	}
 	if len(docs) == 0 {
 		docs = a.recoverEmptyRead(ctx, req, searched, brief, progress, tried)
 	}
@@ -274,8 +313,135 @@ func (a *Agent) Research(ctx context.Context, req Request, progress ProgressFunc
 	return brief, nil
 }
 
+// researchPinned Fetch's the caller's URLs only: no planner, no search, no
+// recovery from HN/arxiv. A failed URL is a warning; if none load, the brief
+// is empty so the caller can draft without invented facts.
+func (a *Agent) researchPinned(ctx context.Context, req Request, brief *Brief, progress ProgressFunc) (*Brief, error) {
+	candidates := make([]Source, 0, len(req.URLs))
+	seen := make(map[string]struct{}, len(req.URLs))
+	for _, raw := range req.URLs {
+		u, err := validateURL(raw)
+		if err != nil {
+			brief.Warnings = append(brief.Warnings, fmt.Sprintf("skipped pinned url %s: %v", strings.TrimSpace(raw), err))
+			continue
+		}
+		key := canonicalURL(u)
+		if key == "" {
+			key = u
+		}
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		candidates = append(candidates, Source{URL: u, Site: siteOf(u)})
+		if len(candidates) >= 20 {
+			break
+		}
+	}
+
+	if len(candidates) == 0 {
+		brief.Warnings = append(brief.Warnings, "none of the pinned knowledge pages could be retrieved")
+		return brief, nil
+	}
+
+	tried := make(map[string]struct{})
+	progress.report(PhaseReading, fmt.Sprintf("Reading %d pinned knowledge page(s)", len(candidates)))
+	docs := a.read(ctx, candidates, brief, len(candidates), tried)
+	if len(docs) == 0 {
+		brief.Warnings = append(brief.Warnings, "none of the pinned knowledge pages could be retrieved")
+		return brief, nil
+	}
+
+	docs = a.expandPinnedForPrices(ctx, req, docs, brief, tried, progress)
+
+	findings := a.extractAll(ctx, req, docs, brief)
+	if len(findings) == 0 {
+		progress.report(PhaseSynthesised, "no claims extracted from pinned pages")
+		return brief, nil
+	}
+
+	progress.report(PhaseVerifying, fmt.Sprintf("Verifying %d claims against their sources", len(findings)))
+	verified := a.verify(ctx, req, findings, docs, brief)
+	brief.Findings = verified
+	brief.Sources = citedSources(verified, docs)
+
+	if len(verified) > 0 {
+		summary, err := a.synthesise(ctx, req, verified)
+		if err != nil {
+			brief.Warnings = append(brief.Warnings, fmt.Sprintf("summary generation failed: %v", err))
+			a.logger.Warn("research: synthesis failed", zap.Error(err))
+		} else {
+			brief.Summary = summary
+		}
+	}
+
+	progress.report(PhaseSynthesised, fmt.Sprintf("%d verified findings from %d pinned page(s)",
+		len(brief.Findings), len(brief.Sources)))
+	return brief, nil
+}
+
+// readSeeds reads the caller's seed URLs as sources, up to MaxSources.
+//
+// A seed that cannot be read is a warning, not a failure: the seeds are a head
+// start, and search still runs to fill whatever they did not.
+func (a *Agent) readSeeds(
+	ctx context.Context, req Request, brief *Brief, progress ProgressFunc, tried map[string]struct{},
+) []Document {
+	if len(req.Seeds) == 0 {
+		return nil
+	}
+	seeds := make([]Source, 0, len(req.Seeds))
+	seen := make(map[string]struct{}, len(req.Seeds))
+	for _, raw := range req.Seeds {
+		u, err := validateURL(raw)
+		if err != nil {
+			brief.Warnings = append(brief.Warnings, fmt.Sprintf("skipped seed url %s: %v", strings.TrimSpace(raw), err))
+			a.logger.Warn("research: skipped an invalid seed", zap.String("url", raw), zap.Error(err))
+			continue
+		}
+		key := canonicalURL(u)
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		seeds = append(seeds, Source{URL: u, Site: siteOf(u)})
+		if len(seeds) >= a.cfg.MaxSources {
+			break
+		}
+	}
+	if len(seeds) == 0 {
+		return nil
+	}
+
+	progress.report(PhaseReading, fmt.Sprintf("Reading %d seed source(s)", len(seeds)))
+	docs := a.read(ctx, seeds, brief, len(seeds), tried)
+
+	// read has already recorded each failure on the brief; the log line is for
+	// whoever is watching the server rather than the run.
+	read := make(map[string]struct{}, len(docs))
+	for _, d := range docs {
+		read[d.URL] = struct{}{}
+	}
+	for _, s := range seeds {
+		if _, ok := read[s.URL]; !ok {
+			a.logger.Warn("research: could not read a seed source, continuing without it",
+				zap.String("url", s.URL), zap.String("topic", req.Topic))
+		}
+	}
+	return docs
+}
+
 // plan asks the model what to search for.
 func (a *Agent) plan(ctx context.Context, req Request) ([]string, error) {
+	queries, err := a.planQueries(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return ensureFocusQuery(req.Topic, queries, req.Focus), nil
+}
+
+// planQueries is the model's half of plan: the queries as the model wrote them.
+func (a *Agent) planQueries(ctx context.Context, req Request) ([]string, error) {
 	guidance := strings.TrimSpace(req.Context)
 	if guidance == "" {
 		guidance = "(none given)"
@@ -287,7 +453,7 @@ TOPIC:
 %s
 
 ADDITIONAL CONTEXT FROM THE REQUESTER (angle, audience, points to cover, things to avoid):
-%s
+%s%s
 
 Produce up to %d web search queries that would find current, factual, citable
 material on this topic.
@@ -300,7 +466,7 @@ Bad:   "Kubernetes Gateway API ingress replacement production implementation"
 
 Respond with JSON only, in exactly this shape:
 {"queries": ["first query", "second query"]}`,
-		req.Topic, guidance, a.cfg.MaxQueries)
+		req.Topic, guidance, focusPlanBlock(req.Focus), a.cfg.MaxQueries)
 
 	resp, err := a.generate(ctx, req.Model, prompt)
 	if err != nil {
@@ -567,7 +733,7 @@ func (a *Agent) selectSources(ctx context.Context, req Request, candidates []Sou
 	prompt := fmt.Sprintf(`You are choosing which search results to read for an article.
 
 ARTICLE TOPIC:
-%s
+%s%s
 
 CANDIDATE SOURCES:
 %s
@@ -584,7 +750,7 @@ Select at most %d. Prefer a plausible, related source over an empty list: return
 
 Respond with JSON only, in exactly this shape:
 {"selected": [0, 3, 7]}`,
-		req.Topic, b.String(), a.cfg.MaxSources*2)
+		req.Topic, focusSelectBlock(req.Focus), b.String(), a.cfg.MaxSources*2)
 
 	// Worth a retry: falling back to search order means reading sources that
 	// are not about the topic, which is the failure this step exists to stop.
@@ -717,7 +883,11 @@ func (a *Agent) extractAll(ctx context.Context, req Request, docs []Document, br
 // looks right; a claim plus a quote can be checked against the actual bytes of
 // the page.
 func (a *Agent) extract(ctx context.Context, req Request, doc Document) ([]Finding, error) {
-	prompt := fmt.Sprintf(`You are extracting citable facts from a source document for an article.
+	var prompt string
+	if len(req.URLs) > 0 {
+		prompt = extractPinnedPrompt(req, doc)
+	} else {
+		prompt = fmt.Sprintf(`You are extracting citable facts from a source document for an article.
 
 ARTICLE TOPIC:
 %s
@@ -741,7 +911,8 @@ Rules:
 
 Respond with JSON only, in exactly this shape:
 {"findings": [{"claim": "...", "quote": "..."}]}`,
-		req.Topic, doc.URL, doc.Title, proseExcerpt(doc.Text, docExcerptChars))
+			req.Topic, doc.URL, doc.Title, proseExcerpt(doc.Text, docExcerptChars))
+	}
 
 	var parsed struct {
 		Findings []struct {
@@ -763,6 +934,65 @@ Respond with JSON only, in exactly this shape:
 		out = append(out, Finding{Claim: claim, SourceURL: doc.URL, Quote: quote})
 	}
 	return out, nil
+}
+
+func extractPinnedPrompt(req Request, doc Document) string {
+	lookFor := pinnedLookFor(req)
+	subject, body := pinnedInbound(req)
+	if len(body) > 4000 {
+		body = body[:4000] + "\n…"
+	}
+	return fmt.Sprintf(`You extract facts from one knowledge page to answer an inbound email.
+Use only DOCUMENT TEXT. If the page does not contain what we are looking for, return {"findings":[]}. Do not guess.
+
+LOOK FOR:
+%s
+
+INBOUND SUBJECT:
+%s
+
+INBOUND EMAIL (trimmed):
+%s
+
+DOCUMENT URL:
+%s
+
+DOCUMENT TEXT:
+%s
+
+Return JSON only:
+{"findings":[{"claim":"...","quote":"..."}]}
+Each claim is one factual sentence. Each quote is verbatim from DOCUMENT TEXT.`,
+		lookFor, subject, body, doc.URL, proseExcerpt(doc.Text, docExcerptChars))
+}
+
+func pinnedLookFor(req Request) string {
+	const prefix = "Look for: "
+	ctx := req.Context
+	if i := strings.Index(ctx, prefix); i >= 0 {
+		rest := ctx[i+len(prefix):]
+		if j := strings.Index(rest, "\n"); j >= 0 {
+			rest = rest[:j]
+		}
+		if s := strings.TrimSpace(rest); s != "" {
+			return s
+		}
+	}
+	return "(whatever the email is asking)"
+}
+
+func pinnedInbound(req Request) (subject, body string) {
+	const prefix = "Inbound email:\n"
+	ctx := req.Context
+	i := strings.Index(ctx, prefix)
+	if i < 0 {
+		return "", strings.TrimSpace(ctx)
+	}
+	inbound := ctx[i+len(prefix):]
+	if j := strings.Index(inbound, "\n"); j >= 0 {
+		return inbound[:j], strings.TrimSpace(inbound[j+1:])
+	}
+	return inbound, ""
 }
 
 // verify drops every finding the source does not actually support.

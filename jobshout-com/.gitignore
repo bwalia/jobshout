@@ -1,0 +1,9 @@
+.env
+.env.local
+web/nextjs/node_modules
+web/nextjs/.next
+web/nextjs/.env.local
+web/nextjs/tsconfig.tsbuildinfo
+.DS_Store
+/target
+**/*.rs.bk

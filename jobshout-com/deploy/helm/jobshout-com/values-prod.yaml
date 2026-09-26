@@ -1,0 +1,16 @@
+env: prod
+host: www.jobshout.com
+# The bare domain serves the same site; both are wslproxy vhosts on pop0.
+hostAliases:
+  - jobshout.com
+
+api:
+  replicas: 2
+
+web:
+  replicas: 2
+  apiURL: "http://jobshout-com-api.prod.svc.cluster.local:8088"
+
+postgres:
+  enabled: true
+  storage: 50Gi

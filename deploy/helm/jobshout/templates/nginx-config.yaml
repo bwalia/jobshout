@@ -42,6 +42,12 @@ data:
         location /api/ {
           set $up http://jobshout-api.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.api.port }};
           proxy_pass $up;
+          # Career scoring holds the request open for one model call per job.
+          # The handler budgets 10m (careerWorkTimeout) and the browser waits
+          # 600s to match, but the 300s default above cut in first and returned
+          # 504 on work that was still running — and still landing, since the
+          # handler detaches from the request context and saves each score.
+          proxy_read_timeout {{ .Values.gateway.apiReadTimeout | default "600s" }};
         }
         location = /health {
           set $up http://jobshout-api.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.api.port }};
@@ -51,6 +57,19 @@ data:
           set $up http://jobshout-api.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.api.port }};
           proxy_pass $up;
         }
+
+        {{- if .Values.reviewBot.enabled }}
+        # PR-reviewer MCP endpoint for editor CLIs (Claude Code / Cursor). The
+        # review-bot serves MCP on its own port; only /mcp is exposed — the REST
+        # /api on that pod stays cluster-internal. Streamable HTTP uses SSE, so
+        # disable buffering and allow a long-lived connection.
+        location /mcp {
+          set $mcp http://jobshout-review-bot.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.reviewBot.mcpPort | default 8766 }};
+          proxy_pass $mcp;
+          proxy_buffering off;
+          proxy_read_timeout 3600s;
+        }
+        {{- end }}
 
         location / {
           set $web http://jobshout-web.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.web.port }};

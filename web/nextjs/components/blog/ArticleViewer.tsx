@@ -91,7 +91,8 @@ export function ArticleViewer({ article }: { article: BlogArticle }) {
             Topic: {article.topic}
           </p>
           <p className="mt-0.5 truncate font-mono text-2xs text-muted-foreground">
-            {article.path} · {article.word_count} words ·{" "}
+            {article.path} · {article.word_count.toLocaleString()}{" "}
+            {article.word_count === 1 ? "word" : "words"} ·{" "}
             {referenceCount === 1 ? "1 source" : `${referenceCount} sources`}
           </p>
         </div>
@@ -119,8 +120,13 @@ export function ArticleViewer({ article }: { article: BlogArticle }) {
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="border-b border-border">
+      {/* Tabs. Sticky rather than an inner scroll region: the page scrolls in
+          the shell's <main>, and nothing between it and this component has a
+          bounded height, so an overflow-y-auto here never actually scrolls —
+          the tab bar just scrolled away with the article. Pinning it keeps
+          view switching reachable mid-article. -mx-5/px-5 bleeds it across
+          the card's padding so content scrolls under a full-width bar. */}
+      <div className="sticky top-0 z-10 -mx-5 border-b border-border bg-card px-5">
         <nav className="-mb-px flex gap-0" aria-label="Article view">
           {TABS.map(({ id, label, icon: Icon }) => (
             <button
@@ -142,7 +148,7 @@ export function ArticleViewer({ article }: { article: BlogArticle }) {
         </nav>
       </div>
 
-      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto scrollbar-thin pt-5">
+      <div className="min-w-0 pt-5">
         {tab === "article" ? (
           <article
             className={cn(
@@ -156,26 +162,65 @@ export function ArticleViewer({ article }: { article: BlogArticle }) {
               // app's tokens so it tracks the theme like everything else.
               "prose-headings:font-display prose-headings:tracking-tight",
               "prose-a:text-primary prose-a:no-underline hover:prose-a:underline",
-              "prose-code:rounded prose-code:bg-muted prose-code:px-1 prose-code:py-0.5",
+              "[&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-muted [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:py-0.5",
               "prose-code:before:content-none prose-code:after:content-none",
-              "prose-pre:border prose-pre:border-border prose-pre:bg-muted/60",
+              "prose-pre:border prose-pre:border-border prose-pre:bg-muted/60 prose-pre:text-foreground",
               "prose-th:text-foreground prose-blockquote:border-l-primary/40"
             )}
           >
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               components={{
-                // A ```mermaid fence becomes a rendered diagram. Every other
-                // fence keeps the default code rendering — an article's shell
-                // and Go snippets must not go anywhere near a diagram parser.
-                code({ className, children, ...props }) {
+                pre({ children }) {
+                  return <>{children}</>;
+                },
+                code({ className, children, node: _node, ...props }) {
                   if (/language-mermaid/.test(className ?? "")) {
                     return <MermaidDiagram chart={String(children)} />;
+                  }
+                  const isBlock = /language-/.test(className ?? "");
+                  if (isBlock) {
+                    return (
+                      <pre className="overflow-x-auto rounded-lg border border-border bg-muted/60 p-4">
+                        <code className={className}>{children}</code>
+                      </pre>
+                    );
                   }
                   return (
                     <code className={className} {...props}>
                       {children}
                     </code>
+                  );
+                },
+                // Inline figures are stored at /api/v1/images/file/… —
+                // a relative <img> hits this Next.js origin and 404s, which
+                // is why the prompt was showing as a broken image's alt text.
+                // object-contain keeps labels on flow/comparison figures
+                // visible; a fixed 3:2 crop used to cut them off.
+                img({ src, alt }) {
+                  if (!src) return null;
+                  const fromStore =
+                    src.startsWith("/api/v1/images/") || src.startsWith("data:");
+                  if (fromStore) {
+                    return (
+                      <StoredImage
+                        src={src}
+                        alt={alt ?? ""}
+                        width={article.cover_image_meta?.width}
+                        height={article.cover_image_meta?.height}
+                        loading="lazy"
+                        className="mx-auto my-4 h-auto max-w-full rounded-lg border border-border object-contain"
+                      />
+                    );
+                  }
+                  return (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={src}
+                      alt={alt ?? ""}
+                      loading="lazy"
+                      className="mx-auto my-4 max-w-full rounded-lg border border-border"
+                    />
                   );
                 },
               }}

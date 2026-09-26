@@ -263,7 +263,7 @@ export function CreateAgentDialog({ open, onClose }: CreateAgentDialogProps) {
           <div>
             <FieldLabel htmlFor="agent-system-prompt">System Prompt</FieldLabel>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Instructions that define the agent's behaviour and constraints.
+              Instructions that define the agent&apos;s behaviour and constraints.
             </p>
             <textarea
               id="agent-system-prompt"

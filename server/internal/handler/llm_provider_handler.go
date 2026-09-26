@@ -106,6 +106,16 @@ func (h *LLMProviderHandler) ListModels(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+// maskProviderKey redacts the stored secret before it leaves the API. Clients
+// never need the full key back — they set it, we keep it.
+func maskProviderKey(p *model.LLMProviderConfig) {
+	if len(p.APIKey) > 8 {
+		p.APIKey = p.APIKey[:4] + "****" + p.APIKey[len(p.APIKey)-4:]
+	} else if p.APIKey != "" {
+		p.APIKey = "****"
+	}
+}
+
 // List returns all user-managed LLM provider configs for the org.
 func (h *LLMProviderHandler) List(w http.ResponseWriter, r *http.Request) {
 	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
@@ -121,6 +131,10 @@ func (h *LLMProviderHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	if providers == nil {
 		providers = []model.LLMProviderConfig{}
+	}
+	// This endpoint used to return every provider's API key verbatim.
+	for i := range providers {
+		maskProviderKey(&providers[i])
 	}
 	RespondJSON(w, http.StatusOK, providers)
 }
@@ -167,12 +181,7 @@ func (h *LLMProviderHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Mask key in response
-	if len(p.APIKey) > 8 {
-		p.APIKey = p.APIKey[:4] + "****" + p.APIKey[len(p.APIKey)-4:]
-	} else if p.APIKey != "" {
-		p.APIKey = "****"
-	}
+	maskProviderKey(p)
 
 	RespondJSON(w, http.StatusCreated, p)
 }
@@ -191,12 +200,7 @@ func (h *LLMProviderHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Mask key
-	if len(p.APIKey) > 8 {
-		p.APIKey = p.APIKey[:4] + "****" + p.APIKey[len(p.APIKey)-4:]
-	} else if p.APIKey != "" {
-		p.APIKey = "****"
-	}
+	maskProviderKey(p)
 
 	RespondJSON(w, http.StatusOK, p)
 }
@@ -224,6 +228,7 @@ func (h *LLMProviderHandler) Update(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, http.StatusInternalServerError, "failed to update provider")
 		return
 	}
+	maskProviderKey(p)
 	RespondJSON(w, http.StatusOK, p)
 }
 

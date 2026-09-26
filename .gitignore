@@ -42,6 +42,7 @@ minio_data/
 # Logs
 *.log
 .dev-logs/
+.dev-data/
 
 # Coverage
 coverage/
@@ -57,3 +58,9 @@ __pycache__/
 # it is deliberately never committed — see strix-service/README.md on retention.
 strix-service/strix_runs/
 strix_runs/
+.serena/
+
+# Alternate Next build dirs (NEXT_DIST_DIR), so a second dev server can run
+# against the same checkout without fighting the first over .next/.
+web/nextjs/.next-*
+web/nextjs/.next.*

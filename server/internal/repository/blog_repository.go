@@ -33,15 +33,26 @@ type BlogRepository interface {
 	UpdateBriefs(ctx context.Context, runID uuid.UUID, briefs []model.BlogBrief, topics []string) error
 	GetByID(ctx context.Context, id uuid.UUID) (*model.BlogRun, error)
 	ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.BlogRun], error)
+	// ListByAgent lists the runs attributed to agentID. includeUnowned adds
+	// runs with no agent, which predate attribution. A nil agentID with
+	// includeUnowned lists only those.
+	ListByAgent(ctx context.Context, orgID uuid.UUID, agentID *uuid.UUID, includeUnowned bool, params model.PaginationParams) (*model.PaginatedResponse[model.BlogRun], error)
 	// Delete removes a run. Its articles go with it via ON DELETE CASCADE.
 	Delete(ctx context.Context, id uuid.UUID) error
 
 	CreateArticles(ctx context.Context, articles []model.BlogArticle) error
 	ListArticlesByRun(ctx context.Context, runID uuid.UUID) ([]model.BlogArticle, error)
 	GetArticle(ctx context.Context, id uuid.UUID) (*model.BlogArticle, error)
+	// UpdateArticles writes the run's lightweight per-article summaries, so a
+	// brief can be persisted without a full terminal Update racing the step
+	// trace.
+	UpdateArticles(ctx context.Context, runID uuid.UUID, articles []model.BlogRunArticle) error
 	// MarkArticlesPosted records where each article landed in the CMS, after a
 	// publish has already succeeded.
 	MarkArticlesPosted(ctx context.Context, posts []model.BlogArticlePost) error
+	// MarkArticlesInInsights records which JobShout.com Insights item each
+	// article was filed as, so a retry does not file it twice.
+	MarkArticlesInInsights(ctx context.Context, items []model.BlogArticleInsights) error
 	// DeleteArticlesByRun clears a run's articles so a retry cannot leave the
 	// previous attempt's output alongside the new one.
 	DeleteArticlesByRun(ctx context.Context, runID uuid.UUID) error
@@ -54,7 +65,16 @@ type BlogRepository interface {
 	// this is how that gets filtered. Added with the schema it depends on
 	// (migration 022 creates the supporting index) rather than left to the
 	// feature that will consume it.
-	RecentTopics(ctx context.Context, orgID uuid.UUID, since time.Time) ([]string, error)
+	// audience scopes the answer to one reader — "" is the default developer
+	// profile. Two schedules writing for different readers are meant to cover
+	// the same subject; without this they lock each other out for a fortnight.
+	RecentTopics(ctx context.Context, orgID uuid.UUID, since time.Time, audience string) ([]string, error)
+	// TouchHeartbeat records that this process is still writing the run, so the
+	// orphan reconciler does not fail a healthy long LLM call.
+	TouchHeartbeat(ctx context.Context, runID uuid.UUID) error
+	// ListStaleRunning returns in-flight runs whose last heartbeat (or start)
+	// is before before. The reconciler fails these; it does not restart them.
+	ListStaleRunning(ctx context.Context, before time.Time) ([]*model.BlogRun, error)
 }
 
 type blogRepository struct {
@@ -70,17 +90,19 @@ func NewBlogRepository(pool *pgxpool.Pool) BlogRepository {
 const blogRunColumns = `
 	id, org_id, agent_id, triggered_by, source, status, topics, briefs, model,
 	cms_namespace, articles, steps, error_message,
-	started_at, completed_at, published_at, created_at`
+	started_at, heartbeat_at, completed_at, published_at, created_at, options,
+	insights_published_at`
 
 // scanBlogRun reads one row in blogRunColumns order.
 func scanBlogRun(row pgx.Row) (*model.BlogRun, error) {
 	run := &model.BlogRun{}
-	var topicsRaw, briefsRaw, articlesRaw, stepsRaw []byte
+	var topicsRaw, briefsRaw, articlesRaw, stepsRaw, optionsRaw []byte
 	err := row.Scan(
 		&run.ID, &run.OrgID, &run.AgentID, &run.TriggeredBy, &run.Source, &run.Status,
 		&topicsRaw, &briefsRaw, &run.Model, &run.CMSNamespace,
 		&articlesRaw, &stepsRaw, &run.ErrorMessage,
-		&run.StartedAt, &run.CompletedAt, &run.PublishedAt, &run.CreatedAt,
+		&run.StartedAt, &run.HeartbeatAt, &run.CompletedAt, &run.PublishedAt, &run.CreatedAt,
+		&optionsRaw, &run.InsightsPublishedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -89,6 +111,7 @@ func scanBlogRun(row pgx.Row) (*model.BlogRun, error) {
 	_ = json.Unmarshal(briefsRaw, &run.Briefs)
 	_ = json.Unmarshal(articlesRaw, &run.Articles)
 	_ = json.Unmarshal(stepsRaw, &run.Steps)
+	_ = json.Unmarshal(optionsRaw, &run.Options)
 
 	// Migration 022 backfills briefs for rows that predate the column, but a
 	// run created between that migration running and this code deploying — or
@@ -109,7 +132,8 @@ func scanBlogRun(row pgx.Row) (*model.BlogRun, error) {
 const blogArticleColumns = `
 	id, run_id, org_id, topic, title, slug, path, references_json, markdown, html,
 	post_uuid, post_status, posted_at, word_count, created_at,
-	cover_image_url, cover_image_prompt, cover_image_meta`
+	cover_image_url, cover_image_prompt, cover_image_meta,
+	insights_item_id, insights_slug, insights_status, insights_posted_at, audience, industry`
 
 // scanBlogArticle reads one row in blogArticleColumns order.
 func scanBlogArticle(row pgx.Row) (*model.BlogArticle, error) {
@@ -123,14 +147,24 @@ func scanBlogArticle(row pgx.Row) (*model.BlogArticle, error) {
 	// leaves cover images switched off.
 	var coverURL, coverPrompt *string
 	var coverMetaRaw []byte
+	// audience/industry are nullable: every article written before readers
+	// existed is a developer piece, which the audience package spells as empty.
+	var aud, industry *string
 	err := row.Scan(
 		&a.ID, &a.RunID, &a.OrgID, &a.Topic, &title, &a.Slug, &a.Path, &referencesRaw,
 		&a.Markdown, &a.HTML,
 		&a.PostUUID, &a.PostStatus, &a.PostedAt, &a.WordCount, &a.CreatedAt,
 		&coverURL, &coverPrompt, &coverMetaRaw,
+		&a.InsightsItemID, &a.InsightsSlug, &a.InsightsStatus, &a.InsightsPostedAt, &aud, &industry,
 	)
 	if err != nil {
 		return nil, err
+	}
+	if aud != nil {
+		a.Audience = *aud
+	}
+	if industry != nil {
+		a.Industry = *industry
 	}
 	if title != nil {
 		a.Title = *title
@@ -161,16 +195,17 @@ func (r *blogRepository) Create(ctx context.Context, run *model.BlogRun) error {
 	briefsJSON, _ := json.Marshal(run.Briefs)
 	articlesJSON, _ := json.Marshal(run.Articles)
 	stepsJSON, _ := json.Marshal(run.Steps)
+	optionsJSON, _ := json.Marshal(run.Options)
 
 	const sql = `
 		INSERT INTO blog_runs
-		    (id, org_id, agent_id, triggered_by, source, status, topics, briefs, model, articles, steps, started_at, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, NOW())
+		    (id, org_id, agent_id, triggered_by, source, status, topics, briefs, model, articles, steps, started_at, heartbeat_at, created_at, options)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12, NOW(), $13)
 		RETURNING created_at`
 
 	return r.pool.QueryRow(ctx, sql,
 		run.ID, run.OrgID, run.AgentID, run.TriggeredBy, run.Source, run.Status,
-		topicsJSON, briefsJSON, run.Model, articlesJSON, stepsJSON, run.StartedAt,
+		topicsJSON, briefsJSON, run.Model, articlesJSON, stepsJSON, run.StartedAt, optionsJSON,
 	).Scan(&run.CreatedAt)
 }
 
@@ -186,15 +221,32 @@ func (r *blogRepository) Update(ctx context.Context, run *model.BlogRun) error {
 		    steps         = $5,
 		    error_message = $6,
 		    completed_at  = $7,
-		    published_at  = $8
+		    published_at  = $8,
+		    insights_published_at = $9
 		WHERE id = $1`
 
 	_, err := r.pool.Exec(ctx, sql,
 		run.ID, run.Status, run.CMSNamespace,
 		articlesJSON, stepsJSON, run.ErrorMessage, run.CompletedAt, run.PublishedAt,
+		run.InsightsPublishedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("blog_repo: update: %w", err)
+	}
+	return nil
+}
+
+func (r *blogRepository) UpdateArticles(ctx context.Context, runID uuid.UUID, articles []model.BlogRunArticle) error {
+	if articles == nil {
+		articles = []model.BlogRunArticle{}
+	}
+	articlesJSON, err := json.Marshal(articles)
+	if err != nil {
+		return fmt.Errorf("blog_repo: marshal articles: %w", err)
+	}
+	_, err = r.pool.Exec(ctx, `UPDATE blog_runs SET articles = $2 WHERE id = $1`, runID, articlesJSON)
+	if err != nil {
+		return fmt.Errorf("blog_repo: update articles: %w", err)
 	}
 	return nil
 }
@@ -291,6 +343,43 @@ func (r *blogRepository) ListByOrg(ctx context.Context, orgID uuid.UUID, params 
 	}, rows.Err()
 }
 
+func (r *blogRepository) ListByAgent(ctx context.Context, orgID uuid.UUID, agentID *uuid.UUID, includeUnowned bool, params model.PaginationParams) (*model.PaginatedResponse[model.BlogRun], error) {
+	params.Normalize()
+
+	// $2 may be NULL: "agent_id = NULL" matches nothing, leaving the unowned
+	// clause to decide.
+	const where = `org_id = $1 AND (agent_id = $2 OR ($3 AND agent_id IS NULL))`
+
+	var total int
+	if err := r.pool.QueryRow(ctx, "SELECT COUNT(*) FROM blog_runs WHERE "+where,
+		orgID, agentID, includeUnowned).Scan(&total); err != nil {
+		return nil, fmt.Errorf("blog_repo: count by agent: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, `SELECT `+blogRunColumns+`
+		FROM blog_runs WHERE `+where+`
+		ORDER BY created_at DESC LIMIT $4 OFFSET $5`,
+		orgID, agentID, includeUnowned, params.PerPage, params.Offset())
+	if err != nil {
+		return nil, fmt.Errorf("blog_repo: list by agent: %w", err)
+	}
+	defer rows.Close()
+
+	runs := make([]model.BlogRun, 0)
+	for rows.Next() {
+		run, err := scanBlogRun(rows)
+		if err != nil {
+			return nil, fmt.Errorf("blog_repo: scan: %w", err)
+		}
+		runs = append(runs, *run)
+	}
+
+	totalPages := (total + params.PerPage - 1) / params.PerPage
+	return &model.PaginatedResponse[model.BlogRun]{
+		Data: runs, Total: total, Page: params.Page, PerPage: params.PerPage, TotalPages: totalPages,
+	}, rows.Err()
+}
+
 func (r *blogRepository) CreateArticles(ctx context.Context, articles []model.BlogArticle) error {
 	if len(articles) == 0 {
 		return nil
@@ -300,8 +389,8 @@ func (r *blogRepository) CreateArticles(ctx context.Context, articles []model.Bl
 	const sql = `
 		INSERT INTO blog_articles
 		    (id, run_id, org_id, topic, title, slug, path, references_json, markdown, html, word_count,
-		     cover_image_url, cover_image_prompt, cover_image_meta, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, NOW())`
+		     cover_image_url, cover_image_prompt, cover_image_meta, audience, industry, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16, NOW())`
 	for _, a := range articles {
 		refsJSON, err := json.Marshal(a.References)
 		if err != nil {
@@ -313,7 +402,7 @@ func (r *blogRepository) CreateArticles(ctx context.Context, articles []model.Bl
 		}
 		batch.Queue(sql, a.ID, a.RunID, a.OrgID, a.Topic, a.Title, a.Slug, a.Path,
 			refsJSON, a.Markdown, a.HTML, a.WordCount,
-			a.CoverImageURL, a.CoverImagePrompt, coverJSON)
+			a.CoverImageURL, a.CoverImagePrompt, coverJSON, a.Audience, a.Industry)
 	}
 
 	br := r.pool.SendBatch(ctx, batch)
@@ -360,7 +449,7 @@ func (r *blogRepository) GetArticle(ctx context.Context, id uuid.UUID) (*model.B
 	return a, nil
 }
 
-func (r *blogRepository) RecentTopics(ctx context.Context, orgID uuid.UUID, since time.Time) ([]string, error) {
+func (r *blogRepository) RecentTopics(ctx context.Context, orgID uuid.UUID, since time.Time, audience string) ([]string, error) {
 	// Two sources, unioned, because an article is written minutes after the
 	// topic is chosen.
 	//
@@ -379,12 +468,20 @@ func (r *blogRepository) RecentTopics(ctx context.Context, orgID uuid.UUID, sinc
 	// mention, so a subject seen three times contributes one row. The outer
 	// ordering is what the caller asked for; the inner one is what DISTINCT ON
 	// requires to pick which duplicate survives.
+	//
+	// Both halves are scoped to one audience. A developer deep dive and a
+	// plain-English briefing on the same subject are two different articles and
+	// an org running both schedules wants both — so what the developer schedule
+	// wrote on Monday must not lock the business schedule out on Tuesday.
+	// COALESCE against '' is what makes a pre-audience row read as the default
+	// developer profile, which is what it is.
 	const sql = `
 		SELECT topic FROM (
 		    SELECT DISTINCT ON (topic) topic, created_at FROM (
 		        SELECT topic, created_at
 		        FROM blog_articles
 		        WHERE org_id = $1 AND created_at >= $2
+		          AND COALESCE(audience, '') = $3
 
 		        UNION ALL
 
@@ -394,12 +491,13 @@ func (r *blogRepository) RecentTopics(ctx context.Context, orgID uuid.UUID, sinc
 		          AND r.created_at >= $2
 		          AND r.status <> 'failed'
 		          AND COALESCE(b->>'topic', '') <> ''
+		          AND COALESCE(b->>'audience', '') = $3
 		    ) all_topics
 		    ORDER BY topic, created_at DESC
 		) t
 		ORDER BY created_at DESC`
 
-	rows, err := r.pool.Query(ctx, sql, orgID, since)
+	rows, err := r.pool.Query(ctx, sql, orgID, since, audience)
 	if err != nil {
 		return nil, fmt.Errorf("blog_repo: recent topics: %w", err)
 	}
@@ -414,6 +512,41 @@ func (r *blogRepository) RecentTopics(ctx context.Context, orgID uuid.UUID, sinc
 		topics = append(topics, topic)
 	}
 	return topics, rows.Err()
+}
+
+func (r *blogRepository) TouchHeartbeat(ctx context.Context, runID uuid.UUID) error {
+	_, err := r.pool.Exec(ctx,
+		`UPDATE blog_runs SET heartbeat_at = NOW() WHERE id = $1 AND status IN ('running', 'pending')`,
+		runID,
+	)
+	if err != nil {
+		return fmt.Errorf("blog_repo: heartbeat: %w", err)
+	}
+	return nil
+}
+
+func (r *blogRepository) ListStaleRunning(ctx context.Context, before time.Time) ([]*model.BlogRun, error) {
+	sql := `SELECT ` + blogRunColumns + `
+		FROM blog_runs
+		WHERE status IN ('running', 'pending')
+		  AND COALESCE(heartbeat_at, started_at, created_at) < $1
+		ORDER BY created_at
+		LIMIT 50`
+	rows, err := r.pool.Query(ctx, sql, before)
+	if err != nil {
+		return nil, fmt.Errorf("blog_repo: list stale running: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]*model.BlogRun, 0)
+	for rows.Next() {
+		run, err := scanBlogRun(rows)
+		if err != nil {
+			return nil, fmt.Errorf("blog_repo: scan stale running: %w", err)
+		}
+		out = append(out, run)
+	}
+	return out, rows.Err()
 }
 
 func (r *blogRepository) MarkArticlesPosted(ctx context.Context, posts []model.BlogArticlePost) error {
@@ -435,6 +568,30 @@ func (r *blogRepository) MarkArticlesPosted(ctx context.Context, posts []model.B
 	for range posts {
 		if _, err := br.Exec(); err != nil {
 			return fmt.Errorf("blog_repo: mark article posted: %w", err)
+		}
+	}
+	return nil
+}
+
+func (r *blogRepository) MarkArticlesInInsights(ctx context.Context, items []model.BlogArticleInsights) error {
+	if len(items) == 0 {
+		return nil
+	}
+
+	batch := &pgx.Batch{}
+	const sql = `
+		UPDATE blog_articles
+		SET insights_item_id = $2, insights_slug = $3, insights_status = $4, insights_posted_at = NOW()
+		WHERE id = $1`
+	for _, it := range items {
+		batch.Queue(sql, it.ArticleID, it.ItemID, it.Slug, it.Status)
+	}
+
+	br := r.pool.SendBatch(ctx, batch)
+	defer br.Close()
+	for range items {
+		if _, err := br.Exec(); err != nil {
+			return fmt.Errorf("blog_repo: mark article in insights: %w", err)
 		}
 	}
 	return nil

@@ -1,7 +1,9 @@
 package model
 
 import (
+	"strings"
 	"time"
+
 	"github.com/google/uuid"
 )
 
@@ -53,6 +55,25 @@ const (
 	// BuiltinPentester is the Penetration Testing Agent: autonomous security testing
 	// powered by Strix. Tests live APIs, applications, and codebases for vulnerabilities.
 	BuiltinPentester = "pentester"
+	// BuiltinWAFLab is the WAF Efficacy Lab: provisions a before/after WAF pair on
+	// wslproxy and measures the attack matrix (secure vs open).
+	BuiltinWAFLab = "waf_lab"
+	// BuiltinABTesting manages wslproxy weighted / canary traffic splits (A/B)
+	// via the wslproxy MCP server — control plane for hosts like
+	// abtesting.fictionally.org.
+	BuiltinABTesting = "ab_testing"
+	// BuiltinPRReviewer reviews GitHub pull requests via the in-cluster review-bot sidecar.
+	BuiltinPRReviewer = "pr_reviewer"
+	// BuiltinMail is the Mail Agent: one shared org Gmail, draft-only replies,
+	// Research Agent handoff, human approve-before-send.
+	BuiltinMail = "mail"
+	// BuiltinImages is the Image Generator: one prompt in, one stored image
+	// on the Task Manager board.
+	BuiltinImages = "images"
+	// BuiltinCareerOps is the career specialist: evaluate jobs against a
+	// person-scoped profile, draft materials, track the pipeline. A human
+	// always submits, sends, or clicks Apply.
+	BuiltinCareerOps = "career_ops"
 )
 
 // EngineConfigStructuredModel is the EngineConfig key holding the Article
@@ -69,11 +90,16 @@ const EngineConfigStructuredModel = "structured_model"
 // IsBuiltin reports whether the agent was seeded by the platform under the
 // given builtin name.
 func (a *Agent) IsBuiltin(name string) bool {
-	if a.Metadata == nil {
-		return false
+	return a.SeededBuiltin() == name
+}
+
+// SeededBuiltin is the specialist name in metadata, or empty for a custom agent.
+func (a *Agent) SeededBuiltin() string {
+	if a == nil || a.Metadata == nil {
+		return ""
 	}
 	v, _ := a.Metadata[MetadataKeyBuiltin].(string)
-	return v == name
+	return strings.TrimSpace(v)
 }
 
 type CreateAgentRequest struct {
@@ -107,6 +133,10 @@ type UpdateAgentStatusRequest struct {
 type PaginationParams struct {
 	Page    int `json:"page"`
 	PerPage int `json:"per_page"`
+	// Status optionally filters list endpoints that support it (org task list).
+	Status string `json:"-"`
+	// AssignedAgentID optionally filters the org task list to one agent.
+	AssignedAgentID string `json:"-"`
 }
 
 type PaginatedResponse[T any] struct {
@@ -128,7 +158,7 @@ func (p *PaginationParams) Normalize() {
 	if p.PerPage < 1 {
 		p.PerPage = 20
 	}
-	if p.PerPage > 100 {
-		p.PerPage = 100
+	if p.PerPage > 200 {
+		p.PerPage = 200
 	}
 }

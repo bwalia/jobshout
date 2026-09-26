@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/jobshout/server/internal/model"
@@ -17,6 +18,7 @@ type WorkflowRepository interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*model.Workflow, error)
 	ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.Workflow], error)
 	Update(ctx context.Context, wf *model.Workflow) error
+	ReplaceSteps(ctx context.Context, workflowID uuid.UUID, steps []model.WorkflowStep) error
 	Delete(ctx context.Context, id uuid.UUID) error
 
 	CreateRun(ctx context.Context, run *model.WorkflowRun) error
@@ -51,30 +53,69 @@ func (r *workflowRepository) Create(ctx context.Context, wf *model.Workflow) err
 		return fmt.Errorf("workflow_repo: insert workflow: %w", err)
 	}
 
-	for i := range wf.Steps {
-		step := &wf.Steps[i]
-		const stepSQL = `
-			INSERT INTO workflow_steps (id, workflow_id, name, agent_id, input_template, position, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6, NOW())`
+	if err = insertSteps(ctx, tx, wf.ID, wf.Steps); err != nil {
+		return err
+	}
 
-		if _, err = tx.Exec(ctx, stepSQL,
-			step.ID, wf.ID, step.Name, step.AgentID, step.InputTemplate, step.Position,
+	return tx.Commit(ctx)
+}
+
+// insertSteps writes the given steps and their dependency links inside tx.
+// All steps are inserted before any dependency is resolved, so a step may
+// depend on one that appears later in the slice.
+func insertSteps(ctx context.Context, tx pgx.Tx, workflowID uuid.UUID, steps []model.WorkflowStep) error {
+	const stepSQL = `
+		INSERT INTO workflow_steps (id, workflow_id, name, agent_id, input_template, position, engine_type, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), NOW())`
+
+	for i := range steps {
+		step := &steps[i]
+		if _, err := tx.Exec(ctx, stepSQL,
+			step.ID, workflowID, step.Name, step.AgentID, step.InputTemplate, step.Position, step.EngineType,
 		); err != nil {
 			return fmt.Errorf("workflow_repo: insert step %q: %w", step.Name, err)
 		}
+	}
 
+	for i := range steps {
+		step := &steps[i]
 		for _, depName := range step.DependsOn {
 			// Resolve dependency step ID by name within this workflow.
 			var depID uuid.UUID
 			const resolveSQL = `SELECT id FROM workflow_steps WHERE workflow_id = $1 AND name = $2`
-			if err = tx.QueryRow(ctx, resolveSQL, wf.ID, depName).Scan(&depID); err != nil {
+			if err := tx.QueryRow(ctx, resolveSQL, workflowID, depName).Scan(&depID); err != nil {
 				return fmt.Errorf("workflow_repo: resolve dependency step %q: %w", depName, err)
 			}
 			const depSQL = `INSERT INTO workflow_step_deps (step_id, depends_on_id) VALUES ($1, $2)`
-			if _, err = tx.Exec(ctx, depSQL, step.ID, depID); err != nil {
+			if _, err := tx.Exec(ctx, depSQL, step.ID, depID); err != nil {
 				return fmt.Errorf("workflow_repo: insert step dependency: %w", err)
 			}
 		}
+	}
+	return nil
+}
+
+// ReplaceSteps swaps the workflow's entire step set for the given one in a
+// single transaction. Dependency links are removed by the ON DELETE CASCADE
+// on workflow_step_deps; agent_executions referencing old steps keep their
+// rows with step_id set to NULL.
+func (r *workflowRepository) ReplaceSteps(ctx context.Context, workflowID uuid.UUID, steps []model.WorkflowStep) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("workflow_repo: begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if _, err = tx.Exec(ctx, `DELETE FROM workflow_steps WHERE workflow_id = $1`, workflowID); err != nil {
+		return fmt.Errorf("workflow_repo: delete existing steps: %w", err)
+	}
+
+	if err = insertSteps(ctx, tx, workflowID, steps); err != nil {
+		return err
+	}
+
+	if _, err = tx.Exec(ctx, `UPDATE workflows SET updated_at = NOW() WHERE id = $1`, workflowID); err != nil {
+		return fmt.Errorf("workflow_repo: touch workflow: %w", err)
 	}
 
 	return tx.Commit(ctx)
@@ -103,7 +144,7 @@ func (r *workflowRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.
 
 func (r *workflowRepository) loadSteps(ctx context.Context, workflowID uuid.UUID) ([]model.WorkflowStep, error) {
 	const stepsSQL = `
-		SELECT id, workflow_id, name, agent_id, input_template, position, created_at
+		SELECT id, workflow_id, name, agent_id, input_template, position, COALESCE(engine_type, ''), created_at
 		FROM workflow_steps WHERE workflow_id = $1 ORDER BY position`
 
 	rows, err := r.pool.Query(ctx, stepsSQL, workflowID)
@@ -115,7 +156,7 @@ func (r *workflowRepository) loadSteps(ctx context.Context, workflowID uuid.UUID
 	var steps []model.WorkflowStep
 	for rows.Next() {
 		var s model.WorkflowStep
-		if err := rows.Scan(&s.ID, &s.WorkflowID, &s.Name, &s.AgentID, &s.InputTemplate, &s.Position, &s.CreatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.WorkflowID, &s.Name, &s.AgentID, &s.InputTemplate, &s.Position, &s.EngineType, &s.CreatedAt); err != nil {
 			return nil, fmt.Errorf("workflow_repo: scan step: %w", err)
 		}
 		steps = append(steps, s)

@@ -1,0 +1,8 @@
+[package]
+name = "jobshout-auth"
+description = "Authentication and identity"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

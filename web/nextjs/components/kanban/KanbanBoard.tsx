@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   DndContext,
   DragOverlay,
   PointerSensor,
+  closestCorners,
   useSensor,
   useSensors,
   type DragEndEvent,
@@ -12,11 +13,16 @@ import {
 } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { RefreshCw, Search, X } from "lucide-react";
 import { toast } from "sonner";
-import { getProjectTasks, updateTask, reorderTask } from "@/lib/api/tasks";
+import { fetchAllTaskPages, getProjectTasks, reorderTask } from "@/lib/api/tasks";
+import { TaskCountLabel } from "@/components/task-manager/TaskProgressChip";
+import { useAgents } from "@/lib/hooks/useAgents";
+import { taskKeys } from "@/lib/hooks/useTasks";
 import { KanbanColumn } from "@/components/kanban/KanbanColumn";
 import { TaskCard } from "@/components/kanban/TaskCard";
 import { useKanbanStore } from "@/lib/store/kanban-store";
+import { cn } from "@/lib/utils/cn";
 import type { Task } from "@/lib/types/project";
 import type { TaskStatus } from "@/lib/types/common";
 
@@ -33,12 +39,32 @@ const COLUMN_ORDER: TaskStatus[] = [
   "done",
 ];
 
+function groupByStatus(tasks: Task[]): Record<TaskStatus, Task[]> {
+  const grouped: Record<TaskStatus, Task[]> = {
+    backlog: [],
+    todo: [],
+    in_progress: [],
+    review: [],
+    done: [],
+  };
+  for (const task of tasks) {
+    if (grouped[task.status]) grouped[task.status].push(task);
+  }
+  for (const status of COLUMN_ORDER) {
+    grouped[status].sort((a, b) => a.position - b.position);
+  }
+  return grouped;
+}
+
 // ---------------------------------------------------------------------------
 // KanbanBoard
 // ---------------------------------------------------------------------------
 
 interface KanbanBoardProps {
   projectId: string;
+  /** Shown in the board toolbar, matching the Ops API project board. */
+  projectName?: string;
+  onOpenTask?: (task: Task) => void;
 }
 
 /**
@@ -52,50 +78,53 @@ interface KanbanBoardProps {
  * - DragOverlay renders a floating copy of the dragged card for visual feedback
  * - Active drag task ID is tracked in the Zustand kanban-store
  */
-export function KanbanBoard({ projectId }: KanbanBoardProps) {
+export function KanbanBoard({ projectId, projectName, onOpenTask }: KanbanBoardProps) {
   const queryClient = useQueryClient();
   const { activeTaskId, setActiveTask, clearActiveTask } = useKanbanStore();
+  const [search, setSearch] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const { data: agentsResp } = useAgents({ per_page: 100 });
+  const assigneeNames = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const a of agentsResp?.data ?? []) m.set(a.id, a.name);
+    return m;
+  }, [agentsResp]);
 
   // ---------------------------------------------------------------------------
   // Data fetching
   // ---------------------------------------------------------------------------
 
-  const queryKey = ["tasks", projectId] as const;
+  // The shared per-project key: every task mutation in the app invalidates
+  // this one, so the board picks up tasks created or edited elsewhere. (An
+  // ad-hoc ["tasks", projectId] key here used to match none of them.)
+  const queryKey = taskKeys.projectLists(projectId);
 
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey,
-    queryFn: () => getProjectTasks(projectId, { per_page: 200 }),
+    queryFn: () =>
+      fetchAllTaskPages((page, perPage) =>
+        getProjectTasks(projectId, { page, per_page: perPage })
+      ),
     enabled: Boolean(projectId),
   });
 
   const allTasks: Task[] = data?.data ?? [];
 
-  // ---------------------------------------------------------------------------
-  // Derived: tasks grouped by status
-  // ---------------------------------------------------------------------------
+  const visibleTasks = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return allTasks;
+    return allTasks.filter(
+      (t) =>
+        t.title.toLowerCase().includes(q) ||
+        (t.description ?? "").toLowerCase().includes(q)
+    );
+  }, [allTasks, search]);
 
-  const tasksByStatus = useMemo(() => {
-    const grouped: Record<TaskStatus, Task[]> = {
-      backlog: [],
-      todo: [],
-      in_progress: [],
-      review: [],
-      done: [],
-    };
-
-    for (const task of allTasks) {
-      if (grouped[task.status]) {
-        grouped[task.status].push(task);
-      }
-    }
-
-    // Sort each column by position so the server-defined order is respected
-    for (const status of COLUMN_ORDER) {
-      grouped[status].sort((a, b) => a.position - b.position);
-    }
-
-    return grouped;
-  }, [allTasks]);
+  const tasksByStatus = useMemo(() => groupByStatus(allTasks), [allTasks]);
+  const displayByStatus = useMemo(
+    () => groupByStatus(visibleTasks),
+    [visibleTasks]
+  );
 
   // ---------------------------------------------------------------------------
   // Active task (for DragOverlay)
@@ -120,10 +149,13 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
       status: TaskStatus;
       position: number;
     }) => reorderTask(taskId, { status, position }),
-    onError: (error: Error, variables) => {
-      // Roll back optimistic update on failure
-      queryClient.invalidateQueries({ queryKey });
+    onError: (error: Error) => {
       toast.error(`Failed to move task: ${error.message}`);
+    },
+    // Success or failure, reconcile with the server's recomputed positions —
+    // the optimistic patch uses dense local indexes that only approximate them.
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey });
     },
   });
 
@@ -133,9 +165,9 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
-      // Require the pointer to move at least 5px before initiating a drag so
+      // Require the pointer to move at least 8px before initiating a drag so
       // simple clicks on task cards still open the detail modal
-      activationConstraint: { distance: 5 },
+      activationConstraint: { distance: 8 },
     })
   );
 
@@ -167,28 +199,68 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
       const draggedTask = allTasks.find((t) => t.id === draggedTaskId);
       if (!draggedTask) return;
 
+      const sourceStatus = draggedTask.status;
+      const sourceColumn = tasksByStatus[sourceStatus];
+      const sourceIndex = sourceColumn.findIndex((t) => t.id === draggedTaskId);
+      if (sourceIndex < 0) return;
+
       let targetStatus: TaskStatus;
-      let targetPosition: number;
+      let targetIndex: number;
 
       if (isColumn) {
-        // Dropped directly onto a column — place at end
+        // Dropped onto a column's background — place at the end.
         targetStatus = overId as TaskStatus;
-        targetPosition = tasksByStatus[targetStatus].length;
+        targetIndex =
+          targetStatus === sourceStatus
+            ? tasksByStatus[targetStatus].length - 1
+            : tasksByStatus[targetStatus].length;
       } else {
-        // Dropped onto another task card — find the target task's column + position
+        // Dropped onto another card — take its place (dnd-kit sortable
+        // previews the drop that way, so the result must match the preview).
         const overTask = allTasks.find((t) => t.id === overId);
         if (!overTask) return;
         targetStatus = overTask.status;
-        targetPosition = overTask.position;
+        targetIndex = tasksByStatus[targetStatus].findIndex(
+          (t) => t.id === overId
+        );
+        if (targetIndex < 0) return;
       }
 
-      // No-op: same position in same column
-      if (
-        draggedTask.status === targetStatus &&
-        draggedTask.position === targetPosition
-      ) {
+      // No-op: dropped back where it started
+      if (sourceStatus === targetStatus && sourceIndex === targetIndex) {
         return;
       }
+
+      // Final order of the affected column(s). Every neighbour is
+      // repositioned, not just the dragged card — giving two cards the same
+      // position used to make same-column drags a visual no-op (stable sort
+      // kept the old order) while the server actually moved the task.
+      const newColumns = new Map<TaskStatus, Task[]>();
+      if (sourceStatus === targetStatus) {
+        newColumns.set(
+          targetStatus,
+          arrayMove(sourceColumn, sourceIndex, targetIndex)
+        );
+      } else {
+        newColumns.set(
+          sourceStatus,
+          sourceColumn.filter((t) => t.id !== draggedTaskId)
+        );
+        const dest = [...tasksByStatus[targetStatus]];
+        dest.splice(targetIndex, 0, { ...draggedTask, status: targetStatus });
+        newColumns.set(targetStatus, dest);
+      }
+
+      // The server inserts at a *stored* position ("shift everything >= p,
+      // place at p") and stored positions can be sparse, so derive the wire
+      // position from the neighbour the card lands after — not from the
+      // dense index.
+      const finalOrder = newColumns.get(targetStatus)!;
+      const finalIndex = finalOrder.findIndex((t) => t.id === draggedTaskId);
+      const wirePosition =
+        finalIndex === 0
+          ? (finalOrder[1]?.position ?? 0)
+          : finalOrder[finalIndex - 1].position + 1;
 
       // ---------------------------------------------------------------------------
       // Optimistic update: reorder the cache immediately for instant feedback
@@ -196,11 +268,14 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
       queryClient.setQueryData(queryKey, (old: typeof data) => {
         if (!old) return old;
 
+        const placement = new Map<string, { status: TaskStatus; position: number }>();
+        newColumns.forEach((tasks, status) => {
+          tasks.forEach((t, i) => placement.set(t.id, { status, position: i }));
+        });
+
         const updatedTasks = old.data.map((t) => {
-          if (t.id === draggedTaskId) {
-            return { ...t, status: targetStatus, position: targetPosition };
-          }
-          return t;
+          const p = placement.get(t.id);
+          return p ? { ...t, ...p } : t;
         });
 
         return { ...old, data: updatedTasks };
@@ -210,7 +285,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
       transitionMutation.mutate({
         taskId: draggedTaskId,
         status: targetStatus,
-        position: targetPosition,
+        position: wirePosition,
       });
     },
     [
@@ -231,81 +306,127 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   // Render
   // ---------------------------------------------------------------------------
 
-  if (isLoading) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <div className="flex flex-col items-center gap-3 text-muted-foreground">
-          <svg
-            className="h-8 w-8 animate-spin"
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-          >
-            <circle
-              className="opacity-25"
-              cx="12"
-              cy="12"
-              r="10"
-              stroke="currentColor"
-              strokeWidth="4"
-            />
-            <path
-              className="opacity-75"
-              fill="currentColor"
-              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-            />
-          </svg>
-          <span className="text-sm">Loading board…</span>
-        </div>
-      </div>
-    );
-  }
-
-  if (isError) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <div className="rounded-xl border border-destructive/50 bg-destructive/10 p-8 text-center">
-          <p className="font-medium text-destructive">Failed to load tasks</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Please refresh the page or try again later.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <DndContext
-      sensors={sensors}
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
-      onDragCancel={onDragCancel}
-    >
-      {/* Horizontally scrollable board surface */}
-      <div className="flex h-full gap-4 overflow-x-auto pb-4">
-        {COLUMN_ORDER.map((status) => (
-          <KanbanColumn
-            key={status}
-            status={status}
-            tasks={tasksByStatus[status]}
-            projectId={projectId}
-          />
-        ))}
+    <div className="flex h-full min-h-0 flex-col bg-muted/40">
+      <div className="flex items-center justify-between gap-2 border-b border-border bg-background px-3 py-3 md:px-6 md:py-4">
+        <div className="flex min-w-0 items-center gap-2 md:gap-4">
+          <div className="min-w-0">
+            <p className="truncate text-lg font-bold md:text-xl">Board</p>
+            {projectName && (
+              <p className="truncate text-xs text-muted-foreground md:text-sm">
+                {projectName}
+              </p>
+            )}
+          </div>
+          <span className="hidden whitespace-nowrap rounded bg-muted px-2 py-1 text-xs text-muted-foreground sm:inline-block md:text-sm">
+            <TaskCountLabel loaded={allTasks.length} total={data?.total} />
+          </span>
+        </div>
+        <div className="flex shrink-0 items-center gap-1 md:gap-2">
+          {searchOpen ? (
+            <div className="flex items-center gap-1">
+              <input
+                autoFocus
+                type="search"
+                placeholder="Search tasks…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="h-8 w-40 rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:w-64"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchOpen(false);
+                  setSearch("");
+                }}
+                className="rounded-md p-2 text-muted-foreground hover:text-foreground"
+                aria-label="Close search"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setSearchOpen(true)}
+              className="rounded-md p-2 text-muted-foreground hover:bg-secondary hover:text-foreground"
+              aria-label="Search tasks"
+            >
+              <Search className="h-4 w-4" />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            disabled={isFetching}
+            className="rounded-md p-2 text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-50"
+            aria-label="Refresh board"
+          >
+            <RefreshCw className={cn("h-4 w-4", isFetching && "animate-spin")} />
+          </button>
+        </div>
       </div>
 
-      {/* Floating drag preview shown while a card is being dragged */}
-      <DragOverlay>
-        {activeTask ? (
-          <div className="rotate-2 opacity-90">
-            {/*
-              Render a non-interactive copy of the card.
-              We pass a no-op handler for onOpenDetail since this is a visual
-              overlay only — the click will never fire during a drag.
-            */}
-            <TaskCard task={activeTask} onOpenDetail={() => undefined} />
+      {isLoading ? (
+        <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+          Loading board…
+        </div>
+      ) : isError ? (
+        <div className="m-6 rounded-xl border border-destructive/50 bg-destructive/10 p-4">
+          <p className="text-sm text-destructive">Failed to load tasks</p>
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            className="mt-2 h-8 rounded-md border border-border px-3 text-sm hover:bg-secondary"
+          >
+            Try again
+          </button>
+        </div>
+      ) : (
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCorners}
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          onDragCancel={onDragCancel}
+        >
+          <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden p-3 md:p-6">
+            <div className="flex h-full gap-3 md:gap-4">
+              {COLUMN_ORDER.map((status) => (
+                <KanbanColumn
+                  key={status}
+                  status={status}
+                  tasks={displayByStatus[status]}
+                  projectId={projectId}
+                  assigneeNames={assigneeNames}
+                  isDragging={Boolean(activeTaskId)}
+                  onOpenTask={onOpenTask}
+                />
+              ))}
+            </div>
           </div>
-        ) : null}
-      </DragOverlay>
-    </DndContext>
+
+          <DragOverlay
+            dropAnimation={{
+              duration: 250,
+              easing: "cubic-bezier(0.18, 0.67, 0.6, 1.22)",
+            }}
+          >
+            {activeTask ? (
+              <TaskCard
+                task={activeTask}
+                assigneeName={
+                  activeTask.assigned_agent_id
+                    ? assigneeNames.get(activeTask.assigned_agent_id)
+                    : undefined
+                }
+                onOpenDetail={() => undefined}
+                isOverlay
+              />
+            ) : null}
+          </DragOverlay>
+        </DndContext>
+      )}
+    </div>
   );
 }

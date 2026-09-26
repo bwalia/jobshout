@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -16,16 +18,30 @@ import (
 	"github.com/rs/cors"
 	"go.uber.org/zap"
 
+	"github.com/jobshout/server/internal/abtest"
+	"github.com/jobshout/server/internal/agentmodule"
+	"github.com/jobshout/server/internal/agentmodules"
+	"github.com/jobshout/server/internal/agentschema"
 	"github.com/jobshout/server/internal/blog"
 	"github.com/jobshout/server/internal/bridge"
+	"github.com/jobshout/server/internal/chatagent"
+	"github.com/jobshout/server/internal/chatsvc"
 	"github.com/jobshout/server/internal/config"
+	"github.com/jobshout/server/internal/course"
 	"github.com/jobshout/server/internal/costengine"
+	"github.com/jobshout/server/internal/creditcontroller"
+	"github.com/jobshout/server/internal/simpro"
+	"github.com/jobshout/server/internal/waflab"
+	"github.com/jobshout/server/internal/wslproxymcp"
 	"github.com/jobshout/server/internal/scheduler"
+	"github.com/jobshout/server/internal/secretsrot"
+	"github.com/jobshout/server/internal/linuxpatch"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/jobshout/server/internal/database"
 	"github.com/jobshout/server/internal/engine"
 	"github.com/jobshout/server/internal/executor"
+	"github.com/jobshout/server/internal/googleauth"
 	"github.com/jobshout/server/internal/handler"
 	"github.com/jobshout/server/internal/imagegen"
 	"github.com/jobshout/server/internal/imagestore"
@@ -33,6 +49,7 @@ import (
 	emailAdapter "github.com/jobshout/server/internal/integration/adapters/email"
 	githubAdapter "github.com/jobshout/server/internal/integration/adapters/github"
 	jiraAdapter "github.com/jobshout/server/internal/integration/adapters/jira"
+	"github.com/jobshout/server/internal/integration/adapters/jobshoutcom"
 	"github.com/jobshout/server/internal/integration/adapters/opsapi"
 	slackAdapter "github.com/jobshout/server/internal/integration/adapters/slack"
 	teamsAdapter "github.com/jobshout/server/internal/integration/adapters/teams"
@@ -42,14 +59,18 @@ import (
 	"github.com/jobshout/server/internal/langgraph"
 	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/llmtrace"
+	"github.com/jobshout/server/internal/mail"
 	"github.com/jobshout/server/internal/middleware"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/modelselect"
+	"github.com/jobshout/server/internal/platformtools"
 	"github.com/jobshout/server/internal/repository"
 	"github.com/jobshout/server/internal/research"
+	"github.com/jobshout/server/internal/reviewbot"
 	"github.com/jobshout/server/internal/selector"
 	"github.com/jobshout/server/internal/service"
 	"github.com/jobshout/server/internal/strix"
+	"github.com/jobshout/server/internal/tasklaunch"
 	"github.com/jobshout/server/internal/tools"
 	ws "github.com/jobshout/server/internal/websocket"
 	wfengine "github.com/jobshout/server/internal/workflow"
@@ -57,7 +78,11 @@ import (
 	"github.com/google/uuid"
 )
 
-const version = "0.3.0"
+// version is the release this binary was built as (CI: -ldflags -X main.version=v1.0.8).
+// Runtime APP_VERSION (Helm image.tag) wins so the sidebar shows what is actually deployed.
+var version = "dev"
+
+var startedAt = time.Now()
 
 // researchRequestTimeout bounds the synchronous research endpoint.
 //
@@ -79,6 +104,11 @@ const researchRequestTimeout = 10 * time.Minute
 // that was cut off while it was working. IMAGE_TIMEOUT still bounds the call
 // downstream; this only stops the ceiling being lower than the floor.
 const imageRequestTimeout = 30 * time.Minute
+
+// chatRequestTimeout bounds a chat turn while the client is still connected.
+// The agent run itself is detached from this context (see chatsvc.SendTurn);
+// this only keeps the SSE response open long enough to stream the reply.
+const chatRequestTimeout = 10 * time.Minute
 
 // defaultRequestTimeout bounds every route that is not doing something
 // legitimately slow. Thirty seconds is generous for a database round trip and
@@ -115,7 +145,9 @@ func requestTimeout(next http.Handler) http.Handler {
 		// pages and makes a model call per source. Minutes of real work, not a
 		// stuck request. Trending under the same prefix is only HTTP calls, so
 		// it keeps the default.
-		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/research") {
+		if r.Method == http.MethodPost && (strings.HasSuffix(r.URL.Path, "/research") ||
+			strings.HasSuffix(r.URL.Path, "/tasks/launch") ||
+			strings.Contains(r.URL.Path, "/career/")) {
 			timeout = researchRequestTimeout
 		}
 		// One call to a single GPU, which draws for tens of seconds and may
@@ -123,6 +155,11 @@ func requestTimeout(next http.Handler) http.Handler {
 		// HTTP call to that service, so it keeps the default.
 		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/images/generate") {
 			timeout = imageRequestTimeout
+		}
+		if r.Method == http.MethodPost && (strings.HasSuffix(r.URL.Path, "/messages") ||
+			strings.HasSuffix(r.URL.Path, "/messages/stream") ||
+			strings.HasSuffix(r.URL.Path, "/chat/route")) {
+			timeout = chatRequestTimeout
 		}
 
 		ctx, cancel := context.WithTimeout(r.Context(), timeout)
@@ -184,6 +221,15 @@ func main() {
 	blogRepo := repository.NewBlogRepository(pool)
 	pentestRunRepo := repository.NewPentestRunRepository(pool)
 	pentestFindingRepo := repository.NewPentestFindingRepository(pool)
+	wafLabRunRepo := repository.NewWAFLabRunRepository(pool)
+	seoRunRepo := repository.NewSEORunRepository(pool)
+	courseRepo := repository.NewCourseRepository(pool)
+	secretsRotRunRepo := repository.NewSecretsRotationRunRepository(pool)
+	linuxPatchRunRepo := repository.NewLinuxPatchRunRepository(pool)
+	reviewRunRepo := repository.NewReviewRunRepository(pool)
+	taskRunRepo := repository.NewTaskRunRepository(pool)
+	mailRepo := repository.NewMailRepository(pool)
+	careerRepo := repository.NewCareerRepository(pool)
 
 	// Autonomous agents + chat + Telegram repositories
 	memoryRepo := repository.NewMemoryRepository(pool)
@@ -208,13 +254,22 @@ func main() {
 	)
 
 	// Langfuse tracing wraps every registered client before anything resolves
-	// one, so a single call here covers the executor, blog, research, chat and
-	// intent paths alike. Disabled tracing wraps with the identity function.
+	// one, so a single call here covers the executor, blog, research and intent
+	// paths. Chat uses a dedicated client (CHAT_MODEL), wrapped separately so
+	// its DefaultModel is not the worker OLLAMA_DEFAULT_MODEL.
+	chatInner := llm.NewChatInner(cfg, llmRouter)
 	tracing := llmtrace.Init(cfg, logger)
 	if tracing.Enabled() {
 		llmRouter.WrapClients(tracing.Wrap)
+		chatInner = tracing.Wrap(chatInner)
 		logger.Info("LLM tracing enabled", zap.String("langfuse_host", cfg.LangfuseHost))
 	}
+	chatClient := llm.NewChatClient(chatInner, cfg.ChatModel, cfg.ChatModelFallback, logger)
+	logger.Info("chat LLM client",
+		zap.String("model", llm.SanitizeChatModel(cfg.ChatModel)),
+		zap.String("fallback", llm.SanitizeChatFallback(cfg.ChatModelFallback)),
+		zap.Int("num_ctx", cfg.ChatNumCtx),
+	)
 
 	// Warm the model-discovery cache so the picker and auto-selection have a
 	// live answer from the first request, then keep it fresh in the background.
@@ -260,10 +315,21 @@ func main() {
 	// The local provider runs on the workstation (see image-service/), outside
 	// the cluster, because Apple MLX cannot be scheduled onto amd64 nodes —
 	// the same arrangement Ollama already uses.
-	imageRouter := imagegen.NewRouter(cfg)
+	imageRouter := imagegen.NewRouter(cfg).WithLogger(logger)
 	var imgStore imagestore.Store
 	if minioClient != nil {
 		imgStore = imagestore.NewMinIOStore(minioClient, cfg.MinIOBucketImages)
+	} else {
+		// MinIO is optional locally. Without somewhere to write, the GPU still
+		// draws covers and inline pictures, then the article pipeline drops them
+		// because a cover with no URL is not a cover. A directory next to the
+		// process is enough for the same /api/v1/images/file/… URLs.
+		dir := os.Getenv("IMAGE_STORE_DIR")
+		if dir == "" {
+			dir = filepath.Join(".", ".dev-data", "images")
+		}
+		imgStore = imagestore.NewDirStore(dir)
+		logger.Info("image storage using local directory (MinIO unset)", zap.String("dir", dir))
 	}
 	imageSvc := service.NewImageService(imageRouter, imgStore, repository.NewImageRepository(pool), logger)
 	if imageSvc.Enabled() {
@@ -281,7 +347,7 @@ func main() {
 			imageRouter.Warm(warmCtx)
 		}()
 	} else {
-		logger.Info("image generation not configured — set IMAGE_BASE_URL or OPENAI_API_KEY to enable it")
+		logger.Info("image generation not configured — set GEMINI_API_KEY, IMAGE_BASE_URL or OPENAI_API_KEY to enable it")
 	}
 
 	// ─── Tool registry ───────────────────────────────────────────────────────
@@ -360,6 +426,10 @@ func main() {
 	costEng := costengine.New()
 	logger.Info("cost engine initialised", zap.Int("known_models", len(costEng.KnownModels())))
 
+	// Enforce agent_policies.max_cost_per_exec with the same pricing that later
+	// produces the bill, so a run's cap and its invoice can never disagree.
+	goNativeExec.WithCostEstimator(costEng)
+
 	// ─── Auto model selection ────────────────────────────────────────────────
 	// Wired here rather than at executor construction because selection is
 	// cost-aware and the cost engine does not exist until now. Agents pinned to
@@ -382,8 +452,22 @@ func main() {
 
 	// ─── Services ────────────────────────────────────────────────────────────
 	jwtSvc := service.NewJWTService(cfg)
-	authSvc := service.NewAuthService(userRepo, tokenRepo, orgRepo, agentRepo, jwtSvc, logger)
+	googleCfg := googleauth.LoadConfig()
+	var googleID googleauth.Identity
+	if googleCfg.Configured() {
+		googleID = googleauth.NewClient(googleCfg, nil)
+		logger.Info("google login oauth configured",
+			zap.String("redirect_url", googleCfg.RedirectURL))
+	} else {
+		logger.Info("google login oauth not configured (set GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET)")
+	}
+	authSvc := service.NewAuthService(userRepo, tokenRepo, orgRepo, agentRepo, rbacRepo, jwtSvc, googleID, googleCfg, logger)
 	agentSvc := service.NewAgentService(agentRepo, logger)
+	agentPackStore := repository.NewAgentPackStore(pool)
+	agentPackSvc := service.NewAgentPackService(
+		agentPackStore, agentRepo, skillRepo, toolRegistry, llmRouter,
+		knowledgeIngestSvc, auditRepo, cfg.AutoModelSelection, logger,
+	)
 	projectSvc := service.NewProjectService(projectRepo, logger)
 	taskSvc := service.NewTaskService(taskRepo, logger)
 	// Langfuse tracing for executions the Python sidecar does not see. Nil when
@@ -399,6 +483,7 @@ func main() {
 	ssoSvc := service.NewSSOService(ssoRepo, userRepo, rbacRepo, auditRepo, logger)
 	leaderboardSvc := service.NewLeaderboardService(usageRepo, logger)
 	execSvc := service.NewExecutionService(agentRepo, execRepo, toolPermRepo, engineRouter, govSvc, logger)
+	taskRunSvc := service.NewTaskRunService(taskRunRepo, taskRepo, projectRepo, agentRepo, execSvc, logger)
 	workflowSvc := service.NewWorkflowService(workflowRepo, agentRepo, execRepo, toolPermRepo, dagEngine, logger)
 	pluginSvc := service.NewPluginService(pluginRepo, agentRepo, engineRouter, logger)
 
@@ -436,6 +521,7 @@ func main() {
 		blogRunner = blog.NewRunner(blog.Config{
 			ContentDir:      cfg.BlogContentDir,
 			AuthorName:      cfg.BlogAuthorName,
+			PublicBaseURL:   cfg.FrontendBaseURL,
 			Model:           cfg.BlogModel,
 			ProseModel:      cfg.BlogProseModel,
 			StructuredModel: cfg.BlogStructuredModel,
@@ -446,19 +532,39 @@ func main() {
 		if cfg.BlogCoverImages && imageSvc.Enabled() {
 			blogRunner = blogRunner.WithIllustrator(&blogIllustrator{images: imageSvc})
 		}
+		// JobShout.com Insights, beside the CMS. NewClient returns nil when the
+		// URL or token is missing, which the runner reads as "not configured".
+		blogRunner = blogRunner.WithInsights(jobshoutcom.NewClient(jobshoutcom.Config{
+			BaseURL: cfg.JobshoutComAPIURL,
+			Token:   cfg.JobshoutComAPIToken,
+			Agent:   model.AgentNameArticleWriter,
+		}))
+		// The Content Writer's articles are published straight to readers:
+		// jobshout.com trusts this agent (INSIGHTS_TRUSTED_AGENTS there) because
+		// a person has already approved the article by publishing it live.
+		blogRunner = blogRunner.WithLiveInsights(jobshoutcom.NewClient(jobshoutcom.Config{
+			BaseURL: cfg.JobshoutComAPIURL,
+			Token:   cfg.JobshoutComAPIToken,
+			Agent:   model.AgentNameJobShoutComWriter,
+		}))
 		writingModel := firstNonEmptyStr(cfg.BlogModel, cfg.OllamaDefaultModel)
 		logger.Info("article generator initialised",
 			zap.String("prose_model", firstNonEmptyStr(cfg.BlogProseModel, writingModel)),
 			zap.String("structured_model", firstNonEmptyStr(cfg.BlogStructuredModel, writingModel)),
 			zap.String("cms_namespace", cfg.OpsAPINamespace),
 			zap.Bool("can_publish", blogRunner.CanPublish()),
+			zap.Bool("can_publish_insights", blogRunner.CanPublishInsights()),
 		)
 		if !blogRunner.CanPublish() {
 			logger.Info("blog: opsapi CMS not configured — articles can be generated and read, but not published " +
 				"(set OPSAPI_BASE_URL, OPSAPI_API_KEY and OPSAPI_NAMESPACE)")
 		}
 	}
-	blogSvc := service.NewBlogService(blogRunner, blogRepo, researchSvc, agentRepo, logger)
+	blogSvc := service.NewBlogService(
+		blogRunner, blogRepo, researchSvc, agentRepo, logger,
+		cfg.BlogOrphanTimeout, cfg.BlogMaxRuntime,
+	)
+	blogReconciler := service.NewBlogReconciler(blogSvc, 0, logger)
 
 	// ─── Penetration Testing (Strix on the workstation) ──────────────────────
 	// The scanner runs on the Mac Studio behind the same JWT-gated HTTP endpoint
@@ -467,8 +573,10 @@ func main() {
 	// scan survives any deploy and multiple replicas share the work safely.
 	strixConfig := strix.LoadConfig(logger)
 	strixClient := strix.NewClient(strixConfig.BaseURL, strixConfig.JWTSecret, strixConfig.Timeout, logger)
-	pentestSvc := service.NewPentestService(pentestRunRepo, pentestFindingRepo, agentRepo, logger)
+	securityFindingEventRepo := repository.NewSecurityFindingEventRepository(pool)
+	pentestSvc := service.NewPentestServiceWithEvents(pentestRunRepo, pentestFindingRepo, securityFindingEventRepo, agentRepo, strixClient, logger)
 	pentestReconciler := service.NewPentestReconciler(pentestRunRepo, strixClient, strixConfig, logger)
+	pentestReconciler.BindVersioning(pentestFindingRepo, securityFindingEventRepo)
 	if strixConfig.Configured() {
 		logger.Info("penetration testing enabled",
 			zap.String("base_url", strixConfig.BaseURL),
@@ -480,50 +588,215 @@ func main() {
 		logger.Info("penetration testing disabled (STRIX_BASE_URL empty)")
 	}
 
+	reviewCfg := reviewbot.LoadConfig(logger)
+	reviewClient := reviewbot.NewClient(reviewCfg.BaseURL, reviewCfg.Token, reviewCfg.Timeout, logger)
+	reviewSvc := service.NewReviewService(reviewRunRepo, reviewCfg, logger)
+	reviewReconciler := service.NewReviewReconciler(reviewRunRepo, reviewClient, reviewCfg, logger)
+	if reviewCfg.Configured() {
+		toolRegistry.Register(tools.NewReviewPullRequestTool(reviewSvc))
+		logger.Info("PR review enabled",
+			zap.String("base_url", reviewCfg.BaseURL),
+			zap.Int("allowlist_size", len(reviewCfg.AllowedRepos)),
+			zap.Duration("poll_interval", reviewCfg.PollInterval),
+		)
+	} else {
+		logger.Info("PR review disabled (REVIEW_BOT_BASE_URL empty)")
+	}
+
+	mailCfg := mail.LoadConfig()
+	var mailLLM llm.Client
+	if c, err := llmRouter.For(cfg.LLMProvider); err != nil {
+		logger.Warn("mail: llm router returned error — classify/draft will use heuristics", zap.Error(err))
+	} else {
+		mailLLM = c
+	}
+	var gmailAPI mail.GmailAPI
+	if mailCfg.Simulate {
+		gmailAPI = mail.NewSimulatedGmail()
+		logger.Warn("mail: MAIL_SIMULATE is on — inbox is fake, Google is not called")
+	} else {
+		gmailAPI = mail.NewGmailAPI(nil, logger)
+	}
+	mailSvc := service.NewMailService(
+		mailRepo, agentRepo, gmailAPI,
+		mail.NewClassifier(mailLLM, logger), mail.NewDrafter(mailLLM, mailCfg.DraftModel, logger),
+		researchSvc, mailCfg, logger,
+	)
+	blogSvc.BindTasks(taskSvc)
+	mailSvc.BindTasks(taskSvc)
+	pentestReconciler.BindTasks(taskSvc)
+	reviewReconciler.BindTasks(taskSvc)
+	launchSvc := &tasklaunch.Service{
+		Agents:   agentSvc,
+		Tasks:    taskSvc,
+		Projects: projectSvc,
+		TaskRuns: taskRunSvc,
+	}
+	// Workflow steps for go_native builtins call specialist Launch (Vault → Patch chains).
+	dagEngine.WithBuiltinLauncher(func(ctx context.Context, orgID, userID uuid.UUID, agent *model.Agent, prompt string, globalInput map[string]any) (string, bool, error) {
+		builtin := agentschema.BuiltinOf(agent)
+		if builtin == "" {
+			return "", false, nil
+		}
+		mod, ok := agentmodule.Lookup(builtin)
+		if !ok || mod.Launch == nil {
+			return "", false, nil
+		}
+		vals := wfengine.ParseLaunchValues(prompt, globalInput)
+		if mod.AbsorbPrompt != nil {
+			mod.AbsorbPrompt(prompt, vals)
+		}
+		dec, err := launchSvc.ResolveProject(ctx, orgID, userID, vals["project"], "")
+		if err != nil {
+			return "", true, err
+		}
+		if dec.Missing != "" {
+			return "", true, fmt.Errorf("workflow specialist launch needs a project: %s", dec.Missing)
+		}
+		res, err := launchSvc.Launch(ctx, tasklaunch.Request{
+			OrgID: orgID, UserID: userID, AgentID: agent.ID, ProjectID: dec.ProjectID,
+			Values: vals, Source: "workflow",
+		})
+		if err != nil {
+			return "", true, err
+		}
+		msg := res.Message
+		if msg == "" {
+			msg = "specialist launched"
+		}
+		if res.RunID != nil {
+			msg = msg + " run_id=" + res.RunID.String()
+		}
+		if res.Task != nil {
+			msg = msg + " task_id=" + res.Task.ID.String()
+		}
+		return msg, true, nil
+	})
+	mailReconciler := service.NewMailReconciler(mailSvc, mailCfg.ReconcileInterval, logger)
+	if mailCfg.Configured() {
+		logger.Info("mail agent oauth configured",
+			zap.String("redirect_url", mailCfg.RedirectURL),
+			zap.Duration("poll_interval", mailCfg.PollInterval),
+		)
+	} else {
+		logger.Info("mail agent oauth not configured (set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_TOKEN_KEY)")
+	}
+
+	var careerLLM llm.Client
+	if c, err := llmRouter.For(cfg.LLMProvider); err != nil {
+		logger.Warn("career: llm router returned error — evaluations use the deterministic scorer", zap.Error(err))
+	} else {
+		careerLLM = c
+	}
+	careerSvc := service.NewCareerService(careerRepo, agentRepo, researchClient, careerLLM, cfg.CareerModel, researchSvc, logger)
+	logger.Info("career ops agent initialised")
+
+	aivcCfg := creditcontroller.LoadConfig()
+	aivcClient := creditcontroller.NewClient(aivcCfg, logger)
+	creditControllerSvc := service.NewCreditControllerService(aivcClient)
+	logger.Info("credit controller agent initialised",
+		zap.String("mode", aivcClient.Mode()),
+		zap.String("aivc_base_url", aivcCfg.BaseURL),
+	)
+
+	simproCfg := simpro.LoadConfig()
+	simproClient := simpro.NewClient(simproCfg, logger)
+	simproPaymentsSvc := service.NewSimproPaymentsService(simproClient)
+	logger.Info("simpro payments agent initialised",
+		zap.String("mode", simproClient.Mode()),
+		zap.Bool("live_configured", simproClient.LiveConfigured()),
+	)
+
+	wafLabCfg := waflab.LoadConfig()
+	wafLabClient := waflab.NewClient(wafLabCfg, logger)
+	wafLabSvc := service.NewWAFLabServiceWithEvents(wafLabRunRepo, securityFindingEventRepo, agentRepo, wafLabCfg, wafLabClient, logger)
+	seoSvc := service.NewSEOService(seoRunRepo, agentRepo, logger)
+	courseCfg := course.LoadConfig()
+	var courseLLM llm.Client
+	if c, err := llmRouter.For(cfg.LLMProvider); err == nil {
+		courseLLM = c
+	}
+	var courseResearcher course.Researcher
+	if researchAgent != nil {
+		courseResearcher = researchAgent
+	}
+	var courseIllus course.Illustrator
+	if imageSvc.Enabled() {
+		courseIllus = &courseIllustrator{images: imageSvc}
+	}
+	courseSvc := service.NewCourseService(courseRepo, agentRepo,
+		course.NewGenerator(courseLLM, courseResearcher, courseIllus, courseCfg, logger),
+		courseCfg, logger)
+	courseSvc.BindTasks(taskSvc)
+	logger.Info("course generator initialised",
+		zap.Bool("llm", courseLLM != nil),
+		zap.Bool("research", courseResearcher != nil),
+		zap.Bool("images", courseCfg.Images && courseIllus != nil),
+		zap.Int("max_chapters", courseCfg.MaxChapters),
+		zap.Duration("chapter_budget", courseCfg.ChapterBudget),
+	)
+	secretsRotCfg := secretsrot.LoadConfig()
+	secretsRotSvc := service.NewSecretsRotationService(secretsRotRunRepo, agentRepo, secretsRotCfg, logger)
+	logger.Info("secrets rotation agent initialised",
+		zap.Bool("enabled", secretsRotCfg.Enabled()),
+		zap.String("vault_addr", secretsRotCfg.Addr),
+	)
+	linuxPatchCfg := linuxpatch.LoadConfig()
+	var patchLLM llm.Client
+	if c, err := llmRouter.For(cfg.LLMProvider); err == nil {
+		patchLLM = c
+	}
+	linuxPatchSvc := service.NewLinuxPatchService(linuxPatchRunRepo, agentRepo, linuxPatchCfg, secretsRotCfg, patchLLM, logger)
+	logger.Info("linux patch agent initialised",
+		zap.Bool("ssh_auth", linuxPatchCfg.HasAuth()),
+		zap.Bool("vault", secretsRotCfg.Enabled()),
+		zap.Bool("llm", patchLLM != nil),
+	)
+	logger.Info("waf efficacy lab initialised",
+		zap.Bool("enabled", wafLabClient.Enabled()),
+		zap.String("base_url", wafLabCfg.BaseURL),
+		zap.Bool("cloudflare", waflab.CloudflareConfigured()),
+	)
+
+	wslMCPCfg := wslproxymcp.LoadConfig()
+	wslMCPClient := wslproxymcp.NewClient(wslMCPCfg)
+	// Rules are read (and, with MCP tools off, written) over the admin API
+	// with the WAF lab's wslproxy credentials.
+	abTestClient := abtest.NewClient(wslMCPClient, wafLabClient)
+	abTestSvc := service.NewABTestService(abTestClient)
+	logger.Info("ab testing agent initialised",
+		zap.Bool("mcp_enabled", wslMCPClient.Enabled()),
+		zap.String("mcp_base_url", wslMCPCfg.BaseURL),
+		zap.Bool("admin_api_enabled", wafLabClient.Enabled()),
+		zap.Bool("live_configured", abTestClient.LiveConfigured()),
+	)
+
+	// All specialists are wired this way: own package, then one Register call.
+	// A new agent does not need significant platform changes — register it.
+	agentmodules.Register(agentmodules.Deps{
+		Career:           careerSvc,
+		Research:         researchSvc,
+		Blog:             blogSvc,
+		Mail:             mailSvc,
+		Pentest:          pentestSvc,
+		Reviews:          reviewSvc,
+		Images:           imageSvc,
+		CreditController: aivcClient,
+		Simpro:           simproClient,
+		WAFLab:           wafLabSvc,
+		ABTest:           abTestClient,
+		SEO:              seoSvc,
+		SecretsRotation:  secretsRotSvc,
+		LinuxPatch:       linuxPatchSvc,
+		Course:           courseSvc,
+	})
+
 	// ─── Autonomous agent engine ────────────────────────────────────────────
 	autonomousExec := executor.NewAutonomousExecutor(goNativeExec, llmRouter, memoryRepo, goalRepo, logger).WithAutoSelect(autoSelector)
 	memorySvc := service.NewMemoryService(memoryRepo, logger)
-	intentSvc := service.NewIntentService(llmRouter, logger)
 	goalSvc := service.NewGoalService(goalRepo, agentRepo, toolPermRepo, autonomousExec, logger)
 	multiAgentSvc := service.NewMultiAgentService(multiAgentRepo, agentRepo, toolPermRepo, goalRepo, autonomousExec, logger)
 	sprintSvc := service.NewSprintService(sprintRepo)
-	chatSvc := service.NewChatService(chatRepo, intentSvc, memorySvc, goalSvc, logger)
-	_ = memorySvc // used by chatSvc
-
-	// 12-stage LLM chat router: intent → policy → clarify/select/plan/execute.
-	// Wired after chatSvc so the two services can reference each other.
-	chatRouterSvc := service.NewChatRouterService(
-		llmRouter,
-		agentSvc,
-		execSvc,
-		workflowSvc,
-		taskRepo,
-		nil, // policies — populate from config/DB when governance wires them through
-		logger,
-	)
-	chatSvc.SetRouter(chatRouterSvc)
-
-	// ─── Telegram bot (conditional on config) ───────────────────────────────
-	var telegramSvc service.TelegramService
-	var tgBot *telegramBot.BotClient
-	if cfg.TelegramBotToken != "" {
-		tgBot = telegramBot.NewBotClient(cfg.TelegramBotToken)
-		telegramSvc = service.NewTelegramService(
-			tgBot, telegramRepo, chatSvc,
-			cfg.TelegramRatePerMin, cfg.FrontendBaseURL, logger,
-		)
-		// Register webhook at startup.
-		if cfg.TelegramWebhookURL != "" {
-			go func() {
-				if err := tgBot.SetWebhook(ctx, cfg.TelegramWebhookURL, cfg.TelegramSecretToken); err != nil {
-					logger.Warn("failed to register telegram webhook", zap.Error(err))
-				} else {
-					logger.Info("telegram webhook registered", zap.String("url", cfg.TelegramWebhookURL))
-				}
-			}()
-		}
-		logger.Info("Telegram bot initialised")
-	}
 
 	// ─── Integration framework ──────────────────────────────────────────────
 	adapterRegistry := integ.NewRegistry()
@@ -574,6 +847,91 @@ func main() {
 		zap.Int("notification_adapters", 3),
 	)
 
+	// ─── Chat agent (tool-calling loop over platform tools) ─────────────────
+	var knowledgeSearch tools.KnowledgeSearcher
+	if knowledgeChunkRepo != nil {
+		knowledgeSearch = knowledgeChunkRepo
+	}
+	var toolEmbedder tools.Embedder
+	if embedder != nil {
+		toolEmbedder = embedder
+	}
+	platformReg := platformtools.NewRegistryWithTools(platformtools.Deps{
+		Agents:          agentSvc,
+		Exec:            execSvc,
+		Workflows:       workflowSvc,
+		Tasks:           taskSvc,
+		Projects:        projectSvc,
+		Goals:           goalSvc,
+		Research:        researchSvc,
+		Blog:            blogSvc,
+		Pentest:         pentestSvc,
+		Images:          imageSvc,
+		Reviews:         reviewSvc,
+		Mail:            mailSvc,
+		Career:          careerSvc,
+		MultiAgent:      multiAgentSvc,
+		Sprints:         sprintSvc,
+		Plugins:         pluginSvc,
+		MCP:             mcpSvc,
+		Integrations:    integSvc,
+		Notifications:   notifSvc,
+		Approvals:       approvalSvc,
+		Analytics:       analyticsSvc,
+		Leaderboard:     leaderboardSvc,
+		Governance:      govSvc,
+		RBAC:            rbacSvc,
+		Scheduler:       schedulerRepo,
+		Skills:          skillRepo,
+		LLMProviders:    llmProviderRepo,
+		Audit:           auditRepo,
+		Sessions:        sessionRepo,
+		Knowledge:       knowledgeIngestSvc,
+		KnowledgeSearch: knowledgeSearch,
+		Embedder:        toolEmbedder,
+		Pool:            pool,
+		Memory:          memorySvc,
+		Launch:          launchSvc,
+	})
+	chatGuard := platformtools.NewGuard(rbacSvc, govSvc)
+	chatAgent := chatagent.New(chatClient, platformReg, chatGuard, memorySvc, logger)
+	chatSvc := chatsvc.NewChatService(chatRepo, chatAgent, logger)
+	chatRouterSvc := chatsvc.NewChatRouterService(chatAgent, logger)
+	logger.Info("chat agent initialised", zap.Int("platform_tools", len(platformReg.Names())))
+	if chatClient != nil {
+		if !chatClient.SupportsTools() {
+			logger.Warn("chat agent: model has no native tool-calling — using ReAct fallback",
+				zap.String("provider", chatClient.ProviderName()),
+				zap.String("model", llm.SanitizeChatModel(cfg.ChatModel)))
+		} else {
+			logger.Info("chat agent: native tool-calling active",
+				zap.String("provider", chatClient.ProviderName()),
+				zap.String("model", llm.SanitizeChatModel(cfg.ChatModel)))
+		}
+	}
+
+	// ─── Telegram bot (conditional on config) ───────────────────────────────
+	// Telegram uses a deterministic session per chat ID, separate from web.
+	var telegramSvc service.TelegramService
+	var tgBot *telegramBot.BotClient
+	if cfg.TelegramBotToken != "" {
+		tgBot = telegramBot.NewBotClient(cfg.TelegramBotToken)
+		telegramSvc = service.NewTelegramService(
+			tgBot, telegramRepo, chatSvc,
+			cfg.TelegramRatePerMin, cfg.FrontendBaseURL, logger,
+		)
+		if cfg.TelegramWebhookURL != "" {
+			go func() {
+				if err := tgBot.SetWebhook(ctx, cfg.TelegramWebhookURL, cfg.TelegramSecretToken); err != nil {
+					logger.Warn("failed to register telegram webhook", zap.Error(err))
+				} else {
+					logger.Info("telegram webhook registered", zap.String("url", cfg.TelegramWebhookURL))
+				}
+			}()
+		}
+		logger.Info("Telegram bot initialised")
+	}
+
 	// ─── Bridge client (SSE streaming) ──────────────────────────────────────
 	var bridgeClient *bridge.Client
 	if cfg.PythonSidecarURL != "" {
@@ -592,11 +950,14 @@ func main() {
 	}
 
 	// ─── Handlers ────────────────────────────────────────────────────────────
-	authHandler := handler.NewAuthHandler(authSvc)
+	authHandler := handler.NewAuthHandler(authSvc, cfg.FrontendBaseURL)
 	imageHandler := handler.NewImageHandler(imageSvc)
 	agentHandler := handler.NewAgentHandler(agentSvc)
+	agentPackHandler := handler.NewAgentPackHandler(agentPackSvc, rbacSvc)
 	projectHandler := handler.NewProjectHandler(projectSvc)
-	taskHandler := handler.NewTaskHandler(taskSvc)
+	taskHandler := handler.NewTaskHandler(taskSvc, launchSvc)
+	agentSchemaHandler := handler.NewAgentSchemaHandler()
+	taskRunHandler := handler.NewTaskRunHandler(taskRunSvc)
 	orgHandler := handler.NewOrganizationHandler(orgRepo)
 	marketplaceHandler := handler.NewMarketplaceHandler(pool, logger)
 	knowledgeHandler := handler.NewKnowledgeHandler(pool, knowledgeIngestSvc, logger)
@@ -622,9 +983,20 @@ func main() {
 	auditHandler := handler.NewAuditHandler(auditRepo)
 	pricingHandler := handler.NewPricingHandler(pricingRepo)
 	leaderboardHandler := handler.NewLeaderboardHandler(leaderboardSvc)
-	blogHandler := handler.NewBlogHandler(blogSvc)
+	blogHandler := handler.NewBlogHandler(blogSvc).WithInsightsSiteURL(cfg.JobshoutComSiteURL)
 	researchHandler := handler.NewResearchHandler(researchSvc)
 	pentestHandler := handler.NewPentestHandler(pentestSvc)
+	reviewHandler := handler.NewReviewHandler(reviewSvc)
+	mailHandler := handler.NewMailHandler(mailSvc, mailCfg.FrontendBaseURL)
+	careerHandler := handler.NewCareerHandler(careerSvc)
+	creditControllerHandler := handler.NewCreditControllerHandler(creditControllerSvc)
+	simproPaymentsHandler := handler.NewSimproPaymentsHandler(simproPaymentsSvc)
+	wafLabHandler := handler.NewWAFLabHandler(wafLabSvc)
+	seoHandler := handler.NewSEOHandler(seoSvc)
+	courseHandler := handler.NewCourseHandler(courseSvc)
+	secretsRotHandler := handler.NewSecretsRotationHandler(secretsRotSvc)
+	linuxPatchHandler := handler.NewLinuxPatchHandler(linuxPatchSvc)
+	abTestHandler := handler.NewABTestHandler(abTestSvc)
 
 	// Chat, goal, multi-agent, and Telegram handlers
 	chatHandler := handler.NewChatHandler(chatSvc)
@@ -658,14 +1030,18 @@ func main() {
 		AllowedOrigins:   cfg.CORSOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Request-ID"},
-		ExposedHeaders:   []string{"X-Request-ID"},
+		ExposedHeaders:   []string{"X-Request-ID", "Content-Disposition", "X-Agent-Pack-Warnings"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	})
 	r.Use(corsHandler.Handler)
 
-	// Health check
-	r.Get("/health", handler.Health(pool, version))
+	// Health check — version/env/deployed_at feed the sidebar build stamp.
+	r.Get("/health", handler.Health(pool, handler.RuntimeInfo{
+		Version:    resolveVersion(),
+		Env:        strings.TrimSpace(os.Getenv("APP_ENV")),
+		DeployedAt: resolveDeployedAt(),
+	}))
 
 	// Prometheus metrics endpoint
 	r.Handle("/metrics", promhttp.Handler())
@@ -685,6 +1061,18 @@ func main() {
 		r.Post("/auth/register", authHandler.Register)
 		r.Post("/auth/login", authHandler.Login)
 		r.Post("/auth/refresh", authHandler.Refresh)
+		r.Get("/auth/google/status", authHandler.GoogleStatus)
+		r.Get("/auth/google/start", authHandler.GoogleStart)
+		r.Get("/auth/google/callback", authHandler.GoogleCallback)
+		r.Post("/auth/google/complete", authHandler.GoogleComplete)
+		// Google redirects the browser here with ?code=&state= — no JWT.
+		r.Get("/mail/connection/oauth/callback", mailHandler.OAuthCallback)
+
+		// Generated images are public. Keys embed UUIDs so they are not
+		// enumerable, and Cache-Control already marks them immutable. Auth
+		// would break opsapi's featured-image preview and any public site
+		// that loads the cover with a plain <img> (no Authorization header).
+		r.Get("/images/file/*", imageHandler.Serve)
 
 		// Protected routes
 		r.Group(func(r chi.Router) {
@@ -697,11 +1085,18 @@ func main() {
 			r.Route("/agents", func(r chi.Router) {
 				r.Get("/", agentHandler.List)
 				r.Post("/", agentHandler.Create)
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireAnyPermission(rbacSvc, model.PermAgentsCreate, model.PermAgentsUpdate))
+					r.Post("/import/preview", agentPackHandler.Preview)
+					r.Post("/import", agentPackHandler.Import)
+				})
 				r.Route("/{agentID}", func(r chi.Router) {
 					r.Get("/", agentHandler.GetByID)
 					r.Put("/", agentHandler.Update)
 					r.Delete("/", agentHandler.Delete)
 					r.Patch("/status", agentHandler.UpdateStatus)
+					r.With(middleware.RequirePermission(rbacSvc, model.PermAgentsRead)).Get("/export", agentPackHandler.Export)
+					r.With(middleware.RequireAnyPermission(rbacSvc, model.PermAgentsCreate, model.PermAgentsDelete)).Post("/import/undo", agentPackHandler.Undo)
 
 					// Agent LLM execution
 					r.Post("/execute", execHandler.Execute)
@@ -747,9 +1142,11 @@ func main() {
 			})
 
 			// Tasks
+			r.Get("/agent-schemas", agentSchemaHandler.List)
 			r.Route("/tasks", func(r chi.Router) {
 				r.Get("/", taskHandler.List)
 				r.Post("/", taskHandler.Create)
+				r.Post("/launch", taskHandler.Launch)
 				r.Route("/{taskID}", func(r chi.Router) {
 					r.Get("/", taskHandler.GetByID)
 					r.Put("/", taskHandler.Update)
@@ -758,8 +1155,15 @@ func main() {
 					r.Put("/position", taskHandler.Reorder)
 					r.Get("/comments", taskHandler.ListComments)
 					r.Post("/comments", taskHandler.AddComment)
+					r.Get("/history", taskHandler.History)
+					// On-demand agent runs of this task.
+					r.Post("/run", taskRunHandler.CreateRun)
+					r.Get("/runs", taskRunHandler.ListRuns)
 				})
 			})
+
+			// A single task run, looked up by its own ID (the poll target).
+			r.Get("/task-runs/{runID}", taskRunHandler.GetRun)
 
 			// Organizations
 			r.Route("/organizations/{orgID}", func(r chi.Router) {
@@ -822,7 +1226,10 @@ func main() {
 					r.Get("/", blogHandler.GetRun)
 					r.Get("/articles", blogHandler.ListArticles)
 					r.Post("/publish", blogHandler.Publish)
+					r.Post("/publish-insights", blogHandler.PublishInsights)
+					r.Post("/publish-live", blogHandler.PublishLive)
 					r.Post("/retry", blogHandler.Retry)
+					r.Post("/cancel", blogHandler.Cancel)
 					r.Delete("/", blogHandler.Delete)
 				})
 				r.Get("/articles/{articleID}", blogHandler.GetArticle)
@@ -841,13 +1248,166 @@ func main() {
 			})
 
 			// Penetration Testing (Strix)
+			r.Route("/pentest", func(r chi.Router) {
+				// Pre-flight: is the workstation ready to scan? Gates the Start button.
+				r.Get("/capabilities", pentestHandler.GetCapabilities)
+			})
 			r.Route("/pentest-runs", func(r chi.Router) {
 				r.Get("/", pentestHandler.ListRuns)
 				r.Post("/", pentestHandler.CreateRun)
 				r.Route("/{runID}", func(r chi.Router) {
 					r.Get("/", pentestHandler.GetRun)
 					r.Get("/findings", pentestHandler.ListFindings)
+					r.Get("/finding-events", pentestHandler.ListFindingEvents)
+					r.Get("/report.pdf", pentestHandler.DownloadReport)
+					r.Post("/cancel", pentestHandler.CancelRun)
 				})
+			})
+
+			r.Route("/review-runs", func(r chi.Router) {
+				r.Get("/repos", reviewHandler.ListRepos)
+				r.Get("/", reviewHandler.ListRuns)
+				r.Post("/", reviewHandler.CreateRun)
+				r.Get("/{runID}", reviewHandler.GetRun)
+			})
+
+			r.Route("/mail", func(r chi.Router) {
+				r.Get("/connection", mailHandler.GetConnection)
+				r.Patch("/connection", mailHandler.PatchConnection)
+				r.Delete("/connection", mailHandler.Disconnect)
+				r.Post("/connection/oauth/start", mailHandler.StartOAuth)
+				r.Post("/sync", mailHandler.Sync)
+				r.Get("/threads", mailHandler.ListThreads)
+				r.Get("/threads/{id}", mailHandler.GetThread)
+				r.Post("/threads/{id}/draft", mailHandler.DraftIgnored)
+				r.Get("/drafts", mailHandler.ListDrafts)
+				r.Patch("/drafts/{id}", mailHandler.PatchDraft)
+				r.Post("/drafts/{id}/approve", mailHandler.ApproveDraft)
+				r.Post("/drafts/{id}/reject", mailHandler.RejectDraft)
+				if mailCfg.Simulate {
+					r.Post("/simulate/connect", mailHandler.SimulateConnect)
+					r.Post("/simulate/inbox", mailHandler.SimulateInbox)
+					r.Post("/simulate/sync", mailHandler.SimulateSync)
+				}
+			})
+
+			r.Route("/career", func(r chi.Router) {
+				r.Get("/profile", careerHandler.GetProfile)
+				r.Patch("/profile", careerHandler.PatchProfile)
+				r.Post("/profile/cv", careerHandler.UploadCV)
+				r.Post("/intake", careerHandler.Intake)
+				r.Post("/evaluate", careerHandler.Evaluate)
+				r.Get("/evaluations", careerHandler.ListEvaluations)
+				r.Get("/evaluations/{id}", careerHandler.GetEvaluation)
+				r.Post("/evaluations/{id}/cover", careerHandler.CoverLetter)
+				r.Post("/evaluations/{id}/cv", careerHandler.TailorCV)
+				r.Post("/evaluations/{id}/email", careerHandler.EmailDraft)
+				r.Get("/pipeline", careerHandler.ListPipeline)
+				r.Post("/pipeline/batch", careerHandler.BatchEvaluate)
+				// Apply sequence over many jobs. Dry run only: it prepares a
+				// tailored CV, cover letter and submission package per posting
+				// and submits none of them (career.NeverSubmit).
+				r.Post("/apply", careerHandler.Apply)
+				r.Post("/listing", careerHandler.PreviewListing)
+				r.Get("/applications", careerHandler.ListTracker)
+				r.Post("/applications/{id}/status", careerHandler.SetStatus)
+				r.Get("/applications/{id}/artifacts", careerHandler.ListArtifacts)
+				r.Get("/artifacts/{id}/pdf", careerHandler.ArtifactPDF)
+				r.Post("/applications/{id}/followup", careerHandler.Followup)
+				r.Post("/applications/{id}/interview-prep", careerHandler.InterviewPrep)
+				r.Post("/applications/{id}/offer-prep", careerHandler.OfferPrep)
+				r.Post("/applications/{id}/salary-gap", careerHandler.SalaryGap)
+				r.Get("/followups", careerHandler.ListFollowups)
+				r.Get("/stories", careerHandler.ListStories)
+				r.Post("/stories", careerHandler.UpsertStory)
+				r.Get("/contacts", careerHandler.ListContacts)
+				r.Post("/contacts", careerHandler.AddContact)
+				r.Post("/scan", careerHandler.Scan)
+				r.Get("/portals", careerHandler.ListPortals)
+				r.Post("/portals", careerHandler.AddPortal)
+				r.Get("/blacklist", careerHandler.ListBlacklist)
+				r.Post("/blacklist", careerHandler.AddBlacklist)
+				r.Get("/doctor", careerHandler.Doctor)
+				r.Get("/patterns", careerHandler.Patterns)
+				r.Get("/upskill", careerHandler.Upskill)
+			})
+
+			r.Route("/credit-controller", func(r chi.Router) {
+				r.Get("/status", creditControllerHandler.Status)
+				r.Get("/summary", creditControllerHandler.Summary)
+				r.Get("/invoices", creditControllerHandler.ListInvoices)
+				r.Get("/invoices/{invoiceID}", creditControllerHandler.GetInvoice)
+				r.Post("/invoices/generate", creditControllerHandler.Generate)
+				r.Post("/triage", creditControllerHandler.Triage)
+				r.Post("/triage/batch", creditControllerHandler.TriageBatch)
+				r.Get("/queue", creditControllerHandler.Queue)
+				r.Post("/approve", creditControllerHandler.Approve)
+			})
+
+			r.Route("/simpro-payments", func(r chi.Router) {
+				r.Get("/status", simproPaymentsHandler.Status)
+				r.Get("/summary", simproPaymentsHandler.Summary)
+				r.Get("/invoices", simproPaymentsHandler.ListInvoices)
+				r.Get("/payments", simproPaymentsHandler.ListPayments)
+				r.Get("/jobs", simproPaymentsHandler.ListJobs)
+				r.Get("/aging", simproPaymentsHandler.Aging)
+				r.Get("/reconcile-preview", simproPaymentsHandler.ReconcilePreview)
+				r.Get("/month-end", simproPaymentsHandler.MonthEnd)
+				r.Get("/fgas", simproPaymentsHandler.FGas)
+				r.Get("/fgas/events", simproPaymentsHandler.ListFGas)
+			})
+
+			r.Route("/waf-lab", func(r chi.Router) {
+				r.Get("/status", wafLabHandler.Status)
+				r.Get("/runs", wafLabHandler.ListRuns)
+				r.Post("/runs", wafLabHandler.CreateRun)
+				r.Get("/runs/{runID}", wafLabHandler.GetRun)
+				r.Get("/runs/{runID}/steps", wafLabHandler.ListSteps)
+				r.Get("/runs/{runID}/results", wafLabHandler.ListResults)
+				r.Get("/runs/{runID}/finding-events", wafLabHandler.ListFindingEvents)
+				r.Get("/runs/{runID}/report.pdf", wafLabHandler.DownloadReport)
+				r.Post("/runs/{runID}/cancel", wafLabHandler.CancelRun)
+			})
+
+			r.Route("/seo", func(r chi.Router) {
+				r.Get("/runs", seoHandler.ListRuns)
+				r.Post("/runs", seoHandler.CreateRun)
+				r.Get("/runs/{runID}", seoHandler.GetRun)
+				r.Post("/runs/{runID}/cancel", seoHandler.CancelRun)
+			})
+
+			r.Route("/courses", func(r chi.Router) {
+				r.Get("/runs", courseHandler.ListRuns)
+				r.Post("/runs", courseHandler.CreateRun)
+				r.Get("/runs/{runID}", courseHandler.GetRun)
+				r.Get("/runs/{runID}/chapters", courseHandler.ListChapters)
+				r.Post("/runs/{runID}/cancel", courseHandler.CancelRun)
+			})
+
+			r.Route("/secrets-rotation", func(r chi.Router) {
+				r.Get("/status", secretsRotHandler.Status)
+				r.Get("/runs", secretsRotHandler.ListRuns)
+				r.Post("/runs", secretsRotHandler.CreateRun)
+				r.Get("/runs/{runID}", secretsRotHandler.GetRun)
+				r.Post("/runs/{runID}/cancel", secretsRotHandler.CancelRun)
+			})
+
+			r.Route("/linux-patch", func(r chi.Router) {
+				r.Get("/status", linuxPatchHandler.Status)
+				r.Get("/runs", linuxPatchHandler.ListRuns)
+				r.Post("/runs", linuxPatchHandler.CreateRun)
+				r.Get("/runs/{runID}", linuxPatchHandler.GetRun)
+				r.Post("/runs/{runID}/cancel", linuxPatchHandler.CancelRun)
+			})
+
+			r.Route("/ab-testing", func(r chi.Router) {
+				r.Get("/status", abTestHandler.Status)
+				r.Get("/experiments", abTestHandler.ListExperiments)
+				r.Get("/experiments/{id}", abTestHandler.GetExperiment)
+				r.Post("/experiments/{id}/weights", abTestHandler.SetWeights)
+				r.Post("/experiments/{id}/promote", abTestHandler.Promote)
+				r.Post("/experiments/{id}/rollback", abTestHandler.Rollback)
+				r.Get("/experiments/{id}/observe", abTestHandler.Observe)
 			})
 
 			// Plugins (user-defined LangGraph/LangChain workflows)
@@ -1021,8 +1581,10 @@ func main() {
 				r.Get("/", chatHandler.ListSessions)
 				r.Post("/", chatHandler.StartSession)
 				r.Route("/{sessionID}", func(r chi.Router) {
+					r.Delete("/", chatHandler.DeleteSession)
 					r.Get("/messages", chatHandler.GetHistory)
 					r.Post("/messages", chatHandler.SendMessage)
+					r.Post("/messages/stream", chatHandler.StreamMessage)
 				})
 			})
 
@@ -1090,11 +1652,11 @@ func main() {
 			// Image generation. Registered unconditionally: /models answers
 			// "enabled: false" when nothing is configured, which the UI renders
 			// as a disabled control — a 404 there would look like a broken
-			// deployment rather than a switched-off feature.
+			// deployment rather than a switched-off feature. File serving is
+			// registered above, outside auth, so CMS covers stay loadable.
 			r.Route("/images", func(r chi.Router) {
 				r.Get("/models", imageHandler.ListModels)
 				r.Post("/generate", imageHandler.Generate)
-				r.Get("/file/*", imageHandler.Serve)
 				r.Get("/", imageHandler.List)
 			})
 
@@ -1106,22 +1668,44 @@ func main() {
 	// ─── Scheduler dispatcher ───────────────────────────────────────────────
 	// Ticks every 30s, picks up due scheduled_tasks, and dispatches them to
 	// the appropriate path (blog pipeline / workflow / agent).
-	schedulerRunner := scheduler.NewRunner(schedulerRepo, blogSvc, workflowSvc, execSvc, multiAgentSvc, logger)
+	schedulerRunner := scheduler.NewRunner(schedulerRepo, blogSvc, workflowSvc, execSvc, multiAgentSvc, logger).WithCareer(careerSvc)
 	go schedulerRunner.Start(ctx)
+
+	// ─── Usage partition maintainer ─────────────────────────────────────────
+	// usage_records is partitioned by month and migration 000008 only reaches
+	// three months past boot. A server that outlives that horizon stops being
+	// able to record usage, silently, and takes budget enforcement down with it
+	// because spend is read from that table. Keeps the horizon rolling.
+	go database.StartUsagePartitionMaintainer(ctx, pool, logger)
 
 	// ─── Pentest reconciler ─────────────────────────────────────────────────
 	// Ticks every STRIX_POLL_INTERVAL, claims due pentest runs with FOR UPDATE
 	// SKIP LOCKED, and advances each by polling the workstation service. A no-op
 	// when STRIX_BASE_URL is unset. Stops when ctx is cancelled on shutdown.
 	go pentestReconciler.Start(ctx)
+	// Same durable-queue shape as pentest: Postgres is the system of record,
+	// the ClusterIP sidecar holds in-memory OpenCode jobs.
+	go reviewReconciler.Start(ctx)
+	go mailReconciler.Start(ctx)
+
+	// ─── Blog orphan reconciler ─────────────────────────────────────────────
+	// Fails running rows whose writer died (SIGKILL, OOM, node drain). SIGTERM
+	// is handled by InterruptAll below; this loop covers the rest. Does not
+	// restart generation — Retry is the user's action.
+	go blogReconciler.Start(ctx)
+	// Same for course runs: fail rows whose heartbeat stopped.
+	go courseSvc.StartReaper(ctx)
 
 	srv := &http.Server{
-		Addr:        cfg.ServerPort,
-		Handler:     r,
-		ReadTimeout: 15 * time.Second,
+		Addr:    cfg.ServerPort,
+		Handler: r,
+		// Header-only; keeps slowloris protection without killing a 5MB CV
+		// upload that takes longer than 15s through the Int edge.
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       2 * time.Minute,
 		// Must exceed the longest per-route handler deadline (research or sync
 		// image generation), or the response is cut off after the work is done.
-		WriteTimeout: max(researchRequestTimeout, imageRequestTimeout) + time.Minute,
+		WriteTimeout: max(researchRequestTimeout, imageRequestTimeout, chatRequestTimeout) + time.Minute,
 		IdleTimeout:  60 * time.Second,
 	}
 
@@ -1129,7 +1713,7 @@ func main() {
 	go func() {
 		logger.Info("starting server",
 			zap.String("port", cfg.ServerPort),
-			zap.String("version", version),
+			zap.String("version", resolveVersion()),
 		)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Fatal("server failed", zap.Error(err))
@@ -1142,6 +1726,14 @@ func main() {
 	<-quit
 
 	logger.Info("shutting down server...")
+	// Fail in-flight article runs before the process dies, otherwise they stay
+	// `running` forever and the UI cannot Retry or Delete them. stopping is
+	// set first so a Generate that is still inside its HTTP handler cannot
+	// start a new goroutine after we have cancelled the ones we know about.
+	blogSvc.InterruptAll(nil)
+	courseSvc.InterruptAll()
+	cancel()
+
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
@@ -1197,4 +1789,29 @@ func startModelDiscovery(router *llm.Router, logger *zap.Logger) {
 			cancel()
 		}
 	}()
+}
+
+func resolveVersion() string {
+	if v := strings.TrimSpace(os.Getenv("APP_VERSION")); v != "" && v != "latest" {
+		return v
+	}
+	if v := strings.TrimSpace(version); v != "" && v != "dev" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("APP_VERSION")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(version); v != "" {
+		return v
+	}
+	return "dev"
+}
+
+func resolveDeployedAt() time.Time {
+	if s := strings.TrimSpace(os.Getenv("APP_DEPLOYED_AT")); s != "" {
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			return t
+		}
+	}
+	return startedAt
 }

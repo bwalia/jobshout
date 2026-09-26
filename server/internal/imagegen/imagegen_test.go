@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"image/png"
 	"io"
 	"net/http"
@@ -16,6 +18,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+
+	"github.com/jobshout/server/internal/config"
 )
 
 const testSecret = "test-image-secret"
@@ -258,14 +262,18 @@ func TestNearestSize_MatchesAspectRatio(t *testing.T) {
 
 // A stub client for Router tests.
 type stubClient struct {
-	provider string
-	models   []ModelInfo
-	calls    int
-	err      error
+	provider      string
+	models        []ModelInfo
+	calls         int
+	generateCalls int
+	lastModel     string
+	err           error
 }
 
 func (s *stubClient) Provider() string { return s.provider }
 func (s *stubClient) Generate(ctx context.Context, req GenerateRequest) (*GenerateResponse, error) {
+	s.generateCalls++
+	s.lastModel = req.Model
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -343,6 +351,287 @@ func TestRouter_CachesSuccessButNotFailure(t *testing.T) {
 
 // A generation that outlives its context must be abandoned, not left holding a
 // blog run open.
+func TestGeminiAspect_MatchesRequestedShape(t *testing.T) {
+	cases := []struct {
+		w, h int
+		want string
+	}{
+		{1024, 576, "16:9"},
+		{1024, 1024, "1:1"},
+		{1024, 688, "3:2"},
+		{600, 900, "2:3"},
+	}
+	for _, tc := range cases {
+		if got := nearestGeminiAspect(tc.w, tc.h); got != tc.want {
+			t.Errorf("nearestGeminiAspect(%d,%d) = %s, want %s", tc.w, tc.h, got, tc.want)
+		}
+	}
+}
+
+func TestGeminiClient_GenerateDecodesInlineImage(t *testing.T) {
+	pngBytes := onePixelPNG(t)
+	var seenKey, seenPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenKey = r.Header.Get("x-goog-api-key")
+		seenPath = r.URL.Path
+		_ = json.NewEncoder(w).Encode(geminiGenerateResponse{
+			Candidates: []struct {
+				Content struct {
+					Parts []geminiPart `json:"parts"`
+				} `json:"content"`
+				FinishReason string `json:"finishReason"`
+			}{{
+				Content: struct {
+					Parts []geminiPart `json:"parts"`
+				}{Parts: []geminiPart{{
+					InlineData: &geminiBlob{
+						MimeType: "image/png",
+						Data:     base64.StdEncoding.EncodeToString(pngBytes),
+					},
+				}}},
+			}},
+		})
+	}))
+	defer srv.Close()
+
+	c := NewGeminiClient(srv.URL, "test-gemini-key", geminiDefaultModel)
+	resp, err := c.Generate(context.Background(), GenerateRequest{Prompt: "a lighthouse", Width: 1024, Height: 576})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if resp.Provider != ProviderGemini || resp.Model != geminiDefaultModel {
+		t.Errorf("metadata = %+v", resp)
+	}
+	if !bytes.Equal(resp.PNG, pngBytes) {
+		t.Error("returned PNG does not match the fixture")
+	}
+	if seenKey != "test-gemini-key" {
+		t.Errorf("api key header = %q", seenKey)
+	}
+	if !strings.Contains(seenPath, geminiDefaultModel) {
+		t.Errorf("path %q should name the model", seenPath)
+	}
+}
+
+func TestEncodeAsPNG_ConvertsJPEG(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	img.Set(0, 0, color.RGBA{R: 255, A: 255})
+	var jpegBuf bytes.Buffer
+	if err := jpeg.Encode(&jpegBuf, img, nil); err != nil {
+		t.Fatalf("encode jpeg: %v", err)
+	}
+
+	pngBytes, w, h, err := encodeAsPNG(jpegBuf.Bytes(), "image/jpeg")
+	if err != nil {
+		t.Fatalf("encodeAsPNG: %v", err)
+	}
+	if w != 2 || h != 2 {
+		t.Errorf("size = %dx%d, want 2x2", w, h)
+	}
+	if !bytes.HasPrefix(pngBytes, pngMagic) {
+		t.Error("JPEG was not converted to PNG")
+	}
+}
+
+func TestDecodeGeminiBase64_AcceptsURLEncoding(t *testing.T) {
+	raw := []byte{0xff, 0xd8, 0xff, 0x00}
+	url := base64.URLEncoding.EncodeToString(raw)
+	got, err := decodeGeminiBase64(url)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !bytes.Equal(got, raw) {
+		t.Errorf("got %x, want %x", got, raw)
+	}
+}
+
+func TestRouter_NilIsAClearError(t *testing.T) {
+	var r *Router
+	_, err := r.Generate(context.Background(), "", GenerateRequest{Prompt: "a hill", Model: "z-image-turbo"})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+}
+
+func TestGeminiClient_APIErrorIsSurface(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{"message": "quota exceeded"},
+		})
+	}))
+	defer srv.Close()
+
+	_, err := NewGeminiClient(srv.URL, "key", "").Generate(context.Background(), GenerateRequest{Prompt: "a hill"})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !strings.Contains(err.Error(), "quota exceeded") {
+		t.Errorf("error should carry the API message: %q", err)
+	}
+}
+
+func TestRouter_GeminiFallsBackToMFlux(t *testing.T) {
+	gemini := &stubClient{provider: ProviderGemini, err: fmt.Errorf("quota")}
+	mflux := &stubClient{provider: ProviderMFlux}
+	r := NewTestRouter(ProviderGemini, map[string]Client{
+		ProviderGemini: gemini,
+		ProviderMFlux:  mflux,
+	})
+
+	resp, err := r.Generate(context.Background(), "", GenerateRequest{Prompt: "a hill"})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if resp.Provider != ProviderMFlux {
+		t.Errorf("fell back to %q, want mflux", resp.Provider)
+	}
+	if gemini.generateCalls != 1 || mflux.generateCalls != 1 {
+		t.Errorf("gemini calls=%d mflux calls=%d", gemini.generateCalls, mflux.generateCalls)
+	}
+	if mflux.lastModel != "" {
+		t.Errorf("fallback should clear a Gemini model name, got %q", mflux.lastModel)
+	}
+}
+
+func TestRouter_GeminiSuccessSkipsMFlux(t *testing.T) {
+	gemini := &stubClient{provider: ProviderGemini}
+	mflux := &stubClient{provider: ProviderMFlux}
+	r := NewTestRouter(ProviderGemini, map[string]Client{
+		ProviderGemini: gemini,
+		ProviderMFlux:  mflux,
+	})
+
+	resp, err := r.Generate(context.Background(), "", GenerateRequest{Prompt: "a hill"})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if resp.Provider != ProviderGemini {
+		t.Errorf("provider = %q, want gemini", resp.Provider)
+	}
+	if mflux.generateCalls != 0 {
+		t.Error("mflux should not run when Gemini succeeds")
+	}
+}
+
+func TestRouter_ExplicitMFluxSkipsGemini(t *testing.T) {
+	gemini := &stubClient{provider: ProviderGemini}
+	mflux := &stubClient{provider: ProviderMFlux}
+	r := NewTestRouter(ProviderGemini, map[string]Client{
+		ProviderGemini: gemini,
+		ProviderMFlux:  mflux,
+	})
+
+	resp, err := r.Generate(context.Background(), ProviderMFlux, GenerateRequest{Prompt: "a hill"})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if resp.Provider != ProviderMFlux {
+		t.Errorf("provider = %q, want mflux", resp.Provider)
+	}
+	if gemini.generateCalls != 0 {
+		t.Error("explicit mflux must not hop through Gemini")
+	}
+}
+
+func TestRouter_NamedWorkstationModelSkipsGemini(t *testing.T) {
+	gemini := &stubClient{provider: ProviderGemini}
+	mflux := &stubClient{provider: ProviderMFlux}
+	r := NewTestRouter(ProviderGemini, map[string]Client{
+		ProviderGemini: gemini,
+		ProviderMFlux:  mflux,
+	})
+
+	resp, err := r.Generate(context.Background(), "", GenerateRequest{Prompt: "a hill", Model: "z-image-turbo"})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if resp.Provider != ProviderMFlux {
+		t.Errorf("provider = %q, want mflux", resp.Provider)
+	}
+	if gemini.generateCalls != 0 {
+		t.Error("a named workstation model must not hop through Gemini")
+	}
+	if mflux.lastModel != "z-image-turbo" {
+		t.Errorf("mflux model = %q", mflux.lastModel)
+	}
+}
+
+func TestRouter_CancelledContextDoesNotFallBack(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	gemini := &stubClient{provider: ProviderGemini, err: context.Canceled}
+	mflux := &stubClient{provider: ProviderMFlux}
+	r := NewTestRouter(ProviderGemini, map[string]Client{
+		ProviderGemini: gemini,
+		ProviderMFlux:  mflux,
+	})
+
+	_, err := r.Generate(ctx, ProviderGemini, GenerateRequest{Prompt: "a hill"})
+	if err == nil {
+		t.Fatal("expected the cancelled request to fail")
+	}
+	if mflux.generateCalls != 0 {
+		t.Error("a cancelled context must not fall back to the workstation")
+	}
+}
+
+func TestRouter_NoFallbackSkipsWorkstation(t *testing.T) {
+	gemini := &stubClient{provider: ProviderGemini, err: fmt.Errorf("down")}
+	mflux := &stubClient{provider: ProviderMFlux}
+	r := NewTestRouter(ProviderGemini, map[string]Client{
+		ProviderGemini: gemini,
+		ProviderMFlux:  mflux,
+	})
+
+	_, err := r.Generate(context.Background(), ProviderGemini, GenerateRequest{
+		Prompt:     "a labeled comparison table",
+		NoFallback: true,
+	})
+	if err == nil {
+		t.Fatal("expected Gemini's error when fallback is forbidden")
+	}
+	if mflux.generateCalls != 0 {
+		t.Error("NoFallback must not draw a labeled figure on the workstation")
+	}
+}
+
+func TestRouter_GeminiClearsModelOnFallback(t *testing.T) {
+	gemini := &stubClient{provider: ProviderGemini, err: fmt.Errorf("down")}
+	mflux := &stubClient{provider: ProviderMFlux}
+	r := NewTestRouter(ProviderGemini, map[string]Client{
+		ProviderGemini: gemini,
+		ProviderMFlux:  mflux,
+	})
+
+	_, err := r.Generate(context.Background(), ProviderGemini, GenerateRequest{
+		Prompt: "a hill",
+		Model:  geminiDefaultModel,
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if mflux.lastModel != "" {
+		t.Errorf("fallback model = %q, want empty so mflux uses its default", mflux.lastModel)
+	}
+}
+
+func TestNewRouter_GeminiBecomesDefaultWhenKeySet(t *testing.T) {
+	r := NewRouter(&config.Config{
+		ImageProvider:     ProviderMFlux,
+		ImageBaseURL:      "http://example.invalid",
+		ImageDefaultModel: "z-image-turbo",
+		GeminiAPIKey:      "test-key",
+		ImageGeminiModel:  geminiDefaultModel,
+	})
+	if r.DefaultProvider() != ProviderGemini {
+		t.Errorf("default = %q, want gemini", r.DefaultProvider())
+	}
+	if _, err := r.For(ProviderMFlux); err != nil {
+		t.Errorf("mflux should still be registered: %v", err)
+	}
+}
+
 func TestMFluxClient_HonoursContextCancellation(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Drain the body before blocking: the server only watches for the

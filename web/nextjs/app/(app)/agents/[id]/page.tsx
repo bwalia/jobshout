@@ -17,6 +17,8 @@ import {
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AgentStatusBadge } from "@/components/agent/AgentStatusBadge";
+import { ExportAgentButton } from "@/components/agent/ExportAgentButton";
+import { RemoveAgentButton } from "@/components/agent/RemoveAgentButton";
 import { useAgent, useUpdateAgent } from "@/lib/hooks/useAgents";
 import { ModelPicker } from "@/components/agent/ModelPicker";
 import { useBlogConfig } from "@/lib/hooks/useBlog";
@@ -60,7 +62,7 @@ const AVATAR_COLOURS = [
   "bg-violet-600",
   "bg-blue-600",
   "bg-emerald-600",
-  "bg-amber-600",
+  "bg-orange-600",
   "bg-rose-600",
   "bg-cyan-600",
   "bg-indigo-600",
@@ -321,7 +323,7 @@ function OverviewTab({ agent }: { agent: NonNullable<ReturnType<typeof useAgent>
 const PRIORITY_CLASSES: Record<string, string> = {
   critical: "bg-red-500/20 text-red-400",
   high: "bg-orange-500/20 text-orange-400",
-  medium: "bg-yellow-500/20 text-yellow-400",
+  medium: "bg-orange-500/20 text-orange-400",
   low: "bg-blue-500/20 text-blue-400",
 };
 
@@ -680,7 +682,7 @@ const SKILL_KIND_META: Record<
 > = {
   tool: { icon: Wrench, color: "text-sky-400" },
   prompt: { icon: MessageSquareText, color: "text-violet-400" },
-  bundle: { icon: Boxes, color: "text-amber-400" },
+  bundle: { icon: Boxes, color: "text-orange-400" },
 };
 
 function SkillsTab({ agentId }: { agentId: string }) {
@@ -867,6 +869,24 @@ export default function AgentProfilePage() {
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <AgentStatusBadge status={agent.status} />
 
+                {agent.metadata?.builtin === "mail" && (
+                  <Link
+                    href="/panel/task-manager?agent=mail"
+                    className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary hover:underline"
+                  >
+                    Open inbox
+                  </Link>
+                )}
+
+                {agent.metadata?.builtin === "career_ops" && (
+                  <Link
+                    href="/panel/task-manager?agent=career"
+                    className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary hover:underline"
+                  >
+                    Open Career Agent
+                  </Link>
+                )}
+
                 {agent.model_provider && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
                     <Cpu className="h-3 w-3" />
@@ -879,7 +899,14 @@ export default function AgentProfilePage() {
           </div>
 
           {/* Performance score badge */}
-          <div className="flex flex-col items-start gap-1 sm:items-end">
+          <div className="flex flex-col items-start gap-2 sm:items-end">
+            <div className="flex flex-wrap justify-end gap-2">
+              <ExportAgentButton agentId={agent.id} />
+              <RemoveAgentButton
+                agent={agent}
+                onRemoved={() => router.push("/panel/task-manager")}
+              />
+            </div>
             <span className="text-xs text-muted-foreground">Performance</span>
             <span className="text-2xl font-bold text-foreground">
               {agent.performance_score}%

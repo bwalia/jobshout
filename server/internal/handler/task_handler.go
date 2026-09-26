@@ -12,15 +12,74 @@ import (
 	mw "github.com/jobshout/server/internal/middleware"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/service"
+	"github.com/jobshout/server/internal/tasklaunch"
 )
 
 type TaskHandler struct {
 	svc      service.TaskService
+	launch   *tasklaunch.Service
 	validate *validator.Validate
 }
 
-func NewTaskHandler(svc service.TaskService) *TaskHandler {
-	return &TaskHandler{svc: svc, validate: validator.New()}
+func NewTaskHandler(svc service.TaskService, launch *tasklaunch.Service) *TaskHandler {
+	return &TaskHandler{svc: svc, launch: launch, validate: validator.New()}
+}
+
+type launchTaskBody struct {
+	AgentID   string            `json:"agent_id" validate:"required,uuid"`
+	ProjectID string            `json:"project_id" validate:"omitempty,uuid"`
+	TaskID    string            `json:"task_id" validate:"omitempty,uuid"`
+	Values    map[string]string `json:"values"`
+}
+
+// Launch POST /api/v1/tasks/launch — create or reuse a board task and start the agent.
+func (h *TaskHandler) Launch(w http.ResponseWriter, r *http.Request) {
+	if h.launch == nil {
+		RespondError(w, http.StatusServiceUnavailable, "task launch is not configured")
+		return
+	}
+	var body launchTaskBody
+	if !DecodeJSON(w, r, &body) {
+		return
+	}
+	if err := h.validate.Struct(body); err != nil {
+		RespondError(w, http.StatusBadRequest, "validation failed: "+err.Error())
+		return
+	}
+	orgID, err := uuid.Parse(mw.GetOrgID(r.Context()))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid org_id in token")
+		return
+	}
+	userID, _ := uuid.Parse(mw.GetUserID(r.Context()))
+	agentID, _ := uuid.Parse(body.AgentID)
+	req := tasklaunch.Request{
+		OrgID: orgID, UserID: userID, AgentID: agentID,
+		Values: body.Values, Source: "task_manager",
+	}
+	if body.ProjectID != "" {
+		req.ProjectID, _ = uuid.Parse(body.ProjectID)
+	}
+	if body.TaskID != "" {
+		id, perr := uuid.Parse(body.TaskID)
+		if perr == nil {
+			req.TaskID = &id
+		}
+	}
+	if req.ProjectID == uuid.Nil && req.TaskID != nil {
+		task, gerr := h.svc.GetByID(r.Context(), *req.TaskID)
+		if gerr != nil {
+			RespondError(w, http.StatusNotFound, "task not found")
+			return
+		}
+		req.ProjectID = task.ProjectID
+	}
+	result, err := h.launch.Launch(r.Context(), req)
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	RespondJSON(w, http.StatusAccepted, result)
 }
 
 func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -65,7 +124,19 @@ func (h *TaskHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 func (h *TaskHandler) List(w http.ResponseWriter, r *http.Request) {
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
-	params := model.PaginationParams{Page: page, PerPage: perPage}
+	status := r.URL.Query().Get("status")
+	switch status {
+	case "", "backlog", "todo", "in_progress", "review", "done":
+	default:
+		RespondError(w, http.StatusBadRequest, "invalid status")
+		return
+	}
+	params := model.PaginationParams{
+		Page:            page,
+		PerPage:         perPage,
+		Status:          status,
+		AssignedAgentID: r.URL.Query().Get("assigned_agent_id"),
+	}
 
 	projectIDStr := r.URL.Query().Get("project_id")
 	if projectIDStr != "" {
@@ -156,6 +227,10 @@ func (h *TaskHandler) Update(w http.ResponseWriter, r *http.Request) {
 			RespondError(w, http.StatusNotFound, err.Error())
 			return
 		}
+		if errors.Is(err, service.ErrInvalidTaskStatus) {
+			RespondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		RespondError(w, http.StatusInternalServerError, "failed to update task")
 		return
 	}
@@ -191,11 +266,17 @@ func (h *TaskHandler) Transition(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.svc.Transition(r.Context(), id, req.Status); err != nil {
+	userID := optionalUserID(r)
+	if err := h.svc.Transition(r.Context(), id, req.Status, userID); err != nil {
 		RespondError(w, http.StatusInternalServerError, "failed to transition task")
 		return
 	}
-	RespondJSON(w, http.StatusOK, map[string]string{"status": req.Status})
+	task, err := h.svc.GetByID(r.Context(), id)
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, "failed to load task after transition")
+		return
+	}
+	RespondJSON(w, http.StatusOK, task)
 }
 
 func (h *TaskHandler) Reorder(w http.ResponseWriter, r *http.Request) {
@@ -214,9 +295,41 @@ func (h *TaskHandler) Reorder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.svc.Reorder(r.Context(), id, req.Status, req.Position); err != nil {
+	userID := optionalUserID(r)
+	if err := h.svc.Reorder(r.Context(), id, req.Status, req.Position, userID); err != nil {
 		RespondError(w, http.StatusInternalServerError, "failed to reorder task")
 		return
 	}
-	RespondJSON(w, http.StatusOK, map[string]string{"status": "reordered"})
+	task, err := h.svc.GetByID(r.Context(), id)
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, "failed to load task after reorder")
+		return
+	}
+	RespondJSON(w, http.StatusOK, task)
+}
+
+func (h *TaskHandler) History(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "taskID"))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid task ID")
+		return
+	}
+	hist, err := h.svc.History(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, service.ErrTaskNotFound) {
+			RespondError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		RespondError(w, http.StatusInternalServerError, "failed to get task history")
+		return
+	}
+	RespondJSON(w, http.StatusOK, hist)
+}
+
+func optionalUserID(r *http.Request) *uuid.UUID {
+	id, err := uuid.Parse(mw.GetUserID(r.Context()))
+	if err != nil {
+		return nil
+	}
+	return &id
 }

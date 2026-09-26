@@ -57,7 +57,7 @@ export default function KnowledgePage() {
   );
 
   // Persist the current file (timestamps updated; in production this would hit the API)
-  const handleSave = useCallback(() => {
+  const handleSave = useCallback(async () => {
     setFiles((prev) =>
       prev.map((f) =>
         f.id === selectedFileId
@@ -97,7 +97,7 @@ export default function KnowledgePage() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       {/* Page header */}
       <div className="flex items-center justify-between border-b border-border px-6 py-4">
         <div>

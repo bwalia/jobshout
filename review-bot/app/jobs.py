@@ -29,8 +29,8 @@ from app.reviewer.schema import Issue
 from app.reviewer.workspace import WorkspaceError
 
 # Worst observed path: run_review retries once on NoReviewJSON (2 × 900s), plus
-# fetch/clone and GitHub round-trips. Anything past this is wedged, not slow.
-JOB_TIMEOUT = 2100
+# fetch/clone and GitHub round-trips. Cap matches Helm reviewBot.maxRuntime (40m).
+JOB_TIMEOUT = 2400
 
 _EXPECTED_ERRORS = (ConfigError, GitHubError, WorkspaceError, OpenCodeError, RepoNotAllowed)
 
@@ -108,11 +108,39 @@ class JobRunner:
 
     # -- submission ---------------------------------------------------------
 
-    def submit_review(self, repo: str, pr_number: int, dry_run: bool = False, force: bool = False) -> Job:
+    def submit_review(
+        self,
+        repo: str,
+        pr_number: int,
+        dry_run: bool = False,
+        force: bool = False,
+        run_ref: str = "",
+    ) -> Job:
         self._registry.require(repo)
+        if run_ref:
+            existing = self.find_by_run_ref(run_ref)
+            if existing is not None:
+                return existing
         return self._enqueue(
-            "review", {"repo": repo, "pr_number": pr_number, "dry_run": dry_run, "force": force}
+            "review",
+            {
+                "repo": repo,
+                "pr_number": pr_number,
+                "dry_run": dry_run,
+                "force": force,
+                "run_ref": run_ref,
+            },
         )
+
+    def find_by_run_ref(self, run_ref: str) -> Job | None:
+        """The job submitted with this run_ref, if any. Used as an idempotency key."""
+        if not run_ref:
+            return None
+        with self._lock:
+            for job in self._jobs.values():
+                if job.kind == "review" and job.params.get("run_ref") == run_ref:
+                    return job
+        return None
 
     def submit_prime(self, repo: str, force: bool = False) -> Job:
         self._registry.require(repo)

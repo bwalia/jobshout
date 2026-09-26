@@ -9,7 +9,7 @@ const signupUser = {
 };
 
 test.describe("Authentication", () => {
-  test("signup creates account and redirects to dashboard", async ({
+  test("signup creates account and redirects to chat", async ({
     page,
   }) => {
     await page.goto("/signup");
@@ -20,11 +20,11 @@ test.describe("Authentication", () => {
     await page.fill("#password", signupUser.password);
     await page.click('button[type="submit"]');
 
-    await page.waitForURL("**/dashboard", { timeout: 15_000 });
-    await expect(page.locator("h1")).toContainText("Dashboard");
+    await page.waitForURL("**/chat**", { timeout: 15_000 });
+    await expect(page.getByRole("button", { name: /new chat/i })).toBeVisible();
   });
 
-  test("login with registered user redirects to dashboard", async ({
+  test("login with registered user redirects to chat", async ({
     page,
   }) => {
     await page.goto("/login");
@@ -33,8 +33,8 @@ test.describe("Authentication", () => {
     await page.fill("#password", signupUser.password);
     await page.click('button[type="submit"]');
 
-    await page.waitForURL("**/dashboard", { timeout: 15_000 });
-    await expect(page.locator("h1")).toContainText("Dashboard");
+    await page.waitForURL("**/chat**", { timeout: 15_000 });
+    await expect(page.getByRole("button", { name: /new chat/i })).toBeVisible();
   });
 
   test("login with wrong password shows error", async ({ browser }) => {
@@ -88,7 +88,7 @@ test.describe("Authentication", () => {
     // Use a fresh context without any stored auth
     const context = await page.context().browser()!.newContext();
     const freshPage = await context.newPage();
-    await freshPage.goto("http://localhost:3001/dashboard");
+    await freshPage.goto("http://localhost:3001/chat");
     await freshPage.waitForURL("**/login", { timeout: 10_000 });
     await context.close();
   });

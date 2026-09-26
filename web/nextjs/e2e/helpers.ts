@@ -32,7 +32,7 @@ export async function registerViaAPI(prefix = "e2e"): Promise<{
   return { token: data.access_token, email, password };
 }
 
-/** Log in through the UI and wait for the dashboard. */
+/** Log in through the UI and wait for chat home. */
 export async function loginViaUI(
   page: Page,
   email: string,
@@ -42,14 +42,14 @@ export async function loginViaUI(
   await page.fill("#email", email);
   await page.fill("#password", password);
   await page.click('button[type="submit"]');
-  await page.waitForURL("**/dashboard", { timeout: 10_000 });
-  await expect(page.locator("h1")).toContainText("Dashboard");
+  await page.waitForURL("**/chat**", { timeout: 10_000 });
+  await expect(page.getByRole("button", { name: /new chat/i })).toBeVisible();
 }
 
-/** Navigate via sidebar link. */
+/** Navigate by URL; old routes redirect to their new panel homes. */
 export async function navigateTo(page: Page, href: string): Promise<void> {
-  await page.click(`nav a[href="${href}"]`);
-  await page.waitForURL(`**${href}`, { timeout: 10_000 });
+  await page.goto(href);
+  await page.waitForLoadState("domcontentloaded");
 }
 
 /** Create an agent via API and return its ID. */
@@ -105,4 +105,34 @@ export async function createProjectViaAPI(
     );
   }
   return (await res.json()).id;
+}
+
+/** Create a task via API and return the created task. */
+export async function createTaskViaAPI(
+  token: string,
+  projectId: string,
+  overrides: {
+    title?: string;
+    description?: string;
+    status?: string;
+  } = {}
+): Promise<{ id: string; title: string; status: string }> {
+  const payload = {
+    project_id: projectId,
+    title: overrides.title ?? "E2E Task",
+    description: overrides.description ?? "Created by E2E tests",
+    status: overrides.status ?? "todo",
+  };
+  const res = await fetch(`${API_URL}/tasks/`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    throw new Error(`Create task failed: ${res.status} ${await res.text()}`);
+  }
+  return res.json();
 }

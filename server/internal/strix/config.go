@@ -2,6 +2,7 @@ package strix
 
 import (
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,6 +42,12 @@ type Config struct {
 	// it is the code path that decides whether a subprocess runs. This copy
 	// refuses obviously out-of-scope work before it crosses the network.
 	TargetAllowlist []string
+	// EngagementRetries is how many times the reconciler will automatically
+	// requeue a hollow run (finished without touching the target) before letting
+	// it fail. One by default: a flaky local model produces the occasional false
+	// hollow run, but a target that is genuinely unreachable must still fail
+	// rather than loop.
+	EngagementRetries int
 }
 
 // Configured reports whether scans can actually be dispatched.
@@ -48,15 +55,36 @@ func (c Config) Configured() bool { return c.Enabled && c.BaseURL != "" }
 
 func LoadConfig(logger *zap.Logger) Config {
 	cfg := Config{
-		Enabled:         os.Getenv("STRIX_ENABLED") != "false",
-		BaseURL:         strings.TrimRight(os.Getenv("STRIX_BASE_URL"), "/"),
-		JWTSecret:       os.Getenv("STRIX_JWT_SECRET"),
-		Timeout:         durationOrDefault("STRIX_TIMEOUT", DefaultTimeout, logger),
-		PollInterval:    durationOrDefault("STRIX_POLL_INTERVAL", DefaultPollInterval, logger),
-		MaxRuntime:      durationOrDefault("STRIX_MAX_RUNTIME", DefaultMaxRuntime, logger),
-		TargetAllowlist: splitList(os.Getenv("STRIX_TARGET_ALLOWLIST")),
+		Enabled:           os.Getenv("STRIX_ENABLED") != "false",
+		BaseURL:           strings.TrimRight(os.Getenv("STRIX_BASE_URL"), "/"),
+		JWTSecret:         os.Getenv("STRIX_JWT_SECRET"),
+		Timeout:           durationOrDefault("STRIX_TIMEOUT", DefaultTimeout, logger),
+		PollInterval:      durationOrDefault("STRIX_POLL_INTERVAL", DefaultPollInterval, logger),
+		MaxRuntime:        durationOrDefault("STRIX_MAX_RUNTIME", DefaultMaxRuntime, logger),
+		TargetAllowlist:   splitList(os.Getenv("STRIX_TARGET_ALLOWLIST")),
+		EngagementRetries: intOrDefault("STRIX_ENGAGEMENT_RETRIES", 1, logger),
 	}
 	return cfg
+}
+
+// intOrDefault reads a non-negative integer from the environment, falling back
+// rather than failing to boot on a typo — the same forgiving posture as
+// durationOrDefault.
+func intOrDefault(key string, fallback int, logger *zap.Logger) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(raw)
+	if err != nil || parsed < 0 {
+		if logger != nil {
+			logger.Warn("ignoring unparseable integer, using default",
+				zap.String("key", key), zap.String("value", raw),
+				zap.Int("default", fallback))
+		}
+		return fallback
+	}
+	return parsed
 }
 
 func durationOrDefault(key string, fallback time.Duration, logger *zap.Logger) time.Duration {
