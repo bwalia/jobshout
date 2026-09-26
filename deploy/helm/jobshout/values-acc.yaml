@@ -50,3 +50,6 @@ wafLab:
 # Created by hand on k3s1, never in git.
 extraSecretRefs:
   - jobshout-gateways
+
+insights:
+  siteURL: "https://acc.jobshout.com"

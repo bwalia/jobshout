@@ -57,3 +57,6 @@ extraSecretRefs:
 secretsRotation:
   kubeconfig:
     enabled: true
+
+insights:
+  siteURL: "https://test.jobshout.com"

@@ -227,6 +227,73 @@ var profiles = []Profile{
 	},
 }
 
+// InsightsKey is the long-form reader of JobShout.com Insights.
+const InsightsKey = "insights"
+
+// hidden are profiles that exist for one agent and are not offered in pickers.
+//
+// The Insights reader belongs to the JobShout.com Content Writer: offering it
+// in the Article Writer's "Written for" picker would put a 3,000-word editorial
+// behind a menu meant for blog posts. For and Known consult these, so a run
+// that names one validates and writes for it; Options does not, so no picker
+// shows it.
+var hidden = []Profile{
+	{
+		Key:   InsightsKey,
+		Label: "JobShout.com Insights — long-form",
+		Hint:  "Independent long-form analysis of AI trends for engineers and technical leaders.",
+
+		Piece:  "long-form technical analysis",
+		Reader: "software engineers, AI engineers, architects and engineering leaders who build with AI and need to know what is real",
+
+		MinWords:   2200,
+		MaxWords:   3400,
+		Sections:   "Eight to twelve",
+		TitleStyle: "Name the idea, not the product launch. Under 80 characters. A subtitle after a colon is allowed when it states the argument.",
+
+		Voice: []string{
+			"JobShout's own editorial voice: independent, precise, and more useful than the\n  announcement it analyses. Never a rewrite or close paraphrase of any source.",
+			"Separate claims by who makes them. Vendor and partner figures are attributed in\n  the sentence (\"TypeSafe reports…\", \"LangChain demonstrates…\"), and never\n  presented as independently verified.",
+			"Never claim JobShout ran an experiment, benchmark or measurement. If the piece\n  proposes a benchmark, describe its method and say plainly it has not been run.",
+			"Date everything that can go stale: model releases, prices, versions and\n  benchmark results carry the date of their source.",
+			"Open with a one-line italic landscape cutoff — \"AI landscape reviewed: <date>\"\n  — using the date the research was done.",
+			"Include a Key takeaways list near the top and a \"What we know / what we don't\n  know\" section, as a table where it fits.",
+			"Say where the technology does not fit, not only where it does. Balance is a\n  requirement, not a courtesy.",
+		},
+		Code:     "Include code or request examples where they make an integration concrete; keep them short and runnable, and mark illustrative ones as such.",
+		Diagrams: "Include one or more DIAGRAMS for architectures, pipelines and decision flows — see the diagram rules below.",
+		Jargon:   "Define each specialised term briefly on first use; the reader is technical but not necessarily in this sub-field.",
+
+		Expand: []string{
+			"Add the evidence: independent results with their method, sample size and\n  limitations, set against the vendor's own claims.",
+			"Add the engineering consequences — architecture, cost, latency, failure modes,\n  and what a team should do differently.",
+			"Add a comparison table where several options, models or results are discussed.",
+		},
+		ReviewChecks: []string{
+			"A vendor or partner claim stated as fact, or without saying whose claim it is.",
+			"Any sentence implying JobShout measured, tested or benchmarked something.",
+			"Undated model, price or benchmark figures.",
+			"Missing Key takeaways, missing \"What we know / what we don't know\", or no\n  section on where the technology does not fit.",
+			"One-sided coverage: only the case for, or only the case against.",
+		},
+
+		Remit:        "the latest developments in AI — models, agents, agent harnesses, model routing, evaluation, inference economics, AI security and infrastructure — analysed for the engineers and leaders who build with them",
+		TopicExample: "\"A startup launches a decision model\" is an event. \"Why agents may need fast decision\nmodels beside LLMs, and what the first independent tests show\" is a topic.",
+		Prefer: []string{
+			"A development from the last few weeks that changes how AI systems are built,\n  bought or evaluated.",
+			"Enough primary sources and early independent evidence to analyse, not just\n  announce.",
+			"A broader engineering idea the development is the best current example of.",
+		},
+		Reject: []string{
+			"Funding rounds, acquisitions and executive moves.",
+			"Minor version bumps and release notes with no architectural consequence.",
+			"Consumer product news with nothing in it for people who build systems.",
+		},
+
+		Tags: []string{"insights", "ai"},
+	},
+}
+
 // All returns the built-in profiles in picker order.
 func All() []Profile {
 	out := make([]Profile, len(profiles))
@@ -263,6 +330,11 @@ func Known(key string) bool {
 			return true
 		}
 	}
+	for _, p := range hidden {
+		if p.Key == k {
+			return true
+		}
+	}
 	return false
 }
 
@@ -294,6 +366,11 @@ func Normalize(key string) string {
 func For(key string) Profile {
 	k := strings.ToLower(strings.TrimSpace(key))
 	for _, p := range profiles {
+		if p.Key == k {
+			return p
+		}
+	}
+	for _, p := range hidden {
 		if p.Key == k {
 			return p
 		}

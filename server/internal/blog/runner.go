@@ -223,6 +223,9 @@ type Runner struct {
 	// insights files articles in JobShout.com's Insights hub, a destination
 	// beside the CMS. Nil means that destination is not configured.
 	insights InsightsPublisher
+	// liveInsights publishes straight to readers on jobshout.com — a client
+	// for an agent jobshout.com trusts. Nil unless WithLiveInsights was called.
+	liveInsights InsightsPublisher
 	// clock lets tests inject a deterministic time.
 	clock func() time.Time
 }

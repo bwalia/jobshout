@@ -131,3 +131,6 @@ secretsRotation:
 # them on a LAN worker with headroom.
 nodeSelector:
   kubernetes.io/hostname: debian004
+
+insights:
+  siteURL: "https://int.jobshout.com"

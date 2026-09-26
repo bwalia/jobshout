@@ -24,7 +24,11 @@ async fn main() -> anyhow::Result<()> {
     jobshout_storage::migrate(&pool).await?;
 
     let staff_emails = std::env::var("INSIGHTS_STAFF_EMAILS").unwrap_or_default();
-    let insights = InsightService::new(pool.clone(), staff_emails.split(',').map(str::to_string));
+    // Agents whose submissions publish without review — only those whose
+    // platform has a person approve each item before sending it.
+    let trusted_agents = std::env::var("INSIGHTS_TRUSTED_AGENTS").unwrap_or_default();
+    let insights = InsightService::new(pool.clone(), staff_emails.split(',').map(str::to_string))
+        .with_trusted_agents(trusted_agents.split(',').map(str::to_string));
     if env_flag("INSIGHTS_SEED_SAMPLES") {
         let n = insights
             .seed_samples()

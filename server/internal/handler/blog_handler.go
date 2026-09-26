@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
@@ -18,11 +19,20 @@ import (
 type BlogHandler struct {
 	svc      service.BlogService
 	validate *validator.Validate
+	// insightsSiteURL is the public jobshout.com site; empty hides links.
+	insightsSiteURL string
 }
 
 // NewBlogHandler creates a BlogHandler.
 func NewBlogHandler(svc service.BlogService) *BlogHandler {
 	return &BlogHandler{svc: svc, validate: validator.New()}
+}
+
+// WithInsightsSiteURL sets the public jobshout.com site for this ring, which the
+// UI links published articles to.
+func (h *BlogHandler) WithInsightsSiteURL(u string) *BlogHandler {
+	h.insightsSiteURL = strings.TrimRight(strings.TrimSpace(u), "/")
+	return h
 }
 
 // Generate handles POST /api/v1/blogs/generate. The pipeline runs in the
@@ -105,6 +115,28 @@ func (h *BlogHandler) PublishInsights(w http.ResponseWriter, r *http.Request) {
 	RespondJSON(w, http.StatusOK, run)
 }
 
+// PublishLive handles POST /api/v1/blogs/runs/{runID}/publish-live — makes a
+// JobShout.com Content Writer run's CMS drafts public and publishes its
+// articles on jobshout.com.
+func (h *BlogHandler) PublishLive(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "runID"))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid run ID")
+		return
+	}
+	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid org_id in token")
+		return
+	}
+	run, err := h.svc.PublishLive(r.Context(), orgID, id)
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	RespondJSON(w, http.StatusOK, run)
+}
+
 // Delete handles DELETE /api/v1/blogs/runs/{runID} — forgets a run and the
 // articles it produced. Drafts already in the CMS are not touched.
 func (h *BlogHandler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -178,6 +210,9 @@ func (h *BlogHandler) Config(w http.ResponseWriter, r *http.Request) {
 		"can_publish": h.svc.CanPublish(),
 		// Whether JobShout.com Insights is reachable, for "Send to Insights".
 		"can_publish_insights": h.svc.CanPublishInsights(),
+		// Whether the Content Writer's "Publish live" can work end to end.
+		"can_publish_live":  h.svc.CanPublishLive(),
+		"insights_site_url": h.insightsSiteURL,
 		// The provider the writing pipeline is bound to at startup. The model
 		// picker filters on it: the pipeline sends a bare model name to this one
 		// provider, so offering a model from another provider would save a
@@ -217,7 +252,17 @@ func (h *BlogHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
 	params := model.PaginationParams{Page: page, PerPage: perPage}
 
-	result, err := h.svc.ListByOrg(r.Context(), orgID, params)
+	// ?writer= lists one writer's runs; without it, the Article Writer's, so
+	// its tab is unchanged by other writers sharing the tables.
+	writer := strings.TrimSpace(r.URL.Query().Get("writer"))
+	if writer == "" {
+		writer = model.BuiltinArticleWriter
+	}
+	if _, ok := model.BlogWriters[writer]; !ok {
+		RespondError(w, http.StatusBadRequest, "unknown writer")
+		return
+	}
+	result, err := h.svc.ListByWriter(r.Context(), orgID, writer, params)
 	if err != nil {
 		RespondError(w, http.StatusInternalServerError, "failed to list blog runs")
 		return

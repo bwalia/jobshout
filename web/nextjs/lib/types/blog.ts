@@ -129,6 +129,8 @@ export interface BlogRunOptions {
   /** The reader and sector the run was asked for; Retry replays these. */
   audience?: string;
   industry?: string;
+  /** Which builtin agent the run belongs to; absent is the Article Writer. */
+  writer?: string;
 }
 
 /**
@@ -205,6 +207,13 @@ export interface GenerateBlogRequest {
   /** The run's default reader and sector; every brief inherits them. */
   audience?: string;
   industry?: string;
+  /** Which builtin agent the run belongs to; omitted is the Article Writer. */
+  writer?: string;
+  /** Discover a trending topic instead of taking one from `briefs`. */
+  trending?: boolean;
+  trending_count?: number;
+  /** Files the finished articles in the CMS without waiting for a click. */
+  auto_publish?: boolean;
 }
 
 /**
@@ -216,6 +225,10 @@ export interface BlogConfig {
   can_publish: boolean;
   /** Whether JobShout.com Insights is reachable, for "Send to Insights". */
   can_publish_insights: boolean;
+  /** Whether the Content Writer's "Publish live" works end to end. */
+  can_publish_live?: boolean;
+  /** This ring's public jobshout.com site, for links to published articles. */
+  insights_site_url?: string;
   /**
    * The provider the writing pipeline is bound to at startup. The model picker
    * filters on it: the pipeline sends a bare model name to this one provider,

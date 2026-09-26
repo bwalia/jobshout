@@ -27,10 +27,18 @@ pub use repo::ListQuery;
 use repo::{InsightRepository, ItemRecord};
 pub use rules::{Actor, Moderation};
 
+/// The synthetic address an agent's submissions are filed under.
+fn agent_email(name: &str) -> String {
+    format!("{}@agents.jobshout.com", rules::slugify(name.trim()))
+}
+
 #[derive(Clone)]
 pub struct InsightService {
     repo: InsightRepository,
     staff: Arc<HashSet<String>>,
+    /// Agent addresses whose submissions publish directly (see
+    /// `with_trusted_agents`).
+    trusted_agents: Arc<HashSet<String>>,
 }
 
 impl InsightService {
@@ -46,7 +54,31 @@ impl InsightService {
                     .filter(|e| !e.is_empty())
                     .collect(),
             ),
+            trusted_agents: Arc::new(HashSet::new()),
         }
+    }
+
+    /// Agents, by the name they submit as (e.g. "JobShout.com Content Writer"),
+    /// whose submitted items are published without review.
+    ///
+    /// Only for an agent whose platform already requires a person to approve
+    /// the item before sending it — the Content Writer sends an article only
+    /// when someone publishes it live — so the review queue would be a second
+    /// approval of the same decision. Every other agent still goes to review.
+    pub fn with_trusted_agents(mut self, names: impl IntoIterator<Item = String>) -> Self {
+        self.trusted_agents = Arc::new(
+            names
+                .into_iter()
+                .map(|n| n.trim().to_string())
+                .filter(|n| !n.is_empty())
+                .map(|n| agent_email(&n))
+                .collect(),
+        );
+        self
+    }
+
+    fn trusts(&self, actor: &Actor) -> bool {
+        actor.agent && self.trusted_agents.contains(&actor.email)
     }
 
     pub fn actor(&self, email: &str, name: &str) -> Actor {
@@ -70,7 +102,7 @@ impl InsightService {
             ));
         }
         Ok(Actor {
-            email: format!("{}@agents.jobshout.com", rules::slugify(name)),
+            email: agent_email(name),
             name: format!("JobShout {name}"),
             is_staff: false,
             agent: true,
@@ -172,7 +204,7 @@ impl InsightService {
         let kind = input
             .kind
             .ok_or_else(|| DomainError::Validation("kind is required".into()))?;
-        let status = rules::status_on_save(actor.source(), input.submit);
+        let status = rules::status_on_create(actor.source(), input.submit, self.trusts(actor));
         let base = rules::slugify(&input.title);
         let slug = rules::next_free_slug(&base, &self.repo.slugs_like(&base).await?);
         let mut rec = self.record(kind, &input, status).await?;

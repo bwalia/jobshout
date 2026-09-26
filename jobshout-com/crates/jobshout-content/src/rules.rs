@@ -60,6 +60,16 @@ pub fn status_on_save(source: InsightSource, submit: bool) -> InsightStatus {
     }
 }
 
+/// Status a newly created item lands in. As `status_on_save`, except that an
+/// agent jobshout.com trusts (INSIGHTS_TRUSTED_AGENTS) publishes a submitted
+/// item directly: its platform only sends an item after a person approved it.
+pub fn status_on_create(source: InsightSource, submit: bool, trusted_agent: bool) -> InsightStatus {
+    match (source, submit, trusted_agent) {
+        (InsightSource::Agent, true, true) => InsightStatus::Published,
+        _ => status_on_save(source, submit),
+    }
+}
+
 /// Authors edit their own work until it is published; staff edit anything.
 pub fn check_can_edit(actor: &Actor, item: &Insight) -> Result<(), DomainError> {
     if actor.is_staff {
@@ -405,6 +415,28 @@ pub(crate) mod tests {
         );
         assert_eq!(
             status_on_save(bot.source(), false),
+            InsightStatus::PendingReview
+        );
+    }
+
+    #[test]
+    fn only_trusted_agents_publish_directly() {
+        assert_eq!(
+            status_on_create(InsightSource::Agent, true, true),
+            InsightStatus::Published
+        );
+        // An untrusted agent, or a trusted one saving a draft, still goes to review.
+        assert_eq!(
+            status_on_create(InsightSource::Agent, true, false),
+            InsightStatus::PendingReview
+        );
+        assert_eq!(
+            status_on_create(InsightSource::Agent, false, true),
+            InsightStatus::PendingReview
+        );
+        // Trust is for agents only; it never lifts a community author.
+        assert_eq!(
+            status_on_create(InsightSource::Community, true, true),
             InsightStatus::PendingReview
         );
     }

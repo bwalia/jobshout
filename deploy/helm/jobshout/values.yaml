@@ -90,6 +90,9 @@ cms:
 # mounted here. Empty apiURL turns the destination off.
 insights:
   apiURL: "http://jobshout-com-api:8088"
+  # The public jobshout.com site for this ring, for "View on jobshout.com"
+  # links on published articles. Set per ring.
+  siteURL: ""
 
 # In-cluster nginx gateway. The wslproxy edge routes the whole host to a single
 # backend, so the ingress points at this gateway and nginx fans traffic out by

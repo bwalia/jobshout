@@ -51,6 +51,10 @@ const (
 	// with its own steps so a run's trace shows which one did what.
 	BlogStepInsightsSending = "insights_sending"
 	BlogStepInsightsSent    = "insights_sent"
+	// Publishing live: the CMS draft goes public and the article is published
+	// on jobshout.com in the same action (JobShout.com Content Writer).
+	BlogStepGoingLive = "going_live"
+	BlogStepLive      = "live"
 )
 
 // Step statuses. A step is pending until it starts, running while it is the
@@ -184,6 +188,9 @@ type BlogRunOptions struct {
 	// for the same reader the second time.
 	Audience string `json:"audience,omitempty"`
 	Industry string `json:"industry,omitempty"`
+	// Writer is the builtin the run belongs to, so a retry is attributed to the
+	// same agent. Empty is the Article Writer.
+	Writer string `json:"writer,omitempty"`
 }
 
 // RunOptions extracts what a run records about how it was asked to work.
@@ -196,6 +203,7 @@ func (r *GenerateBlogRequest) RunOptions() BlogRunOptions {
 		AutoPublish:   r.AutoPublish,
 		Audience:      r.Audience,
 		Industry:      r.Industry,
+		Writer:        r.Writer,
 	}
 }
 
@@ -375,6 +383,11 @@ type GenerateBlogRequest struct {
 	Audience string `json:"audience,omitempty"`
 	// Industry is the run's default sector framing, inherited the same way.
 	Industry string `json:"industry,omitempty"`
+	// Writer is which builtin agent the run belongs to — a key of BlogWriters.
+	// Empty is the Article Writer. It decides whose tab the run appears on and
+	// what happens after writing, so an unknown value is rejected rather than
+	// quietly filed under the Article Writer.
+	Writer string `json:"writer,omitempty"`
 }
 
 // Normalize folds the legacy Topics field into Briefs and trims empties, so
@@ -382,7 +395,17 @@ type GenerateBlogRequest struct {
 func (r *GenerateBlogRequest) Normalize() {
 	// The run's reader and sector are settled first, so every brief below can
 	// inherit them and no consumer has to know the precedence.
+	r.Writer = strings.ToLower(strings.TrimSpace(r.Writer))
+	if r.Writer == BuiltinArticleWriter {
+		r.Writer = ""
+	}
 	r.Audience = audience.Normalize(r.Audience)
+	// The Content Writer writes for one reader. A request that names no
+	// audience — a schedule, a chat launch — gets that one rather than the
+	// developer default, which would be the wrong piece for jobshout.com.
+	if r.Writer == BuiltinJobShoutComWriter && r.Audience == "" {
+		r.Audience = audience.InsightsKey
+	}
 	r.Industry = audience.NormalizeIndustry(r.Industry)
 
 	briefs := make([]BlogBrief, 0, len(r.Briefs)+len(r.Topics))
@@ -493,6 +516,11 @@ func (r *GenerateBlogRequest) resolveIndustry(brief string) string {
 // conditional: briefs are required unless the run is discovering its own
 // topics, and `validate:"required"` cannot express that.
 func (r *GenerateBlogRequest) Validate() error {
+	if r.Writer != "" {
+		if _, ok := BlogWriters[r.Writer]; !ok {
+			return fmt.Errorf("unknown writer %q", r.Writer)
+		}
+	}
 	// Rejected rather than defaulted. A typo'd audience that quietly wrote a
 	// developer article would look exactly like a schedule working correctly,
 	// and nobody checks a nightly job that is producing articles.
