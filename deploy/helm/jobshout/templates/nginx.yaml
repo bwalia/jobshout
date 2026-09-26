@@ -19,6 +19,10 @@ spec:
         # Roll the gateway when its config changes.
         checksum/config: {{ include (print $.Template.BasePath "/nginx-config.yaml") . | sha256sum }}
     spec:
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: nginx
           image: {{ .Values.gateway.image }}

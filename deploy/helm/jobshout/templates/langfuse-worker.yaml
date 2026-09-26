@@ -18,6 +18,10 @@ spec:
       labels:
         {{- include "jobshout.selector" (dict "name" "langfuse-worker") | nindent 8 }}
     spec:
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: langfuse-worker
           image: {{ .Values.langfuse.workerImage }}
