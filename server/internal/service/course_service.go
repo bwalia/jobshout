@@ -180,7 +180,7 @@ func (s *courseService) execute(ctx context.Context, run *model.CourseRun, agent
 	tracker := &courseSteps{steps: run.Steps}
 	chapters := 0
 
-	err := s.gen.Generate(ctx, course.Job{OrgID: run.OrgID, UserID: run.RequestedBy, Brief: run.Brief}, course.Hooks{
+	err := s.gen.Generate(ctx, course.Job{RunID: run.ID, OrgID: run.OrgID, UserID: run.RequestedBy, Brief: run.Brief}, course.Hooks{
 		Step: func(key, detail string) {
 			if err := s.repo.UpdateSteps(pctx, run.ID, tracker.advance(key, detail)); err != nil {
 				log.Warn("course: persist steps", zap.Error(err))

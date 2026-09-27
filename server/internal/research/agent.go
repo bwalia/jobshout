@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -110,6 +111,10 @@ type AgentConfig struct {
 	MaxSources int
 	// FetchConcurrency bounds simultaneous retrievals.
 	FetchConcurrency int
+	// ExtractConcurrency bounds simultaneous extraction calls. Each document is
+	// extracted independently, so running them one after another only adds
+	// their latencies together. Zero or less means defaultExtractConcurrency.
+	ExtractConcurrency int
 	// MinFindings is the floor below which the brief is reported unusable.
 	MinFindings int
 }
@@ -117,17 +122,26 @@ type AgentConfig struct {
 // DefaultAgentConfig returns the standard bounds.
 func DefaultAgentConfig() AgentConfig {
 	return AgentConfig{
-		MaxQueries:       4,
-		MaxSources:       6,
-		FetchConcurrency: 3,
-		MinFindings:      3,
+		MaxQueries:         4,
+		MaxSources:         6,
+		FetchConcurrency:   3,
+		ExtractConcurrency: defaultExtractConcurrency,
+		MinFindings:        3,
 	}
 }
+
+// defaultExtractConcurrency is a small bound on purpose: extraction calls hit
+// the same model server, which queues what it cannot run in parallel, and a
+// queued request still counts against the client's HTTP timeout.
+const defaultExtractConcurrency = 3
 
 // NewAgent wires a Research Agent.
 func NewAgent(sources *Client, llmClient llm.Client, cfg AgentConfig, logger *zap.Logger) *Agent {
 	if cfg.MaxQueries <= 0 {
 		cfg = DefaultAgentConfig()
+	}
+	if cfg.ExtractConcurrency <= 0 {
+		cfg.ExtractConcurrency = defaultExtractConcurrency
 	}
 	return &Agent{sources: sources, llm: llmClient, cfg: cfg, logger: logger}
 }
@@ -198,7 +212,9 @@ func (a *Agent) Research(ctx context.Context, req Request, progress ProgressFunc
 	if budget > 0 {
 		// 1. Plan — turn the topic and the caller's guidance into search queries.
 		progress.report(PhasePlanning, fmt.Sprintf("Planning research for %q", topic))
+		planStart := time.Now()
 		queries, err := a.plan(ctx, req)
+		a.logPhase("plan", planStart, err, zap.Int("queries", len(queries)))
 		if err != nil {
 			return nil, err
 		}
@@ -859,20 +875,74 @@ func broadenQueries(topic string, planned []string) []string {
 const docExcerptChars = 6000
 
 // extractAll pulls claims from every document.
+//
+// Documents are independent, so up to ExtractConcurrency run at once. Each
+// result lands in its document's slot and the slots are merged in document
+// order afterwards, so findings and warnings come out exactly as they did when
+// this loop was sequential. A document that fails is a warning, not an error,
+// as before; once ctx is cancelled no further extractions start.
 func (a *Agent) extractAll(ctx context.Context, req Request, docs []Document, brief *Brief) []Finding {
-	var out []Finding
+	start := time.Now()
+	found := make([][]Finding, len(docs))
+	errs := make([]error, len(docs))
+
+	sem := make(chan struct{}, a.cfg.ExtractConcurrency)
+	var wg sync.WaitGroup
 	for i := range docs {
-		found, err := a.extract(ctx, req, docs[i])
-		if err != nil {
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+		}
+		if err := ctx.Err(); err != nil {
+			// The slot may have been won in the same instant as the cancel.
+			select {
+			case <-sem:
+			default:
+			}
+			for j := i; j < len(docs); j++ {
+				errs[j] = err
+			}
+			break
+		}
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			found[i], errs[i] = a.extract(ctx, req, docs[i])
+		}(i)
+	}
+	wg.Wait()
+
+	var out []Finding
+	failed := 0
+	for i := range docs {
+		if err := errs[i]; err != nil {
+			failed++
 			brief.Warnings = append(brief.Warnings,
 				fmt.Sprintf("could not extract claims from %s: %v", docs[i].URL, err))
 			a.logger.Warn("research: extraction failed",
 				zap.String("url", docs[i].URL), zap.Error(err))
 			continue
 		}
-		out = append(out, found...)
+		out = append(out, found[i]...)
 	}
+	a.logPhase("extraction", start, ctx.Err(),
+		zap.Int("documents", len(docs)),
+		zap.Int("failed", failed),
+		zap.Int("findings", len(out)),
+		zap.Int("concurrency", a.cfg.ExtractConcurrency))
 	return out
+}
+
+// logPhase records how long a research phase took. It logs counts, never
+// prompt or document text.
+func (a *Agent) logPhase(phase string, start time.Time, err error, fields ...zap.Field) {
+	fields = append(fields, zap.String("phase", phase), zap.Duration("duration", time.Since(start)))
+	if err != nil {
+		a.logger.Warn("research: phase failed", append(fields, zap.Error(err))...)
+		return
+	}
+	a.logger.Info("research: phase done", fields...)
 }
 
 // extract asks the model what one document establishes.
@@ -1134,7 +1204,7 @@ Use only the findings above. Do not introduce facts that are not present in them
 Respond with the summary text only — no preamble, no JSON, no bullet points.`,
 		req.Topic, b.String())
 
-	resp, err := a.generateBounded(ctx, req.Model, prompt, maxSummaryTokens)
+	resp, err := a.generateBounded(ctx, req.Model, prompt, maxSummaryTokens, false)
 	if err != nil {
 		return "", err
 	}
@@ -1162,8 +1232,10 @@ const (
 	maxSummaryTokens = 800
 )
 
+// generate asks for a structured JSON reply. Its only caller is the planner,
+// which decodes JSON without a retry.
 func (a *Agent) generate(ctx context.Context, model, prompt string) (string, error) {
-	return a.generateBounded(ctx, model, prompt, maxResearchTokens)
+	return a.generateBounded(ctx, model, prompt, maxResearchTokens, true)
 }
 
 // generateJSON asks for a JSON reply and decodes it into v, repairing what it
@@ -1173,7 +1245,7 @@ func (a *Agent) generateJSON(
 ) error {
 	return llm.GenerateJSON(ctx, stage, prompt, v,
 		func(ctx context.Context, p string) (string, error) {
-			return a.generateBounded(ctx, model, p, maxTokens)
+			return a.generateBounded(ctx, model, p, maxTokens, true)
 		},
 		func(reply string, err error) {
 			a.logger.Warn("research: could not parse the model's JSON, asking again",
@@ -1183,10 +1255,14 @@ func (a *Agent) generateJSON(
 	)
 }
 
-func (a *Agent) generateBounded(ctx context.Context, model, prompt string, maxTokens int) (string, error) {
+// generateBounded makes one bounded call. jsonMode requests a reply
+// constrained to JSON (see llm.GenerateRequest.JSON); every structured stage
+// sets it, the free-text synthesis does not.
+func (a *Agent) generateBounded(ctx context.Context, model, prompt string, maxTokens int, jsonMode bool) (string, error) {
 	resp, err := a.llm.Generate(ctx, llm.GenerateRequest{
 		Model:     model,
 		MaxTokens: maxTokens,
+		JSON:      jsonMode,
 		Messages:  []llm.Message{{Role: llm.RoleUser, Content: prompt}},
 	})
 	if err != nil {
