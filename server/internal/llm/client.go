@@ -72,6 +72,12 @@ type GenerateRequest struct {
 	// it is a no-op. Callers that set it should budget MaxTokens generously:
 	// thinking tokens count against the same limit as the answer.
 	Think bool
+	// JSON asks for a reply constrained to a JSON value. On Ollama it sends
+	// format:"json" and forces thinking off, so a reasoning model cannot write
+	// its monologue into the content ahead of the JSON — the failure that made
+	// every structured stage of a qwen3 run parse-fail and retry. Other
+	// providers ignore it today; callers must still decode tolerantly.
+	JSON bool
 	// OnToken, when set, receives each content chunk as it arrives from a
 	// streaming provider, before the full Content is returned on the response.
 	// It is a process-local callback, never serialised; clients that do not

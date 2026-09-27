@@ -169,7 +169,10 @@ type ollamaChatRequest struct {
 	// models whose discovery capabilities include "thinking", because sending
 	// think:true to a model without the capability is an error on some Ollama
 	// builds. Models with no thinking phase ignore the field when false.
-	Think   bool          `json:"think"`
+	Think bool `json:"think"`
+	// Format is "json" when the caller set GenerateRequest.JSON: Ollama then
+	// constrains decoding to a JSON value. Empty leaves the reply free-form.
+	Format  string        `json:"format,omitempty"`
 	Options ollamaOptions `json:"options,omitempty"`
 	// Tools carries native function definitions. Only attached when the
 	// resolved model advertises the "tools" capability — sending them to a
@@ -274,8 +277,11 @@ func (c *OllamaClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 		Model:    model,
 		Messages: msgs,
 		Stream:   true,
-		Think:    req.Think && c.modelSupportsThinking(ctx, model),
+		Think:    req.Think && !req.JSON && c.modelSupportsThinking(ctx, model),
 		Options:  opts,
+	}
+	if req.JSON {
+		body.Format = "json"
 	}
 	if len(req.ToolDefs) > 0 && c.modelSupportsTools(ctx, model) {
 		body.Tools = make([]ollamaTool, len(req.ToolDefs))

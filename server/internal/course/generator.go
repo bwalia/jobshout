@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -39,6 +41,8 @@ type Illustrator interface {
 
 // Job is one course to generate.
 type Job struct {
+	// RunID tags the phase timing logs; it is optional.
+	RunID  uuid.UUID
 	OrgID  uuid.UUID
 	UserID *uuid.UUID
 	Brief  model.CourseBrief
@@ -95,7 +99,17 @@ func (g *Generator) Generate(ctx context.Context, job Job, h Hooks) error {
 	h = h.withDefaults()
 	b := job.Brief
 
+	total := g.phase(job, "total", zap.Int("chapters", b.ChapterCount))
+	err := g.generate(ctx, job, h)
+	total(err)
+	return err
+}
+
+func (g *Generator) generate(ctx context.Context, job Job, h Hooks) error {
+	b := job.Brief
+
 	h.Step(model.CourseStepResearching, b.Topic)
+	done := g.phase(job, "research")
 	brief, err := g.researcher.Research(ctx, research.Request{
 		Topic:   b.Topic,
 		Context: strings.TrimSpace(b.Audience + "\n" + b.Context),
@@ -103,6 +117,7 @@ func (g *Generator) Generate(ctx context.Context, job Job, h Hooks) error {
 		Seeds:   b.SeedURLs,
 		Model:   g.modelFor(b),
 	}, nil)
+	done(err)
 	if err != nil {
 		return fmt.Errorf("research: %w", err)
 	}
@@ -115,7 +130,9 @@ func (g *Generator) Generate(ctx context.Context, job Job, h Hooks) error {
 	notes := researchNotes(brief, maxNoteFindings)
 
 	h.Step(model.CourseStepOutlining, "")
+	done = g.phase(job, "outline")
 	outline, err := g.outline(ctx, b, notes, h)
+	done(err)
 	if err != nil {
 		return err
 	}
@@ -129,7 +146,10 @@ func (g *Generator) Generate(ctx context.Context, job Job, h Hooks) error {
 
 	if g.imagesEnabled() {
 		h.Step(model.CourseStepIllustrating, "course cover")
-		if url, err := g.illustrator.Illustrate(ctx, job.OrgID, job.UserID, coverPrompt(outline), 1536, 864); err != nil {
+		done = g.phase(job, "cover")
+		url, err := g.illustrator.Illustrate(ctx, job.OrgID, job.UserID, coverPrompt(outline), 1536, 864)
+		done(err)
+		if err != nil {
 			h.Warn("cover image: " + err.Error())
 		} else if err := h.Cover(url); err != nil {
 			return fmt.Errorf("save cover: %w", err)
@@ -239,8 +259,12 @@ func (g *Generator) chapter(ctx context.Context, job Job, o *model.CourseOutline
 	plan := o.Chapters[idx]
 	label := fmt.Sprintf("%d/%d: %s", idx+1, len(o.Chapters), plan.Title)
 
+	chapter := zap.Int("chapter", idx+1)
+
 	h.Step(model.CourseStepWriting, label)
+	done := g.phase(job, "write", chapter)
 	md, err := g.text(ctx, chapterPrompt(b, o, idx, notes), maxChapterTokens, b)
+	done(err)
 	if err != nil {
 		return nil, fmt.Errorf("write: %w", err)
 	}
@@ -252,10 +276,15 @@ func (g *Generator) chapter(ctx context.Context, job Job, o *model.CourseOutline
 	var review struct {
 		Issues looseStrings `json:"issues"`
 	}
-	if err := g.json(ctx, "review", reviewPrompt(b, plan.Title, md), maxReviewTokens, b, &review); err != nil {
+	done = g.phase(job, "review", chapter)
+	err = g.json(ctx, "review", reviewPrompt(b, plan.Title, md), maxReviewTokens, b, &review)
+	done(err)
+	if err != nil {
 		h.Warn(fmt.Sprintf("chapter %d review skipped: %v", idx+1, err))
 	} else if issues := capList(review.Issues, maxReviewIssues); len(issues) > 0 {
+		done = g.phase(job, "revise", chapter, zap.Int("issues", len(issues)))
 		revised, err := g.text(ctx, revisePrompt(b, plan.Title, md, issues), maxChapterTokens, b)
+		done(err)
 		switch {
 		case err != nil:
 			h.Warn(fmt.Sprintf("chapter %d revision failed, keeping draft: %v", idx+1, err))
@@ -268,7 +297,9 @@ func (g *Generator) chapter(ctx context.Context, job Job, o *model.CourseOutline
 	var images []model.CourseImage
 	if g.imagesEnabled() {
 		h.Step(model.CourseStepIllustrating, label)
+		done = g.phase(job, "illustrate", chapter)
 		url, err := g.illustrator.Illustrate(ctx, job.OrgID, job.UserID, illustrationPrompt(o.Title, plan.Title, plan.Summary), 1280, 720)
+		done(err)
 		if err != nil {
 			h.Warn(fmt.Sprintf("chapter %d image: %v", idx+1, err))
 		} else {
@@ -279,7 +310,10 @@ func (g *Generator) chapter(ctx context.Context, job Job, o *model.CourseOutline
 	h.Step(model.CourseStepQuizzing, label)
 	var quiz *model.CourseQuiz
 	var qw quizWire
-	if err := g.json(ctx, "quiz", quizPrompt(b, plan.Title, md), maxQuizTokens, b, &qw); err != nil {
+	done = g.phase(job, "quiz", chapter)
+	err = g.json(ctx, "quiz", quizPrompt(b, plan.Title, md), maxQuizTokens, b, &qw)
+	done(err)
+	if err != nil {
 		h.Warn(fmt.Sprintf("chapter %d quiz: %v", idx+1, err))
 	} else if q, err := validateQuiz(qw); err != nil {
 		h.Warn(fmt.Sprintf("chapter %d %v", idx+1, err))
@@ -312,9 +346,17 @@ func (g *Generator) modelFor(b model.CourseBrief) string {
 }
 
 func (g *Generator) text(ctx context.Context, prompt string, maxTokens int, b model.CourseBrief) (string, error) {
+	return g.generateText(ctx, prompt, maxTokens, b, false)
+}
+
+// generateText makes one call. jsonMode constrains the reply to JSON (see
+// llm.GenerateRequest.JSON); the structured stages set it, chapter prose does
+// not.
+func (g *Generator) generateText(ctx context.Context, prompt string, maxTokens int, b model.CourseBrief, jsonMode bool) (string, error) {
 	resp, err := g.llm.Generate(ctx, llm.GenerateRequest{
 		Model:     g.modelFor(b),
 		MaxTokens: maxTokens,
+		JSON:      jsonMode,
 		Messages: []llm.Message{
 			{Role: llm.RoleSystem, Content: systemPrompt},
 			{Role: llm.RoleUser, Content: prompt},
@@ -326,13 +368,36 @@ func (g *Generator) text(ctx context.Context, prompt string, maxTokens int, b mo
 	return strings.TrimSpace(resp.Content), nil
 }
 
+// json asks for a JSON reply. llm.GenerateJSON retries once with a corrective
+// instruction when the reply cannot be decoded, and returns a DecodeError if
+// the retry fails too — never more than two calls per stage.
 func (g *Generator) json(ctx context.Context, stage, prompt string, maxTokens int, b model.CourseBrief, v any) error {
 	return llm.GenerateJSON(ctx, stage, prompt, v,
-		func(ctx context.Context, p string) (string, error) { return g.text(ctx, p, maxTokens, b) },
+		func(ctx context.Context, p string) (string, error) { return g.generateText(ctx, p, maxTokens, b, true) },
 		func(_ string, err error) {
-			g.logger.Debug("course: retrying unparseable JSON", zap.String("stage", stage), zap.Error(err))
+			g.logger.Warn("course: unparseable JSON, retrying once", zap.String("stage", stage), zap.Error(err))
 		},
 	)
+}
+
+// phase logs the start of a pipeline phase and returns a func that logs its
+// outcome and duration. It logs identifiers and counts, never prompt or
+// chapter text.
+func (g *Generator) phase(job Job, name string, fields ...zap.Field) func(error) {
+	fields = append(slices.Clip(fields), zap.String("phase", name))
+	if job.RunID != uuid.Nil {
+		fields = append(fields, zap.String("course_run_id", job.RunID.String()))
+	}
+	g.logger.Info("course: phase start", fields...)
+	start := time.Now()
+	return func(err error) {
+		out := append(slices.Clip(fields), zap.Duration("duration", time.Since(start)))
+		if err != nil {
+			g.logger.Warn("course: phase failed", append(out, zap.Error(err))...)
+			return
+		}
+		g.logger.Info("course: phase done", out...)
+	}
 }
 
 // stripFence removes a ```markdown wrapper some models put around the reply.

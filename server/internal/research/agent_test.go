@@ -22,6 +22,7 @@ type scriptedLLM struct {
 	prompts []string
 	// failOn makes any prompt containing this substring return an error.
 	failOn string
+	mu     sync.Mutex
 }
 
 type scriptedResponse struct {
@@ -33,7 +34,10 @@ func (s *scriptedLLM) ProviderName() string { return "scripted" }
 
 func (s *scriptedLLM) Generate(_ context.Context, req llm.GenerateRequest) (*llm.GenerateResponse, error) {
 	prompt := req.Messages[len(req.Messages)-1].Content
+	// Extraction runs concurrently, so recording must be safe for it.
+	s.mu.Lock()
 	s.prompts = append(s.prompts, prompt)
+	s.mu.Unlock()
 
 	if s.failOn != "" && strings.Contains(prompt, s.failOn) {
 		return nil, fmt.Errorf("scripted failure")

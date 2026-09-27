@@ -171,12 +171,16 @@ func (r *courseRepository) AppendWarning(ctx context.Context, id uuid.UUID, warn
 	return err
 }
 
+// Transition moves a run to status unless it is already terminal. $2 is cast
+// explicitly: it appears both as the varchar column value and inside IN (...),
+// and without the cast Postgres deduces two types for it and rejects the
+// statement (SQLSTATE 42P08) — which left every finished run stuck "running".
 func (r *courseRepository) Transition(ctx context.Context, id uuid.UUID, status string, errMsg *string) (bool, error) {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE course_runs SET
-			status=$2,
+			status=$2::varchar,
 			error_message=COALESCE($3, error_message),
-			completed_at=CASE WHEN $2 IN ('completed','failed','cancelled') THEN NOW() ELSE completed_at END,
+			completed_at=CASE WHEN $2::varchar IN ('completed','failed','cancelled') THEN NOW() ELSE completed_at END,
 			updated_at=NOW()
 		WHERE id=$1 AND status NOT IN ('completed','failed','cancelled')`,
 		id, status, errMsg)
