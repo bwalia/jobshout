@@ -15,6 +15,10 @@ info:
     Live updates: `GET /ws` (WebSocket, same bearer header). Frames are
     `LiveEvent`s and are hints to refetch, not state; keep polling as the
     source of truth.
+
+    Response fields that carry a status are plain strings with their values
+    documented, not enums, so a new server-side value can't break a client's
+    decoding.
 servers:
   - url: https://int.jobshout.co.uk/api/v1
     description: int
@@ -548,7 +552,7 @@ components:
         role: { type: string }
         description: { type: [string, 'null'] }
         avatar_url: { type: [string, 'null'] }
-        status: { type: string, enum: [idle, active, paused, offline] }
+        status: { type: string, description: 'idle, active, paused or offline. Treat unknown values as idle.' }
         model_name: { type: [string, 'null'] }
         performance_score: { type: number }
         engine_type: { type: string }
@@ -559,14 +563,16 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     AgentPage:
-      allOf:
-        - $ref: '#/components/schemas/PageMeta'
-        - type: object
-          required: [data]
-          properties:
-            data:
-              type: array
-              items: { $ref: '#/components/schemas/Agent' }
+      type: object
+      required: [data, total, page, per_page, total_pages]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Agent' }
+        total: { type: integer }
+        page: { type: integer }
+        per_page: { type: integer }
+        total_pages: { type: integer }
     AgentSchema:
       type: object
       required: [builtin, fields]
@@ -618,7 +624,7 @@ components:
         project_id: { type: string, format: uuid }
         title: { type: string }
         description: { type: [string, 'null'] }
-        status: { $ref: '#/components/schemas/TaskStatus' }
+        status: { type: string, description: 'backlog, todo, in_progress, review or done.' }
         priority: { type: string }
         assigned_agent_id: { type: [string, 'null'], format: uuid }
         created_at: { type: string, format: date-time }
@@ -628,14 +634,16 @@ components:
         last_run_status: { type: string }
         last_run_at: { type: string, format: date-time }
     TaskPage:
-      allOf:
-        - $ref: '#/components/schemas/PageMeta'
-        - type: object
-          required: [data]
-          properties:
-            data:
-              type: array
-              items: { $ref: '#/components/schemas/Task' }
+      type: object
+      required: [data, total, page, per_page, total_pages]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Task' }
+        total: { type: integer }
+        page: { type: integer }
+        per_page: { type: integer }
+        total_pages: { type: integer }
     TaskRun:
       type: object
       required: [id, task_id, agent_id, status]
@@ -644,21 +652,23 @@ components:
         task_id: { type: string, format: uuid }
         agent_id: { type: string, format: uuid }
         execution_id: { type: [string, 'null'], format: uuid }
-        status: { type: string, enum: [queued, running, completed, failed] }
+        status: { type: string, description: 'queued, running, completed or failed.' }
         output: { type: [string, 'null'] }
         error_message: { type: [string, 'null'] }
         total_tokens: { type: integer }
         cost_usd: { type: number }
         latency_ms: { type: integer }
     TaskRunPage:
-      allOf:
-        - $ref: '#/components/schemas/PageMeta'
-        - type: object
-          required: [data]
-          properties:
-            data:
-              type: array
-              items: { $ref: '#/components/schemas/TaskRun' }
+      type: object
+      required: [data, total, page, per_page, total_pages]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/TaskRun' }
+        total: { type: integer }
+        page: { type: integer }
+        per_page: { type: integer }
+        total_pages: { type: integer }
     LaunchRequest:
       type: object
       required: [agent_id]
@@ -692,7 +702,7 @@ components:
         tool_input:
           type: object
           additionalProperties: true
-        status: { type: string, enum: [pending, approved, rejected] }
+        status: { type: string, description: 'pending, approved or rejected.' }
         reason: { type: [string, 'null'] }
         requested_at: { type: string, format: date-time }
         decided_by: { type: [string, 'null'], format: uuid }
@@ -705,18 +715,18 @@ components:
         id: { type: string, format: uuid }
         name: { type: string }
         description: { type: [string, 'null'] }
-        task_type: { type: string, enum: [agent, workflow, multi_agent, blog, career_scan, career_apply] }
+        task_type: { type: string }
         agent_id: { type: [string, 'null'], format: uuid }
         input_prompt: { type: string }
         input_json:
           type: object
           additionalProperties: true
-        schedule_type: { type: string, enum: [cron, interval, once] }
+        schedule_type: { type: string, description: 'cron, interval or once.' }
         cron_expression: { type: [string, 'null'] }
         interval_seconds: { type: [integer, 'null'] }
         run_at: { type: [string, 'null'], format: date-time }
         schedule_preset: { type: string }
-        status: { type: string, enum: [active, paused, completed, failed] }
+        status: { type: string, description: 'active, paused, completed or failed.' }
         last_run_at: { type: [string, 'null'], format: date-time }
         next_run_at: { type: [string, 'null'], format: date-time }
         run_count: { type: integer }
@@ -756,23 +766,17 @@ components:
         status: { type: string, enum: [active, paused, completed] }
         max_runs: { type: integer }
     SchedulePage:
-      allOf:
-        - $ref: '#/components/schemas/PageMeta'
-        - type: object
-          required: [data]
-          properties:
-            data:
-              type: array
-              items: { $ref: '#/components/schemas/Schedule' }
-
-    PageMeta:
       type: object
-      required: [total, page, per_page, total_pages]
+      required: [data, total, page, per_page, total_pages]
       properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Schedule' }
         total: { type: integer }
         page: { type: integer }
         per_page: { type: integer }
         total_pages: { type: integer }
+
 
     LiveEvent:
       type: object
@@ -780,14 +784,7 @@ components:
       properties:
         type:
           type: string
-          enum:
-            - task.transitioned
-            - task.assigned
-            - agent.status_changed
-            - execution.status_changed
-            - approval.requested
-            - approval.decided
-            - metrics.updated
+          description: 'task.transitioned, task.assigned, agent.status_changed, execution.status_changed, approval.requested, approval.decided or metrics.updated. Ignore unknown types.'
         payload:
           type: object
           additionalProperties: true
