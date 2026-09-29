@@ -1,0 +1,116 @@
+# XcodeGen spec. Generate the project with `xcodegen` (see README.md); the
+# .xcodeproj is not committed.
+name: JobShout
+options:
+  bundleIdPrefix: com.jobshout
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+  defaultConfig: Debug
+
+# Debug talks to int, Staging to acc, Release to prod. Each has its own bundle
+# id so all three install side by side; every one must be listed in the
+# ring's APPLE_CLIENT_IDS for Sign in with Apple to accept its tokens.
+configs:
+  Debug: debug
+  Staging: release
+  Release: release
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    # Set your team locally or via xcodebuild DEVELOPMENT_TEAM=...; never commit it.
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+  configs:
+    Debug:
+      JOBSHOUT_ENVIRONMENT: int
+      PRODUCT_BUNDLE_IDENTIFIER: com.jobshout.app.dev
+      APS_ENVIRONMENT: development
+    Staging:
+      JOBSHOUT_ENVIRONMENT: acc
+      PRODUCT_BUNDLE_IDENTIFIER: com.jobshout.app.staging
+      APS_ENVIRONMENT: production
+    Release:
+      JOBSHOUT_ENVIRONMENT: prod
+      PRODUCT_BUNDLE_IDENTIFIER: com.jobshout.app
+      APS_ENVIRONMENT: production
+
+packages:
+  JobShoutKit:
+    path: JobShoutKit
+
+targets:
+  JobShout:
+    type: application
+    platform: iOS
+    sources:
+      - App
+    dependencies:
+      - package: JobShoutKit
+        product: JobShoutFeatures
+    settings:
+      base:
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        TARGETED_DEVICE_FAMILY: "1"
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: JobShout
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        JobShoutEnvironment: $(JOBSHOUT_ENVIRONMENT)
+        ITSAppUsesNonExemptEncryption: false
+        LSRequiresIPhoneOS: true
+        UILaunchScreen:
+          UIColorName: AccentColor
+        UIBackgroundModes: [remote-notification]
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        NSFaceIDUsageDescription: Confirm it's you before approving an agent's action.
+        # Only for the debug "local" environment (a server on this Mac).
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    entitlements:
+      path: App/JobShout.entitlements
+      properties:
+        com.apple.developer.applesignin: [Default]
+        aps-environment: $(APS_ENVIRONMENT)
+
+  JobShoutUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - UITests
+    dependencies:
+      - target: JobShout
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.jobshout.app.uitests
+
+schemes:
+  JobShout:
+    build:
+      targets:
+        JobShout: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - JobShoutUITests
+    archive:
+      config: Release
+  JobShout (Staging):
+    build:
+      targets:
+        JobShout: all
+    run:
+      config: Staging
+    archive:
+      config: Staging

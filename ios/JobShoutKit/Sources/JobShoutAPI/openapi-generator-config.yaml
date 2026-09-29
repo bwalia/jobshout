@@ -1,0 +1,7 @@
+# The spec is a symlink to server/api/openapi.yaml: one source of truth, and
+# the Go test there guarantees every operation in it is actually routed.
+generate:
+  - types
+  - client
+accessModifier: public
+namingStrategy: idiomatic
