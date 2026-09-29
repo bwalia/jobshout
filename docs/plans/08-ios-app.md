@@ -11,7 +11,7 @@ This doc maps the product brief (60 sections) onto what the two backends actuall
 | One backend on Rust/Axum | **Two.** Go platform (`server/`, `jobshout.co.uk`) owns identity, agents, tasks, executions, schedules, approvals, budgets, chat, career. Rust (`jobshout-com/`, `jobshout.com`) owns public jobs, profiles, Showcase apps, Insights. |
 | One identity | Go: HS256 JWT (15 min) + rotating opaque refresh token (7 d). Rust: no bearer auth; writes trust `x-jobshout-user-email` signed with the shared `x-jobshout-internal-token` (only Next.js server can send it). |
 | OpenAPI-generated client | No spec in Go. Rust declares `utoipa` but doesn't use it. |
-| WebSocket live status | `GET /api/v1/ws` exists, but **nothing calls `Hub.BroadcastToOrg`**, and `/ws` runs under the 30 s `requestTimeout`, so the socket's context dies at 30 s. |
+| WebSocket live status | `GET /api/v1/ws` exists, but **nothing calls `Hub.BroadcastToOrg`**, so no event is ever sent. (The web client also connects with `?token=`, which the auth middleware ignores.) |
 | Push notifications | None. No device table, no APNs. Notification configs are Slack/Teams/Telegram. |
 | Execution lifecycle state machine | Executions: pending/running/completed/failed/cancelled. Tasks: backlog/todo/in_progress/review/done (not enforced). Cancel is per-specialist only. |
 | Teams (humans + agents) | No teams model in either backend. |
@@ -77,7 +77,7 @@ ios/
 ## Phases
 
 **Phase 1: foundations + the core loop (TestFlight internal).**
-Backend: logout/revoke, device registration, Sign in with Apple, `/ws` timeout exemption + real broadcasts (task transition, execution status, approval requested), OpenAPI for the mobile surface with a route-drift test.
+Backend: logout/revoke, device registration, Sign in with Apple, real WebSocket broadcasts (task transition, execution status, approval requested/decided), OpenAPI for the mobile surface with a route-drift test.
 App: sign in (Apple / email), Agents list → agent detail → schema-driven **Call Agent** → Work list (polled) → Approvals inbox → approve/reject. CI builds and unit-tests the package on every PR touching `ios/`.
 
 **Phase 2: the ecosystem (TestFlight external).**
