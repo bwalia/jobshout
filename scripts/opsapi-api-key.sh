@@ -79,13 +79,13 @@ verify=$(curl -sS -m 30 -X POST "$BASE_URL/auth/2fa/verify" \
 jwt=$(printf '%s' "$verify" | jq -r '.token // empty')
 [[ -n "$jwt" ]] || die "verification failed" "$verify"
 
-# Step 3 — mint the key. Scoped to creating CMS posts and nothing else; a
-# leaked key cannot read data or touch any other module.
+# Step 3 — mint the key. Scoped to creating and updating CMS posts (drafts
+# plus Publish live). A leaked key still cannot touch any other module.
 created=$(curl -sS -m 30 -X POST "$BASE_URL/api/v2/api-keys" \
     -H "Authorization: Bearer $jwt" \
     -H "X-Namespace-Slug: $NAMESPACE" \
     -H "Content-Type: application/json" \
-    -d "$(jq -nc --arg n "$KEY_NAME" '{name:$n, scopes:{cms:["create"]}}')")
+    -d "$(jq -nc --arg n "$KEY_NAME" '{name:$n, scopes:{cms:["create","update","read"]}}')")
 
 key=$(printf '%s' "$created" | jq -r '.data.key // empty')
 [[ -n "$key" ]] || die "key creation failed" "$created"
@@ -93,7 +93,7 @@ key=$(printf '%s' "$created" | jq -r '.data.key // empty')
 # Informational only — guarded with || true so a formatting failure can never
 # suppress the key below, which is shown exactly once.
 printf '%s' "$created" | jq -r --arg ns "$NAMESPACE" --arg base "$BASE_URL" \
-    '"\nCreated API key \"\(.data.name)\" (\(.data.uuid)) in namespace \($ns), scope cms:create.\nThis is the only time the key is shown. Set OPSAPI_API_KEY to it and OPSAPI_NAMESPACE to \($ns).\nRevoke it any time: DELETE \($base)/api/v2/api-keys/\(.data.uuid)\n"' >&2 \
+    '"\nCreated API key \"\(.data.name)\" (\(.data.uuid)) in namespace \($ns), scopes cms:create+update+read.\nThis is the only time the key is shown. Set OPSAPI_API_KEY to it and OPSAPI_NAMESPACE to \($ns).\nRevoke it any time: DELETE \($base)/api/v2/api-keys/\(.data.uuid)\n"' >&2 \
     || true
 
 echo "$key"

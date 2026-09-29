@@ -66,13 +66,20 @@ func (s *blogService) PublishLive(ctx context.Context, orgID uuid.UUID, runID uu
 	}
 
 	postArticle := make(map[string]uuid.UUID, len(stored))
-	var pending []string
+	var pending []blog.LiveCMSPost
 	articleIDs := make(map[string]uuid.UUID, len(stored))
 	var toSubmit []blog.GeneratedArticle
 	for _, a := range stored {
 		if a.PostUUID != nil && *a.PostUUID != "" && (a.PostStatus == nil || *a.PostStatus != opsapi.StatusPublished) {
 			postArticle[*a.PostUUID] = a.ID
-			pending = append(pending, *a.PostUUID)
+			pending = append(pending, blog.LiveCMSPost{
+				UUID: *a.PostUUID,
+				Article: blog.GeneratedArticle{
+					Topic: a.Topic, Slug: a.Slug, Path: a.Path, Title: a.Title,
+					Markdown: a.Markdown, HTML: a.HTML, WordCount: a.WordCount,
+					CoverImageURL: a.CoverImageURL,
+				},
+			})
 		}
 		if a.InsightsItemID == nil || *a.InsightsItemID == "" {
 			articleIDs[a.Slug] = a.ID
@@ -110,8 +117,12 @@ func (s *blogService) PublishLive(ctx context.Context, orgID uuid.UUID, runID uu
 	if len(pending) > 0 {
 		live, lerr := s.runner.SetPostsLive(ctx, pending, writer, tracker.advance)
 		posts := make([]model.BlogArticlePost, 0, len(live))
-		for _, id := range live {
-			posts = append(posts, model.BlogArticlePost{ArticleID: postArticle[id], PostUUID: id, Status: opsapi.StatusPublished})
+		for _, res := range live {
+			posts = append(posts, model.BlogArticlePost{
+				ArticleID: postArticle[res.OriginalUUID],
+				PostUUID:  res.LiveUUID,
+				Status:    opsapi.StatusPublished,
+			})
 		}
 		if err := s.repo.MarkArticlesPosted(ctx, posts); err != nil {
 			s.logger.Error("blog_svc: failed to record live CMS posts", zap.Error(err))

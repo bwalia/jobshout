@@ -25,6 +25,21 @@ type CMSStatusSetter interface {
 	SetPostStatus(ctx context.Context, postUUID, status string) (*opsapi.Post, error)
 }
 
+// LiveCMSPost is a draft to take public, with enough of the article to re-file
+// as published when the API key cannot update existing posts (cms:create only).
+type LiveCMSPost struct {
+	UUID    string
+	Article GeneratedArticle
+}
+
+// LiveCMSResult is one draft that is now public. LiveUUID equals OriginalUUID
+// when the draft was updated in place; otherwise it is a new published post
+// created because the key lacked cms:update.
+type LiveCMSResult struct {
+	OriginalUUID string
+	LiveUUID     string
+}
+
 // WithLiveInsights enables publishing straight to readers on jobshout.com.
 func (r *Runner) WithLiveInsights(p InsightsPublisher) *Runner {
 	r.liveInsights = p
@@ -48,24 +63,72 @@ func (r *Runner) CanPublishLive() bool {
 	return true
 }
 
-// SetPostsLive makes each CMS draft public. It stops at the first failure and
-// returns the posts that went live before it, so the caller can record them
-// and a retry does not touch them again.
-func (r *Runner) SetPostsLive(ctx context.Context, postUUIDs []string, agentName string, progress ProgressFunc) ([]string, error) {
+// SetPostsLive makes each CMS draft public. Prefer updating the draft in place;
+// when the API key only has cms:create (opsapi returns 403 on PUT), create a
+// new post already in published status with the same body. Stops at the first
+// failure and returns what went live before it.
+func (r *Runner) SetPostsLive(ctx context.Context, posts []LiveCMSPost, agentName string, progress ProgressFunc) ([]LiveCMSResult, error) {
 	setter, ok := r.cms.(CMSStatusSetter)
 	if !ok || !r.CanPublish() {
 		return nil, fmt.Errorf("blog: the CMS is not configured for publishing live")
 	}
-	live := make([]string, 0, len(postUUIDs))
-	for i, id := range postUUIDs {
+	live := make([]LiveCMSResult, 0, len(posts))
+	for i, p := range posts {
 		report(progress, model.BlogStepGoingLive,
-			fmt.Sprintf("Publishing %d/%d in the CMS", i+1, len(postUUIDs)), agentName)
-		if _, err := setter.SetPostStatus(ctx, id, opsapi.StatusPublished); err != nil {
-			return live, fmt.Errorf("blog: publish CMS post %d/%d: %w", i+1, len(postUUIDs), err)
+			fmt.Sprintf("Publishing %d/%d in the CMS", i+1, len(posts)), agentName)
+		res, err := r.takePostLive(ctx, setter, p)
+		if err != nil {
+			return live, fmt.Errorf("blog: publish CMS post %d/%d: %w", i+1, len(posts), err)
 		}
-		live = append(live, id)
+		live = append(live, res)
 	}
 	return live, nil
+}
+
+func (r *Runner) takePostLive(ctx context.Context, setter CMSStatusSetter, p LiveCMSPost) (LiveCMSResult, error) {
+	if _, err := setter.SetPostStatus(ctx, p.UUID, opsapi.StatusPublished); err == nil {
+		return LiveCMSResult{OriginalUUID: p.UUID, LiveUUID: p.UUID}, nil
+	} else if !opsapi.IsUpdateForbidden(err) {
+		return LiveCMSResult{}, err
+	}
+
+	// Key can create but not update: file a published copy. The draft stays;
+	// editors can delete it in the CMS. Prefer this over blocking Publish live
+	// on a key minted with the original create-only script.
+	a := p.Article
+	if a.HTML == "" {
+		if err := a.render(); err != nil {
+			return LiveCMSResult{}, fmt.Errorf("render for create-as-published: %w", err)
+		}
+	} else {
+		if a.Title == "" {
+			a.Title = articleTitle(a.Markdown, a.Topic)
+		}
+		if a.Excerpt == "" {
+			a.Excerpt = articleExcerpt(a.HTML)
+		}
+	}
+	post, err := r.cms.CreatePost(ctx, opsapi.CreatePostRequest{
+		Title:            a.Title,
+		Slug:             a.Slug,
+		Excerpt:          a.Excerpt,
+		ContentHTML:      a.HTML,
+		Status:           opsapi.StatusPublished,
+		AuthorName:       r.cfg.AuthorName,
+		FeaturedImageURL: publicImageURL(r.cfg.PublicBaseURL, a.CoverImageURL),
+		Tags:             articleTags(a),
+		SEOTitle:         a.Title,
+		SEODescription:   a.Excerpt,
+	})
+	if err != nil {
+		return LiveCMSResult{}, fmt.Errorf("create-as-published after cms:update denied: %w", err)
+	}
+	r.logger.Info("blog: created published CMS post because API key lacks cms:update",
+		zap.String("draft_uuid", p.UUID),
+		zap.String("live_uuid", post.UUID),
+		zap.String("slug", post.Slug),
+	)
+	return LiveCMSResult{OriginalUUID: p.UUID, LiveUUID: post.UUID}, nil
 }
 
 // PublishLiveInsights publishes each article on jobshout.com. Same retry rule
