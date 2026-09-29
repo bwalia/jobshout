@@ -1169,6 +1169,7 @@ func main() {
 
 			// Tasks
 			r.Get("/agent-schemas", agentSchemaHandler.List)
+			r.Get("/agent-schemas/generic", agentSchemaHandler.Generic)
 			r.Route("/tasks", func(r chi.Router) {
 				r.Get("/", taskHandler.List)
 				r.Post("/", taskHandler.Create)

@@ -247,6 +247,32 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/AgentSchema' }
+  /agent-schemas/generic:
+    get:
+      operationId: getGenericAgentSchema
+      tags: [agents]
+      description: Launch form for custom agents (no `metadata.builtin`).
+      responses:
+        '200':
+          description: Schema
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentSchema' }
+
+  /projects:
+    get:
+      operationId: listProjects
+      tags: [work]
+      description: '`/tasks/launch` needs a project for a new task.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Projects in the caller's organization
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectPage' }
 
   /tasks:
     get:
@@ -613,6 +639,25 @@ components:
               label: { type: string }
               value: { type: string }
 
+    Project:
+      type: object
+      required: [id, name, status]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: [string, 'null'] }
+        status: { type: string }
+    ProjectPage:
+      type: object
+      required: [data, total, page, per_page, total_pages]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Project' }
+        total: { type: integer }
+        page: { type: integer }
+        per_page: { type: integer }
+        total_pages: { type: integer }
     TaskStatus:
       type: string
       enum: [backlog, todo, in_progress, review, done]
@@ -674,7 +719,7 @@ components:
       required: [agent_id]
       properties:
         agent_id: { type: string, format: uuid }
-        project_id: { type: string, format: uuid, description: Defaults to the org's only project. }
+        project_id: { type: string, format: uuid, description: 'Required unless task_id is given.' }
         task_id: { type: string, format: uuid, description: Re-run an existing task. }
         values:
           type: object
