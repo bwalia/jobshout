@@ -16,7 +16,7 @@ public final class Resource<Value> {
         self.value = value
     }
 
-    public func load(_ fetch: () async throws -> Value) async {
+    public func load(_ fetch: @MainActor () async throws -> Value) async {
         isLoading = true
         defer { isLoading = false }
         do {
