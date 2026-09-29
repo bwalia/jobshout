@@ -612,9 +612,15 @@ components:
           items: { $ref: '#/components/schemas/AgentSchemaField' }
         require_any:
           type: array
+          description: At least one field in each group must be filled.
           items:
             type: object
-            additionalProperties: true
+            required: [keys]
+            properties:
+              keys:
+                type: array
+                items: { type: string }
+              question: { type: string }
     AgentSchemaField:
       type: object
       required: [key, label, required]
