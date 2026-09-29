@@ -167,9 +167,16 @@ func (s *authService) maybeRefreshGoogleProfile(ctx context.Context, user *model
 }
 
 func (s *authService) registerGoogleUser(ctx context.Context, p googleauth.Profile, orgName string, avatar *string) (*model.User, error) {
-	name := clipString(p.Name, 255)
+	sub := p.Sub
+	return s.registerExternalUser(ctx, p.Email, p.Name, orgName, avatar, &sub)
+}
+
+// registerExternalUser creates a password-less owner with their own
+// organization, for sign-ins where a provider has vouched for the email.
+func (s *authService) registerExternalUser(ctx context.Context, email, fullName, orgName string, avatar, googleSub *string) (*model.User, error) {
+	name := clipString(strings.TrimSpace(fullName), 255)
 	if name == "" {
-		name = strings.Split(p.Email, "@")[0]
+		name = strings.Split(email, "@")[0]
 	}
 	if strings.TrimSpace(orgName) == "" {
 		orgName = name + "'s workspace"
@@ -185,16 +192,15 @@ func (s *authService) registerGoogleUser(ctx context.Context, p googleauth.Profi
 		return nil, fmt.Errorf("creating organization: %w", err)
 	}
 
-	sub := p.Sub
 	user := &model.User{
 		ID:        uuid.New(),
-		Email:     p.Email,
+		Email:     email,
 		Password:  "",
 		FullName:  name,
 		AvatarURL: avatar,
 		Role:      "admin",
 		OrgID:     &org.ID,
-		GoogleSub: &sub,
+		GoogleSub: googleSub,
 	}
 	if err := s.userRepo.Create(ctx, user); err != nil {
 		return nil, fmt.Errorf("creating user: %w", err)
