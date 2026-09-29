@@ -273,6 +273,26 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ProjectPage' }
+    post:
+      operationId: createProject
+      tags: [work]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 2 }
+                description: { type: string }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Project' }
+        '400': { $ref: '#/components/responses/Error' }
 
   /tasks:
     get:
