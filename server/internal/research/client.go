@@ -41,6 +41,29 @@ func New(logger *zap.Logger, githubToken string) *Client {
 	}
 }
 
+// WithWebSearch adds general web search, when there is a key for it.
+//
+// It goes first among the search backends: results are interleaved in backend
+// order, and for a subject Hacker News and arXiv do not cover, theirs are the
+// loosest matches. A blank key leaves the client as it was — web search is an
+// addition, and research works without it.
+func (c *Client) WithWebSearch(braveAPIKey string) *Client {
+	if strings.TrimSpace(braveAPIKey) == "" {
+		return c
+	}
+	c.searchers = append([]Searcher{NewBraveClient(braveAPIKey)}, c.searchers...)
+	return c
+}
+
+// SearchBackends names the search backends in the order they are consulted.
+func (c *Client) SearchBackends() []string {
+	names := make([]string, 0, len(c.searchers))
+	for _, s := range c.searchers {
+		names = append(names, s.Name())
+	}
+	return names
+}
+
 // RoutingFetcher sends each URL to whichever backend can actually read it.
 //
 // It exists for GitHub specifically: Jina Reader refuses github.com to

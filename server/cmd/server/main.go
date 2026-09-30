@@ -362,8 +362,10 @@ func main() {
 	// web_search / web_fetch / trending_topics give agents grounded internet
 	// access. They need no credentials, so they register unconditionally — any
 	// agent can be granted them through its tool permissions, and the Article
-	// Writer is built on them.
-	researchClient := research.New(logger, cfg.GitHubToken)
+	// Writer is built on them. A Brave key adds the general web to what
+	// web_search covers.
+	researchClient := research.New(logger, cfg.GitHubToken).WithWebSearch(cfg.BraveSearchAPIKey)
+	logger.Info("research: search backends", zap.Strings("backends", researchClient.SearchBackends()))
 	for _, rt := range tools.NewResearchTools(researchClient) {
 		toolRegistry.Register(rt)
 	}
