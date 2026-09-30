@@ -224,6 +224,12 @@ type Config struct {
 	// try, not enough for a busy schedule. A token raises the ceiling to 5000
 	// and needs no scopes for public repositories.
 	GitHubToken string `mapstructure:"GITHUB_TOKEN"`
+
+	// BraveSearchAPIKey is optional. With it, research searches the general
+	// web as well as Hacker News and arXiv — which is what a brief outside
+	// software (recruitment, regulation, a named industry) needs to find any
+	// relevant source at all. Without it research works as before.
+	BraveSearchAPIKey string `mapstructure:"BRAVE_SEARCH_API_KEY"`
 }
 
 // AccessTokenExpiry returns the access token expiry duration.
@@ -380,6 +386,7 @@ func Load() (*Config, error) {
 		BlogOrphanTimeout:    viper.GetDuration("BLOG_ORPHAN_TIMEOUT"),
 		BlogMaxRuntime:       viper.GetDuration("BLOG_MAX_RUNTIME"),
 		GitHubToken:          viper.GetString("GITHUB_TOKEN"),
+		BraveSearchAPIKey:    viper.GetString("BRAVE_SEARCH_API_KEY"),
 
 		DatabaseConnectTimeout: viper.GetDuration("DATABASE_CONNECT_TIMEOUT"),
 		AutoModelSelection:     viper.GetBool("AUTO_MODEL_SELECTION"),

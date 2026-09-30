@@ -265,6 +265,17 @@ mail:
 # Name that secret in extraSecretRefs. You may instead add those two keys to
 # jobshout-mail if the ring already mounts it.
 
+# General web search for the Research Agent (Brave Search API). Optional:
+# without it research searches Hacker News and arXiv only, and a brief outside
+# software finds little that is relevant. Create the secret once per ring:
+#
+#   kubectl -n <ring> create secret generic jobshout-research \
+#     --from-literal=BRAVE_SEARCH_API_KEY=<key> \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#
+# and name it in extraSecretRefs. The entry plan allows one request a second;
+# the client spaces its requests to stay inside that.
+
 # In-cluster PR reviewer (OpenCode + git clones in the pod; Ollama on the Mac
 # via ollama.workstation.co.uk). Off by default — int opts in. No public URL:
 # the API reaches it at http://jobshout-review-bot:8765. Create the operator
