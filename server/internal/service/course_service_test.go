@@ -121,7 +121,9 @@ type courseAgents struct {
 	agent *model.Agent
 }
 
-func (a *courseAgents) FindByID(context.Context, uuid.UUID) (*model.Agent, error) { return a.agent, nil }
+func (a *courseAgents) FindByID(context.Context, uuid.UUID) (*model.Agent, error) {
+	return a.agent, nil
+}
 
 // fakeGen writes one chapter, or blocks until cancelled when block is set.
 type fakeGen struct {
@@ -280,19 +282,31 @@ func TestCourseRun_InterruptAllAndReap(t *testing.T) {
 	svc, repo := newCourseSvc(&fakeGen{block: true}, agent)
 	run, _ := svc.CreateRun(context.Background(), model.CreateCourseRunRequest{AgentID: agent.ID, Brief: model.CourseBrief{Topic: "Go"}}, org, nil)
 
+	// The process exits right after InterruptAll returns, so the status must
+	// already be recorded — no waiting on the run goroutine.
 	svc.InterruptAll()
-	waitStatus(t, repo, run.ID, model.CourseRunFailed)
+	if got := repo.status(run.ID); got != model.CourseRunFailed {
+		t.Fatalf("status after InterruptAll = %q, want failed", got)
+	}
 	if _, err := svc.CreateRun(context.Background(), model.CreateCourseRunRequest{AgentID: agent.ID, Brief: model.CourseBrief{Topic: "Go"}}, org, nil); err == nil {
 		t.Error("no new runs once shutting down")
 	}
 
 	orphan := uuid.New()
-	repo.runs[orphan] = &model.CourseRun{ID: orphan, OrgID: org, Status: model.CourseRunRunning}
+	repo.runs[orphan] = &model.CourseRun{ID: orphan, OrgID: org, Status: model.CourseRunRunning, Steps: []model.CourseRunStep{
+		{Key: model.CourseStepResearching, Status: "done"},
+		{Key: model.CourseStepOutlining, Status: "running"},
+		{Key: model.CourseStepWriting, Status: "pending"},
+	}}
 	repo.stale = []uuid.UUID{orphan}
 	if n, err := svc.ReapOrphans(context.Background()); err != nil || n != 1 {
 		t.Fatalf("reap = %d, %v", n, err)
 	}
 	if repo.status(orphan) != model.CourseRunFailed {
 		t.Error("orphan should be failed")
+	}
+	got, _ := repo.GetRun(context.Background(), orphan)
+	if want := []string{"done", "failed", "skipped"}; got.Steps[0].Status != want[0] || got.Steps[1].Status != want[1] || got.Steps[2].Status != want[2] {
+		t.Errorf("orphan steps = %+v, want statuses %v", got.Steps, want)
 	}
 }

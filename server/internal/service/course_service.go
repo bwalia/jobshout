@@ -313,8 +313,7 @@ func (s *courseService) CancelRun(ctx context.Context, runID, orgID uuid.UUID) (
 	} else {
 		// No goroutine in this process (another replica, or a restart):
 		// record it directly so the row does not stay running.
-		msg := errCourseCancelled.Error()
-		if _, err := s.repo.Transition(ctx, runID, model.CourseRunCancelled, &msg); err != nil {
+		if _, err := s.endDetached(ctx, runID, model.CourseRunCancelled, errCourseCancelled); err != nil {
 			return nil, err
 		}
 	}
@@ -332,7 +331,6 @@ func (s *courseService) ReapOrphans(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	n := 0
-	msg := errCourseInterrupted.Error()
 	for _, id := range ids {
 		s.mu.Lock()
 		_, live := s.cancels[id]
@@ -340,11 +338,31 @@ func (s *courseService) ReapOrphans(ctx context.Context) (int, error) {
 		if live {
 			continue
 		}
-		if ok, err := s.repo.Transition(ctx, id, model.CourseRunFailed, &msg); err == nil && ok {
+		if ok, err := s.endDetached(ctx, id, model.CourseRunFailed, errCourseInterrupted); err == nil && ok {
 			n++
 		}
 	}
 	return n, nil
+}
+
+// endDetached records a terminal status for a run without going through its
+// goroutine: the goroutine is in another process, is gone, or will not get to
+// write before this process exits. It closes the step list as well, so the
+// run does not keep showing a step as running. Reports whether the row changed.
+func (s *courseService) endDetached(ctx context.Context, id uuid.UUID, status string, reason error) (bool, error) {
+	msg := reason.Error()
+	ok, err := s.repo.Transition(ctx, id, status, &msg)
+	if err != nil || !ok {
+		return false, err
+	}
+	run, err := s.repo.GetRun(ctx, id)
+	if err != nil {
+		return true, nil
+	}
+	if err := s.repo.UpdateSteps(ctx, id, failCourseSteps(run.Steps)); err != nil {
+		s.logger.Warn("course: persist steps", zap.String("course_run_id", id.String()), zap.Error(err))
+	}
+	return true, nil
 }
 
 func (s *courseService) StartReaper(ctx context.Context) {
@@ -371,13 +389,19 @@ func (s *courseService) StartReaper(ctx context.Context) {
 func (s *courseService) InterruptAll() {
 	s.mu.Lock()
 	s.shuttingDown = true
-	cancels := make([]context.CancelCauseFunc, 0, len(s.cancels))
-	for _, c := range s.cancels {
-		cancels = append(cancels, c)
+	cancels := make(map[uuid.UUID]context.CancelCauseFunc, len(s.cancels))
+	for id, c := range s.cancels {
+		cancels[id] = c
 	}
 	s.mu.Unlock()
-	for _, c := range cancels {
+	for id, c := range cancels {
 		c(errCourseInterrupted)
+		// Record it here, not only in the run goroutine: the process exits
+		// before that goroutine has unwound from its LLM call, and the run
+		// would stay running until the reaper's heartbeat timeout.
+		if _, err := s.endDetached(context.Background(), id, model.CourseRunFailed, errCourseInterrupted); err != nil {
+			s.logger.Warn("course: record interruption", zap.String("course_run_id", id.String()), zap.Error(err))
+		}
 	}
 }
 
@@ -447,13 +471,22 @@ func (t *courseSteps) doneOrSkipped(key string) string {
 func (t *courseSteps) fail() []model.CourseRunStep {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	for i := range t.steps {
-		switch t.steps[i].Status {
+	t.steps = failCourseSteps(t.steps)
+	return t.snapshot()
+}
+
+// failCourseSteps closes a step list for a run that ended early: the running
+// step failed, and the ones after it never ran.
+func failCourseSteps(steps []model.CourseRunStep) []model.CourseRunStep {
+	out := make([]model.CourseRunStep, len(steps))
+	copy(out, steps)
+	for i := range out {
+		switch out[i].Status {
 		case "running":
-			t.steps[i].Status = "failed"
+			out[i].Status = "failed"
 		case "pending":
-			t.steps[i].Status = "skipped"
+			out[i].Status = "skipped"
 		}
 	}
-	return t.snapshot()
+	return out
 }
