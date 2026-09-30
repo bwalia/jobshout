@@ -48,8 +48,22 @@ ai:
   chatModelFallback: "llama3.1:8b"
   mailModel: "muse-glimmer:latest"
   # Shared workstation Ollama is CPU-heavy and often queued; research/draft
-  # calls were dying at 10m with "awaiting headers". Match imageTimeout headroom.
-  ollamaTimeout: "30m"
+  # calls were dying at 10m with "awaiting headers". 45m because one draft on
+  # the larger writing model below took 17–28m, and over 28m once.
+  ollamaTimeout: "45m"
+  # int is the proving ring for the writing model. llama3.1:8b invented studies,
+  # statistics and an API in long-form prose; qwen3.8 on the same briefs did
+  # not. Research and the JSON stages stay on ollamaModel.
+  blogProseModel: "qwen3.8:latest"
+  # With qwen3.8 on the shared host: research ~15m, then a draft, a revision
+  # and sometimes an expansion at 17–28m each. 45m ran out during review on
+  # every test run.
+  blogMaxRuntime: "120m"
+  # Revising a 3400-word Insights piece sends the draft and gets the article
+  # back; 8192 does not hold both. The Ollama host serves qwen3.8 at the same
+  # window (OLLAMA_CONTEXT_LENGTH=16384), so the model is not reloaded between
+  # this and its other callers.
+  blogProseNumCtx: 16384
   imageBaseURL: "https://images.workstation.co.uk"
   # Blog covers use z-image-turbo (dark editorial template, ~8 steps, ~1 min).
   imageModel: "z-image-turbo"

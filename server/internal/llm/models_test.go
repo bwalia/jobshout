@@ -143,15 +143,15 @@ func TestOllamaNumCtxCappedByDiscoveredLimit(t *testing.T) {
 		{Provider: "ollama", Name: "llama3:latest", ContextTokens: 8192},
 	})
 
-	if got := c.effectiveNumCtx("llama3:latest"); got != 8192 {
+	if got := c.effectiveNumCtx("llama3:latest", 0); got != 8192 {
 		t.Errorf("effectiveNumCtx = %d, want it capped to the model limit 8192", got)
 	}
 	// ":latest" is implicit in Ollama, so the bare name must resolve too.
-	if got := c.effectiveNumCtx("llama3"); got != 8192 {
+	if got := c.effectiveNumCtx("llama3", 0); got != 8192 {
 		t.Errorf("effectiveNumCtx(bare name) = %d, want 8192", got)
 	}
 	// An unknown model keeps the configured value.
-	if got := c.effectiveNumCtx("who:knows"); got != 131072 {
+	if got := c.effectiveNumCtx("who:knows", 0); got != 131072 {
 		t.Errorf("effectiveNumCtx(unknown) = %d, want the configured 131072", got)
 	}
 }
@@ -221,5 +221,34 @@ func TestOllamaFinishReasonReportsTheTokenCeiling(t *testing.T) {
 		if resp.FinishReason != want {
 			t.Errorf("done_reason %q: FinishReason = %q, want %q", reason, resp.FinishReason, want)
 		}
+	}
+}
+
+// A call can ask for its own context window. The client's setting is the
+// default, and the model's own limit still caps either.
+func TestOllamaNumCtxPerRequest(t *testing.T) {
+	var captured map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&captured)
+		_, _ = w.Write([]byte(`{"model":"m","message":{"role":"assistant","content":"hi"},"done":true}`))
+	}))
+	defer srv.Close()
+	c := NewOllamaClient(srv.URL, "llama3").WithNumCtx(8192)
+
+	sent := func(numCtx int) float64 {
+		t.Helper()
+		if _, err := c.Generate(context.Background(), GenerateRequest{
+			Messages: []Message{{Role: RoleUser, Content: "hello"}}, NumCtx: numCtx,
+		}); err != nil {
+			t.Fatalf("Generate: %v", err)
+		}
+		return captured["options"].(map[string]any)["num_ctx"].(float64)
+	}
+
+	if got := sent(16384); got != 16384 {
+		t.Errorf("per-request num_ctx = %v, want 16384", got)
+	}
+	if got := sent(0); got != 8192 {
+		t.Errorf("num_ctx with none requested = %v, want the client's 8192", got)
 	}
 }

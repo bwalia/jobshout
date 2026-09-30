@@ -83,8 +83,14 @@ const DefaultOllamaNumCtx = 8192
 // selector's belief about a context window matches what will actually be
 // requested. If these two ever disagree, the selector will approve prompts that
 // get silently truncated.
-func (c *OllamaClient) effectiveNumCtx(model string) int {
-	want := c.NumCtx
+//
+// requested is a per-call window (GenerateRequest.NumCtx); zero means the
+// client's configured one. Either way the model's own limit still caps it.
+func (c *OllamaClient) effectiveNumCtx(model string, requested int) int {
+	want := requested
+	if want <= 0 {
+		want = c.NumCtx
+	}
 	if want <= 0 {
 		want = DefaultOllamaNumCtx
 	}
@@ -269,7 +275,7 @@ func (c *OllamaClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 	if req.MaxTokens > 0 {
 		opts.NumPredict = req.MaxTokens
 	}
-	opts.NumCtx = c.effectiveNumCtx(model)
+	opts.NumCtx = c.effectiveNumCtx(model, req.NumCtx)
 
 	// Stream so response headers arrive with the first token. With stream:false
 	// Ollama holds the connection silent until the whole reply is ready, and
