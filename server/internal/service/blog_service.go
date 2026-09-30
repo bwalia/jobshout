@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -28,6 +29,10 @@ var (
 	errRunOrphaned    = errors.New("interrupted: timed out or server restarted")
 	errRunTimedOut    = errors.New("interrupted: run exceeded maximum runtime")
 	errRunStopping    = errors.New("blog_svc: server is shutting down")
+	// errRunSuperseded is what a writer sees when its attempt is no longer the
+	// run's: cancelled or retried, possibly from another replica. It is never
+	// written to the run — the run belongs to someone else by then.
+	errRunSuperseded = errors.New("blog_svc: run was cancelled or retried elsewhere")
 )
 
 // BlogService orchestrates blog.Runner invocations and persists each run.
@@ -214,11 +219,12 @@ func (s *blogService) beginGeneration(run *model.BlogRun, agent *model.Agent, re
 	if s.active == nil {
 		s.active = make(map[uuid.UUID]*trackedRun)
 	}
-	s.active[run.ID] = &trackedRun{cancel: cancel}
+	tracked := &trackedRun{cancel: cancel}
+	s.active[run.ID] = tracked
 	s.mu.Unlock()
 
 	go func() {
-		defer s.untrack(run.ID)
+		defer s.untrack(run.ID, tracked)
 		// A panic here used to take the pod down, leaving every run on it in
 		// "running" until the reaper noticed. Fail this run and keep the rest.
 		defer func() {
@@ -234,9 +240,14 @@ func (s *blogService) beginGeneration(run *model.BlogRun, agent *model.Agent, re
 	return nil
 }
 
-func (s *blogService) untrack(id uuid.UUID) {
+// untrack removes t from the active set. A retry of the same run can replace
+// the entry before the previous attempt's goroutine has unwound; that
+// goroutine must not remove its successor.
+func (s *blogService) untrack(id uuid.UUID, t *trackedRun) {
 	s.mu.Lock()
-	delete(s.active, id)
+	if s.active[id] == t {
+		delete(s.active, id)
+	}
 	s.mu.Unlock()
 }
 
@@ -264,13 +275,20 @@ func (s *blogService) consumeReason(id uuid.UUID) error {
 // settle serialises the terminal write so Cancel, shutdown and the generation
 // goroutine cannot flip a completed run back to failed, or a cancelled run
 // back to completed.
-func (s *blogService) settle(runID uuid.UUID, write func()) bool {
+//
+// It also refuses a writer whose attempt is no longer the run's: after a
+// retry, the previous attempt's goroutine — on this replica or another — sees
+// a running row again and would otherwise settle the new attempt.
+func (s *blogService) settle(run *model.BlogRun, write func()) bool {
 	s.finishMu.Lock()
 	defer s.finishMu.Unlock()
-	current, err := s.repo.GetByID(persistCtx(), runID)
+	current, err := s.repo.GetByID(persistCtx(), run.ID)
 	if err == nil && current != nil {
 		switch current.Status {
 		case model.BlogRunStatusCompleted, model.BlogRunStatusFailed, model.BlogRunStatusCancelled:
+			return false
+		}
+		if current.Attempt != run.Attempt {
 			return false
 		}
 	}
@@ -419,10 +437,13 @@ func publishSteps() []model.BlogStep {
 // to a step closes the previous one, which keeps "exactly one running step" true
 // — the agent board's LATERAL lookup relies on that.
 type stepTracker struct {
-	runID  uuid.UUID
-	steps  []model.BlogStep
-	repo   repository.BlogRepository
-	logger *zap.Logger
+	runID uuid.UUID
+	// attempt is the run attempt this trace belongs to; writes to any other
+	// attempt are dropped by the repository.
+	attempt int
+	steps   []model.BlogStep
+	repo    repository.BlogRepository
+	logger  *zap.Logger
 	// writer is the agent the run belongs to. The pipeline attributes its
 	// writing steps to the Article Writer by name; a run of another writer
 	// shows that writer instead. Empty keeps the pipeline's name.
@@ -431,7 +452,7 @@ type stepTracker struct {
 
 // newTracker is a stepTracker for run, attributed to the run's writer.
 func (s *blogService) newTracker(run *model.BlogRun) *stepTracker {
-	return &stepTracker{runID: run.ID, steps: run.Steps, repo: s.repo, logger: s.logger, writer: runWriterName(run)}
+	return &stepTracker{runID: run.ID, attempt: run.Attempt, steps: run.Steps, repo: s.repo, logger: s.logger, writer: runWriterName(run)}
 }
 
 // runWriterName is the display name of the agent a run belongs to.
@@ -538,7 +559,7 @@ func (t *stepTracker) fail(err error) {
 
 func (t *stepTracker) persist() {
 	// Best-effort: losing a progress write must never abort the run itself.
-	if err := t.repo.UpdateSteps(context.Background(), t.runID, t.steps); err != nil {
+	if err := t.repo.UpdateSteps(context.Background(), t.runID, t.attempt, t.steps); err != nil {
 		t.logger.Warn("blog: failed to persist step trace", zap.Error(err))
 	}
 }
@@ -712,7 +733,7 @@ func (s *blogService) failRun(
 	log *zap.Logger,
 	agent *model.Agent,
 ) {
-	s.settle(run.ID, func() {
+	s.settle(run, func() {
 		tracker.fail(cause)
 		run.Steps = tracker.steps
 		completedAt := time.Now()
@@ -763,6 +784,11 @@ func (s *blogService) persistArticle(run *model.BlogRun, a blog.GeneratedArticle
 			Height:   a.CoverImageHeight,
 		},
 	}
+	// An article from an attempt that has been cancelled or retried must not
+	// land on the run: the retry would inherit it, or write the topic twice.
+	if owns, err := s.repo.TouchHeartbeat(persistCtx(), run.ID, run.Attempt); err == nil && !owns {
+		return errRunSuperseded
+	}
 	if err := s.repo.CreateArticles(persistCtx(), []model.BlogArticle{row}); err != nil {
 		return err
 	}
@@ -770,7 +796,7 @@ func (s *blogService) persistArticle(run *model.BlogRun, a blog.GeneratedArticle
 		ID: id, Topic: a.Topic, Title: a.Title, Slug: a.Slug, Path: a.Path,
 		WordCount: a.WordCount, ReferenceCount: len(refs),
 	})
-	return s.repo.UpdateArticles(persistCtx(), run.ID, run.Articles)
+	return s.repo.UpdateArticles(persistCtx(), run.ID, run.Attempt, run.Articles)
 }
 
 func (s *blogService) failCreatedRun(run *model.BlogRun, cause error) {
@@ -790,9 +816,18 @@ func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, age
 	})
 	log := s.logger.With(zap.String("blog_run_id", run.ID.String()))
 
+	// The heartbeat doubles as the ownership check. When it reports the run is
+	// no longer this attempt's — cancelled or retried from another replica,
+	// where signalCancel cannot reach this goroutine — the work is abandoned.
+	ctx, abandon := context.WithCancel(ctx)
+	defer abandon()
+	var superseded atomic.Bool
 	stopHB := make(chan struct{})
 	defer close(stopHB)
-	go s.heartbeatLoop(run.ID, stopHB)
+	go s.heartbeatLoop(run, stopHB, func() {
+		superseded.Store(true)
+		abandon()
+	})
 
 	tracker := s.newTracker(run)
 	s.setAgentStatus(persistCtx(), agent.ID, "active")
@@ -810,6 +845,10 @@ func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, age
 	// than only once it finishes.
 	if req.Trending {
 		briefs, derr := s.discoverBriefs(ctx, run, req, tracker)
+		if superseded.Load() {
+			log.Info("blog: attempt superseded, abandoning it", zap.Int("attempt", run.Attempt))
+			return
+		}
 		if derr != nil {
 			s.failRun(run, tracker, s.interruptCause(run.ID, derr), log, agent)
 			s.notifyBoard(taskID, "Article run failed while discovering a topic.", "")
@@ -822,7 +861,7 @@ func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, age
 		// discovered subject needs its own narrow one. Without it the run
 		// finishes with an empty topic list, which leaves the page headerless
 		// and makes Retry refuse the run for having nothing to retry.
-		if uerr := s.repo.UpdateBriefs(persistCtx(), run.ID, run.Briefs, run.Topics); uerr != nil {
+		if uerr := s.repo.UpdateBriefs(persistCtx(), run.ID, run.Attempt, run.Briefs, run.Topics); uerr != nil {
 			log.Warn("blog_svc: failed to record discovered topics", zap.Error(uerr))
 		}
 	}
@@ -840,6 +879,13 @@ func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, age
 		AgentStructuredModel: agentStructured,
 		OnArticle:            func(a blog.GeneratedArticle) error { return s.persistArticle(run, a) },
 	}, tracker.advance)
+
+	// Nothing here belongs to this goroutine any more: the row is another
+	// attempt's, or already cancelled. No terminal write, no board note.
+	if superseded.Load() {
+		log.Info("blog: attempt superseded, abandoning it", zap.Int("attempt", run.Attempt))
+		return
+	}
 
 	if ctx.Err() != nil {
 		cause := s.interruptCause(run.ID, ctx.Err())
@@ -914,7 +960,7 @@ func (s *blogService) finishSuccessfulRun(
 	agent *model.Agent,
 ) bool {
 	wrote := false
-	s.settle(run.ID, func() {
+	s.settle(run, func() {
 		tracker.finish()
 		run.Steps = tracker.steps
 		completedAt := time.Now()
@@ -1297,6 +1343,9 @@ func (s *blogService) Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUI
 		return nil, err
 	}
 
+	if err := s.claimRetry(ctx, run); err != nil {
+		return nil, err
+	}
 	startedAt := time.Now()
 	run.Status = model.BlogRunStatusRunning
 	run.AgentID = &agent.ID
@@ -1311,7 +1360,7 @@ func (s *blogService) Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUI
 	}
 	// Update does not write steps back to their reset state on its own path for
 	// a fresh run, so stamp the trace explicitly before work starts.
-	if err := s.repo.UpdateSteps(ctx, run.ID, run.Steps); err != nil {
+	if err := s.repo.UpdateSteps(ctx, run.ID, run.Attempt, run.Steps); err != nil {
 		return nil, fmt.Errorf("blog_svc: reset steps for retry: %w", err)
 	}
 
@@ -1348,6 +1397,9 @@ func (s *blogService) retryDiscovery(ctx context.Context, run *model.BlogRun) (*
 		return nil, err
 	}
 
+	if err := s.claimRetry(ctx, run); err != nil {
+		return nil, err
+	}
 	startedAt := time.Now()
 	run.Status = model.BlogRunStatusRunning
 	run.AgentID = &agent.ID
@@ -1359,7 +1411,7 @@ func (s *blogService) retryDiscovery(ctx context.Context, run *model.BlogRun) (*
 	if err := s.repo.Update(ctx, run); err != nil {
 		return nil, fmt.Errorf("blog_svc: reset run for retry: %w", err)
 	}
-	if err := s.repo.UpdateSteps(ctx, run.ID, run.Steps); err != nil {
+	if err := s.repo.UpdateSteps(ctx, run.ID, run.Attempt, run.Steps); err != nil {
 		return nil, fmt.Errorf("blog_svc: reset steps for retry: %w", err)
 	}
 
@@ -1367,6 +1419,21 @@ func (s *blogService) retryDiscovery(ctx context.Context, run *model.BlogRun) (*
 		return nil, err
 	}
 	return run, nil
+}
+
+// claimRetry moves run to its next attempt. Only one caller wins: a second
+// Retry of the same run — a double click, or the same request landing on the
+// other replica — is refused rather than starting a second writer.
+func (s *blogService) claimRetry(ctx context.Context, run *model.BlogRun) error {
+	won, err := s.repo.BeginRetry(ctx, run.ID, run.Attempt)
+	if err != nil {
+		return fmt.Errorf("blog_svc: reset run for retry: %w", err)
+	}
+	if !won {
+		return fmt.Errorf("blog_svc: run is already being retried")
+	}
+	run.Attempt++
+	return nil
 }
 
 // discoveryRetryRequest rebuilds the request a trending run was created with.
@@ -1458,13 +1525,29 @@ func (s *blogService) InterruptAll(reason error) {
 	}
 }
 
-const heartbeatInterval = 30 * time.Second
+// heartbeatInterval is also how long an attempt cancelled or retried from
+// another replica keeps working before it notices. A var so tests can shorten it.
+var heartbeatInterval = 30 * time.Second
 
-func (s *blogService) heartbeatLoop(runID uuid.UUID, stop <-chan struct{}) {
+// heartbeatLoop keeps the run's heartbeat fresh, and calls lost once if the
+// run stops being this attempt's.
+func (s *blogService) heartbeatLoop(run *model.BlogRun, stop <-chan struct{}, lost func()) {
 	if s.repo == nil {
 		return
 	}
-	_ = s.repo.TouchHeartbeat(persistCtx(), runID)
+	beat := func() bool {
+		owns, err := s.repo.TouchHeartbeat(persistCtx(), run.ID, run.Attempt)
+		if err != nil {
+			// A database blip is not evidence the run was taken away.
+			s.logger.Warn("blog: heartbeat failed", zap.String("blog_run_id", run.ID.String()), zap.Error(err))
+			return true
+		}
+		return owns
+	}
+	if !beat() {
+		lost()
+		return
+	}
 	t := time.NewTicker(heartbeatInterval)
 	defer t.Stop()
 	for {
@@ -1472,8 +1555,9 @@ func (s *blogService) heartbeatLoop(runID uuid.UUID, stop <-chan struct{}) {
 		case <-stop:
 			return
 		case <-t.C:
-			if err := s.repo.TouchHeartbeat(persistCtx(), runID); err != nil {
-				s.logger.Warn("blog: heartbeat failed", zap.String("blog_run_id", runID.String()), zap.Error(err))
+			if !beat() {
+				lost()
+				return
 			}
 		}
 	}
