@@ -335,6 +335,11 @@ func (r *Runner) Generate(ctx context.Context, req GenerateRequest, progress Pro
 				Context:  strings.TrimSpace(b.Context),
 				Audience: strings.TrimSpace(b.Audience),
 				Industry: strings.TrimSpace(b.Industry),
+				// A discovered topic's trending pages and the run's focus
+				// areas keep research on the brief. Dropped here, research
+				// started from the topic's wording alone and drifted.
+				Seeds: b.Seeds,
+				Focus: b.Focus,
 			})
 		}
 	}
@@ -373,7 +378,8 @@ func (r *Runner) Generate(ctx context.Context, req GenerateRequest, progress Pro
 // Posts go in as drafts without exception: this pipeline decides what gets
 // written, not what a public site shows.
 //
-// A failure part-way leaves the earlier drafts in place. They are drafts, so
+// A failure part-way leaves the earlier drafts in place, and returns them in
+// the result alongside the error. They are drafts, so
 // nothing is visible to anyone, and deleting them to "clean up" would throw
 // away work the user can simply publish again — the alternative, an
 // all-or-nothing rollback, is not something the CMS API offers anyway.
@@ -434,7 +440,11 @@ func (r *Runner) Publish(ctx context.Context, articles []GeneratedArticle, progr
 			SEODescription: a.Excerpt,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("blog: publish %d/%d: %w", i+1, len(articles), err)
+			// The drafts posted before this one exist in the CMS. Return
+			// them with the error so the caller can record them — otherwise
+			// a retry posts them a second time.
+			return &PublishResult{Namespace: namespace, Posts: posts, PublishedAt: r.clock()},
+				fmt.Errorf("blog: publish %d/%d: %w", i+1, len(articles), err)
 		}
 
 		posts = append(posts, PostedArticle{

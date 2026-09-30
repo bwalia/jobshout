@@ -180,8 +180,20 @@ func (s *blogService) runtimeBudget(req model.GenerateBlogRequest) time.Duration
 		n = req.MaxArticles
 	}
 	n = min(max(n, 1), blog.HardMaxArticles)
-	return s.maxRuntime * time.Duration(n)
+	budget := s.maxRuntime * time.Duration(n)
+	if req.Trending {
+		// Discovery runs before any article and used to spend the first
+		// article's budget: a sweep, seven focus searches and a topic call on
+		// a queued Ollama left too little for writing.
+		budget += discoveryAllowance
+	}
+	return budget
 }
+
+// discoveryAllowance is added to a trending run's budget for choosing its
+// topics. Discovery took about three minutes on a shared local model; this
+// covers a queued one.
+const discoveryAllowance = 15 * time.Minute
 
 func (s *blogService) beginGeneration(run *model.BlogRun, agent *model.Agent, req model.GenerateBlogRequest) error {
 	s.mu.Lock()
@@ -207,6 +219,16 @@ func (s *blogService) beginGeneration(run *model.BlogRun, agent *model.Agent, re
 
 	go func() {
 		defer s.untrack(run.ID)
+		// A panic here used to take the pod down, leaving every run on it in
+		// "running" until the reaper noticed. Fail this run and keep the rest.
+		defer func() {
+			if rec := recover(); rec != nil {
+				s.logger.Error("blog: generation panicked",
+					zap.String("blog_run_id", run.ID.String()), zap.Any("panic", rec),
+					zap.Stack("stack"))
+				s.failCreatedRun(run, fmt.Errorf("internal error during generation: %v", rec))
+			}
+		}()
 		s.runGeneration(ctx, run, agent, req)
 	}()
 	return nil
@@ -820,9 +842,16 @@ func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, age
 	}, tracker.advance)
 
 	if ctx.Err() != nil {
-		s.failRun(run, tracker, s.interruptCause(run.ID, ctx.Err()), log, agent)
-		s.notifyBoard(taskID, "Article run was interrupted.", "")
-		return
+		cause := s.interruptCause(run.ID, ctx.Err())
+		// Running out of budget after an article was stored is a partial
+		// success, not a failure: failing it stranded finished articles on a
+		// run nothing could publish. A cancel or shutdown still stops here.
+		if !errors.Is(cause, errRunTimedOut) || len(run.Articles) == 0 {
+			s.failRun(run, tracker, cause, log, agent)
+			s.notifyBoard(taskID, "Article run was interrupted.", "")
+			return
+		}
+		err = errors.Join(err, cause)
 	}
 
 	if len(run.Articles) == 0 {
@@ -1024,6 +1053,11 @@ func (s *blogService) Publish(ctx context.Context, orgID uuid.UUID, runID uuid.U
 
 	result, err := s.runner.Publish(ctx, articles, tracker.advance)
 	if err != nil {
+		// Drafts posted before the failure are recorded, so a retry skips
+		// them instead of posting them twice.
+		if result != nil {
+			s.markPosted(persistCtx(), articleIDs, result.Posts)
+		}
 		tracker.fail(err)
 		run.Steps = tracker.steps
 		msg := err.Error()
@@ -1037,8 +1071,15 @@ func (s *blogService) Publish(ctx context.Context, orgID uuid.UUID, runID uuid.U
 	tracker.finish()
 	run.Steps = tracker.steps
 
-	posted := make([]model.BlogArticlePost, 0, len(result.Posts))
-	for _, p := range result.Posts {
+	s.markPosted(ctx, articleIDs, result.Posts)
+
+	return s.finalizePublished(ctx, run, result.Namespace, result.PublishedAt)
+}
+
+// markPosted records which stored articles now have a CMS draft.
+func (s *blogService) markPosted(ctx context.Context, articleIDs map[string]uuid.UUID, posts []blog.PostedArticle) {
+	posted := make([]model.BlogArticlePost, 0, len(posts))
+	for _, p := range posts {
 		id, ok := articleIDs[p.Slug]
 		if !ok {
 			// Only reachable if the runner invented a slug we never sent. The
@@ -1052,6 +1093,9 @@ func (s *blogService) Publish(ctx context.Context, orgID uuid.UUID, runID uuid.U
 			ArticleID: id, PostUUID: p.PostUUID, Status: p.Status,
 		})
 	}
+	if len(posted) == 0 {
+		return
+	}
 	if err := s.repo.MarkArticlesPosted(ctx, posted); err != nil {
 		// The drafts are in the CMS; losing our record of where is worth a loud
 		// log but not an error that suggests the publish did not happen. It does
@@ -1059,8 +1103,6 @@ func (s *blogService) Publish(ctx context.Context, orgID uuid.UUID, runID uuid.U
 		s.logger.Error("blog_svc: failed to record posted articles — a retry would duplicate them",
 			zap.Error(err))
 	}
-
-	return s.finalizePublished(ctx, run, result.Namespace, result.PublishedAt)
 }
 
 func (s *blogService) PublishInsights(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) (*model.BlogRun, error) {
