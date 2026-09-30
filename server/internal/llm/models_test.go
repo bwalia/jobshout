@@ -200,3 +200,26 @@ func TestStaticModelsCoverCloudProviders(t *testing.T) {
 		t.Error("ollama has real discovery; it should have no static list")
 	}
 }
+
+// Ollama ends a reply that ran into num_predict with done=true and
+// done_reason "length". That has to reach the caller as FinishReason "length":
+// reported as "stop", an article cut mid-sentence looked finished.
+func TestOllamaFinishReasonReportsTheTokenCeiling(t *testing.T) {
+	for reason, want := range map[string]string{"length": "length", "stop": "stop", "": "stop"} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"model":"m","message":{"role":"assistant","content":"cut off mid"},"done":false}` + "\n"))
+			_, _ = w.Write([]byte(`{"model":"m","message":{"role":"assistant","content":""},"done":true,"done_reason":"` + reason + `"}` + "\n"))
+		}))
+		c := NewOllamaClient(srv.URL, "llama3")
+		resp, err := c.Generate(context.Background(), GenerateRequest{
+			Messages: []Message{{Role: RoleUser, Content: "hello"}},
+		})
+		srv.Close()
+		if err != nil {
+			t.Fatalf("done_reason %q: Generate: %v", reason, err)
+		}
+		if resp.FinishReason != want {
+			t.Errorf("done_reason %q: FinishReason = %q, want %q", reason, resp.FinishReason, want)
+		}
+	}
+}
