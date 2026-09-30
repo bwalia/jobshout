@@ -347,3 +347,47 @@ func TestGenerate_InterruptedStageIsNotRecordedAsDone(t *testing.T) {
 		}
 	}
 }
+
+// cancelledResearch behaves like the real research agent when the run is
+// stopped part-way: it tolerates its failed stages and hands back a thinner
+// but usable brief with no error.
+type cancelledResearch struct {
+	brief  *research.Brief
+	cancel context.CancelFunc
+}
+
+func (c *cancelledResearch) Research(context.Context, research.Request, research.ProgressFunc) (*research.Brief, error) {
+	c.cancel()
+	return c.brief, nil
+}
+
+func TestGenerate_ResearchCutOffByShutdownIsNotSaved(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	g := NewGenerator(&scriptLLM{replies: goodScript()}, &cancelledResearch{brief: usableBrief(), cancel: cancel}, nil, Config{}, nil)
+	saved := false
+	err := g.Generate(ctx, Job{Brief: testBrief()}, Hooks{
+		Researched: func(string, []model.CourseSource) error { saved = true; return nil },
+	})
+	if !errors.Is(err, context.Canceled) || saved {
+		t.Fatalf("research cut off by a stop must be redone on resume, not saved: err=%v saved=%v", err, saved)
+	}
+}
+
+func TestGenerate_OutlineCutOffByShutdownIsNotSaved(t *testing.T) {
+	// The first plan is one chapter short, and the stop lands on the
+	// corrective retry. The short plan must not become the course.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	short := `{"title":"Kubernetes Networking","description":"d","category":"DevOps","tags":[],"learning_outcomes":[],
+	 "chapters":[{"title":"Pods and IPs","summary":"s","objectives":[]}]}`
+	lm := &cancelOn{scriptLLM: &scriptLLM{replies: []scripted{{"Plan a course.", short}}}, trigger: "Your previous plan had", cancel: cancel}
+	g := NewGenerator(lm, &stubResearch{brief: usableBrief()}, nil, Config{}, nil)
+	planned := false
+	err := g.Generate(ctx, Job{Brief: testBrief()}, Hooks{
+		Planned: func(*model.CourseOutline, []model.CourseSource) error { planned = true; return nil },
+	})
+	if !errors.Is(err, context.Canceled) || planned {
+		t.Fatalf("an outline whose retry was cut off must not be saved: err=%v planned=%v", err, planned)
+	}
+}

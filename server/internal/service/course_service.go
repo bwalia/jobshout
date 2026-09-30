@@ -26,6 +26,8 @@ var ErrCourseNotCancellable = errors.New("course run cannot be cancelled")
 var (
 	courseHeartbeatInterval = 30 * time.Second
 	courseResumeInterval    = 20 * time.Second
+	courseFinishTries       = 4
+	courseFinishBackoff     = 2 * time.Second
 )
 
 // CourseService is the launch and HTTP surface for the Course Generator.
@@ -291,7 +293,7 @@ func (s *courseService) execute(ctx context.Context, cancel context.CancelCauseF
 		if errors.Is(err, errCourseCancelled) {
 			status = model.CourseRunCancelled
 		}
-		ended, terr := s.repo.Finish(pctx, run.ID, run.Attempt, status, &msg)
+		ended, terr := s.finish(run, status, &msg)
 		if terr != nil {
 			log.Error("course: record failure", zap.Error(terr))
 		}
@@ -305,7 +307,7 @@ func (s *courseService) execute(ctx context.Context, cancel context.CancelCauseF
 	if err := s.repo.UpdateSteps(pctx, run.ID, run.Attempt, tracker.finish()); err != nil {
 		log.Warn("course: persist steps", zap.Error(err))
 	}
-	ended, err := s.repo.Finish(pctx, run.ID, run.Attempt, model.CourseRunCompleted, nil)
+	ended, err := s.finish(run, model.CourseRunCompleted, nil)
 	if err != nil {
 		log.Error("course: record completion", zap.Error(err))
 	}
@@ -322,6 +324,23 @@ func (s *courseService) execute(ctx context.Context, cancel context.CancelCauseF
 	}
 	log.Info("course: run completed", zap.Int("chapters", chapters))
 	s.notifyBoard(run.TaskID, fmt.Sprintf("Course ready for review: %s (%d chapters)", title, chapters), "done")
+}
+
+// finish records the attempt's terminal status, retrying a failed write. A
+// run whose ending is not recorded stays running with no heartbeat, and the
+// resumer would then start it again — including one that failed for good.
+func (s *courseService) finish(run *model.CourseRun, status string, msg *string) (bool, error) {
+	var ended bool
+	var err error
+	for try := range courseFinishTries {
+		if try > 0 {
+			time.Sleep(courseFinishBackoff)
+		}
+		if ended, err = s.repo.Finish(context.Background(), run.ID, run.Attempt, status, msg); err == nil {
+			return ended, nil
+		}
+	}
+	return false, err
 }
 
 // heartbeat keeps the attempt's heartbeat fresh, and calls lost once if the
@@ -402,20 +421,25 @@ func (s *courseService) CancelRun(ctx context.Context, runID, orgID uuid.UUID) (
 	default:
 		return nil, ErrCourseNotCancellable
 	}
+	// Record it here rather than leaving it to the run goroutine. That
+	// goroutine may be on another replica, may already be unwinding from a
+	// shutdown (its cancel cause is then "interrupted" and it would hand the
+	// run back), or may belong to an attempt that has been taken over. A
+	// cancelled row is terminal: no attempt can write to it and it is never
+	// resumed.
+	msg := errCourseCancelled.Error()
+	ended, err := s.repo.Transition(ctx, runID, model.CourseRunCancelled, &msg)
+	if err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	l, live := s.live[runID]
 	s.mu.Unlock()
 	if live {
-		// The run goroutine records the cancellation itself.
 		l.cancel(errCourseCancelled)
-	} else {
-		// No goroutine in this process (another replica, or waiting to be
-		// resumed): record it directly. A goroutine elsewhere stops at its
-		// next write or heartbeat, and a cancelled run is never resumed.
-		msg := errCourseCancelled.Error()
-		if _, err := s.repo.Transition(ctx, runID, model.CourseRunCancelled, &msg); err != nil {
-			return nil, err
-		}
+	}
+	if ended {
+		s.notifyBoard(run.TaskID, fmt.Sprintf("Course run %s: %s", model.CourseRunCancelled, msg), "")
 	}
 	run.Status = model.CourseRunCancelled
 	return run, nil

@@ -144,6 +144,12 @@ func (g *Generator) generate(ctx context.Context, job Job, h Hooks) error {
 		if err != nil {
 			return fmt.Errorf("research: %w", err)
 		}
+		// Research tolerates a failed stage (a missing summary, an unread
+		// source) and can hand back a thinner brief when the run was stopped
+		// part-way. That is not finished research and must not be saved as it.
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr
+		}
 		if !brief.IsUsable() {
 			return errors.New("research found no verified sources for this topic; add source URLs or narrow the topic")
 		}
@@ -166,6 +172,11 @@ func (g *Generator) generate(ctx context.Context, job Job, h Hooks) error {
 		done := g.phase(job, "outline")
 		var err error
 		outline, err = g.outline(ctx, b, notes, h)
+		// A stopped run may have had its corrective retry cut off and be
+		// holding the short first plan; do not save that as the outline.
+		if cerr := ctx.Err(); err == nil && cerr != nil {
+			err = cerr
+		}
 		done(err)
 		if err != nil {
 			return err

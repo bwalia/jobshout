@@ -30,7 +30,9 @@ type Config struct {
 	// fact alive is safe; this only trades resume delay against that waste.
 	OrphanTimeout time.Duration
 	// MaxResumes is how many times a run may be resumed before it is failed,
-	// so a run that takes its server down cannot loop forever.
+	// so a run that takes its server down cannot loop forever. It is generous
+	// because ordinary deploys spend it too: a rolling deploy of two replicas
+	// can hand one run back twice.
 	MaxResumes int
 }
 
@@ -43,7 +45,7 @@ func LoadConfig() Config {
 		MaxChapters:   intEnv("COURSE_MAX_CHAPTERS", 8, 1, 12),
 		Images:        boolEnv("COURSE_IMAGES", true),
 		OrphanTimeout: durationEnv("COURSE_ORPHAN_TIMEOUT", 2*time.Minute),
-		MaxResumes:    intEnv("COURSE_MAX_RESUMES", 5, 0, 20),
+		MaxResumes:    intEnv("COURSE_MAX_RESUMES", 20, 0, 100),
 	}
 }
 
