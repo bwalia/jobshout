@@ -19,6 +19,9 @@ logLevel: debug
 #     --from-literal=WSLPROXY_API_TOKEN=...
 extraSecretRefs:
   - jobshout-cms
+  # BRAVE_SEARCH_API_KEY: general web search for the Research Agent. Without
+  # it research searches Hacker News and arXiv only.
+  - jobshout-research
   - jobshout-review
   - jobshout-mail
   - jobshout-google
