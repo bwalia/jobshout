@@ -1695,8 +1695,9 @@ func main() {
 	// is handled by InterruptAll below; this loop covers the rest. Does not
 	// restart generation — Retry is the user's action.
 	go blogReconciler.Start(ctx)
-	// Same for course runs: fail rows whose heartbeat stopped.
-	go courseSvc.StartReaper(ctx)
+	// Course runs are resumed, not failed: pick up runs handed back at shutdown
+	// or left with a stale heartbeat by a killed pod.
+	go courseSvc.StartResumer(ctx)
 
 	srv := &http.Server{
 		Addr:    cfg.ServerPort,
@@ -1733,6 +1734,8 @@ func main() {
 	// set first so a Generate that is still inside its HTTP handler cannot
 	// start a new goroutine after we have cancelled the ones we know about.
 	blogSvc.InterruptAll(nil)
+	// Course runs are handed back instead: the next server resumes them from
+	// their saved state.
 	courseSvc.InterruptAll()
 	cancel()
 

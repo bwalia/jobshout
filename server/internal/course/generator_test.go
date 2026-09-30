@@ -225,3 +225,125 @@ func TestStripFence(t *testing.T) {
 		t.Errorf("a code fence must be kept: %q", got)
 	}
 }
+
+func countCalls(calls []string, trigger string) int {
+	n := 0
+	for _, c := range calls {
+		if strings.Contains(c, trigger) {
+			n++
+		}
+	}
+	return n
+}
+
+func TestGenerate_ResumeSkipsSavedWork(t *testing.T) {
+	lm := &scriptLLM{replies: goodScript()}
+	rs := &stubResearch{brief: usableBrief()}
+	il := &stubIllus{}
+	g := NewGenerator(lm, rs, il, Config{Images: true}, nil)
+
+	outline := &model.CourseOutline{Title: "Kubernetes Networking", Chapters: []model.CourseOutlineChapter{
+		{Title: "Pods and IPs", Summary: "Pod addressing."},
+		{Title: "Services", Summary: "Stable endpoints."},
+	}}
+	// Chapter 1 is saved; chapter 2 was written and reviewed when the server
+	// went away, so only its image and quiz are left.
+	state := State{
+		Notes:   "Findings:\n- Every pod gets its own IP.",
+		Outline: outline,
+		Done:    map[int]bool{1: true},
+		Progress: model.CourseProgress{CoverDone: true, Draft: &model.CourseChapterDraft{
+			Position: 2, Markdown: "## Saved draft\n\nServices are stable.", Reviewed: true,
+		}},
+	}
+
+	var chapters []*model.CourseChapter
+	var planned, researched bool
+	var last model.CourseProgress
+	err := g.Generate(context.Background(), Job{OrgID: uuid.New(), Brief: testBrief(), Resume: state}, Hooks{
+		Researched: func(string, []model.CourseSource) error { researched = true; return nil },
+		Planned:    func(*model.CourseOutline, []model.CourseSource) error { planned = true; return nil },
+		Progress:   func(p model.CourseProgress) error { last = p; return nil },
+		Chapter:    func(ch *model.CourseChapter) error { chapters = append(chapters, ch); return nil },
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if rs.got.Topic != "" || researched || planned {
+		t.Error("saved research and outline must not be redone")
+	}
+	if n := countCalls(lm.calls, "Plan a course.") + countCalls(lm.calls, "Write chapter") + countCalls(lm.calls, "Review this course chapter"); n != 0 {
+		t.Errorf("outline, writing and review were already saved; %d such calls were made", n)
+	}
+	if n := countCalls(lm.calls, "Write a multiple-choice quiz"); n != 1 {
+		t.Errorf("only the interrupted chapter's quiz should run, got %d", n)
+	}
+	if il.count != 1 {
+		t.Errorf("want the one missing chapter image and no cover, got %d images", il.count)
+	}
+	if len(chapters) != 1 || chapters[0].Position != 2 {
+		t.Fatalf("only chapter 2 should be saved, got %+v", chapters)
+	}
+	if !strings.Contains(chapters[0].Markdown, "Saved draft") || chapters[0].Quiz == nil || len(chapters[0].Images) != 1 {
+		t.Errorf("chapter 2 must keep its saved draft and gain a quiz and image: %+v", chapters[0])
+	}
+	if last.Draft != nil || !last.CoverDone {
+		t.Errorf("the draft must be cleared once its chapter is saved: %+v", last)
+	}
+}
+
+// cancelOn cancels the run when a prompt containing trigger arrives, the way
+// a shutdown lands in the middle of a stage.
+type cancelOn struct {
+	*scriptLLM
+	trigger string
+	cancel  context.CancelFunc
+}
+
+func (c *cancelOn) Generate(ctx context.Context, req llm.GenerateRequest) (*llm.GenerateResponse, error) {
+	if strings.Contains(req.Messages[len(req.Messages)-1].Content, c.trigger) {
+		c.cancel()
+		return nil, ctx.Err()
+	}
+	return c.scriptLLM.Generate(ctx, req)
+}
+
+func TestGenerate_InterruptedStageIsNotRecordedAsDone(t *testing.T) {
+	// Review and quiz failures are normally tolerated (warn, keep the
+	// chapter). A stage cut off by a shutdown is different: recording it as
+	// done would save a chapter without its quiz for good.
+	for _, trigger := range []string{"Review this course chapter", "Write a multiple-choice quiz"} {
+		ctx, cancel := context.WithCancel(context.Background())
+		lm := &cancelOn{scriptLLM: &scriptLLM{replies: goodScript()}, trigger: trigger, cancel: cancel}
+		g := NewGenerator(lm, &stubResearch{brief: usableBrief()}, nil, Config{}, nil)
+
+		var last model.CourseProgress
+		var chapters int
+		var warnings []string
+		err := g.Generate(ctx, Job{Brief: testBrief()}, Hooks{
+			Progress: func(p model.CourseProgress) error {
+				last = p
+				if p.Draft != nil {
+					d := *p.Draft
+					last.Draft = &d
+				}
+				return nil
+			},
+			Chapter: func(*model.CourseChapter) error { chapters++; return nil },
+			Warn:    func(m string) { warnings = append(warnings, m) },
+		})
+		cancel()
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("%s: want the cancellation returned, got %v", trigger, err)
+		}
+		if chapters != 0 || len(warnings) != 0 {
+			t.Errorf("%s: an interrupted chapter must not be saved or warned about: chapters=%d warnings=%v", trigger, chapters, warnings)
+		}
+		if last.Draft == nil || last.Draft.Markdown == "" || last.Draft.Quizzed {
+			t.Errorf("%s: the written draft must be saved and the quiz left to do: %+v", trigger, last.Draft)
+		}
+		if strings.Contains(trigger, "Review") && last.Draft.Reviewed {
+			t.Errorf("an interrupted review must be left to do")
+		}
+	}
+}

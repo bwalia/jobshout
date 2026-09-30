@@ -1,6 +1,7 @@
 /** Course Generator wire types (server: internal/model/course.go). */
 
-export type CourseRunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+/** "resuming": the server generating the run restarted; a server picks it up from its saved state. */
+export type CourseRunStatus = "queued" | "running" | "resuming" | "completed" | "failed" | "cancelled";
 
 export interface CourseBrief {
   topic: string;
@@ -53,6 +54,8 @@ export interface CourseRun {
   sources?: CourseSource[];
   warnings?: string[];
   error_message?: string | null;
+  /** 1 for the launch; goes up each time the run is resumed after a server restart. */
+  attempt?: number;
   started_at: string | null;
   completed_at: string | null;
   created_at: string;
@@ -87,5 +90,5 @@ export interface CourseChapter {
 }
 
 export function isCourseRunActive(status: CourseRunStatus): boolean {
-  return status === "queued" || status === "running";
+  return status === "queued" || status === "running" || status === "resuming";
 }

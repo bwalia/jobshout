@@ -24,9 +24,14 @@ type Config struct {
 	MaxChapters int
 	// Images turns chapter illustrations and the course cover on or off.
 	Images bool
-	// OrphanTimeout is how stale a running row's heartbeat must be before
-	// the reaper fails it.
+	// OrphanTimeout is how stale a running run's heartbeat must be before
+	// another server takes it to be abandoned (pod killed) and resumes it.
+	// Writes are guarded by attempt, so resuming a run whose writer is in
+	// fact alive is safe; this only trades resume delay against that waste.
 	OrphanTimeout time.Duration
+	// MaxResumes is how many times a run may be resumed before it is failed,
+	// so a run that takes its server down cannot loop forever.
+	MaxResumes int
 }
 
 // LoadConfig reads COURSE_* variables with safe defaults.
@@ -37,7 +42,8 @@ func LoadConfig() Config {
 		PlanBudget:    durationEnv("COURSE_PLAN_RUNTIME", 20*time.Minute),
 		MaxChapters:   intEnv("COURSE_MAX_CHAPTERS", 8, 1, 12),
 		Images:        boolEnv("COURSE_IMAGES", true),
-		OrphanTimeout: durationEnv("COURSE_ORPHAN_TIMEOUT", 10*time.Minute),
+		OrphanTimeout: durationEnv("COURSE_ORPHAN_TIMEOUT", 2*time.Minute),
+		MaxResumes:    intEnv("COURSE_MAX_RESUMES", 5, 0, 20),
 	}
 }
 
