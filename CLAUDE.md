@@ -12,6 +12,7 @@
 ## Rings and deploys (Ring Promoter, k3s1)
 
 - A merge to master deploys int. Ring Promoter auto-promotes int → test → acc when healthy; prod is manual and needs the production password.
+- An int deploy that fails with `UPGRADE FAILED: context deadline exceeded` means a pod in the release never became Ready; `helm --wait` covers Langfuse too, not just the API. Find it with `kubectl -n int get pods | grep -v Running` before suspecting the chart. Failed int deploys stop promotion to every later ring.
 - `jobshout` uses RP's **k8sjob** deployer (a Job in `ring-exec` runs `helm upgrade`). Re-seeding the running version is a no-op; to pick up changed secrets use `POST /api/apps/jobshout/rings/{ring}/restart` with an explicit `deployments` list. `app.kubernetes.io/instance=jobshout` also matches redis/langfuse/minio — never restart by that label.
 
 ## Secrets on k3s1
