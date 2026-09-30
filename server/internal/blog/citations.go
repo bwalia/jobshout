@@ -83,7 +83,30 @@ func resolveCitations(markdown string, brief *research.Brief) (string, []model.B
 		return fmt.Sprintf("[%d]", idx)
 	})
 
-	return tidySpacing(rewritten), refs
+	return tidySpacing(collapseRepeatedCitations(rewritten)), refs
+}
+
+// repeatedCitation matches a marker followed by more markers, with only
+// spaces or commas between them.
+var repeatedCitation = regexp.MustCompile(`\[\d+\](?:[ ,]*\[\d+\])+`)
+
+// collapseRepeatedCitations turns "[1][1]" and "[2], [2], [2]" into one marker.
+//
+// A writer cites findings; several findings from one page renumber to the same
+// reference, so a sentence built on three of them read "[2][2][2]". Different
+// references next to each other are kept, each once, in order.
+func collapseRepeatedCitations(markdown string) string {
+	return repeatedCitation.ReplaceAllStringFunc(markdown, func(run string) string {
+		seen := map[string]bool{}
+		var out []string
+		for _, m := range citationMark.FindAllString(run, -1) {
+			if !seen[m] {
+				seen[m] = true
+				out = append(out, m)
+			}
+		}
+		return strings.Join(out, "")
+	})
 }
 
 // stripAllCitations removes every citation marker, used when there is no brief

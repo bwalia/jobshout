@@ -24,11 +24,17 @@ type stubLLM struct {
 	calls     []llm.GenerateRequest
 	// failOn makes any prompt containing this substring return an error.
 	failOn string
+	// deadlineOn ends the run's context when a prompt containing this
+	// substring arrives, the way a budget expiring mid-call does.
+	deadlineOn string
+	expire     context.CancelFunc
 }
 
 type scriptedResponse struct {
 	trigger string
 	content string
+	// finish is the reply's FinishReason; empty means "stop".
+	finish string
 }
 
 func (s *stubLLM) Generate(ctx context.Context, req llm.GenerateRequest) (*llm.GenerateResponse, error) {
@@ -38,9 +44,13 @@ func (s *stubLLM) Generate(ctx context.Context, req llm.GenerateRequest) (*llm.G
 	if s.failOn != "" && strings.Contains(prompt, s.failOn) {
 		return nil, fmt.Errorf("stubLLM: scripted failure")
 	}
+	if s.deadlineOn != "" && strings.Contains(prompt, s.deadlineOn) {
+		s.expire()
+		return nil, ctx.Err()
+	}
 	for _, r := range s.responses {
 		if strings.Contains(prompt, r.trigger) {
-			return &llm.GenerateResponse{Content: r.content}, nil
+			return &llm.GenerateResponse{Content: r.content, FinishReason: r.finish}, nil
 		}
 	}
 	return nil, fmt.Errorf("stubLLM: no canned response matched prompt")

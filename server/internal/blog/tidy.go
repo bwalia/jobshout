@@ -281,3 +281,51 @@ var landscapeDate = regexp.MustCompile(`(?i)(landscape reviewed:\s*)[^*_\n]+`)
 func stampLandscapeDate(markdown string, now time.Time) string {
 	return landscapeDate.ReplaceAllString(markdown, "${1}"+now.Format("2006-01-02"))
 }
+
+// trimIncompleteTail cuts a reply that stopped at the token ceiling back to
+// its last complete block: an unclosed code fence goes, then a final paragraph
+// that does not end a sentence, then any heading left with nothing under it.
+func trimIncompleteTail(markdown string) string {
+	// An odd number of fences means the last one was never closed.
+	if strings.Count(markdown, "```")%2 == 1 {
+		markdown = markdown[:strings.LastIndex(markdown, "```")]
+	}
+	blocks := splitBlocks(markdown)
+	for len(blocks) > 0 && !blockComplete(blocks[len(blocks)-1]) {
+		blocks = blocks[:len(blocks)-1]
+	}
+	return strings.TrimSpace(removeEmptyHeadings(strings.Join(blocks, "\n\n")))
+}
+
+// listItem matches a bullet or numbered line; list items rarely end a sentence.
+var listItem = regexp.MustCompile(`^\s*(?:[-*+]|\d+[.)])\s+\S`)
+
+// blockComplete reports whether a block reads as finished. Headings, fenced
+// code, tables and lists are taken whole; prose must end a sentence.
+func blockComplete(block string) bool {
+	t := strings.TrimSpace(block)
+	if t == "" {
+		return false
+	}
+	last := t[strings.LastIndex(t, "\n")+1:]
+	switch {
+	case strings.HasPrefix(t, "#"), strings.HasSuffix(t, "```"):
+		return true
+	case strings.HasPrefix(strings.TrimSpace(last), "|"):
+		// A table row is complete when it closes its last cell.
+		return strings.HasSuffix(strings.TrimSpace(last), "|")
+	}
+	if listItem.MatchString(last) {
+		return true
+	}
+	end := strings.TrimRight(t, "*_)\"'`] ")
+	if end == "" {
+		return false
+	}
+	switch end[len(end)-1] {
+	case '.', '!', '?', ':':
+		return true
+	}
+	// A citation closes a sentence too: "…at a lower cost [2]".
+	return citationMark.MatchString(t[max(0, len(t)-6):]) && strings.HasSuffix(t, "]")
+}

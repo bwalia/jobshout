@@ -228,6 +228,9 @@ type ollamaChatResponse struct {
 	Model   string        `json:"model"`
 	Message ollamaMessage `json:"message"`
 	Done    bool          `json:"done"`
+	// DoneReason is why a finished reply stopped: "stop", or "length" when it
+	// ran into num_predict. A reply cut at the limit still arrives done=true.
+	DoneReason string `json:"done_reason"`
 	// Ollama reports token counts only when done=true.
 	PromptEvalCount int `json:"prompt_eval_count"`
 	EvalCount       int `json:"eval_count"`
@@ -336,6 +339,7 @@ func (c *OllamaClient) readStream(body io.Reader, model string, numPredict int, 
 		thinking  strings.Builder
 		toolCalls []ollamaToolCall
 		done      bool
+		reason    string
 		inTok     int
 		outTok    int
 	)
@@ -365,6 +369,7 @@ func (c *OllamaClient) readStream(body io.Reader, model string, numPredict int, 
 		toolCalls = append(toolCalls, chunk.Message.ToolCalls...)
 		if chunk.Done {
 			done = true
+			reason = chunk.DoneReason
 			inTok = chunk.PromptEvalCount
 			outTok = chunk.EvalCount
 		}
@@ -373,8 +378,11 @@ func (c *OllamaClient) readStream(body io.Reader, model string, numPredict int, 
 		return nil, fmt.Errorf("ollama: read stream: %w", err)
 	}
 
+	// "length" when the stream ended without a done chunk, or when Ollama
+	// says it stopped at num_predict. The second case used to be reported as
+	// "stop", so a caller could not tell a finished reply from a cut one.
 	finishReason := "stop"
-	if !done {
+	if !done || reason == "length" {
 		finishReason = "length"
 	}
 
