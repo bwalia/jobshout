@@ -462,8 +462,11 @@ langfuse:
   # ring emits. Defaults to the release namespace (int/test/acc/prod), which is
   # what keeps rings separable if they ever share one Langfuse project.
   tracingEnvironment: ""
-  webImage: langfuse/langfuse:4
-  workerImage: langfuse/langfuse-worker:4
+  # Pinned, not the floating ":4". Langfuse runs schema migrations at boot, so
+  # a pod rescheduled onto a node without the image cached pulled a newer 4.x
+  # and migrated ClickHouse mid-outage. Bump both together, deliberately.
+  webImage: langfuse/langfuse:4.46.0
+  workerImage: langfuse/langfuse-worker:4.46.0
   web:
     resources:
       requests: { cpu: 200m, memory: 512Mi }
