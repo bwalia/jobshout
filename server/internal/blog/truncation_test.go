@@ -136,3 +136,36 @@ func TestCollapseRepeatedCitations(t *testing.T) {
 		}
 	}
 }
+
+// The larger window is for the calls that write article text. The JSON stages
+// run on the worker model, which research is using at the default window;
+// asking for a different one there would make Ollama reload it.
+func TestProseNumCtx_OnlyOnProseCalls(t *testing.T) {
+	stub := &stubLLM{responses: writeScript("T", "# T\n\nBody [1].")}
+	r := NewRunner(Config{ProseNumCtx: 16384}, stub, nil, &fakeResearcher{}, testLogger())
+
+	if _, err := r.Generate(context.Background(), GenerateRequest{
+		Briefs: []model.BlogBrief{{Topic: "Gateway API"}},
+	}, nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	prose, structured := 0, 0
+	for _, call := range stub.calls {
+		prompt := call.Messages[len(call.Messages)-1].Content
+		isProse := strings.Contains(prompt, promptDraft) || strings.Contains(prompt, promptRevise) || strings.Contains(prompt, promptExpand)
+		switch {
+		case isProse && call.NumCtx == 16384:
+			prose++
+		case isProse:
+			t.Errorf("a prose call asked for num_ctx %d, want 16384", call.NumCtx)
+		case call.NumCtx != 0:
+			t.Errorf("a JSON stage asked for num_ctx %d, want the client default", call.NumCtx)
+		default:
+			structured++
+		}
+	}
+	if prose == 0 || structured == 0 {
+		t.Fatalf("saw %d prose and %d structured calls; the test needs both", prose, structured)
+	}
+}

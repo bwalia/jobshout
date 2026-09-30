@@ -132,7 +132,7 @@ func TestNewChatInner_OllamaUsesChatNumCtx(t *testing.T) {
 	if oc.NumCtx != 16384 {
 		t.Fatalf("NumCtx = %d", oc.NumCtx)
 	}
-	if oc.effectiveNumCtx("qwen3-coder:30b") != 16384 && oc.NumCtx != 16384 {
+	if oc.effectiveNumCtx("qwen3-coder:30b", 0) != 16384 && oc.NumCtx != 16384 {
 		t.Fatal("chat num_ctx should be 16384 before model clamp")
 	}
 }

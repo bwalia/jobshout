@@ -197,6 +197,17 @@ type Config struct {
 	BlogProseModel      string `mapstructure:"BLOG_PROSE_MODEL"`
 	BlogStructuredModel string `mapstructure:"BLOG_STRUCTURED_MODEL"`
 
+	// BlogProseNumCtx is the context window asked for on the calls that write
+	// article text. Zero keeps OLLAMA_NUM_CTX.
+	//
+	// Revising or expanding an article sends the whole draft and gets the whole
+	// article back, so the window has to hold it twice, plus the findings. A
+	// 3400-word piece does not fit in 8192 tokens that way. It is set for the
+	// prose calls only: the JSON stages usually run on the worker model, which
+	// research is using at OLLAMA_NUM_CTX at the same time, and Ollama reloads
+	// a model whenever two callers ask for different windows.
+	BlogProseNumCtx int `mapstructure:"BLOG_PROSE_NUM_CTX"`
+
 	// CareerModel pins the model behind Career Agent, separately from the
 	// worker OLLAMA_DEFAULT_MODEL, for the same reason CHAT_MODEL and
 	// BLOG_MODEL are pinned: the work is different.
@@ -214,8 +225,10 @@ type Config struct {
 	// the reconciler marks it failed. Must outlast a legitimate long LLM call.
 	BlogOrphanTimeout time.Duration `mapstructure:"BLOG_ORPHAN_TIMEOUT"`
 	// BlogMaxRuntime is the wall-clock budget per article; a run gets this
-	// times its article count. One article on int takes ~25m end to end, so
-	// the budget must sit well above that. A single hung LLM call is bounded
+	// times its article count. One article on int takes ~25m end to end on the
+	// worker model, so the budget must sit well above that. It follows the
+	// writing model: a larger BLOG_PROSE_MODEL on a shared host took 17–28m for
+	// the draft alone, and a run makes up to three such calls. A single hung LLM call is bounded
 	// by OLLAMA_TIMEOUT and a dead run by BLOG_ORPHAN_TIMEOUT.
 	BlogMaxRuntime time.Duration `mapstructure:"BLOG_MAX_RUNTIME"`
 
@@ -377,6 +390,7 @@ func Load() (*Config, error) {
 		BlogProseModel:       viper.GetString("BLOG_PROSE_MODEL"),
 		CareerModel:          viper.GetString("CAREER_MODEL"),
 		BlogStructuredModel:  viper.GetString("BLOG_STRUCTURED_MODEL"),
+		BlogProseNumCtx:      viper.GetInt("BLOG_PROSE_NUM_CTX"),
 		BlogOrphanTimeout:    viper.GetDuration("BLOG_ORPHAN_TIMEOUT"),
 		BlogMaxRuntime:       viper.GetDuration("BLOG_MAX_RUNTIME"),
 		GitHubToken:          viper.GetString("GITHUB_TOKEN"),

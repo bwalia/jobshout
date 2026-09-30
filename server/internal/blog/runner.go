@@ -78,6 +78,10 @@ type Config struct {
 	// would break the requirement that a diagram agree with the text around it.
 	ProseModel      string
 	StructuredModel string
+
+	// ProseNumCtx is the context window asked for on prose calls, in tokens.
+	// Zero leaves it to the LLM client. See config.BlogProseNumCtx.
+	ProseNumCtx int
 }
 
 // CMSPublisher is the slice of the opsapi client this package uses. Declared

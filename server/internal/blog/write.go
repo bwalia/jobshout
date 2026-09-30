@@ -647,7 +647,7 @@ func articleTokens(brief model.BlogBrief) int {
 // half-way through a sentence.
 func (r *Runner) generate(ctx context.Context, modelName string, brief model.BlogBrief, prompt string) (string, error) {
 	limit := articleTokens(brief)
-	resp, err := r.complete(ctx, modelName, prompt, limit)
+	resp, err := r.complete(ctx, modelName, prompt, limit, r.cfg.ProseNumCtx)
 	if err != nil {
 		return "", err
 	}
@@ -685,18 +685,20 @@ func (r *Runner) generateJSON(
 }
 
 func (r *Runner) generateBounded(ctx context.Context, modelName, prompt string, maxTokens int) (string, error) {
-	resp, err := r.complete(ctx, modelName, prompt, maxTokens)
+	resp, err := r.complete(ctx, modelName, prompt, maxTokens, 0)
 	if err != nil {
 		return "", err
 	}
 	return resp.Content, nil
 }
 
-// complete is the single point where the writer talks to the LLM.
-func (r *Runner) complete(ctx context.Context, modelName, prompt string, maxTokens int) (*llm.GenerateResponse, error) {
+// complete is the single point where the writer talks to the LLM. numCtx is
+// the context window to ask for; zero leaves it to the client.
+func (r *Runner) complete(ctx context.Context, modelName, prompt string, maxTokens, numCtx int) (*llm.GenerateResponse, error) {
 	resp, err := r.llm.Generate(ctx, llm.GenerateRequest{
 		Model:     modelName,
 		MaxTokens: maxTokens,
+		NumCtx:    numCtx,
 		Messages:  []llm.Message{{Role: llm.RoleUser, Content: prompt}},
 	})
 	if err != nil {

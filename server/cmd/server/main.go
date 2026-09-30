@@ -525,6 +525,7 @@ func main() {
 			Model:           cfg.BlogModel,
 			ProseModel:      cfg.BlogProseModel,
 			StructuredModel: cfg.BlogStructuredModel,
+			ProseNumCtx:     cfg.BlogProseNumCtx,
 		}, blogLLM, cmsClient, researchSvc, logger)
 		// Cover images and in-article illustrations are opt-in per environment:
 		// each costs tens of seconds on a single shared GPU, so an operator
