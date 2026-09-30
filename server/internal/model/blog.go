@@ -167,6 +167,11 @@ type BlogRun struct {
 	// reconciler can fail a run whose writer died (deploy SIGKILL, OOM)
 	// without false-positiving a healthy long Ollama call.
 	HeartbeatAt *time.Time `json:"heartbeat_at,omitempty"`
+	// Attempt counts how many times this run has been started: 1, then one
+	// more per retry. Whoever is writing an attempt guards its writes with
+	// this number, so a writer left over from an earlier attempt — possibly
+	// on another replica — cannot write onto the current one.
+	Attempt     int        `json:"attempt"`
 	CompletedAt *time.Time `json:"completed_at"`
 	PublishedAt *time.Time `json:"published_at"`
 	// InsightsPublishedAt is when the run's articles were filed in JobShout.com

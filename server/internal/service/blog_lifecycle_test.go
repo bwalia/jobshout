@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,8 +18,14 @@ import (
 
 // runStore is a repository stub holding one run, enough to exercise the guards
 // that Delete and Retry apply before doing any work.
+//
+// Like the real repository, its writes only land while the row is on the
+// attempt the writer names.
 type runStore struct {
 	repository.BlogRepository
+	// mu guards the row: the heartbeat goroutine and the writing goroutine
+	// both reach it, as two connections reach one database row.
+	mu              sync.Mutex
 	run             *model.BlogRun
 	stale           []*model.BlogRun
 	storedArticles  []model.BlogArticle
@@ -27,7 +34,13 @@ type runStore struct {
 }
 
 func (s *runStore) GetByID(_ context.Context, _ uuid.UUID) (*model.BlogRun, error) {
-	return s.run, nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.run == nil {
+		return nil, nil
+	}
+	row := *s.run
+	return &row, nil
 }
 func (s *runStore) Delete(_ context.Context, _ uuid.UUID) error {
 	s.deleted = true
@@ -38,17 +51,45 @@ func (s *runStore) DeleteArticlesByRun(_ context.Context, _ uuid.UUID) error {
 	return nil
 }
 func (s *runStore) Update(_ context.Context, run *model.BlogRun) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.run != nil && s.run.Attempt != run.Attempt {
+		return nil
+	}
 	copy := *run
 	s.run = &copy
 	return nil
 }
-func (s *runStore) UpdateSteps(_ context.Context, _ uuid.UUID, steps []model.BlogStep) error {
-	if s.run != nil {
+func (s *runStore) UpdateSteps(_ context.Context, _ uuid.UUID, attempt int, steps []model.BlogStep) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.run != nil && s.run.Attempt == attempt {
 		s.run.Steps = append([]model.BlogStep(nil), steps...)
 	}
 	return nil
 }
-func (s *runStore) TouchHeartbeat(_ context.Context, _ uuid.UUID) error { return nil }
+func (s *runStore) TouchHeartbeat(_ context.Context, _ uuid.UUID, attempt int) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.run == nil {
+		return true, nil
+	}
+	live := s.run.Status == model.BlogRunStatusRunning || s.run.Status == model.BlogRunStatusPending
+	return live && s.run.Attempt == attempt, nil
+}
+func (s *runStore) BeginRetry(_ context.Context, _ uuid.UUID, attempt int) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	retryable := s.run.Status == model.BlogRunStatusFailed || s.run.Status == model.BlogRunStatusCancelled
+	if !retryable || s.run.Attempt != attempt {
+		return false, nil
+	}
+	next := *s.run
+	next.Attempt++
+	next.Status = model.BlogRunStatusRunning
+	s.run = &next
+	return true, nil
+}
 func (s *runStore) ListStaleRunning(_ context.Context, _ time.Time) ([]*model.BlogRun, error) {
 	if s.stale == nil {
 		return nil, nil
@@ -56,21 +97,30 @@ func (s *runStore) ListStaleRunning(_ context.Context, _ time.Time) ([]*model.Bl
 	return s.stale, nil
 }
 func (s *runStore) CreateArticles(_ context.Context, articles []model.BlogArticle) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.storedArticles = append(s.storedArticles, articles...)
 	return nil
 }
 func (s *runStore) ListArticlesByRun(_ context.Context, _ uuid.UUID) ([]model.BlogArticle, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return append([]model.BlogArticle(nil), s.storedArticles...), nil
 }
-func (s *runStore) UpdateArticles(_ context.Context, _ uuid.UUID, articles []model.BlogRunArticle) error {
-	if s.run != nil {
+func (s *runStore) UpdateArticles(_ context.Context, _ uuid.UUID, attempt int, articles []model.BlogRunArticle) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.run != nil && s.run.Attempt == attempt {
 		s.run.Articles = append([]model.BlogRunArticle(nil), articles...)
 	}
 	return nil
 }
 
 func newLifecycleSvc(run *model.BlogRun) (*blogService, *runStore) {
-	store := &runStore{run: run}
+	// The store keeps its own copy, as a database row is its own copy: a
+	// writer changing its in-memory run must not change what is stored.
+	stored := *run
+	store := &runStore{run: &stored}
 	return &blogService{repo: store, logger: zap.NewNop()}, store
 }
 
