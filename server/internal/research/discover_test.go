@@ -420,3 +420,52 @@ func TestSearchAreas_Deduplicates(t *testing.T) {
 		t.Errorf("searchAreas = %v; want one area", got)
 	}
 }
+
+// A small model quoting its seed indexes and in_focus flag used to fail the
+// whole reply, and with it the scheduled run.
+func TestDiscover_ToleratesQuotedSeedsAndFlags(t *testing.T) {
+	model := &scriptedLLM{responses: []scriptedResponse{
+		{trigger: promptDiscover, content: `{"topics":[
+			{"topic":"What a kube-proxy-free datapath changes for cluster operators",
+			 "context":"For platform engineers.","rationale":"r",
+			 "seeds":["0"],"in_focus":"true"}
+		]}`},
+	}}
+	agent := newDiscoverAgent(t, sampleTrending(), model)
+
+	got, err := agent.Discover(context.Background(), DiscoverRequest{Count: 1}, nil)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(got) != 1 || len(got[0].Seeds) != 1 || got[0].Seeds[0] != "https://cilium.io/blog/1" {
+		t.Fatalf("got %+v, want one topic seeded from the first trending item", got)
+	}
+}
+
+// Seven focus areas used to put 96 candidates in front of an 8192-token
+// model. The cap keeps every channel represented.
+func TestCapCandidates_KeepsEveryChannel(t *testing.T) {
+	var items []TrendingItem
+	for i := 0; i < 40; i++ {
+		items = append(items, TrendingItem{Channel: "hackernews", Source: Source{URL: fmt.Sprintf("https://hn/%d", i)}})
+	}
+	for a := 0; a < 7; a++ {
+		for i := 0; i < 8; i++ {
+			items = append(items, TrendingItem{Channel: fmt.Sprintf("search:%d", a), Source: Source{URL: fmt.Sprintf("https://s%d/%d", a, i)}})
+		}
+	}
+	got := capCandidates(items, maxPromptCandidates)
+	if len(got) != maxPromptCandidates {
+		t.Fatalf("kept %d, want %d", len(got), maxPromptCandidates)
+	}
+	seen := map[string]int{}
+	for _, it := range got {
+		seen[it.Channel]++
+	}
+	if len(seen) != 8 {
+		t.Errorf("channels kept = %v, want all 8", seen)
+	}
+	if short := capCandidates(items[:10], maxPromptCandidates); len(short) != 10 {
+		t.Errorf("a pool under the cap was trimmed to %d", len(short))
+	}
+}

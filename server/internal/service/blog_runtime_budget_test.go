@@ -26,7 +26,11 @@ func TestRuntimeBudgetScalesPerArticle(t *testing.T) {
 		{"empty never zero", model.GenerateBlogRequest{}, 1},
 	}
 	for _, tc := range cases {
-		if got, want := s.runtimeBudget(tc.req), time.Duration(tc.want)*45*time.Minute; got != want {
+		want := time.Duration(tc.want) * 45 * time.Minute
+		if tc.req.Trending {
+			want += discoveryAllowance
+		}
+		if got := s.runtimeBudget(tc.req); got != want {
 			t.Errorf("%s: budget = %v, want %v", tc.name, got, want)
 		}
 	}
