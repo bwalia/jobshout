@@ -170,6 +170,8 @@ func (r *Runner) finalizeArticle(
 		}
 	}
 
+	article.Markdown = tidyMarkdown(article.Markdown, r.canIllustrate())
+
 	report(progress, model.BlogStepConverting,
 		fmt.Sprintf("Converting %s to HTML", article.Title), model.AgentNameArticleWriter)
 	return article.render()
@@ -308,6 +310,12 @@ func (r *Runner) writeOne(
 	// 8. Resolve citations into a reference list. This drops markers pointing
 	// at sources that were never offered and renumbers what survives, so the
 	// published article's references are exactly what it cites.
+	// The model sometimes writes its own reference list — a dump of findings
+	// with their quotes — and this step appends the real one after it.
+	markdown = stripModelReferences(markdown)
+	// The reader profile asks for a dated opener, but no prompt carries the
+	// date, so the model guessed one from its training data. Write it here.
+	markdown = stampLandscapeDate(markdown, r.clock())
 	rawCitations := countCitations(markdown)
 	markdown, refs := resolveCitations(markdown, rb)
 	markdown = strings.TrimRight(markdown, "\n") + referencesMarkdown(refs)
