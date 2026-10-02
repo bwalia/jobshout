@@ -1,4 +1,4 @@
--- Migration 057: resumable Course Generator runs.
+-- Migration 059: resumable Course Generator runs.
 -- IDEMPOTENCY IS MANDATORY (migrate.go replays every *.up.sql on boot).
 
 -- The notes every later stage is written from. Saved when research finishes so

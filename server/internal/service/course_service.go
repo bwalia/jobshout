@@ -214,7 +214,11 @@ func (s *courseService) execute(ctx context.Context, cancel context.CancelCauseF
 		SessionID: run.ID.String(),
 		AgentID:   run.AgentID.String(),
 		OrgID:     run.OrgID.String(),
-	})
+	}
+	if run.TaskID != nil {
+		trace.TaskID = run.TaskID.String()
+	}
+	ctx = llmtrace.WithTrace(ctx, trace)
 	log := s.logger.With(zap.String("course_run_id", run.ID.String()), zap.Int("attempt", run.Attempt))
 	lost := func() { cancel(errCourseLost) }
 
@@ -637,4 +641,25 @@ func (t *courseSteps) doneOrSkipped(key string) string {
 		return "done"
 	}
 	return "skipped"
+}
+
+// withAgentModel fills the brief's provider and model from the agent's
+// standing choice where the launch did not name one. A model on the agent is
+// taken only when the run uses the agent's provider: a model names a model on
+// one provider and means nothing on another.
+func withAgentModel(b model.CourseBrief, agent *model.Agent) model.CourseBrief {
+	if agent == nil {
+		return b
+	}
+	agentProv := ""
+	if agent.ModelProvider != nil {
+		agentProv = llm.NormalizeProvider(*agent.ModelProvider)
+	}
+	if b.Provider == "" {
+		b.Provider = agentProv
+	}
+	if b.Model == "" && agent.ModelName != nil && b.Provider == agentProv {
+		b.Model = strings.TrimSpace(*agent.ModelName)
+	}
+	return b
 }

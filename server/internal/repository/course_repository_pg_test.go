@@ -61,7 +61,7 @@ func coursePG(t *testing.T) (*pgxpool.Pool, uuid.UUID, uuid.UUID) {
 		exec(string(b))
 	}
 	migrate("000053_course_generator.up.sql")
-	migrate("000057_course_run_resume.up.sql")
+	migrate("000059_course_run_resume.up.sql")
 
 	var org, agent uuid.UUID
 	if err := pool.QueryRow(ctx, `SELECT org_id, id FROM agents LIMIT 1`).Scan(&org, &agent); err != nil {
@@ -70,7 +70,7 @@ func coursePG(t *testing.T) (*pgxpool.Pool, uuid.UUID, uuid.UUID) {
 	// Migrations replay on every boot, with live rows in every status.
 	exec(`INSERT INTO course_runs (agent_id, org_id, status) VALUES ('` + agent.String() + `','` + org.String() + `','resuming')`)
 	migrate("000053_course_generator.up.sql")
-	migrate("000057_course_run_resume.up.sql")
+	migrate("000059_course_run_resume.up.sql")
 	exec(`DELETE FROM course_runs`)
 	return pool, org, agent
 }
