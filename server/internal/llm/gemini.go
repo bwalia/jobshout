@@ -86,11 +86,17 @@ type geminiResponse struct {
 	PromptFeedback *struct {
 		BlockReason string `json:"blockReason"`
 	} `json:"promptFeedback"`
+	// Pointers: a count Gemini leaves out is unknown, not 0.
 	UsageMetadata struct {
-		PromptTokenCount     int `json:"promptTokenCount"`
-		CandidatesTokenCount int `json:"candidatesTokenCount"`
-		ThoughtsTokenCount   int `json:"thoughtsTokenCount"`
+		PromptTokenCount     *int `json:"promptTokenCount"`
+		CandidatesTokenCount *int `json:"candidatesTokenCount"`
+		ThoughtsTokenCount   *int `json:"thoughtsTokenCount"`
+		TotalTokenCount      *int `json:"totalTokenCount"`
 	} `json:"usageMetadata"`
+	// ModelVersion is the concrete model that answered; for an alias such as
+	// gemini-flash-latest it names the version the alias resolved to.
+	ModelVersion string `json:"modelVersion"`
+	ResponseID   string `json:"responseId"`
 }
 
 // Generate sends one generateContent call.
@@ -130,7 +136,7 @@ func (c *GeminiClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 	if err != nil {
 		return nil, err
 	}
-	return parseGeminiResponse(body, model)
+	return parseGeminiResponse(ctx, body, model)
 }
 
 // buildGeminiRequest maps the provider-neutral conversation onto Gemini's
@@ -185,11 +191,16 @@ func buildGeminiRequest(req GenerateRequest) geminiRequest {
 	return out
 }
 
-func parseGeminiResponse(body []byte, model string) (*GenerateResponse, error) {
+func parseGeminiResponse(ctx context.Context, body []byte, model string) (*GenerateResponse, error) {
 	var gr geminiResponse
 	if err := json.Unmarshal(body, &gr); err != nil {
 		return nil, malformed("gemini", "decode response: "+err.Error())
 	}
+	usage := geminiUsage(gr)
+	providerModel := strings.TrimPrefix(gr.ModelVersion, "models/")
+	// Noted before the reply is judged, so a blocked or thinking-only reply
+	// that fails below still records what it reported.
+	noteReply(ctx, providerModel, gr.ResponseID, usage)
 	if len(gr.Candidates) == 0 {
 		if gr.PromptFeedback != nil && gr.PromptFeedback.BlockReason != "" {
 			return nil, &ProviderError{Provider: "gemini", Kind: ErrProviderBadRequest,
@@ -210,7 +221,7 @@ func parseGeminiResponse(body []byte, model string) (*GenerateResponse, error) {
 
 	if strings.TrimSpace(text.String()) == "" {
 		switch {
-		case finish == "length" && gr.UsageMetadata.ThoughtsTokenCount > 0:
+		case finish == "length" && intOr(gr.UsageMetadata.ThoughtsTokenCount) > 0:
 			return nil, fmt.Errorf("gemini: model %s %w (raise MaxTokens)", model, ErrOnlyThinking)
 		case finish != "stop" && finish != "length" && finish != "":
 			return nil, &ProviderError{Provider: "gemini", Kind: ErrProviderBadRequest,
@@ -219,13 +230,32 @@ func parseGeminiResponse(body []byte, model string) (*GenerateResponse, error) {
 	}
 
 	return &GenerateResponse{
-		Content:      text.String(),
-		FinishReason: finish,
-		Model:        model,
-		InputTokens:  gr.UsageMetadata.PromptTokenCount,
-		// Thinking tokens are billed as output, so they count here.
-		OutputTokens: gr.UsageMetadata.CandidatesTokenCount + gr.UsageMetadata.ThoughtsTokenCount,
+		Content:       text.String(),
+		FinishReason:  finish,
+		Model:         model,
+		InputTokens:   intOr(usage.InputTokens),
+		OutputTokens:  intOr(usage.OutputTokens),
+		ProviderModel: providerModel,
+		RequestID:     gr.ResponseID,
+		Usage:         usage,
 	}, nil
+}
+
+// geminiUsage maps usageMetadata as reported. Output is candidates plus
+// thoughts, because thinking tokens are billed as output; it stays nil only
+// when Gemini reported neither.
+func geminiUsage(gr geminiResponse) Usage {
+	um := gr.UsageMetadata
+	u := Usage{
+		InputTokens:     um.PromptTokenCount,
+		TotalTokens:     um.TotalTokenCount,
+		ReasoningTokens: um.ThoughtsTokenCount,
+	}
+	if um.CandidatesTokenCount != nil || um.ThoughtsTokenCount != nil {
+		out := intOr(um.CandidatesTokenCount) + intOr(um.ThoughtsTokenCount)
+		u.OutputTokens = &out
+	}
+	return u
 }
 
 // geminiFinishReason maps Gemini's reasons onto the OpenAI-style values the

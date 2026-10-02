@@ -58,6 +58,7 @@ import (
 	"github.com/jobshout/server/internal/langfuse"
 	"github.com/jobshout/server/internal/langgraph"
 	"github.com/jobshout/server/internal/llm"
+	"github.com/jobshout/server/internal/llmbench"
 	"github.com/jobshout/server/internal/llmtrace"
 	"github.com/jobshout/server/internal/mail"
 	"github.com/jobshout/server/internal/middleware"
@@ -280,6 +281,13 @@ func main() {
 		chatInner = tracing.Wrap(chatInner)
 		logger.Info("LLM tracing enabled", zap.String("langfuse_host", cfg.LangfuseHost))
 	}
+	// The LLM benchmark records one usage_records row per text LLM call. It is
+	// always on and independent of Langfuse, and like tracing it wraps every
+	// registered client plus chat's separately built one.
+	llmBenchRepo := repository.NewLLMBenchmarkRepository(pool)
+	llmBench := llmbench.New(llmBenchRepo, logger, llmbench.Options{})
+	llmRouter.WrapClients(llmBench.Wrap)
+	chatInner = llmBench.Wrap(chatInner)
 	chatClient := llm.NewChatClient(chatInner, cfg.ChatModel, cfg.ChatModelFallback, logger)
 	logger.Info("chat LLM client",
 		zap.String("model", llm.SanitizeChatModel(cfg.ChatModel)),
@@ -1007,6 +1015,7 @@ func main() {
 	webhookHandler := handler.NewWebhookHandler(integRepo, linkRepo, logger)
 	governanceHandler := handler.NewGovernanceHandler(govSvc)
 	analyticsHandler := handler.NewAnalyticsHandler(analyticsSvc)
+	llmBenchHandler := handler.NewLLMBenchmarkHandler(llmBenchRepo)
 	rbacHandler := handler.NewRBACHandler(rbacSvc)
 	ssoHandler := handler.NewSSOHandler(ssoSvc, jwtSvc)
 	auditHandler := handler.NewAuditHandler(auditRepo)
@@ -1565,6 +1574,14 @@ func main() {
 				r.Get("/top-agents", analyticsHandler.TopAgents)
 			})
 
+			// LLM benchmark (read-only, org-scoped per-call timings)
+			r.Route("/benchmarks", func(r chi.Router) {
+				r.Get("/models", llmBenchHandler.Models)
+				r.Get("/runs", llmBenchHandler.Runs)
+				r.Get("/runs/{kind}/{runID}", llmBenchHandler.Run)
+				r.Get("/calls", llmBenchHandler.Calls)
+			})
+
 			// RBAC (roles and permissions)
 			r.Route("/rbac", func(r chi.Router) {
 				r.Get("/me/permissions", rbacHandler.MyPermissions)
@@ -1775,6 +1792,9 @@ func main() {
 	tracer.Close()
 	if err := tracing.Shutdown(shutdownCtx); err != nil {
 		logger.Warn("langfuse flush failed", zap.Error(err))
+	}
+	if err := llmBench.Close(shutdownCtx); err != nil {
+		logger.Warn("llm benchmark flush failed", zap.Error(err))
 	}
 
 	logger.Info("server stopped")

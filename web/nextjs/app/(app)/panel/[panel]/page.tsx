@@ -9,6 +9,7 @@ import { TaskManagerPanel } from "@/components/panels/TaskManagerPanel";
 import { ArtifactsPanel } from "@/components/panels/ArtifactsPanel";
 import { PluginsSkillsPanel } from "@/components/panels/PluginsSkillsPanel";
 import { SecurityTesterPanel } from "@/components/panels/SecurityTesterPanel";
+import { LLMBenchmarksPanel } from "@/components/panels/LLMBenchmarksPanel";
 import { PANELS, type PanelId } from "@/lib/panels";
 
 import SchedulerPage from "@/app/(app)/scheduler/page";
@@ -114,6 +115,8 @@ function PanelBody({ panel }: { panel: Exclude<PanelId, "chat"> }) {
           <LLMProvidersPage />
         </div>
       );
+    case "llm-benchmarks":
+      return <LLMBenchmarksPanel />;
     case "settings":
       return (
         <div className="p-6">

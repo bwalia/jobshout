@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/jobshout/server/internal/llmtrace"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/repository"
 )
@@ -141,6 +142,9 @@ func (s *taskRunService) execute(ctx context.Context, run *model.TaskRun, agentI
 		s.logger.Warn("failed to mark task run running", zap.String("run_id", run.ID.String()), zap.Error(err))
 	}
 
+	// Link every LLM call of the execution to this task run and its task;
+	// the executor's own trace label inherits both.
+	ctx = llmtrace.WithTaskRun(ctx, run.TaskID.String(), run.ID.String())
 	exec, err := s.execSvc.Execute(ctx, run.OrgID, agentID, model.ExecuteAgentRequest{
 		Prompt:         run.Prompt,
 		EngineOverride: run.Engine,
