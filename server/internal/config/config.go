@@ -227,6 +227,11 @@ type Config struct {
 	// experience the CV does not contain — that is what the grounding check in
 	// package career refuses, so raising this must not be done without it.
 	CareerModel string `mapstructure:"CAREER_MODEL"`
+	// CareerProvider is the provider CareerModel lives on. Empty means
+	// LLM_PROVIDER. Set it when the server default moves off the provider that
+	// serves CAREER_MODEL, or Career would ask the new default for a model it
+	// does not have.
+	CareerProvider string `mapstructure:"CAREER_PROVIDER"`
 	// BlogOrphanTimeout is how stale a running run's heartbeat may be before
 	// the reconciler marks it failed. Must outlast a legitimate long LLM call.
 	BlogOrphanTimeout time.Duration `mapstructure:"BLOG_ORPHAN_TIMEOUT"`
@@ -405,6 +410,7 @@ func Load() (*Config, error) {
 		BlogModel:            viper.GetString("BLOG_MODEL"),
 		BlogProseModel:       viper.GetString("BLOG_PROSE_MODEL"),
 		CareerModel:          viper.GetString("CAREER_MODEL"),
+		CareerProvider:       viper.GetString("CAREER_PROVIDER"),
 		BlogStructuredModel:  viper.GetString("BLOG_STRUCTURED_MODEL"),
 		BlogProseNumCtx:      viper.GetInt("BLOG_PROSE_NUM_CTX"),
 		BlogOrphanTimeout:    viper.GetDuration("BLOG_ORPHAN_TIMEOUT"),

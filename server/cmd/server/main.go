@@ -126,6 +126,20 @@ func firstNonEmptyStr(vals ...string) string {
 	return ""
 }
 
+// providerDefaultModel names the model LLM_PROVIDER uses when a call names
+// none. It is for startup logs only; the client applies its own default.
+func providerDefaultModel(cfg *config.Config) string {
+	switch cfg.LLMProvider {
+	case "gemini":
+		return firstNonEmptyStr(cfg.GeminiDefaultModel, llm.GeminiDefaultModel)
+	case "openai":
+		return cfg.OpenAIDefaultModel
+	case "claude":
+		return cfg.ClaudeDefaultModel
+	}
+	return cfg.OllamaDefaultModel
+}
+
 // requestTimeout applies a per-route deadline.
 //
 // It replaces a single global chi Timeout because that cannot be relaxed for
@@ -558,8 +572,9 @@ func main() {
 			Token:   cfg.JobshoutComAPIToken,
 			Agent:   model.AgentNameJobShoutComWriter,
 		}))
-		writingModel := firstNonEmptyStr(cfg.BlogModel, cfg.OllamaDefaultModel)
+		writingModel := firstNonEmptyStr(cfg.BlogModel, providerDefaultModel(cfg))
 		logger.Info("article generator initialised",
+			zap.String("provider", cfg.LLMProvider),
 			zap.String("prose_model", firstNonEmptyStr(cfg.BlogProseModel, writingModel)),
 			zap.String("structured_model", firstNonEmptyStr(cfg.BlogStructuredModel, writingModel)),
 			zap.String("cms_namespace", cfg.OpsAPINamespace),
@@ -616,7 +631,9 @@ func main() {
 
 	mailCfg := mail.LoadConfig()
 	var mailLLM llm.Client
-	if c, err := llmRouter.For(cfg.LLMProvider); err != nil {
+	// MAIL_MODEL names a model on one provider, so mail resolves the provider
+	// that serves it (MAIL_PROVIDER) rather than whatever the default is.
+	if c, err := llmRouter.For(firstNonEmptyStr(mailCfg.Provider, cfg.LLMProvider)); err != nil {
 		logger.Warn("mail: llm router returned error — classify/draft will use heuristics", zap.Error(err))
 	} else {
 		mailLLM = c
@@ -694,7 +711,7 @@ func main() {
 	}
 
 	var careerLLM llm.Client
-	if c, err := llmRouter.For(cfg.LLMProvider); err != nil {
+	if c, err := llmRouter.For(firstNonEmptyStr(cfg.CareerProvider, cfg.LLMProvider)); err != nil {
 		logger.Warn("career: llm router returned error — evaluations use the deterministic scorer", zap.Error(err))
 	} else {
 		careerLLM = c
