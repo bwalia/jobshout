@@ -155,6 +155,9 @@ ai:
   # all. It generates at half the tokens/sec but has the runner to itself, and
   # it is the model built for this agent. Empty falls back to ollamaModel.
   careerModel: "careerops:32k"
+  # The provider careerModel lives on. Empty follows ai.provider; set it when
+  # ai.provider moves off the provider that serves careerModel.
+  careerProvider: ""
   # Chat is pinned separately from ollamaModel so workers stay on the small
   # worker model while the control-desk conversation uses a tool-capable one.
   chatModel: "qwen3-coder:30b"
@@ -163,6 +166,9 @@ ai:
   # slow reasoning model (its thinking phase engages automatically), while
   # classification stays on the fast worker model. Empty keeps ollamaModel.
   mailModel: "muse-glimmer:latest"
+  # The provider mail runs on, and that mailModel lives on. Empty follows
+  # ai.provider.
+  mailProvider: ""
   chatNumCtx: 16384
   openaiBaseURL: "https://api.openai.com"
   openaiModel: "gpt-4o-mini"

@@ -31,8 +31,8 @@ extraSecretRefs:
   # Secrets Rotation credentials: SECRETS_VAULT_ADDR/SECRETS_VAULT_TOKEN and
   # RP_API_TOKEN. Created by hand on k3s1, never in git.
   - jobshout-secretsrot
-  # GEMINI_API_KEY: registers Gemini as an LLM provider (used only by agents
-  # whose provider is set to gemini) and as the first-choice image backend.
+  # GEMINI_API_KEY: registers Gemini as an LLM provider (int's default, see
+  # ai.provider) and as the first-choice image backend.
   #   kubectl -n int create secret generic jobshout-gemini --from-literal=GEMINI_API_KEY=...
   - jobshout-gemini
 
@@ -46,28 +46,28 @@ cms:
 
 ai:
   enabled: true
+  # Gemini is int's default text provider: the Article Writer, Course
+  # Generator, Research and every agent without a provider of its own use it.
+  # Needs GEMINI_API_KEY from the jobshout-gemini secret above.
+  provider: gemini
+  geminiModel: "gemini-flash-latest"
   ollamaBaseURL: "https://ollama.workstation.co.uk"
   ollamaModel: "llama3.1:8b"
+  # Chat stays on Ollama whatever ai.provider is (NewChatInner).
   chatModel: "qwen3-coder:30b"
   chatModelFallback: "llama3.1:8b"
+  # Mail and Career keep their Ollama models, so they stay on Ollama.
   mailModel: "muse-glimmer:latest"
+  mailProvider: ollama
+  careerProvider: ollama
   # Shared workstation Ollama is CPU-heavy and often queued; research/draft
   # calls were dying at 10m with "awaiting headers". 45m because one draft on
   # the larger writing model below took 17–28m, and over 28m once.
   ollamaTimeout: "45m"
-  # int is the proving ring for the writing model. llama3.1:8b invented studies,
-  # statistics and an API in long-form prose; qwen3.8 on the same briefs did
-  # not. Research and the JSON stages stay on ollamaModel.
-  blogProseModel: "qwen3.8:latest"
-  # With qwen3.8 on the shared host: research ~15m, then a draft, a revision
-  # and sometimes an expansion at 17–28m each. 45m ran out during review on
-  # every test run.
+  # No blogProseModel here: it names a model on ai.provider, and int's writing
+  # model is now Gemini's default (geminiModel). The qwen3.8 pin it held was an
+  # Ollama model. Runtime stays generous while Gemini timings are measured.
   blogMaxRuntime: "120m"
-  # Revising a 3400-word Insights piece sends the draft and gets the article
-  # back; 8192 does not hold both. The Ollama host serves qwen3.8 at the same
-  # window (OLLAMA_CONTEXT_LENGTH=16384), so the model is not reloaded between
-  # this and its other callers.
-  blogProseNumCtx: 16384
   imageBaseURL: "https://images.workstation.co.uk"
   # Blog covers use z-image-turbo (dark editorial template, ~8 steps, ~1 min).
   imageModel: "z-image-turbo"

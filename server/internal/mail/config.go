@@ -24,6 +24,9 @@ type Config struct {
 	// triage runs on every inbound mail and must stay fast, while draft
 	// quality is worth a slower reasoning model. Empty keeps the default.
 	DraftModel string
+	// Provider is the LLM provider mail runs on, and the one DraftModel lives
+	// on (MAIL_PROVIDER). Empty means the server default, LLM_PROVIDER.
+	Provider string
 }
 
 // LoadConfig reads GMAIL_* / MAIL_* / FRONTEND_BASE_URL from the environment.
@@ -45,6 +48,7 @@ func LoadConfig() Config {
 	c.PollInterval = envDuration("MAIL_POLL_INTERVAL", 5*time.Minute)
 	c.ReconcileInterval = envDuration("MAIL_RECONCILE_INTERVAL", 15*time.Second)
 	c.DraftModel = strings.TrimSpace(os.Getenv("MAIL_MODEL"))
+	c.Provider = strings.TrimSpace(os.Getenv("MAIL_PROVIDER"))
 	c.Simulate = SimulateEnabled()
 	if c.Simulate {
 		if c.ClientID == "" {
