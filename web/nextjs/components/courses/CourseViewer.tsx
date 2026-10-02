@@ -126,6 +126,12 @@ export function CourseViewer({ runId }: { runId: string }) {
 
       <StepList steps={run.steps} />
 
+      {run.status === "resuming" ? (
+        <p className="rounded-md border border-border bg-secondary/40 p-3 text-sm text-muted-foreground">
+          The server restarted. This course resumes from its last saved step; finished chapters are kept.
+        </p>
+      ) : null}
+
       {run.error_message ? (
         <p className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
           {run.error_message}

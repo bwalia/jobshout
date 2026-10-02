@@ -13,8 +13,11 @@ const (
 
 // Course run statuses.
 const (
-	CourseRunQueued    = "queued"
-	CourseRunRunning   = "running"
+	CourseRunQueued  = "queued"
+	CourseRunRunning = "running"
+	// CourseRunResuming: the server generating the run went away; a server
+	// will pick it up from its saved state.
+	CourseRunResuming  = "resuming"
 	CourseRunCompleted = "completed"
 	CourseRunFailed    = "failed"
 	CourseRunCancelled = "cancelled"
@@ -119,12 +122,44 @@ type CourseRun struct {
 	Sources      []CourseSource  `json:"sources,omitempty"`
 	Warnings     []string        `json:"warnings,omitempty"`
 	ErrorMessage *string         `json:"error_message,omitempty"`
-	RequestedBy  *uuid.UUID      `json:"requested_by"`
-	HeartbeatAt  *time.Time      `json:"heartbeat_at,omitempty"`
-	StartedAt    *time.Time      `json:"started_at"`
-	CompletedAt  *time.Time      `json:"completed_at"`
-	CreatedAt    time.Time       `json:"created_at"`
-	UpdatedAt    time.Time       `json:"updated_at"`
+	// Attempt starts at 1 and goes up each time the run is resumed after its
+	// server went away.
+	Attempt int `json:"attempt"`
+	// ResearchNotes and Progress are what a resumed run continues from. They
+	// are working state, not part of the API.
+	ResearchNotes string          `json:"-"`
+	Progress      *CourseProgress `json:"-"`
+	RequestedBy   *uuid.UUID      `json:"requested_by"`
+	HeartbeatAt   *time.Time      `json:"heartbeat_at,omitempty"`
+	StartedAt     *time.Time      `json:"started_at"`
+	CompletedAt   *time.Time      `json:"completed_at"`
+	CreatedAt     time.Time       `json:"created_at"`
+	UpdatedAt     time.Time       `json:"updated_at"`
+}
+
+// CourseProgress is what a run has finished beyond its saved outline and
+// chapters.
+type CourseProgress struct {
+	// CoverDone is set once the cover was attempted, whether or not it
+	// produced an image, so a resumed run does not try again.
+	CoverDone bool `json:"cover_done,omitempty"`
+	// Draft is the chapter being worked on. It is cleared when the chapter is
+	// saved.
+	Draft *CourseChapterDraft `json:"draft,omitempty"`
+}
+
+// CourseChapterDraft is a chapter part-way through its stages. Each flag is
+// set when its stage finished — including a stage that failed in a way the
+// pipeline tolerates (no image, no quiz) — so a resumed run redoes only the
+// stage that was interrupted.
+type CourseChapterDraft struct {
+	Position    int           `json:"position"`
+	Markdown    string        `json:"markdown,omitempty"`
+	Reviewed    bool          `json:"reviewed,omitempty"`
+	Illustrated bool          `json:"illustrated,omitempty"`
+	Images      []CourseImage `json:"images,omitempty"`
+	Quizzed     bool          `json:"quizzed,omitempty"`
+	Quiz        *CourseQuiz   `json:"quiz,omitempty"`
 }
 
 // CourseSource is a research source the course rests on.

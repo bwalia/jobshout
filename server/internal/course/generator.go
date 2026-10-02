@@ -46,20 +46,40 @@ type Job struct {
 	OrgID  uuid.UUID
 	UserID *uuid.UUID
 	Brief  model.CourseBrief
+	// Resume is what an earlier attempt of this run saved. The zero value is
+	// a fresh run.
+	Resume State
 }
 
-// Hooks let the caller persist progress as it happens, so a crash late in a
-// long run does not lose the chapters already written.
+// State is a run's saved work. Generate skips whatever is here and carries on
+// from the first thing that is missing.
+type State struct {
+	// Notes are the research notes; empty means research has not finished.
+	Notes   string
+	Sources []model.CourseSource
+	Outline *model.CourseOutline
+	// Progress holds the cover flag and the chapter in flight.
+	Progress model.CourseProgress
+	// Done is the set of chapter positions already saved.
+	Done map[int]bool
+}
+
+// Hooks let the caller persist progress as it happens, so a run interrupted
+// at any point can be resumed from its last finished stage (see State).
 type Hooks struct {
-	Step    func(key, detail string)
-	Planned func(outline *model.CourseOutline, sources []model.CourseSource) error
-	Cover   func(url string) error
-	Chapter func(ch *model.CourseChapter) error
-	Warn    func(msg string)
+	Step       func(key, detail string)
+	Researched func(notes string, sources []model.CourseSource) error
+	Planned    func(outline *model.CourseOutline, sources []model.CourseSource) error
+	Cover      func(url string) error
+	// Progress is called after each chapter stage and after the cover.
+	Progress func(p model.CourseProgress) error
+	Chapter  func(ch *model.CourseChapter) error
+	Warn     func(msg string)
 }
 
 // Generator runs the text pipeline: research → outline → per chapter
-// (theory → review/revise → visuals → quiz) → render.
+// (theory → review/revise → visuals → quiz) → render. Every stage is saved
+// through Hooks as it finishes and skipped when Job.Resume already has it.
 type Generator struct {
 	llm         llm.Client
 	researcher  Researcher
@@ -107,57 +127,87 @@ func (g *Generator) Generate(ctx context.Context, job Job, h Hooks) error {
 
 func (g *Generator) generate(ctx context.Context, job Job, h Hooks) error {
 	b := job.Brief
+	st := job.Resume
 	// Every call in the run — research included — goes to the brief's
 	// provider through the routed client.
 	if p := llm.NormalizeProvider(b.Provider); p != "" {
 		ctx = llm.WithProvider(ctx, p)
 	}
 
-	h.Step(model.CourseStepResearching, b.Topic)
-	done := g.phase(job, "research")
-	brief, err := g.researcher.Research(llm.WithStage(ctx, "research"), research.Request{
-		Topic:   b.Topic,
-		Context: strings.TrimSpace(b.Audience + "\n" + b.Context),
-		Focus:   b.Focus,
-		Seeds:   b.SeedURLs,
-		Model:   g.modelFor(b),
-	}, nil)
-	done(err)
-	if err != nil {
-		return fmt.Errorf("research: %w", err)
+	notes, sources := st.Notes, st.Sources
+	if notes == "" {
+		h.Step(model.CourseStepResearching, b.Topic)
+		done := g.phase(job, "research")
+		brief, err := g.researcher.Research(llm.WithStage(ctx, "research"), research.Request{
+			Topic:   b.Topic,
+			Context: strings.TrimSpace(b.Audience + "\n" + b.Context),
+			Focus:   b.Focus,
+			Seeds:   b.SeedURLs,
+			Model:   g.modelFor(b),
+		}, nil)
+		done(err)
+		if err != nil {
+			return fmt.Errorf("research: %w", err)
+		}
+		// Research tolerates a failed stage (a missing summary, an unread
+		// source) and can hand back a thinner brief when the run was stopped
+		// part-way. That is not finished research and must not be saved as it.
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr
+		}
+		if !brief.IsUsable() {
+			return errors.New("research found no verified sources for this topic; add source URLs or narrow the topic")
+		}
+		for _, w := range brief.Warnings {
+			h.Warn("research: " + w)
+		}
+		notes = researchNotes(brief, maxNoteFindings)
+		sources = make([]model.CourseSource, 0, len(brief.Sources))
+		for _, s := range brief.Sources {
+			sources = append(sources, model.CourseSource{URL: s.URL, Title: s.Title})
+		}
+		if err := h.Researched(notes, sources); err != nil {
+			return fmt.Errorf("save research: %w", err)
+		}
 	}
-	if !brief.IsUsable() {
-		return errors.New("research found no verified sources for this topic; add source URLs or narrow the topic")
-	}
-	for _, w := range brief.Warnings {
-		h.Warn("research: " + w)
-	}
-	notes := researchNotes(brief, maxNoteFindings)
 
-	h.Step(model.CourseStepOutlining, "")
-	done = g.phase(job, "outline")
-	outline, err := g.outline(llm.WithStage(ctx, "outline"), b, notes, h)
-	done(err)
-	if err != nil {
-		return err
-	}
-	sources := make([]model.CourseSource, 0, len(brief.Sources))
-	for _, s := range brief.Sources {
-		sources = append(sources, model.CourseSource{URL: s.URL, Title: s.Title})
-	}
-	if err := h.Planned(outline, sources); err != nil {
-		return fmt.Errorf("save outline: %w", err)
+	outline := st.Outline
+	if outline == nil || len(outline.Chapters) == 0 {
+		h.Step(model.CourseStepOutlining, "")
+		done := g.phase(job, "outline")
+		var err error
+		outline, err = g.outline(llm.WithStage(ctx, "outline"), b, notes, h)
+		// A stopped run may have had its corrective retry cut off and be
+		// holding the short first plan; do not save that as the outline.
+		if cerr := ctx.Err(); err == nil && cerr != nil {
+			err = cerr
+		}
+		done(err)
+		if err != nil {
+			return err
+		}
+		if err := h.Planned(outline, sources); err != nil {
+			return fmt.Errorf("save outline: %w", err)
+		}
 	}
 
-	if g.imagesEnabled() {
+	progress := st.Progress
+	if g.imagesEnabled() && !progress.CoverDone {
 		h.Step(model.CourseStepIllustrating, "course cover")
-		done = g.phase(job, "cover")
+		done := g.phase(job, "cover")
 		url, err := g.illustrator.Illustrate(ctx, job.OrgID, job.UserID, coverPrompt(outline), 1536, 864)
 		done(err)
 		if err != nil {
+			if cerr := ctx.Err(); cerr != nil {
+				return cerr
+			}
 			h.Warn("cover image: " + err.Error())
 		} else if err := h.Cover(url); err != nil {
 			return fmt.Errorf("save cover: %w", err)
+		}
+		progress.CoverDone = true
+		if err := h.Progress(progress); err != nil {
+			return fmt.Errorf("save progress: %w", err)
 		}
 	}
 
@@ -165,12 +215,19 @@ func (g *Generator) generate(ctx context.Context, job Job, h Hooks) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		ch, err := g.chapter(ctx, job, outline, i, notes, h)
+		if st.Done[i+1] {
+			continue
+		}
+		ch, err := g.chapter(ctx, job, outline, i, notes, &progress, h)
 		if err != nil {
 			return fmt.Errorf("chapter %d: %w", i+1, err)
 		}
 		if err := h.Chapter(ch); err != nil {
 			return fmt.Errorf("save chapter %d: %w", i+1, err)
+		}
+		progress.Draft = nil
+		if err := h.Progress(progress); err != nil {
+			return fmt.Errorf("save progress: %w", err)
 		}
 	}
 	h.Step(model.CourseStepSaved, "")
@@ -259,74 +316,124 @@ func normalizeOutline(w outlineWire, b model.CourseBrief) *model.CourseOutline {
 	return o
 }
 
-func (g *Generator) chapter(ctx context.Context, job Job, o *model.CourseOutline, idx int, notes string, h Hooks) (*model.CourseChapter, error) {
+// chapter runs one chapter's stages. Each finished stage is saved on the
+// draft in progress, and a stage already marked there is skipped, so a resumed
+// run redoes only the stage that was interrupted. A stage that fails because
+// the run was stopped is not marked: it returns the context's error instead of
+// being recorded as a tolerated failure.
+func (g *Generator) chapter(ctx context.Context, job Job, o *model.CourseOutline, idx int, notes string, progress *model.CourseProgress, h Hooks) (*model.CourseChapter, error) {
 	b := job.Brief
 	plan := o.Chapters[idx]
 	label := fmt.Sprintf("%d/%d: %s", idx+1, len(o.Chapters), plan.Title)
 
 	chapter := zap.Int("chapter", idx+1)
 
-	h.Step(model.CourseStepWriting, label)
-	done := g.phase(job, "write", chapter)
-	md, err := g.text(llm.WithStage(ctx, "write"), chapterPrompt(b, o, idx, notes), maxChapterTokens, b)
-	done(err)
-	if err != nil {
-		return nil, fmt.Errorf("write: %w", err)
+	d := progress.Draft
+	if d == nil || d.Position != idx+1 {
+		d = &model.CourseChapterDraft{Position: idx + 1}
+		progress.Draft = d
 	}
-	if strings.TrimSpace(md) == "" {
-		return nil, errors.New("write: empty chapter")
+	save := func() error {
+		if err := h.Progress(*progress); err != nil {
+			return fmt.Errorf("save progress: %w", err)
+		}
+		return nil
 	}
 
-	h.Step(model.CourseStepReviewing, label)
-	var review struct {
-		Issues looseStrings `json:"issues"`
-	}
-	done = g.phase(job, "review", chapter)
-	err = g.json(llm.WithStage(ctx, "review"), "review", reviewPrompt(b, plan.Title, md), maxReviewTokens, b, &review)
-	done(err)
-	if err != nil {
-		h.Warn(fmt.Sprintf("chapter %d review skipped: %v", idx+1, err))
-	} else if issues := capList(review.Issues, maxReviewIssues); len(issues) > 0 {
-		done = g.phase(job, "revise", chapter, zap.Int("issues", len(issues)))
-		revised, err := g.text(llm.WithStage(ctx, "revise"), revisePrompt(b, plan.Title, md, issues), maxChapterTokens, b)
+	if strings.TrimSpace(d.Markdown) == "" {
+		h.Step(model.CourseStepWriting, label)
+		done := g.phase(job, "write", chapter)
+		md, err := g.text(llm.WithStage(ctx, "write"), chapterPrompt(b, o, idx, notes), maxChapterTokens, b)
 		done(err)
-		switch {
-		case err != nil:
-			h.Warn(fmt.Sprintf("chapter %d revision failed, keeping draft: %v", idx+1, err))
-		case strings.TrimSpace(revised) != "":
-			md = revised
+		if err != nil {
+			return nil, fmt.Errorf("write: %w", err)
+		}
+		if strings.TrimSpace(md) == "" {
+			return nil, errors.New("write: empty chapter")
+		}
+		d.Markdown = md
+		if err := save(); err != nil {
+			return nil, err
 		}
 	}
-	md = stripFence(md)
 
-	var images []model.CourseImage
-	if g.imagesEnabled() {
+	if !d.Reviewed {
+		h.Step(model.CourseStepReviewing, label)
+		md := d.Markdown
+		var review struct {
+			Issues looseStrings `json:"issues"`
+		}
+		done := g.phase(job, "review", chapter)
+		err := g.json(llm.WithStage(ctx, "review"), "review", reviewPrompt(b, plan.Title, md), maxReviewTokens, b, &review)
+		done(err)
+		if err != nil {
+			if cerr := ctx.Err(); cerr != nil {
+				return nil, cerr
+			}
+			h.Warn(fmt.Sprintf("chapter %d review skipped: %v", idx+1, err))
+		} else if issues := capList(review.Issues, maxReviewIssues); len(issues) > 0 {
+			done = g.phase(job, "revise", chapter, zap.Int("issues", len(issues)))
+			revised, err := g.text(llm.WithStage(ctx, "revise"), revisePrompt(b, plan.Title, md, issues), maxChapterTokens, b)
+			done(err)
+			switch {
+			case err != nil:
+				if cerr := ctx.Err(); cerr != nil {
+					return nil, cerr
+				}
+				h.Warn(fmt.Sprintf("chapter %d revision failed, keeping draft: %v", idx+1, err))
+			case strings.TrimSpace(revised) != "":
+				md = revised
+			}
+		}
+		d.Markdown = stripFence(md)
+		d.Reviewed = true
+		if err := save(); err != nil {
+			return nil, err
+		}
+	}
+
+	if g.imagesEnabled() && !d.Illustrated {
 		h.Step(model.CourseStepIllustrating, label)
-		done = g.phase(job, "illustrate", chapter)
+		done := g.phase(job, "illustrate", chapter)
 		url, err := g.illustrator.Illustrate(ctx, job.OrgID, job.UserID, illustrationPrompt(o.Title, plan.Title, plan.Summary), 1280, 720)
 		done(err)
 		if err != nil {
+			if cerr := ctx.Err(); cerr != nil {
+				return nil, cerr
+			}
 			h.Warn(fmt.Sprintf("chapter %d image: %v", idx+1, err))
 		} else {
-			images = append(images, model.CourseImage{URL: url, Alt: plan.Title, Caption: plan.Summary})
+			d.Images = append(d.Images, model.CourseImage{URL: url, Alt: plan.Title, Caption: plan.Summary})
+		}
+		d.Illustrated = true
+		if err := save(); err != nil {
+			return nil, err
 		}
 	}
 
-	h.Step(model.CourseStepQuizzing, label)
-	var quiz *model.CourseQuiz
-	var qw quizWire
-	done = g.phase(job, "quiz", chapter)
-	err = g.json(llm.WithStage(ctx, "quiz"), "quiz", quizPrompt(b, plan.Title, md), maxQuizTokens, b, &qw)
-	done(err)
-	if err != nil {
-		h.Warn(fmt.Sprintf("chapter %d quiz: %v", idx+1, err))
-	} else if q, err := validateQuiz(qw); err != nil {
-		h.Warn(fmt.Sprintf("chapter %d %v", idx+1, err))
-	} else {
-		quiz = q
+	if !d.Quizzed {
+		h.Step(model.CourseStepQuizzing, label)
+		var qw quizWire
+		done := g.phase(job, "quiz", chapter)
+		err := g.json(llm.WithStage(ctx, "quiz"), "quiz", quizPrompt(b, plan.Title, d.Markdown), maxQuizTokens, b, &qw)
+		done(err)
+		if err != nil {
+			if cerr := ctx.Err(); cerr != nil {
+				return nil, cerr
+			}
+			h.Warn(fmt.Sprintf("chapter %d quiz: %v", idx+1, err))
+		} else if q, err := validateQuiz(qw); err != nil {
+			h.Warn(fmt.Sprintf("chapter %d %v", idx+1, err))
+		} else {
+			d.Quiz = q
+		}
+		d.Quizzed = true
+		if err := save(); err != nil {
+			return nil, err
+		}
 	}
 
-	html, err := renderLesson(md, images)
+	html, err := renderLesson(d.Markdown, d.Images)
 	if err != nil {
 		return nil, err
 	}
@@ -336,10 +443,10 @@ func (g *Generator) chapter(ctx context.Context, job Job, o *model.CourseOutline
 		Title:      plan.Title,
 		Summary:    plan.Summary,
 		Objectives: plan.Objectives,
-		Markdown:   md,
+		Markdown:   d.Markdown,
 		HTML:       html,
-		Images:     images,
-		Quiz:       quiz,
+		Images:     d.Images,
+		Quiz:       d.Quiz,
 	}, nil
 }
 
@@ -444,6 +551,12 @@ func capList(items []string, n int) []string {
 func (h Hooks) withDefaults() Hooks {
 	if h.Step == nil {
 		h.Step = func(string, string) {}
+	}
+	if h.Researched == nil {
+		h.Researched = func(string, []model.CourseSource) error { return nil }
+	}
+	if h.Progress == nil {
+		h.Progress = func(model.CourseProgress) error { return nil }
 	}
 	if h.Planned == nil {
 		h.Planned = func(*model.CourseOutline, []model.CourseSource) error { return nil }
