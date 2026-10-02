@@ -14,6 +14,7 @@ import (
 	"github.com/jobshout/server/internal/course"
 	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/model"
+	"github.com/jobshout/server/internal/repository"
 	"github.com/jobshout/server/internal/research"
 )
 
@@ -38,6 +39,7 @@ type world struct {
 	holdKey string
 	held    chan struct{} // closed when a call reaches the held stage
 	letGo   chan struct{} // closed to let the held call finish
+	deaf    bool          // the held call ignores cancellation
 }
 
 func newWorld() *world { return &world{calls: map[string]int{}} }
@@ -51,6 +53,16 @@ func (w *world) hold(key string) <-chan struct{} {
 	return w.held
 }
 
+// holdIgnoringCancel is hold for a call that does not notice cancellation
+// until released, like a model call that is slow to unwind.
+func (w *world) holdIgnoringCancel(key string) <-chan struct{} {
+	held := w.hold(key)
+	w.mu.Lock()
+	w.deaf = true
+	w.mu.Unlock()
+	return held
+}
+
 // release lets the held call return normally, as if its server were alive.
 func (w *world) release() {
 	w.mu.Lock()
@@ -62,13 +74,19 @@ func (w *world) enter(ctx context.Context, key string) error {
 	w.mu.Lock()
 	w.calls[key]++
 	var letGo chan struct{}
+	deaf := false
 	if w.holdKey == key {
 		w.holdKey = ""
 		close(w.held)
-		letGo = w.letGo
+		letGo, deaf = w.letGo, w.deaf
+		w.deaf = false
 	}
 	w.mu.Unlock()
 	if letGo == nil {
+		return ctx.Err()
+	}
+	if deaf {
+		<-letGo
 		return ctx.Err()
 	}
 	select {
@@ -188,6 +206,10 @@ func (e *resumeEnv) launch(svc *courseService) uuid.UUID {
 		e.t.Fatal(err)
 	}
 	return run.ID
+}
+
+func repositoryRef(id uuid.UUID, attempt int) repository.CourseRunRef {
+	return repository.CourseRunRef{ID: id, Attempt: attempt}
 }
 
 func waitHeld(t *testing.T, held <-chan struct{}) {
@@ -543,5 +565,130 @@ func TestCourseResume_RealFailureIsNotResumed(t *testing.T) {
 	waitStatus(t, repo, run.ID, model.CourseRunFailed)
 	if n, _ := svc.ResumeInterrupted(context.Background()); n != 0 {
 		t.Errorf("a failed run must not be resumed, resumed %d", n)
+	}
+}
+
+func waitNotLive(t *testing.T, svc *courseService) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		svc.mu.Lock()
+		n := len(svc.live)
+		svc.mu.Unlock()
+		if n == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the run goroutine never stopped")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// A cancel and a shutdown can land together, in either order. The run must
+// end cancelled and stay that way — not be handed back and resumed.
+func TestCourseResume_CancelDuringShutdownStaysCancelled(t *testing.T) {
+	for _, cancelFirst := range []bool{true, false} {
+		e := newResumeEnv(t)
+		s1 := e.server()
+		// The held call ignores cancellation until released, so the goroutine
+		// is still live for whichever of the two comes second.
+		held := e.w.holdIgnoringCancel("write:1")
+		id := e.launch(s1)
+		waitHeld(t, held)
+
+		if cancelFirst {
+			if _, err := s1.CancelRun(context.Background(), id, e.org); err != nil {
+				t.Fatal(err)
+			}
+			s1.InterruptAll()
+		} else {
+			s1.InterruptAll()
+			if _, err := s1.CancelRun(context.Background(), id, e.org); err != nil {
+				t.Fatalf("cancel after shutdown began: %v", err)
+			}
+		}
+		e.w.release()
+		waitNotLive(t, s1)
+
+		if got := e.repo.status(id); got != model.CourseRunCancelled {
+			t.Fatalf("cancelFirst=%v: status = %q, want cancelled", cancelFirst, got)
+		}
+		e.resume(e.server(), 0)
+		if got := e.repo.status(id); got != model.CourseRunCancelled {
+			t.Fatalf("cancelFirst=%v: a cancelled run was resumed (status %q)", cancelFirst, got)
+		}
+	}
+}
+
+// A goroutine stuck in a long model call makes no writes, so only its
+// heartbeat can tell it the run was taken over.
+func TestCourseResume_HeartbeatStopsSupersededAttempt(t *testing.T) {
+	old := courseHeartbeatInterval
+	courseHeartbeatInterval = 10 * time.Millisecond
+	t.Cleanup(func() { courseHeartbeatInterval = old })
+
+	e := newResumeEnv(t)
+	s1 := e.server()
+	held := e.w.hold("write:2")
+	id := e.launch(s1)
+	waitHeld(t, held)
+
+	e.makeStale(id)
+	// Claim directly rather than through a second server, so nothing else
+	// races the old attempt's heartbeat for the stale row.
+	claimed, err := e.repo.Claim(context.Background(), repositoryRef(id, 1))
+	if err != nil || claimed == nil {
+		t.Fatalf("claim = %+v, %v", claimed, err)
+	}
+	// The held call is never released: the heartbeat must cancel it.
+	waitNotLive(t, s1)
+	if got := e.repo.status(id); got != model.CourseRunRunning {
+		t.Fatalf("the superseded attempt changed the run's status to %q", got)
+	}
+	if e.w.count("review:2") != 0 {
+		t.Error("the superseded attempt carried on generating")
+	}
+}
+
+// finishFails makes the first n terminal writes fail, like a database blip.
+type finishFails struct {
+	*memCourseRepo
+	mu sync.Mutex
+	n  int
+}
+
+func (f *finishFails) Finish(ctx context.Context, id uuid.UUID, attempt int, status string, msg *string) (bool, error) {
+	f.mu.Lock()
+	fail := f.n > 0
+	if fail {
+		f.n--
+	}
+	f.mu.Unlock()
+	if fail {
+		return false, errors.New("connection reset")
+	}
+	return f.memCourseRepo.Finish(ctx, id, attempt, status, msg)
+}
+
+// A failed run whose ending could not be written at first must still end
+// failed, not be left running for the resumer to start again.
+func TestCourseResume_FailureIsRecordedDespiteWriteError(t *testing.T) {
+	old := courseFinishBackoff
+	courseFinishBackoff = time.Millisecond
+	t.Cleanup(func() { courseFinishBackoff = old })
+
+	org := uuid.New()
+	agent := courseAgent(org)
+	repo := &finishFails{memCourseRepo: newMemCourseRepo(), n: 2}
+	cfg := course.Config{PlanBudget: time.Minute, ChapterBudget: time.Minute, MaxChapters: 8, MaxResumes: 5, OrphanTimeout: time.Nanosecond}
+	svc := NewCourseService(repo, &courseAgents{agent: agent}, &fakeGen{err: errors.New("model offline")}, cfg, nil).(*courseService)
+	run, err := svc.CreateRun(context.Background(), model.CreateCourseRunRequest{AgentID: agent.ID, Brief: model.CourseBrief{Topic: "Go"}}, org, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, repo.memCourseRepo, run.ID, model.CourseRunFailed)
+	if n, _ := svc.ResumeInterrupted(context.Background()); n != 0 {
+		t.Errorf("a failed run was resumed")
 	}
 }
