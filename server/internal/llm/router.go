@@ -1,7 +1,9 @@
 package llm
 
 import (
+	"context"
 	"fmt"
+	"strings"
 
 	"github.com/jobshout/server/internal/config"
 )
@@ -49,7 +51,15 @@ func NewRouter(cfg *config.Config) *Router {
 		openAIBase = "https://api.openai.com"
 	}
 	if cfg.OpenAIAPIKey != "" {
-		r.clients["openai"] = NewOpenAIClient(openAIBase, cfg.OpenAIAPIKey, cfg.OpenAIDefaultModel)
+		r.clients["openai"] = NewOpenAIClient(openAIBase, cfg.OpenAIAPIKey, cfg.OpenAIDefaultModel).
+			WithTimeout(cfg.OpenAITimeout)
+	}
+
+	// Gemini is registered when GEMINI_API_KEY is set — the same key image
+	// generation uses. Registering it changes nothing on its own: a call goes
+	// to Gemini only when an agent or run names the provider.
+	if cfg.GeminiAPIKey != "" {
+		r.clients["gemini"] = NewGeminiClient(cfg.GeminiBaseURL, cfg.GeminiAPIKey, cfg.GeminiDefaultModel, cfg.GeminiTimeout)
 	}
 
 	// Claude / Anthropic is registered when an API key is set.
@@ -129,9 +139,91 @@ func (r *Router) For(providerName string) (Client, error) {
 
 	c, ok := r.clients[name]
 	if !ok {
+		if env, known := providerKeyEnv[name]; known {
+			return nil, fmt.Errorf("llm: provider %q: %w — set %s (registered: %v)",
+				name, ErrProviderNotConfigured, env, r.registeredNames())
+		}
 		return nil, fmt.Errorf("llm: unknown provider %q (registered: %v)", name, r.registeredNames())
 	}
 	return c, nil
+}
+
+// providerKeyEnv names the variable that registers each hosted provider, so a
+// run that asks for one this server has no key for says what to set.
+var providerKeyEnv = map[string]string{
+	"openai": "OPENAI_API_KEY",
+	"claude": "CLAUDE_API_KEY",
+	"gemini": "GEMINI_API_KEY",
+}
+
+// ─── Per-run provider selection ─────────────────────────────────────────────
+
+type providerCtxKey struct{}
+
+// WithProvider records which provider every LLM call made under ctx should use
+// when it goes through a Routed client. A run sets it once at the top, and the
+// stages it calls — research included — follow without each one threading a
+// provider argument. Blank or "auto" clears any earlier choice.
+func WithProvider(ctx context.Context, provider string) context.Context {
+	return context.WithValue(ctx, providerCtxKey{}, NormalizeProvider(provider))
+}
+
+// ProviderFrom returns the provider set by WithProvider, or "".
+func ProviderFrom(ctx context.Context) string {
+	p, _ := ctx.Value(providerCtxKey{}).(string)
+	return p
+}
+
+// NormalizeProvider lower-cases and trims a provider name. "auto" is the model
+// selector's choice and means "no explicit provider" here, so it maps to "".
+func NormalizeProvider(p string) string {
+	p = strings.ToLower(strings.TrimSpace(p))
+	if p == "auto" {
+		return ""
+	}
+	return p
+}
+
+// Routed returns a Client that resolves its provider on every call: the one in
+// the call's context (WithProvider), else fallback, else the router default.
+//
+// Agents that are handed a single Client — the Article Writer, Course
+// Generator and Research Agent — use it so that a provider chosen on the
+// agent or the run is honoured, with no provider-specific code in the agent.
+func (r *Router) Routed(fallback string) Client {
+	return &routedClient{router: r, fallback: NormalizeProvider(fallback)}
+}
+
+type routedClient struct {
+	router   *Router
+	fallback string
+}
+
+func (c *routedClient) provider(ctx context.Context) string {
+	if p := ProviderFrom(ctx); p != "" {
+		return p
+	}
+	if c.fallback != "" {
+		return c.fallback
+	}
+	return c.router.defaultProvider
+}
+
+func (c *routedClient) Generate(ctx context.Context, req GenerateRequest) (*GenerateResponse, error) {
+	inner, err := c.router.For(c.provider(ctx))
+	if err != nil {
+		return nil, err
+	}
+	return inner.Generate(ctx, req)
+}
+
+// ProviderName names the fallback provider. Per-call attribution comes from
+// the resolved client (and its tracing wrapper), not from here.
+func (c *routedClient) ProviderName() string {
+	if c.fallback != "" {
+		return c.fallback
+	}
+	return c.router.defaultProvider
 }
 
 // Default returns the default client.

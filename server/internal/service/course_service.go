@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/jobshout/server/internal/course"
+	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/llmtrace"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/repository"
@@ -104,6 +106,7 @@ func (s *courseService) CreateRun(ctx context.Context, req model.CreateCourseRun
 	if agent == nil || agent.OrgID != orgID || agent.SeededBuiltin() != model.BuiltinCourseGenerator {
 		return nil, errors.New("agent not found")
 	}
+	brief = withAgentModel(brief, agent)
 
 	now := time.Now()
 	run := &model.CourseRun{
@@ -456,4 +459,25 @@ func (t *courseSteps) fail() []model.CourseRunStep {
 		}
 	}
 	return t.snapshot()
+}
+
+// withAgentModel fills the brief's provider and model from the agent's
+// standing choice where the launch did not name one. A model on the agent is
+// taken only when the run uses the agent's provider: a model names a model on
+// one provider and means nothing on another.
+func withAgentModel(b model.CourseBrief, agent *model.Agent) model.CourseBrief {
+	if agent == nil {
+		return b
+	}
+	agentProv := ""
+	if agent.ModelProvider != nil {
+		agentProv = llm.NormalizeProvider(*agent.ModelProvider)
+	}
+	if b.Provider == "" {
+		b.Provider = agentProv
+	}
+	if b.Model == "" && agent.ModelName != nil && b.Provider == agentProv {
+		b.Model = strings.TrimSpace(*agent.ModelName)
+	}
+	return b
 }
