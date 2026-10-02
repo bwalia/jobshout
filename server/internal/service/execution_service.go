@@ -205,7 +205,13 @@ func (s *executionService) finish(ctx context.Context, st *startedExec) (*model.
 		})
 	}
 	runner := s.engineRouter.For(st.engineType)
+	runStart := time.Now()
 	result := runner.Run(ctx, st.exec.ID, st.agent, st.req.Prompt, st.agentTools)
+	// Not every engine measures itself (the LangChain and LangGraph runners
+	// leave LatencyMs at zero), so the wall-clock time of the run stands in.
+	if result.LatencyMs <= 0 {
+		result.LatencyMs = int(time.Since(runStart).Milliseconds())
+	}
 
 	_ = s.agentRepo.UpdateStatus(ctx, st.agentID, "idle")
 
@@ -241,22 +247,35 @@ func (s *executionService) finish(ctx context.Context, st *startedExec) (*model.
 	}
 
 	completed, err := s.execRepo.GetByID(ctx, st.exec.ID)
-	if err != nil {
-		completedAt := time.Now()
-		st.exec.CompletedAt = &completedAt
-		if result.Err != nil {
-			errMsg := result.Err.Error()
-			st.exec.Status = model.ExecutionStatusFailed
-			st.exec.ErrorMessage = &errMsg
-		} else {
-			st.exec.Status = model.ExecutionStatusCompleted
-			st.exec.Output = &result.FinalAnswer
+	if err == nil && completed != nil {
+		// latency_ms and the token split reach the row through RecordUsage,
+		// which runs in the background — the read above usually beats it and
+		// saw zeros, which the task run then copied ("0 ms"). The measured
+		// values are already in hand.
+		if completed.LatencyMs == 0 {
+			completed.LatencyMs = result.LatencyMs
 		}
-		st.exec.TotalTokens = result.TotalTokens
-		st.exec.Iterations = result.Iterations
-		return st.exec, nil
+		if completed.InputTokens == 0 && completed.OutputTokens == 0 {
+			completed.InputTokens, completed.OutputTokens = result.InputTokens, result.OutputTokens
+		}
+		return completed, nil
 	}
-	return completed, nil
+	completedAt := time.Now()
+	st.exec.CompletedAt = &completedAt
+	if result.Err != nil {
+		errMsg := result.Err.Error()
+		st.exec.Status = model.ExecutionStatusFailed
+		st.exec.ErrorMessage = &errMsg
+	} else {
+		st.exec.Status = model.ExecutionStatusCompleted
+		st.exec.Output = &result.FinalAnswer
+	}
+	st.exec.TotalTokens = result.TotalTokens
+	st.exec.InputTokens = result.InputTokens
+	st.exec.OutputTokens = result.OutputTokens
+	st.exec.LatencyMs = result.LatencyMs
+	st.exec.Iterations = result.Iterations
+	return st.exec, nil
 }
 
 func (s *executionService) GetByID(ctx context.Context, id uuid.UUID) (*model.AgentExecution, error) {

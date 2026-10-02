@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/model"
 )
 
@@ -35,12 +36,15 @@ func BriefFromValues(vals map[string]string) model.CourseBrief {
 		SeedURLs:     splitList(vals["seed_urls"]),
 		Focus:        splitList(vals["focus"]),
 		Model:        strings.TrimSpace(vals["model"]),
+		Provider:     strings.TrimSpace(vals["provider"]),
 	}
 }
 
 // NormalizeBrief applies defaults and validates. maxChapters is the
 // deployment's cap (Config.MaxChapters).
 func NormalizeBrief(b model.CourseBrief, maxChapters int) (model.CourseBrief, error) {
+	b.Provider = llm.NormalizeProvider(b.Provider)
+	b.Model = strings.TrimSpace(b.Model)
 	b.Topic = strings.TrimSpace(b.Topic)
 	if b.Topic == "" {
 		return b, fmt.Errorf("topic is required")

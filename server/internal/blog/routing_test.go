@@ -111,3 +111,32 @@ func TestModelRoutingIgnoresBlankValues(t *testing.T) {
 		t.Errorf("structuredModel = %q, want %q", got, "writer")
 	}
 }
+
+// An agent set to another provider must not be sent the environment's models:
+// BLOG_PROSE_MODEL names an Ollama tag that Gemini would reject on every call.
+func TestModelRoutingOtherProviderSkipsEnvironmentModels(t *testing.T) {
+	r := routingRunner(Config{Provider: "ollama", Model: "qwen3:8b", ProseModel: "qwen3.8:latest", StructuredModel: "qwen3:8b"})
+
+	req := GenerateRequest{AgentProvider: "gemini"}
+	if got := r.proseModel(req); got != "" {
+		t.Errorf("proseModel = %q, want the provider default (empty)", got)
+	}
+	if got := r.structuredModel(req); got != "" {
+		t.Errorf("structuredModel = %q, want the provider default (empty)", got)
+	}
+
+	req = GenerateRequest{AgentProvider: "gemini", AgentProseModel: "gemini-2.5-pro"}
+	if got := r.proseModel(req); got != "gemini-2.5-pro" {
+		t.Errorf("proseModel = %q, want the agent's model", got)
+	}
+}
+
+// Naming the server's own provider (or "auto") on the agent changes nothing.
+func TestModelRoutingSameProviderKeepsEnvironmentModels(t *testing.T) {
+	r := routingRunner(Config{Provider: "ollama", Model: "writer"})
+	for _, p := range []string{"", "ollama", "OLLAMA", "auto"} {
+		if got := r.proseModel(GenerateRequest{AgentProvider: p}); got != "writer" {
+			t.Errorf("AgentProvider %q: proseModel = %q, want %q", p, got, "writer")
+		}
+	}
+}

@@ -78,6 +78,16 @@ type Config struct {
 	// would break the requirement that a diagram agree with the text around it.
 	ProseModel      string
 	StructuredModel string
+
+	// ProseNumCtx is the context window asked for on prose calls, in tokens.
+	// Zero leaves it to the LLM client. See config.BlogProseNumCtx.
+	ProseNumCtx int
+
+	// Provider is the LLM provider the server was started with (LLM_PROVIDER).
+	// Model, ProseModel and StructuredModel name models on that provider, so
+	// they apply only while a run uses it; a run on another provider falls
+	// back to that provider's own default model instead.
+	Provider string
 }
 
 // CMSPublisher is the slice of the opsapi client this package uses. Declared
@@ -111,6 +121,11 @@ type GenerateRequest struct {
 	// read, which is worse than not offering the control at all.
 	AgentProseModel      string
 	AgentStructuredModel string
+	// AgentProvider is the LLM provider set on the agent ("gemini", "openai").
+	// Empty or "auto" keeps the server's provider. The pipeline never calls a
+	// provider directly: the choice rides on the context (llm.WithProvider)
+	// to the routed client, research included.
+	AgentProvider string
 
 	// OnArticle is invoked after each brief is fully written (markdown, HTML,
 	// optional cover) so the caller can persist it before the next brief
@@ -145,12 +160,26 @@ func firstNonBlank(values ...string) string {
 
 // proseModel is the model for calls that produce article text.
 func (r *Runner) proseModel(req GenerateRequest) string {
+	if !r.onServerProvider(req) {
+		return firstNonBlank(req.Model, req.AgentProseModel)
+	}
 	return firstNonBlank(req.Model, req.AgentProseModel, r.cfg.ProseModel, r.cfg.Model)
 }
 
 // structuredModel is the model for calls that must return JSON.
 func (r *Runner) structuredModel(req GenerateRequest) string {
+	if !r.onServerProvider(req) {
+		return firstNonBlank(req.Model, req.AgentStructuredModel)
+	}
 	return firstNonBlank(req.Model, req.AgentStructuredModel, r.cfg.StructuredModel, r.cfg.Model)
+}
+
+// onServerProvider reports whether the run uses the provider the environment
+// models were chosen for. Sending BLOG_PROSE_MODEL (an Ollama tag) to Gemini
+// would fail every call.
+func (r *Runner) onServerProvider(req GenerateRequest) bool {
+	p := llm.NormalizeProvider(req.AgentProvider)
+	return p == "" || p == llm.NormalizeProvider(r.cfg.Provider)
 }
 
 // HardMaxArticles is the safety ceiling regardless of what the caller asks
@@ -320,6 +349,9 @@ func (r *Runner) Generate(ctx context.Context, req GenerateRequest, progress Pro
 	}
 	if r.research == nil {
 		return nil, fmt.Errorf("blog: research is not configured — articles are written from verified sources and there are none available")
+	}
+	if p := llm.NormalizeProvider(req.AgentProvider); p != "" {
+		ctx = llm.WithProvider(ctx, p)
 	}
 
 	// Copied field by field rather than passed through, so a blank topic is
