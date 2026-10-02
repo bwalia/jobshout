@@ -115,9 +115,17 @@ reviewBot:
     - bwalia/opsapi
     - bwalia/ring-promoter
     - bwalia/wslproxy
+  resources:
+    requests: { cpu: 50m }
 
 api:
   replicas: 1
+  resources:
+    # int pins every pod to debian004 (see nodeSelector), which is close to
+    # fully requested. These pods idle at a few millicores; the chart's
+    # default requests left no room for a rolling update's surge pod, so
+    # every deploy timed out in helm --wait (2 Oct 2026). Limits unchanged.
+    requests: { cpu: 50m }
 
 web:
   replicas: 1
@@ -126,6 +134,8 @@ web:
 
 pythonRuntime:
   replicas: 1
+  resources:
+    requests: { cpu: 50m }
 
 storage:
   postgres: 10Gi
