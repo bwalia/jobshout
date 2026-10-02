@@ -59,6 +59,11 @@ type GenerateRequest struct {
 	Model string
 	// MaxTokens caps the response length (0 means use the client default).
 	MaxTokens int
+	// NumCtx asks for a context window for this one call, in tokens. Zero
+	// keeps the client's own. Only Ollama reads it; the window there is a
+	// per-request setting, and a call that needs a long prompt and a long
+	// reply together should not have to raise it for every other caller.
+	NumCtx int
 	// Temperature controls randomness (0.0–1.0; 0 means use client default).
 	Temperature float64
 	// ToolDefs, when non-empty and supported by the client, are sent as native

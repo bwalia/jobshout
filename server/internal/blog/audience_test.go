@@ -189,3 +189,33 @@ func containsString(haystack []string, needle string) bool {
 	}
 	return false
 }
+
+// A discovered topic's trending pages and the run's focus areas have to reach
+// research through Generate. Generate rebuilt each brief field by field and
+// dropped both, so every trending run researched from the topic's wording
+// alone.
+func TestSeedsAndFocusReachTheResearchAgent(t *testing.T) {
+	researcher := &fakeResearcher{}
+	r := newRunnerWithResearcher(researcher, writeScript("T", "# T\n\nBody [1]."))
+
+	_, err := r.Generate(context.Background(), GenerateRequest{
+		Briefs: []model.BlogBrief{{
+			Topic: "Inference cost after a model launch",
+			Seeds: []string{"https://example.com/launch"},
+			Focus: []string{"model routing and inference economics"},
+		}},
+	}, nil)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(researcher.requests) != 1 {
+		t.Fatalf("research called %d time(s); want 1", len(researcher.requests))
+	}
+	got := researcher.requests[0]
+	if len(got.Seeds) != 1 || got.Seeds[0] != "https://example.com/launch" {
+		t.Errorf("seeds = %v; want the discovered page", got.Seeds)
+	}
+	if len(got.Focus) != 1 || got.Focus[0] != "model routing and inference economics" {
+		t.Errorf("focus = %v; want the run's focus areas", got.Focus)
+	}
+}

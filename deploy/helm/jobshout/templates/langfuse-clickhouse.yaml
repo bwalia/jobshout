@@ -1,4 +1,47 @@
+{{- define "jobshout.clickhouseConfig" -}}
+<clickhouse>
+    <trace_log remove="1"/>
+    <text_log remove="1"/>
+    <metric_log remove="1"/>
+    <asynchronous_metric_log remove="1"/>
+    <part_log remove="1"/>
+    <processors_profile_log remove="1"/>
+    <query_metric_log remove="1"/>
+    <opentelemetry_span_log remove="1"/>
+    <background_schedule_pool_log remove="1"/>
+    <asynchronous_insert_log remove="1"/>
+    <query_views_log remove="1"/>
+    <!-- Kept: these are what you read when a query misbehaves. Bounded. -->
+    <query_log>
+        <ttl>event_date + INTERVAL 7 DAY DELETE</ttl>
+    </query_log>
+    <error_log>
+        <ttl>event_date + INTERVAL 7 DAY DELETE</ttl>
+    </error_log>
+    <!-- Stay inside the container's memory limit instead of being killed at it. -->
+    <max_server_memory_usage_to_ram_ratio>0.75</max_server_memory_usage_to_ram_ratio>
+</clickhouse>
+{{- end }}
 {{- if .Values.langfuse.enabled }}
+# ClickHouse server settings for a small single-node install.
+#
+# ClickHouse keeps a dozen diagnostic log tables about itself, none with a TTL.
+# On int they reached 31 GB in 43 days (trace_log 18 GB, text_log 9.6 GB) beside
+# 4 MB of Langfuse data — local-path does not enforce the PVC size — until the
+# server needed 3.5 GB to start and was OOM-killed at its 2Gi limit on every
+# boot. langfuse-web then failed its ClickHouse migrations, never became
+# Ready, and every `helm upgrade --wait` timed out: eight failed deploys and no
+# promotion past int.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: langfuse-clickhouse-config
+  labels:
+    {{- include "jobshout.labels" . | nindent 4 }}
+data:
+  jobshout.xml: |
+    {{- include "jobshout.clickhouseConfig" . | nindent 4 }}
+---
 # Single-node ClickHouse — Langfuse's analytical store (traces/observations
 # land here; Postgres only keeps transactional state). Cluster mode stays off
 # (CLICKHOUSE_CLUSTER_ENABLED=false on the langfuse pods) to match.
@@ -19,6 +62,9 @@ spec:
     metadata:
       labels:
         {{- include "jobshout.selector" (dict "name" "langfuse-clickhouse") | nindent 8 }}
+      annotations:
+        # Restart ClickHouse when its settings change; it reads them at boot.
+        checksum/config: {{ include "jobshout.clickhouseConfig" . | sha256sum }}
     spec:
       # The clickhouse image runs as uid/gid 101; fsGroup makes the local-path
       # volume writable for it.
@@ -64,9 +110,15 @@ spec:
               mountPath: /var/lib/clickhouse
             - name: logs
               mountPath: /var/log/clickhouse-server
+            - name: config
+              mountPath: /etc/clickhouse-server/config.d/jobshout.xml
+              subPath: jobshout.xml
       volumes:
         - name: logs
           emptyDir: {}
+        - name: config
+          configMap:
+            name: langfuse-clickhouse-config
   volumeClaimTemplates:
     - metadata:
         name: data

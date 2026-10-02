@@ -30,7 +30,7 @@ type discoveryRepo struct {
 }
 
 func (r *discoveryRepo) UpdateBriefs(
-	_ context.Context, _ uuid.UUID, briefs []model.BlogBrief, _ []string,
+	_ context.Context, _ uuid.UUID, _ int, briefs []model.BlogBrief, _ []string,
 ) error {
 	r.briefs = briefs
 	r.briefsWritten = true
@@ -43,7 +43,7 @@ func (r *discoveryRepo) RecentTopics(_ context.Context, _ uuid.UUID, since time.
 	return r.recent, r.recentErr
 }
 
-func (r *discoveryRepo) UpdateSteps(_ context.Context, _ uuid.UUID, steps []model.BlogStep) error {
+func (r *discoveryRepo) UpdateSteps(_ context.Context, _ uuid.UUID, _ int, steps []model.BlogStep) error {
 	r.steps = steps
 	return nil
 }
@@ -230,7 +230,7 @@ func TestGenerate_PersistsDiscoveredTopics(t *testing.T) {
 
 	// discoverBriefs returns them; runGeneration is what persists them, so
 	// this asserts the writer exists and round-trips what it is given.
-	if err := repo.UpdateBriefs(context.Background(), run.ID, briefs, []string{briefs[0].Topic}); err != nil {
+	if err := repo.UpdateBriefs(context.Background(), run.ID, 0, briefs, []string{briefs[0].Topic}); err != nil {
 		t.Fatalf("UpdateBriefs: %v", err)
 	}
 	if !repo.briefsWritten {

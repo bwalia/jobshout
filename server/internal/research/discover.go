@@ -77,6 +77,40 @@ type DiscoverRequest struct {
 // HTTP, and a wider net gives the selection something to choose between.
 const discoverCandidates = 40
 
+// maxPromptCandidates caps what reaches the topic prompt. The trending sweep
+// plus eight results for each of seven focus areas came to 96 candidates —
+// about 9k tokens against an 8192-token num_ctx, and Ollama truncates an
+// over-long prompt silently rather than refusing it. 48 leaves room for the
+// instructions and the reply.
+const maxPromptCandidates = 48
+
+// capCandidates keeps at most n items, taken round-robin across channels in
+// their original order, so a cap trims every feed and focus search a little
+// rather than cutting the last focus areas out entirely.
+func capCandidates(items []TrendingItem, n int) []TrendingItem {
+	if len(items) <= n {
+		return items
+	}
+	var order []string
+	byChannel := map[string][]TrendingItem{}
+	for _, it := range items {
+		if _, seen := byChannel[it.Channel]; !seen {
+			order = append(order, it.Channel)
+		}
+		byChannel[it.Channel] = append(byChannel[it.Channel], it)
+	}
+	out := make([]TrendingItem, 0, n)
+	for len(out) < n {
+		for _, ch := range order {
+			if q := byChannel[ch]; len(q) > 0 && len(out) < n {
+				out = append(out, q[0])
+				byChannel[ch] = q[1:]
+			}
+		}
+	}
+	return out
+}
+
 // Discover finds subjects currently worth writing about.
 //
 // The shape mirrors the research loop deliberately — gather broadly, then let
@@ -118,6 +152,8 @@ func (a *Agent) Discover(ctx context.Context, req DiscoverRequest, progress Prog
 	if len(items) == 0 {
 		return nil, fmt.Errorf("research: discover: everything trending has been written about recently")
 	}
+
+	items = capCandidates(items, maxPromptCandidates)
 
 	progress.report(PhaseDiscovering,
 		fmt.Sprintf("Choosing %d topic(s) from %d trending item(s)", count, len(items)))
@@ -315,11 +351,11 @@ Respond with JSON only, in exactly this shape:
 
 	var parsed struct {
 		Topics []struct {
-			Topic     string `json:"topic"`
-			Context   string `json:"context"`
-			Rationale string `json:"rationale"`
-			Seeds     []int  `json:"seeds"`
-			InFocus   bool   `json:"in_focus"`
+			Topic     string    `json:"topic"`
+			Context   string    `json:"context"`
+			Rationale string    `json:"rationale"`
+			Seeds     looseInts `json:"seeds"`
+			InFocus   looseBool `json:"in_focus"`
 		} `json:"topics"`
 	}
 	// generateJSON repairs what it can and asks once more when it cannot: a
@@ -356,7 +392,7 @@ Respond with JSON only, in exactly this shape:
 			Context:   strings.TrimSpace(t.Context),
 			Rationale: strings.TrimSpace(t.Rationale),
 			Seeds:     seeds,
-			InFocus:   t.InFocus,
+			InFocus:   bool(t.InFocus),
 		})
 	}
 	return selectByFocus(confirmFocus(out, req.Focus), count, len(req.Focus) > 0), nil

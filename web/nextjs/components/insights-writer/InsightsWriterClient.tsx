@@ -190,8 +190,9 @@ export function InsightsWriterClient() {
 
       {config && !canPublishLive && (
         <p className="rounded-md border border-signal/30 bg-signal/5 px-3 py-2 text-xs text-muted-foreground">
-          Publishing live is not configured on this deployment: it needs the opsapi CMS (with the cms:update
-          scope) and jobshout.com Insights.
+          Publishing live is not configured on this deployment: it needs the opsapi CMS and
+          jobshout.com Insights. Prefer an API key with cms:create+update+read; create alone
+          still works (Publish live files a published copy).
         </p>
       )}
 

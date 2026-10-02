@@ -21,7 +21,11 @@ type BlogRepository interface {
 	// UpdateSteps persists just the progress trace. Called on every step
 	// transition, so it is deliberately narrow — a full Update would race with
 	// the terminal write that happens at the end of a run.
-	UpdateSteps(ctx context.Context, runID uuid.UUID, steps []model.BlogStep) error
+	//
+	// It, UpdateArticles, UpdateBriefs and Update only write while the row is
+	// still on the given attempt, so a writer left over from a cancelled or
+	// retried attempt changes nothing.
+	UpdateSteps(ctx context.Context, runID uuid.UUID, attempt int, steps []model.BlogStep) error
 	// UpdateBriefs persists what a run is writing about, for runs that did not
 	// know at creation time.
 	//
@@ -30,7 +34,11 @@ type BlogRepository interface {
 	// terminal write, and a run's subject is not something it should be able to
 	// change on completion. So discovery gets its own narrow writer, for the
 	// same reason UpdateSteps has one.
-	UpdateBriefs(ctx context.Context, runID uuid.UUID, briefs []model.BlogBrief, topics []string) error
+	UpdateBriefs(ctx context.Context, runID uuid.UUID, attempt int, briefs []model.BlogBrief, topics []string) error
+	// BeginRetry moves a failed or cancelled run to running on its next
+	// attempt, and reports whether this caller won. It is a compare-and-set on
+	// attempt, so two replicas retrying the same run start one writer, not two.
+	BeginRetry(ctx context.Context, runID uuid.UUID, attempt int) (bool, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*model.BlogRun, error)
 	ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.BlogRun], error)
 	// ListByAgent lists the runs attributed to agentID. includeUnowned adds
@@ -46,7 +54,7 @@ type BlogRepository interface {
 	// UpdateArticles writes the run's lightweight per-article summaries, so a
 	// brief can be persisted without a full terminal Update racing the step
 	// trace.
-	UpdateArticles(ctx context.Context, runID uuid.UUID, articles []model.BlogRunArticle) error
+	UpdateArticles(ctx context.Context, runID uuid.UUID, attempt int, articles []model.BlogRunArticle) error
 	// MarkArticlesPosted records where each article landed in the CMS, after a
 	// publish has already succeeded.
 	MarkArticlesPosted(ctx context.Context, posts []model.BlogArticlePost) error
@@ -71,7 +79,11 @@ type BlogRepository interface {
 	RecentTopics(ctx context.Context, orgID uuid.UUID, since time.Time, audience string) ([]string, error)
 	// TouchHeartbeat records that this process is still writing the run, so the
 	// orphan reconciler does not fail a healthy long LLM call.
-	TouchHeartbeat(ctx context.Context, runID uuid.UUID) error
+	//
+	// It reports whether the run is still running on the given attempt. False
+	// means it was cancelled or retried — possibly from another replica — and
+	// the caller no longer owns it.
+	TouchHeartbeat(ctx context.Context, runID uuid.UUID, attempt int) (bool, error)
 	// ListStaleRunning returns in-flight runs whose last heartbeat (or start)
 	// is before before. The reconciler fails these; it does not restart them.
 	ListStaleRunning(ctx context.Context, before time.Time) ([]*model.BlogRun, error)
@@ -91,7 +103,7 @@ const blogRunColumns = `
 	id, org_id, agent_id, triggered_by, source, status, topics, briefs, model,
 	cms_namespace, articles, steps, error_message,
 	started_at, heartbeat_at, completed_at, published_at, created_at, options,
-	insights_published_at`
+	insights_published_at, attempt`
 
 // scanBlogRun reads one row in blogRunColumns order.
 func scanBlogRun(row pgx.Row) (*model.BlogRun, error) {
@@ -102,7 +114,7 @@ func scanBlogRun(row pgx.Row) (*model.BlogRun, error) {
 		&topicsRaw, &briefsRaw, &run.Model, &run.CMSNamespace,
 		&articlesRaw, &stepsRaw, &run.ErrorMessage,
 		&run.StartedAt, &run.HeartbeatAt, &run.CompletedAt, &run.PublishedAt, &run.CreatedAt,
-		&optionsRaw, &run.InsightsPublishedAt,
+		&optionsRaw, &run.InsightsPublishedAt, &run.Attempt,
 	)
 	if err != nil {
 		return nil, err
@@ -201,12 +213,12 @@ func (r *blogRepository) Create(ctx context.Context, run *model.BlogRun) error {
 		INSERT INTO blog_runs
 		    (id, org_id, agent_id, triggered_by, source, status, topics, briefs, model, articles, steps, started_at, heartbeat_at, created_at, options)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12, NOW(), $13)
-		RETURNING created_at`
+		RETURNING created_at, attempt`
 
 	return r.pool.QueryRow(ctx, sql,
 		run.ID, run.OrgID, run.AgentID, run.TriggeredBy, run.Source, run.Status,
 		topicsJSON, briefsJSON, run.Model, articlesJSON, stepsJSON, run.StartedAt, optionsJSON,
-	).Scan(&run.CreatedAt)
+	).Scan(&run.CreatedAt, &run.Attempt)
 }
 
 func (r *blogRepository) Update(ctx context.Context, run *model.BlogRun) error {
@@ -223,12 +235,12 @@ func (r *blogRepository) Update(ctx context.Context, run *model.BlogRun) error {
 		    completed_at  = $7,
 		    published_at  = $8,
 		    insights_published_at = $9
-		WHERE id = $1`
+		WHERE id = $1 AND attempt = $10`
 
 	_, err := r.pool.Exec(ctx, sql,
 		run.ID, run.Status, run.CMSNamespace,
 		articlesJSON, stepsJSON, run.ErrorMessage, run.CompletedAt, run.PublishedAt,
-		run.InsightsPublishedAt,
+		run.InsightsPublishedAt, run.Attempt,
 	)
 	if err != nil {
 		return fmt.Errorf("blog_repo: update: %w", err)
@@ -236,7 +248,7 @@ func (r *blogRepository) Update(ctx context.Context, run *model.BlogRun) error {
 	return nil
 }
 
-func (r *blogRepository) UpdateArticles(ctx context.Context, runID uuid.UUID, articles []model.BlogRunArticle) error {
+func (r *blogRepository) UpdateArticles(ctx context.Context, runID uuid.UUID, attempt int, articles []model.BlogRunArticle) error {
 	if articles == nil {
 		articles = []model.BlogRunArticle{}
 	}
@@ -244,16 +256,16 @@ func (r *blogRepository) UpdateArticles(ctx context.Context, runID uuid.UUID, ar
 	if err != nil {
 		return fmt.Errorf("blog_repo: marshal articles: %w", err)
 	}
-	_, err = r.pool.Exec(ctx, `UPDATE blog_runs SET articles = $2 WHERE id = $1`, runID, articlesJSON)
+	_, err = r.pool.Exec(ctx, `UPDATE blog_runs SET articles = $2 WHERE id = $1 AND attempt = $3`, runID, articlesJSON, attempt)
 	if err != nil {
 		return fmt.Errorf("blog_repo: update articles: %w", err)
 	}
 	return nil
 }
 
-func (r *blogRepository) UpdateSteps(ctx context.Context, runID uuid.UUID, steps []model.BlogStep) error {
+func (r *blogRepository) UpdateSteps(ctx context.Context, runID uuid.UUID, attempt int, steps []model.BlogStep) error {
 	stepsJSON, _ := json.Marshal(steps)
-	_, err := r.pool.Exec(ctx, `UPDATE blog_runs SET steps = $2 WHERE id = $1`, runID, stepsJSON)
+	_, err := r.pool.Exec(ctx, `UPDATE blog_runs SET steps = $2 WHERE id = $1 AND attempt = $3`, runID, stepsJSON, attempt)
 	if err != nil {
 		return fmt.Errorf("blog_repo: update steps: %w", err)
 	}
@@ -261,7 +273,7 @@ func (r *blogRepository) UpdateSteps(ctx context.Context, runID uuid.UUID, steps
 }
 
 func (r *blogRepository) UpdateBriefs(
-	ctx context.Context, runID uuid.UUID, briefs []model.BlogBrief, topics []string,
+	ctx context.Context, runID uuid.UUID, attempt int, briefs []model.BlogBrief, topics []string,
 ) error {
 	briefsJSON, err := json.Marshal(briefs)
 	if err != nil {
@@ -275,8 +287,8 @@ func (r *blogRepository) UpdateBriefs(
 	// Both columns move together: topics is the topic-only projection of
 	// briefs, and letting them disagree would give the legacy readers a
 	// different answer than the current ones.
-	const sql = `UPDATE blog_runs SET briefs = $2, topics = $3 WHERE id = $1`
-	if _, err := r.pool.Exec(ctx, sql, runID, briefsJSON, topicsJSON); err != nil {
+	const sql = `UPDATE blog_runs SET briefs = $2, topics = $3 WHERE id = $1 AND attempt = $4`
+	if _, err := r.pool.Exec(ctx, sql, runID, briefsJSON, topicsJSON, attempt); err != nil {
 		return fmt.Errorf("blog_repo: update briefs: %w", err)
 	}
 	return nil
@@ -514,15 +526,34 @@ func (r *blogRepository) RecentTopics(ctx context.Context, orgID uuid.UUID, sinc
 	return topics, rows.Err()
 }
 
-func (r *blogRepository) TouchHeartbeat(ctx context.Context, runID uuid.UUID) error {
-	_, err := r.pool.Exec(ctx,
-		`UPDATE blog_runs SET heartbeat_at = NOW() WHERE id = $1 AND status IN ('running', 'pending')`,
-		runID,
+func (r *blogRepository) TouchHeartbeat(ctx context.Context, runID uuid.UUID, attempt int) (bool, error) {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE blog_runs SET heartbeat_at = NOW()
+		 WHERE id = $1 AND attempt = $2 AND status IN ('running', 'pending')`,
+		runID, attempt,
 	)
 	if err != nil {
-		return fmt.Errorf("blog_repo: heartbeat: %w", err)
+		return false, fmt.Errorf("blog_repo: heartbeat: %w", err)
 	}
-	return nil
+	return tag.RowsAffected() == 1, nil
+}
+
+func (r *blogRepository) BeginRetry(ctx context.Context, runID uuid.UUID, attempt int) (bool, error) {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE blog_runs SET
+		    attempt       = attempt + 1,
+		    status        = 'running',
+		    started_at    = NOW(),
+		    heartbeat_at  = NOW(),
+		    completed_at  = NULL,
+		    error_message = NULL
+		 WHERE id = $1 AND attempt = $2 AND status IN ('failed', 'cancelled')`,
+		runID, attempt,
+	)
+	if err != nil {
+		return false, fmt.Errorf("blog_repo: begin retry: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
 func (r *blogRepository) ListStaleRunning(ctx context.Context, before time.Time) ([]*model.BlogRun, error) {

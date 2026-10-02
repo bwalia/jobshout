@@ -216,7 +216,7 @@ Return only the markdown article — no preamble, no meta commentary.`,
 		r.plannedFiguresNote(plan),
 	)
 
-	resp, err := r.generate(ctx, modelName, prompt)
+	resp, err := r.generate(ctx, modelName, brief, prompt)
 	if err != nil {
 		return "", fmt.Errorf("draft: %w", err)
 	}
@@ -352,7 +352,7 @@ you changed.`,
 		reader.IndefinitePiece(), reader.Reader,
 		plan.Title, formatSources(rb), formatIssues(c.Issues), markdown)
 
-	resp, err := r.generate(ctx, modelName, prompt)
+	resp, err := r.generate(ctx, modelName, brief, prompt)
 	if err != nil {
 		return "", fmt.Errorf("revise: %w", err)
 	}
@@ -602,7 +602,7 @@ Return only the expanded markdown article — no preamble, no commentary.`,
 		reader.ExpandRules(),
 	)
 
-	resp, err := r.generate(ctx, modelName, prompt)
+	resp, err := r.generate(ctx, modelName, brief, prompt)
 	if err != nil {
 		return "", fmt.Errorf("expand: %w", err)
 	}
@@ -616,23 +616,52 @@ Return only the expanded markdown article — no preamble, no commentary.`,
 // wordCount counts words the way the UI reports them.
 func wordCount(markdown string) int { return len(strings.Fields(markdown)) }
 
-// generate is the single point where the writer talks to the LLM.
 // Generation ceilings, in tokens. See the note in research/agent.go — these
 // bound a runaway rather than shape the output.
 //
-// The article ceiling is deliberately roomy: MaxArticleWords is 1400, which is
-// roughly 1900 tokens of prose, and markdown structure and code blocks push it
-// higher. Truncating a finished article mid-sentence would be a worse failure
-// than the one this guards against.
+// The article ceiling is deliberately roomy: a 1400-word piece is roughly 1900
+// tokens of prose, and markdown structure and code blocks push it higher.
+// Truncating a finished article mid-sentence would be a worse failure than the
+// one this guards against.
 const (
-	// maxArticleTokens covers drafting, revising and expanding.
+	// maxArticleTokens covers drafting, revising and expanding, for readers
+	// whose longest piece fits in it. See articleTokens.
 	maxArticleTokens = 4000
 	// maxPlanTokens covers the outline and the review, both short JSON.
 	maxPlanTokens = 1500
 )
 
-func (r *Runner) generate(ctx context.Context, modelName, prompt string) (string, error) {
-	return r.generateBounded(ctx, modelName, prompt, maxArticleTokens)
+// articleTokens is the generation ceiling for one reader's article.
+//
+// A fixed 4000 was sized for 1400-word pieces. The Insights reader asks for up
+// to 3400 words, and a live draft for it ran into the ceiling and stopped
+// mid-sentence. Two tokens a word leaves room for tables, diagrams and code.
+func articleTokens(brief model.BlogBrief) int {
+	return max(maxArticleTokens, audience.For(brief.Audience).MaxWords*2)
+}
+
+// generate asks for article prose for brief's reader.
+//
+// A reply that stops at the token ceiling is cut back to its last complete
+// block. The ceiling still bounds a runaway, but an article must not end
+// half-way through a sentence.
+func (r *Runner) generate(ctx context.Context, modelName string, brief model.BlogBrief, prompt string) (string, error) {
+	limit := articleTokens(brief)
+	resp, err := r.complete(ctx, modelName, prompt, limit, r.cfg.ProseNumCtx, false)
+	if err != nil {
+		return "", err
+	}
+	if resp.FinishReason != "length" {
+		return resp.Content, nil
+	}
+	trimmed := trimIncompleteTail(resp.Content)
+	r.logger.Warn("blog: the model ran into the token ceiling, dropped the unfinished ending",
+		zap.String("model", modelName), zap.Int("max_tokens", limit),
+		zap.Int("words_kept", wordCount(trimmed)), zap.Int("words_dropped", wordCount(resp.Content)-wordCount(trimmed)))
+	if strings.TrimSpace(trimmed) == "" {
+		return "", fmt.Errorf("the reply stopped at the %d-token ceiling before finishing a paragraph", limit)
+	}
+	return trimmed, nil
 }
 
 // generateJSON asks for a JSON reply and decodes it into v.
@@ -646,7 +675,15 @@ func (r *Runner) generateJSON(
 ) error {
 	return llm.GenerateJSON(ctx, stage, prompt, v,
 		func(ctx context.Context, p string) (string, error) {
-			return r.generateBounded(ctx, modelName, p, maxTokens)
+			// JSON mode, as research and the course generator already ask
+			// for. On the prompt alone, a reviewer handed a 2900-word draft
+			// answered "Here is a harsh critique of the draft:" twice, and the
+			// article went out unrevised.
+			resp, err := r.complete(ctx, modelName, p, maxTokens, 0, true)
+			if err != nil {
+				return "", err
+			}
+			return resp.Content, nil
 		},
 		func(reply string, err error) {
 			r.logger.Warn("blog: could not parse the model's JSON, asking again",
@@ -655,19 +692,24 @@ func (r *Runner) generateJSON(
 	)
 }
 
-func (r *Runner) generateBounded(ctx context.Context, modelName, prompt string, maxTokens int) (string, error) {
+// complete is the single point where the writer talks to the LLM. numCtx is
+// the context window to ask for; zero leaves it to the client. jsonReply asks
+// the provider to constrain the reply to JSON.
+func (r *Runner) complete(ctx context.Context, modelName, prompt string, maxTokens, numCtx int, jsonReply bool) (*llm.GenerateResponse, error) {
 	resp, err := r.llm.Generate(ctx, llm.GenerateRequest{
 		Model:     modelName,
 		MaxTokens: maxTokens,
+		NumCtx:    numCtx,
+		JSON:      jsonReply,
 		Messages:  []llm.Message{{Role: llm.RoleUser, Content: prompt}},
 	})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if resp == nil || strings.TrimSpace(resp.Content) == "" {
-		return "", fmt.Errorf("empty response from %s", r.llm.ProviderName())
+		return nil, fmt.Errorf("empty response from %s", r.llm.ProviderName())
 	}
-	return resp.Content, nil
+	return resp, nil
 }
 
 // formatFindings numbers the verified claims for a prompt.

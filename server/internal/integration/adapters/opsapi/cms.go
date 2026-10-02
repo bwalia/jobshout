@@ -9,6 +9,7 @@ package opsapi
 import (
 	"bytes"
 	"context"
+	"errors"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +18,16 @@ import (
 	"strings"
 	"time"
 )
+
+// ErrUpdateForbidden is returned by SetPostStatus when the API key can create
+// posts but not change them (missing cms:update). Callers that still have the
+// article body can CreatePost with StatusPublished instead.
+var ErrUpdateForbidden = errors.New("opsapi: cms update forbidden")
+
+// IsUpdateForbidden reports whether err is (or wraps) ErrUpdateForbidden.
+func IsUpdateForbidden(err error) bool {
+	return errors.Is(err, ErrUpdateForbidden)
+}
 
 // DefaultTimeout bounds a single CMS call. A post body is a few tens of KB, so
 // anything slower than this is a problem with the link, not the payload.
@@ -34,8 +45,10 @@ type Config struct {
 	// slash and no /api/v2 suffix; both are added where needed.
 	BaseURL string
 	// APIKey is a namespace-scoped opsapi API key ("opsk_..."), minted via
-	// opsapi's POST /api/v2/api-keys with scope {"cms":["create"]}. It is a
-	// long-lived machine credential — no refresh dance, no expiry to babysit.
+	// opsapi's POST /api/v2/api-keys with scope {"cms":["create","update","read"]}.
+	// create alone can file drafts and create-as-published; update is needed to
+	// flip an existing draft live. It is a long-lived machine credential — no
+	// refresh dance, no expiry to babysit.
 	APIKey string
 	// Namespace is the opsapi namespace slug that owns the posts. Sent as
 	// X-Namespace-Slug; it must be the namespace the API key belongs to, or
@@ -199,8 +212,9 @@ func (c *Client) SetPostStatus(ctx context.Context, postUUID, status string) (*P
 		switch resp.StatusCode {
 		case http.StatusForbidden:
 			return nil, fmt.Errorf(
-				"opsapi: set post %s to %s forbidden (403) — the API key needs the cms:update scope "+
-					"in namespace %q. Response: %s", postUUID, status, c.cfg.Namespace, b)
+				"%w: set post %s to %s — the API key needs the cms:update scope "+
+					"in namespace %q (or CreatePost with status=published). Response: %s",
+				ErrUpdateForbidden, postUUID, status, c.cfg.Namespace, b)
 		case http.StatusNotFound:
 			return nil, fmt.Errorf("opsapi: post %s not found in namespace %q — was the draft deleted? Response: %s",
 				postUUID, c.cfg.Namespace, b)

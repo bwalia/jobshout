@@ -37,6 +37,18 @@ func StaticModels(provider string) []ModelInfo {
 			{Provider: "claude", Name: "claude-3-haiku-20240307", ContextTokens: 200_000,
 				Capabilities: []string{CapCompletion, CapTools, CapVision}},
 		}
+	case "gemini":
+		// Gemini's /models lists every model the key can reach, image and
+		// embedding ones included, without a tool flag — so, like OpenAI and
+		// Claude, it is listed by hand.
+		return []ModelInfo{
+			{Provider: "gemini", Name: GeminiDefaultModel, ContextTokens: 1_048_576,
+				Capabilities: []string{CapCompletion, CapVision, CapThinking}},
+			{Provider: "gemini", Name: "gemini-2.5-flash", ContextTokens: 1_048_576,
+				Capabilities: []string{CapCompletion, CapVision, CapThinking}},
+			{Provider: "gemini", Name: "gemini-2.5-pro", ContextTokens: 1_048_576,
+				Capabilities: []string{CapCompletion, CapVision, CapThinking}},
+		}
 	default:
 		return nil
 	}

@@ -21,6 +21,9 @@ type SchedulerRepository interface {
 	ListDueTasks(ctx context.Context) ([]model.ScheduledTask, error)
 	IncrementRunCount(ctx context.Context, id uuid.UUID) error
 	SetNextRunAt(ctx context.Context, id uuid.UUID, next time.Time) error
+	// ClaimTask moves next_run_at from due to next only if it is still due,
+	// and reports whether this caller won the task.
+	ClaimTask(ctx context.Context, id uuid.UUID, due *time.Time, next time.Time) (bool, error)
 	CreateRun(ctx context.Context, run *model.ScheduledTaskRun) error
 	ListRuns(ctx context.Context, taskID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.ScheduledTaskRun], error)
 }
@@ -209,6 +212,20 @@ func (r *schedulerRepository) SetNextRunAt(ctx context.Context, id uuid.UUID, ne
 		"UPDATE scheduled_tasks SET next_run_at = $2, updated_at = NOW() WHERE id = $1",
 		id, next)
 	return err
+}
+
+// ClaimTask is a compare-and-set on next_run_at. Every API replica runs a
+// scheduler, and both can list the same due task; only the one whose update
+// still sees the old next_run_at gets to dispatch it.
+func (r *schedulerRepository) ClaimTask(ctx context.Context, id uuid.UUID, due *time.Time, next time.Time) (bool, error) {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE scheduled_tasks SET next_run_at = $3, updated_at = NOW()
+		 WHERE id = $1 AND status = 'active' AND next_run_at IS NOT DISTINCT FROM $2`,
+		id, due, next)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
 func (r *schedulerRepository) CreateRun(ctx context.Context, run *model.ScheduledTaskRun) error {

@@ -113,16 +113,23 @@ func (r *Runner) tick(ctx context.Context) {
 		// Pushing next_run_at forward here makes the claim atomic enough for a
 		// single runner: the next tick no longer sees the task. runOne still
 		// advances it properly on completion.
-		r.claim(ctx, tasks[i])
+		if !r.claim(ctx, tasks[i]) {
+			continue
+		}
 		// Spawn per-task so a slow LLM call can't block the tick loop.
 		go r.runOne(ctx, tasks[i])
 	}
 }
 
 // claim pushes next_run_at past the point where the next tick would re-select
-// the task. A failure here is logged and not fatal: the worst case is the old
-// behaviour of a duplicate dispatch, which is better than dropping the run.
-func (r *Runner) claim(ctx context.Context, t model.ScheduledTask) {
+// the task, and reports whether this runner should dispatch it.
+//
+// It is a compare-and-set because every API replica runs a scheduler: two
+// replicas listing the same due task both used to dispatch it, and a trending
+// article schedule wrote the same topic twice. The replica that loses the
+// update skips the task. A database error is logged and still dispatches: a
+// possible duplicate is better than dropping the run.
+func (r *Runner) claim(ctx context.Context, t model.ScheduledTask) bool {
 	next, err := r.computeNextRun(t)
 	if err != nil || next == nil {
 		// No computable next run (one-shot, or a bad expression). runOne's
@@ -130,10 +137,17 @@ func (r *Runner) claim(ctx context.Context, t model.ScheduledTask) {
 		hold := time.Now().Add(TickInterval)
 		next = &hold
 	}
-	if err := r.repo.SetNextRunAt(ctx, t.ID, *next); err != nil {
+	won, err := r.repo.ClaimTask(ctx, t.ID, t.NextRunAt, *next)
+	if err != nil {
 		r.logger.Error("scheduler: claim task failed — it may run twice",
 			zap.String("task_id", t.ID.String()), zap.Error(err))
+		return true
 	}
+	if !won {
+		r.logger.Info("scheduler: task claimed by another runner",
+			zap.String("task_id", t.ID.String()))
+	}
+	return won
 }
 
 func (r *Runner) runOne(ctx context.Context, t model.ScheduledTask) {
@@ -141,6 +155,13 @@ func (r *Runner) runOne(ctx context.Context, t model.ScheduledTask) {
 		zap.String("task_id", t.ID.String()),
 		zap.String("name", t.Name),
 	)
+	// runOne is its own goroutine: a panic in one task must not stop the
+	// server and every other schedule with it.
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Error("scheduler: task panicked", zap.Any("panic", rec), zap.Stack("stack"))
+		}
+	}()
 	log.Info("scheduler: running scheduled task")
 
 	runRec := &model.ScheduledTaskRun{

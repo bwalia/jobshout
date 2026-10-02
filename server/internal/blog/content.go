@@ -170,6 +170,8 @@ func (r *Runner) finalizeArticle(
 		}
 	}
 
+	article.Markdown = tidyMarkdown(article.Markdown, r.canIllustrate())
+
 	report(progress, model.BlogStepConverting,
 		fmt.Sprintf("Converting %s to HTML", article.Title), model.AgentNameArticleWriter)
 	return article.render()
@@ -232,6 +234,11 @@ func (r *Runner) writeOne(
 	report(progress, model.BlogStepReviewing, "Reviewing "+plan.Title, model.AgentNameArticleWriter)
 	c, err := r.review(ctx, r.structuredModel(req), brief, rb, plan, markdown)
 	switch {
+	case err != nil && ctx.Err() != nil:
+		// Out of time or cancelled is not a critic being unavailable. Every
+		// step after this would fail the same way, and what is left is an
+		// unreviewed first draft — a live run stored one as a finished article.
+		return nil, ctx.Err()
 	case err != nil:
 		// A failed review costs the revision pass, not the article. The draft
 		// is already written from verified sources; discarding it because the
@@ -246,6 +253,9 @@ func (r *Runner) writeOne(
 			fmt.Sprintf("Revising %s (%d issue(s))", plan.Title, len(c.Issues)),
 			model.AgentNameArticleWriter)
 		revised, rerr := r.revise(ctx, r.proseModel(req), brief, rb, plan, markdown, c)
+		if rerr != nil && ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		if rerr != nil {
 			r.logger.Warn("blog: revision failed, keeping the reviewed draft",
 				zap.String("title", plan.Title), zap.Error(rerr))
@@ -273,6 +283,8 @@ func (r *Runner) writeOne(
 
 		expanded, eerr := r.expand(ctx, r.proseModel(req), brief, rb, plan, markdown, words)
 		switch {
+		case eerr != nil && ctx.Err() != nil:
+			return nil, ctx.Err()
 		case eerr != nil:
 			r.logger.Warn("blog: expansion failed, keeping the short article",
 				zap.String("title", plan.Title), zap.Int("words", words), zap.Error(eerr))
@@ -308,6 +320,12 @@ func (r *Runner) writeOne(
 	// 8. Resolve citations into a reference list. This drops markers pointing
 	// at sources that were never offered and renumbers what survives, so the
 	// published article's references are exactly what it cites.
+	// The model sometimes writes its own reference list — a dump of findings
+	// with their quotes — and this step appends the real one after it.
+	markdown = stripModelReferences(markdown)
+	// The reader profile asks for a dated opener, but no prompt carries the
+	// date, so the model guessed one from its training data. Write it here.
+	markdown = stampLandscapeDate(markdown, r.clock())
 	rawCitations := countCitations(markdown)
 	markdown, refs := resolveCitations(markdown, rb)
 	markdown = strings.TrimRight(markdown, "\n") + referencesMarkdown(refs)

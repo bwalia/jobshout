@@ -107,6 +107,11 @@ func (g *Generator) Generate(ctx context.Context, job Job, h Hooks) error {
 
 func (g *Generator) generate(ctx context.Context, job Job, h Hooks) error {
 	b := job.Brief
+	// Every call in the run — research included — goes to the brief's
+	// provider through the routed client.
+	if p := llm.NormalizeProvider(b.Provider); p != "" {
+		ctx = llm.WithProvider(ctx, p)
+	}
 
 	h.Step(model.CourseStepResearching, b.Topic)
 	done := g.phase(job, "research")
@@ -341,6 +346,11 @@ func (g *Generator) chapter(ctx context.Context, job Job, o *model.CourseOutline
 func (g *Generator) modelFor(b model.CourseBrief) string {
 	if b.Model != "" {
 		return b.Model
+	}
+	// COURSE_MODEL names a model on the server's provider; on any other the
+	// provider's own default is used.
+	if p := llm.NormalizeProvider(b.Provider); p != "" && p != llm.NormalizeProvider(g.cfg.Provider) {
+		return ""
 	}
 	return g.cfg.Model
 }

@@ -19,6 +19,9 @@ logLevel: debug
 #     --from-literal=WSLPROXY_API_TOKEN=...
 extraSecretRefs:
   - jobshout-cms
+  # BRAVE_SEARCH_API_KEY: general web search for the Research Agent. Without
+  # it research searches Hacker News and arXiv only.
+  - jobshout-research
   - jobshout-review
   - jobshout-mail
   - jobshout-google
@@ -28,6 +31,10 @@ extraSecretRefs:
   # Secrets Rotation credentials: SECRETS_VAULT_ADDR/SECRETS_VAULT_TOKEN and
   # RP_API_TOKEN. Created by hand on k3s1, never in git.
   - jobshout-secretsrot
+  # GEMINI_API_KEY: registers Gemini as an LLM provider (int's default, see
+  # ai.provider) and as the first-choice image backend.
+  #   kubectl -n int create secret generic jobshout-gemini --from-literal=GEMINI_API_KEY=...
+  - jobshout-gemini
 
 # opsapi CMS — the Article Writer files generated articles there as drafts.
 # The host and namespace slug are not secret; the API key is, and comes from
@@ -39,14 +46,28 @@ cms:
 
 ai:
   enabled: true
+  # Gemini is int's default text provider: the Article Writer, Course
+  # Generator, Research and every agent without a provider of its own use it.
+  # Needs GEMINI_API_KEY from the jobshout-gemini secret above.
+  provider: gemini
+  geminiModel: "gemini-flash-latest"
   ollamaBaseURL: "https://ollama.workstation.co.uk"
   ollamaModel: "llama3.1:8b"
+  # Chat stays on Ollama whatever ai.provider is (NewChatInner).
   chatModel: "qwen3-coder:30b"
   chatModelFallback: "llama3.1:8b"
+  # Mail and Career keep their Ollama models, so they stay on Ollama.
   mailModel: "muse-glimmer:latest"
+  mailProvider: ollama
+  careerProvider: ollama
   # Shared workstation Ollama is CPU-heavy and often queued; research/draft
-  # calls were dying at 10m with "awaiting headers". Match imageTimeout headroom.
-  ollamaTimeout: "30m"
+  # calls were dying at 10m with "awaiting headers". 45m because one draft on
+  # the larger writing model below took 17–28m, and over 28m once.
+  ollamaTimeout: "45m"
+  # No blogProseModel here: it names a model on ai.provider, and int's writing
+  # model is now Gemini's default (geminiModel). The qwen3.8 pin it held was an
+  # Ollama model. Runtime stays generous while Gemini timings are measured.
+  blogMaxRuntime: "120m"
   imageBaseURL: "https://images.workstation.co.uk"
   # Blog covers use z-image-turbo (dark editorial template, ~8 steps, ~1 min).
   imageModel: "z-image-turbo"

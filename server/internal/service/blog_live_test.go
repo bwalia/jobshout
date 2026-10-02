@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -19,11 +20,13 @@ import (
 type liveCMS struct {
 	statusCalls []string
 	statusErr   error
+	created     []opsapi.CreatePostRequest
 }
 
 func (c *liveCMS) Namespace() string { return "acme" }
 func (c *liveCMS) CreatePost(_ context.Context, req opsapi.CreatePostRequest) (*opsapi.Post, error) {
-	return &opsapi.Post{UUID: "new-" + req.Slug, Status: req.Status}, nil
+	c.created = append(c.created, req)
+	return &opsapi.Post{UUID: "new-" + req.Slug, Status: req.Status, Slug: req.Slug}, nil
 }
 func (c *liveCMS) SetPostStatus(_ context.Context, id, status string) (*opsapi.Post, error) {
 	if c.statusErr != nil {
@@ -84,7 +87,9 @@ func liveFixture(writer string) (*blogService, *liveStore, *liveCMS, *liveJobsho
 	postID, draft := "post-1", opsapi.StatusDraft
 	store := &liveStore{runStore{run: run, storedArticles: []model.BlogArticle{{
 		ID: uuid.New(), RunID: run.ID, Topic: "Decision models", Slug: "decision-models",
-		Title: "Decision models", Markdown: "# Decision models\n\nBody.", PostUUID: &postID, PostStatus: &draft,
+		Title: "Decision models", Markdown: "# Decision models\n\nBody.",
+		HTML: "<h1>Decision models</h1><p>Body.</p>",
+		PostUUID: &postID, PostStatus: &draft,
 	}}}}
 	cms, js := &liveCMS{}, &liveJobshout{}
 	runner := blog.NewRunner(blog.Config{}, nil, cms, nil, zap.NewNop()).WithLiveInsights(js)
@@ -150,6 +155,30 @@ func TestPublishLive_RetryFinishesOnlyWhatFailed(t *testing.T) {
 	}
 	if len(cms.statusCalls) != 1 || len(js.submitted) != 1 {
 		t.Fatal("an already-live run must not be sent again")
+	}
+}
+
+func TestPublishLive_CreateAsPublishedWhenUpdateForbidden(t *testing.T) {
+	svc, store, cms, js, org := liveFixture(model.BuiltinJobShoutComWriter)
+	cms.statusErr = fmt.Errorf("%w: missing update", opsapi.ErrUpdateForbidden)
+	run, err := svc.PublishLive(context.Background(), org, store.run.ID)
+	if err != nil {
+		t.Fatalf("publish live: %v", err)
+	}
+	if len(cms.statusCalls) != 0 {
+		t.Fatalf("SetPostStatus should have failed before recording a call, got %v", cms.statusCalls)
+	}
+	if len(cms.created) != 1 || cms.created[0].Status != opsapi.StatusPublished {
+		t.Fatalf("want one create-as-published, got %+v", cms.created)
+	}
+	if store.storedArticles[0].PostUUID == nil || *store.storedArticles[0].PostUUID != "new-decision-models" {
+		t.Fatalf("article should point at the new published post, got %v", store.storedArticles[0].PostUUID)
+	}
+	if len(js.submitted) != 1 {
+		t.Fatalf("want jobshout.com submission after CMS fallback, got %d", len(js.submitted))
+	}
+	if run.InsightsPublishedAt == nil {
+		t.Fatal("run should be stamped live")
 	}
 }
 

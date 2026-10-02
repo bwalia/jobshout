@@ -20,7 +20,7 @@ type stepRecorder struct {
 	calls int
 }
 
-func (r *stepRecorder) UpdateSteps(_ context.Context, _ uuid.UUID, steps []model.BlogStep) error {
+func (r *stepRecorder) UpdateSteps(_ context.Context, _ uuid.UUID, _ int, steps []model.BlogStep) error {
 	r.last = append([]model.BlogStep(nil), steps...)
 	r.calls++
 	return nil
