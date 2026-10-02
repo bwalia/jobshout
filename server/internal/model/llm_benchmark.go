@@ -9,26 +9,51 @@ import (
 // LLMCall is one recorded text LLM call (a usage_records row written by
 // internal/llmbench). It holds metadata only — never prompts or replies.
 type LLMCall struct {
-	ID             uuid.UUID  `json:"id"`
-	AgentID        *uuid.UUID `json:"agent_id,omitempty"`
-	TaskID         *uuid.UUID `json:"task_id,omitempty"`
-	RunKind        string     `json:"run_kind"`
-	RunID          string     `json:"run_id"`
-	Stage          string     `json:"stage"`
-	Attempt        int        `json:"attempt"`
-	Provider       string     `json:"provider"`
-	Model          string     `json:"model"`
-	RequestedModel string     `json:"requested_model"`
-	DurationMs     int        `json:"duration_ms"`
+	ID          uuid.UUID  `json:"id"`
+	AgentID     *uuid.UUID `json:"agent_id,omitempty"`
+	TaskID      *uuid.UUID `json:"task_id,omitempty"`
+	TaskRunID   *uuid.UUID `json:"task_run_id,omitempty"`
+	ExecutionID *uuid.UUID `json:"execution_id,omitempty"`
+	RunKind     string     `json:"run_kind"`
+	RunID       string     `json:"run_id"`
+	Stage       string     `json:"stage"`
+	Attempt     int        `json:"attempt"`
+	// Provider is the concrete client that made the call. Model is the model
+	// the provider's reply named when ModelReported, else the model sent;
+	// RequestedModel is always the model sent.
+	Provider       string `json:"provider"`
+	Model          string `json:"model"`
+	ModelReported  bool   `json:"model_reported"`
+	RequestedModel string `json:"requested_model"`
+	// DurationMs is the whole call, retries included; APIDurationMs only the
+	// HTTP exchanges with the provider (null when not measured).
+	DurationMs    int  `json:"duration_ms"`
+	APIDurationMs *int `json:"api_duration_ms"`
+	// APIAttemptCount is how many HTTP requests were actually sent (null when
+	// not reported); APIAttempts lists each one.
+	APIAttemptCount *int             `json:"api_attempt_count"`
+	APIAttempts     []LLMCallAttempt `json:"api_attempts"`
 	// Token counts are null when the provider did not report them.
-	InputTokens  *int       `json:"input_tokens"`
-	OutputTokens *int       `json:"output_tokens"`
-	TotalTokens  *int       `json:"total_tokens"`
-	Retries      int        `json:"retries"`
-	Status       string     `json:"status"`
-	Error        string     `json:"error,omitempty"`
-	StartedAt    *time.Time `json:"started_at"`
-	CompletedAt  *time.Time `json:"completed_at"`
+	// TotalTokens is the provider's own total, never computed.
+	InputTokens       *int       `json:"input_tokens"`
+	OutputTokens      *int       `json:"output_tokens"`
+	TotalTokens       *int       `json:"total_tokens"`
+	ReasoningTokens   *int       `json:"reasoning_tokens"`
+	ProviderRequestID *string    `json:"provider_request_id"`
+	Retries           int        `json:"retries"`
+	Status            string     `json:"status"`
+	Error             string     `json:"error,omitempty"`
+	StartedAt         *time.Time `json:"started_at"`
+	CompletedAt       *time.Time `json:"completed_at"`
+}
+
+// LLMCallAttempt is one HTTP request a call actually sent to its provider.
+type LLMCallAttempt struct {
+	StartedAt  time.Time `json:"started_at"`
+	DurationMs int       `json:"duration_ms"`
+	HTTPStatus int       `json:"http_status,omitempty"`
+	RequestID  string    `json:"request_id,omitempty"`
+	Error      string    `json:"error,omitempty"`
 }
 
 // LLMModelStat aggregates raw calls for one provider + exact model (and,
@@ -97,4 +122,8 @@ type LLMBenchmarkFilter struct {
 	Model    string
 	Stage    string
 	ByStage  bool
+	// Links to the work that made the calls; nil means any.
+	TaskID      *uuid.UUID
+	TaskRunID   *uuid.UUID
+	ExecutionID *uuid.UUID
 }

@@ -3,8 +3,21 @@
 // It is a decorator installed with llm.Router.WrapClients (and on chat's
 // separately built client), so every call that passes through the common LLM
 // layer is measured the same way whichever provider or agent made it. Nothing
-// here is provider- or agent-specific: the provider and model come from the
-// response, the run and step from labels already on ctx.
+// here is provider- or agent-specific: the provider is the concrete client
+// that ran, the model, usage and request ID come from the provider's reply,
+// and the run, task and step from labels already on ctx.
+//
+// Nothing is guessed. A token count, total or request ID the provider did not
+// report is stored as NULL, and the model the provider reported is kept apart
+// from the one requested.
+//
+// Granularity: one row is one logical Generate call — what the agent asked
+// for. Every HTTP request actually sent to the provider for it (the first try
+// and each transport retry) is kept on that row as an attempt: api_attempts
+// counts them and metadata.api_attempts lists each with its start, duration,
+// HTTP status, request ID and error. GenerateJSON's corrective retry and
+// chat's fallback model are separate Generate calls, so they are rows of their
+// own (attempt = 2 / a different model).
 //
 // What is stored is metadata only — timing, token counts, retries, status and
 // a short error. Prompts, replies and credentials never are.
@@ -32,32 +45,57 @@ import (
 // Call statuses.
 const (
 	StatusSuccess   = "success"
-	StatusError     = "error"
+	StatusFailed    = "failed"
 	StatusCancelled = "cancelled"
 )
 
 // maxErrorLen caps the stored error text.
 const maxErrorLen = 1024
 
-// maxModelLen matches usage_records.model.
-const maxModelLen = 100
+// maxModelLen matches usage_records.model and requested_model.
+const maxModelLen = 200
+
+// maxRequestIDLen matches usage_records.provider_request_id.
+const maxRequestIDLen = 200
 
 // Record is one LLM call.
 type Record struct {
-	OrgID          *uuid.UUID
-	AgentID        *uuid.UUID
-	TaskID         *uuid.UUID
-	RunKind        string
-	RunID          string
-	Stage          string
-	Attempt        int
-	Provider       string
-	Model          string
+	OrgID       *uuid.UUID
+	AgentID     *uuid.UUID
+	TaskID      *uuid.UUID
+	TaskRunID   *uuid.UUID
+	ExecutionID *uuid.UUID
+	RunKind     string
+	RunID       string
+	Stage       string
+	Attempt     int
+	// Provider is the concrete client that made the call.
+	Provider string
+	// Model is the model the provider's reply named when it named one
+	// (ModelReported), else the model that was sent.
+	Model         string
+	ModelReported bool
+	// RequestedModel is the model sent to the provider: the caller's, or the
+	// client's default when the caller named none.
 	RequestedModel string
-	// TokensIn and TokensOut are nil when the provider did not report them.
-	TokensIn    *int
-	TokensOut   *int
-	LatencyMs   int
+	// Token counts are nil when the provider did not report them. TokensTotal
+	// is the provider's own total, never a sum computed here.
+	TokensIn        *int
+	TokensOut       *int
+	TokensTotal     *int
+	TokensReasoning *int
+	// ProviderRequestID is the provider's ID for the call; "" when none.
+	ProviderRequestID string
+	// LatencyMs is the whole Generate call, retries and backoff included.
+	// APIDurationMs is only the time spent in HTTP exchanges with the
+	// provider; nil when the client does not measure it.
+	LatencyMs     int
+	APIDurationMs *int
+	// APIAttempts is how many HTTP requests were actually sent; Attempts
+	// lists them (errors redacted). Both are empty when the client does not
+	// report its HTTP exchanges.
+	APIAttempts int
+	Attempts    []llm.APIAttempt
 	Retries     int
 	Status      string
 	Error       string
@@ -157,45 +195,97 @@ func (c *benchClient) Generate(ctx context.Context, req llm.GenerateRequest) (*l
 	start := c.rec.now()
 	resp, err := c.inner.Generate(callCtx, req)
 	end := c.rec.now()
-	c.rec.enqueue(buildRecord(ctx, c.inner.ProviderName(), req, resp, err, stats.Retries(), start, end))
+	c.rec.enqueue(buildRecord(ctx, c.inner.ProviderName(), c.requestedModel(req), resp, err, stats, start, end))
 	return resp, err
+}
+
+// requestedModel is the model the call asks for: the request's, else the
+// client's default when it can say (llm.ModelNamed). A successful reply
+// overrides it with the model the client actually sent.
+func (c *benchClient) requestedModel(req llm.GenerateRequest) string {
+	if m := strings.TrimSpace(req.Model); m != "" {
+		return m
+	}
+	if mn, ok := c.inner.(llm.ModelNamed); ok {
+		return mn.ModelName()
+	}
+	return ""
 }
 
 // buildRecord turns one finished call into a Record. ctx is the caller's, so
 // a cancellation that arrived during the call is visible here.
 func buildRecord(
-	ctx context.Context, provider string, req llm.GenerateRequest,
-	resp *llm.GenerateResponse, err error, retries int, start, end time.Time,
+	ctx context.Context, provider, requested string,
+	resp *llm.GenerateResponse, err error, stats *llm.CallStats, start, end time.Time,
 ) Record {
 	info, _ := llmtrace.FromContext(ctx)
 	rec := Record{
-		OrgID:          parseID(info.OrgID),
-		AgentID:        parseID(info.AgentID),
-		TaskID:         parseID(info.TaskID),
-		RunKind:        runKind(info),
-		RunID:          info.SessionID,
-		Stage:          llm.StageFrom(ctx),
-		Attempt:        llm.AttemptFrom(ctx),
-		Provider:       provider,
-		Model:          truncate(req.Model, maxModelLen),
-		RequestedModel: truncate(req.Model, 200),
-		LatencyMs:      int(end.Sub(start).Milliseconds()),
-		Retries:        retries,
-		Status:         StatusSuccess,
-		StartedAt:      start.UTC(),
-		CompletedAt:    end.UTC(),
+		OrgID:       parseID(info.OrgID),
+		AgentID:     parseID(info.AgentID),
+		TaskID:      parseID(info.TaskID),
+		TaskRunID:   parseID(info.TaskRunID),
+		ExecutionID: parseID(info.ExecutionID),
+		RunKind:     runKind(info),
+		RunID:       info.SessionID,
+		Stage:       llm.StageFrom(ctx),
+		Attempt:     llm.AttemptFrom(ctx),
+		Provider:    provider,
+		LatencyMs:   int(end.Sub(start).Milliseconds()),
+		Status:      StatusSuccess,
+		StartedAt:   start.UTC(),
+		CompletedAt: end.UTC(),
+	}
+	var reply *llm.ReplyInfo
+	if stats != nil {
+		rec.Retries = stats.Retries()
+		if d, ok := stats.APIDuration(); ok {
+			ms := int(d.Milliseconds())
+			rec.APIDurationMs = &ms
+		}
+		rec.ProviderRequestID = stats.RequestID()
+		rec.Attempts = stats.Attempts()
+		rec.APIAttempts = len(rec.Attempts)
+		for i := range rec.Attempts {
+			rec.Attempts[i].Error = truncate(redact(rec.Attempts[i].Error), maxErrorLen)
+		}
+		reply = stats.Reply()
+	}
+	// A failed call whose reply was decoded before it was rejected (blocked,
+	// thinking-only, an error body) still records what that reply reported.
+	if resp == nil && reply != nil {
+		resp = &llm.GenerateResponse{ProviderModel: reply.Model, RequestID: reply.RequestID, Usage: reply.Usage}
 	}
 	if resp != nil {
 		if resp.Model != "" {
-			rec.Model = truncate(resp.Model, maxModelLen)
+			requested = resp.Model
 		}
-		// Providers leave a count at 0 when they did not report it (Ollama
-		// without its final chunk); a real prompt or reply is never 0 tokens.
-		rec.TokensIn = positive(resp.InputTokens)
-		rec.TokensOut = positive(resp.OutputTokens)
+		if resp.ProviderModel != "" {
+			rec.Model = truncate(resp.ProviderModel, maxModelLen)
+			rec.ModelReported = true
+		}
+		if resp.RequestID != "" {
+			rec.ProviderRequestID = resp.RequestID
+		}
+		if resp.Usage.Reported() {
+			rec.TokensIn = resp.Usage.InputTokens
+			rec.TokensOut = resp.Usage.OutputTokens
+			rec.TokensTotal = resp.Usage.TotalTokens
+			rec.TokensReasoning = resp.Usage.ReasoningTokens
+		} else {
+			// A client outside package llm that fills only the legacy int
+			// fields: a 0 there means "not reported" (a real prompt or reply
+			// is never 0 tokens), so it is stored as unknown.
+			rec.TokensIn = positive(resp.InputTokens)
+			rec.TokensOut = positive(resp.OutputTokens)
+		}
 	}
+	rec.RequestedModel = truncate(requested, maxModelLen)
+	if rec.Model == "" {
+		rec.Model = rec.RequestedModel
+	}
+	rec.ProviderRequestID = truncate(rec.ProviderRequestID, maxRequestIDLen)
 	if err != nil {
-		rec.Status = StatusError
+		rec.Status = StatusFailed
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
 			rec.Status = StatusCancelled
 		}

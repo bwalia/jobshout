@@ -101,3 +101,31 @@ func TestBenchmarkRunNotFoundIs404(t *testing.T) {
 		t.Error("run lookup must use the caller's org")
 	}
 }
+
+func TestBenchmarkCallsFilterByTaskRunAndExecution(t *testing.T) {
+	org, task, taskRun, exec := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	store := &fakeBenchStore{}
+	rec := httptest.NewRecorder()
+	benchRouter(store).ServeHTTP(rec, benchReq("/benchmarks/calls?task_id="+task.String()+
+		"&task_run_id="+taskRun.String()+"&execution_id="+exec.String(), org.String()))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	f := store.gotFilter
+	if f.TaskID == nil || *f.TaskID != task || f.TaskRunID == nil || *f.TaskRunID != taskRun ||
+		f.ExecutionID == nil || *f.ExecutionID != exec {
+		t.Errorf("filter = %+v", f)
+	}
+	// A query for one task run spans all time rather than the last 30 days.
+	if !f.From.IsZero() {
+		t.Errorf("from = %v, want unbounded", f.From)
+	}
+}
+
+func TestBenchmarkBadTaskRunIDIs400(t *testing.T) {
+	rec := httptest.NewRecorder()
+	benchRouter(&fakeBenchStore{}).ServeHTTP(rec, benchReq("/benchmarks/calls?task_run_id=nope", uuid.NewString()))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status %d, want 400", rec.Code)
+	}
+}

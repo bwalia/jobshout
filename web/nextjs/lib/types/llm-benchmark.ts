@@ -6,22 +6,47 @@ export interface LLMCall {
   id: string;
   agent_id?: string;
   task_id?: string;
+  task_run_id?: string;
+  execution_id?: string;
   run_kind: string;
   run_id: string;
   stage: string;
   attempt: number;
+  /** The concrete client that made the call. */
   provider: string;
+  /** The model the provider's reply named when model_reported, else the model sent. */
   model: string;
+  model_reported: boolean;
+  /** The model sent to the provider. */
   requested_model: string;
+  /** The whole call, retries and backoff included. */
   duration_ms: number;
+  /** Only the HTTP exchanges with the provider; null when not measured. */
+  api_duration_ms: number | null;
+  /** HTTP requests actually sent (first try + transport retries); null when not reported. */
+  api_attempt_count: number | null;
+  api_attempts: LLMCallAttempt[];
   input_tokens: number | null;
   output_tokens: number | null;
+  /** The provider's own total; null when it reports none (never computed). */
   total_tokens: number | null;
+  reasoning_tokens: number | null;
+  provider_request_id: string | null;
   retries: number;
-  status: "success" | "error" | "cancelled" | string;
+  status: "success" | "failed" | "cancelled" | string;
   error?: string;
   started_at: string | null;
   completed_at: string | null;
+}
+
+/** One HTTP request a call actually sent to its provider. */
+export interface LLMCallAttempt {
+  started_at: string;
+  duration_ms: number;
+  /** Absent when no response arrived (connection error, timeout). */
+  http_status?: number;
+  request_id?: string;
+  error?: string;
 }
 
 export interface LLMModelStat {

@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -77,5 +79,39 @@ func TestBuildCallsQueryPaging(t *testing.T) {
 	}
 	if strings.Contains(strings.ToLower(q), "prompt") || strings.Contains(strings.ToLower(q), "content") {
 		t.Error("calls query must not select payload columns")
+	}
+}
+
+func TestInsertLLMCallSQLPlaceholdersMatchColumns(t *testing.T) {
+	cols := insertLLMCallSQL[strings.Index(insertLLMCallSQL, "(")+1 : strings.Index(insertLLMCallSQL, ")")]
+	nCols := len(strings.Split(cols, ","))
+	vals := insertLLMCallSQL[strings.Index(insertLLMCallSQL, "VALUES"):]
+	// created_at reuses started_at's placeholder, so one fewer distinct arg.
+	maxN := 0
+	for _, m := range regexp.MustCompile(`\$(\d+)`).FindAllStringSubmatch(vals, -1) {
+		n, _ := strconv.Atoi(m[1])
+		maxN = max(maxN, n)
+	}
+	if nCols != 29 || maxN != 28 {
+		t.Errorf("columns = %d, distinct args = %d; want 29 and 28", nCols, maxN)
+	}
+	for _, c := range []string{"task_run_id", "execution_id", "model_reported", "requested_model",
+		"tokens_total", "tokens_reasoning", "api_duration_ms", "api_attempts", "metadata", "provider_request_id"} {
+		if !strings.Contains(cols, c) {
+			t.Errorf("insert misses %s", c)
+		}
+	}
+}
+
+func TestFilterWhereLinks(t *testing.T) {
+	task, run, exec := uuid.New(), uuid.New(), uuid.New()
+	where, args := filterWhere(model.LLMBenchmarkFilter{OrgID: uuid.New(), TaskID: &task, TaskRunID: &run, ExecutionID: &exec})
+	for _, c := range []string{"task_id = $2", "task_run_id = $3", "execution_id = $4"} {
+		if !strings.Contains(where, c) {
+			t.Errorf("where %q misses %q", where, c)
+		}
+	}
+	if len(args) != 4 || args[1] != task || args[2] != run || args[3] != exec {
+		t.Errorf("args = %v", args)
 	}
 }

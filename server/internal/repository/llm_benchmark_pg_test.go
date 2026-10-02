@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/jobshout/server/internal/database"
+	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/llmbench"
 	"github.com/jobshout/server/internal/model"
 )
@@ -53,7 +55,7 @@ func TestLLMBenchmarkAgainstPostgres(t *testing.T) {
 	}
 	// Unknown tokens, a retry and a failure.
 	recs = append(recs, llmbench.Record{OrgID: &org, RunKind: "course", RunID: run, Stage: "quiz", Attempt: 2,
-		Provider: "gemini", Model: "gemini-flash-latest", LatencyMs: 50, Retries: 1, Status: llmbench.StatusError,
+		Provider: "gemini", Model: "gemini-flash-latest", LatencyMs: 50, Retries: 1, Status: llmbench.StatusFailed,
 		Error: "boom", StartedAt: now.Add(10 * time.Second), CompletedAt: now.Add(10 * time.Second)})
 	// Another org's call must never show up.
 	recs = append(recs, llmbench.Record{OrgID: &other, RunKind: "course", RunID: run, Provider: "gemini",
@@ -110,7 +112,101 @@ func TestLLMBenchmarkAgainstPostgres(t *testing.T) {
 	}
 
 	calls, err := repo.ListCalls(ctx, model.LLMBenchmarkFilter{OrgID: org, Stage: "quiz"}, model.PaginationParams{})
-	if err != nil || calls.Total != 1 || calls.Data[0].Status != "error" {
+	if err != nil || calls.Total != 1 || calls.Data[0].Status != "failed" {
 		t.Errorf("calls = %+v, %v", calls, err)
+	}
+	// The failed call reported nothing, so everything optional is NULL.
+	if q := calls.Data[0]; q.TotalTokens != nil || q.ReasoningTokens != nil || q.APIDurationMs != nil ||
+		q.ProviderRequestID != nil || q.TaskRunID != nil || q.ExecutionID != nil || q.ModelReported {
+		t.Errorf("unreported fields not NULL: %+v", q)
+	}
+
+	// An executor call from a Task Manager run carries every link and what the
+	// provider reported, and a reported model longer than the old 100 chars.
+	task, taskRun, exec := uuid.New(), uuid.New(), uuid.New()
+	longModel := "gemini-2.5-flash-preview-" + strings.Repeat("x", 110)
+	execRun := exec.String()
+	if err := repo.InsertLLMCalls(ctx, []llmbench.Record{{
+		OrgID: &org, TaskID: &task, TaskRunID: &taskRun, ExecutionID: &exec,
+		RunKind: "executor", RunID: execRun, Attempt: 1, Provider: "gemini",
+		Model: longModel, ModelReported: true, RequestedModel: "gemini-flash-latest",
+		TokensIn: ms(12), TokensOut: ms(0), TokensTotal: ms(12), TokensReasoning: ms(0),
+		LatencyMs: 900, APIDurationMs: ms(700), ProviderRequestID: "resp-123",
+		APIAttempts: 2, Attempts: []llm.APIAttempt{
+			{StartedAt: now, DurationMs: 300, HTTPStatus: 503, Error: "gemini: overloaded"},
+			{StartedAt: now.Add(time.Second), DurationMs: 400, HTTPStatus: 200, RequestID: "hdr-2"},
+		},
+		Status: llmbench.StatusSuccess, StartedAt: now, CompletedAt: now,
+	}}); err != nil {
+		t.Fatalf("insert linked call: %v", err)
+	}
+	linked, err := repo.ListCalls(ctx, model.LLMBenchmarkFilter{OrgID: org, RunID: execRun}, model.PaginationParams{})
+	if err != nil || linked.Total != 1 {
+		t.Fatalf("linked = %+v, %v", linked, err)
+	}
+	l := linked.Data[0]
+	if l.TaskID == nil || *l.TaskID != task || l.TaskRunID == nil || *l.TaskRunID != taskRun ||
+		l.ExecutionID == nil || *l.ExecutionID != exec {
+		t.Errorf("links = task %v task_run %v execution %v", l.TaskID, l.TaskRunID, l.ExecutionID)
+	}
+	if l.Model != longModel || !l.ModelReported || l.RequestedModel != "gemini-flash-latest" {
+		t.Errorf("model = %q reported=%v requested=%q", l.Model, l.ModelReported, l.RequestedModel)
+	}
+	// A reported 0 stays 0; it is not turned into NULL.
+	if l.OutputTokens == nil || *l.OutputTokens != 0 || l.TotalTokens == nil || *l.TotalTokens != 12 ||
+		l.ReasoningTokens == nil || *l.ReasoningTokens != 0 {
+		t.Errorf("tokens out=%v total=%v reasoning=%v", l.OutputTokens, l.TotalTokens, l.ReasoningTokens)
+	}
+	if l.DurationMs != 900 || l.APIDurationMs == nil || *l.APIDurationMs != 700 ||
+		l.ProviderRequestID == nil || *l.ProviderRequestID != "resp-123" {
+		t.Errorf("duration=%d api=%v request_id=%v", l.DurationMs, l.APIDurationMs, l.ProviderRequestID)
+	}
+	if l.APIAttemptCount == nil || *l.APIAttemptCount != 2 || len(l.APIAttempts) != 2 ||
+		l.APIAttempts[0].HTTPStatus != 503 || l.APIAttempts[1].RequestID != "hdr-2" {
+		t.Errorf("attempts = %v %+v", l.APIAttemptCount, l.APIAttempts)
+	}
+
+	// An execution resumed after an approval pause records calls without its
+	// task link; the insert recovers it from the task run that owns the
+	// execution. FKs are skipped so the test needs no org/agent/task rows.
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerRun, ownerTask, resumed := uuid.New(), uuid.New(), uuid.New()
+	if _, err := conn.Exec(ctx, `SET session_replication_role = replica`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(ctx, `INSERT INTO task_runs (id, task_id, agent_id, org_id, execution_id, prompt)
+		VALUES ($1, $2, $3, $4, $5, 'p')`, ownerRun, ownerTask, uuid.New(), org, resumed); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = conn.Exec(ctx, `SET session_replication_role = origin`)
+	conn.Release()
+	if err := repo.InsertLLMCalls(ctx, []llmbench.Record{{
+		OrgID: &org, ExecutionID: &resumed, RunKind: "executor", RunID: resumed.String(), Attempt: 1,
+		Provider: "ollama", Model: "qwen3:8b", RequestedModel: "qwen3:8b", LatencyMs: 5,
+		Status: llmbench.StatusFailed, Error: "boom", StartedAt: now, CompletedAt: now,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := repo.ListCalls(ctx, model.LLMBenchmarkFilter{OrgID: org, ExecutionID: &resumed}, model.PaginationParams{})
+	if err != nil || res.Total != 1 {
+		t.Fatalf("resumed = %+v, %v", res, err)
+	}
+	if rc := res.Data[0]; rc.TaskRunID == nil || *rc.TaskRunID != ownerRun || rc.TaskID == nil || *rc.TaskID != ownerTask ||
+		rc.APIAttemptCount != nil || len(rc.APIAttempts) != 0 {
+		t.Errorf("resumed links = task_run %v task %v attempts %v", rc.TaskRunID, rc.TaskID, rc.APIAttemptCount)
+	}
+	// Another org's task run is never borrowed.
+	if err := repo.InsertLLMCalls(ctx, []llmbench.Record{{
+		OrgID: &other, ExecutionID: &resumed, RunKind: "executor", RunID: "x", Provider: "ollama",
+		Status: llmbench.StatusSuccess, StartedAt: now, CompletedAt: now,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if res, _ := repo.ListCalls(ctx, model.LLMBenchmarkFilter{OrgID: other, ExecutionID: &resumed}, model.PaginationParams{}); res == nil ||
+		res.Total != 1 || res.Data[0].TaskRunID != nil {
+		t.Errorf("cross-org link = %+v", res)
 	}
 }

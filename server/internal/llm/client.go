@@ -107,6 +107,45 @@ type GenerateResponse struct {
 	// ToolCalls holds any native tool invocations the model requested. Empty
 	// unless ToolDefs were sent and the provider returned tool calls.
 	ToolCalls []ToolCall
+
+	// ProviderModel is the model the provider's reply says served the call
+	// (Gemini's modelVersion, the "model" field elsewhere). It can differ from
+	// Model when Model is an alias such as gemini-flash-latest. Empty when the
+	// reply named none.
+	ProviderModel string
+	// RequestID is the provider's own ID for this call, from the reply body
+	// (Gemini responseId, OpenAI/Claude id). Empty when it gave none.
+	RequestID string
+	// Usage is the token usage exactly as the provider reported it. Unlike
+	// InputTokens/OutputTokens, a count the provider did not send stays nil
+	// rather than reading as 0.
+	Usage Usage
+}
+
+// Usage is a provider's reported token usage. Each field is nil when the
+// provider did not report it; nothing here is estimated or derived.
+type Usage struct {
+	InputTokens  *int
+	OutputTokens *int
+	// TotalTokens is set only when the provider reports a total itself.
+	TotalTokens *int
+	// ReasoningTokens are thinking tokens, where the provider counts them
+	// separately. They are already included in OutputTokens.
+	ReasoningTokens *int
+}
+
+// Reported reports whether the provider sent any usage at all.
+func (u Usage) Reported() bool {
+	return u.InputTokens != nil || u.OutputTokens != nil || u.TotalTokens != nil || u.ReasoningTokens != nil
+}
+
+// intOr returns *p, or 0 when the provider did not report it. It is for the
+// legacy int fields that existing cost and token totals read.
+func intOr(p *int) int {
+	if p == nil {
+		return 0
+	}
+	return *p
 }
 
 // ErrOnlyThinking reports a reply whose entire token budget went to a reasoning

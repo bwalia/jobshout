@@ -3,6 +3,9 @@ package llmbench
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -129,7 +132,7 @@ func TestFailedCallIsRecordedAndReturned(t *testing.T) {
 		}
 	})
 	r := recs[0]
-	if r.Status != StatusError || r.Model != "gemini-flash-latest" || r.TokensIn != nil {
+	if r.Status != StatusFailed || r.Model != "gemini-flash-latest" || r.TokensIn != nil {
 		t.Errorf("record = %+v", r)
 	}
 	if strings.Contains(r.Error, "abcdef") || !strings.Contains(r.Error, "[REDACTED]") {
@@ -243,5 +246,136 @@ func TestRedact(t *testing.T) {
 		if out := redact(in); strings.Contains(out, secret) || !strings.Contains(out, "[REDACTED]") {
 			t.Errorf("redact(%q) = %q", in, out)
 		}
+	}
+}
+
+func intp(n int) *int { return &n }
+
+func TestRecordsReportedModelUsageAndRequestID(t *testing.T) {
+	c := &fakeClient{provider: "gemini", resp: &llm.GenerateResponse{
+		Content: "x", Model: "gemini-flash-latest", ProviderModel: "gemini-2.5-flash-preview-09-2025",
+		RequestID: "resp-1",
+		// A reported 0 must stay 0, not become NULL.
+		Usage: llm.Usage{InputTokens: intp(30), OutputTokens: intp(0), TotalTokens: intp(30), ReasoningTokens: intp(0)},
+	}}
+	recs := record(t, c, func(w llm.Client) { _, _ = w.Generate(context.Background(), llm.GenerateRequest{}) })
+	r := recs[0]
+	if r.Model != "gemini-2.5-flash-preview-09-2025" || !r.ModelReported || r.RequestedModel != "gemini-flash-latest" {
+		t.Errorf("model=%q reported=%v requested=%q", r.Model, r.ModelReported, r.RequestedModel)
+	}
+	if r.ProviderRequestID != "resp-1" {
+		t.Errorf("request id = %q", r.ProviderRequestID)
+	}
+	if !eq(r.TokensIn, 30) || !eq(r.TokensOut, 0) || !eq(r.TokensTotal, 30) || !eq(r.TokensReasoning, 0) {
+		t.Errorf("tokens = %v/%v/%v/%v", r.TokensIn, r.TokensOut, r.TokensTotal, r.TokensReasoning)
+	}
+}
+
+func eq(p *int, want int) bool { return p != nil && *p == want }
+
+func TestUnreportedModelFallsBackToSentAndTotalStaysNil(t *testing.T) {
+	c := &fakeClient{provider: "claude", resp: &llm.GenerateResponse{
+		Content: "x", Model: "claude-x", Usage: llm.Usage{InputTokens: intp(5), OutputTokens: intp(2)},
+	}}
+	recs := record(t, c, func(w llm.Client) { _, _ = w.Generate(context.Background(), llm.GenerateRequest{Model: "claude-x"}) })
+	r := recs[0]
+	if r.Model != "claude-x" || r.ModelReported || r.RequestedModel != "claude-x" {
+		t.Errorf("model=%q reported=%v requested=%q", r.Model, r.ModelReported, r.RequestedModel)
+	}
+	if r.TokensTotal != nil || r.TokensReasoning != nil || r.ProviderRequestID != "" {
+		t.Errorf("total=%v reasoning=%v id=%q, want unreported", r.TokensTotal, r.TokensReasoning, r.ProviderRequestID)
+	}
+	// The fake does not time HTTP, so the API duration is unknown.
+	if r.APIDurationMs != nil {
+		t.Errorf("api duration = %v, want nil", *r.APIDurationMs)
+	}
+}
+
+type namedClient struct{ fakeClient }
+
+func (n *namedClient) ModelName() string { return "default-model" }
+
+func TestFailedCallRecordsClientDefaultAsRequested(t *testing.T) {
+	c := &namedClient{fakeClient{provider: "gemini", err: errors.New("boom")}}
+	recs := record(t, c, func(w llm.Client) { _, _ = w.Generate(context.Background(), llm.GenerateRequest{}) })
+	r := recs[0]
+	if r.RequestedModel != "default-model" || r.Model != "default-model" || r.ModelReported {
+		t.Errorf("model=%q requested=%q reported=%v", r.Model, r.RequestedModel, r.ModelReported)
+	}
+	if r.TokensIn != nil || r.TokensOut != nil || r.Status != StatusFailed {
+		t.Errorf("tokens=%v/%v status=%s", r.TokensIn, r.TokensOut, r.Status)
+	}
+}
+
+func TestRecordsTaskRunAndExecutionLinks(t *testing.T) {
+	org, agent, task, taskRun, exec := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	// The task run service links the work; the executor then labels its run.
+	ctx := llmtrace.WithTaskRun(context.Background(), task.String(), taskRun.String())
+	ctx = llmtrace.WithTrace(ctx, llmtrace.TraceInfo{
+		TraceName: "go-executor-run", SessionID: exec.String(), ExecutionID: exec.String(),
+		AgentID: agent.String(), OrgID: org.String(),
+	})
+	c := &fakeClient{provider: "ollama", resp: &llm.GenerateResponse{Content: "x", Model: "m"}}
+	recs := record(t, c, func(w llm.Client) { _, _ = w.Generate(ctx, llm.GenerateRequest{}) })
+	r := recs[0]
+	if r.TaskID == nil || *r.TaskID != task || r.TaskRunID == nil || *r.TaskRunID != taskRun ||
+		r.ExecutionID == nil || *r.ExecutionID != exec || r.RunKind != "executor" || r.RunID != exec.String() {
+		t.Errorf("links = task %v task_run %v exec %v kind %s run %s", r.TaskID, r.TaskRunID, r.ExecutionID, r.RunKind, r.RunID)
+	}
+}
+
+func TestFailedOllamaCallThroughRealClient(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = io.WriteString(w, `{"error":"model 'qwen3:8b' not found"}`)
+	}))
+	defer srv.Close()
+	ctx, _, _, _ := runCtx()
+	recs := record(t, llm.NewOllamaClient(srv.URL, "qwen3:8b"), func(w llm.Client) {
+		_, _ = w.Generate(ctx, llm.GenerateRequest{})
+	})
+	r := recs[0]
+	if r.Status != StatusFailed || r.Provider != "ollama" || r.RequestedModel != "qwen3:8b" || r.Model != "qwen3:8b" || r.ModelReported {
+		t.Errorf("row = %+v", r)
+	}
+	if !strings.Contains(r.Error, "500") || r.TokensIn != nil || r.TokensOut != nil || r.TokensTotal != nil {
+		t.Errorf("error=%q tokens=%v/%v/%v", r.Error, r.TokensIn, r.TokensOut, r.TokensTotal)
+	}
+	if r.APIAttempts != 1 || r.Attempts[0].HTTPStatus != 500 || r.APIDurationMs == nil {
+		t.Errorf("attempts=%d %+v api=%v", r.APIAttempts, r.Attempts, r.APIDurationMs)
+	}
+}
+
+func TestFailedGeminiCallKeepsReportedUsage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"candidates":[{"content":{"parts":[{"text":"hmm","thought":true}]},"finishReason":"MAX_TOKENS"}],
+		  "usageMetadata":{"promptTokenCount":40,"thoughtsTokenCount":100,"totalTokenCount":140},
+		  "modelVersion":"gemini-2.5-flash","responseId":"r-think"}`)
+	}))
+	defer srv.Close()
+	c := llm.NewGeminiClient(srv.URL, strings.Join([]string{"test", "key"}, "-"), "gemini-flash-latest", time.Minute)
+	recs := record(t, c, func(w llm.Client) { _, _ = w.Generate(context.Background(), llm.GenerateRequest{}) })
+	r := recs[0]
+	if r.Status != StatusFailed || r.Model != "gemini-2.5-flash" || !r.ModelReported || r.RequestedModel != "gemini-flash-latest" {
+		t.Errorf("status=%s model=%q reported=%v requested=%q", r.Status, r.Model, r.ModelReported, r.RequestedModel)
+	}
+	if r.ProviderRequestID != "r-think" || !eq(r.TokensIn, 40) || !eq(r.TokensOut, 100) ||
+		!eq(r.TokensTotal, 140) || !eq(r.TokensReasoning, 100) {
+		t.Errorf("id=%q tokens=%v/%v/%v/%v", r.ProviderRequestID, r.TokensIn, r.TokensOut, r.TokensTotal, r.TokensReasoning)
+	}
+}
+
+func TestAttemptErrorsAreRedacted(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = io.WriteString(w, "upstream said "+strings.Join([]string{"key", "abcdef123"}, "="))
+	}))
+	defer srv.Close()
+	recs := record(t, llm.NewOllamaClient(srv.URL, "m"), func(w llm.Client) {
+		_, _ = w.Generate(context.Background(), llm.GenerateRequest{})
+	})
+	r := recs[0]
+	if strings.Contains(r.Error, "abcdef123") || strings.Contains(r.Attempts[0].Error, "abcdef123") {
+		t.Errorf("secret leaked: error=%q attempt=%q", r.Error, r.Attempts[0].Error)
 	}
 }

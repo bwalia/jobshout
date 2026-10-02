@@ -115,6 +115,9 @@ func (c *OllamaClient) UsesGateway() bool { return c.auth.enabled() }
 
 func (c *OllamaClient) ProviderName() string { return "ollama" }
 
+// ModelName is the model a call without an explicit Model will use.
+func (c *OllamaClient) ModelName() string { return c.DefaultModel }
+
 // SupportsTools reports whether the DEFAULT model does native tool-calling.
 // Tool support on Ollama is per-model, not per-server (see ollama_models.go),
 // so the answer comes from the discovery cache. False is the safe answer: a
@@ -237,9 +240,11 @@ type ollamaChatResponse struct {
 	// DoneReason is why a finished reply stopped: "stop", or "length" when it
 	// ran into num_predict. A reply cut at the limit still arrives done=true.
 	DoneReason string `json:"done_reason"`
-	// Ollama reports token counts only when done=true.
-	PromptEvalCount int `json:"prompt_eval_count"`
-	EvalCount       int `json:"eval_count"`
+	// Ollama reports token counts only when done=true, and may leave
+	// prompt_eval_count out (a fully cached prompt). Pointers keep a missing
+	// count unknown rather than 0.
+	PromptEvalCount *int `json:"prompt_eval_count"`
+	EvalCount       *int `json:"eval_count"`
 }
 
 func (c *OllamaClient) Generate(ctx context.Context, req GenerateRequest) (*GenerateResponse, error) {
@@ -320,34 +325,46 @@ func (c *OllamaClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 		return nil, err
 	}
 
+	// The attempt lasts until the stream is fully read.
+	attempt := beginAttempt(ctx)
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("ollama: HTTP error: %w", err)
+		err = fmt.Errorf("ollama: HTTP error: %w", err)
+		attempt.end(err)
+		return nil, err
 	}
 	defer resp.Body.Close()
+	attempt.response(resp)
 
 	if isAuthStatus(resp.StatusCode) {
 		rawBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
-		return nil, authError(resp.StatusCode, rawBody)
+		err := authError(resp.StatusCode, rawBody)
+		attempt.end(err)
+		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
 		rawBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
-		return nil, fmt.Errorf("ollama: unexpected status %d: %s", resp.StatusCode, upstreamSnippet(rawBody))
+		err := fmt.Errorf("ollama: unexpected status %d: %s", resp.StatusCode, upstreamSnippet(rawBody))
+		attempt.end(err)
+		return nil, err
 	}
 
-	return c.readStream(resp.Body, model, opts.NumPredict, req.OnToken)
+	out, err := c.readStream(ctx, resp.Body, model, opts.NumPredict, req.OnToken)
+	attempt.end(err)
+	return out, err
 }
 
 // readStream accumulates an Ollama NDJSON chat stream into one GenerateResponse.
-func (c *OllamaClient) readStream(body io.Reader, model string, numPredict int, onToken func(string)) (*GenerateResponse, error) {
+func (c *OllamaClient) readStream(ctx context.Context, body io.Reader, model string, numPredict int, onToken func(string)) (*GenerateResponse, error) {
 	var (
 		content   strings.Builder
 		thinking  strings.Builder
 		toolCalls []ollamaToolCall
 		done      bool
 		reason    string
-		inTok     int
-		outTok    int
+		inTok     *int
+		outTok    *int
+		served    string
 	)
 	// Stream tokens through the leak guard so leaked tool-call markup is never
 	// forwarded to a live client.
@@ -373,6 +390,9 @@ func (c *OllamaClient) readStream(body io.Reader, model string, numPredict int, 
 		// Usually one chunk carries every tool call, but append rather than
 		// overwrite in case they arrive split across chunks.
 		toolCalls = append(toolCalls, chunk.Message.ToolCalls...)
+		if chunk.Model != "" {
+			served = chunk.Model
+		}
 		if chunk.Done {
 			done = true
 			reason = chunk.DoneReason
@@ -380,6 +400,9 @@ func (c *OllamaClient) readStream(body io.Reader, model string, numPredict int, 
 			outTok = chunk.EvalCount
 		}
 	}
+	// Noted before the reply is judged (and even when the stream broke), so
+	// a thinking-only or cut reply still records what it reported.
+	noteReply(ctx, served, "", Usage{InputTokens: inTok, OutputTokens: outTok})
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("ollama: read stream: %w", err)
 	}
@@ -428,12 +451,15 @@ func (c *OllamaClient) readStream(body io.Reader, model string, numPredict int, 
 		}
 	}
 
+	// Ollama reports no total and no request ID.
 	return &GenerateResponse{
-		Content:      text,
-		FinishReason: finishReason,
-		Model:        model,
-		InputTokens:  inTok,
-		OutputTokens: outTok,
-		ToolCalls:    calls,
+		Content:       text,
+		FinishReason:  finishReason,
+		Model:         model,
+		InputTokens:   intOr(inTok),
+		OutputTokens:  intOr(outTok),
+		ToolCalls:     calls,
+		ProviderModel: served,
+		Usage:         Usage{InputTokens: inTok, OutputTokens: outTok},
 	}, nil
 }

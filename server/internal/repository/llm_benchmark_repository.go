@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -42,12 +43,45 @@ func NewLLMBenchmarkRepository(pool *pgxpool.Pool) LLMBenchmarkRepository {
 // benchmarkRows restricts reads to rows written by the benchmark recorder.
 const benchmarkRows = `status <> ''`
 
+// insertLLMCallSQL writes one call. An executor call that reached the
+// recorder without its task link (an execution resumed after an approval
+// pause starts from a fresh context) takes task_run_id and task_id from the
+// task run that owns its execution, within the same org.
 const insertLLMCallSQL = `
-	INSERT INTO usage_records (org_id, agent_id, task_id, provider, model,
-	    requested_model, tokens_in, tokens_out, latency_ms, retries, is_error,
-	    run_kind, run_id, stage, attempt, status, error,
-	    started_at, completed_at, created_at)
-	VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$18)`
+	INSERT INTO usage_records (org_id, agent_id, task_id, task_run_id, execution_id,
+	    provider, model, model_reported, requested_model,
+	    tokens_in, tokens_out, tokens_total, tokens_reasoning,
+	    latency_ms, api_duration_ms, api_attempts, retries, is_error,
+	    run_kind, run_id, stage, attempt, status, error, provider_request_id,
+	    metadata, started_at, completed_at, created_at)
+	VALUES ($1,$2,
+	    COALESCE($3, (SELECT tr.task_id FROM task_runs tr WHERE tr.execution_id = $5 AND tr.org_id = $1 LIMIT 1)),
+	    COALESCE($4, (SELECT tr.id FROM task_runs tr WHERE tr.execution_id = $5 AND tr.org_id = $1 LIMIT 1)),
+	    $5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,
+	    NULLIF($25, ''),$26,$27,$28,$27)`
+
+// apiAttempts is NULL when the client did not report its HTTP exchanges,
+// rather than a misleading 0.
+func apiAttempts(rec llmbench.Record) *int {
+	if rec.APIAttempts == 0 {
+		return nil
+	}
+	n := rec.APIAttempts
+	return &n
+}
+
+// callMetadata is the usage_records.metadata of a recorded call: the HTTP
+// attempts actually sent to the provider.
+func callMetadata(rec llmbench.Record) string {
+	if len(rec.Attempts) == 0 {
+		return "{}"
+	}
+	b, err := json.Marshal(map[string]any{"api_attempts": rec.Attempts})
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
 
 func (r *llmBenchmarkRepository) InsertLLMCalls(ctx context.Context, recs []llmbench.Record) error {
 	if len(recs) == 0 {
@@ -56,11 +90,12 @@ func (r *llmBenchmarkRepository) InsertLLMCalls(ctx context.Context, recs []llmb
 	batch := &pgx.Batch{}
 	for _, rec := range recs {
 		batch.Queue(insertLLMCallSQL,
-			rec.OrgID, rec.AgentID, rec.TaskID, rec.Provider, rec.Model,
-			rec.RequestedModel, rec.TokensIn, rec.TokensOut, rec.LatencyMs, rec.Retries,
-			rec.Status != llmbench.StatusSuccess,
-			rec.RunKind, rec.RunID, rec.Stage, rec.Attempt, rec.Status, rec.Error,
-			rec.StartedAt, rec.CompletedAt,
+			rec.OrgID, rec.AgentID, rec.TaskID, rec.TaskRunID, rec.ExecutionID,
+			rec.Provider, rec.Model, rec.ModelReported, rec.RequestedModel,
+			rec.TokensIn, rec.TokensOut, rec.TokensTotal, rec.TokensReasoning,
+			rec.LatencyMs, rec.APIDurationMs, apiAttempts(rec), rec.Retries, rec.Status != llmbench.StatusSuccess,
+			rec.RunKind, rec.RunID, rec.Stage, rec.Attempt, rec.Status, rec.Error, rec.ProviderRequestID,
+			callMetadata(rec), rec.StartedAt, rec.CompletedAt,
 		)
 	}
 	if err := r.pool.SendBatch(ctx, batch).Close(); err != nil {
@@ -98,6 +133,15 @@ func filterWhere(f model.LLMBenchmarkFilter) (string, []any) {
 	if f.Stage != "" {
 		add("stage = $%d", f.Stage)
 	}
+	if f.TaskID != nil {
+		add("task_id = $%d", *f.TaskID)
+	}
+	if f.TaskRunID != nil {
+		add("task_run_id = $%d", *f.TaskRunID)
+	}
+	if f.ExecutionID != nil {
+		add("execution_id = $%d", *f.ExecutionID)
+	}
 	return strings.Join(conds, " AND "), args
 }
 
@@ -116,7 +160,7 @@ func buildModelStatsQuery(f model.LLMBenchmarkFilter) (string, []any) {
 		       COUNT(*),
 		       COUNT(DISTINCT NULLIF(run_id, '')),
 		       COUNT(*) FILTER (WHERE status = 'success'),
-		       COUNT(*) FILTER (WHERE status = 'error'),
+		       COUNT(*) FILTER (WHERE status = 'failed'),
 		       COUNT(*) FILTER (WHERE status = 'cancelled'),
 		       AVG(latency_ms)::float8,
 		       MIN(latency_ms),
@@ -172,7 +216,7 @@ func buildRunsQuery(f model.LLMBenchmarkFilter, limit, offset int) (string, stri
 		       (array_agg(agent_id) FILTER (WHERE agent_id IS NOT NULL))[1] AS agent_id,
 		       array_agg(DISTINCT provider || '/' || model) AS models,
 		       COUNT(*) AS calls,
-		       COUNT(*) FILTER (WHERE status = 'error') AS failures,
+		       COUNT(*) FILTER (WHERE status = 'failed') AS failures,
 		       COALESCE(SUM(retries), 0)::int AS retries,
 		       COALESCE(SUM(latency_ms), 0)::bigint AS llm_ms,
 		       SUM(tokens_in)::bigint AS tokens_in,
@@ -254,9 +298,11 @@ func (r *llmBenchmarkRepository) GetRun(ctx context.Context, orgID uuid.UUID, ru
 	return &model.LLMRunDetail{LLMRunSummary: s, Calls: calls}, nil
 }
 
-const llmCallColumns = `id, agent_id, task_id, run_kind, run_id, stage, attempt,
-	provider, model, requested_model, latency_ms, tokens_in, tokens_out,
-	tokens_in + tokens_out, retries, status, error, started_at, completed_at`
+const llmCallColumns = `id, agent_id, task_id, task_run_id, execution_id, run_kind, run_id, stage, attempt,
+	provider, model, model_reported, requested_model, latency_ms, api_duration_ms,
+	api_attempts, COALESCE(metadata->'api_attempts', '[]'::jsonb),
+	tokens_in, tokens_out, tokens_total, tokens_reasoning, provider_request_id,
+	retries, status, error, started_at, completed_at`
 
 // buildCallsQuery lists raw calls; chronological within a run, newest first
 // otherwise.
@@ -282,9 +328,12 @@ func (r *llmBenchmarkRepository) queryCalls(ctx context.Context, q string, args 
 	out := []model.LLMCall{}
 	for rows.Next() {
 		var c model.LLMCall
-		if err := rows.Scan(&c.ID, &c.AgentID, &c.TaskID, &c.RunKind, &c.RunID, &c.Stage, &c.Attempt,
-			&c.Provider, &c.Model, &c.RequestedModel, &c.DurationMs, &c.InputTokens, &c.OutputTokens,
-			&c.TotalTokens, &c.Retries, &c.Status, &c.Error, &c.StartedAt, &c.CompletedAt,
+		if err := rows.Scan(&c.ID, &c.AgentID, &c.TaskID, &c.TaskRunID, &c.ExecutionID,
+			&c.RunKind, &c.RunID, &c.Stage, &c.Attempt,
+			&c.Provider, &c.Model, &c.ModelReported, &c.RequestedModel, &c.DurationMs, &c.APIDurationMs,
+			&c.APIAttemptCount, &c.APIAttempts,
+			&c.InputTokens, &c.OutputTokens, &c.TotalTokens, &c.ReasoningTokens, &c.ProviderRequestID,
+			&c.Retries, &c.Status, &c.Error, &c.StartedAt, &c.CompletedAt,
 		); err != nil {
 			return nil, fmt.Errorf("llm_benchmark_repo: scan call: %w", err)
 		}

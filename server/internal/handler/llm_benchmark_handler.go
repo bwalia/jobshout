@@ -139,7 +139,23 @@ func benchmarkFilter(w http.ResponseWriter, r *http.Request) (model.LLMBenchmark
 			return f, false
 		}
 	}
-	if f.From.IsZero() && f.RunID == "" {
+	for _, p := range []struct {
+		name string
+		dst  **uuid.UUID
+	}{{"task_id", &f.TaskID}, {"task_run_id", &f.TaskRunID}, {"execution_id", &f.ExecutionID}} {
+		v := q.Get(p.name)
+		if v == "" {
+			continue
+		}
+		id, perr := uuid.Parse(v)
+		if perr != nil {
+			RespondError(w, http.StatusBadRequest, "invalid "+p.name)
+			return f, false
+		}
+		*p.dst = &id
+	}
+	// A query for one run, task, task run or execution spans all time.
+	if f.From.IsZero() && f.RunID == "" && f.TaskID == nil && f.TaskRunID == nil && f.ExecutionID == nil {
 		f.From = time.Now().AddDate(0, 0, -30)
 	}
 	return f, true
