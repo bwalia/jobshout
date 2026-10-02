@@ -165,12 +165,16 @@ func (s *courseService) execute(ctx context.Context, run *model.CourseRun, agent
 		delete(s.cancels, run.ID)
 		s.mu.Unlock()
 	}()
-	ctx = llmtrace.WithTrace(ctx, llmtrace.TraceInfo{
+	trace := llmtrace.TraceInfo{
 		TraceName: "go-course-run",
 		SessionID: run.ID.String(),
 		AgentID:   agentID.String(),
 		OrgID:     run.OrgID.String(),
-	})
+	}
+	if run.TaskID != nil {
+		trace.TaskID = run.TaskID.String()
+	}
+	ctx = llmtrace.WithTrace(ctx, trace)
 	log := s.logger.With(zap.String("course_run_id", run.ID.String()))
 
 	stopHB := make(chan struct{})

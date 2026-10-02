@@ -668,7 +668,7 @@ func (s *blogService) discoverBriefs(
 	}
 
 	count := req.ResolvedTrendingCount(blog.HardMaxArticles)
-	topics, err := s.research.Discover(ctx, run.OrgID, research.DiscoverRequest{
+	topics, err := s.research.Discover(llm.WithStage(ctx, "discovery"), run.OrgID, research.DiscoverRequest{
 		Count:    count,
 		Avoid:    avoid,
 		Focus:    req.Focus,

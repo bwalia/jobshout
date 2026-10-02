@@ -14,6 +14,8 @@ import type { Agent } from "@/lib/types/agent";
 import type { Task } from "@/lib/types/project";
 import type { TaskRun, TaskRunStatus } from "@/lib/types/task-run";
 import Link from "next/link";
+import { useLLMRun } from "@/lib/hooks/useLLMBenchmarks";
+import { LLMCallsTable } from "@/components/benchmarks/LLMCallsTable";
 
 function specialistLaunch(task: Task): {
   label: string;
@@ -303,6 +305,27 @@ function RunDetail({
       {run.debug && run.execution_id && (
         <DebugTrace executionId={run.execution_id} />
       )}
+
+      {/* Measured LLM calls of the linked execution (benchmark records) */}
+      {run.execution_id && (
+        <RunLLMCalls
+          executionId={run.execution_id}
+          active={run.status === "running" || run.status === "queued"}
+        />
+      )}
+    </div>
+  );
+}
+
+function RunLLMCalls({ executionId, active }: { executionId: string; active: boolean }) {
+  const { data } = useLLMRun("executor", executionId, active);
+  if (!data || data.calls.length === 0) return null;
+  return (
+    <div className="space-y-1.5">
+      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        LLM calls
+      </div>
+      <LLMCallsTable calls={data.calls} />
     </div>
   );
 }

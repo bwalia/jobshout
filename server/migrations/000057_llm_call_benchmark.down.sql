@@ -1,0 +1,11 @@
+DROP INDEX IF EXISTS idx_usage_records_org_model_created;
+DROP INDEX IF EXISTS idx_usage_records_org_run;
+ALTER TABLE usage_records DROP COLUMN IF EXISTS completed_at;
+ALTER TABLE usage_records DROP COLUMN IF EXISTS started_at;
+ALTER TABLE usage_records DROP COLUMN IF EXISTS requested_model;
+ALTER TABLE usage_records DROP COLUMN IF EXISTS error;
+ALTER TABLE usage_records DROP COLUMN IF EXISTS status;
+ALTER TABLE usage_records DROP COLUMN IF EXISTS attempt;
+ALTER TABLE usage_records DROP COLUMN IF EXISTS stage;
+ALTER TABLE usage_records DROP COLUMN IF EXISTS run_id;
+ALTER TABLE usage_records DROP COLUMN IF EXISTS run_kind;

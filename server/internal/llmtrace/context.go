@@ -26,12 +26,21 @@ type TraceInfo struct {
 	AgentID string
 	// OrgID tags the trace with the tenant. Empty when unknown.
 	OrgID string
+	// TaskID is the board task the run was launched from, when it has one.
+	TaskID string
+	// RunKind is the TraceName the run was started under. WithTrace sets it;
+	// WithTraceName leaves it alone, so a nested engine (research inside a
+	// blog run) still reports which run its calls belong to.
+	RunKind string
 }
 
 type ctxKey struct{}
 
 // WithTrace labels ctx so every LLM call under it is traced as info describes.
 func WithTrace(ctx context.Context, info TraceInfo) context.Context {
+	if info.RunKind == "" {
+		info.RunKind = info.TraceName
+	}
 	return context.WithValue(ctx, ctxKey{}, info)
 }
 

@@ -150,6 +150,7 @@ func doHosted(
 			return nil, ctx.Err()
 		case <-t.C:
 		}
+		noteRetry(ctx)
 	}
 	return nil, lastErr
 }
