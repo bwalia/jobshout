@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/jobshout/server/internal/audience"
+	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/research"
 )
@@ -194,7 +195,7 @@ func (r *Runner) writeOne(
 ) (*GeneratedArticle, error) {
 	// 1. Research. Everything downstream is written from what this returns.
 	report(progress, model.BlogStepResearching, "Researching "+label, model.AgentNameResearcher)
-	rb, err := r.research.Research(ctx, req.OrgID, research.Request{
+	rb, err := r.research.Research(llm.WithStage(ctx, "research"), req.OrgID, research.Request{
 		Topic: brief.Topic,
 		// The reader goes to research as guidance rather than as a parameter,
 		// because that is what it is: research returns facts, and who is
@@ -218,21 +219,21 @@ func (r *Runner) writeOne(
 
 	// 2. Plan — the title comes from what the research found.
 	report(progress, model.BlogStepOutlining, "Planning "+label, model.AgentNameArticleWriter)
-	plan, err := r.plan(ctx, r.structuredModel(req), brief, rb)
+	plan, err := r.plan(llm.WithStage(ctx, "plan"), r.structuredModel(req), brief, rb)
 	if err != nil {
 		return nil, err
 	}
 
 	// 3. Draft.
 	report(progress, model.BlogStepGenerating, "Writing "+plan.Title, model.AgentNameArticleWriter)
-	markdown, err := r.draft(ctx, r.proseModel(req), brief, rb, plan)
+	markdown, err := r.draft(llm.WithStage(ctx, "draft"), r.proseModel(req), brief, rb, plan)
 	if err != nil {
 		return nil, err
 	}
 
 	// 4. Review, then 5. revise — but only when there is something to fix.
 	report(progress, model.BlogStepReviewing, "Reviewing "+plan.Title, model.AgentNameArticleWriter)
-	c, err := r.review(ctx, r.structuredModel(req), brief, rb, plan, markdown)
+	c, err := r.review(llm.WithStage(ctx, "review"), r.structuredModel(req), brief, rb, plan, markdown)
 	switch {
 	case err != nil && ctx.Err() != nil:
 		// Out of time or cancelled is not a critic being unavailable. Every
@@ -252,7 +253,7 @@ func (r *Runner) writeOne(
 		report(progress, model.BlogStepRevising,
 			fmt.Sprintf("Revising %s (%d issue(s))", plan.Title, len(c.Issues)),
 			model.AgentNameArticleWriter)
-		revised, rerr := r.revise(ctx, r.proseModel(req), brief, rb, plan, markdown, c)
+		revised, rerr := r.revise(llm.WithStage(ctx, "revise"), r.proseModel(req), brief, rb, plan, markdown, c)
 		if rerr != nil && ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -281,7 +282,7 @@ func (r *Runner) writeOne(
 			fmt.Sprintf("Expanding %s (%d words, target %d)", plan.Title, words, minWords),
 			model.AgentNameArticleWriter)
 
-		expanded, eerr := r.expand(ctx, r.proseModel(req), brief, rb, plan, markdown, words)
+		expanded, eerr := r.expand(llm.WithStage(ctx, "expand"), r.proseModel(req), brief, rb, plan, markdown, words)
 		switch {
 		case eerr != nil && ctx.Err() != nil:
 			return nil, ctx.Err()

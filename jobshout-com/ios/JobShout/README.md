@@ -1,6 +1,3 @@
-# JobShout iOS (SwiftUI)
+# JobShout iOS
 
-Native candidate client for JobShout.com.
-
-Phase 1: placeholder only. The app will talk to the Rust API (`/api/v1`) with
-URLSession + WebSockets. See the platform build prompt §§30–34.
+Moved to [`/ios`](../../../ios) at the repo root: the app spans both the Go platform and this Rust API. See [`docs/plans/08-ios-app.md`](../../../docs/plans/08-ios-app.md).

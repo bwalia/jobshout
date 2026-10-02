@@ -26,12 +26,48 @@ type TraceInfo struct {
 	AgentID string
 	// OrgID tags the trace with the tenant. Empty when unknown.
 	OrgID string
+	// TaskID is the board task the run was launched from, when it has one.
+	TaskID string
+	// TaskRunID is the Task Manager run (task_runs.id) that started this
+	// work, when it was started from one.
+	TaskRunID string
+	// ExecutionID is the agent execution (agent_executions.id) the calls
+	// belong to, for executor runs.
+	ExecutionID string
+	// RunKind is the TraceName the run was started under. WithTrace sets it;
+	// WithTraceName leaves it alone, so a nested engine (research inside a
+	// blog run) still reports which run its calls belong to.
+	RunKind string
 }
 
 type ctxKey struct{}
 
 // WithTrace labels ctx so every LLM call under it is traced as info describes.
+//
+// The task link is inherited: a run started on behalf of a Task Manager run
+// (WithTaskRun) keeps that task and task run unless info names its own.
 func WithTrace(ctx context.Context, info TraceInfo) context.Context {
+	if info.RunKind == "" {
+		info.RunKind = info.TraceName
+	}
+	if outer, ok := FromContext(ctx); ok {
+		if info.TaskID == "" {
+			info.TaskID = outer.TaskID
+		}
+		if info.TaskRunID == "" {
+			info.TaskRunID = outer.TaskRunID
+		}
+	}
+	return context.WithValue(ctx, ctxKey{}, info)
+}
+
+// WithTaskRun records that the work under ctx was started by Task Manager run
+// taskRunID on board task taskID. The run's own WithTrace, set later by the
+// engine, inherits both.
+func WithTaskRun(ctx context.Context, taskID, taskRunID string) context.Context {
+	info, _ := FromContext(ctx)
+	info.TaskID = taskID
+	info.TaskRunID = taskRunID
 	return context.WithValue(ctx, ctxKey{}, info)
 }
 

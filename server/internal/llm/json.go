@@ -214,6 +214,11 @@ func GenerateJSON(
 	generate func(ctx context.Context, prompt string) (string, error),
 	onRetry func(reply string, err error),
 ) error {
+	// Label the calls for telemetry. A step the caller already marked with
+	// WithStage wins: it is the broader step this JSON call belongs to.
+	if stage != "" && StageFrom(ctx) == "" {
+		ctx = WithStage(ctx, stage)
+	}
 	reply, err := generate(ctx, prompt)
 	if err != nil {
 		return err
@@ -231,7 +236,7 @@ func GenerateJSON(
 	// the retry cannot inherit half a value from the reply that failed.
 	zero(v)
 
-	retry, err := generate(ctx, prompt+JSONRetryInstruction)
+	retry, err := generate(withAttempt(ctx, 2), prompt+JSONRetryInstruction)
 	if err != nil {
 		return err
 	}

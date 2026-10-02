@@ -38,6 +38,9 @@ func NewClaudeClient(baseURL, apiKey, defaultModel string) *ClaudeClient {
 
 func (c *ClaudeClient) ProviderName() string { return "claude" }
 
+// ModelName is the model a call without an explicit Model will use.
+func (c *ClaudeClient) ModelName() string { return c.DefaultModel }
+
 // SupportsTools reports that this client can use native tool-calling
 // (GenerateRequest.ToolDefs / GenerateResponse.ToolCalls).
 func (c *ClaudeClient) SupportsTools() bool { return true }
@@ -66,7 +69,9 @@ type claudeTool struct {
 }
 
 type claudeResponse struct {
-	ID      string `json:"id"`
+	ID string `json:"id"`
+	// Model is the model that served the call.
+	Model   string `json:"model"`
 	Type    string `json:"type"`
 	Role    string `json:"role"`
 	Content []struct {
@@ -77,9 +82,11 @@ type claudeResponse struct {
 		Input json.RawMessage `json:"input"`
 	} `json:"content"`
 	StopReason string `json:"stop_reason"`
-	Usage      struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
+	// Pointers: a count the reply leaves out is unknown, not 0. Anthropic
+	// reports no total.
+	Usage *struct {
+		InputTokens  *int `json:"input_tokens"`
+		OutputTokens *int `json:"output_tokens"`
 	} `json:"usage"`
 	Error *struct {
 		Type    string `json:"type"`
@@ -173,25 +180,41 @@ func (c *ClaudeClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 	httpReq.Header.Set("x-api-key", c.APIKey)
 	httpReq.Header.Set("anthropic-version", "2023-06-01")
 
+	attempt := beginAttempt(ctx)
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("claude: HTTP error: %w", err)
+		err = fmt.Errorf("claude: HTTP error: %w", err)
+		attempt.end(err)
+		return nil, err
 	}
 	defer resp.Body.Close()
+	attempt.response(resp)
 
 	rawBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("claude: read response body: %w", err)
+		err = fmt.Errorf("claude: read response body: %w", err)
+		attempt.end(err)
+		return nil, err
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("claude: unexpected status %d: %s", resp.StatusCode, string(rawBody))
+		err := fmt.Errorf("claude: unexpected status %d: %s", resp.StatusCode, string(rawBody))
+		attempt.end(err)
+		return nil, err
 	}
+	attempt.end(nil)
 
 	var chatResp claudeResponse
 	if err := json.Unmarshal(rawBody, &chatResp); err != nil {
 		return nil, fmt.Errorf("claude: decode response: %w", err)
 	}
+	var usage Usage
+	if chatResp.Usage != nil {
+		usage = Usage{InputTokens: chatResp.Usage.InputTokens, OutputTokens: chatResp.Usage.OutputTokens}
+	}
+	// Noted before the reply is judged, so an error reply still records what
+	// it reported.
+	noteReply(ctx, chatResp.Model, chatResp.ID, usage)
 
 	if chatResp.Error != nil {
 		return nil, fmt.Errorf("claude: API error (%s): %s", chatResp.Error.Type, chatResp.Error.Message)
@@ -218,11 +241,14 @@ func (c *ClaudeClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 	}
 
 	return &GenerateResponse{
-		Content:      content,
-		FinishReason: chatResp.StopReason,
-		Model:        model,
-		InputTokens:  chatResp.Usage.InputTokens,
-		OutputTokens: chatResp.Usage.OutputTokens,
-		ToolCalls:    toolCalls,
+		Content:       content,
+		FinishReason:  chatResp.StopReason,
+		Model:         model,
+		InputTokens:   intOr(usage.InputTokens),
+		OutputTokens:  intOr(usage.OutputTokens),
+		ToolCalls:     toolCalls,
+		ProviderModel: chatResp.Model,
+		RequestID:     chatResp.ID,
+		Usage:         usage,
 	}, nil
 }

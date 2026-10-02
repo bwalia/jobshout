@@ -34,6 +34,9 @@ func NewOpenAIClient(baseURL, apiKey, defaultModel string) *OpenAIClient {
 
 func (c *OpenAIClient) ProviderName() string { return "openai" }
 
+// ModelName is the model a call without an explicit Model will use.
+func (c *OpenAIClient) ModelName() string { return c.DefaultModel }
+
 // SupportsTools reports that this client can use native tool-calling
 // (GenerateRequest.ToolDefs / GenerateResponse.ToolCalls).
 func (c *OpenAIClient) SupportsTools() bool { return true }
@@ -81,13 +84,22 @@ type openAIToolCallFunction struct {
 }
 
 type openAIChatResponse struct {
+	// ID is OpenAI's ID for the completion; Model the model that served it.
+	ID      string `json:"id"`
+	Model   string `json:"model"`
 	Choices []struct {
 		Message      openAIMessage `json:"message"`
 		FinishReason string        `json:"finish_reason"`
 	} `json:"choices"`
-	Usage struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
+	// Pointers: a count the reply leaves out (or a missing usage object) is
+	// unknown, not 0.
+	Usage *struct {
+		PromptTokens            *int `json:"prompt_tokens"`
+		CompletionTokens        *int `json:"completion_tokens"`
+		TotalTokens             *int `json:"total_tokens"`
+		CompletionTokensDetails *struct {
+			ReasoningTokens *int `json:"reasoning_tokens"`
+		} `json:"completion_tokens_details"`
 	} `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
@@ -148,25 +160,38 @@ func (c *OpenAIClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 		httpReq.Header.Set("Authorization", "Bearer "+c.APIKey)
 	}
 
+	attempt := beginAttempt(ctx)
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("openai: HTTP error: %w", err)
+		err = fmt.Errorf("openai: HTTP error: %w", err)
+		attempt.end(err)
+		return nil, err
 	}
 	defer resp.Body.Close()
+	attempt.response(resp)
 
 	rawBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("openai: read response body: %w", err)
+		err = fmt.Errorf("openai: read response body: %w", err)
+		attempt.end(err)
+		return nil, err
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("openai: unexpected status %d: %s", resp.StatusCode, string(rawBody))
+		err := fmt.Errorf("openai: unexpected status %d: %s", resp.StatusCode, string(rawBody))
+		attempt.end(err)
+		return nil, err
 	}
+	attempt.end(nil)
 
 	var chatResp openAIChatResponse
 	if err := json.Unmarshal(rawBody, &chatResp); err != nil {
 		return nil, fmt.Errorf("openai: decode response: %w", err)
 	}
+	usage := openAIUsage(chatResp)
+	// Noted before the reply is judged, so an error reply still records what
+	// it reported.
+	noteReply(ctx, chatResp.Model, chatResp.ID, usage)
 
 	if chatResp.Error != nil {
 		return nil, fmt.Errorf("openai: API error (%s): %s", chatResp.Error.Type, chatResp.Error.Message)
@@ -193,11 +218,30 @@ func (c *OpenAIClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 	}
 
 	return &GenerateResponse{
-		Content:      choice.Message.Content,
-		FinishReason: choice.FinishReason,
-		Model:        model,
-		InputTokens:  chatResp.Usage.PromptTokens,
-		OutputTokens: chatResp.Usage.CompletionTokens,
-		ToolCalls:    toolCalls,
+		Content:       choice.Message.Content,
+		FinishReason:  choice.FinishReason,
+		Model:         model,
+		InputTokens:   intOr(usage.InputTokens),
+		OutputTokens:  intOr(usage.OutputTokens),
+		ToolCalls:     toolCalls,
+		ProviderModel: chatResp.Model,
+		RequestID:     chatResp.ID,
+		Usage:         usage,
 	}, nil
+}
+
+// openAIUsage maps the reply's usage object as reported.
+func openAIUsage(r openAIChatResponse) Usage {
+	if r.Usage == nil {
+		return Usage{}
+	}
+	u := Usage{
+		InputTokens:  r.Usage.PromptTokens,
+		OutputTokens: r.Usage.CompletionTokens,
+		TotalTokens:  r.Usage.TotalTokens,
+	}
+	if d := r.Usage.CompletionTokensDetails; d != nil {
+		u.ReasoningTokens = d.ReasoningTokens
+	}
+	return u
 }

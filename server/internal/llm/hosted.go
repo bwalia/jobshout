@@ -150,6 +150,7 @@ func doHosted(
 			return nil, ctx.Err()
 		case <-t.C:
 		}
+		noteRetry(ctx)
 	}
 	return nil, lastErr
 }
@@ -157,11 +158,16 @@ func doHosted(
 func doOnce(
 	ctx context.Context, hc *http.Client, provider string,
 	build func(context.Context) (*http.Request, error), classify errorClassifier,
-) ([]byte, error) {
+) (_ []byte, err error) {
 	req, err := build(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("%s: build request: %w", provider, err)
 	}
+	// One attempt is one HTTP request actually sent. It is timed from sending
+	// to having read the reply, so the API duration excludes doHosted's
+	// backoff waits, and each retry is kept as its own attempt.
+	attempt := beginAttempt(ctx)
+	defer func() { attempt.end(err) }()
 	resp, err := hc.Do(req)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -175,6 +181,7 @@ func doOnce(
 		return nil, &ProviderError{Provider: provider, Kind: kind, Message: err.Error()}
 	}
 	defer resp.Body.Close()
+	attempt.response(resp)
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxHostedResponseBytes))
 	if err != nil {
