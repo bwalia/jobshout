@@ -190,6 +190,8 @@ ai:
   # Tried first when GEMINI_API_KEY is set; mflux (imageBaseURL) is the fallback.
   imageGeminiModel: "gemini-3.1-flash-lite-image"
   geminiBaseURL: "https://generativelanguage.googleapis.com"
+  # Text model for agents set to the gemini provider (same GEMINI_API_KEY).
+  geminiModel: "gemini-flash-latest"
   imageBucket: "images"
   # Off by default: a cover costs roughly 25 seconds of a single shared GPU per
   # article, and that is a cost an operator should choose to pay. Image

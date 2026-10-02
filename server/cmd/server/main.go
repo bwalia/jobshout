@@ -27,15 +27,15 @@ import (
 	"github.com/jobshout/server/internal/chatagent"
 	"github.com/jobshout/server/internal/chatsvc"
 	"github.com/jobshout/server/internal/config"
-	"github.com/jobshout/server/internal/course"
 	"github.com/jobshout/server/internal/costengine"
+	"github.com/jobshout/server/internal/course"
 	"github.com/jobshout/server/internal/creditcontroller"
+	"github.com/jobshout/server/internal/linuxpatch"
+	"github.com/jobshout/server/internal/scheduler"
+	"github.com/jobshout/server/internal/secretsrot"
 	"github.com/jobshout/server/internal/simpro"
 	"github.com/jobshout/server/internal/waflab"
 	"github.com/jobshout/server/internal/wslproxymcp"
-	"github.com/jobshout/server/internal/scheduler"
-	"github.com/jobshout/server/internal/secretsrot"
-	"github.com/jobshout/server/internal/linuxpatch"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/jobshout/server/internal/database"
@@ -251,6 +251,8 @@ func main() {
 		zap.Bool("ollama_gateway_auth", cfg.OllamaJWTSecret != ""),
 		zap.Duration("ollama_timeout", cfg.OllamaTimeout),
 		zap.Int("ollama_num_ctx", cfg.OllamaNumCtx),
+		// Whether Gemini has a key — never the key itself.
+		zap.Bool("gemini", cfg.GeminiAPIKey != ""),
 	)
 
 	// Langfuse tracing wraps every registered client before anything resolves
@@ -505,18 +507,23 @@ func main() {
 	// The Research Agent shares the article generator's LLM but is wired
 	// independently: it is a platform capability in its own right, and anything
 	// that needs current, cited material about a subject consumes it.
+	//
+	// Research, the Article Writer and the Course Generator are each handed a
+	// routed client: LLM_PROVIDER by default, or the provider a run selects
+	// (llm.WithProvider) — so an agent set to Gemini uses it with no
+	// provider code of its own. The server's own provider must still resolve.
 	var researchAgent *research.Agent
-	if researchLLM, err := llmRouter.For(cfg.LLMProvider); err != nil {
+	if _, err := llmRouter.For(cfg.LLMProvider); err != nil {
 		logger.Warn("research: llm router returned error — research agent disabled", zap.Error(err))
 	} else {
-		researchAgent = research.NewAgent(researchClient, researchLLM, research.DefaultAgentConfig(), logger)
+		researchAgent = research.NewAgent(researchClient, llmRouter.Routed(cfg.LLMProvider), research.DefaultAgentConfig(), logger)
 		logger.Info("research agent initialised",
 			zap.Int("max_sources", research.DefaultAgentConfig().MaxSources))
 	}
 	researchSvc := service.NewResearchService(researchAgent, researchClient, agentRepo, logger)
 
 	var blogRunner *blog.Runner
-	if blogLLM, err := llmRouter.For(cfg.LLMProvider); err != nil {
+	if _, err := llmRouter.For(cfg.LLMProvider); err != nil {
 		logger.Warn("blog: llm router returned error — article generator disabled",
 			zap.Error(err))
 	} else {
@@ -528,7 +535,8 @@ func main() {
 			ProseModel:      cfg.BlogProseModel,
 			StructuredModel: cfg.BlogStructuredModel,
 			ProseNumCtx:     cfg.BlogProseNumCtx,
-		}, blogLLM, cmsClient, researchSvc, logger)
+			Provider:        cfg.LLMProvider,
+		}, llmRouter.Routed(cfg.LLMProvider), cmsClient, researchSvc, logger)
 		// Cover images and in-article illustrations are opt-in per environment:
 		// each costs tens of seconds on a single shared GPU, so an operator
 		// decides whether every article pays for one.
@@ -715,9 +723,10 @@ func main() {
 	wafLabSvc := service.NewWAFLabServiceWithEvents(wafLabRunRepo, securityFindingEventRepo, agentRepo, wafLabCfg, wafLabClient, logger)
 	seoSvc := service.NewSEOService(seoRunRepo, agentRepo, logger)
 	courseCfg := course.LoadConfig()
+	courseCfg.Provider = cfg.LLMProvider
 	var courseLLM llm.Client
-	if c, err := llmRouter.For(cfg.LLMProvider); err == nil {
-		courseLLM = c
+	if _, err := llmRouter.For(cfg.LLMProvider); err == nil {
+		courseLLM = llmRouter.Routed(cfg.LLMProvider)
 	}
 	var courseResearcher course.Researcher
 	if researchAgent != nil {

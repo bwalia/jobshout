@@ -40,6 +40,9 @@ data:
   IMAGE_OPENAI_MODEL: {{ .Values.ai.imageOpenaiModel | default "gpt-image-1" | quote }}
   IMAGE_GEMINI_MODEL: {{ .Values.ai.imageGeminiModel | default "gemini-3.1-flash-lite-image" | quote }}
   GEMINI_BASE_URL: {{ .Values.ai.geminiBaseURL | default "https://generativelanguage.googleapis.com" | quote }}
+  # GEMINI_API_KEY also registers Gemini as an LLM provider, used only by
+  # agents whose model_provider is "gemini". This is their default model.
+  GEMINI_DEFAULT_MODEL: {{ .Values.ai.geminiModel | default "gemini-flash-latest" | quote }}
   # Whether every article run pays for a cover image. Off leaves generation
   # available on demand through the API and the generate_image tool.
   BLOG_COVER_IMAGES: {{ .Values.ai.blogCoverImages | default false | quote }}

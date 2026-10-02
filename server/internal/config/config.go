@@ -108,6 +108,12 @@ type Config struct {
 	GeminiBaseURL string `mapstructure:"GEMINI_BASE_URL"`
 	// ImageGeminiModel is the Gemini image model used when a request names none.
 	ImageGeminiModel string `mapstructure:"IMAGE_GEMINI_MODEL"`
+	// GeminiDefaultModel is the text model an agent gets when it names the
+	// gemini provider but no model. GEMINI_API_KEY also registers Gemini as an
+	// LLM provider; it is used only where an agent or run selects it.
+	GeminiDefaultModel string `mapstructure:"GEMINI_DEFAULT_MODEL"`
+	// GeminiTimeout bounds one Gemini HTTP attempt.
+	GeminiTimeout time.Duration `mapstructure:"GEMINI_TIMEOUT"`
 	// BlogCoverImages turns on cover-image generation inside article runs. Off
 	// leaves the rest of image generation available on demand — the toggle is
 	// about whether every article pays for a picture, not about whether the
@@ -301,6 +307,8 @@ func Load() (*Config, error) {
 	viper.SetDefault("IMAGE_OPENAI_MODEL", "gpt-image-1")
 	viper.SetDefault("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com")
 	viper.SetDefault("IMAGE_GEMINI_MODEL", "gemini-3.1-flash-lite-image")
+	viper.SetDefault("GEMINI_DEFAULT_MODEL", "gemini-flash-latest")
+	viper.SetDefault("GEMINI_TIMEOUT", "180s")
 	// Off by default: a cover image costs 25 seconds of a shared GPU per
 	// article, and an operator should opt into spending that on every run.
 	viper.SetDefault("BLOG_COVER_IMAGES", false)
@@ -368,6 +376,8 @@ func Load() (*Config, error) {
 		GeminiAPIKey:         viper.GetString("GEMINI_API_KEY"),
 		GeminiBaseURL:        viper.GetString("GEMINI_BASE_URL"),
 		ImageGeminiModel:     viper.GetString("IMAGE_GEMINI_MODEL"),
+		GeminiDefaultModel:   viper.GetString("GEMINI_DEFAULT_MODEL"),
+		GeminiTimeout:        viper.GetDuration("GEMINI_TIMEOUT"),
 		BlogCoverImages:      viper.GetBool("BLOG_COVER_IMAGES"),
 		EmbeddingProvider:    viper.GetString("EMBEDDING_PROVIDER"),
 		EmbeddingModel:       viper.GetString("EMBEDDING_MODEL"),

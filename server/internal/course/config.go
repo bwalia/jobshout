@@ -12,8 +12,11 @@ import (
 // agent. Nothing here is a secret.
 type Config struct {
 	// Model overrides the LLM model for every stage. Empty uses the
-	// provider's default.
+	// provider's default. It names a model on Provider, so a run on another
+	// provider ignores it.
 	Model string
+	// Provider is the server's LLM provider (LLM_PROVIDER), set by main.
+	Provider string
 	// ChapterBudget is the runtime allowed per chapter. A run's deadline is
 	// ChapterBudget × chapters + PlanBudget, so a long course is not killed by
 	// a flat cap sized for a short one.
