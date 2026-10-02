@@ -60,8 +60,17 @@ wafLab:
 # The chart renders jobshout-secrets with them empty when externalSecret is
 # off, so without this the gateways refuse every LLM and image call (403).
 # Created by hand on k3s1, never in git.
+#
+# jobshout-google: "Continue with Google" on /login and /signup
+# (GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET). The OAuth client must
+# list https://jobshout.co.uk/api/v1/auth/google/callback as a redirect URI.
+# Refs are optional, so until the secret exists the button just stays hidden.
+#   kubectl -n prod create secret generic jobshout-google \
+#     --from-literal=GOOGLE_OAUTH_CLIENT_ID=... \
+#     --from-literal=GOOGLE_OAUTH_CLIENT_SECRET=...
 extraSecretRefs:
   - jobshout-gateways
+  - jobshout-google
 
 insights:
   siteURL: "https://www.jobshout.com"
