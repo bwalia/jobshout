@@ -1,4 +1,4 @@
--- Migration 056: device-bound sessions and external sign-in identities.
+-- Migration 058: device-bound sessions and external sign-in identities.
 --
 -- devices: one row per signed-in app install. Refresh tokens hang off it, so
 -- signing a device out (or deleting it from "Your devices") revokes exactly
