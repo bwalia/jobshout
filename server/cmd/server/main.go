@@ -27,15 +27,15 @@ import (
 	"github.com/jobshout/server/internal/chatagent"
 	"github.com/jobshout/server/internal/chatsvc"
 	"github.com/jobshout/server/internal/config"
-	"github.com/jobshout/server/internal/course"
 	"github.com/jobshout/server/internal/costengine"
+	"github.com/jobshout/server/internal/course"
 	"github.com/jobshout/server/internal/creditcontroller"
+	"github.com/jobshout/server/internal/linuxpatch"
+	"github.com/jobshout/server/internal/scheduler"
+	"github.com/jobshout/server/internal/secretsrot"
 	"github.com/jobshout/server/internal/simpro"
 	"github.com/jobshout/server/internal/waflab"
 	"github.com/jobshout/server/internal/wslproxymcp"
-	"github.com/jobshout/server/internal/scheduler"
-	"github.com/jobshout/server/internal/secretsrot"
-	"github.com/jobshout/server/internal/linuxpatch"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/jobshout/server/internal/database"
@@ -58,6 +58,7 @@ import (
 	"github.com/jobshout/server/internal/langfuse"
 	"github.com/jobshout/server/internal/langgraph"
 	"github.com/jobshout/server/internal/llm"
+	"github.com/jobshout/server/internal/llmbench"
 	"github.com/jobshout/server/internal/llmtrace"
 	"github.com/jobshout/server/internal/mail"
 	"github.com/jobshout/server/internal/middleware"
@@ -124,6 +125,20 @@ func firstNonEmptyStr(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// providerDefaultModel names the model LLM_PROVIDER uses when a call names
+// none. It is for startup logs only; the client applies its own default.
+func providerDefaultModel(cfg *config.Config) string {
+	switch cfg.LLMProvider {
+	case "gemini":
+		return firstNonEmptyStr(cfg.GeminiDefaultModel, llm.GeminiDefaultModel)
+	case "openai":
+		return cfg.OpenAIDefaultModel
+	case "claude":
+		return cfg.ClaudeDefaultModel
+	}
+	return cfg.OllamaDefaultModel
 }
 
 // requestTimeout applies a per-route deadline.
@@ -251,6 +266,8 @@ func main() {
 		zap.Bool("ollama_gateway_auth", cfg.OllamaJWTSecret != ""),
 		zap.Duration("ollama_timeout", cfg.OllamaTimeout),
 		zap.Int("ollama_num_ctx", cfg.OllamaNumCtx),
+		// Whether Gemini has a key — never the key itself.
+		zap.Bool("gemini", cfg.GeminiAPIKey != ""),
 	)
 
 	// Langfuse tracing wraps every registered client before anything resolves
@@ -264,6 +281,13 @@ func main() {
 		chatInner = tracing.Wrap(chatInner)
 		logger.Info("LLM tracing enabled", zap.String("langfuse_host", cfg.LangfuseHost))
 	}
+	// The LLM benchmark records one usage_records row per text LLM call. It is
+	// always on and independent of Langfuse, and like tracing it wraps every
+	// registered client plus chat's separately built one.
+	llmBenchRepo := repository.NewLLMBenchmarkRepository(pool)
+	llmBench := llmbench.New(llmBenchRepo, logger, llmbench.Options{})
+	llmRouter.WrapClients(llmBench.Wrap)
+	chatInner = llmBench.Wrap(chatInner)
 	chatClient := llm.NewChatClient(chatInner, cfg.ChatModel, cfg.ChatModelFallback, logger)
 	logger.Info("chat LLM client",
 		zap.String("model", llm.SanitizeChatModel(cfg.ChatModel)),
@@ -505,18 +529,23 @@ func main() {
 	// The Research Agent shares the article generator's LLM but is wired
 	// independently: it is a platform capability in its own right, and anything
 	// that needs current, cited material about a subject consumes it.
+	//
+	// Research, the Article Writer and the Course Generator are each handed a
+	// routed client: LLM_PROVIDER by default, or the provider a run selects
+	// (llm.WithProvider) — so an agent set to Gemini uses it with no
+	// provider code of its own. The server's own provider must still resolve.
 	var researchAgent *research.Agent
-	if researchLLM, err := llmRouter.For(cfg.LLMProvider); err != nil {
+	if _, err := llmRouter.For(cfg.LLMProvider); err != nil {
 		logger.Warn("research: llm router returned error — research agent disabled", zap.Error(err))
 	} else {
-		researchAgent = research.NewAgent(researchClient, researchLLM, research.DefaultAgentConfig(), logger)
+		researchAgent = research.NewAgent(researchClient, llmRouter.Routed(cfg.LLMProvider), research.DefaultAgentConfig(), logger)
 		logger.Info("research agent initialised",
 			zap.Int("max_sources", research.DefaultAgentConfig().MaxSources))
 	}
 	researchSvc := service.NewResearchService(researchAgent, researchClient, agentRepo, logger)
 
 	var blogRunner *blog.Runner
-	if blogLLM, err := llmRouter.For(cfg.LLMProvider); err != nil {
+	if _, err := llmRouter.For(cfg.LLMProvider); err != nil {
 		logger.Warn("blog: llm router returned error — article generator disabled",
 			zap.Error(err))
 	} else {
@@ -527,7 +556,9 @@ func main() {
 			Model:           cfg.BlogModel,
 			ProseModel:      cfg.BlogProseModel,
 			StructuredModel: cfg.BlogStructuredModel,
-		}, blogLLM, cmsClient, researchSvc, logger)
+			ProseNumCtx:     cfg.BlogProseNumCtx,
+			Provider:        cfg.LLMProvider,
+		}, llmRouter.Routed(cfg.LLMProvider), cmsClient, researchSvc, logger)
 		// Cover images and in-article illustrations are opt-in per environment:
 		// each costs tens of seconds on a single shared GPU, so an operator
 		// decides whether every article pays for one.
@@ -549,8 +580,9 @@ func main() {
 			Token:   cfg.JobshoutComAPIToken,
 			Agent:   model.AgentNameJobShoutComWriter,
 		}))
-		writingModel := firstNonEmptyStr(cfg.BlogModel, cfg.OllamaDefaultModel)
+		writingModel := firstNonEmptyStr(cfg.BlogModel, providerDefaultModel(cfg))
 		logger.Info("article generator initialised",
+			zap.String("provider", cfg.LLMProvider),
 			zap.String("prose_model", firstNonEmptyStr(cfg.BlogProseModel, writingModel)),
 			zap.String("structured_model", firstNonEmptyStr(cfg.BlogStructuredModel, writingModel)),
 			zap.String("cms_namespace", cfg.OpsAPINamespace),
@@ -607,7 +639,9 @@ func main() {
 
 	mailCfg := mail.LoadConfig()
 	var mailLLM llm.Client
-	if c, err := llmRouter.For(cfg.LLMProvider); err != nil {
+	// MAIL_MODEL names a model on one provider, so mail resolves the provider
+	// that serves it (MAIL_PROVIDER) rather than whatever the default is.
+	if c, err := llmRouter.For(firstNonEmptyStr(mailCfg.Provider, cfg.LLMProvider)); err != nil {
 		logger.Warn("mail: llm router returned error — classify/draft will use heuristics", zap.Error(err))
 	} else {
 		mailLLM = c
@@ -685,7 +719,7 @@ func main() {
 	}
 
 	var careerLLM llm.Client
-	if c, err := llmRouter.For(cfg.LLMProvider); err != nil {
+	if c, err := llmRouter.For(firstNonEmptyStr(cfg.CareerProvider, cfg.LLMProvider)); err != nil {
 		logger.Warn("career: llm router returned error — evaluations use the deterministic scorer", zap.Error(err))
 	} else {
 		careerLLM = c
@@ -714,9 +748,10 @@ func main() {
 	wafLabSvc := service.NewWAFLabServiceWithEvents(wafLabRunRepo, securityFindingEventRepo, agentRepo, wafLabCfg, wafLabClient, logger)
 	seoSvc := service.NewSEOService(seoRunRepo, agentRepo, logger)
 	courseCfg := course.LoadConfig()
+	courseCfg.Provider = cfg.LLMProvider
 	var courseLLM llm.Client
-	if c, err := llmRouter.For(cfg.LLMProvider); err == nil {
-		courseLLM = c
+	if _, err := llmRouter.For(cfg.LLMProvider); err == nil {
+		courseLLM = llmRouter.Routed(cfg.LLMProvider)
 	}
 	var courseResearcher course.Researcher
 	if researchAgent != nil {
@@ -980,6 +1015,7 @@ func main() {
 	webhookHandler := handler.NewWebhookHandler(integRepo, linkRepo, logger)
 	governanceHandler := handler.NewGovernanceHandler(govSvc)
 	analyticsHandler := handler.NewAnalyticsHandler(analyticsSvc)
+	llmBenchHandler := handler.NewLLMBenchmarkHandler(llmBenchRepo)
 	rbacHandler := handler.NewRBACHandler(rbacSvc)
 	ssoHandler := handler.NewSSOHandler(ssoSvc, jwtSvc)
 	auditHandler := handler.NewAuditHandler(auditRepo)
@@ -1538,6 +1574,14 @@ func main() {
 				r.Get("/top-agents", analyticsHandler.TopAgents)
 			})
 
+			// LLM benchmark (read-only, org-scoped per-call timings)
+			r.Route("/benchmarks", func(r chi.Router) {
+				r.Get("/models", llmBenchHandler.Models)
+				r.Get("/runs", llmBenchHandler.Runs)
+				r.Get("/runs/{kind}/{runID}", llmBenchHandler.Run)
+				r.Get("/calls", llmBenchHandler.Calls)
+			})
+
 			// RBAC (roles and permissions)
 			r.Route("/rbac", func(r chi.Router) {
 				r.Get("/me/permissions", rbacHandler.MyPermissions)
@@ -1751,6 +1795,9 @@ func main() {
 	tracer.Close()
 	if err := tracing.Shutdown(shutdownCtx); err != nil {
 		logger.Warn("langfuse flush failed", zap.Error(err))
+	}
+	if err := llmBench.Close(shutdownCtx); err != nil {
+		logger.Warn("llm benchmark flush failed", zap.Error(err))
 	}
 
 	logger.Info("server stopped")

@@ -438,6 +438,11 @@ func (g *Generator) modelFor(b model.CourseBrief) string {
 	if b.Model != "" {
 		return b.Model
 	}
+	// COURSE_MODEL names a model on the server's provider; on any other the
+	// provider's own default is used.
+	if p := llm.NormalizeProvider(b.Provider); p != "" && p != llm.NormalizeProvider(g.cfg.Provider) {
+		return ""
+	}
 	return g.cfg.Model
 }
 

@@ -647,7 +647,7 @@ func articleTokens(brief model.BlogBrief) int {
 // half-way through a sentence.
 func (r *Runner) generate(ctx context.Context, modelName string, brief model.BlogBrief, prompt string) (string, error) {
 	limit := articleTokens(brief)
-	resp, err := r.complete(ctx, modelName, prompt, limit)
+	resp, err := r.complete(ctx, modelName, prompt, limit, r.cfg.ProseNumCtx, false)
 	if err != nil {
 		return "", err
 	}
@@ -675,7 +675,15 @@ func (r *Runner) generateJSON(
 ) error {
 	return llm.GenerateJSON(ctx, stage, prompt, v,
 		func(ctx context.Context, p string) (string, error) {
-			return r.generateBounded(ctx, modelName, p, maxTokens)
+			// JSON mode, as research and the course generator already ask
+			// for. On the prompt alone, a reviewer handed a 2900-word draft
+			// answered "Here is a harsh critique of the draft:" twice, and the
+			// article went out unrevised.
+			resp, err := r.complete(ctx, modelName, p, maxTokens, 0, true)
+			if err != nil {
+				return "", err
+			}
+			return resp.Content, nil
 		},
 		func(reply string, err error) {
 			r.logger.Warn("blog: could not parse the model's JSON, asking again",
@@ -684,19 +692,15 @@ func (r *Runner) generateJSON(
 	)
 }
 
-func (r *Runner) generateBounded(ctx context.Context, modelName, prompt string, maxTokens int) (string, error) {
-	resp, err := r.complete(ctx, modelName, prompt, maxTokens)
-	if err != nil {
-		return "", err
-	}
-	return resp.Content, nil
-}
-
-// complete is the single point where the writer talks to the LLM.
-func (r *Runner) complete(ctx context.Context, modelName, prompt string, maxTokens int) (*llm.GenerateResponse, error) {
+// complete is the single point where the writer talks to the LLM. numCtx is
+// the context window to ask for; zero leaves it to the client. jsonReply asks
+// the provider to constrain the reply to JSON.
+func (r *Runner) complete(ctx context.Context, modelName, prompt string, maxTokens, numCtx int, jsonReply bool) (*llm.GenerateResponse, error) {
 	resp, err := r.llm.Generate(ctx, llm.GenerateRequest{
 		Model:     modelName,
 		MaxTokens: maxTokens,
+		NumCtx:    numCtx,
+		JSON:      jsonReply,
 		Messages:  []llm.Message{{Role: llm.RoleUser, Content: prompt}},
 	})
 	if err != nil {

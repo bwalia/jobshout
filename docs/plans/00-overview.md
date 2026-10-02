@@ -29,6 +29,7 @@ Chat does **not** go through Task Manager. `runAgentExecute` in `server/internal
 | [05-chatbot.md](05-chatbot.md) | Chat | Scripted invocation evals, then route through `tasklaunch` |
 | [06-task-history-and-board-ux.md](06-task-history-and-board-ux.md) | Board + Task Manager UX | Run + history from the card; completed-at; honest progress |
 | [07-agent-import-export.md](07-agent-import-export.md) | Agent file import/export | Versioned JSON package; custom create then builtin overlay |
+| [08-ios-app.md](08-ios-app.md) | iOS app | Go as sole origin; device sessions + Apple + WS; then the Call Agent → Work → Approve loop |
 
 ## Implementation order
 

@@ -15,6 +15,7 @@ import (
 	"github.com/jobshout/server/internal/agentmodule"
 	"github.com/jobshout/server/internal/audience"
 	"github.com/jobshout/server/internal/blog"
+	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/llmtrace"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/repository"
@@ -340,6 +341,14 @@ func agentModels(agent *model.Agent) (prose, structured string) {
 	return prose, structured
 }
 
+// agentProvider is the LLM provider set on the agent, or "" for the server's.
+func agentProvider(agent *model.Agent) string {
+	if agent == nil || agent.ModelProvider == nil {
+		return ""
+	}
+	return llm.NormalizeProvider(*agent.ModelProvider)
+}
+
 func (s *blogService) EnsureArticleWriter(ctx context.Context, orgID uuid.UUID) (*model.Agent, error) {
 	return s.ensureWriter(ctx, orgID, model.BuiltinArticleWriter)
 }
@@ -659,7 +668,7 @@ func (s *blogService) discoverBriefs(
 	}
 
 	count := req.ResolvedTrendingCount(blog.HardMaxArticles)
-	topics, err := s.research.Discover(ctx, run.OrgID, research.DiscoverRequest{
+	topics, err := s.research.Discover(llm.WithStage(ctx, "discovery"), run.OrgID, research.DiscoverRequest{
 		Count:    count,
 		Avoid:    avoid,
 		Focus:    req.Focus,
@@ -805,15 +814,24 @@ func (s *blogService) failCreatedRun(run *model.BlogRun, cause error) {
 }
 
 func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, agent *model.Agent, req model.GenerateBlogRequest) {
-	// Label the run's LLM calls for Langfuse: the blog run is the session, so
-	// every drafting/planning call (and the research nested inside) groups
-	// under it in the tracing view.
-	ctx = llmtrace.WithTrace(ctx, llmtrace.TraceInfo{
+	taskID := s.resolveLaunchTaskID(persistCtx(), req.TaskID, run.ID)
+
+	// Label the run's LLM calls for Langfuse and the LLM benchmark: the blog
+	// run is the session, so every drafting/planning call (and the research
+	// nested inside) groups under it, linked to the board task it serves.
+	trace := llmtrace.TraceInfo{
 		TraceName: "go-blog-run",
 		SessionID: run.ID.String(),
 		AgentID:   agent.ID.String(),
 		OrgID:     run.OrgID.String(),
-	})
+	}
+	if taskID != nil {
+		trace.TaskID = taskID.String()
+	}
+	ctx = llmtrace.WithTrace(ctx, trace)
+	// The provider set on the agent applies to the whole run — topic
+	// discovery and research as well as writing — via the routed LLM client.
+	ctx = llm.WithProvider(ctx, agentProvider(agent))
 	log := s.logger.With(zap.String("blog_run_id", run.ID.String()))
 
 	// The heartbeat doubles as the ownership check. When it reports the run is
@@ -831,8 +849,6 @@ func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, age
 
 	tracker := s.newTracker(run)
 	s.setAgentStatus(persistCtx(), agent.ID, "active")
-
-	taskID := s.resolveLaunchTaskID(persistCtx(), req.TaskID, run.ID)
 
 	if ctx.Err() != nil {
 		s.failRun(run, tracker, s.interruptCause(run.ID, ctx.Err()), log, agent)
@@ -877,6 +893,7 @@ func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, age
 		MaxArticles:          req.MaxArticles,
 		AgentProseModel:      agentProse,
 		AgentStructuredModel: agentStructured,
+		AgentProvider:        agentProvider(agent),
 		OnArticle:            func(a blog.GeneratedArticle) error { return s.persistArticle(run, a) },
 	}, tracker.advance)
 

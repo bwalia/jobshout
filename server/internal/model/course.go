@@ -70,6 +70,9 @@ type CourseBrief struct {
 	SeedURLs     []string `json:"seed_urls,omitempty"`
 	Focus        []string `json:"focus,omitempty"`
 	Model        string   `json:"model,omitempty"`
+	// Provider is the LLM provider for the run ("gemini", "openai"). Empty
+	// uses the server's. Persisted with the brief so a resumed run keeps it.
+	Provider string `json:"provider,omitempty"`
 }
 
 // CreateCourseRunRequest is the launch payload for a Course Generator run.

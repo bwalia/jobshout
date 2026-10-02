@@ -191,10 +191,11 @@ func (e *Executor) Resume(ctx context.Context, approval *model.Approval) Result 
 	// boundary with a fresh ctx, and the resumed calls belong to the same
 	// execution session as the ones before the gate.
 	ctx = llmtrace.WithTrace(ctx, llmtrace.TraceInfo{
-		TraceName: "go-executor-run",
-		SessionID: approval.ExecutionID.String(),
-		AgentID:   approval.AgentID.String(),
-		OrgID:     approval.OrgID.String(),
+		TraceName:   "go-executor-run",
+		SessionID:   approval.ExecutionID.String(),
+		ExecutionID: approval.ExecutionID.String(),
+		AgentID:     approval.AgentID.String(),
+		OrgID:       approval.OrgID.String(),
 	})
 
 	client, err := e.llmRouter.For(rs.Provider)

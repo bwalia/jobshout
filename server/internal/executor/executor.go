@@ -269,10 +269,11 @@ func (e *Executor) Run(
 	// Label every LLM call of this run for Langfuse: the execution groups the
 	// calls, the agent feeds the by-agent widget.
 	ctx = llmtrace.WithTrace(ctx, llmtrace.TraceInfo{
-		TraceName: "go-executor-run",
-		SessionID: execID.String(),
-		AgentID:   agent.ID.String(),
-		OrgID:     agent.OrgID.String(),
+		TraceName:   "go-executor-run",
+		SessionID:   execID.String(),
+		ExecutionID: execID.String(),
+		AgentID:     agent.ID.String(),
+		OrgID:       agent.OrgID.String(),
 	})
 
 	// Stream a safe "executing" signal for any listening SSE handler (chat).

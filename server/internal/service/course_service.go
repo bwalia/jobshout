@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/jobshout/server/internal/course"
+	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/llmtrace"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/repository"
@@ -119,6 +121,7 @@ func (s *courseService) CreateRun(ctx context.Context, req model.CreateCourseRun
 	if agent == nil || agent.OrgID != orgID || agent.SeededBuiltin() != model.BuiltinCourseGenerator {
 		return nil, errors.New("agent not found")
 	}
+	brief = withAgentModel(brief, agent)
 
 	now := time.Now()
 	run := &model.CourseRun{
@@ -206,7 +209,7 @@ func (s *courseService) execute(ctx context.Context, cancel context.CancelCauseF
 		}
 		s.mu.Unlock()
 	}()
-	ctx = llmtrace.WithTrace(ctx, llmtrace.TraceInfo{
+	trace := llmtrace.TraceInfo{
 		TraceName: "go-course-run",
 		SessionID: run.ID.String(),
 		AgentID:   run.AgentID.String(),

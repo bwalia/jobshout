@@ -23,6 +23,7 @@ data:
   OLLAMA_TIMEOUT: {{ .Values.ai.ollamaTimeout | default "10m" | quote }}
   OLLAMA_NUM_CTX: {{ .Values.ai.ollamaNumCtx | default 8192 | quote }}
   CAREER_MODEL: {{ .Values.ai.careerModel | default "" | quote }}
+  CAREER_PROVIDER: {{ .Values.ai.careerProvider | default "" | quote }}
   CHAT_MODEL: {{ .Values.ai.chatModel | default "qwen3-coder:30b" | quote }}
   CHAT_MODEL_FALLBACK: {{ .Values.ai.chatModelFallback | default "llama3.1:8b" | quote }}
   CHAT_NUM_CTX: {{ .Values.ai.chatNumCtx | default 16384 | quote }}
@@ -40,11 +41,18 @@ data:
   IMAGE_OPENAI_MODEL: {{ .Values.ai.imageOpenaiModel | default "gpt-image-1" | quote }}
   IMAGE_GEMINI_MODEL: {{ .Values.ai.imageGeminiModel | default "gemini-3.1-flash-lite-image" | quote }}
   GEMINI_BASE_URL: {{ .Values.ai.geminiBaseURL | default "https://generativelanguage.googleapis.com" | quote }}
+  # GEMINI_API_KEY also registers Gemini as an LLM provider: used when
+  # LLM_PROVIDER is "gemini" or an agent's model_provider is. This is its
+  # default model.
+  GEMINI_DEFAULT_MODEL: {{ .Values.ai.geminiModel | default "gemini-flash-latest" | quote }}
   # Whether every article run pays for a cover image. Off leaves generation
   # available on demand through the API and the generate_image tool.
   BLOG_COVER_IMAGES: {{ .Values.ai.blogCoverImages | default false | quote }}
   BLOG_ORPHAN_TIMEOUT: {{ .Values.ai.blogOrphanTimeout | default "45m" | quote }}
   BLOG_MAX_RUNTIME: {{ .Values.ai.blogMaxRuntime | default "45m" | quote }}
+  BLOG_PROSE_MODEL: {{ .Values.ai.blogProseModel | default "" | quote }}
+  BLOG_STRUCTURED_MODEL: {{ .Values.ai.blogStructuredModel | default "" | quote }}
+  BLOG_PROSE_NUM_CTX: {{ .Values.ai.blogProseNumCtx | default 0 | quote }}
   MINIO_BUCKET_IMAGES: {{ .Values.ai.imageBucket | default "images" | quote }}
   PYTHON_SIDECAR_URL: "http://python-runtime:8001"
   # opsapi CMS — where the Article Writer files generated posts as drafts. The
@@ -110,6 +118,7 @@ data:
   MAIL_POLL_INTERVAL: {{ .Values.mail.pollInterval | default "5m" | quote }}
   MAIL_RECONCILE_INTERVAL: {{ .Values.mail.reconcileInterval | default "15s" | quote }}
   MAIL_MODEL: {{ .Values.ai.mailModel | default "" | quote }}
+  MAIL_PROVIDER: {{ .Values.ai.mailProvider | default "" | quote }}
   # Secrets Rotation propagation (non-secret). Tokens live in jobshout-secrets /
   # extraSecretRefs; kubeconfigs are files under SECRETS_ROT_KUBECONFIG_DIR.
   SECRETS_ROT_KUBECONFIG_DIR: {{ .Values.secretsRotation.kubeconfig.mountPath | default "/etc/secretsrot/kube" | quote }}
