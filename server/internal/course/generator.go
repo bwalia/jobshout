@@ -128,12 +128,17 @@ func (g *Generator) Generate(ctx context.Context, job Job, h Hooks) error {
 func (g *Generator) generate(ctx context.Context, job Job, h Hooks) error {
 	b := job.Brief
 	st := job.Resume
+	// Every call in the run — research included — goes to the brief's
+	// provider through the routed client.
+	if p := llm.NormalizeProvider(b.Provider); p != "" {
+		ctx = llm.WithProvider(ctx, p)
+	}
 
 	notes, sources := st.Notes, st.Sources
 	if notes == "" {
 		h.Step(model.CourseStepResearching, b.Topic)
 		done := g.phase(job, "research")
-		brief, err := g.researcher.Research(ctx, research.Request{
+		brief, err := g.researcher.Research(llm.WithStage(ctx, "research"), research.Request{
 			Topic:   b.Topic,
 			Context: strings.TrimSpace(b.Audience + "\n" + b.Context),
 			Focus:   b.Focus,
@@ -171,7 +176,7 @@ func (g *Generator) generate(ctx context.Context, job Job, h Hooks) error {
 		h.Step(model.CourseStepOutlining, "")
 		done := g.phase(job, "outline")
 		var err error
-		outline, err = g.outline(ctx, b, notes, h)
+		outline, err = g.outline(llm.WithStage(ctx, "outline"), b, notes, h)
 		// A stopped run may have had its corrective retry cut off and be
 		// holding the short first plan; do not save that as the outline.
 		if cerr := ctx.Err(); err == nil && cerr != nil {
@@ -338,7 +343,7 @@ func (g *Generator) chapter(ctx context.Context, job Job, o *model.CourseOutline
 	if strings.TrimSpace(d.Markdown) == "" {
 		h.Step(model.CourseStepWriting, label)
 		done := g.phase(job, "write", chapter)
-		md, err := g.text(ctx, chapterPrompt(b, o, idx, notes), maxChapterTokens, b)
+		md, err := g.text(llm.WithStage(ctx, "write"), chapterPrompt(b, o, idx, notes), maxChapterTokens, b)
 		done(err)
 		if err != nil {
 			return nil, fmt.Errorf("write: %w", err)
@@ -359,7 +364,7 @@ func (g *Generator) chapter(ctx context.Context, job Job, o *model.CourseOutline
 			Issues looseStrings `json:"issues"`
 		}
 		done := g.phase(job, "review", chapter)
-		err := g.json(ctx, "review", reviewPrompt(b, plan.Title, md), maxReviewTokens, b, &review)
+		err := g.json(llm.WithStage(ctx, "review"), "review", reviewPrompt(b, plan.Title, md), maxReviewTokens, b, &review)
 		done(err)
 		if err != nil {
 			if cerr := ctx.Err(); cerr != nil {
@@ -368,7 +373,7 @@ func (g *Generator) chapter(ctx context.Context, job Job, o *model.CourseOutline
 			h.Warn(fmt.Sprintf("chapter %d review skipped: %v", idx+1, err))
 		} else if issues := capList(review.Issues, maxReviewIssues); len(issues) > 0 {
 			done = g.phase(job, "revise", chapter, zap.Int("issues", len(issues)))
-			revised, err := g.text(ctx, revisePrompt(b, plan.Title, md, issues), maxChapterTokens, b)
+			revised, err := g.text(llm.WithStage(ctx, "revise"), revisePrompt(b, plan.Title, md, issues), maxChapterTokens, b)
 			done(err)
 			switch {
 			case err != nil:
@@ -410,7 +415,7 @@ func (g *Generator) chapter(ctx context.Context, job Job, o *model.CourseOutline
 		h.Step(model.CourseStepQuizzing, label)
 		var qw quizWire
 		done := g.phase(job, "quiz", chapter)
-		err := g.json(ctx, "quiz", quizPrompt(b, plan.Title, d.Markdown), maxQuizTokens, b, &qw)
+		err := g.json(llm.WithStage(ctx, "quiz"), "quiz", quizPrompt(b, plan.Title, d.Markdown), maxQuizTokens, b, &qw)
 		done(err)
 		if err != nil {
 			if cerr := ctx.Err(); cerr != nil {
