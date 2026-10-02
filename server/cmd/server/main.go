@@ -27,15 +27,15 @@ import (
 	"github.com/jobshout/server/internal/chatagent"
 	"github.com/jobshout/server/internal/chatsvc"
 	"github.com/jobshout/server/internal/config"
-	"github.com/jobshout/server/internal/course"
 	"github.com/jobshout/server/internal/costengine"
+	"github.com/jobshout/server/internal/course"
 	"github.com/jobshout/server/internal/creditcontroller"
+	"github.com/jobshout/server/internal/linuxpatch"
+	"github.com/jobshout/server/internal/scheduler"
+	"github.com/jobshout/server/internal/secretsrot"
 	"github.com/jobshout/server/internal/simpro"
 	"github.com/jobshout/server/internal/waflab"
 	"github.com/jobshout/server/internal/wslproxymcp"
-	"github.com/jobshout/server/internal/scheduler"
-	"github.com/jobshout/server/internal/secretsrot"
-	"github.com/jobshout/server/internal/linuxpatch"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/jobshout/server/internal/database"
@@ -251,9 +251,7 @@ func main() {
 		zap.Bool("ollama_gateway_auth", cfg.OllamaJWTSecret != ""),
 		zap.Duration("ollama_timeout", cfg.OllamaTimeout),
 		zap.Int("ollama_num_ctx", cfg.OllamaNumCtx),
-		// Which hosted providers have a key — never the key itself.
-		zap.Bool("openai", cfg.OpenAIAPIKey != ""),
-		zap.Bool("claude", cfg.ClaudeAPIKey != ""),
+		// Whether Gemini has a key — never the key itself.
 		zap.Bool("gemini", cfg.GeminiAPIKey != ""),
 	)
 
@@ -512,7 +510,7 @@ func main() {
 	//
 	// Research, the Article Writer and the Course Generator are each handed a
 	// routed client: LLM_PROVIDER by default, or the provider a run selects
-	// (llm.WithProvider) — so an agent set to Gemini or OpenAI uses it with no
+	// (llm.WithProvider) — so an agent set to Gemini uses it with no
 	// provider code of its own. The server's own provider must still resolve.
 	var researchAgent *research.Agent
 	if _, err := llmRouter.For(cfg.LLMProvider); err != nil {

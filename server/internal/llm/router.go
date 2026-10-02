@@ -51,8 +51,7 @@ func NewRouter(cfg *config.Config) *Router {
 		openAIBase = "https://api.openai.com"
 	}
 	if cfg.OpenAIAPIKey != "" {
-		r.clients["openai"] = NewOpenAIClient(openAIBase, cfg.OpenAIAPIKey, cfg.OpenAIDefaultModel).
-			WithTimeout(cfg.OpenAITimeout)
+		r.clients["openai"] = NewOpenAIClient(openAIBase, cfg.OpenAIAPIKey, cfg.OpenAIDefaultModel)
 	}
 
 	// Gemini is registered when GEMINI_API_KEY is set — the same key image

@@ -70,8 +70,6 @@ type Config struct {
 	OpenAIAPIKey       string `mapstructure:"OPENAI_API_KEY"`
 	OpenAIBaseURL      string `mapstructure:"OPENAI_BASE_URL"`
 	OpenAIDefaultModel string `mapstructure:"OPENAI_DEFAULT_MODEL"`
-	// OpenAITimeout bounds one OpenAI HTTP attempt.
-	OpenAITimeout time.Duration `mapstructure:"OPENAI_TIMEOUT"`
 
 	// Claude / Anthropic configuration.
 	// When LLM_PROVIDER=claude, CLAUDE_API_KEY must be set.
@@ -290,7 +288,6 @@ func Load() (*Config, error) {
 	viper.SetDefault("CHAT_NUM_CTX", DefaultChatNumCtx)
 	viper.SetDefault("OPENAI_BASE_URL", "https://api.openai.com")
 	viper.SetDefault("OPENAI_DEFAULT_MODEL", "gpt-4o-mini")
-	viper.SetDefault("OPENAI_TIMEOUT", "120s")
 	viper.SetDefault("CLAUDE_BASE_URL", "https://api.anthropic.com")
 	viper.SetDefault("CLAUDE_DEFAULT_MODEL", "claude-sonnet-4-20250514")
 
@@ -367,7 +364,6 @@ func Load() (*Config, error) {
 		OpenAIAPIKey:         viper.GetString("OPENAI_API_KEY"),
 		OpenAIBaseURL:        viper.GetString("OPENAI_BASE_URL"),
 		OpenAIDefaultModel:   viper.GetString("OPENAI_DEFAULT_MODEL"),
-		OpenAITimeout:        viper.GetDuration("OPENAI_TIMEOUT"),
 		ClaudeAPIKey:         viper.GetString("CLAUDE_API_KEY"),
 		ClaudeBaseURL:        viper.GetString("CLAUDE_BASE_URL"),
 		ClaudeDefaultModel:   viper.GetString("CLAUDE_DEFAULT_MODEL"),

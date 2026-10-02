@@ -31,6 +31,10 @@ extraSecretRefs:
   # Secrets Rotation credentials: SECRETS_VAULT_ADDR/SECRETS_VAULT_TOKEN and
   # RP_API_TOKEN. Created by hand on k3s1, never in git.
   - jobshout-secretsrot
+  # GEMINI_API_KEY: registers Gemini as an LLM provider (used only by agents
+  # whose provider is set to gemini) and as the first-choice image backend.
+  #   kubectl -n int create secret generic jobshout-gemini --from-literal=GEMINI_API_KEY=...
+  - jobshout-gemini
 
 # opsapi CMS — the Article Writer files generated articles there as drafts.
 # The host and namespace slug are not secret; the API key is, and comes from

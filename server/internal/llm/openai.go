@@ -5,9 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
-	"net/url"
-	"strings"
 	"time"
 )
 
@@ -18,7 +17,6 @@ type OpenAIClient struct {
 	APIKey       string
 	DefaultModel string
 	httpClient   *http.Client
-	retry        retryPolicy
 }
 
 // NewOpenAIClient creates an OpenAIClient with a sensible HTTP timeout.
@@ -31,31 +29,10 @@ func NewOpenAIClient(baseURL, apiKey, defaultModel string) *OpenAIClient {
 		httpClient: &http.Client{
 			Timeout: 120 * time.Second,
 		},
-		retry: defaultRetryPolicy,
 	}
-}
-
-// WithTimeout sets the per-attempt HTTP timeout. Zero keeps the current one.
-func (c *OpenAIClient) WithTimeout(d time.Duration) *OpenAIClient {
-	if d > 0 {
-		c.httpClient.Timeout = d
-	}
-	return c
 }
 
 func (c *OpenAIClient) ProviderName() string { return "openai" }
-
-// ModelName is the model a call without an explicit Model will use.
-func (c *OpenAIClient) ModelName() string { return c.DefaultModel }
-
-// isOpenAIProper reports whether BaseURL is OpenAI itself rather than a
-// compatible server (LM Studio, vLLM, Groq). Parameters only OpenAI is known to
-// accept are sent only there, so a compatible endpoint keeps the request shape
-// it has always had.
-func (c *OpenAIClient) isOpenAIProper() bool {
-	u, err := url.Parse(c.BaseURL)
-	return err == nil && strings.EqualFold(u.Hostname(), "api.openai.com")
-}
 
 // SupportsTools reports that this client can use native tool-calling
 // (GenerateRequest.ToolDefs / GenerateResponse.ToolCalls).
@@ -63,19 +40,11 @@ func (c *OpenAIClient) SupportsTools() bool { return true }
 
 // openAIChatRequest mirrors the OpenAI /v1/chat/completions request body.
 type openAIChatRequest struct {
-	Model     string          `json:"model"`
-	Messages  []openAIMessage `json:"messages"`
-	MaxTokens int             `json:"max_tokens,omitempty"`
-	// MaxCompletionTokens replaces max_tokens on OpenAI itself; reasoning
-	// models (o-series, gpt-5) reject max_tokens outright.
-	MaxCompletionTokens int               `json:"max_completion_tokens,omitempty"`
-	Temperature         float64           `json:"temperature,omitempty"`
-	Tools               []openAITool      `json:"tools,omitempty"`
-	ResponseFormat      *openAIRespFormat `json:"response_format,omitempty"`
-}
-
-type openAIRespFormat struct {
-	Type string `json:"type"`
+	Model       string          `json:"model"`
+	Messages    []openAIMessage `json:"messages"`
+	MaxTokens   int             `json:"max_tokens,omitempty"`
+	Temperature float64         `json:"temperature,omitempty"`
+	Tools       []openAITool    `json:"tools,omitempty"`
 }
 
 type openAIMessage struct {
@@ -149,17 +118,8 @@ func (c *OpenAIClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 	body := openAIChatRequest{
 		Model:       model,
 		Messages:    msgs,
+		MaxTokens:   req.MaxTokens,
 		Temperature: req.Temperature,
-	}
-	if c.isOpenAIProper() {
-		body.MaxCompletionTokens = req.MaxTokens
-		// json_object mode is refused unless the conversation mentions JSON,
-		// so it is only asked for when a prompt already does.
-		if req.JSON && mentionsJSON(req.Messages) {
-			body.ResponseFormat = &openAIRespFormat{Type: "json_object"}
-		}
-	} else {
-		body.MaxTokens = req.MaxTokens
 	}
 
 	// Native tool-calling: advertise function definitions when provided.
@@ -179,36 +139,41 @@ func (c *OpenAIClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 		return nil, fmt.Errorf("openai: marshal request: %w", err)
 	}
 
-	rawBody, err := doHosted(ctx, c.httpClient, "openai", c.retry,
-		func(ctx context.Context) (*http.Request, error) {
-			r, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/v1/chat/completions", bytes.NewReader(payload))
-			if err != nil {
-				return nil, err
-			}
-			r.Header.Set("Content-Type", "application/json")
-			if c.APIKey != "" {
-				r.Header.Set("Authorization", "Bearer "+c.APIKey)
-			}
-			return r, nil
-		},
-		classifyOpenAIError,
-	)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/v1/chat/completions", bytes.NewReader(payload))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("openai: build request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if c.APIKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+c.APIKey)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("openai: HTTP error: %w", err)
+	}
+	defer resp.Body.Close()
+
+	rawBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("openai: read response body: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("openai: unexpected status %d: %s", resp.StatusCode, string(rawBody))
 	}
 
 	var chatResp openAIChatResponse
 	if err := json.Unmarshal(rawBody, &chatResp); err != nil {
-		return nil, malformed("openai", "decode response: "+err.Error())
+		return nil, fmt.Errorf("openai: decode response: %w", err)
 	}
 
 	if chatResp.Error != nil {
-		return nil, &ProviderError{Provider: "openai", Kind: ErrProviderBadRequest,
-			Message: snippet(chatResp.Error.Type+": "+chatResp.Error.Message, 300)}
+		return nil, fmt.Errorf("openai: API error (%s): %s", chatResp.Error.Type, chatResp.Error.Message)
 	}
 
 	if len(chatResp.Choices) == 0 {
-		return nil, malformed("openai", "response contained no choices")
+		return nil, fmt.Errorf("openai: response contained no choices")
 	}
 
 	choice := chatResp.Choices[0]
@@ -235,44 +200,4 @@ func (c *OpenAIClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 		OutputTokens: chatResp.Usage.CompletionTokens,
 		ToolCalls:    toolCalls,
 	}, nil
-}
-
-func mentionsJSON(msgs []Message) bool {
-	for _, m := range msgs {
-		if strings.Contains(strings.ToLower(m.Content), "json") {
-			return true
-		}
-	}
-	return false
-}
-
-// classifyOpenAIError reads OpenAI's error envelope:
-//
-//	{"error":{"message":"…","type":"insufficient_quota","code":"insufficient_quota"}}
-//
-// An exhausted quota is a 429 like a rate limit, but waiting will not clear
-// it, so it is marked not retryable.
-func classifyOpenAIError(status int, header http.Header, body []byte) *ProviderError {
-	var env struct {
-		Error struct {
-			Message string `json:"message"`
-			Type    string `json:"type"`
-			Code    any    `json:"code"`
-		} `json:"error"`
-	}
-	_ = json.Unmarshal(body, &env)
-
-	pe := &ProviderError{Provider: "openai", Kind: kindForStatus(status), Status: status,
-		RetryAfter: retryAfterHeader(header)}
-	pe.Message = snippet(env.Error.Message, 300)
-	if pe.Message == "" {
-		pe.Message = snippet(string(body), 300)
-	}
-	if code, _ := env.Error.Code.(string); code == "insufficient_quota" || env.Error.Type == "insufficient_quota" {
-		pe.noRetry = true
-	}
-	if code, _ := env.Error.Code.(string); code == "invalid_api_key" {
-		pe.Kind = ErrProviderAuth
-	}
-	return pe
 }
