@@ -1,0 +1,863 @@
+openapi: 3.1.0
+info:
+  title: JobShout platform API (mobile surface)
+  version: 0.1.0
+  description: |
+    The subset of the Go platform API the native apps use. Hand-written;
+    `cmd/server/openapi_test.go` fails if an operation here is not registered
+    on the router, so the spec cannot promise a route that doesn't exist.
+
+    Auth: `Authorization: Bearer <access_token>`. Access tokens last 15
+    minutes; refresh with `/auth/refresh`, which rotates the refresh token.
+    Native clients send `device` on sign-in and keep the returned
+    `device_id`; the session is then bound to that install.
+
+    Live updates: `GET /ws` (WebSocket, same bearer header). Frames are
+    `LiveEvent`s and are hints to refetch, not state; keep polling as the
+    source of truth.
+
+    Response fields that carry a status are plain strings with their values
+    documented, not enums, so a new server-side value can't break a client's
+    decoding.
+servers:
+  - url: https://int.jobshout.co.uk/api/v1
+    description: int
+  - url: https://test.jobshout.co.uk/api/v1
+    description: test
+  - url: https://acc.jobshout.co.uk/api/v1
+    description: acc
+  - url: https://jobshout.co.uk/api/v1
+    description: prod
+security:
+  - bearer: []
+
+paths:
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/Auth' }
+        '401': { $ref: '#/components/responses/Error' }
+  /auth/register:
+    post:
+      operationId: register
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201': { $ref: '#/components/responses/Auth' }
+        '409': { $ref: '#/components/responses/Error' }
+  /auth/refresh:
+    post:
+      operationId: refresh
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/Auth' }
+        '401': { $ref: '#/components/responses/Error' }
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      security: []
+      description: Revokes the session the refresh token belongs to (the whole device for a device-bound token). Unknown tokens succeed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        '204': { description: Signed out }
+  /auth/logout-all:
+    post:
+      operationId: logoutAll
+      tags: [auth]
+      description: Revokes every session and device the caller has. Issued access tokens stay valid until they expire.
+      responses:
+        '204': { description: Signed out everywhere }
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      responses:
+        '200':
+          description: The signed-in user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+  /auth/apple/status:
+    get:
+      operationId: appleStatus
+      tags: [auth]
+      security: []
+      responses:
+        '200':
+          description: Whether Sign in with Apple is configured
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled]
+                properties:
+                  enabled: { type: boolean }
+  /auth/apple/nonce:
+    post:
+      operationId: appleNonce
+      tags: [auth]
+      security: []
+      description: One-time nonce, valid ten minutes. Put SHA-256(nonce), hex, in the Apple request; send the raw nonce to `/auth/apple`.
+      responses:
+        '200':
+          description: Nonce issued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [nonce, expires_at]
+                properties:
+                  nonce: { type: string }
+                  expires_at: { type: string, format: date-time }
+        '503': { $ref: '#/components/responses/Error' }
+  /auth/apple:
+    post:
+      operationId: signInWithApple
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AppleSignInRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/Auth' }
+        '401': { $ref: '#/components/responses/Error' }
+        '422':
+          description: First sign-in without a verified email (the user hid it and Apple sent none).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+
+  /devices:
+    get:
+      operationId: listDevices
+      tags: [devices]
+      responses:
+        '200':
+          description: The caller's signed-in installs, most recent first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [devices]
+                properties:
+                  devices:
+                    type: array
+                    items: { $ref: '#/components/schemas/Device' }
+  /devices/{deviceID}:
+    delete:
+      operationId: revokeDevice
+      tags: [devices]
+      parameters:
+        - $ref: '#/components/parameters/DeviceID'
+      responses:
+        '204': { description: Device signed out }
+        '404': { $ref: '#/components/responses/Error' }
+  /devices/{deviceID}/push:
+    put:
+      operationId: setDevicePush
+      tags: [devices]
+      parameters:
+        - $ref: '#/components/parameters/DeviceID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                token: { type: string, description: 'APNs device token, hex. Empty clears it.' }
+                environment: { type: string, enum: [sandbox, production] }
+      responses:
+        '204': { description: Stored }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /agents:
+    get:
+      operationId: listAgents
+      tags: [agents]
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - { name: search, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Agents in the caller's organization
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentPage' }
+  /agents/{agentID}:
+    get:
+      operationId: getAgent
+      tags: [agents]
+      parameters:
+        - { name: agentID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The agent
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Agent' }
+        '404': { $ref: '#/components/responses/Error' }
+  /agent-schemas:
+    get:
+      operationId: listAgentSchemas
+      tags: [agents]
+      description: Launch forms for every built-in specialist. Match an agent by `metadata.builtin`. Agents without a schema launch with a free-text prompt.
+      responses:
+        '200':
+          description: Schemas
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AgentSchema' }
+  /agent-schemas/generic:
+    get:
+      operationId: getGenericAgentSchema
+      tags: [agents]
+      description: Launch form for custom agents (no `metadata.builtin`).
+      responses:
+        '200':
+          description: Schema
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentSchema' }
+
+  /projects:
+    get:
+      operationId: listProjects
+      tags: [work]
+      description: '`/tasks/launch` needs a project for a new task.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Projects in the caller's organization
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectPage' }
+    post:
+      operationId: createProject
+      tags: [work]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 2 }
+                description: { type: string }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Project' }
+        '400': { $ref: '#/components/responses/Error' }
+
+  /tasks:
+    get:
+      operationId: listTasks
+      tags: [work]
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/TaskStatus' } }
+        - { name: project_id, in: query, schema: { type: string, format: uuid } }
+        - { name: assigned_agent_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Tasks
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskPage' }
+  /tasks/launch:
+    post:
+      operationId: launchTask
+      tags: [work]
+      description: Call an agent. Creates (or reuses) a board task and starts the agent with the schema values.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LaunchRequest' }
+      responses:
+        '200':
+          description: Launched
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LaunchResult' }
+        '400': { $ref: '#/components/responses/Error' }
+  /tasks/{taskID}:
+    get:
+      operationId: getTask
+      tags: [work]
+      parameters:
+        - $ref: '#/components/parameters/TaskID'
+      responses:
+        '200':
+          description: The task
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        '404': { $ref: '#/components/responses/Error' }
+  /tasks/{taskID}/runs:
+    get:
+      operationId: listTaskRuns
+      tags: [work]
+      parameters:
+        - $ref: '#/components/parameters/TaskID'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Runs of this task, newest first
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskRunPage' }
+  /task-runs/{runID}:
+    get:
+      operationId: getTaskRun
+      tags: [work]
+      parameters:
+        - { name: runID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The run (poll target)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskRun' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /approvals:
+    get:
+      operationId: listApprovals
+      tags: [approvals]
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [pending, approved, rejected] } }
+      responses:
+        '200':
+          description: Approvals, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Approval' }
+  /approvals/{approvalID}:
+    get:
+      operationId: getApproval
+      tags: [approvals]
+      parameters:
+        - $ref: '#/components/parameters/ApprovalID'
+      responses:
+        '200':
+          description: The approval
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Approval' }
+        '404': { $ref: '#/components/responses/Error' }
+  /approvals/{approvalID}/decide:
+    post:
+      operationId: decideApproval
+      tags: [approvals]
+      parameters:
+        - $ref: '#/components/parameters/ApprovalID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [approve, reject] }
+                reason: { type: string }
+      responses:
+        '200':
+          description: Decided; the paused execution resumes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Approval' }
+        '400': { $ref: '#/components/responses/Error' }
+
+  /scheduled-tasks:
+    get:
+      operationId: listSchedules
+      tags: [schedules]
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Schedules
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SchedulePage' }
+    post:
+      operationId: createSchedule
+      tags: [schedules]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScheduleRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Schedule' }
+        '400': { $ref: '#/components/responses/Error' }
+  /scheduled-tasks/{taskID}:
+    get:
+      operationId: getSchedule
+      tags: [schedules]
+      parameters:
+        - $ref: '#/components/parameters/TaskID'
+      responses:
+        '200':
+          description: The schedule
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Schedule' }
+    put:
+      operationId: updateSchedule
+      tags: [schedules]
+      description: Also how a schedule is paused and resumed (`status`).
+      parameters:
+        - $ref: '#/components/parameters/TaskID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScheduleUpdate' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Schedule' }
+    delete:
+      operationId: deleteSchedule
+      tags: [schedules]
+      parameters:
+        - $ref: '#/components/parameters/TaskID'
+      responses:
+        '204': { description: Deleted }
+
+  /ws:
+    get:
+      operationId: liveEvents
+      tags: [live]
+      description: WebSocket upgrade. Each text frame is a `LiveEvent` scoped to the caller's organization.
+      responses:
+        '101': { description: Switching protocols }
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Page: { name: page, in: query, schema: { type: integer, minimum: 1 } }
+    PerPage: { name: per_page, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
+    DeviceID: { name: deviceID, in: path, required: true, schema: { type: string, format: uuid } }
+    TaskID: { name: taskID, in: path, required: true, schema: { type: string, format: uuid } }
+    ApprovalID: { name: approvalID, in: path, required: true, schema: { type: string, format: uuid } }
+
+  responses:
+    Auth:
+      description: Signed in
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/AuthResponse' }
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+
+    DeviceInfo:
+      type: object
+      required: [platform]
+      properties:
+        id: { type: string, format: uuid, description: 'The device_id from an earlier sign-in, if kept.' }
+        platform: { type: string, enum: [ios, android] }
+        name: { type: string, maxLength: 255 }
+        app_version: { type: string, maxLength: 64 }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+        device: { $ref: '#/components/schemas/DeviceInfo' }
+    RegisterRequest:
+      type: object
+      required: [email, password, full_name, org_name]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8 }
+        full_name: { type: string, minLength: 2 }
+        org_name: { type: string, minLength: 2 }
+        device: { $ref: '#/components/schemas/DeviceInfo' }
+    AppleSignInRequest:
+      type: object
+      required: [identity_token, nonce]
+      properties:
+        identity_token: { type: string }
+        nonce: { type: string, description: The raw nonce from /auth/apple/nonce. }
+        full_name: { type: string, description: Apple only provides it on the first authorization. }
+        org_name: { type: string }
+        device: { $ref: '#/components/schemas/DeviceInfo' }
+    AuthResponse:
+      type: object
+      required: [access_token, refresh_token, user]
+      properties:
+        access_token: { type: string }
+        refresh_token: { type: string }
+        user: { $ref: '#/components/schemas/User' }
+        device_id: { type: string, format: uuid }
+    User:
+      type: object
+      required: [id, email, full_name, role]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string }
+        full_name: { type: string }
+        avatar_url: { type: [string, 'null'] }
+        role: { type: string }
+        org_id: { type: [string, 'null'], format: uuid }
+    Device:
+      type: object
+      required: [id, platform, name, app_version, has_push, created_at, last_seen_at]
+      properties:
+        id: { type: string, format: uuid }
+        platform: { type: string }
+        name: { type: string }
+        app_version: { type: string }
+        has_push: { type: boolean }
+        push_environment: { type: string }
+        created_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+
+    Agent:
+      type: object
+      required: [id, name, role, status, engine_type]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        role: { type: string }
+        description: { type: [string, 'null'] }
+        avatar_url: { type: [string, 'null'] }
+        status: { type: string, description: 'idle, active, paused or offline. Treat unknown values as idle.' }
+        model_name: { type: [string, 'null'] }
+        performance_score: { type: number }
+        engine_type: { type: string }
+        metadata:
+          type: object
+          description: '`builtin` names the specialist; match it to an AgentSchema.'
+          additionalProperties: true
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AgentPage:
+      type: object
+      required: [data, total, page, per_page, total_pages]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Agent' }
+        total: { type: integer }
+        page: { type: integer }
+        per_page: { type: integer }
+        total_pages: { type: integer }
+    AgentSchema:
+      type: object
+      required: [builtin, fields]
+      properties:
+        builtin: { type: string }
+        label: { type: string }
+        icon: { type: string }
+        hint: { type: string }
+        fields:
+          type: array
+          items: { $ref: '#/components/schemas/AgentSchemaField' }
+        require_any:
+          type: array
+          description: At least one field in each group must be filled.
+          items:
+            type: object
+            required: [keys]
+            properties:
+              keys:
+                type: array
+                items: { type: string }
+              question: { type: string }
+    AgentSchemaField:
+      type: object
+      required: [key, label, required]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        question: { type: string }
+        type: { type: string, description: 'text (default), textarea, number, select, url, email, ...' }
+        required: { type: boolean }
+        min_length: { type: integer }
+        min: { type: integer }
+        default: { type: string }
+        placeholder: { type: string }
+        help: { type: string }
+        group: { type: string }
+        options:
+          type: array
+          items:
+            type: object
+            required: [label, value]
+            properties:
+              label: { type: string }
+              value: { type: string }
+
+    Project:
+      type: object
+      required: [id, name, status]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: [string, 'null'] }
+        status: { type: string }
+    ProjectPage:
+      type: object
+      required: [data, total, page, per_page, total_pages]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Project' }
+        total: { type: integer }
+        page: { type: integer }
+        per_page: { type: integer }
+        total_pages: { type: integer }
+    TaskStatus:
+      type: string
+      enum: [backlog, todo, in_progress, review, done]
+    Task:
+      type: object
+      required: [id, project_id, title, status, priority, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        project_id: { type: string, format: uuid }
+        title: { type: string }
+        description: { type: [string, 'null'] }
+        status: { type: string, description: 'backlog, todo, in_progress, review or done.' }
+        priority: { type: string }
+        assigned_agent_id: { type: [string, 'null'], format: uuid }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        completed_at: { type: [string, 'null'], format: date-time }
+        last_run_id: { type: string, format: uuid }
+        last_run_status: { type: string }
+        last_run_at: { type: string, format: date-time }
+    TaskPage:
+      type: object
+      required: [data, total, page, per_page, total_pages]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Task' }
+        total: { type: integer }
+        page: { type: integer }
+        per_page: { type: integer }
+        total_pages: { type: integer }
+    TaskRun:
+      type: object
+      required: [id, task_id, agent_id, status]
+      properties:
+        id: { type: string, format: uuid }
+        task_id: { type: string, format: uuid }
+        agent_id: { type: string, format: uuid }
+        execution_id: { type: [string, 'null'], format: uuid }
+        status: { type: string, description: 'queued, running, completed or failed.' }
+        output: { type: [string, 'null'] }
+        error_message: { type: [string, 'null'] }
+        total_tokens: { type: integer }
+        cost_usd: { type: number }
+        latency_ms: { type: integer }
+    TaskRunPage:
+      type: object
+      required: [data, total, page, per_page, total_pages]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/TaskRun' }
+        total: { type: integer }
+        page: { type: integer }
+        per_page: { type: integer }
+        total_pages: { type: integer }
+    LaunchRequest:
+      type: object
+      required: [agent_id]
+      properties:
+        agent_id: { type: string, format: uuid }
+        project_id: { type: string, format: uuid, description: 'Required unless task_id is given.' }
+        task_id: { type: string, format: uuid, description: Re-run an existing task. }
+        values:
+          type: object
+          description: Field key → value, per the agent's schema.
+          additionalProperties: { type: string }
+    LaunchResult:
+      type: object
+      required: [kind]
+      properties:
+        task: { $ref: '#/components/schemas/Task' }
+        kind: { type: string }
+        run_id: { type: string, format: uuid }
+        evaluation_id: { type: string, format: uuid }
+        image_url: { type: string }
+        message: { type: string }
+
+    Approval:
+      type: object
+      required: [id, execution_id, agent_id, tool_name, status, requested_at]
+      properties:
+        id: { type: string, format: uuid }
+        execution_id: { type: string, format: uuid }
+        agent_id: { type: string, format: uuid }
+        tool_name: { type: string }
+        tool_input:
+          type: object
+          additionalProperties: true
+        status: { type: string, description: 'pending, approved or rejected.' }
+        reason: { type: [string, 'null'] }
+        requested_at: { type: string, format: date-time }
+        decided_by: { type: [string, 'null'], format: uuid }
+        decided_at: { type: [string, 'null'], format: date-time }
+
+    Schedule:
+      type: object
+      required: [id, name, task_type, schedule_type, status, run_count]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: [string, 'null'] }
+        task_type: { type: string }
+        agent_id: { type: [string, 'null'], format: uuid }
+        input_prompt: { type: string }
+        input_json:
+          type: object
+          additionalProperties: true
+        schedule_type: { type: string, description: 'cron, interval or once.' }
+        cron_expression: { type: [string, 'null'] }
+        interval_seconds: { type: [integer, 'null'] }
+        run_at: { type: [string, 'null'], format: date-time }
+        schedule_preset: { type: string }
+        status: { type: string, description: 'active, paused, completed or failed.' }
+        last_run_at: { type: [string, 'null'], format: date-time }
+        next_run_at: { type: [string, 'null'], format: date-time }
+        run_count: { type: integer }
+        max_runs: { type: [integer, 'null'] }
+    ScheduleRequest:
+      type: object
+      required: [name, task_type, schedule_type]
+      properties:
+        name: { type: string, minLength: 2 }
+        description: { type: string }
+        task_type: { type: string, enum: [agent, workflow, multi_agent, blog, career_scan, career_apply] }
+        agent_id: { type: string, format: uuid }
+        input_prompt: { type: string }
+        input_json:
+          type: object
+          additionalProperties: true
+        schedule_preset:
+          type: string
+          enum: [every_midnight, every_morning_9am, every_morning_10am, hourly, every_15m, every_5m, weekdays_9am, weekly_monday_9am]
+        schedule_type: { type: string, enum: [cron, interval, once] }
+        cron_expression: { type: string }
+        interval_seconds: { type: integer }
+        run_at: { type: string, format: date-time }
+    ScheduleUpdate:
+      type: object
+      description: Every field optional; only those sent change.
+      properties:
+        name: { type: string }
+        description: { type: string }
+        input_prompt: { type: string }
+        input_json:
+          type: object
+          additionalProperties: true
+        cron_expression: { type: string }
+        interval_seconds: { type: integer }
+        run_at: { type: string, format: date-time }
+        status: { type: string, enum: [active, paused, completed] }
+        max_runs: { type: integer }
+    SchedulePage:
+      type: object
+      required: [data, total, page, per_page, total_pages]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Schedule' }
+        total: { type: integer }
+        page: { type: integer }
+        per_page: { type: integer }
+        total_pages: { type: integer }
+
+
+    LiveEvent:
+      type: object
+      required: [type, payload, timestamp, org_id]
+      properties:
+        type:
+          type: string
+          description: 'task.transitioned, task.assigned, agent.status_changed, execution.status_changed, approval.requested, approval.decided or metrics.updated. Ignore unknown types.'
+        payload:
+          type: object
+          additionalProperties: true
+        timestamp: { type: string, format: date-time }
+        org_id: { type: string, format: uuid }

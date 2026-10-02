@@ -35,6 +35,9 @@ func (h *ApprovalHandler) List(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if out == nil {
+		out = []model.Approval{}
+	}
 	RespondJSON(w, http.StatusOK, out)
 }
 

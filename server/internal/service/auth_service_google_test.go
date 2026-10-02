@@ -204,7 +204,7 @@ func googleSvc(t *testing.T, users repository.UserRepository, orgs repository.Or
 		ClientSecret: "csecret",
 		RedirectURL:  "http://localhost/callback",
 	}
-	return NewAuthService(users, tokens, orgs, nil, nil, testJWT(t), g, cfg, zap.NewNop())
+	return NewAuthService(users, tokens, orgs, nil, nil, testJWT(t), g, cfg, MobileAuth{}, zap.NewNop())
 }
 
 func TestGoogleSignupThenTicket(t *testing.T) {
@@ -369,7 +369,7 @@ func TestGoogleInvalidState(t *testing.T) {
 }
 
 func TestGoogleNotConfigured(t *testing.T) {
-	svc := NewAuthService(newMemUsers(), &memTokens{}, &memOrgs{}, nil, nil, testJWT(t), nil, googleauth.Config{}, zap.NewNop())
+	svc := NewAuthService(newMemUsers(), &memTokens{}, &memOrgs{}, nil, nil, testJWT(t), nil, googleauth.Config{}, MobileAuth{}, zap.NewNop())
 	if svc.GoogleEnabled() {
 		t.Fatal("expected disabled")
 	}

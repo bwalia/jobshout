@@ -1,0 +1,56 @@
+name: iOS
+
+on:
+  pull_request:
+    paths:
+      - "ios/**"
+      - "server/api/openapi.yaml"
+      - ".github/workflows/ios.yml"
+  push:
+    branches: [master]
+    paths:
+      - "ios/**"
+      - "server/api/openapi.yaml"
+      - ".github/workflows/ios.yml"
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: iOS build & test
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Xcode
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_16*.app | sort -V | tail -1)"
+          xcodebuild -version
+
+      # Unit tests run on macOS: JobShoutKit builds for both platforms, which
+      # keeps them fast and simulator-free. This also regenerates the API
+      # client from server/api/openapi.yaml, so a spec change that breaks the
+      # app fails here.
+      - name: Package tests
+        working-directory: ios/JobShoutKit
+        run: swift test
+
+      - name: Generate project
+        working-directory: ios
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      # Ad-hoc signed ("-") so entitlements apply without a team. No
+      # credentials in CI; TestFlight lanes come with the App Store work.
+      - name: Build app (simulator)
+        working-directory: ios
+        run: |
+          xcodebuild build \
+            -project JobShout.xcodeproj -scheme JobShout -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -skipPackagePluginValidation \
+            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=
