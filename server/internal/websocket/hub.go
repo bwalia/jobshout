@@ -61,11 +61,18 @@ func (h *Hub) Run() {
 }
 
 // BroadcastToOrg enqueues an event for all clients belonging to the given org.
-// It is safe to call from any goroutine.
+// It is safe to call from any goroutine and never blocks: callers publish from
+// request and run paths, and a stalled hub must not stall them. Events are
+// refetch hints, so dropping one when the queue is full costs latency only.
 func (h *Hub) BroadcastToOrg(orgID string, event Event) {
 	// Stamp the org onto the event so recipients can verify the scope.
 	event.OrgID = orgID
-	h.broadcast <- event
+	select {
+	case h.broadcast <- event:
+	default:
+		h.logger.Warn("ws broadcast queue full; dropping event",
+			zap.String("type", event.Type), zap.String("org_id", orgID))
+	}
 }
 
 // Register enqueues a new client for the hub.

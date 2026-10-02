@@ -34,3 +34,9 @@ func (h *AgentSchemaHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	RespondJSON(w, http.StatusOK, out)
 }
+
+// Generic handles GET /agent-schemas/generic: the form for custom agents,
+// which have no builtin marker and so no entry in List.
+func (h *AgentSchemaHandler) Generic(w http.ResponseWriter, r *http.Request) {
+	RespondJSON(w, http.StatusOK, agentschema.GenericWire())
+}

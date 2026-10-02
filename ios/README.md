@@ -1,0 +1,89 @@
+# JobShout iOS
+
+Native SwiftUI client for the JobShout platform. Plan and scope:
+[`docs/plans/08-ios-app.md`](../docs/plans/08-ios-app.md).
+
+Phase 1 covers the core loop: sign in (Sign in with Apple or email), browse
+agents, **call an agent** with its server-defined launch form, watch the work
+live, and **approve or reject** what agents ask to do.
+
+## Layout
+
+```
+ios/
+├── project.yml        XcodeGen spec (the .xcodeproj is generated, not committed)
+├── App/               @main, push registration, assets, privacy manifest
+├── UITests/           end-to-end test against a running API
+└── JobShoutKit/       Swift package: everything else, testable on macOS
+    ├── JobShoutCore       environments, logging
+    ├── JobShoutAPI        client generated from server/api/openapi.yaml (symlink) + auth middleware
+    ├── JobShoutAuth       Keychain session, single-flight refresh, sign-in flows
+    ├── JobShoutLive       WebSocket live events with reconnect/backoff
+    └── JobShoutFeatures   screens and @Observable models
+```
+
+The API client is generated at build time by `swift-openapi-generator` from
+`server/api/openapi.yaml`. A Go test (`server/cmd/server/openapi_test.go`)
+fails if that spec documents a route the server doesn't register, so the app
+can't be built against an endpoint that doesn't exist.
+
+Launch forms are **not** coded per agent: the app renders
+`GET /agent-schemas` (or `/agent-schemas/generic` for custom agents), the same
+schema the web uses. A new specialist appears in the app with no app release.
+
+## Run
+
+```sh
+brew install xcodegen
+cd ios && xcodegen generate && open JobShout.xcodeproj
+```
+
+| Configuration | Ring | Bundle id |
+|---|---|---|
+| Debug | int | `com.jobshout.app.dev` |
+| Staging | acc | `com.jobshout.app.staging` |
+| Release | prod | `com.jobshout.app` |
+
+Set your team in Xcode (never commit `DEVELOPMENT_TEAM`). On the simulator,
+ad-hoc signing is enough: `CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual`.
+An unsigned build (`CODE_SIGNING_ALLOWED=NO`) has no Keychain access, so
+sign-in fails with "Couldn't store your sign-in securely".
+
+**Against a local server:** debug builds honour `JOBSHOUT_ENVIRONMENT=local`
+(and `JOBSHOUT_LOCAL_PORT`, default 8190):
+
+```sh
+SIMCTL_CHILD_JOBSHOUT_ENVIRONMENT=local SIMCTL_CHILD_JOBSHOUT_LOCAL_PORT=8190 \
+  xcrun simctl launch booted com.jobshout.app.dev
+```
+
+**Sign in with Apple** needs the bundle ids above in the ring's
+`APPLE_CLIENT_IDS` (Helm `apple.clientIds`) and the capability on the App ID.
+
+## Test
+
+```sh
+cd ios/JobShoutKit && swift test            # unit tests, macOS, no simulator
+```
+
+The UI test signs in and walks Home → Agents → Call agent → Work → task →
+Approvals → Me against a real server. It skips unless given an account:
+
+```sh
+TEST_RUNNER_JOBSHOUT_UITEST_EMAIL=you@example.com \
+TEST_RUNNER_JOBSHOUT_UITEST_PASSWORD=… \
+TEST_RUNNER_JOBSHOUT_UITEST_PORT=8190 \
+xcodebuild test -project JobShout.xcodeproj -scheme JobShout \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -skipPackagePluginValidation CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=
+```
+
+## Rules the code keeps
+
+- Tokens live only in the Keychain (`AfterFirstUnlockThisDeviceOnly`), never
+  in UserDefaults, logs or notifications.
+- Live events are hints to refetch; screens also poll while work is moving
+  and always show when data was last loaded.
+- Response status fields are strings, not enums, so a new server value can't
+  break decoding.
+- Approving an agent's action asks for Face ID / passcode first.

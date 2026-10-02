@@ -49,6 +49,12 @@ func All() []WireSchema {
 	return out
 }
 
+// GenericWire is the launch form for a custom (non-builtin) agent, for
+// clients that render schemas instead of hard-coding the fallback.
+func GenericWire() WireSchema {
+	return Wire(Generic())
+}
+
 // Wire converts a Schema to the API shape. Label/icon/tab are filled by the handler
 // from the module registry when present; this copies schema-owned fields.
 func Wire(s Schema) WireSchema {

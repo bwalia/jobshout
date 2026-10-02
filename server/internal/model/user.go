@@ -22,16 +22,18 @@ type User struct {
 
 // RegisterRequest is the payload for user registration.
 type RegisterRequest struct {
-	Email    string `json:"email" validate:"required,email"`
-	Password string `json:"password" validate:"required,min=8"`
-	FullName string `json:"full_name" validate:"required,min=2"`
-	OrgName  string `json:"org_name" validate:"required,min=2"`
+	Email    string      `json:"email" validate:"required,email"`
+	Password string      `json:"password" validate:"required,min=8"`
+	FullName string      `json:"full_name" validate:"required,min=2"`
+	OrgName  string      `json:"org_name" validate:"required,min=2"`
+	Device   *DeviceInfo `json:"device,omitempty"`
 }
 
 // LoginRequest is the payload for user login.
 type LoginRequest struct {
-	Email    string `json:"email" validate:"required,email"`
-	Password string `json:"password" validate:"required"`
+	Email    string      `json:"email" validate:"required,email"`
+	Password string      `json:"password" validate:"required"`
+	Device   *DeviceInfo `json:"device,omitempty"`
 }
 
 // AuthResponse is returned after successful login or registration.
@@ -39,6 +41,9 @@ type AuthResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
 	User         User   `json:"user"`
+	// DeviceID is set when the sign-in named a device. Native clients keep it
+	// and send it back on their next sign-in.
+	DeviceID *uuid.UUID `json:"device_id,omitempty"`
 }
 
 // RefreshRequest is the payload for token refresh.
@@ -79,4 +84,6 @@ type RefreshToken struct {
 	TokenHash string    `json:"-"`
 	ExpiresAt time.Time `json:"expires_at"`
 	CreatedAt time.Time `json:"created_at"`
+	// DeviceID binds the token to a signed-in install; nil for web sessions.
+	DeviceID *uuid.UUID `json:"device_id,omitempty"`
 }

@@ -318,6 +318,11 @@ mail:
 #
 # and name it in extraSecretRefs. The sidecar also needs OLLAMA_JWT_SECRET from
 # jobshout-secrets (same gateway as articles).
+# Sign in with Apple for the iOS app (docs/plans/08-ios-app.md). Bundle ids
+# accepted as the identity-token audience; empty disables it.
+apple:
+  clientIds: []
+
 reviewBot:
   enabled: false
   port: 8765

@@ -22,6 +22,7 @@ import (
 	"github.com/jobshout/server/internal/agentmodule"
 	"github.com/jobshout/server/internal/agentmodules"
 	"github.com/jobshout/server/internal/agentschema"
+	"github.com/jobshout/server/internal/appleauth"
 	"github.com/jobshout/server/internal/blog"
 	"github.com/jobshout/server/internal/bridge"
 	"github.com/jobshout/server/internal/chatagent"
@@ -31,6 +32,7 @@ import (
 	"github.com/jobshout/server/internal/course"
 	"github.com/jobshout/server/internal/creditcontroller"
 	"github.com/jobshout/server/internal/linuxpatch"
+	"github.com/jobshout/server/internal/liveevents"
 	"github.com/jobshout/server/internal/scheduler"
 	"github.com/jobshout/server/internal/secretsrot"
 	"github.com/jobshout/server/internal/simpro"
@@ -223,6 +225,15 @@ func main() {
 	pluginRepo := repository.NewPluginRepository(pool)
 	integRepo := repository.NewIntegrationRepository(pool)
 	linkRepo := repository.NewTaskLinkRepository(pool)
+
+	// ─── WebSocket hub ───────────────────────────────────────────────────────
+	// Built before the services so task, execution and approval writes can
+	// publish live events; the decorated repos are what every service gets.
+	hub := ws.NewHub(logger)
+	go hub.Run()
+	taskRepo = liveevents.NewTasks(taskRepo, projectRepo, hub, logger)
+	execRepo = liveevents.NewExecutions(execRepo, hub, logger)
+	approvalRepo = liveevents.NewApprovals(approvalRepo, hub, logger)
 	syncLogRepo := repository.NewSyncLogRepository(pool)
 	notifConfigRepo := repository.NewNotificationConfigRepository(pool)
 	mcpRepo := repository.NewMCPRepository(pool)
@@ -487,7 +498,18 @@ func main() {
 	} else {
 		logger.Info("google login oauth not configured (set GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET)")
 	}
-	authSvc := service.NewAuthService(userRepo, tokenRepo, orgRepo, agentRepo, rbacRepo, jwtSvc, googleID, googleCfg, logger)
+	appleCfg := appleauth.LoadConfig()
+	mobileAuth := service.MobileAuth{
+		Devices:    repository.NewDeviceRepository(pool),
+		Identities: repository.NewIdentityRepository(pool),
+	}
+	if appleCfg.Configured() {
+		mobileAuth.Apple = appleauth.NewVerifier(appleCfg, nil)
+		logger.Info("sign in with apple configured", zap.Strings("client_ids", appleCfg.ClientIDs))
+	} else {
+		logger.Info("sign in with apple not configured (set APPLE_CLIENT_IDS)")
+	}
+	authSvc := service.NewAuthService(userRepo, tokenRepo, orgRepo, agentRepo, rbacRepo, jwtSvc, googleID, googleCfg, mobileAuth, logger)
 	agentSvc := service.NewAgentService(agentRepo, logger)
 	agentPackStore := repository.NewAgentPackStore(pool)
 	agentPackSvc := service.NewAgentPackService(
@@ -975,10 +997,6 @@ func main() {
 		bridgeClient = bridge.NewClient(cfg.PythonSidecarURL, cfg.PythonSidecarSecret, logger)
 	}
 
-	// ─── WebSocket hub ───────────────────────────────────────────────────────
-	hub := ws.NewHub(logger)
-	go hub.Run()
-
 	// ─── Uploads ─────────────────────────────────────────────────────────────
 	// The MinIO client itself is built earlier, where image storage needs it.
 	var uploadHandler *handler.UploadHandler
@@ -1103,6 +1121,10 @@ func main() {
 		r.Get("/auth/google/start", authHandler.GoogleStart)
 		r.Get("/auth/google/callback", authHandler.GoogleCallback)
 		r.Post("/auth/google/complete", authHandler.GoogleComplete)
+		r.Post("/auth/logout", authHandler.Logout)
+		r.Get("/auth/apple/status", authHandler.AppleStatus)
+		r.Post("/auth/apple/nonce", authHandler.AppleNonce)
+		r.Post("/auth/apple", authHandler.AppleSignIn)
 		// Google redirects the browser here with ?code=&state= — no JWT.
 		r.Get("/mail/connection/oauth/callback", mailHandler.OAuthCallback)
 
@@ -1118,6 +1140,10 @@ func main() {
 
 			r.Get("/auth/me", authHandler.GetMe)
 			r.Patch("/auth/me", authHandler.UpdateProfile)
+			r.Post("/auth/logout-all", authHandler.LogoutAll)
+			r.Get("/devices", authHandler.ListDevices)
+			r.Delete("/devices/{deviceID}", authHandler.RevokeDevice)
+			r.Put("/devices/{deviceID}/push", authHandler.SetDevicePush)
 
 			// Agents
 			r.Route("/agents", func(r chi.Router) {
@@ -1181,6 +1207,7 @@ func main() {
 
 			// Tasks
 			r.Get("/agent-schemas", agentSchemaHandler.List)
+			r.Get("/agent-schemas/generic", agentSchemaHandler.Generic)
 			r.Route("/tasks", func(r chi.Router) {
 				r.Get("/", taskHandler.List)
 				r.Post("/", taskHandler.Create)

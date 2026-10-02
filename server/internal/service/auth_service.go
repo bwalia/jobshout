@@ -12,6 +12,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/jobshout/server/internal/agentmodule"
+	"github.com/jobshout/server/internal/appleauth"
 	"github.com/jobshout/server/internal/googleauth"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/repository"
@@ -29,6 +30,25 @@ type AuthService interface {
 	AbandonGoogle(ctx context.Context, state string) (intent string)
 	CompleteGoogle(ctx context.Context, state, code string) (ticket, intent string, err error)
 	ExchangeGoogleTicket(ctx context.Context, ticket string) (*model.AuthResponse, error)
+
+	// Native clients (auth_service_mobile.go).
+	Logout(ctx context.Context, refreshToken string) error
+	LogoutAll(ctx context.Context, userID uuid.UUID) error
+	ListDevices(ctx context.Context, userID uuid.UUID) ([]model.Device, error)
+	RevokeDevice(ctx context.Context, userID, deviceID uuid.UUID) error
+	SetDevicePush(ctx context.Context, userID, deviceID uuid.UUID, req model.DevicePushRequest) error
+	AppleEnabled() bool
+	AppleNonce(ctx context.Context) (nonce string, expiresAt time.Time, err error)
+	SignInWithApple(ctx context.Context, req model.AppleSignInRequest) (*model.AuthResponse, error)
+}
+
+// MobileAuth is what native sign-in needs on top of the web flows. Any nil
+// field disables the feature that needs it: without Devices, sign-ins are not
+// device-bound; without Identities or Apple, Sign in with Apple is off.
+type MobileAuth struct {
+	Devices    repository.DeviceRepository
+	Identities repository.IdentityRepository
+	Apple      appleauth.Verifier
 }
 
 type authService struct {
@@ -40,6 +60,7 @@ type authService struct {
 	jwtSvc    JWTService
 	google    googleauth.Identity
 	googleCfg googleauth.Config
+	mobile    MobileAuth
 	logger    *zap.Logger
 }
 
@@ -56,6 +77,7 @@ func NewAuthService(
 	jwtSvc JWTService,
 	google googleauth.Identity,
 	googleCfg googleauth.Config,
+	mobile MobileAuth,
 	logger *zap.Logger,
 ) AuthService {
 	return &authService{
@@ -67,6 +89,7 @@ func NewAuthService(
 		jwtSvc:    jwtSvc,
 		google:    google,
 		googleCfg: googleCfg,
+		mobile:    mobile,
 		logger:    logger,
 	}
 }
@@ -114,7 +137,7 @@ func (s *authService) Register(ctx context.Context, req model.RegisterRequest) (
 	s.seedOwnerRole(ctx, org.ID, user.ID)
 	s.seedBuiltinAgents(ctx, org.ID, user.ID)
 
-	return s.generateAuthResponse(ctx, user)
+	return s.authResponseForDevice(ctx, user, req.Device)
 }
 
 // seedOwnerRole creates the organization's system roles and grants the
@@ -199,7 +222,7 @@ func (s *authService) Login(ctx context.Context, req model.LoginRequest) (*model
 		return nil, ErrInvalidCredentials
 	}
 
-	return s.generateAuthResponse(ctx, user)
+	return s.authResponseForDevice(ctx, user, req.Device)
 }
 
 func (s *authService) RefreshToken(ctx context.Context, refreshToken string) (*model.AuthResponse, error) {
@@ -233,7 +256,11 @@ func (s *authService) RefreshToken(ctx context.Context, refreshToken string) (*m
 		return nil, ErrInvalidRefreshToken
 	}
 
-	return s.generateAuthResponse(ctx, user)
+	// The rotated token stays bound to the same install.
+	if stored.DeviceID != nil {
+		s.touchDevice(ctx, user.ID, *stored.DeviceID)
+	}
+	return s.issueTokens(ctx, user, stored.DeviceID)
 }
 
 func (s *authService) GetMe(ctx context.Context, userID uuid.UUID) (*model.User, error) {
@@ -270,6 +297,12 @@ func (s *authService) UpdateProfile(ctx context.Context, userID uuid.UUID, req m
 }
 
 func (s *authService) generateAuthResponse(ctx context.Context, user *model.User) (*model.AuthResponse, error) {
+	return s.issueTokens(ctx, user, nil)
+}
+
+// issueTokens mints an access token and a refresh token bound to deviceID
+// (nil for web sessions).
+func (s *authService) issueTokens(ctx context.Context, user *model.User, deviceID *uuid.UUID) (*model.AuthResponse, error) {
 	accessToken, err := s.jwtSvc.GenerateAccessToken(user.ID, user.Email, user.OrgID, user.Role)
 	if err != nil {
 		return nil, fmt.Errorf("generating access token: %w", err)
@@ -282,6 +315,7 @@ func (s *authService) generateAuthResponse(ctx context.Context, user *model.User
 		UserID:    user.ID,
 		TokenHash: refreshHash,
 		ExpiresAt: expiresAt,
+		DeviceID:  deviceID,
 	}
 	if err := s.tokenRepo.Save(ctx, storedToken); err != nil {
 		return nil, fmt.Errorf("saving refresh token: %w", err)
@@ -291,6 +325,7 @@ func (s *authService) generateAuthResponse(ctx context.Context, user *model.User
 		AccessToken:  accessToken,
 		RefreshToken: plainRefresh,
 		User:         *user,
+		DeviceID:     deviceID,
 	}, nil
 }
 
@@ -314,6 +349,10 @@ var (
 	ErrInvalidGoogleState      = authError("invalid or expired google sign-in state")
 	ErrInvalidGoogleTicket     = authError("invalid or expired google sign-in ticket")
 	ErrGoogleEmailNotVerified  = authError("google email is not verified")
+	ErrAppleAuthNotConfigured  = authError("sign in with apple is not configured")
+	ErrInvalidAppleToken       = authError("invalid sign in with apple token")
+	ErrAppleEmailRequired      = authError("apple did not share a verified email")
+	ErrDeviceNotFound          = authError("device not found")
 )
 
 type authError string

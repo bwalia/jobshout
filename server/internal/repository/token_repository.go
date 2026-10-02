@@ -30,24 +30,24 @@ func NewTokenRepository(pool *pgxpool.Pool) TokenRepository {
 
 func (r *tokenRepository) Save(ctx context.Context, token *model.RefreshToken) error {
 	query := `
-		INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at, created_at)
-		VALUES ($1, $2, $3, $4, NOW())
+		INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at, device_id, created_at)
+		VALUES ($1, $2, $3, $4, $5, NOW())
 		RETURNING created_at`
 
 	return r.pool.QueryRow(ctx, query,
-		token.ID, token.UserID, token.TokenHash, token.ExpiresAt,
+		token.ID, token.UserID, token.TokenHash, token.ExpiresAt, token.DeviceID,
 	).Scan(&token.CreatedAt)
 }
 
 func (r *tokenRepository) FindByHash(ctx context.Context, tokenHash string) (*model.RefreshToken, error) {
 	query := `
-		SELECT id, user_id, token_hash, expires_at, created_at
+		SELECT id, user_id, token_hash, expires_at, created_at, device_id
 		FROM refresh_tokens WHERE token_hash = $1`
 
 	token := &model.RefreshToken{}
 	err := r.pool.QueryRow(ctx, query, tokenHash).Scan(
 		&token.ID, &token.UserID, &token.TokenHash,
-		&token.ExpiresAt, &token.CreatedAt,
+		&token.ExpiresAt, &token.CreatedAt, &token.DeviceID,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
