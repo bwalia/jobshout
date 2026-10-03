@@ -31,6 +31,7 @@ import (
 	"github.com/jobshout/server/internal/costengine"
 	"github.com/jobshout/server/internal/course"
 	"github.com/jobshout/server/internal/creditcontroller"
+	"github.com/jobshout/server/internal/linkedin"
 	"github.com/jobshout/server/internal/linuxpatch"
 	"github.com/jobshout/server/internal/liveevents"
 	"github.com/jobshout/server/internal/scheduler"
@@ -794,6 +795,24 @@ func main() {
 		zap.Int("max_chapters", courseCfg.MaxChapters),
 		zap.Duration("chapter_budget", courseCfg.ChapterBudget),
 	)
+	// ─── LinkedIn Poster ────────────────────────────────────────────────────
+	linkedInCfg := linkedin.LoadConfig()
+	linkedInCfg.Provider = cfg.LLMProvider
+	linkedInCfg.InsightsSiteURL = cfg.JobshoutComSiteURL
+	var linkedInDrafter *linkedin.Drafter
+	if _, err := llmRouter.For(cfg.LLMProvider); err == nil {
+		linkedInDrafter = &linkedin.Drafter{LLM: llmRouter.Routed(cfg.LLMProvider), Cfg: linkedInCfg}
+	}
+	linkedInSvc := service.NewLinkedInService(repository.NewLinkedInRepository(pool), agentRepo,
+		linkedin.NewClient(linkedInCfg.APIVersion), linkedInDrafter, linkedInCfg, logger)
+	linkedInSvc.BindTasks(taskSvc)
+	logger.Info("linkedin poster initialised",
+		zap.Bool("configured", linkedInCfg.Configured()),
+		zap.Bool("llm", linkedInDrafter != nil),
+		zap.Bool("auto_draft", linkedInCfg.AutoDraft),
+		zap.String("api_version", linkedInCfg.APIVersion),
+	)
+
 	secretsRotCfg := secretsrot.LoadConfig()
 	secretsRotSvc := service.NewSecretsRotationService(secretsRotRunRepo, agentRepo, secretsRotCfg, logger)
 	logger.Info("secrets rotation agent initialised",
@@ -848,6 +867,7 @@ func main() {
 		SecretsRotation:  secretsRotSvc,
 		LinuxPatch:       linuxPatchSvc,
 		Course:           courseSvc,
+		LinkedIn:         linkedInSvc,
 	})
 
 	// ─── Autonomous agent engine ────────────────────────────────────────────
@@ -1050,6 +1070,7 @@ func main() {
 	wafLabHandler := handler.NewWAFLabHandler(wafLabSvc)
 	seoHandler := handler.NewSEOHandler(seoSvc)
 	courseHandler := handler.NewCourseHandler(courseSvc)
+	linkedInHandler := handler.NewLinkedInHandler(linkedInSvc, cfg.FrontendBaseURL)
 	secretsRotHandler := handler.NewSecretsRotationHandler(secretsRotSvc)
 	linuxPatchHandler := handler.NewLinuxPatchHandler(linuxPatchSvc)
 	abTestHandler := handler.NewABTestHandler(abTestSvc)
@@ -1127,6 +1148,8 @@ func main() {
 		r.Post("/auth/apple", authHandler.AppleSignIn)
 		// Google redirects the browser here with ?code=&state= — no JWT.
 		r.Get("/mail/connection/oauth/callback", mailHandler.OAuthCallback)
+		// LinkedIn redirects the browser here with ?code=&state= — no JWT.
+		r.Get("/linkedin/oauth/callback", linkedInHandler.OAuthCallback)
 
 		// Generated images are public. Keys embed UUIDs so they are not
 		// enumerable, and Cache-Control already marks them immutable. Auth
@@ -1449,6 +1472,16 @@ func main() {
 				r.Post("/runs/{runID}/cancel", courseHandler.CancelRun)
 			})
 
+			r.Route("/linkedin", func(r chi.Router) {
+				r.Get("/connection", linkedInHandler.Status)
+				r.Delete("/connection", linkedInHandler.Disconnect)
+				r.Post("/connection/oauth/start", linkedInHandler.StartConnect)
+				r.Get("/posts", linkedInHandler.ListPosts)
+				r.Patch("/posts/{postID}", linkedInHandler.UpdatePost)
+				r.Post("/posts/{postID}/redraft", linkedInHandler.Redraft)
+				r.Post("/posts/{postID}/publish", linkedInHandler.Publish)
+			})
+
 			r.Route("/secrets-rotation", func(r chi.Router) {
 				r.Get("/status", secretsRotHandler.Status)
 				r.Get("/runs", secretsRotHandler.ListRuns)
@@ -1769,6 +1802,8 @@ func main() {
 	// Course runs are resumed, not failed: pick up runs handed back at shutdown
 	// or left with a stale heartbeat by a killed pod.
 	go courseSvc.StartResumer(ctx)
+	// LinkedIn drafts for newly published articles, for orgs that connected it.
+	go linkedInSvc.StartAutoDraft(ctx)
 
 	srv := &http.Server{
 		Addr:    cfg.ServerPort,
