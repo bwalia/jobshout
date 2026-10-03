@@ -53,6 +53,20 @@ externalSecret:
 # does not break a deploy.
 extraSecretRefs: []
 
+# Secrets kept in Vault instead of created by hand. Each entry renders an
+# ExternalSecret that copies every key under `key` into a Secret called
+# `name`; list the same name in extraSecretRefs so the API loads it. Only the
+# Vault path is committed — the values never are.
+#
+#   vaultSecrets:
+#     - name: jobshout-linkedin
+#       store: wslvault-backend   # ClusterSecretStore
+#       key: jobshout/int/linkedin
+#
+# The API reads its environment at start, so restart it once after the first
+# sync (or a rotation) for new values to take effect.
+vaultSecrets: []
+
 # Fallback plaintext secrets, used ONLY when externalSecret.enabled=false.
 # On k3s1 that is every deploy, so these stay as placeholders: a real value
 # committed here would be public. Anything genuinely secret belongs in an
