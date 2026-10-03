@@ -1,8 +1,10 @@
+export type LLMProviderType = "ollama" | "openai" | "claude" | "gemini";
+
 export interface LLMProviderConfig {
   id: string;
   org_id: string;
   name: string;
-  provider_type: "ollama" | "openai" | "claude";
+  provider_type: LLMProviderType;
   base_url: string;
   api_key: string;
   default_model: string;
@@ -16,7 +18,7 @@ export interface LLMProviderConfig {
 
 export interface CreateLLMProviderRequest {
   name: string;
-  provider_type: "ollama" | "openai" | "claude";
+  provider_type: LLMProviderType;
   base_url: string;
   api_key?: string;
   default_model: string;

@@ -11,7 +11,7 @@ type LLMProviderConfig struct {
 	ID           uuid.UUID      `json:"id"`
 	OrgID        uuid.UUID      `json:"org_id"`
 	Name         string         `json:"name"`
-	ProviderType string         `json:"provider_type"` // ollama, openai, claude
+	ProviderType string         `json:"provider_type"` // ollama, openai, claude, gemini
 	BaseURL      string         `json:"base_url"`
 	APIKey       string         `json:"api_key,omitempty"` // masked in responses
 	DefaultModel string         `json:"default_model"`
@@ -25,7 +25,7 @@ type LLMProviderConfig struct {
 
 type CreateLLMProviderRequest struct {
 	Name         string         `json:"name" validate:"required,min=2"`
-	ProviderType string         `json:"provider_type" validate:"required,oneof=ollama openai claude"`
+	ProviderType string         `json:"provider_type" validate:"required,oneof=ollama openai claude gemini"`
 	BaseURL      string         `json:"base_url"`
 	APIKey       string         `json:"api_key"`
 	DefaultModel string         `json:"default_model" validate:"required"`

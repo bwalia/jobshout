@@ -8,9 +8,9 @@ import {
   useUpdateLLMProvider,
   useDeleteLLMProvider,
 } from "@/lib/hooks/useLLMProviders";
-import type { CreateLLMProviderRequest } from "@/lib/types/llm-provider";
+import type { CreateLLMProviderRequest, LLMProviderType } from "@/lib/types/llm-provider";
 
-const PROVIDER_PRESETS: Record<string, { base_url: string; models: string[] }> = {
+const PROVIDER_PRESETS: Record<LLMProviderType, { base_url: string; models: string[]; key_placeholder?: string }> = {
   ollama: {
     base_url: "http://localhost:11434",
     models: ["llama3", "llama3.1", "mistral", "codellama", "phi3", "gemma2", "qwen2"],
@@ -27,6 +27,11 @@ const PROVIDER_PRESETS: Record<string, { base_url: string; models: string[] }> =
       "claude-haiku-4-20250514",
       "claude-3-5-sonnet-20241022",
     ],
+  },
+  gemini: {
+    base_url: "https://generativelanguage.googleapis.com",
+    models: ["gemini-flash-latest", "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"],
+    key_placeholder: "AIza...",
   },
 };
 
@@ -57,7 +62,7 @@ export default function LLMProvidersPage() {
     is_default: false,
   });
 
-  function handleProviderTypeChange(type: "ollama" | "openai" | "claude") {
+  function handleProviderTypeChange(type: LLMProviderType) {
     const preset = PROVIDER_PRESETS[type];
     setForm({
       ...form,
@@ -156,13 +161,14 @@ export default function LLMProvidersPage() {
                 <select
                   value={form.provider_type}
                   onChange={(e) =>
-                    handleProviderTypeChange(e.target.value as "ollama" | "openai" | "claude")
+                    handleProviderTypeChange(e.target.value as LLMProviderType)
                   }
                   className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <option value="ollama">Ollama (Local)</option>
                   <option value="openai">OpenAI / Compatible</option>
                   <option value="claude">Claude (Anthropic)</option>
+                  <option value="gemini">Gemini (Google)</option>
                 </select>
               </div>
 
@@ -198,7 +204,7 @@ export default function LLMProvidersPage() {
                     type="password"
                     value={form.api_key}
                     onChange={(e) => setForm({ ...form, api_key: e.target.value })}
-                    placeholder="sk-..."
+                    placeholder={PROVIDER_PRESETS[form.provider_type]?.key_placeholder ?? "sk-..."}
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   />
                 </div>
@@ -256,6 +262,8 @@ export default function LLMProvidersPage() {
                         ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
                         : p.provider_type === "claude"
                         ? "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400"
+                        : p.provider_type === "gemini"
+                        ? "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400"
                         : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
                     }`}
                   >
