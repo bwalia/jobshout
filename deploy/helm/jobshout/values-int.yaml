@@ -25,6 +25,9 @@ extraSecretRefs:
   - jobshout-review
   - jobshout-mail
   - jobshout-google
+  # LinkedIn Poster: LINKEDIN_CLIENT_ID / LINKEDIN_CLIENT_SECRET / LINKEDIN_TOKEN_KEY.
+  # Without it the agent still drafts; connecting and posting stay disabled.
+  - jobshout-linkedin
   # wafLab.baseURL below is set, but the client stays disabled until it also has
   # a token (or username+password) — those arrive only through this secret.
   - jobshout-wslproxy
