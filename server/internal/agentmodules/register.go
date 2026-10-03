@@ -22,6 +22,7 @@ import (
 	"github.com/jobshout/server/internal/pentester"
 	"github.com/jobshout/server/internal/prreview"
 	"github.com/jobshout/server/internal/research"
+	"github.com/jobshout/server/internal/linkedin"
 	"github.com/jobshout/server/internal/linuxpatch"
 	"github.com/jobshout/server/internal/secretsrot"
 	"github.com/jobshout/server/internal/seo"
@@ -49,6 +50,7 @@ type Deps struct {
 	SecretsRotation  secretsrot.Runner
 	LinuxPatch       linuxpatch.Runner
 	Course           course.Runner
+	LinkedIn         linkedin.Runner
 }
 
 func init() {
@@ -81,6 +83,7 @@ func Register(d Deps) {
 	agentmodule.Register(secretsrot.Module(d.SecretsRotation))
 	agentmodule.Register(linuxpatch.Module(d.LinuxPatch))
 	agentmodule.Register(course.Module(d.Course))
+	agentmodule.Register(linkedin.Module(d.LinkedIn))
 }
 
 type imageAdapter struct{ svc *service.ImageService }

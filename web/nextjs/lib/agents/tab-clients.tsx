@@ -16,6 +16,7 @@ import { ArticlesView } from "@/components/articles/ArticlesView";
 import { ImagesView } from "@/components/image/ImagesView";
 import { CourseGeneratorClient } from "@/components/courses/CourseGeneratorClient";
 import { InsightsWriterClient } from "@/components/insights-writer/InsightsWriterClient";
+import { LinkedInClient } from "@/components/linkedin/LinkedInClient";
 
 /**
  * Optional product UI that owns the Task Manager tab (replaces the schema form).
@@ -43,4 +44,5 @@ export const AGENT_CLIENTS: Record<string, ComponentType> = {
   },
   course_generator: CourseGeneratorClient,
   jobshout_com_writer: InsightsWriterClient,
+  linkedin_poster: LinkedInClient,
 };
