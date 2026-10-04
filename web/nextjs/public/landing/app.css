@@ -49,8 +49,9 @@
   --sc-accent:      hsl(var(--brand-accent-h) var(--brand-accent-s) var(--brand-accent-l));
   --sc-accent-ink:  hsl(var(--brand-card-h) var(--brand-card-s) var(--brand-card-l));
 
-  --sc-font-display: "Outfit", system-ui, sans-serif;
-  --sc-font-text:    "Plus Jakarta Sans", system-ui, sans-serif;
+  /* The Workstation type system, as on workstation.co.uk. */
+  --sc-font-display: "Unbounded", "Poppins", sans-serif;
+  --sc-font-text:    "Poppins", "Helvetica Neue", Arial, sans-serif;
   --sc-font-mono:    "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 
   --sc-shadow-color: var(--brand-ink-h) var(--brand-ink-s) var(--brand-ink-l);

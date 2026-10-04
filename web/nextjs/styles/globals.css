@@ -164,19 +164,28 @@
   body {
     @apply bg-background text-foreground antialiased;
   }
-  /* Headings default to the display face at a real weight. Utilities still
-     win (Tailwind sits above @layer base), so a component asking for
-     font-semibold keeps it — this is the floor, not a ceiling. */
+  /* Headings follow workstation.co.uk: Unbounded for h1/h2, Poppins for
+     h3/h4, on the same fluid scale. Utilities still win (Tailwind sits above
+     @layer base), so a component asking for text-lg or font-semibold keeps
+     it — this is the floor, not a ceiling. */
   h1, h2, h3, h4 {
-    font-family: var(--font-display), var(--font-sans), system-ui, sans-serif;
+    font-family: var(--font-sans), "Helvetica Neue", Arial, sans-serif;
     font-weight: 700;
-    letter-spacing: -0.015em;
+    line-height: 1.3;
+    letter-spacing: -0.02em;
     text-wrap: balance;
   }
-  h1 { @apply text-3xl; }
-  h2 { @apply text-2xl; }
-  h3 { @apply text-xl; }
-  h4 { @apply text-lg; }
+  h1, h2 {
+    font-family: var(--font-display), var(--font-sans), sans-serif;
+  }
+  h1 { font-size: clamp(1.75rem, 1.25rem + 2vw, 2.6rem); }
+  h2 { font-size: clamp(1.4rem, 1.1rem + 1.2vw, 2rem); }
+  h3 {
+    font-size: clamp(1.1rem, 1rem + 0.45vw, 1.3rem);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  h4 { font-size: 1.125rem; }
   .tabular {
     font-family: var(--font-mono), ui-monospace, monospace;
     font-variant-numeric: tabular-nums;

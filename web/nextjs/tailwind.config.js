@@ -11,9 +11,8 @@ module.exports = {
       fontFamily: {
         sans: [
           "var(--font-sans)",
-          "-apple-system",
-          "BlinkMacSystemFont",
-          "Segoe UI",
+          "Helvetica Neue",
+          "Arial",
           "sans-serif",
         ],
         display: [
@@ -42,7 +41,7 @@ module.exports = {
         "2xs": ["11px", { lineHeight: "15px", letterSpacing: "0.02em" }],
         xs: ["13px", { lineHeight: "18px" }],
         sm: ["14px", { lineHeight: "21px" }],
-        base: ["16px", { lineHeight: "25px" }],
+        base: ["16px", { lineHeight: "24px" }],
         lg: ["18px", { lineHeight: "27px" }],
         xl: ["20px", { lineHeight: "29px", letterSpacing: "-0.01em" }],
         "2xl": ["25px", { lineHeight: "33px", letterSpacing: "-0.015em" }],
