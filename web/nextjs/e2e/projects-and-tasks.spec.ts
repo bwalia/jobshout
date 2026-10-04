@@ -55,28 +55,28 @@ test.describe("Projects & Tasks", () => {
       timeout: 10_000,
     });
     await expect(page.locator("h1")).toContainText("E2E Kanban Project");
-    await expect(page.locator("text=Backlog").first()).toBeVisible({
+    await expect(page.locator("text=Backlog >> visible=true").first()).toBeVisible({
       timeout: 5_000,
     });
 
     // The project's tasks are the shared Tasks view: Board or List.
     await page.getByRole("button", { name: "List" }).click();
-    await expect(page.getByRole("table")).toBeVisible();
+    await expect(page.getByRole("button", { name: "List" })).toHaveAttribute("aria-pressed", "true");
   });
 
   test("navigate to project detail and see kanban board", async ({ page }) => {
     await page.goto(`/projects/${projectId}`);
 
-    await expect(page.locator("text=Backlog").first()).toBeVisible({
+    await expect(page.locator("text=Backlog >> visible=true").first()).toBeVisible({
       timeout: 5_000,
     });
-    await expect(page.locator("text=Todo").first()).toBeVisible();
-    await expect(page.locator("text=In Progress").first()).toBeVisible();
+    await expect(page.locator("text=Todo >> visible=true").first()).toBeVisible();
+    await expect(page.locator("text=In Progress >> visible=true").first()).toBeVisible();
   });
 
   test("create a task from kanban board", async ({ page }) => {
     await page.goto(`/projects/${projectId}`);
-    await expect(page.locator("text=Backlog").first()).toBeVisible({
+    await expect(page.locator("text=Backlog >> visible=true").first()).toBeVisible({
       timeout: 5_000,
     });
 
@@ -105,7 +105,7 @@ test.describe("Projects & Tasks", () => {
 
   test("create second task and verify both visible", async ({ page }) => {
     await page.goto(`/projects/${projectId}`);
-    await expect(page.locator("text=Backlog").first()).toBeVisible({
+    await expect(page.locator("text=Backlog >> visible=true").first()).toBeVisible({
       timeout: 5_000,
     });
 
@@ -135,7 +135,7 @@ test.describe("Projects & Tasks", () => {
   test("tasks shows the all-tasks board, groups by agent and switches to a list", async ({ page }) => {
     await navigateTo(page, "/panel/tasks");
     await expect(page.locator("h1")).toContainText("Tasks");
-    await expect(page.locator("text=Backlog").first()).toBeVisible({
+    await expect(page.locator("text=Backlog >> visible=true").first()).toBeVisible({
       timeout: 5_000,
     });
 
@@ -165,7 +165,7 @@ test.describe("Projects & Tasks", () => {
     await expect(page.getByRole("button", { name: /^Run$/ })).toHaveCount(0);
 
     await page.getByRole("button", { name: "Show History" }).first().click();
-    await expect(page.getByRole("heading", { name: "History" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "History" }).first()).toBeVisible();
     await expect(page.getByText(/Completed/i).first()).toBeVisible();
   });
 

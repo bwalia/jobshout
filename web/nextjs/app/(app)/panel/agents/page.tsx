@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, Bot, CheckCircle2, Cpu, Download, Loader2, Plus, Search } from "lucide-react";
 import { CreateAgentDialog } from "@/components/agent/CreateAgentDialog";
@@ -12,7 +12,7 @@ import { useBlogConfig } from "@/lib/hooks/useBlog";
 import { useRunFailures, type AgentRunStats } from "@/lib/hooks/useRunFailures";
 import type { Agent } from "@/lib/types/agent";
 import { cn } from "@/lib/utils/cn";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 
 /** The engine_config key the server reads the structured model from. */
 const STRUCTURED_MODEL_KEY = "structured_model";
@@ -71,24 +71,23 @@ function LastRunCell({ stats }: { stats?: AgentRunStats }) {
  * its Models tab.
  */
 export default function AgentsPage() {
-  // useSearchParams on a static route needs a Suspense boundary to build.
-  return (
-    <Suspense fallback={null}>
-      <AgentsList />
-    </Suspense>
-  );
-}
-
-function AgentsList() {
   const router = useRouter();
-  const params = useSearchParams();
   const { data, isLoading } = useAgents({ per_page: 100 });
   const { data: blogConfig } = useBlogConfig();
   const { byAgent } = useRunFailures();
   const [query, setQuery] = useState("");
-  // ?new=1 (the palette's "New agent") opens the create dialog straight away.
-  const [createOpen, setCreateOpen] = useState(params.get("new") === "1");
-  const [importOpen, setImportOpen] = useState(params.get("import") === "1");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+
+  // ?new=1 (the palette's "New agent") and ?import=1 open their dialogs.
+  // Read once from the location rather than useSearchParams, which on this
+  // static route would need a Suspense boundary that can remount the page
+  // (and an open dialog) while it hydrates.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    if (q.get("new") === "1") setCreateOpen(true);
+    if (q.get("import") === "1") setImportOpen(true);
+  }, []);
 
   const agents = useMemo(() => {
     const q = query.trim().toLowerCase();

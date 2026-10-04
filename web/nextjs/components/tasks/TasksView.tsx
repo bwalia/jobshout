@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { AlertTriangle, LayoutGrid, List, Loader2, Plus, Search, X } from "lucide-react";
@@ -152,6 +152,7 @@ export function TasksView({ lockedProjectId }: { lockedProjectId?: string }) {
   const closeTask = () => setParams({ task: null, run: null });
 
   const wantsNew = params.get("new") === "1";
+  const opened = useRef(false);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -388,9 +389,20 @@ export function TasksView({ lockedProjectId }: { lockedProjectId?: string }) {
           projects={projectFilter ? undefined : projects}
           agents={agents}
           initialAgentId={agentFilter && agentFilter !== "none" ? agentFilter : undefined}
-          onClose={() => setParams({ new: null })}
-          onSaved={(t) => setParams({ new: null, task: t.id })}
-          onLaunched={(result) => setParams({ new: null, task: result.task.id, run: result.run_id ?? null })}
+          // The editor calls onSaved/onLaunched and then onClose; closing must
+          // not rewrite the URL from stale params and drop the task just opened.
+          onClose={() => {
+            if (opened.current) opened.current = false;
+            else setParams({ new: null });
+          }}
+          onSaved={(t) => {
+            opened.current = true;
+            setParams({ new: null, task: t.id });
+          }}
+          onLaunched={(result) => {
+            opened.current = true;
+            setParams({ new: null, task: result.task.id, run: result.run_id ?? null });
+          }}
         />
       )}
       {selected && (

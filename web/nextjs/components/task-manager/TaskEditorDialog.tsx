@@ -355,6 +355,11 @@ function CreateTaskForm({
   const createTask = useCreateTask();
   const [agentId, setAgentId] = useState(initialAgentId ?? "");
   const [projectId, setProjectId] = useState(fixedProjectId ?? "");
+  // Preselect a project so New task is one step; the picker still shows it
+  // and it can be changed. Projects may arrive after the dialog opens.
+  useEffect(() => {
+    if (!projectId && projects?.length) setProjectId(projects[0].id);
+  }, [projectId, projects]);
   const [priority, setPriority] = useState<Priority>("medium");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
