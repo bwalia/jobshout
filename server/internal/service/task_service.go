@@ -196,6 +196,9 @@ func (s *taskService) Update(ctx context.Context, id uuid.UUID, req model.Update
 	if req.Metadata != nil {
 		task.Metadata = req.Metadata
 	}
+	if req.ModelOverride != nil {
+		task.Metadata = model.WithModelOverride(task.Metadata, *req.ModelOverride)
+	}
 
 	nextStatus := ""
 	if req.Status != nil {

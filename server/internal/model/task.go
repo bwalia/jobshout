@@ -59,6 +59,60 @@ type UpdateTaskRequest struct {
 	StoryPoints     *int           `json:"story_points"`
 	DueDate         OptionalString `json:"due_date"`
 	Metadata        map[string]any `json:"metadata,omitempty"`
+	// ModelOverride sets which model this task's runs use instead of the
+	// agent's. Absent leaves it unchanged; an empty provider and model clear
+	// it. Stored under metadata["model_override"], merged so other metadata
+	// keys (launch values, run_id) are kept.
+	ModelOverride *TaskModelOverride `json:"model_override,omitempty"`
+}
+
+// TaskModelOverride is a task's own model choice. Empty means "use the agent's".
+type TaskModelOverride struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+}
+
+// IsZero reports whether the override names nothing.
+func (o TaskModelOverride) IsZero() bool {
+	return strings.TrimSpace(o.Provider) == "" && strings.TrimSpace(o.Model) == ""
+}
+
+// TaskMetaModelOverride is the metadata key a task's model override lives under.
+const TaskMetaModelOverride = "model_override"
+
+// ModelOverrideFrom reads a task's model override from its metadata. Nil when
+// unset or malformed: a bad value must not break running the task.
+func ModelOverrideFrom(meta map[string]any) *TaskModelOverride {
+	raw, ok := meta[TaskMetaModelOverride].(map[string]any)
+	if !ok {
+		return nil
+	}
+	o := TaskModelOverride{}
+	o.Provider, _ = raw["provider"].(string)
+	o.Model, _ = raw["model"].(string)
+	o.Provider, o.Model = strings.TrimSpace(o.Provider), strings.TrimSpace(o.Model)
+	if o.IsZero() {
+		return nil
+	}
+	return &o
+}
+
+// WithModelOverride returns a copy of meta with the override set, or removed
+// when o is zero. Other keys are untouched.
+func WithModelOverride(meta map[string]any, o TaskModelOverride) map[string]any {
+	out := make(map[string]any, len(meta)+1)
+	for k, v := range meta {
+		out[k] = v
+	}
+	if o.IsZero() {
+		delete(out, TaskMetaModelOverride)
+		return out
+	}
+	out[TaskMetaModelOverride] = map[string]any{
+		"provider": strings.TrimSpace(o.Provider),
+		"model":    strings.TrimSpace(o.Model),
+	}
+	return out
 }
 
 type TransitionTaskRequest struct {

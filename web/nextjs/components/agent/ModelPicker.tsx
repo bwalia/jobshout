@@ -31,6 +31,8 @@ interface ModelPickerProps {
   recommended?: string;
   /** What an unset choice resolves to, shown on the default option. */
   inheritedModel?: string;
+  /** Label for the empty choice; defaults to "Platform default". */
+  defaultLabel?: string;
 }
 
 /** How a provider key is titled in the dropdown. */
@@ -102,15 +104,14 @@ export function ModelPicker({
   providerFilter,
   recommended,
   inheritedModel,
+  defaultLabel = "Platform default",
 }: ModelPickerProps) {
   const { data, isLoading, isError } = useAvailableModels();
 
   const options = useMemo<Option[]>(() => {
     const out: Option[] = [
       {
-        label: inheritedModel
-          ? `Platform default (${inheritedModel})`
-          : "Platform default",
+        label: inheritedModel ? `${defaultLabel} (${inheritedModel})` : defaultLabel,
         selection: { provider: "", model: "" },
         group: "Default",
       },
@@ -155,7 +156,7 @@ export function ModelPicker({
     }
 
     return out;
-  }, [data, includeAuto, providerFilter, recommended, inheritedModel]);
+  }, [data, includeAuto, providerFilter, recommended, inheritedModel, defaultLabel]);
 
   const missingRecommended = options.find((o) => o.disabled)?.selection;
 
