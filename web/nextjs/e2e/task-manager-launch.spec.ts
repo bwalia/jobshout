@@ -3,7 +3,7 @@ import { registerViaAPI, loginViaUI, navigateTo, createProjectViaAPI } from "./h
 
 let creds: { email: string; password: string; token: string };
 
-test.describe("Task Manager launch fields", () => {
+test.describe("New task launch fields", () => {
   test.beforeAll(async () => {
     creds = await registerViaAPI("tm-launch");
     await createProjectViaAPI(creds.token, { name: "Launch Board" });
@@ -16,10 +16,10 @@ test.describe("Task Manager launch fields", () => {
   test("Article Writer, Research Agent, Mail Agent, and Image Generator show their fields", async ({
     page,
   }) => {
-    await navigateTo(page, "/panel/task-manager");
-    await expect(page.locator("h1")).toContainText("Task Manager");
+    await navigateTo(page, "/panel/tasks");
+    await expect(page.locator("h1")).toContainText("Tasks");
 
-    await page.click('button:has-text("New task")');
+    await page.getByRole("main").getByRole("button", { name: "New task" }).click();
     await expect(page.getByRole("heading", { name: /new task/i })).toBeVisible({
       timeout: 8_000,
     });
@@ -66,8 +66,8 @@ test.describe("Task Manager launch fields", () => {
   test("Run on a created task reuses the saved topic instead of a blank form", async ({
     page,
   }) => {
-    await navigateTo(page, "/panel/task-manager");
-    await page.click('button:has-text("New task")');
+    await navigateTo(page, "/panel/tasks");
+    await page.getByRole("main").getByRole("button", { name: "New task" }).click();
     const agentSelect = page.locator("#create-task-agent");
     const value = await agentSelect
       .locator("option", { hasText: "Research Agent" })

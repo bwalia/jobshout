@@ -36,7 +36,9 @@ test.describe("Articles", () => {
 
   test("articles page loads with an empty state", async ({ page }) => {
     await navigateTo(page, "/articles");
-    await expect(page.locator("h1")).toContainText("Articles");
+    // The Article Writer's workspace tab on its agent profile.
+    await page.waitForURL(/\/panel\/agents\/[0-9a-f-]{36}\?tab=workspace/, { timeout: 15_000 });
+    await expect(page.locator("h1")).toContainText("Article Writer");
     await expect(page.getByText("No articles yet.")).toBeVisible({
       timeout: 5_000,
     });

@@ -27,9 +27,9 @@ test.describe("Full E2E Flow", () => {
     await page.waitForURL("**/chat**", { timeout: 15_000 });
     await expect(page.getByRole("button", { name: /new chat/i })).toBeVisible();
 
-    // ── Step 2: Task Manager — create agent ──
-    await page.goto("/panel/task-manager");
-    await expect(page.locator("h1").first()).toContainText("Task Manager");
+    // ── Step 2: All agents — create agent ──
+    await page.goto("/panel/agents");
+    await expect(page.locator("h1").first()).toContainText("All agents");
 
     await page.click('button:has-text("New agent")');
     await expect(page.locator('[role="dialog"]')).toBeVisible();
@@ -45,6 +45,7 @@ test.describe("Full E2E Flow", () => {
     });
 
     // ── Step 3: Create a Project via dialog ──
+    await page.goto("/panel/projects");
     await page.click('button:has-text("New project")');
     await page.fill("#project-name", "Flow Test Project");
     await page.fill("#project-desc", "Full E2E test project");
@@ -55,7 +56,8 @@ test.describe("Full E2E Flow", () => {
     });
 
     // ── Step 4: Create a task ──
-    await page.click('button:has-text("New task")');
+    await page.goto("/panel/tasks");
+    await page.getByRole("main").getByRole("button", { name: "New task" }).click();
     await expect(page.getByText(/new task|create task/i).first()).toBeVisible({
       timeout: 5_000,
     });

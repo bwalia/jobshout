@@ -101,7 +101,7 @@ test.describe("Career Agent", () => {
     expect(art.body_markdown.length).toBeGreaterThan(0);
   });
 
-  test("Career Agent panel opens in Task Manager", async ({ page }) => {
+  test("Career Agent workspace opens from the old Task Manager link", async ({ page }) => {
     await loginViaUI(page, creds.email, creds.password);
     await navigateTo(page, "/panel/task-manager?agent=career");
     await expect(page.getByRole("heading", { name: "Career Agent" })).toBeVisible({

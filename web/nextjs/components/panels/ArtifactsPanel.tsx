@@ -200,7 +200,7 @@ export function ArtifactsPanel() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-foreground">
-            Artifacts
+            Outputs
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Articles and other work agents have produced. Open one to review it.

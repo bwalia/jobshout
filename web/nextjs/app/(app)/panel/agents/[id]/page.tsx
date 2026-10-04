@@ -1031,6 +1031,12 @@ export default function AgentProfilePage() {
           {/* Performance score badge */}
           <div className="flex flex-col items-start gap-2 sm:items-end">
             <div className="flex flex-wrap justify-end gap-2">
+              <Link
+                href={`/panel/tasks?new=1&agent=${agent.id}`}
+                className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:opacity-90"
+              >
+                New task
+              </Link>
               <ExportAgentButton agentId={agent.id} />
               <RemoveAgentButton
                 agent={agent}

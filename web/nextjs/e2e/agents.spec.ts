@@ -4,7 +4,7 @@ import { registerViaAPI, loginViaUI, navigateTo } from "./helpers";
 
 let creds: { email: string; password: string; token: string };
 
-test.describe("Agents (Task Manager panel)", () => {
+test.describe("Agents (All agents + profile)", () => {
   test.beforeAll(async () => {
     creds = await registerViaAPI("agents");
   });
@@ -13,14 +13,14 @@ test.describe("Agents (Task Manager panel)", () => {
     await loginViaUI(page, creds.email, creds.password);
   });
 
-  test("old /agents route lands in Task Manager", async ({ page }) => {
+  test("old /agents route lands on All agents", async ({ page }) => {
     await navigateTo(page, "/agents");
-    await page.waitForURL("**/panel/task-manager**", { timeout: 10_000 });
-    await expect(page.locator("h1")).toContainText("Task Manager");
+    await page.waitForURL("**/panel/agents**", { timeout: 10_000 });
+    await expect(page.locator("h1")).toContainText("All agents");
   });
 
   test("create agent via dialog", async ({ page }) => {
-    await navigateTo(page, "/panel/task-manager");
+    await navigateTo(page, "/panel/agents");
 
     await page.click('button:has-text("New agent")');
     await expect(page.locator('[role="dialog"]')).toBeVisible();
@@ -47,33 +47,31 @@ test.describe("Agents (Task Manager panel)", () => {
       timeout: 5_000,
     });
 
-    // Agent should appear in the master rail
+    // Agent should appear in the All agents table
     await expect(
       page.locator("text=Playwright Test Agent").first(),
     ).toBeVisible({ timeout: 5_000 });
   });
 
-  test("agent detail shows and links to full profile", async ({ page }) => {
-    await navigateTo(page, "/panel/task-manager");
-
-    await page
-      .locator('button:has-text("Playwright Test Agent")')
-      .first()
-      .click();
+  test("agent row opens its profile", async ({ page }) => {
+    await navigateTo(page, "/panel/agents");
     await expect(page.locator("text=e2e-tester").first()).toBeVisible({
       timeout: 5_000,
     });
 
-    await page.click('a:has-text("Full profile")');
-    await page.waitForURL("**/agents/**", { timeout: 5_000 });
-    await expect(page.locator("text=Overview")).toBeVisible();
+    await page.getByRole("link", { name: "Playwright Test Agent" }).first().click();
+    await page.waitForURL("**/panel/agents/**", { timeout: 5_000 });
+    await expect(page.getByRole("button", { name: "Overview" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Export" })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Breadcrumb" })).toContainText(
+      "Playwright Test Agent"
+    );
   });
 
   test("create agent validation - empty name shows error", async ({
     page,
   }) => {
-    await navigateTo(page, "/panel/task-manager");
+    await navigateTo(page, "/panel/agents");
 
     await page.click('button:has-text("New agent")');
     await expect(page.locator('[role="dialog"]')).toBeVisible();
@@ -85,19 +83,19 @@ test.describe("Agents (Task Manager panel)", () => {
     await expect(page.locator('[role="dialog"]')).toBeVisible();
   });
 
-  test("import and export controls are on Task Manager", async ({ page }) => {
-    await navigateTo(page, "/panel/task-manager");
-    await expect(page.getByRole("button", { name: "Import agent" })).toBeVisible();
+  test("import is on All agents, export on the profile", async ({ page }) => {
+    await navigateTo(page, "/panel/agents");
+    await expect(page.getByRole("button", { name: "Import", exact: true })).toBeVisible();
 
-    await page.locator('button:has-text("Playwright Test Agent")').first().click();
+    await page.getByRole("link", { name: "Playwright Test Agent" }).first().click();
     await expect(page.getByRole("button", { name: "Export" })).toBeVisible();
   });
 
   test("export downloads a package without org_id or secrets", async ({
     page,
   }) => {
-    await navigateTo(page, "/panel/task-manager");
-    await page.locator('button:has-text("Playwright Test Agent")').first().click();
+    await navigateTo(page, "/panel/agents");
+    await page.getByRole("link", { name: "Playwright Test Agent" }).first().click();
     await expect(page.getByRole("button", { name: "Export" })).toBeVisible();
 
     const [download] = await Promise.all([
@@ -127,8 +125,8 @@ test.describe("Agents (Task Manager panel)", () => {
   test("import rejects invalid files then creates a custom agent", async ({
     page,
   }) => {
-    await navigateTo(page, "/panel/task-manager");
-    await page.getByRole("button", { name: "Import agent" }).click();
+    await navigateTo(page, "/panel/agents");
+    await page.getByRole("button", { name: "Import", exact: true }).click();
     await expect(page.getByRole("dialog", { name: "Import agent" })).toBeVisible();
 
     await page.locator("#agent-pack-file").setInputFiles({
@@ -186,7 +184,7 @@ test.describe("Agents (Task Manager panel)", () => {
     await expect(page.getByRole("dialog", { name: "Import agent" })).not.toBeVisible({
       timeout: 10_000,
     });
-    await expect(page).toHaveURL(/agent=/);
+    await expect(page).toHaveURL(/\/panel\/agents\/[0-9a-f-]{36}/);
     await expect(page.getByRole("heading", { name })).toBeVisible({
       timeout: 5_000,
     });
@@ -201,8 +199,8 @@ test.describe("Agents (Task Manager panel)", () => {
   test("import of a seeded specialist shows overlay confirm copy", async ({
     page,
   }) => {
-    await navigateTo(page, "/panel/task-manager");
-    await page.getByRole("button", { name: "Import agent" }).click();
+    await navigateTo(page, "/panel/agents");
+    await page.getByRole("button", { name: "Import", exact: true }).click();
     await page.locator("#agent-pack-file").setInputFiles({
       name: "mail.jobshout-agent.json",
       mimeType: "application/json",
@@ -229,8 +227,9 @@ test.describe("Agents (Task Manager panel)", () => {
     await page.getByRole("button", { name: "Cancel" }).click();
   });
 
-  test("specialist tab has export and no remove", async ({ page }) => {
+  test("old Task Manager link opens the specialist's workspace, with export and no remove", async ({ page }) => {
     await navigateTo(page, "/panel/task-manager?agent=mail");
+    await page.waitForURL(/\/panel\/agents\/[0-9a-f-]{36}\?tab=workspace/, { timeout: 15_000 });
     await expect(page.getByRole("heading", { name: "Mail Agent" })).toBeVisible({
       timeout: 10_000,
     });

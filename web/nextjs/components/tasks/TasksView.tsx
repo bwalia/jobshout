@@ -6,7 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { AlertTriangle, LayoutGrid, List, Loader2, Plus, Search, X } from "lucide-react";
 import { KanbanBoard } from "@/components/kanban/KanbanBoard";
 import { TaskCardFace } from "@/components/kanban/TaskCard";
-import { CreateTaskDialog } from "@/components/kanban/CreateTaskDialog";
+import { TaskEditorDialog } from "@/components/task-manager/TaskEditorDialog";
 import { TaskDetailModal } from "@/components/kanban/TaskDetailModal";
 import { TaskProgressChip, TaskCountLabel } from "@/components/task-manager/TaskProgressChip";
 import { agentHref } from "@/lib/agents/links";
@@ -151,10 +151,7 @@ export function TasksView({ lockedProjectId }: { lockedProjectId?: string }) {
   };
   const closeTask = () => setParams({ task: null, run: null });
 
-  // New task: straight into the dialog when the project is known, else ask.
   const wantsNew = params.get("new") === "1";
-  const [pickedProject, setPickedProject] = useState("");
-  const newTaskProject = projectFilter || pickedProject;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -383,42 +380,17 @@ export function TasksView({ lockedProjectId }: { lockedProjectId?: string }) {
         )}
       </div>
 
-      {wantsNew && !newTaskProject && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-label="Choose a project">
-          <div className="w-full max-w-sm rounded-lg border border-border bg-card p-5 shadow-card-hover">
-            <h2 className="text-base font-semibold">Which project is this task for?</h2>
-            {projects.length === 0 ? (
-              <p className="mt-2 text-sm text-muted-foreground">
-                Tasks live in a project.{" "}
-                <Link href="/panel/projects" className="font-medium text-primary hover:underline">Create a project first</Link>.
-              </p>
-            ) : (
-              <select autoFocus aria-label="Project" defaultValue="" onChange={(e) => setPickedProject(e.target.value)} className={cn(selectCls, "mt-3 w-full")}>
-                <option value="" disabled>Choose a project…</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-            )}
-            <div className="mt-4 flex justify-end">
-              <button type="button" onClick={() => setParams({ new: null })} className="rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground">
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {wantsNew && newTaskProject && (
-        <CreateTaskDialog
-          projectId={newTaskProject}
-          onClose={() => {
-            setPickedProject("");
-            setParams({ new: null });
-          }}
-          onCreated={(t) => {
-            setPickedProject("");
-            setParams({ new: null, task: t.id });
-          }}
+      {wantsNew && (
+        // The task editor carries each specialist's launch fields, so a task
+        // for the Article Writer asks for its topic here, as in chat.
+        <TaskEditorDialog
+          projectId={projectFilter || undefined}
+          projects={projectFilter ? undefined : projects}
+          agents={agents}
+          initialAgentId={agentFilter && agentFilter !== "none" ? agentFilter : undefined}
+          onClose={() => setParams({ new: null })}
+          onSaved={(t) => setParams({ new: null, task: t.id })}
+          onLaunched={(result) => setParams({ new: null, task: result.task.id, run: result.run_id ?? null })}
         />
       )}
       {selected && (
