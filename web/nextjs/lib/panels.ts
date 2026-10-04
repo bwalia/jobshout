@@ -17,12 +17,14 @@ import {
   Archive,
   ShieldAlert,
   Gauge,
+  Bot,
 } from "lucide-react";
 
 export type PanelId =
   | "chat"
   | "dashboard"
   | "projects"
+  | "agents"
   | "task-board"
   | "task-manager"
   | "security-tester"
@@ -56,6 +58,9 @@ export const PANELS: PanelDef[] = [
   { id: "dashboard", label: "Dashboard", href: "/panel/dashboard", icon: LayoutDashboard },
   { id: "projects", label: "Projects", href: "/panel/projects", icon: FolderKanban },
   { id: "task-board", label: "Task Board", href: "/panel/task-board", icon: Kanban },
+  // A static route (app/(app)/panel/agents); listed so panel transitions and
+  // the palette know about it.
+  { id: "agents", label: "All agents", href: "/panel/agents", icon: Bot, hidden: true },
   { id: "task-manager", label: "Task Manager", href: "/panel/task-manager", icon: ListTree },
   { id: "security-tester", label: "Security Tester", href: "/panel/security-tester", icon: ShieldAlert, hidden: true },
   { id: "artifacts", label: "Artifacts", href: "/panel/artifacts", icon: Archive },
@@ -104,7 +109,7 @@ const LEGACY_PREFIXES: { prefix: string; id: PanelId }[] = [
   { prefix: "/metrics", id: "dashboard" },
   { prefix: "/settings", id: "settings" },
   { prefix: "/projects", id: "projects" },
-  { prefix: "/agents", id: "task-manager" },
+  { prefix: "/agents", id: "agents" },
   { prefix: "/tasks", id: "task-board" },
 ];
 
@@ -157,8 +162,8 @@ export const ROUTE_MIGRATION: { from: string; to: string; note: string }[] = [
   { from: "/task-manager", to: "/panel/task-manager", note: "Task Manager panel" },
   { from: "/projects", to: "/panel/projects", note: "Projects panel" },
   { from: "/projects/[id]", to: "/panel/projects?project=[id]", note: "Project tasks under Projects" },
-  { from: "/agents", to: "/panel/task-manager", note: "Agents list in Task Manager" },
-  { from: "/agents/[id]", to: "/agents/[id]", note: "Rich agent profile kept, linked from Task Manager" },
+  { from: "/agents", to: "/panel/agents", note: "All agents list" },
+  { from: "/agents/[id]", to: "/panel/agents/[id]", note: "Agent profile under /panel" },
   { from: "/agents/pentest", to: "/panel/task-manager?agent=pentest", note: "Security Tester in Task Manager" },
   { from: "/agents/review", to: "/panel/task-manager?agent=review", note: "PR Reviewer in Task Manager" },
   { from: "/agents/mail", to: "/panel/task-manager?agent=mail", note: "Mail Agent in Task Manager" },

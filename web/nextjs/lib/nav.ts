@@ -99,7 +99,7 @@ export const NAV_SECTIONS: NavSection[] = [
       {
         id: "agents",
         label: "All agents",
-        href: "/panel/task-manager",
+        href: "/panel/agents",
         icon: Bot,
         match: ["/panel/agents", "/panel/task-manager", "/agents"],
         keywords: ["agents", "task manager", "specialists"],

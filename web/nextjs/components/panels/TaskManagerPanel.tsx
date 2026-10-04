@@ -21,6 +21,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
+import { agentHref } from "@/lib/agents/links";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAgents } from "@/lib/hooks/useAgents";
 import { useAgentSchemas } from "@/lib/hooks/useAgentSchemas";
@@ -750,7 +751,7 @@ function AgentDetailView({
           <ExportAgentButton agentId={agent.id} />
           <RemoveAgentButton agent={agent} onRemoved={onRemoved} />
           <Link
-            href={`/agents/${agent.id}`}
+            href={agentHref(agent.id)}
             className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border px-3 text-sm hover:bg-secondary"
           >
             <BookOpen className="h-4 w-4" /> Full profile

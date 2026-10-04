@@ -62,7 +62,7 @@ const nextConfig = {
         destination: "/panel/projects?project=:id",
         permanent: false,
       },
-      { source: "/agents", destination: "/panel/task-manager", permanent: false },
+      { source: "/agents", destination: "/panel/agents", permanent: false },
       {
         source: "/agents/pentest",
         destination: "/panel/task-manager?agent=pentest",
@@ -78,8 +78,9 @@ const nextConfig = {
         destination: "/panel/task-manager?agent=mail",
         permanent: false,
       },
-      // /agents/:id and /agents/:id/knowledge stay routable — the rich agent
-      // profile (edit, knowledge, skills, metrics) is linked from Task Manager.
+      // The agent profile lives under /panel now; old links keep working. One
+      // segment only, so /agents/:id/knowledge is still its own page.
+      { source: "/agents/:id", destination: "/panel/agents/:id", permanent: false },
       {
         source: "/articles",
         destination: "/panel/task-manager?agent=articles",

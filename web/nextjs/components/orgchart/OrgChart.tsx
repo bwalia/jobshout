@@ -10,9 +10,12 @@ import ReactFlow, {
   useEdgesState,
   type Connection,
   type Edge,
+  type Node,
   type NodeTypes,
 } from "reactflow";
 import "reactflow/dist/style.css";
+import { useRouter } from "next/navigation";
+import { agentHref } from "@/lib/agents/links";
 
 import { AgentNode } from "@/components/orgchart/AgentNode";
 import { useOrgChart } from "@/lib/hooks/useOrgChart";
@@ -118,6 +121,27 @@ export function OrgChart({ agents: _agents }: OrgChartProps) {
     []
   );
 
+  // A click on a node opens that agent; dragging it still moves it, and
+  // dragging from its handles still connects it. React Flow can report a click
+  // at the end of a drag, so a click that ends a drag is ignored.
+  const router = useRouter();
+  const dragged = useRef(false);
+  const onNodeDragStart = useCallback(() => {
+    dragged.current = true;
+  }, []);
+  const onNodeDragStop = useCallback(() => {
+    window.setTimeout(() => {
+      dragged.current = false;
+    }, 0);
+  }, []);
+  const onNodeClick = useCallback(
+    (_: React.MouseEvent, node: Node) => {
+      if (dragged.current) return;
+      router.push(agentHref(node.id));
+    },
+    [router]
+  );
+
   function handleSave() {
     saveChart(edges);
   }
@@ -171,6 +195,9 @@ export function OrgChart({ agents: _agents }: OrgChartProps) {
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onEdgesDelete={onEdgesDelete}
+        onNodeClick={onNodeClick}
+        onNodeDragStart={onNodeDragStart}
+        onNodeDragStop={onNodeDragStop}
         deleteKeyCode="Delete"
         fitView
         fitViewOptions={{ padding: 0.2 }}

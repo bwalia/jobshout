@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useMemo, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -13,7 +13,17 @@ import {
   Wrench,
   MessageSquareText,
   Boxes,
+  LayoutGrid,
 } from "lucide-react";
+import { BuiltinAgentTab } from "@/components/task-manager/BuiltinAgentTab";
+import { AGENT_CLIENTS } from "@/lib/agents/tab-clients";
+import { useAgentSchemas } from "@/lib/hooks/useAgentSchemas";
+import { useProjects } from "@/lib/hooks/useProjects";
+import { taskKeys } from "@/lib/hooks/useTasks";
+import type { LaunchResult } from "@/lib/agents/launch";
+import { providerName } from "@/components/agent/ModelPicker";
+import { useBreadcrumbs } from "@/lib/store/breadcrumb-store";
+import { agentHref, type AgentTab } from "@/lib/agents/links";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AgentStatusBadge } from "@/components/agent/AgentStatusBadge";
@@ -45,15 +55,18 @@ import type { Task } from "@/lib/types/project";
 // ---------------------------------------------------------------------------
 // Tab types
 // ---------------------------------------------------------------------------
-type Tab = "overview" | "tasks" | "metrics" | "knowledge" | "skills";
+type Tab = AgentTab;
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
+  { id: "models", label: "Models" },
+  { id: "workspace", label: "Workspace" },
   { id: "tasks", label: "Tasks" },
   { id: "metrics", label: "Metrics" },
   { id: "knowledge", label: "Knowledge" },
   { id: "skills", label: "Skills" },
 ];
+
 
 // ---------------------------------------------------------------------------
 // Avatar helpers (mirrored from AgentCard to keep consistency)
@@ -266,10 +279,114 @@ function ModelSetting({
   );
 }
 
+/** What this agent's models resolve to, in words a person can check. */
+function modelSummary(
+  provider: string | null | undefined,
+  model: string | null | undefined,
+  inherited?: string
+): string {
+  if (provider === "auto") return "Automatic (chosen per request)";
+  if (!provider && !model) {
+    return inherited ? `Platform default → ${inherited}` : "Platform default";
+  }
+  return [providerName(provider ?? ""), model || "provider default"].filter(Boolean).join(" · ");
+}
+
+/** The top-of-Overview card: which models run this agent, and a way to change them. */
+function ModelsSummary({ agent }: { agent: NonNullable<ReturnType<typeof useAgent>["data"]> }) {
+  const { data: blogConfig } = useBlogConfig();
+  const isArticleWriter = agent.metadata?.builtin === "article_writer";
+  const structured =
+    typeof agent.engine_config?.[STRUCTURED_MODEL_KEY] === "string"
+      ? (agent.engine_config[STRUCTURED_MODEL_KEY] as string)
+      : "";
+  return (
+    <section className="flex flex-col gap-3 rounded-lg border border-border bg-card p-5 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0 space-y-1">
+        <h3 className="text-sm font-semibold text-foreground">Models</h3>
+        <p className="text-sm text-muted-foreground">
+          <span className="text-foreground">{isArticleWriter ? "Writing: " : ""}</span>
+          {modelSummary(agent.model_provider, agent.model_name, isArticleWriter ? blogConfig?.effective_models?.prose : undefined)}
+        </p>
+        {isArticleWriter && (
+          <p className="text-sm text-muted-foreground">
+            <span className="text-foreground">Structured: </span>
+            {structured
+              ? `${providerName(blogConfig?.provider ?? "")} · ${structured}`
+              : modelSummary(null, null, blogConfig?.effective_models?.structured)}
+          </p>
+        )}
+      </div>
+      <Link
+        href={agentHref(agent.id, "models")}
+        scroll={false}
+        className="inline-flex shrink-0 items-center gap-1.5 self-start rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 sm:self-center"
+      >
+        <Cpu className="h-4 w-4" />
+        Change model
+      </Link>
+    </section>
+  );
+}
+
+/** Models tab: the model selectors, with what each one governs. */
+function ModelsTab({ agent }: { agent: NonNullable<ReturnType<typeof useAgent>["data"]> }) {
+  return (
+    <section className="space-y-3">
+      <div>
+        <h3 className="text-sm font-semibold text-foreground">Which models this agent uses</h3>
+        <p className="text-sm text-muted-foreground">
+          Changes save straight away and apply to the agent&apos;s next run. A single task can still
+          override the model from its task panel.
+        </p>
+      </div>
+      <dl className="space-y-3 rounded-lg border border-border bg-card p-5">
+        <ModelRow agent={agent} />
+      </dl>
+    </section>
+  );
+}
+
+/**
+ * Workspace tab: the specialist's own UI (its registered tab client), or its
+ * launch form and Run. What Task Manager used to show for this agent.
+ */
+function WorkspaceTab({ agent }: { agent: NonNullable<ReturnType<typeof useAgent>["data"]> }) {
+  const router = useRouter();
+  const qc = useQueryClient();
+  const { data: catalog } = useAgentSchemas();
+  const { data: projectsResp } = useProjects({ per_page: 100 });
+  const builtin = agent.metadata?.builtin;
+  const wire = catalog?.find((w) => w.builtin === builtin);
+
+  function onLaunched(result: LaunchResult) {
+    void qc.invalidateQueries({ queryKey: taskKeys.all });
+    if (!result.task || wire?.stay_on_tab) return;
+    const params = new URLSearchParams({ project: result.task.project_id, task: result.task.id });
+    if (result.run_id) params.set("run", result.run_id);
+    router.push(`/panel/projects?${params.toString()}`);
+  }
+
+  if (!wire) {
+    return <p className="text-sm text-muted-foreground">Loading this agent&apos;s workspace…</p>;
+  }
+  return (
+    <BuiltinAgentTab
+      wire={wire}
+      agent={agent}
+      projects={projectsResp?.data ?? []}
+      Client={builtin ? AGENT_CLIENTS[builtin] : undefined}
+      onLaunched={onLaunched}
+    />
+  );
+}
+
 /** Overview tab: agent details, description, system prompt. */
 function OverviewTab({ agent }: { agent: NonNullable<ReturnType<typeof useAgent>["data"]> }) {
   return (
     <div className="space-y-6">
+      <ModelsSummary agent={agent} />
+
       {/* Core details */}
       <section>
         <h3 className="mb-3 text-sm font-semibold uppercase tracking-widest text-muted-foreground">
@@ -277,7 +394,6 @@ function OverviewTab({ agent }: { agent: NonNullable<ReturnType<typeof useAgent>
         </h3>
         <dl className="space-y-3 rounded-lg border border-border bg-card p-5">
           <DetailRow label="Role" value={agent.role} />
-          <ModelRow agent={agent} />
           <DetailRow
             label="Created"
             value={new Date(agent.created_at).toLocaleDateString()}
@@ -796,9 +912,25 @@ function SkillsTab({ agentId }: { agentId: string }) {
 export default function AgentProfilePage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<Tab>("overview");
-
+  const search = useSearchParams();
   const { data: agent, isLoading, isError } = useAgent(id);
+  const isBuiltin = Boolean(agent?.metadata?.builtin);
+  const tabs = useMemo(
+    () => TABS.filter((t) => t.id !== "workspace" || isBuiltin),
+    [isBuiltin]
+  );
+  const requested = search.get("tab") as Tab | null;
+  const activeTab: Tab = tabs.some((t) => t.id === requested) ? (requested as Tab) : "overview";
+  const setActiveTab = (tab: Tab) => router.replace(agentHref(id, tab), { scroll: false });
+
+  useBreadcrumbs(
+    agent
+      ? [
+          { label: agent.name, href: agentHref(agent.id) },
+          { label: tabs.find((t) => t.id === activeTab)?.label ?? "Overview" },
+        ]
+      : []
+  );
 
   if (isLoading) {
     return (
@@ -814,11 +946,11 @@ export default function AgentProfilePage() {
     return (
       <div className="space-y-4">
         <Link
-          href="/agents"
+          href="/panel/agents"
           className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />
-          Back to Agents
+          All agents
         </Link>
         <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-5 py-4 text-sm text-destructive">
           Agent not found or failed to load.
@@ -833,14 +965,13 @@ export default function AgentProfilePage() {
   return (
     <div className="space-y-6">
       {/* Back navigation */}
-      <button
-        type="button"
-        onClick={() => router.back()}
+      <Link
+        href="/panel/agents"
         className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
       >
         <ArrowLeft className="h-4 w-4" />
-        Back
-      </button>
+        All agents
+      </Link>
 
       {/* Agent header card */}
       <div className="rounded-lg border border-border bg-card p-6">
@@ -869,31 +1000,25 @@ export default function AgentProfilePage() {
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <AgentStatusBadge status={agent.status} />
 
-                {agent.metadata?.builtin === "mail" && (
+                {isBuiltin && (
                   <Link
-                    href="/panel/task-manager?agent=mail"
+                    href={agentHref(agent.id, "workspace")}
+                    scroll={false}
                     className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary hover:underline"
                   >
-                    Open inbox
+                    Open workspace
                   </Link>
                 )}
 
-                {agent.metadata?.builtin === "career_ops" && (
-                  <Link
-                    href="/panel/task-manager?agent=career"
-                    className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary hover:underline"
-                  >
-                    Open Career Agent
-                  </Link>
-                )}
-
-                {agent.model_provider && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                    <Cpu className="h-3 w-3" />
-                    {agent.model_provider}
-                    {agent.model_name ? ` / ${agent.model_name}` : ""}
-                  </span>
-                )}
+                <Link
+                  href={agentHref(agent.id, "models")}
+                  scroll={false}
+                  title="Change model"
+                  className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground hover:underline"
+                >
+                  <Cpu className="h-3 w-3" />
+                  {modelSummary(agent.model_provider, agent.model_name)}
+                </Link>
               </div>
             </div>
           </div>
@@ -904,7 +1029,7 @@ export default function AgentProfilePage() {
               <ExportAgentButton agentId={agent.id} />
               <RemoveAgentButton
                 agent={agent}
-                onRemoved={() => router.push("/panel/task-manager")}
+                onRemoved={() => router.push("/panel/agents")}
               />
             </div>
             <span className="text-xs text-muted-foreground">Performance</span>
@@ -918,7 +1043,7 @@ export default function AgentProfilePage() {
       {/* Tab bar */}
       <div className="border-b border-border">
         <nav className="-mb-px flex gap-0" aria-label="Agent profile tabs">
-          {TABS.map(({ id: tabId, label }) => (
+          {tabs.map(({ id: tabId, label }) => (
             <button
               key={tabId}
               type="button"
@@ -931,6 +1056,8 @@ export default function AgentProfilePage() {
               aria-current={activeTab === tabId ? "page" : undefined}
             >
               {tabId === "overview" && <StickyNote className="h-4 w-4" />}
+              {tabId === "models" && <Cpu className="h-4 w-4" />}
+              {tabId === "workspace" && <LayoutGrid className="h-4 w-4" />}
               {tabId === "tasks" && <Activity className="h-4 w-4" />}
               {tabId === "metrics" && <Activity className="h-4 w-4" />}
               {tabId === "knowledge" && <BookOpen className="h-4 w-4" />}
@@ -944,6 +1071,8 @@ export default function AgentProfilePage() {
       {/* Tab content */}
       <div className="relative">
         {activeTab === "overview" && <OverviewTab agent={agent} />}
+        {activeTab === "models" && <ModelsTab agent={agent} />}
+        {activeTab === "workspace" && <WorkspaceTab agent={agent} />}
         {activeTab === "tasks" && <TasksTab agentId={agent.id} />}
         {activeTab === "metrics" && (
           <MetricsTab performanceScore={agent.performance_score} />

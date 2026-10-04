@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { agentHref } from "@/lib/agents/links";
 import { useQuery } from "@tanstack/react-query";
 import {
   ListChecks,
@@ -446,10 +447,10 @@ export function DashboardPanel() {
           title="Agent performance"
           action={
             <Link
-              href="/panel/task-manager"
+              href="/panel/agents"
               className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
             >
-              Task Manager <ArrowRight className="h-3 w-3" />
+              All agents <ArrowRight className="h-3 w-3" />
             </Link>
           }
         >
@@ -463,7 +464,7 @@ export function DashboardPanel() {
             <div className="flex h-40 flex-col items-center justify-center gap-2 text-center">
               <p className="text-sm text-muted-foreground">No agents yet.</p>
               <Link
-                href="/panel/task-manager"
+                href="/panel/agents"
                 className="text-sm font-medium text-primary hover:underline"
               >
                 Create your first agent
@@ -474,7 +475,7 @@ export function DashboardPanel() {
               {topAgents.map((agent, i) => (
                 <li key={agent.id}>
                   <Link
-                    href={`/panel/task-manager?agent=${agent.id}`}
+                    href={agentHref(agent.id)}
                     className="group flex items-center gap-3"
                   >
                     <span

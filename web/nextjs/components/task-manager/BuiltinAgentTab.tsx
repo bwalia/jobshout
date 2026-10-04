@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type ComponentType } from "react";
 import Link from "next/link";
+import { agentHref } from "@/lib/agents/links";
 import { BookOpen, Loader2, Rocket } from "lucide-react";
 import { toast } from "sonner";
 
@@ -114,7 +115,7 @@ export function BuiltinAgentTab({
           <div className="flex gap-2">
             <ExportAgentButton agentId={agent.id} />
             <Link
-              href={`/agents/${agent.id}`}
+              href={agentHref(agent.id)}
               className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border px-3 text-sm hover:bg-secondary"
             >
               <BookOpen className="h-3.5 w-3.5" /> Full profile

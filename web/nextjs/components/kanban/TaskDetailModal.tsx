@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
+import { agentHref } from "@/lib/agents/links";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { updateTask, getTaskComments, addTaskComment } from "@/lib/api/tasks";
@@ -264,9 +266,19 @@ export function TaskDetailModal({
 
           {/* Assignee picker */}
           <div className="space-y-1.5">
-            <label htmlFor="task-assignee" className="text-sm font-medium">
-              Assigned Agent
-            </label>
+            <div className="flex items-center justify-between gap-2">
+              <label htmlFor="task-assignee" className="text-sm font-medium">
+                Assigned Agent
+              </label>
+              {assignedAgentId && agents.some((a) => a.id === assignedAgentId) && (
+                <Link
+                  href={agentHref(assignedAgentId)}
+                  className="text-xs font-medium text-primary hover:underline"
+                >
+                  Open {agents.find((a) => a.id === assignedAgentId)?.name} →
+                </Link>
+              )}
+            </div>
             <select
               id="task-assignee"
               value={assignedAgentId}
