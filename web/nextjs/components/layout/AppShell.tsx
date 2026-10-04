@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { usePathname } from "next/navigation";
 import { Menu } from "lucide-react";
 import { BetaBanner } from "./BetaBanner";
+import { Breadcrumbs } from "./Breadcrumbs";
 import { ChatSidebar } from "./ChatSidebar";
 import { CommandPalette } from "./CommandPalette";
 import { PanelFrame } from "./PanelFrame";
@@ -40,16 +41,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         )}
       >
         <BetaBanner />
-        <header className="sticky top-0 z-20 flex h-12 shrink-0 items-center gap-2 border-b border-border bg-background px-3 lg:hidden">
+        <header className="sticky top-0 z-20 flex h-12 shrink-0 items-center gap-2 border-b border-border bg-background px-3 lg:px-6">
           <button
             type="button"
             onClick={() => setMobileSidebarOpen(true)}
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-secondary hover:text-foreground"
-            aria-label="Open sidebar"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-secondary hover:text-foreground lg:hidden"
+            aria-label="Open menu"
           >
             <Menu className="h-5 w-5" />
           </button>
-          <span className="text-sm font-semibold">JobShout</span>
+          <Suspense fallback={null}>
+            <Breadcrumbs />
+          </Suspense>
         </header>
 
         <main className="relative min-h-0 flex-1 overflow-y-auto scrollbar-thin">
