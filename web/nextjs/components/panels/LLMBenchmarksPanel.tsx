@@ -36,10 +36,11 @@ export function LLMBenchmarksPanel() {
   const runs = useLLMRuns(query, page);
 
   return (
-    <div className="space-y-6 p-6" data-testid="llm-benchmarks-panel">
+    <div className="space-y-6" data-testid="llm-benchmarks-panel">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold">LLM Benchmarks</h1>
+          {/* A tab of Models & providers, so a section heading, not the page's h1. */}
+          <h2 className="text-xl font-semibold">LLM Benchmarks</h2>
           <p className="text-sm text-muted-foreground">
             Measured duration and token usage of every text LLM call, per provider and exact model.
             Token counts show “—” when the provider did not report them.

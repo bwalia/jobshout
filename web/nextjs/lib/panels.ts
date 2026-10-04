@@ -75,7 +75,7 @@ export const PANELS: PanelDef[] = [
   { id: "marketplace", label: "Marketplace", href: "/panel/marketplace", icon: Store },
   { id: "plugins-skills", label: "Plugins & Skills", href: "/panel/plugins-skills", icon: Puzzle },
   { id: "llm-providers", label: "LLM Providers", href: "/panel/llm-providers", icon: Cpu },
-  { id: "llm-benchmarks", label: "LLM Benchmarks", href: "/panel/llm-benchmarks", icon: Gauge },
+  { id: "llm-benchmarks", label: "LLM Benchmarks", href: "/panel/llm-providers?tab=benchmarks", icon: Gauge, hidden: true },
   { id: "settings", label: "Settings", href: "/panel/settings", icon: Settings },
 ];
 

@@ -9,7 +9,7 @@ import { LegacyTaskRedirect } from "@/components/tasks/LegacyTaskRedirect";
 import { ArtifactsPanel } from "@/components/panels/ArtifactsPanel";
 import { PluginsSkillsPanel } from "@/components/panels/PluginsSkillsPanel";
 import { SecurityTesterPanel } from "@/components/panels/SecurityTesterPanel";
-import { LLMBenchmarksPanel } from "@/components/panels/LLMBenchmarksPanel";
+import { PanelRedirect } from "@/components/layout/PanelRedirect";
 import { PANELS, type PanelId } from "@/lib/panels";
 
 import SchedulerPage from "@/app/(app)/scheduler/page";
@@ -134,7 +134,8 @@ function PanelBody({ panel }: { panel: Exclude<PanelId, "chat"> }) {
         </div>
       );
     case "llm-benchmarks":
-      return <LLMBenchmarksPanel />;
+      // Benchmarks is a tab of Models & providers now.
+      return <PanelRedirect to="/panel/llm-providers?tab=benchmarks" />;
     case "settings":
       return (
         <div className="p-6">

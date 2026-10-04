@@ -159,6 +159,11 @@ export function ModelPicker({
   }, [data, includeAuto, providerFilter, recommended, inheritedModel, defaultLabel]);
 
   const missingRecommended = options.find((o) => o.disabled)?.selection;
+  // Providers that contribute nothing to this list, so an empty section is
+  // explained rather than silently missing.
+  const silentProviders = (data?.providers ?? []).filter(
+    (p) => (!providerFilter || p.provider === providerFilter) && (p.error || p.models.length === 0)
+  );
 
   // An agent may hold a model that is no longer installed, or free text typed
   // before this picker existed. Surface it rather than silently rewriting the
@@ -219,6 +224,18 @@ export function ModelPicker({
       {isError && (
         <p className="mt-1 text-xs text-destructive">
           Could not load the model list. The platform default will be used.
+        </p>
+      )}
+      {silentProviders.length > 0 && (
+        <p className="mt-1 text-xs text-muted-foreground">
+          {silentProviders
+            .map((p) => `${providerName(p.provider)} ${p.error ? "is not reachable" : "reports no models"}`)
+            .join("; ")}
+          , so its models are not listed.{" "}
+          <Link href="/panel/llm-providers" className="font-medium text-primary hover:underline">
+            Check Models &amp; providers
+          </Link>
+          .
         </p>
       )}
       {missingRecommended && (
