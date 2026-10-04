@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { MarketplaceCard } from "@/components/marketplace/MarketplaceCard";
@@ -202,10 +203,36 @@ export default function MarketplacePage() {
       {/* Empty state */}
       {!isLoading && !isError && filteredAgents.length === 0 && (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-20 text-center">
-          <p className="text-lg font-medium">No agents found</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Try adjusting your search or category filter.
-          </p>
+          {agents.length > 0 ? (
+            <>
+              <p className="text-lg font-medium">No agents match</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery("");
+                  setActiveCategory("All");
+                }}
+                className="mt-4 inline-flex items-center gap-1.5 rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-muted"
+              >
+                Clear search and filters
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-lg font-medium">The marketplace is empty</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                No shared agents yet. Build your own, or import an agent package.
+              </p>
+              <div className="mt-4 flex gap-2">
+                <Link href="/panel/agents?new=1" className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90">
+                  Create an agent
+                </Link>
+                <Link href="/panel/agents?import=1" className="inline-flex items-center gap-1.5 rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-muted">
+                  Import agent
+                </Link>
+              </div>
+            </>
+          )}
         </div>
       )}
 

@@ -280,6 +280,16 @@ export function ArtifactsPanel() {
                   ? "No articles yet."
                   : "No artifacts yet."}
           </p>
+          {searchQuery && (
+            <button type="button" onClick={() => setSearchQuery("")} className="mt-4 inline-flex items-center gap-1.5 rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-muted">
+              Clear search
+            </button>
+          )}
+          {!searchQuery && filter === "image" && (
+            <Link href="/panel/task-manager?agent=images" className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90">
+              Generate an image
+            </Link>
+          )}
           {!searchQuery && filter !== "image" && (
             <button
               type="button"
