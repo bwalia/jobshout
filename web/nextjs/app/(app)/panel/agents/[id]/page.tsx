@@ -939,7 +939,7 @@ export default function AgentProfilePage() {
 
   if (isLoading) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6 p-6">
         <div className="h-8 w-48 animate-pulse rounded bg-muted" />
         <div className="h-32 animate-pulse rounded-lg bg-muted" />
         <div className="h-64 animate-pulse rounded-lg bg-muted" />
@@ -949,7 +949,7 @@ export default function AgentProfilePage() {
 
   if (isError || !agent) {
     return (
-      <div className="space-y-4">
+      <div className="space-y-4 p-6">
         <Link
           href="/panel/agents"
           className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
@@ -968,7 +968,7 @@ export default function AgentProfilePage() {
   const initials = getInitials(agent.name);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-6">
       {/* Back navigation */}
       <Link
         href="/panel/agents"

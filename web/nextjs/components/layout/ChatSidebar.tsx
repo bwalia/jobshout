@@ -35,11 +35,11 @@ import { useNavBadges } from "@/lib/hooks/useNavBadges";
 import { useLocalState } from "@/lib/utils/local-state";
 
 // Every item must fit on a 768px-tall screen without scrolling, so rows are
-// 36px rather than 44px; the active state stays unmistakable (filled row plus
-// a primary bar) so nobody has to hunt for where they are.
+// 32px; the active state stays unmistakable (filled row plus a primary bar)
+// so nobody has to hunt for where they are.
 function navItemClass(active: boolean, collapsed: boolean) {
   return cn(
-    "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-[15px] leading-5 transition-colors",
+    "flex w-full items-center gap-3 rounded-lg px-3 py-1.5 text-sm leading-5 transition-colors",
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
     collapsed && "h-10 w-10 justify-center px-0",
     active
@@ -73,7 +73,7 @@ function NavLink({
       onClick={() => onNavigate(item.href)}
       className={cn(navItemClass(active, collapsed), "relative")}
     >
-      <Icon className="h-[18px] w-[18px] shrink-0" />
+      <Icon className="h-4 w-4 shrink-0" />
       {!collapsed && <span className="min-w-0 flex-1 truncate">{item.label}</span>}
       {badge ? (
         <span
@@ -107,7 +107,7 @@ function SectionHeader({
       onClick={onToggle}
       aria-expanded={open}
       aria-controls={controls}
-      className="mt-2 flex w-full items-center gap-1 rounded-md px-3 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="mt-1.5 flex w-full items-center gap-1 rounded-md px-3 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <span className="flex-1 text-left">{label}</span>
       <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", !open && "-rotate-90")} />
@@ -230,7 +230,7 @@ function SidebarBody({
         )}
       </div>
 
-      <div className={cn("flex shrink-0 gap-1.5 px-2 pt-3", collapsed && "flex-col items-center")}>
+      <div className={cn("flex shrink-0 gap-1.5 px-2 pt-2.5", collapsed && "flex-col items-center")}>
         <button
           type="button"
           onClick={() => router.push("/chat")}
@@ -263,7 +263,7 @@ function SidebarBody({
       <nav
         aria-label="Main"
         className={cn(
-          "mt-2 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2 pb-2 scrollbar-thin",
+          "mt-1.5 flex min-h-0 flex-1 flex-col gap-px overflow-y-auto px-2 pb-2 scrollbar-thin",
           collapsed && "items-center"
         )}
       >
@@ -398,7 +398,7 @@ function SidebarBody({
         )}
       </nav>
 
-      <div className={cn("flex shrink-0 flex-col gap-0.5 border-t border-sidebar-border px-2 py-2", collapsed && "items-center")}>
+      <div className={cn("flex shrink-0 flex-col gap-px border-t border-sidebar-border px-2 py-1.5", collapsed && "items-center")}>
         {NAV_BOTTOM.map(link)}
       </div>
       <SidebarFooter collapsed={collapsed} />

@@ -66,6 +66,9 @@ export function shortError(raw: string | null | undefined): string {
   if (status === "401" || status === "403") {
     return `${provider || "Provider"} rejected the credentials (HTTP ${status})`;
   }
+  if (/connection refused|dial tcp|no such host|ECONNREFUSED|unreachable/i.test(s)) {
+    return `${provider || "The model provider"} is not reachable`;
+  }
   if (/timed out|deadline|timeout/i.test(s)) return "Timed out";
   if (/not found|no such model|model .* not (?:found|installed)/i.test(s)) {
     return `${provider ? `${provider}: ` : ""}model not available`;

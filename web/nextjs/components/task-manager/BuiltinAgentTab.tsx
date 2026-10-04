@@ -1,12 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ComponentType } from "react";
-import Link from "next/link";
-import { agentHref } from "@/lib/agents/links";
-import { BookOpen, Loader2, Rocket } from "lucide-react";
+import { Loader2, Rocket } from "lucide-react";
 import { toast } from "sonner";
 
-import { ExportAgentButton } from "@/components/agent/ExportAgentButton";
 import { AgentInputFields } from "@/components/task-manager/AgentInputFields";
 import {
   defaultValuesForSchema,
@@ -25,7 +22,8 @@ const inputCls =
   "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 /**
- * Generic Task Manager specialist tab.
+ * A specialist's Workspace tab on its agent profile (the profile header
+ * already carries the name, Export and Remove).
  *
  * If AGENT_CLIENTS registered a client, that UI is the tab (schema still used
  * in New task / Run task / chat). Otherwise: schema form + Run.
@@ -107,23 +105,6 @@ export function BuiltinAgentTab({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <h2 className="text-lg font-semibold tracking-tight">
-          {wire.label || agent?.name || "Agent"}
-        </h2>
-        {agent ? (
-          <div className="flex gap-2">
-            <ExportAgentButton agentId={agent.id} />
-            <Link
-              href={agentHref(agent.id)}
-              className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border px-3 text-sm hover:bg-secondary"
-            >
-              <BookOpen className="h-3.5 w-3.5" /> Full profile
-            </Link>
-          </div>
-        ) : null}
-      </div>
-
       {ownsTab && Client ? (
         !agent ? (
           <p className="text-sm text-muted-foreground">
