@@ -14,7 +14,9 @@ import {
   MessageSquareText,
   Boxes,
   LayoutGrid,
+  AlertTriangle,
 } from "lucide-react";
+import { useRunFailures } from "@/lib/hooks/useRunFailures";
 import { BuiltinAgentTab } from "@/components/task-manager/BuiltinAgentTab";
 import { AGENT_CLIENTS } from "@/lib/agents/tab-clients";
 import { useAgentSchemas } from "@/lib/hooks/useAgentSchemas";
@@ -919,6 +921,9 @@ export default function AgentProfilePage() {
     () => TABS.filter((t) => t.id !== "workspace" || isBuiltin),
     [isBuiltin]
   );
+  const { failures, byAgent } = useRunFailures();
+  const failed = byAgent.get(id)?.failed ?? 0;
+  const latestFailure = failures.find((f) => f.agentId === id);
   const requested = search.get("tab") as Tab | null;
   const activeTab: Tab = tabs.some((t) => t.id === requested) ? (requested as Tab) : "overview";
   const setActiveTab = (tab: Tab) => router.replace(agentHref(id, tab), { scroll: false });
@@ -1033,12 +1038,47 @@ export default function AgentProfilePage() {
               />
             </div>
             <span className="text-xs text-muted-foreground">Performance</span>
-            <span className="text-2xl font-bold text-foreground">
-              {agent.performance_score}%
-            </span>
+            {failed > 0 && Math.round(agent.performance_score) === 0 ? (
+              <span className="text-lg font-bold text-destructive">
+                {failed} failed run{failed === 1 ? "" : "s"}
+              </span>
+            ) : (
+              <span className="text-2xl font-bold text-foreground">
+                {agent.performance_score}%
+              </span>
+            )}
           </div>
         </div>
       </div>
+
+      {failed > 0 && (
+        <div role="alert" className="flex flex-col gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="flex items-start gap-2 text-sm">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+            <span>
+              <span className="font-semibold text-destructive">
+                {failed} failed run{failed === 1 ? "" : "s"} in the last two weeks.
+              </span>{" "}
+              {latestFailure && <span className="text-muted-foreground">Latest: {latestFailure.error}</span>}
+            </span>
+          </p>
+          <div className="flex shrink-0 gap-2">
+            <Link
+              href={`/panel/tasks?agent=${agent.id}&failed=1`}
+              className="inline-flex h-8 items-center rounded-md border border-border bg-background px-3 text-xs font-medium hover:bg-muted"
+            >
+              See failed tasks
+            </Link>
+            <Link
+              href={agentHref(agent.id, "models")}
+              scroll={false}
+              className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground hover:opacity-90"
+            >
+              <Cpu className="h-3.5 w-3.5" /> Change model
+            </Link>
+          </div>
+        </div>
+      )}
 
       {/* Tab bar */}
       <div className="border-b border-border">

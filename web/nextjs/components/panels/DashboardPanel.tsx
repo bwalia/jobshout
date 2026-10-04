@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { agentHref } from "@/lib/agents/links";
+import { NeedsAttention } from "@/components/dashboard/NeedsAttention";
+import { useRunFailures } from "@/lib/hooks/useRunFailures";
 import { useQuery } from "@tanstack/react-query";
 import {
   ListChecks,
@@ -240,6 +242,9 @@ export function DashboardPanel() {
     [agents]
   );
 
+  const { byAgent } = useRunFailures();
+  const failedRuns = (agentId: string) => byAgent.get(agentId)?.failed ?? 0;
+
   const completionRate =
     summary && summary.total_tasks > 0
       ? Math.round((summary.tasks_completed / summary.total_tasks) * 100)
@@ -279,6 +284,8 @@ export function DashboardPanel() {
           </Link>
         </div>
       </div>
+
+      <NeedsAttention />
 
       {/* KPI strip */}
       {summaryQuery.isLoading ? (
@@ -491,9 +498,19 @@ export function DashboardPanel() {
                         <p className="truncate text-sm font-medium group-hover:text-primary">
                           {agent.name}
                         </p>
-                        <span className="shrink-0 font-mono text-xs text-muted-foreground">
-                          {Math.round(agent.performance_score)}%
-                        </span>
+                        {failedRuns(agent.id) > 0 && Math.round(agent.performance_score) === 0 ? (
+                          // A bare 0% reads as "bad agent"; say why instead.
+                          <span className="shrink-0 text-xs font-medium text-destructive">
+                            {failedRuns(agent.id)} failed run{failedRuns(agent.id) === 1 ? "" : "s"}
+                          </span>
+                        ) : (
+                          <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                            {Math.round(agent.performance_score)}%
+                            {failedRuns(agent.id) > 0 && (
+                              <span className="ml-1 font-sans text-destructive">· {failedRuns(agent.id)} failed</span>
+                            )}
+                          </span>
+                        )}
                       </div>
                       <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-secondary">
                         <div
