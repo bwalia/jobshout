@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { agentHref } from "@/lib/agents/links";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -59,8 +60,8 @@ export function ExecutionCard({
   const [open, setOpen] = useState(false);
   const { data: exec, isLoading, isError, refetch } = useExecution(executionId);
   const detailHref = agentId
-    ? `/panel/task-manager?agent=${agentId}&run=${executionId}`
-    : `/panel/task-manager`;
+    ? agentHref(agentId, "tasks")
+    : `/panel/agents`;
 
   if (isError) {
     return (

@@ -69,7 +69,7 @@ export const NAV_SECTIONS: NavSection[] = [
       {
         id: "tasks",
         label: "Tasks",
-        href: "/panel/task-board",
+        href: "/panel/tasks",
         icon: Kanban,
         match: ["/panel/tasks", "/panel/task-board", "/tasks"],
         keywords: ["board", "kanban", "task board"],
@@ -214,4 +214,4 @@ export function sectionOf(itemId: string): NavSection | null {
 }
 
 /** Where the sidebar's "New task" button goes. */
-export const NEW_TASK_HREF = "/panel/task-board";
+export const NEW_TASK_HREF = "/panel/tasks?new=1";

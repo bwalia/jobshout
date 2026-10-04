@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { agentHref } from "@/lib/agents/links";
 import { AgentStatusBadge } from "@/components/agent/AgentStatusBadge";
 import type { Agent } from "@/lib/types/agent";
 
@@ -51,7 +52,7 @@ export function AgentCard({ agent, currentTask }: AgentCardProps) {
 
   return (
     <Link
-      href={`/panel/task-manager?agent=${agent.id}`}
+      href={agentHref(agent.id)}
       className="group flex flex-col gap-4 rounded-xl border border-border bg-card p-5 shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:shadow-card-hover"
     >
       {/* Top row: avatar + status */}

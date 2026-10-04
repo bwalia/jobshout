@@ -25,6 +25,7 @@ export type PanelId =
   | "dashboard"
   | "projects"
   | "agents"
+  | "tasks"
   | "task-board"
   | "task-manager"
   | "security-tester"
@@ -57,11 +58,13 @@ export const PANELS: PanelDef[] = [
   { id: "chat", label: "Chat", href: "/chat", icon: MessageSquare },
   { id: "dashboard", label: "Dashboard", href: "/panel/dashboard", icon: LayoutDashboard },
   { id: "projects", label: "Projects", href: "/panel/projects", icon: FolderKanban },
-  { id: "task-board", label: "Task Board", href: "/panel/task-board", icon: Kanban },
+  { id: "tasks", label: "Tasks", href: "/panel/tasks", icon: Kanban },
+  // Folded into Tasks and the agent profile; kept as redirects for old links.
+  { id: "task-board", label: "Task Board", href: "/panel/task-board", icon: Kanban, hidden: true },
   // A static route (app/(app)/panel/agents); listed so panel transitions and
   // the palette know about it.
   { id: "agents", label: "All agents", href: "/panel/agents", icon: Bot, hidden: true },
-  { id: "task-manager", label: "Task Manager", href: "/panel/task-manager", icon: ListTree },
+  { id: "task-manager", label: "Task Manager", href: "/panel/task-manager", icon: ListTree, hidden: true },
   { id: "security-tester", label: "Security Tester", href: "/panel/security-tester", icon: ShieldAlert, hidden: true },
   { id: "artifacts", label: "Artifacts", href: "/panel/artifacts", icon: Archive },
   { id: "scheduler", label: "Scheduler", href: "/panel/scheduler", icon: Clock },
@@ -110,7 +113,7 @@ const LEGACY_PREFIXES: { prefix: string; id: PanelId }[] = [
   { prefix: "/settings", id: "settings" },
   { prefix: "/projects", id: "projects" },
   { prefix: "/agents", id: "agents" },
-  { prefix: "/tasks", id: "task-board" },
+  { prefix: "/tasks", id: "tasks" },
 ];
 
 function legacyPanelFromPath(pathname: string): PanelId | null {

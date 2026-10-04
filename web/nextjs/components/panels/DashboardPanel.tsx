@@ -266,7 +266,7 @@ export function DashboardPanel() {
         </div>
         <div className="flex items-center gap-2">
           <Link
-            href="/panel/task-manager"
+            href="/panel/agents"
             className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-sm font-medium hover:bg-secondary"
           >
             <Plus className="h-4 w-4" /> New agent
@@ -380,7 +380,7 @@ export function DashboardPanel() {
           className="lg:col-span-2"
           action={
             <Link
-              href="/panel/task-board"
+              href="/panel/tasks"
               className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
             >
               Task Board <ArrowRight className="h-3 w-3" />
@@ -408,7 +408,7 @@ export function DashboardPanel() {
               {recentTasks.map((task) => (
                 <li key={task.id}>
                   <Link
-                    href={`/panel/task-board?task=${task.id}`}
+                    href={`/panel/tasks?task=${task.id}`}
                     className="flex items-center gap-3 rounded-lg px-2 py-2.5 transition-colors hover:bg-secondary/50"
                   >
                     <span

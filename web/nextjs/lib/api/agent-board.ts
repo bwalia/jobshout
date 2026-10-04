@@ -33,7 +33,7 @@ export function agentBoardHref(entry: AgentBoardEntry): string | null {
   switch (entry.activity_kind) {
     case "task_run":
       return entry.task_id
-        ? `/panel/task-board?task=${entry.task_id}&run=${entry.current_job_id}`
+        ? `/panel/tasks?task=${entry.task_id}&run=${entry.current_job_id}`
         : null;
     case "blog":
       return `/articles/${entry.current_job_id}`;

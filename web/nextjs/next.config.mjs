@@ -53,8 +53,8 @@ const nextConfig = {
       { source: "/landing", destination: "/", permanent: false },
       { source: "/dashboard", destination: "/panel/dashboard", permanent: false },
       { source: "/metrics", destination: "/panel/dashboard", permanent: false },
-      { source: "/agent-board", destination: "/panel/task-board", permanent: false },
-      { source: "/tasks", destination: "/panel/task-board", permanent: false },
+      { source: "/agent-board", destination: "/panel/tasks?group=agent", permanent: false },
+      { source: "/tasks", destination: "/panel/tasks", permanent: false },
       { source: "/task-manager", destination: "/panel/task-manager", permanent: false },
       { source: "/projects", destination: "/panel/projects", permanent: false },
       {

@@ -67,7 +67,7 @@ export function ChatHeader({
       ) : null}
 
       <Link
-        href="/panel/task-board"
+        href="/panel/tasks"
         title="Open task board"
         className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:h-11 max-sm:w-11"
       >
