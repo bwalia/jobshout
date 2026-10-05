@@ -85,7 +85,7 @@ export function ChatContextRail({
       <section>
         <RailHeading
           title="Agents at work"
-          href="/panel/task-manager"
+          href="/panel/agents"
           hint={idle > 0 ? `${idle} idle` : undefined}
         />
         {board.isLoading ? (
@@ -106,7 +106,7 @@ export function ChatContextRail({
       </section>
 
       <section>
-        <RailHeading title="Your board" href="/panel/task-board" />
+        <RailHeading title="Your board" href="/panel/tasks" />
         <dl className="space-y-2">
           <Stat label="In progress" value={count(inProgress.data?.total)} />
           <Stat label="In review" value={count(inReview.data?.total)} />
@@ -133,7 +133,7 @@ export function ChatContextRail({
 
       {specialists.length > 0 ? (
         <section>
-          <RailHeading title="Hand it to a specialist" href="/panel/task-manager" />
+          <RailHeading title="Hand it to a specialist" href="/panel/agents" />
           <ul className="space-y-1.5">
             {specialists.map((a) => {
               const key = String(a.metadata?.builtin ?? "");

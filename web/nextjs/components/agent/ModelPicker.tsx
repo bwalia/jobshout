@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import Link from "next/link";
 import { useAvailableModels } from "@/lib/hooks/useLLMProviders";
 import type { AvailableModel } from "@/lib/types/llm-provider";
 
@@ -30,6 +31,8 @@ interface ModelPickerProps {
   recommended?: string;
   /** What an unset choice resolves to, shown on the default option. */
   inheritedModel?: string;
+  /** Label for the empty choice; defaults to "Platform default". */
+  defaultLabel?: string;
 }
 
 /** How a provider key is titled in the dropdown. */
@@ -37,7 +40,20 @@ const PROVIDER_LABELS: Record<string, string> = {
   ollama: "Ollama (local)",
   openai: "OpenAI",
   claude: "Claude",
+  gemini: "Gemini",
 };
+
+/** The short provider name each option leads with: "Gemini · gemini-2.5-pro". */
+const PROVIDER_SHORT: Record<string, string> = {
+  ollama: "Ollama",
+  openai: "OpenAI",
+  claude: "Claude",
+  gemini: "Gemini",
+};
+
+export function providerName(provider: string): string {
+  return PROVIDER_SHORT[provider] ?? (provider ? provider[0].toUpperCase() + provider.slice(1) : "");
+}
 
 /** Compact context-window label: 262144 -> "256k". */
 function formatContext(tokens: number): string {
@@ -61,6 +77,8 @@ interface Option {
   label: string;
   selection: ModelSelection;
   group: string;
+  /** Listed so people can see it exists, but it cannot be chosen. */
+  disabled?: boolean;
 }
 
 const SELECT_CLASS =
@@ -86,15 +104,14 @@ export function ModelPicker({
   providerFilter,
   recommended,
   inheritedModel,
+  defaultLabel = "Platform default",
 }: ModelPickerProps) {
   const { data, isLoading, isError } = useAvailableModels();
 
   const options = useMemo<Option[]>(() => {
     const out: Option[] = [
       {
-        label: inheritedModel
-          ? `Platform default (${inheritedModel})`
-          : "Platform default",
+        label: inheritedModel ? `${defaultLabel} (${inheritedModel})` : defaultLabel,
         selection: { provider: "", model: "" },
         group: "Default",
       },
@@ -118,16 +135,35 @@ export function ModelPicker({
           // first thing to disappear — leaving a dangling dash and no badge.
           label:
             m.name === recommended
-              ? `Recommended · ${describe(m)}`
-              : describe(m),
+              ? `Recommended · ${providerName(p.provider)} · ${describe(m)}`
+              : `${providerName(p.provider)} · ${describe(m)}`,
           selection: { provider: p.provider, model: m.name },
           group,
         });
       }
     }
 
+    // A recommended model the provider does not have is still listed, so the
+    // advice is visible, but it cannot be picked until someone installs it.
+    if (recommended && data && !out.some((o) => o.selection.model === recommended)) {
+      const provider = providerFilter ?? "";
+      out.push({
+        label: `Recommended · ${provider ? `${providerName(provider)} · ` : ""}${recommended} — not installed`,
+        selection: { provider, model: recommended },
+        group: "Not installed",
+        disabled: true,
+      });
+    }
+
     return out;
-  }, [data, includeAuto, providerFilter, recommended, inheritedModel]);
+  }, [data, includeAuto, providerFilter, recommended, inheritedModel, defaultLabel]);
+
+  const missingRecommended = options.find((o) => o.disabled)?.selection;
+  // Providers that contribute nothing to this list, so an empty section is
+  // explained rather than silently missing.
+  const silentProviders = (data?.providers ?? []).filter(
+    (p) => (!providerFilter || p.provider === providerFilter) && (p.error || p.models.length === 0)
+  );
 
   // An agent may hold a model that is no longer installed, or free text typed
   // before this picker existed. Surface it rather than silently rewriting the
@@ -178,7 +214,7 @@ export function ModelPicker({
         {groups.map((g) => (
           <optgroup key={g.name} label={g.name}>
             {g.items.map(({ option, index }) => (
-              <option key={index} value={index}>
+              <option key={index} value={index} disabled={option.disabled}>
                 {option.label}
               </option>
             ))}
@@ -188,6 +224,30 @@ export function ModelPicker({
       {isError && (
         <p className="mt-1 text-xs text-destructive">
           Could not load the model list. The platform default will be used.
+        </p>
+      )}
+      {silentProviders.length > 0 && (
+        <p className="mt-1 text-xs text-muted-foreground">
+          {silentProviders
+            .map((p) => `${providerName(p.provider)} ${p.error ? "is not reachable" : "reports no models"}`)
+            .join("; ")}
+          , so its models are not listed.{" "}
+          <Link href="/panel/llm-providers" className="font-medium text-primary hover:underline">
+            Check Models &amp; providers
+          </Link>
+          .
+        </p>
+      )}
+      {missingRecommended && (
+        <p className="mt-1 text-xs text-muted-foreground">
+          {missingRecommended.provider
+            ? `Not installed on ${providerName(missingRecommended.provider)}`
+            : "Not installed"}
+          : pull {missingRecommended.model} or add a provider in{" "}
+          <Link href="/panel/llm-providers" className="font-medium text-primary hover:underline">
+            Models &amp; providers
+          </Link>
+          .
         </p>
       )}
     </>

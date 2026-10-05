@@ -6,7 +6,7 @@ test.describe("Chat", () => {
     const creds = await registerViaAPI("chat");
     await loginViaUI(page, creds.email, creds.password);
     await expect(page).toHaveURL(/\/chat/);
-    await expect(page.getByRole("button", { name: "JobShout home" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "JobShout home" })).toBeVisible();
     const composer = page.getByPlaceholder(/ask jobshout to build/i);
     await expect(composer).toBeVisible();
     const box = await composer.boundingBox();

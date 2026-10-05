@@ -90,28 +90,28 @@ export function SidebarFooter({ collapsed }: { collapsed: boolean }) {
   }
 
   return (
-    <div className="border-t border-sidebar-border px-3 py-3">
+    <div className="border-t border-sidebar-border px-2 py-1.5">
       <div className="flex items-center gap-2">
         <div ref={menuRef} className="relative min-w-0 flex-1">
           <button
             type="button"
             onClick={() => setMenuOpen((v) => !v)}
             className={cn(
-              "flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors",
+              "flex w-full items-center gap-2 rounded-lg px-1.5 py-1 text-left transition-colors",
               "hover:bg-sidebar-muted",
               menuOpen && "bg-sidebar-muted"
             )}
             aria-haspopup="true"
             aria-expanded={menuOpen}
           >
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-xs font-bold text-primary-foreground">
               {avatar}
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-base font-semibold text-foreground">
+              <span className="block truncate text-sm font-semibold leading-5 text-foreground">
                 {label}
               </span>
-              <span className="block truncate text-sm text-muted-foreground">
+              <span className="block truncate text-xs leading-4 text-muted-foreground">
                 {user?.email}
               </span>
             </span>
@@ -136,7 +136,7 @@ export function SidebarFooter({ collapsed }: { collapsed: boolean }) {
         <button
           type="button"
           onClick={() => setTheme(isDark ? "light" : "dark")}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-sidebar-foreground hover:bg-sidebar-muted hover:text-foreground"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sidebar-foreground hover:bg-sidebar-muted hover:text-foreground"
           aria-label={isDark ? "Switch to light" : "Switch to dark"}
         >
           {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
@@ -218,7 +218,7 @@ function BuildStamp({
 
   return (
     <div
-      className="mt-2 flex items-start justify-between gap-2 px-2"
+      className="mt-0.5 flex items-start justify-between gap-2 px-1.5"
       title={title}
     >
       <span className="min-w-0 truncate text-2xs leading-tight text-muted-foreground">

@@ -89,9 +89,11 @@ export function CreateAgentDialog({ open, onClose }: CreateAgentDialogProps) {
     },
   });
 
-  // Reset the form whenever the dialog is opened fresh
+  // Clear the form when the dialog closes, so it always opens empty. Doing
+  // it on open instead raced the first keystrokes: the reset ran after the
+  // dialog painted and wiped whatever had just been typed into Name.
   useEffect(() => {
-    if (open) {
+    if (!open) {
       reset();
     }
   }, [open, reset]);

@@ -96,6 +96,7 @@ func (s *taskRunService) CreateRun(ctx context.Context, taskID uuid.UUID, req mo
 		return nil, fmt.Errorf("nothing to run: the task has no description and no prompt was provided")
 	}
 
+	provider, modelName := runModel(task, req)
 	run := &model.TaskRun{
 		ID:            uuid.New(),
 		TaskID:        taskID,
@@ -104,8 +105,8 @@ func (s *taskRunService) CreateRun(ctx context.Context, taskID uuid.UUID, req mo
 		Status:        model.TaskRunStatusQueued,
 		Prompt:        prompt,
 		Engine:        req.Engine,
-		ModelProvider: req.ModelProvider,
-		ModelName:     req.ModelName,
+		ModelProvider: provider,
+		ModelName:     modelName,
 		SkillSlugs:    normalizeSlugs(req.SkillSlugs),
 		Inputs:        req.Inputs,
 		Debug:         req.Debug,
@@ -318,4 +319,17 @@ func normalizeSlugs(slugs []string) []string {
 		out = append(out, s)
 	}
 	return out
+}
+
+// runModel is the model a run uses: the run request's own choice, else the
+// task's model override, else nothing (the agent's model applies).
+func runModel(task *model.Task, req model.CreateTaskRunRequest) (*string, *string) {
+	if req.ModelProvider != nil || req.ModelName != nil {
+		return req.ModelProvider, req.ModelName
+	}
+	if o := model.ModelOverrideFrom(task.Metadata); o != nil {
+		p, m := o.Provider, o.Model
+		return &p, &m
+	}
+	return nil, nil
 }

@@ -1,6 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
+import { agentHref } from "@/lib/agents/links";
+import { TaskLatestRun, TaskModelSection, savedModelOverride } from "@/components/kanban/TaskModelAndRun";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { updateTask, getTaskComments, addTaskComment } from "@/lib/api/tasks";
@@ -76,6 +79,7 @@ export function TaskDetailModal({
   const [dueDate, setDueDate] = useState(
     task.due_date ? task.due_date.slice(0, 10) : ""
   );
+  const [modelOverride, setModelOverride] = useState(() => savedModelOverride(task));
 
   // Comment input state
   const [commentBody, setCommentBody] = useState("");
@@ -99,6 +103,7 @@ export function TaskDetailModal({
     setPriority(task.priority);
     setAssignedAgentId(task.assigned_agent_id ?? "");
     setDueDate(task.due_date ? task.due_date.slice(0, 10) : "");
+    setModelOverride(savedModelOverride(task));
   }, [task]);
 
   // Fetch comments for this task
@@ -142,6 +147,9 @@ export function TaskDetailModal({
   function handleSave() {
     if (!title.trim()) return;
 
+    const saved = savedModelOverride(task);
+    const overrideChanged =
+      saved.provider !== modelOverride.provider || saved.model !== modelOverride.model;
     updateMutation.mutate({
       title: title.trim(),
       description: description.trim() || undefined,
@@ -149,6 +157,7 @@ export function TaskDetailModal({
       priority,
       assigned_agent_id: assignedAgentId.trim() || null,
       due_date: dueDate || null,
+      ...(overrideChanged ? { model_override: modelOverride } : {}),
     });
   }
 
@@ -166,11 +175,11 @@ export function TaskDetailModal({
     >
       {/* Slide-over panel */}
       <div
-        className="flex h-full w-full max-w-md flex-col overflow-y-auto border-l border-border bg-card shadow-2xl"
+        className="flex h-full w-full max-w-md flex-col border-l border-border bg-card shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-border px-6 py-4">
+        <div className="flex shrink-0 items-center justify-between border-b border-border px-6 py-4">
           <h2 className="text-base font-semibold">Task Detail</h2>
           <button
             type="button"
@@ -193,7 +202,7 @@ export function TaskDetailModal({
         </div>
 
         {/* Form body */}
-        <div className="flex-1 space-y-5 px-6 py-5">
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5 scrollbar-thin">
           {/* Title */}
           <div className="space-y-1.5">
             <label htmlFor="task-title" className="text-sm font-medium">
@@ -264,9 +273,19 @@ export function TaskDetailModal({
 
           {/* Assignee picker */}
           <div className="space-y-1.5">
-            <label htmlFor="task-assignee" className="text-sm font-medium">
-              Assigned Agent
-            </label>
+            <div className="flex items-center justify-between gap-2">
+              <label htmlFor="task-assignee" className="text-sm font-medium">
+                Assigned Agent
+              </label>
+              {assignedAgentId && agents.some((a) => a.id === assignedAgentId) && (
+                <Link
+                  href={agentHref(assignedAgentId)}
+                  className="text-xs font-medium text-primary hover:underline"
+                >
+                  Open {agents.find((a) => a.id === assignedAgentId)?.name} →
+                </Link>
+              )}
+            </div>
             <select
               id="task-assignee"
               value={assignedAgentId}
@@ -289,6 +308,15 @@ export function TaskDetailModal({
               ))}
             </select>
           </div>
+
+          {/* Which model the runs use, and the latest run's outcome */}
+          <TaskModelSection
+            task={task}
+            agent={agents.find((a) => a.id === assignedAgentId)}
+            override={modelOverride}
+            onOverride={setModelOverride}
+          />
+          <TaskLatestRun task={task} agent={agents.find((a) => a.id === task.assigned_agent_id)} />
 
           {formatCompletedAt(task.completed_at) && (
             <p className="text-sm text-muted-foreground">
@@ -371,7 +399,7 @@ export function TaskDetailModal({
         </div>
 
         {/* Footer actions */}
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-6 py-4">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-border bg-card px-6 py-4">
           <TaskActions
             task={task}
             onShowHistory={() => setHistoryOpen(true)}

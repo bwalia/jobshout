@@ -11,7 +11,7 @@ The agent owns: seed (name, role, prompt, `metadata.builtin`), launch schema, `L
 
 Register on three surfaces only:
 
-1. **Task Manager** — rail tab from the registry. No new `BUILTINS` row or `selection.id === "…"` in `TaskManagerPanel.tsx`.
+1. **Agent profile** — the Workspace tab of `/panel/agents/[id]` comes from the registry. No per-agent branch in the profile page or the nav config.
 2. **Chat** — `agent_execute` + schema interview. Extra tools live with the agent. No new bullet in `chatagent/prompt.go`, no new `if` in `platformtools/execute.go`.
 3. **That agent’s tab** — if the specialist registered a tab client (`AGENT_CLIENTS`), that UI is the tab. Schema form stays on New task / Run task / chat. Agents without a client keep the schema form + Run.
 
@@ -19,4 +19,4 @@ Platform that must stay generic: `AgentInputFields`, `POST /tasks/launch`, `agen
 
 Do not duplicate launch fields in Go and TypeScript. One schema (`agentschema` / `GET /api/v1/agent-schemas`); the web consumes it.
 
-Existing switches (`tasklaunch/launch.go`, `input-schemas.ts`, `TaskManagerPanel` `BUILTINS`) are debt. New agents must not add cases. Claude copy: `.claude/rules/agent-modules.md`.
+Existing switches (`tasklaunch/launch.go`, `input-schemas.ts`, `TaskManagerPanel` `BUILTINS`, now removed) are debt. New agents must not add cases. Claude copy: `.claude/rules/agent-modules.md`.

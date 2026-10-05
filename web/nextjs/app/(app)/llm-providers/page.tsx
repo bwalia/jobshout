@@ -1,7 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { AlertTriangle, ChevronRight } from "lucide-react";
+import { LLMBenchmarksPanel } from "@/components/panels/LLMBenchmarksPanel";
+import { ProviderDrawer } from "@/components/llm/ProviderDrawer";
+import { cn } from "@/lib/utils/cn";
 import {
+  useAvailableModels,
   useBuiltinProviders,
   useLLMProviders,
   useCreateLLMProvider,
@@ -45,8 +51,56 @@ function maskedKey(key: string): string {
   return key.length > 4 ? `••••${key.slice(-4)}` : "••••";
 }
 
+type PageTab = "providers" | "benchmarks";
+
+/**
+ * Models & providers: the providers agents can use, and (as a tab) the LLM
+ * benchmarks of every call they made.
+ */
 export default function LLMProvidersPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const tab: PageTab = params.get("tab") === "benchmarks" ? "benchmarks" : "providers";
+  const setTab = (t: PageTab) => router.replace(t === "providers" ? pathname : `${pathname}?tab=${t}`, { scroll: false });
+
+  return (
+    <div className="mx-auto max-w-6xl space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">Models &amp; providers</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Where agents get their models, and how each model has performed.
+        </p>
+      </div>
+      <div className="border-b border-border" role="tablist" aria-label="Models and providers">
+        {([
+          { id: "providers", label: "Providers" },
+          { id: "benchmarks", label: "Benchmarks" },
+        ] as const).map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={tab === t.id}
+            onClick={() => setTab(t.id)}
+            className={cn(
+              "-mb-px border-b-2 px-4 py-2.5 text-sm font-medium",
+              tab === t.id ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
+            )}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {tab === "benchmarks" ? <LLMBenchmarksPanel /> : <ProvidersTab />}
+    </div>
+  );
+}
+
+function ProvidersTab() {
   const { data: builtinProviders } = useBuiltinProviders();
+  const { data: available } = useAvailableModels();
+  const [openProvider, setOpenProvider] = useState<string | null>(null);
   const { data: providers, isLoading } = useLLMProviders();
   const createMutation = useCreateLLMProvider();
   const updateMutation = useUpdateLLMProvider();
@@ -87,14 +141,12 @@ export default function LLMProvidersPage() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-8">
+    <div className="max-w-4xl space-y-8">
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">LLM Providers</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Configure multiple LLM providers (local and cloud) for your agents and workflows.
-          </p>
-        </div>
+        <p className="text-sm text-muted-foreground">
+          Configure LLM providers (local and cloud) for your agents and workflows. Click a system
+          provider to see the models it offers.
+        </p>
         <button
           onClick={() => setShowForm(!showForm)}
           className="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
@@ -111,29 +163,40 @@ export default function LLMProvidersPage() {
             These providers are configured via environment variables and always available.
           </p>
           <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-            {builtinProviders.map((bp) => (
-              <div
-                key={bp.name}
-                className="flex items-center justify-between rounded-lg border border-border bg-background p-4"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-sm font-bold text-primary uppercase">
-                    {bp.name.charAt(0)}
+            {builtinProviders.map((bp) => {
+              const group = available?.providers.find((p) => p.provider === bp.name);
+              const count = group?.models.length;
+              const problem = group?.error ? "Not reachable" : group && count === 0 ? "No models" : null;
+              return (
+                <button
+                  type="button"
+                  key={bp.name}
+                  onClick={() => setOpenProvider(bp.name)}
+                  aria-label={`${bp.name}: show models`}
+                  className="flex items-center justify-between rounded-lg border border-border bg-background p-4 text-left transition-colors hover:border-primary/40 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-sm font-bold uppercase text-primary">
+                      {bp.name.charAt(0)}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium capitalize">{bp.name}</p>
+                      <p className={cn("text-xs", problem ? "text-destructive" : "text-muted-foreground")}>
+                        {problem ? (
+                          <span className="inline-flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> {problem}</span>
+                        ) : (
+                          <>
+                            {bp.is_default ? "Default" : "Available"}
+                            {typeof count === "number" ? ` · ${count} model${count === 1 ? "" : "s"}` : ""}
+                          </>
+                        )}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm font-medium capitalize">{bp.name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {bp.is_default ? "Default" : "Available"}
-                    </p>
-                  </div>
-                </div>
-                {bp.is_default && (
-                  <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">
-                    Default
-                  </span>
-                )}
-              </div>
-            ))}
+                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                </button>
+              );
+            })}
           </div>
         </section>
       )}
@@ -335,6 +398,7 @@ export default function LLMProvidersPage() {
           </div>
         )}
       </section>
+      {openProvider && <ProviderDrawer provider={openProvider} onClose={() => setOpenProvider(null)} />}
     </div>
   );
 }

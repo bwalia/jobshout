@@ -19,10 +19,11 @@ import { InsightsWriterClient } from "@/components/insights-writer/InsightsWrite
 import { LinkedInClient } from "@/components/linkedin/LinkedInClient";
 
 /**
- * Optional product UI that owns the Task Manager tab (replaces the schema form).
+ * Optional product UI that owns an agent's Workspace tab (replaces the schema form).
  * Schema fields stay on New task / Run task / chat.
  *
- * Keyed by metadata.builtin. Register here; do not add a TaskManagerPanel branch.
+ * Keyed by metadata.builtin. Shown as the agent profile's Workspace tab. Register
+ * here; do not add a per-agent branch to the profile.
  */
 export const AGENT_CLIENTS: Record<string, ComponentType> = {
   career_ops: CareerAgentClient,

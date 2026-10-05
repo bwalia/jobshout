@@ -15,6 +15,8 @@ import {
 import { formatDateOnly, isDueOverdue } from "@/lib/dates";
 import { TaskProgressChip } from "@/components/task-manager/TaskProgressChip";
 import { cn } from "@/lib/utils/cn";
+import Link from "next/link";
+import { agentHref } from "@/lib/agents/links";
 import type { Priority } from "@/lib/types/common";
 import type { Task } from "@/lib/types/project";
 
@@ -149,13 +151,20 @@ export function TaskCardFace({
       )}
 
       <div className="mt-3 flex items-center justify-between border-t border-border pt-2">
-        {assigneeName ? (
-          <div
-            className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-card bg-primary/15 text-[10px] font-semibold text-primary"
-            title={assigneeName}
+        {assigneeName && task.assigned_agent_id ? (
+          <Link
+            href={agentHref(task.assigned_agent_id)}
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+            title={`Open ${assigneeName}`}
+            className="flex min-w-0 items-center gap-1.5 rounded-full pr-1 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            {initials(assigneeName)}
-          </div>
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 border-card bg-primary/15 text-[10px] font-semibold text-primary">
+              {initials(assigneeName)}
+            </span>
+            <span className="truncate">{assigneeName}</span>
+          </Link>
         ) : (
           <User className="h-3.5 w-3.5 text-muted-foreground/60" />
         )}

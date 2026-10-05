@@ -83,6 +83,17 @@ export interface UpdateTaskRequest {
   story_points?: number | null;
   due_date?: string | null;
   position?: number;
+  /**
+   * This task's own model, instead of the agent's. Omit to leave it as is;
+   * an empty provider and model clear it. Read back from
+   * metadata.model_override.
+   */
+  model_override?: TaskModelOverride;
+}
+
+export interface TaskModelOverride {
+  provider: string;
+  model: string;
 }
 
 export interface TaskComment {

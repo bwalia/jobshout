@@ -14,7 +14,7 @@ test.describe("Artifacts", () => {
 
   test("library shows an empty state and type tabs", async ({ page }) => {
     await navigateTo(page, "/panel/artifacts");
-    await expect(page.locator("h1")).toContainText("Artifacts");
+    await expect(page.locator("h1")).toContainText("Outputs");
     await expect(page.getByRole("button", { name: "All" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Articles", exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Images", exact: true })).toBeVisible();
@@ -35,7 +35,7 @@ test.describe("Artifacts", () => {
   test("/artifacts redirects to the panel", async ({ page }) => {
     await page.goto("/artifacts");
     await page.waitForURL("**/panel/artifacts**", { timeout: 10_000 });
-    await expect(page.locator("h1")).toContainText("Artifacts");
+    await expect(page.locator("h1")).toContainText("Outputs");
   });
 
   test("a started article run appears in the library", async ({ page }) => {

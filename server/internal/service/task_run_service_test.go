@@ -85,3 +85,23 @@ func TestNormalizeSlugs(t *testing.T) {
 		t.Fatalf("nil should normalize to empty, non-nil slice")
 	}
 }
+
+func TestRunModelPrefersRequestThenTaskOverride(t *testing.T) {
+	task := &model.Task{Metadata: model.WithModelOverride(nil, model.TaskModelOverride{Provider: "gemini", Model: "gemini-2.5-pro"})}
+
+	p, m := runModel(task, model.CreateTaskRunRequest{})
+	if p == nil || m == nil || *p != "gemini" || *m != "gemini-2.5-pro" {
+		t.Errorf("task override not applied: %v %v", p, m)
+	}
+
+	reqP, reqM := "ollama", "llama3"
+	p, m = runModel(task, model.CreateTaskRunRequest{ModelProvider: &reqP, ModelName: &reqM})
+	if *p != "ollama" || *m != "llama3" {
+		t.Errorf("run request did not win: %v %v", *p, *m)
+	}
+
+	p, m = runModel(&model.Task{}, model.CreateTaskRunRequest{})
+	if p != nil || m != nil {
+		t.Errorf("no override should leave the agent's model: %v %v", p, m)
+	}
+}

@@ -154,6 +154,11 @@ export default function WorkflowsPage() {
               ? "Try adjusting your search."
               : "Create your first workflow to get started."}
           </p>
+          {searchQuery && (
+            <button type="button" onClick={() => setSearchQuery("")} className="mt-4 inline-flex items-center gap-1.5 rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-muted">
+              Clear search
+            </button>
+          )}
           {!searchQuery && (
             <button
               type="button"

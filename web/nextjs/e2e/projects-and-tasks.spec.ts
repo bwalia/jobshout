@@ -55,43 +55,28 @@ test.describe("Projects & Tasks", () => {
       timeout: 10_000,
     });
     await expect(page.locator("h1")).toContainText("E2E Kanban Project");
-    await expect(page.locator("text=Backlog").first()).toBeVisible({
+    await expect(page.locator("text=Backlog >> visible=true").first()).toBeVisible({
       timeout: 5_000,
     });
 
-    await page.click('button:has-text("Tasks")');
-    await expect(page).toHaveURL(/view=tasks/);
-  });
-
-  test("clicking a project opens its board and tasks", async ({ page }) => {
-    await navigateTo(page, "/panel/projects");
-    await expect(page.locator("h1")).toContainText("Projects");
-    await page.getByRole("heading", { name: "E2E Kanban Project" }).click();
-    await page.waitForURL(new RegExp(`project=${projectId}`), {
-      timeout: 10_000,
-    });
-    await expect(page.locator("h1")).toContainText("E2E Kanban Project");
-    await expect(page.locator("text=Backlog").first()).toBeVisible({
-      timeout: 5_000,
-    });
-
-    await page.click('button:has-text("Tasks")');
-    await expect(page).toHaveURL(/view=tasks/);
+    // The project's tasks are the shared Tasks view: Board or List.
+    await page.getByRole("button", { name: "List" }).click();
+    await expect(page.getByRole("button", { name: "List" })).toHaveAttribute("aria-pressed", "true");
   });
 
   test("navigate to project detail and see kanban board", async ({ page }) => {
     await page.goto(`/projects/${projectId}`);
 
-    await expect(page.locator("text=Backlog").first()).toBeVisible({
+    await expect(page.locator("text=Backlog >> visible=true").first()).toBeVisible({
       timeout: 5_000,
     });
-    await expect(page.locator("text=Todo").first()).toBeVisible();
-    await expect(page.locator("text=In Progress").first()).toBeVisible();
+    await expect(page.locator("text=Todo >> visible=true").first()).toBeVisible();
+    await expect(page.locator("text=In Progress >> visible=true").first()).toBeVisible();
   });
 
   test("create a task from kanban board", async ({ page }) => {
     await page.goto(`/projects/${projectId}`);
-    await expect(page.locator("text=Backlog").first()).toBeVisible({
+    await expect(page.locator("text=Backlog >> visible=true").first()).toBeVisible({
       timeout: 5_000,
     });
 
@@ -120,7 +105,7 @@ test.describe("Projects & Tasks", () => {
 
   test("create second task and verify both visible", async ({ page }) => {
     await page.goto(`/projects/${projectId}`);
-    await expect(page.locator("text=Backlog").first()).toBeVisible({
+    await expect(page.locator("text=Backlog >> visible=true").first()).toBeVisible({
       timeout: 5_000,
     });
 
@@ -140,27 +125,28 @@ test.describe("Projects & Tasks", () => {
     ).toBeVisible({ timeout: 5_000 });
   });
 
-  test("task manager panel loads with project rail", async ({ page }) => {
+  test("old /task-manager lands on Tasks", async ({ page }) => {
     await navigateTo(page, "/task-manager");
-    await page.waitForURL("**/panel/task-manager**", { timeout: 10_000 });
-    await expect(page.locator("h1")).toContainText("Task Manager");
-    await expect(page.locator("text=Projects").first()).toBeVisible({
-      timeout: 5_000,
-    });
+    // Task Manager folded into Tasks and the agent profiles.
+    await page.waitForURL("**/panel/tasks**", { timeout: 10_000 });
+    await expect(page.locator("h1")).toContainText("Tasks");
   });
 
-  test("task board shows all-tasks kanban and agents view", async ({ page }) => {
-    await navigateTo(page, "/panel/task-board");
-    await expect(page.locator("h1")).toContainText("Task Board");
-    await expect(page.locator("text=Backlog").first()).toBeVisible({
+  test("tasks shows the all-tasks board, groups by agent and switches to a list", async ({ page }) => {
+    await navigateTo(page, "/panel/tasks");
+    await expect(page.locator("h1")).toContainText("Tasks");
+    await expect(page.locator("text=Backlog >> visible=true").first()).toBeVisible({
       timeout: 5_000,
     });
 
-    await page.click('button:has-text("Agents")');
-    await page.waitForURL("**view=agents**", { timeout: 5_000 });
+    await page.getByRole("combobox", { name: "Group by" }).selectOption("agent");
+    await page.waitForURL("**group=agent**", { timeout: 5_000 });
+    await page.getByRole("button", { name: "List" }).click();
+    await expect(page.getByRole("table")).toBeVisible();
+    await page.getByRole("button", { name: "Board" }).click();
   });
 
-  test("done task shows history and hides Run in task manager", async ({
+  test("done task shows history and hides Run", async ({
     page,
   }) => {
     const title = `Done history ${Date.now()}`;
@@ -169,9 +155,9 @@ test.describe("Projects & Tasks", () => {
       status: "done",
     });
 
-    await navigateTo(page, "/panel/task-manager");
-    await expect(page.locator("h1")).toContainText("Task Manager");
-    await page.getByRole("button", { name: title }).click();
+    await navigateTo(page, `/panel/tasks?q=${encodeURIComponent(title)}`);
+    await expect(page.locator("h1")).toContainText("Tasks");
+    await page.getByText(title, { exact: true }).first().click();
 
     await expect(
       page.getByRole("button", { name: "Show History" }).first()
@@ -179,52 +165,54 @@ test.describe("Projects & Tasks", () => {
     await expect(page.getByRole("button", { name: /^Run$/ })).toHaveCount(0);
 
     await page.getByRole("button", { name: "Show History" }).first().click();
-    await expect(page.getByRole("heading", { name: "History" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "History" }).first()).toBeVisible();
     await expect(page.getByText(/Completed/i).first()).toBeVisible();
   });
 
-  test("task board detail offers Run and Show History", async ({ page }) => {
+  test("task detail offers Run and Show History", async ({ page }) => {
     const title = `Board run ${Date.now()}`;
     await createTaskViaAPI(creds.token, projectId, {
       title,
       status: "todo",
     });
 
-    await navigateTo(page, "/panel/task-board");
-    await expect(page.locator("h1")).toContainText("Task Board");
-    await page.getByRole("button", { name: new RegExp(title) }).click();
+    await navigateTo(page, `/panel/tasks?q=${encodeURIComponent(title)}`);
+    await expect(page.locator("h1")).toContainText("Tasks");
+    await page.getByText(title, { exact: true }).first().click();
     await expect(page.getByRole("heading", { name: "Task Detail" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Show History" })).toBeVisible();
     await expect(page.getByRole("button", { name: /^Run$/ })).toBeVisible();
   });
 
-  test("kanban card click writes task on the board URL", async ({ page }) => {
+  test("kanban card click writes task on the Tasks URL", async ({ page }) => {
     const title = `Kanban url ${Date.now()}`;
     const task = await createTaskViaAPI(creds.token, projectId, {
       title,
       status: "todo",
     });
 
+    // Old Task Board links carry the project over to Tasks.
     await navigateTo(page, `/panel/task-board?project=${projectId}`);
-    await expect(page.locator("h1")).toContainText("Task Board");
+    await page.waitForURL(new RegExp(`/panel/tasks\\?.*project=${projectId}`), { timeout: 10_000 });
+    await expect(page.locator("h1")).toContainText("Tasks");
     await page.getByText(title, { exact: true }).first().click();
     await expect(page).toHaveURL(new RegExp(`task=${task.id}`));
     await expect(page.getByRole("heading", { name: "Task Detail" })).toBeVisible();
   });
 
-  test("task manager click writes project and task on the URL", async ({
-    page,
-  }) => {
-    const title = `TM url ${Date.now()}`;
+  test("filters and the open task live in the URL", async ({ page }) => {
+    const title = `URL state ${Date.now()}`;
     const task = await createTaskViaAPI(creds.token, projectId, {
       title,
       status: "todo",
     });
 
-    await navigateTo(page, "/panel/task-manager");
-    await expect(page.locator("h1")).toContainText("Task Manager");
-    await page.getByRole("button", { name: title }).click();
+    await navigateTo(page, "/panel/tasks");
+    await page.getByRole("combobox", { name: "Project" }).selectOption(projectId);
     await expect(page).toHaveURL(new RegExp(`project=${projectId}`));
+    await page.getByRole("searchbox", { name: "Search tasks" }).fill(title);
+    await expect(page).toHaveURL(/q=URL/);
+    await page.getByText(title, { exact: true }).first().click();
     await expect(page).toHaveURL(new RegExp(`task=${task.id}`));
   });
 });

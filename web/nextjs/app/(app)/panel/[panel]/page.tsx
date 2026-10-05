@@ -4,12 +4,12 @@ import { Suspense } from "react";
 import { notFound, useParams } from "next/navigation";
 import { DashboardPanel } from "@/components/panels/DashboardPanel";
 import { ProjectsPanel } from "@/components/panels/ProjectsPanel";
-import { TaskBoardPanel } from "@/components/panels/TaskBoardPanel";
-import { TaskManagerPanel } from "@/components/panels/TaskManagerPanel";
+import { TasksView } from "@/components/tasks/TasksView";
+import { LegacyTaskRedirect } from "@/components/tasks/LegacyTaskRedirect";
 import { ArtifactsPanel } from "@/components/panels/ArtifactsPanel";
 import { PluginsSkillsPanel } from "@/components/panels/PluginsSkillsPanel";
 import { SecurityTesterPanel } from "@/components/panels/SecurityTesterPanel";
-import { LLMBenchmarksPanel } from "@/components/panels/LLMBenchmarksPanel";
+import { PanelRedirect } from "@/components/layout/PanelRedirect";
 import { PANELS, type PanelId } from "@/lib/panels";
 
 import SchedulerPage from "@/app/(app)/scheduler/page";
@@ -59,10 +59,28 @@ function PanelBody({ panel }: { panel: Exclude<PanelId, "chat"> }) {
       return <DashboardPanel />;
     case "projects":
       return <ProjectsPanel />;
+    case "tasks":
+      return (
+        <div className="flex h-full min-h-0 flex-col">
+          <div className="px-6 pt-5">
+            <h1 className="text-2xl">Tasks</h1>
+            <p className="text-sm text-muted-foreground">
+              Every task in one place. Filter, search, group by status, agent or project, and switch
+              between a board and a list.
+            </p>
+          </div>
+          <div className="min-h-0 flex-1">
+            <TasksView />
+          </div>
+        </div>
+      );
     case "task-board":
-      return <TaskBoardPanel />;
+      return <LegacyTaskRedirect from="task-board" />;
     case "task-manager":
-      return <TaskManagerPanel />;
+      return <LegacyTaskRedirect from="task-manager" />;
+    case "agents":
+      // /panel/agents is its own static route; this only satisfies the type.
+      return null;
     case "security-tester":
       return (
         <div className="p-6">
@@ -116,7 +134,8 @@ function PanelBody({ panel }: { panel: Exclude<PanelId, "chat"> }) {
         </div>
       );
     case "llm-benchmarks":
-      return <LLMBenchmarksPanel />;
+      // Benchmarks is a tab of Models & providers now.
+      return <PanelRedirect to="/panel/llm-providers?tab=benchmarks" />;
     case "settings":
       return (
         <div className="p-6">

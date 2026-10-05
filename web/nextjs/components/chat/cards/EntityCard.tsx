@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { agentHref } from "@/lib/agents/links";
 import { cn } from "@/lib/utils/cn";
 import type { EntityRef } from "@/lib/types/chat";
 import { StoredImage } from "@/components/image/StoredImage";
@@ -44,12 +45,12 @@ function fallbackHref(entity: EntityRef): string {
   switch (entity.kind) {
     case "agent":
       return entity.id
-        ? `/panel/task-manager?agent=${entity.id}`
-        : "/panel/task-manager";
+        ? agentHref(entity.id)
+        : "/panel/agents";
     case "task":
       return entity.id
-        ? `/panel/task-board?task=${entity.id}`
-        : "/panel/task-board";
+        ? `/panel/tasks?task=${entity.id}`
+        : "/panel/tasks";
     case "project":
       return entity.id
         ? `/panel/projects?project=${entity.id}`

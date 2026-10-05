@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { OrgChart } from "@/components/orgchart/OrgChart";
 import { useAgents } from "@/lib/hooks/useAgents";
 
@@ -84,6 +85,9 @@ export default function OrgBuilderPage() {
               <p className="text-sm text-muted-foreground">
                 Create agents first, then come back to build your org chart.
               </p>
+              <Link href="/panel/agents?new=1" className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90">
+                Create an agent
+              </Link>
             </div>
           </div>
         )}

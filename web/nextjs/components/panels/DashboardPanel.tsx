@@ -2,6 +2,9 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { agentHref } from "@/lib/agents/links";
+import { NeedsAttention } from "@/components/dashboard/NeedsAttention";
+import { useRunFailures } from "@/lib/hooks/useRunFailures";
 import { useQuery } from "@tanstack/react-query";
 import {
   ListChecks,
@@ -239,6 +242,9 @@ export function DashboardPanel() {
     [agents]
   );
 
+  const { byAgent } = useRunFailures();
+  const failedRuns = (agentId: string) => byAgent.get(agentId)?.failed ?? 0;
+
   const completionRate =
     summary && summary.total_tasks > 0
       ? Math.round((summary.tasks_completed / summary.total_tasks) * 100)
@@ -265,7 +271,7 @@ export function DashboardPanel() {
         </div>
         <div className="flex items-center gap-2">
           <Link
-            href="/panel/task-manager"
+            href="/panel/agents"
             className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-sm font-medium hover:bg-secondary"
           >
             <Plus className="h-4 w-4" /> New agent
@@ -278,6 +284,8 @@ export function DashboardPanel() {
           </Link>
         </div>
       </div>
+
+      <NeedsAttention />
 
       {/* KPI strip */}
       {summaryQuery.isLoading ? (
@@ -379,7 +387,7 @@ export function DashboardPanel() {
           className="lg:col-span-2"
           action={
             <Link
-              href="/panel/task-board"
+              href="/panel/tasks"
               className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
             >
               Task Board <ArrowRight className="h-3 w-3" />
@@ -407,7 +415,7 @@ export function DashboardPanel() {
               {recentTasks.map((task) => (
                 <li key={task.id}>
                   <Link
-                    href={`/panel/task-board?task=${task.id}`}
+                    href={`/panel/tasks?task=${task.id}`}
                     className="flex items-center gap-3 rounded-lg px-2 py-2.5 transition-colors hover:bg-secondary/50"
                   >
                     <span
@@ -446,10 +454,10 @@ export function DashboardPanel() {
           title="Agent performance"
           action={
             <Link
-              href="/panel/task-manager"
+              href="/panel/agents"
               className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
             >
-              Task Manager <ArrowRight className="h-3 w-3" />
+              All agents <ArrowRight className="h-3 w-3" />
             </Link>
           }
         >
@@ -463,7 +471,7 @@ export function DashboardPanel() {
             <div className="flex h-40 flex-col items-center justify-center gap-2 text-center">
               <p className="text-sm text-muted-foreground">No agents yet.</p>
               <Link
-                href="/panel/task-manager"
+                href="/panel/agents"
                 className="text-sm font-medium text-primary hover:underline"
               >
                 Create your first agent
@@ -474,7 +482,7 @@ export function DashboardPanel() {
               {topAgents.map((agent, i) => (
                 <li key={agent.id}>
                   <Link
-                    href={`/panel/task-manager?agent=${agent.id}`}
+                    href={agentHref(agent.id)}
                     className="group flex items-center gap-3"
                   >
                     <span
@@ -490,9 +498,19 @@ export function DashboardPanel() {
                         <p className="truncate text-sm font-medium group-hover:text-primary">
                           {agent.name}
                         </p>
-                        <span className="shrink-0 font-mono text-xs text-muted-foreground">
-                          {Math.round(agent.performance_score)}%
-                        </span>
+                        {failedRuns(agent.id) > 0 && Math.round(agent.performance_score) === 0 ? (
+                          // A bare 0% reads as "bad agent"; say why instead.
+                          <span className="shrink-0 text-xs font-medium text-destructive">
+                            {failedRuns(agent.id)} failed run{failedRuns(agent.id) === 1 ? "" : "s"}
+                          </span>
+                        ) : (
+                          <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                            {Math.round(agent.performance_score)}%
+                            {failedRuns(agent.id) > 0 && (
+                              <span className="ml-1 font-sans text-destructive">· {failedRuns(agent.id)} failed</span>
+                            )}
+                          </span>
+                        )}
                       </div>
                       <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-secondary">
                         <div

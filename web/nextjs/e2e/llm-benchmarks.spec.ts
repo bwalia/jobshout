@@ -54,8 +54,8 @@ test.describe("LLM Benchmarks panel", () => {
   });
 
   test("shows provider, exact model, durations, tokens, retries and failures", async ({ page }) => {
-    await page.goto("/panel/llm-benchmarks");
-    await expect(page.locator("h1").first()).toContainText("LLM Benchmarks");
+    await page.goto("/panel/llm-providers?tab=benchmarks");
+    await expect(page.getByRole("heading", { name: "LLM Benchmarks" })).toBeVisible();
 
     const stats = page.getByTestId("llm-model-stats");
     await expect(stats).toContainText("gemini");

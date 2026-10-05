@@ -183,7 +183,7 @@ export function ChatEmptyState({ onPick }: { onPick: (prompt: string) => void })
                 Your specialists
               </h2>
               <Link
-                href="/panel/task-manager"
+                href="/panel/agents"
                 className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
               >
                 Manage

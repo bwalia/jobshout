@@ -19,9 +19,8 @@ import {
   Star,
   Trash2,
 } from "lucide-react";
-import { KanbanBoard } from "@/components/kanban/KanbanBoard";
-import { CreateTaskDialog } from "@/components/kanban/CreateTaskDialog";
-import { TaskDetailModal } from "@/components/kanban/TaskDetailModal";
+import { TasksView } from "@/components/tasks/TasksView";
+import { useBreadcrumbs } from "@/lib/store/breadcrumb-store";
 import { NewProjectDialog } from "@/components/task-manager/NewProjectDialog";
 import { formatDateOnly } from "@/lib/dates";
 import {
@@ -31,11 +30,10 @@ import {
   useUpdateProject,
   projectKeys,
 } from "@/lib/hooks/useProjects";
-import { taskKeys, useAllTasks, useProjectTasks } from "@/lib/hooks/useTasks";
-import { THEME_BADGE, STATUS_DOT } from "@/lib/status-colors";
-import { PRIORITY_OPTIONS, STATUS_OPTIONS, statusLabel } from "@/lib/task-labels";
-import type { Priority, ProjectStatus, TaskStatus } from "@/lib/types/common";
-import type { Project, Task } from "@/lib/types/project";
+import { taskKeys, useAllTasks } from "@/lib/hooks/useTasks";
+import { THEME_BADGE } from "@/lib/status-colors";
+import type { Priority, ProjectStatus } from "@/lib/types/common";
+import type { Project } from "@/lib/types/project";
 import { cn } from "@/lib/utils/cn";
 
 const STARRED_KEY = "jobshout-starred-projects";
@@ -150,17 +148,10 @@ function panelHref(next: {
 export function ProjectsPanel() {
   const searchParams = useSearchParams();
   const projectId = searchParams.get("project");
-  const viewParam = searchParams.get("view");
-  const taskId = searchParams.get("task");
-  const view: ProjectView = viewParam === "tasks" ? "tasks" : "board";
 
   if (projectId) {
     return (
-      <ProjectDetail
-        projectId={projectId}
-        view={view}
-        taskId={taskId}
-      />
+      <ProjectDetail projectId={projectId} />
     );
   }
 
@@ -480,32 +471,10 @@ function ProjectListing() {
   );
 }
 
-function ProjectDetail({
-  projectId,
-  view,
-  taskId,
-}: {
-  projectId: string;
-  view: ProjectView;
-  taskId: string | null;
-}) {
+function ProjectDetail({ projectId }: { projectId: string }) {
   const router = useRouter();
   const { data: project, isLoading, isError } = useProject(projectId);
-  const { data: tasksResp, isLoading: tasksLoading } = useProjectTasks(projectId);
-  const tasks = useMemo(() => tasksResp?.data ?? [], [tasksResp]);
-  const [createOpen, setCreateOpen] = useState(false);
-  const selected = tasks.find((t) => t.id === taskId) ?? null;
-
-  function go(next: { view?: ProjectView | null; task?: string | null }) {
-    router.replace(
-      panelHref({
-        project: projectId,
-        view: next.view === undefined ? view : next.view,
-        task: next.task === undefined ? taskId : next.task,
-      }),
-      { scroll: false }
-    );
-  }
+  useBreadcrumbs(project ? [{ label: project.name, href: `/panel/projects?project=${projectId}` }, { label: "Tasks" }] : []);
 
   const statusMeta = project
     ? STATUS_META[project.status] ?? STATUS_META.active
@@ -543,37 +512,6 @@ function ProjectDetail({
             )}
           </div>
         </div>
-
-        <div className="flex items-center gap-2">
-          <div className="flex items-center rounded-lg border border-border bg-background">
-            <button
-              type="button"
-              onClick={() => go({ view: "board", task: null })}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium",
-                view === "board"
-                  ? "bg-secondary text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <LayoutGrid className="h-4 w-4" />
-              Board
-            </button>
-            <button
-              type="button"
-              onClick={() => go({ view: "tasks", task: null })}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium",
-                view === "tasks"
-                  ? "bg-secondary text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <List className="h-4 w-4" />
-              Tasks
-            </button>
-          </div>
-        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-hidden">
@@ -590,136 +528,11 @@ function ProjectDetail({
               </button>
             </div>
           </div>
-        ) : view === "board" ? (
-          <KanbanBoard
-            projectId={projectId}
-            projectName={project?.name}
-            onOpenTask={(task) => go({ task: task.id })}
-          />
         ) : (
-          <div className="h-full overflow-auto p-4">
-            <TaskList
-              tasks={tasks}
-              isLoading={tasksLoading}
-              onOpen={(task) => go({ task: task.id })}
-              onCreate={() => setCreateOpen(true)}
-            />
-          </div>
+          // The same task view as /panel/tasks, locked to this project.
+          <TasksView lockedProjectId={projectId} />
         )}
       </div>
-
-      {createOpen && (
-        <CreateTaskDialog
-          projectId={projectId}
-          onClose={() => setCreateOpen(false)}
-        />
-      )}
-      {selected && (
-        <TaskDetailModal
-          task={selected}
-          onClose={() => go({ task: null })}
-        />
-      )}
-    </div>
-  );
-}
-
-function TaskList({
-  tasks,
-  isLoading,
-  onOpen,
-  onCreate,
-}: {
-  tasks: Task[];
-  isLoading: boolean;
-  onOpen: (task: Task) => void;
-  onCreate: () => void;
-}) {
-  const grouped = useMemo(() => {
-    const map = new Map<TaskStatus, Task[]>();
-    for (const s of STATUS_OPTIONS) map.set(s.value, []);
-    for (const t of tasks) {
-      (map.get(t.status) ?? map.get("backlog")!).push(t);
-    }
-    return STATUS_OPTIONS.map((s) => ({
-      ...s,
-      items: map.get(s.value) ?? [],
-    })).filter((g) => g.items.length > 0);
-  }, [tasks]);
-
-  if (isLoading) {
-    return (
-      <p className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-        Loading tasks…
-      </p>
-    );
-  }
-
-  if (tasks.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-16 text-center">
-        <p className="text-sm font-medium">No tasks yet</p>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Create a task to start tracking work in this project.
-        </p>
-        <button
-          type="button"
-          onClick={onCreate}
-          className="mt-4 inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground"
-        >
-          <Plus className="h-4 w-4" /> New task
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      <p className="text-sm text-muted-foreground">
-        {tasks.length} task{tasks.length === 1 ? "" : "s"}
-      </p>
-      {grouped.map((group) => (
-        <section key={group.value}>
-          <h2 className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            <span className={cn("h-2 w-2 rounded-full", STATUS_DOT[group.value])} />
-            {group.label}
-            <span className="font-mono text-[10px]">{group.items.length}</span>
-          </h2>
-          <ul className="space-y-1.5">
-            {group.items.map((task) => (
-              <li key={task.id}>
-                <button
-                  type="button"
-                  onClick={() => onOpen(task)}
-                  className="flex w-full items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5 text-left transition-colors hover:bg-secondary/60"
-                >
-                  <span
-                    className={cn(
-                      "h-2 w-2 shrink-0 rounded-full",
-                      STATUS_DOT[task.status]
-                    )}
-                  />
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                    {task.title}
-                  </span>
-                  <span
-                    className={cn(
-                      "hidden rounded-full px-2 py-0.5 text-[11px] font-medium sm:inline-flex",
-                      PRIORITY_BADGE[task.priority] ?? THEME_BADGE.muted
-                    )}
-                  >
-                    {PRIORITY_OPTIONS.find((p) => p.value === task.priority)?.label ??
-                      task.priority}
-                  </span>
-                  <span className="hidden w-24 shrink-0 text-right text-xs text-muted-foreground md:block">
-                    {formatDue(task.due_date) ?? statusLabel(task.status)}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
     </div>
   );
 }
