@@ -33,6 +33,8 @@ interface ModelPickerProps {
   inheritedModel?: string;
   /** Label for the empty choice; defaults to "Platform default". */
   defaultLabel?: string;
+  /** The provider `recommended` belongs to; only that provider's model is badged. */
+  recommendedProvider?: string;
 }
 
 /** How a provider key is titled in the dropdown. */
@@ -105,6 +107,7 @@ export function ModelPicker({
   recommended,
   inheritedModel,
   defaultLabel = "Platform default",
+  recommendedProvider,
 }: ModelPickerProps) {
   const { data, isLoading, isError } = useAvailableModels();
 
@@ -134,7 +137,7 @@ export function ModelPicker({
           // the right, and these labels are long enough that a suffix is the
           // first thing to disappear — leaving a dangling dash and no badge.
           label:
-            m.name === recommended
+            m.name === recommended && (!recommendedProvider || p.provider === recommendedProvider)
               ? `Recommended · ${providerName(p.provider)} · ${describe(m)}`
               : `${providerName(p.provider)} · ${describe(m)}`,
           selection: { provider: p.provider, model: m.name },
@@ -145,8 +148,12 @@ export function ModelPicker({
 
     // A recommended model the provider does not have is still listed, so the
     // advice is visible, but it cannot be picked until someone installs it.
-    if (recommended && data && !out.some((o) => o.selection.model === recommended)) {
-      const provider = providerFilter ?? "";
+    // Only for the provider the recommendation is for: on another provider it
+    // is not "missing", just not that provider's model.
+    const recProvider = recommendedProvider ?? providerFilter ?? "";
+    const listsRecProvider = !providerFilter || !recommendedProvider || providerFilter === recommendedProvider;
+    if (recommended && data && listsRecProvider && !out.some((o) => o.selection.model === recommended)) {
+      const provider = recProvider;
       out.push({
         label: `Recommended · ${provider ? `${providerName(provider)} · ` : ""}${recommended} — not installed`,
         selection: { provider, model: recommended },
@@ -156,7 +163,7 @@ export function ModelPicker({
     }
 
     return out;
-  }, [data, includeAuto, providerFilter, recommended, inheritedModel, defaultLabel]);
+  }, [data, includeAuto, providerFilter, recommended, inheritedModel, defaultLabel, recommendedProvider]);
 
   const missingRecommended = options.find((o) => o.disabled)?.selection;
   // Providers that contribute nothing to this list, so an empty section is
