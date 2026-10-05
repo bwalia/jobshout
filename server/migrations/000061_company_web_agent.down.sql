@@ -1,0 +1,1 @@
+DELETE FROM agents WHERE metadata->>'builtin' = 'company_web';
