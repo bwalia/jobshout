@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +12,13 @@ import (
 	"strings"
 	"time"
 )
+
+// ErrSecretNotFound means the path genuinely does not exist (HTTP 404), as
+// opposed to a request that failed for another reason — an auth failure (401/403)
+// above all. The distinction matters: a missing secret is a valid plan target
+// ("create version 1"), but planning that on an auth failure could propose
+// overwriting a secret that is actually there. Callers test it with errors.Is.
+var ErrSecretNotFound = errors.New("secret not found")
 
 // Client talks Vault-compatible KV v2 / transit / sys APIs (HC Vault + WSLVault).
 type Client struct {
@@ -102,7 +110,7 @@ func (c *Client) ReadKV2(ctx context.Context, mount, path string, version int) (
 		return nil, SecretMeta{}, err
 	}
 	if code == 404 {
-		return nil, SecretMeta{}, fmt.Errorf("secret not found at %s/%s", mount, path)
+		return nil, SecretMeta{}, fmt.Errorf("%w at %s/%s", ErrSecretNotFound, mount, path)
 	}
 	if code >= 300 {
 		return nil, SecretMeta{}, fmt.Errorf("read failed: HTTP %d", code)
@@ -184,7 +192,14 @@ func (c *Client) MetadataKV2(ctx context.Context, mount, path string) (SecretMet
 		// current version too; its values are dropped unread.
 		_, meta, rerr := c.ReadKV2(ctx, mount, path, 0)
 		if rerr != nil {
-			return SecretMeta{}, fmt.Errorf("metadata not found at %s/%s", mount, path)
+			// Only a genuine 404 on the data read means "absent". Any other
+			// failure (above all a 401/403) must propagate, not be disguised as
+			// not-found — otherwise the planner would treat an auth failure as
+			// an empty path and propose creating version 1 over a live secret.
+			if errors.Is(rerr, ErrSecretNotFound) {
+				return SecretMeta{}, fmt.Errorf("%w at %s/%s", ErrSecretNotFound, mount, path)
+			}
+			return SecretMeta{}, rerr
 		}
 		return meta, nil
 	}
