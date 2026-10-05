@@ -10,9 +10,9 @@ import (
 
 // VaultSSHOptions pulls an SSH private key (and optional user/password) from Vault KV v2.
 type VaultSSHOptions struct {
-	Mount    string
-	Path     string
-	KeyField string // default ssh_private_key
+	Mount     string
+	Path      string
+	KeyField  string // default ssh_private_key
 	UserField string
 	PassField string
 }

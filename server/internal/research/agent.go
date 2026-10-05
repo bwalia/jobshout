@@ -117,6 +117,11 @@ type AgentConfig struct {
 	ExtractConcurrency int
 	// MinFindings is the floor below which the brief is reported unusable.
 	MinFindings int
+	// DefaultModel is the model used when a request names none. It lets an
+	// operator repoint the Research Agent from the environment without a code
+	// change; a caller that embeds research (blog, course) still overrides it
+	// per request. Empty means the provider's own default.
+	DefaultModel string
 }
 
 // DefaultAgentConfig returns the standard bounds.
@@ -1259,6 +1264,9 @@ func (a *Agent) generateJSON(
 // constrained to JSON (see llm.GenerateRequest.JSON); every structured stage
 // sets it, the free-text synthesis does not.
 func (a *Agent) generateBounded(ctx context.Context, model, prompt string, maxTokens int, jsonMode bool) (string, error) {
+	if strings.TrimSpace(model) == "" {
+		model = a.cfg.DefaultModel
+	}
 	resp, err := a.llm.Generate(ctx, llm.GenerateRequest{
 		Model:     model,
 		MaxTokens: maxTokens,

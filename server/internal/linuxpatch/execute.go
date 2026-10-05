@@ -13,21 +13,21 @@ import (
 
 // RunOptions drives a plan/patch/verify execution.
 type RunOptions struct {
-	Mode         string
-	Workload     string
-	HostsRaw     string
-	SSHUser      string
-	PreScript    string
-	PostScript   string
-	Services     []string
-	RebootPolicy string
-	DryRun       bool
-	UseLLM       bool
-	Instruction  string
-	VaultMount   string
-	VaultPath    string
+	Mode          string
+	Workload      string
+	HostsRaw      string
+	SSHUser       string
+	PreScript     string
+	PostScript    string
+	Services      []string
+	RebootPolicy  string
+	DryRun        bool
+	UseLLM        bool
+	Instruction   string
+	VaultMount    string
+	VaultPath     string
 	VaultKeyField string
-	VaultCfg     secretsrot.Config // used when VaultPath set
+	VaultCfg      secretsrot.Config // used when VaultPath set
 }
 
 // RunOutcome is returned to the service layer.
@@ -144,7 +144,7 @@ func Execute(ctx context.Context, cfg Config, llmClient llm.Client, opt RunOptio
 	setPhase("plan", "active", "Heuristic + optional LLM")
 	plan := BuildHeuristicPlan(opt.Workload, hosts, opt.RebootPolicy)
 	if opt.UseLLM && llmClient != nil {
-		plan = EnrichPlanWithLLM(ctx, llmClient, plan, opt.Workload, opt.Instruction, inventory)
+		plan = EnrichPlanWithLLM(ctx, llmClient, cfg.Model, plan, opt.Workload, opt.Instruction, inventory)
 	}
 	out.Plan = plan
 	setPhase("plan", "completed", plan.Strategy)

@@ -181,8 +181,7 @@ func buildGeminiRequest(req GenerateRequest) geminiRequest {
 	if req.MaxTokens > 0 {
 		out.GenerationConfig.MaxOutputTokens = req.MaxTokens
 	}
-	if req.Temperature > 0 {
-		t := req.Temperature
+	if t := resolvedTemperature(req); t > 0 {
 		out.GenerationConfig.Temperature = &t
 	}
 	if req.JSON {
