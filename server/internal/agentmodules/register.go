@@ -14,16 +14,17 @@ import (
 	"github.com/jobshout/server/internal/agentmodule"
 	"github.com/jobshout/server/internal/blog"
 	"github.com/jobshout/server/internal/career"
+	"github.com/jobshout/server/internal/companyweb"
 	"github.com/jobshout/server/internal/course"
 	"github.com/jobshout/server/internal/creditcontroller"
 	"github.com/jobshout/server/internal/images"
 	"github.com/jobshout/server/internal/jobshoutcomwriter"
+	"github.com/jobshout/server/internal/linkedin"
+	"github.com/jobshout/server/internal/linuxpatch"
 	"github.com/jobshout/server/internal/mail"
 	"github.com/jobshout/server/internal/pentester"
 	"github.com/jobshout/server/internal/prreview"
 	"github.com/jobshout/server/internal/research"
-	"github.com/jobshout/server/internal/linkedin"
-	"github.com/jobshout/server/internal/linuxpatch"
 	"github.com/jobshout/server/internal/secretsrot"
 	"github.com/jobshout/server/internal/seo"
 	"github.com/jobshout/server/internal/service"
@@ -51,6 +52,7 @@ type Deps struct {
 	LinuxPatch       linuxpatch.Runner
 	Course           course.Runner
 	LinkedIn         linkedin.Runner
+	CompanyWeb       companyweb.Runner
 }
 
 func init() {
@@ -84,6 +86,7 @@ func Register(d Deps) {
 	agentmodule.Register(linuxpatch.Module(d.LinuxPatch))
 	agentmodule.Register(course.Module(d.Course))
 	agentmodule.Register(linkedin.Module(d.LinkedIn))
+	agentmodule.Register(companyweb.Module(d.CompanyWeb))
 }
 
 type imageAdapter struct{ svc *service.ImageService }

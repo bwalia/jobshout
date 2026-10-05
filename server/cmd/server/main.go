@@ -27,6 +27,7 @@ import (
 	"github.com/jobshout/server/internal/bridge"
 	"github.com/jobshout/server/internal/chatagent"
 	"github.com/jobshout/server/internal/chatsvc"
+	"github.com/jobshout/server/internal/companyweb"
 	"github.com/jobshout/server/internal/config"
 	"github.com/jobshout/server/internal/costengine"
 	"github.com/jobshout/server/internal/course"
@@ -922,6 +923,7 @@ func main() {
 		LinuxPatch:       linuxPatchSvc,
 		Course:           courseSvc,
 		LinkedIn:         linkedInSvc,
+		CompanyWeb:       companyweb.ClientRunner{Client: researchClient},
 	})
 
 	// ─── Autonomous agent engine ────────────────────────────────────────────
