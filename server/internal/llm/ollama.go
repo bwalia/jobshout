@@ -276,7 +276,7 @@ func (c *OllamaClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 		msgs[i] = om
 	}
 
-	opts := ollamaOptions{Temperature: req.Temperature}
+	opts := ollamaOptions{Temperature: resolvedTemperature(req)}
 	if req.MaxTokens > 0 {
 		opts.NumPredict = req.MaxTokens
 	}

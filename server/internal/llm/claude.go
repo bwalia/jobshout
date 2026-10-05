@@ -47,11 +47,12 @@ func (c *ClaudeClient) SupportsTools() bool { return true }
 
 // claudeRequest mirrors the Anthropic /v1/messages request body.
 type claudeRequest struct {
-	Model     string          `json:"model"`
-	MaxTokens int             `json:"max_tokens"`
-	System    string          `json:"system,omitempty"`
-	Messages  []claudeMessage `json:"messages"`
-	Tools     []claudeTool    `json:"tools,omitempty"`
+	Model       string          `json:"model"`
+	MaxTokens   int             `json:"max_tokens"`
+	Temperature *float64        `json:"temperature,omitempty"`
+	System      string          `json:"system,omitempty"`
+	Messages    []claudeMessage `json:"messages"`
+	Tools       []claudeTool    `json:"tools,omitempty"`
 }
 
 // claudeMessage's Content is either a plain string or an array of content
@@ -152,6 +153,9 @@ func (c *ClaudeClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 		MaxTokens: maxTokens,
 		System:    systemPrompt,
 		Messages:  msgs,
+	}
+	if t := resolvedTemperature(req); t > 0 {
+		body.Temperature = &t
 	}
 
 	// Native tool-calling: advertise function definitions when provided.

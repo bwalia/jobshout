@@ -131,7 +131,7 @@ func (c *OpenAIClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 		Model:       model,
 		Messages:    msgs,
 		MaxTokens:   req.MaxTokens,
-		Temperature: req.Temperature,
+		Temperature: resolvedTemperature(req),
 	}
 
 	// Native tool-calling: advertise function definitions when provided.
