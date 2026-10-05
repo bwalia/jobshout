@@ -2,15 +2,20 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { BotIcon, LayersIcon, PlusIcon, SearchIcon } from "@/components/icons";
 import { AgentCard } from "@/components/showcase/AppCard";
+import { ActiveFilters, IndustryFilter } from "@/components/showcase/IndustryFilter";
 import { Badge, EmptyState, ErrorNotice, buttonClass, cx } from "@/components/ui";
 import {
   CAPABILITIES,
   directoryHref,
+  findIndustry,
+  industryNames,
   isCapability,
   isSortKey,
   listApps,
+  listIndustries,
   listTags,
   type Capability,
+  type IndustryNode,
   type ShowcaseApp,
   type ShowcaseTag,
   type SortKey,
@@ -49,21 +54,26 @@ export default async function AgentsPage({ searchParams }: { searchParams: Searc
     kind,
     capability: kind === "agent" && isCapability(cap) ? (cap as Capability) : null,
     tech: one(searchParams.tech) || null,
+    industry: one(searchParams.industry).toLowerCase() || null,
+    cross: one(searchParams.cross) !== "0",
     q: one(searchParams.q) || null,
     sort: (isSortKey(sort) ? sort : "new") as SortKey,
   } as const;
   const page = Math.max(1, Number.parseInt(one(searchParams.page) || "1", 10) || 1);
-  const filtered = Boolean(filters.capability || filters.tech || filters.q);
+  const filtered = Boolean(filters.capability || filters.tech || filters.q || filters.industry);
 
   let entries: ShowcaseApp[] = [];
   let total = 0;
   let tags: ShowcaseTag[] = [];
+  let tree: IndustryNode[] = [];
   let error = "";
   try {
-    const [list, tagList] = await Promise.all([
+    const [list, tagList, industryTree] = await Promise.all([
       listApps({ ...filters, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }, viewer),
       kind === "agent" ? listTags(14, "agent") : Promise.resolve([]),
+      listIndustries(kind).catch(() => [] as IndustryNode[]),
     ]);
+    tree = industryTree;
     entries = list.data;
     total = list.total;
     tags = tagList;
@@ -72,6 +82,16 @@ export default async function AgentsPage({ searchParams }: { searchParams: Searc
   }
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const noun = kind === "team" ? "team" : "agent";
+  const names = industryNames(tree);
+  const sector = findIndustry(tree, filters.industry);
+  const active = [
+    sector ? { key: "industry", label: sector.node.name, href: directoryHref({ ...filters, industry: null }) } : null,
+    filters.capability
+      ? { key: "capability", label: CAPABILITIES[filters.capability], href: directoryHref({ ...filters, capability: null }) }
+      : null,
+    filters.tech ? { key: "tech", label: filters.tech, href: directoryHref({ ...filters, tech: null }) } : null,
+    filters.q ? { key: "q", label: `“${filters.q}”`, href: directoryHref({ ...filters, q: null }) } : null,
+  ].filter((f): f is { key: string; label: string; href: string } => Boolean(f));
   const sortLinks: Array<{ key: SortKey; label: string }> = [
     { key: "new", label: "Newest" },
     { key: "stars", label: "Most starred" },
@@ -115,6 +135,9 @@ export default async function AgentsPage({ searchParams }: { searchParams: Searc
           <form action="/agents" role="search" className="relative mt-8 w-full sm:max-w-sm">
             {kind === "team" ? <input type="hidden" name="kind" value="team" /> : null}
             {filters.capability ? <input type="hidden" name="capability" value={filters.capability} /> : null}
+            {filters.tech ? <input type="hidden" name="tech" value={filters.tech} /> : null}
+            {filters.industry ? <input type="hidden" name="industry" value={filters.industry} /> : null}
+            {filters.industry && !filters.cross ? <input type="hidden" name="cross" value="0" /> : null}
             <label htmlFor="agents-q" className="sr-only">
               Search the directory
             </label>
@@ -151,6 +174,13 @@ export default async function AgentsPage({ searchParams }: { searchParams: Searc
               ))}
             </ul>
           </nav>
+          <IndustryFilter
+            tree={tree}
+            active={filters.industry}
+            cross={filters.cross}
+            noun={noun}
+            href={(industry, cross) => directoryHref({ ...filters, industry, cross, page: 1 })}
+          />
           {kind === "agent" ? (
             <nav aria-label="Filter by capability">
               <ul className="flex flex-wrap gap-2">
@@ -205,6 +235,7 @@ export default async function AgentsPage({ searchParams }: { searchParams: Searc
           <div className="flex flex-wrap items-baseline justify-between gap-3 border-b border-line pb-4">
             <h2 id="dir-heading" className="font-display text-xl font-semibold text-ink">
               {filters.q ? `Results for “${filters.q}”` : kind === "team" ? "Agent teams" : "Agents"}
+              {sector && !filters.q ? <span className="text-mute"> · {sector.node.name}</span> : null}
               {filters.capability ? <span className="text-mute"> · {CAPABILITIES[filters.capability]}</span> : null}
               {filters.tech ? <span className="text-mute"> · {filters.tech}</span> : null}
             </h2>
@@ -238,11 +269,15 @@ export default async function AgentsPage({ searchParams }: { searchParams: Searc
             </div>
           </div>
 
+          <div className="mt-4">
+            <ActiveFilters items={active} clearHref={directoryHref({ kind })} />
+          </div>
+
           {entries.length ? (
             <ul className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
               {entries.map((e) => (
                 <li key={e.id}>
-                  <AgentCard app={e} />
+                  <AgentCard app={e} industries={names} />
                 </li>
               ))}
             </ul>
@@ -250,9 +285,13 @@ export default async function AgentsPage({ searchParams }: { searchParams: Searc
             <div className="mt-6">
               <EmptyState
                 icon={filtered ? <SearchIcon className="h-6 w-6" /> : <BotIcon className="h-6 w-6" />}
-                title={filtered ? "Nothing matches that yet" : `No ${noun}s listed yet`}
+                title={
+                  sector ? `No ${sector.node.name} ${noun}s match that yet` : filtered ? "Nothing matches that yet" : `No ${noun}s listed yet`
+                }
                 body={
-                  filtered
+                  sector
+                    ? `Loosen a filter${filters.cross ? "" : ", include cross-industry tools,"} or list a ${noun} built for this sector.`
+                    : filtered
                     ? "Try another capability or skill, or search for something broader."
                     : kind === "team"
                       ? "Put agents from the directory together and show how the work flows between them."

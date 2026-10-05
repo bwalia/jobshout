@@ -94,6 +94,7 @@ function fieldFor(message: string): string | null {
   if (m.includes("website link")) return "website_url";
   if (m.includes("docs link")) return "docs_url";
   if (m.includes("status page")) return "status_page_url";
+  if (m.includes("industr") || m.includes("specialism")) return "industries";
   if (m.includes("technolog")) return "technologies";
   if (m.includes("model")) return "ai_models";
   if (m.includes("oversight")) return "human_oversight";
@@ -173,6 +174,8 @@ export async function saveAppAction(_prev: FormState, form: FormData): Promise<F
         tools: list(form, "tools"),
         mcp_servers: list(form, "mcp_servers"),
         capabilities: form.getAll("capabilities").map(String),
+        // Absent keeps what the entry has; the picker always marks itself present.
+        industries: form.get("industries_present") ? form.getAll("industries").map(String) : undefined,
         agent_links: links(form, "agent_links"),
         team_slug: links(form, "team_slug")[0]?.slug ?? "",
         job_ids: form.getAll("job_ids").map(String),

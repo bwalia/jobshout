@@ -7,6 +7,7 @@ import { EMPTY_FORM_STATE } from "@/lib/form-state";
 import { previewAction } from "@/app/insights/actions";
 import { saveAppAction } from "@/app/showcase/actions";
 import { CheckCircleIcon, ShieldIcon } from "@/components/icons";
+import { IndustryPicker } from "@/components/showcase/IndustryPicker";
 import { LinkPicker } from "@/components/showcase/LinkPicker";
 import type { Job } from "@/lib/api";
 import { Button, ErrorNotice, Field, Input, Select, Textarea, buttonClass, cx } from "@/components/ui";
@@ -22,6 +23,7 @@ import {
   type AppType,
   type BuildMethod,
   type Capability,
+  type IndustryNode,
   type Kind,
   type Maturity,
   type Pricing,
@@ -113,8 +115,11 @@ export function AppForm({
   initial,
   kind: newKind = "app",
   jobs = [],
+  industries = [],
 }: {
   isStaff: boolean;
+  /** The industry taxonomy; the picker is hidden when it could not be loaded. */
+  industries?: IndustryNode[];
   initial?: ShowcaseApp | null;
   /** Open jobs the viewer may link (their own; editors: any). */
   jobs?: Job[];
@@ -278,6 +283,12 @@ export function AppForm({
           <FieldError message={errors.description_md} />
         </div>
       </Section>
+
+      {industries.length ? (
+        <Section title="Who it is for" lead="Helps people in a sector find it. Search covers these too.">
+          <IndustryPicker tree={industries} initial={initial?.industries ?? []} noun={noun} error={errors.industries} />
+        </Section>
+      ) : null}
 
       <Section
         title="Links"

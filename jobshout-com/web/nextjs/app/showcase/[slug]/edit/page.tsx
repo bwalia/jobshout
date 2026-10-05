@@ -6,7 +6,7 @@ import { SignInPrompt } from "@/components/insights/SignInPrompt";
 import { AppForm } from "@/components/showcase/AppForm";
 import { ErrorNotice } from "@/components/ui";
 import { isEditor } from "@/lib/insights";
-import { KINDS, STATUS_LABELS, entryHref, getApp, linkableJobs } from "@/lib/showcase";
+import { KINDS, STATUS_LABELS, entryHref, getApp, linkableJobs, listIndustries, type IndustryNode } from "@/lib/showcase";
 import { currentViewer } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -22,7 +22,12 @@ export default async function EditAppPage({ params }: { params: { slug: string }
       </div>
     );
   }
-  const [app, editor, jobs] = await Promise.all([getApp(params.slug, viewer), isEditor(viewer), linkableJobs(viewer)]);
+  const [app, editor, jobs, industries] = await Promise.all([
+    getApp(params.slug, viewer),
+    isEditor(viewer),
+    linkableJobs(viewer),
+    listIndustries().catch(() => [] as IndustryNode[]),
+  ]);
   if (!app) notFound();
   const owner = app.creator_email?.toLowerCase() === viewer.email.toLowerCase();
 
@@ -51,7 +56,7 @@ export default async function EditAppPage({ params }: { params: { slug: string }
         ) : app.status === "archived" && !editor ? (
           <ErrorNotice title="This was archived" body="Archived listings can only be changed by the editors." />
         ) : (
-          <AppForm isStaff={editor} initial={app} jobs={jobs} />
+          <AppForm isStaff={editor} initial={app} jobs={jobs} industries={industries} />
         )}
       </div>
     </div>

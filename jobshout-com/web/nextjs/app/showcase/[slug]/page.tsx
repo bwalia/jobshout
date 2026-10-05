@@ -19,6 +19,7 @@ import {
 } from "@/components/icons";
 import { ShareLinks } from "@/components/insights/ShareLinks";
 import { AppLogo, AppRow, BuildBadge, MaturityBadge } from "@/components/showcase/AppCard";
+import { IndustryLinks, industryAudience } from "@/components/showcase/IndustryLinks";
 import { ShowcaseReviewActions } from "@/components/showcase/ShowcaseReviewActions";
 import { StarButton } from "@/components/showcase/StarButton";
 import { Badge, buttonClass, cx } from "@/components/ui";
@@ -36,8 +37,11 @@ import {
   VISIBILITY,
   displayUrl,
   getApp,
+  industryLabels,
+  listIndustries,
   relatedApps,
   showcaseHref,
+  type IndustryNode,
   type ShowcaseApp,
 } from "@/lib/showcase";
 import { currentViewer } from "@/lib/session";
@@ -71,7 +75,8 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   };
 }
 
-function structuredData(app: ShowcaseApp, url: string) {
+function structuredData(app: ShowcaseApp, url: string, tree: IndustryNode[]) {
+  const sectors = industryLabels(tree, app.industries).map((l) => l.name);
   return {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
@@ -84,7 +89,8 @@ function structuredData(app: ShowcaseApp, url: string) {
     codeRepository: app.repo_url || undefined,
     image: app.logo_url || undefined,
     screenshot: app.screenshots.length ? app.screenshots : undefined,
-    keywords: app.technologies.join(", ") || undefined,
+    keywords: [...app.technologies, ...sectors].join(", ") || undefined,
+    audience: industryAudience(app.industries, tree),
     author: { "@type": app.team_name ? "Organization" : "Person", name: app.team_name || app.creator_display_name },
     datePublished: app.published_at ?? undefined,
     dateModified: app.updated_at,
@@ -247,10 +253,11 @@ export default async function ShowcaseAppPage({ params }: Params) {
   if (app.kind !== "app") redirect(`/agents/${app.slug}`);
 
   const live = app.status === "published";
-  const [editor, related, jobs] = await Promise.all([
+  const [editor, related, jobs, tree] = await Promise.all([
     isEditor(viewer),
     live ? relatedApps(app.slug) : Promise.resolve([]),
     listJobs(30).catch(() => [] as Job[]),
+    listIndustries().catch(() => [] as IndustryNode[]),
   ]);
   const owner = Boolean(viewer && app.creator_email?.toLowerCase() === viewer.email.toLowerCase());
   const canEdit = editor || (owner && app.status !== "archived");
@@ -276,7 +283,7 @@ export default async function ShowcaseAppPage({ params }: Params) {
         <script
           type="application/ld+json"
           // JSON.stringify output with "<" escaped cannot break out of the script tag.
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData(app, url)).replace(/</g, "\\u003c") }}
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData(app, url, tree)).replace(/</g, "\\u003c") }}
         />
       ) : null}
 
@@ -388,6 +395,8 @@ export default async function ShowcaseAppPage({ params }: Params) {
           ) : (
             <p className="text-mute">No description yet.</p>
           )}
+
+          <IndustryLinks industries={app.industries} tree={tree} />
 
           {app.technologies.length ? (
             <section aria-labelledby="stack-heading" className="mt-10">

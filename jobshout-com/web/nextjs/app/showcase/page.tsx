@@ -2,17 +2,23 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { BotIcon, BriefcaseIcon, PlusIcon, RocketIcon, SearchIcon, SparkIcon } from "@/components/icons";
 import { AppCard } from "@/components/showcase/AppCard";
+import { ActiveFilters, IndustryFilter } from "@/components/showcase/IndustryFilter";
 import { Badge, EmptyState, ErrorNotice, buttonClass, cx } from "@/components/ui";
 import {
   APP_TYPES,
   COLLECTIONS,
+  findIndustry,
+  industryNames,
   isAppType,
   isCollection,
   isSortKey,
   listApps,
+  listIndustries,
   listTags,
   showcaseHref,
   type Collection,
+  type IndustryNames,
+  type IndustryNode,
   type ShowcaseApp,
   type ShowcaseQuery,
   type ShowcaseTag,
@@ -83,6 +89,8 @@ function Search({ filters }: { filters: ShowcaseQuery }) {
       {filters.collection ? <input type="hidden" name="collection" value={filters.collection} /> : null}
       {filters.type ? <input type="hidden" name="type" value={filters.type} /> : null}
       {filters.tech ? <input type="hidden" name="tech" value={filters.tech} /> : null}
+      {filters.industry ? <input type="hidden" name="industry" value={filters.industry} /> : null}
+      {filters.industry && filters.cross === false ? <input type="hidden" name="cross" value="0" /> : null}
       <label htmlFor="showcase-q" className="sr-only">
         Search the showcase
       </label>
@@ -143,6 +151,7 @@ function Shelf({
   icon,
   apps,
   href,
+  industries,
 }: {
   id: string;
   title: string;
@@ -150,6 +159,7 @@ function Shelf({
   icon: React.ReactNode;
   apps: ShowcaseApp[];
   href: string;
+  industries: IndustryNames;
 }) {
   if (!apps.length) return null;
   return (
@@ -169,7 +179,7 @@ function Shelf({
       <ul className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
         {apps.map((app) => (
           <li key={app.id}>
-            <AppCard app={app} />
+            <AppCard app={app} industries={industries} />
           </li>
         ))}
       </ul>
@@ -186,16 +196,19 @@ export default async function ShowcasePage({ searchParams }: { searchParams: Sea
     collection: isCollection(collection) ? collection : null,
     type: isAppType(type) ? type : null,
     tech: one(searchParams.tech) || null,
+    industry: one(searchParams.industry).toLowerCase() || null,
+    cross: one(searchParams.cross) !== "0",
     q: one(searchParams.q) || null,
     sort: isSortKey(sort) ? sort : "new",
   };
   const page = Math.max(1, Number.parseInt(one(searchParams.page) || "1", 10) || 1);
-  const filtered = Boolean(filters.collection || filters.type || filters.tech || filters.q);
+  const filtered = Boolean(filters.collection || filters.type || filters.tech || filters.q || filters.industry);
   const front = !filtered && page === 1 && filters.sort === "new";
 
   let apps: ShowcaseApp[] = [];
   let total = 0;
   let tags: ShowcaseTag[] = [];
+  let tree: IndustryNode[] = [];
   let shelves: Record<"featured" | "agents" | "production" | "hiring", ShowcaseApp[]> = {
     featured: [],
     agents: [],
@@ -206,9 +219,11 @@ export default async function ShowcasePage({ searchParams }: { searchParams: Sea
   try {
     const shelf = (c: Collection) =>
       front ? listApps({ collection: c, sort: "stars", limit: 3 }, viewer).then((r) => r.data) : Promise.resolve([]);
-    const [list, tagList, featured, agents, production, hiring] = await Promise.all([
+    const [list, tagList, industryTree, featured, agents, production, hiring] = await Promise.all([
       listApps({ ...filters, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }, viewer),
       listTags(16),
+      // The page still works without industries; the API may predate them.
+      listIndustries("app").catch(() => [] as IndustryNode[]),
       shelf("featured"),
       shelf("built_by_agents"),
       shelf("production_ready"),
@@ -217,12 +232,24 @@ export default async function ShowcasePage({ searchParams }: { searchParams: Sea
     apps = list.data;
     total = list.total;
     tags = tagList;
+    tree = industryTree;
     shelves = { featured, agents, production, hiring };
   } catch (e) {
     error = e instanceof Error ? e.message : "Could not load the showcase";
   }
 
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const names = industryNames(tree);
+  const sector = findIndustry(tree, filters.industry);
+  const active = [
+    sector ? { key: "industry", label: sector.node.name, href: showcaseHref({ ...filters, industry: null }) } : null,
+    filters.collection
+      ? { key: "collection", label: COLLECTIONS[filters.collection].label, href: showcaseHref({ ...filters, collection: null }) }
+      : null,
+    filters.type ? { key: "type", label: APP_TYPES[filters.type], href: showcaseHref({ ...filters, type: null }) } : null,
+    filters.tech ? { key: "tech", label: filters.tech, href: showcaseHref({ ...filters, tech: null }) } : null,
+    filters.q ? { key: "q", label: `“${filters.q}”`, href: showcaseHref({ ...filters, q: null }) } : null,
+  ].filter((f): f is { key: string; label: string; href: string } => Boolean(f));
   const heading = filters.q
     ? `Results for “${filters.q}”`
     : filters.collection
@@ -281,6 +308,13 @@ export default async function ShowcasePage({ searchParams }: { searchParams: Sea
 
         <div className="flex flex-col gap-4">
           <CollectionTabs filters={filters} />
+          <IndustryFilter
+            tree={tree}
+            active={filters.industry ?? null}
+            cross={filters.cross !== false}
+            noun="app"
+            href={(industry, cross) => showcaseHref({ ...filters, industry, cross, page: 1 })}
+          />
           <Chips
             label="Filter by kind of app"
             items={(["ai_application", "agent_application", "mcp_server", "rag_application", "developer_tool", "saas", "infrastructure"] as const).map(
@@ -316,6 +350,7 @@ export default async function ShowcasePage({ searchParams }: { searchParams: Sea
               title="Featured"
               lead={COLLECTIONS.featured.blurb}
               icon={<SparkIcon className="h-5 w-5" />}
+              industries={names}
               apps={shelves.featured}
               href={showcaseHref({ collection: "featured" })}
             />
@@ -324,6 +359,7 @@ export default async function ShowcasePage({ searchParams }: { searchParams: Sea
               title="Built by AI agents"
               lead={COLLECTIONS.built_by_agents.blurb}
               icon={<BotIcon className="h-5 w-5" />}
+              industries={names}
               apps={shelves.agents}
               href={showcaseHref({ collection: "built_by_agents" })}
             />
@@ -332,6 +368,7 @@ export default async function ShowcasePage({ searchParams }: { searchParams: Sea
               title="Production ready"
               lead={COLLECTIONS.production_ready.blurb}
               icon={<RocketIcon className="h-5 w-5" />}
+              industries={names}
               apps={shelves.production}
               href={showcaseHref({ collection: "production_ready" })}
             />
@@ -340,6 +377,7 @@ export default async function ShowcasePage({ searchParams }: { searchParams: Sea
               title="Hiring now"
               lead={COLLECTIONS.hiring.blurb}
               icon={<BriefcaseIcon className="h-5 w-5" />}
+              industries={names}
               apps={shelves.hiring}
               href={showcaseHref({ collection: "hiring" })}
             />
@@ -350,6 +388,7 @@ export default async function ShowcasePage({ searchParams }: { searchParams: Sea
           <div className="flex flex-wrap items-baseline justify-between gap-3 border-b border-line pb-4">
             <h2 id="all-heading" className="font-display text-xl font-semibold text-ink">
               {heading}
+              {sector && !filters.q ? <span className="text-mute"> · {sector.node.name}</span> : null}
               {filters.type ? <span className="text-mute"> · {APP_TYPES[filters.type]}</span> : null}
               {filters.tech ? <span className="text-mute"> · {filters.tech}</span> : null}
             </h2>
@@ -382,6 +421,9 @@ export default async function ShowcasePage({ searchParams }: { searchParams: Sea
               </span>
             </div>
           </div>
+          <div className="mt-4">
+            <ActiveFilters items={active} clearHref="/showcase" />
+          </div>
           {filters.collection === "production_ready" ? (
             <p className="mt-4 text-sm text-mute">
               Production claims are the creator&apos;s own, backed by the evidence they list on each page. JobShout
@@ -393,23 +435,45 @@ export default async function ShowcasePage({ searchParams }: { searchParams: Sea
             <ul className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
               {apps.map((app) => (
                 <li key={app.id}>
-                  <AppCard app={app} />
+                  <AppCard app={app} industries={names} />
                 </li>
               ))}
             </ul>
           ) : !error ? (
             <div className="mt-6">
               {filtered ? (
-                <EmptyState
-                  icon={<SearchIcon className="h-6 w-6" />}
-                  title="Nothing matches that yet"
-                  body="Try another collection or technology, or search for something broader."
-                  action={
-                    <Link href="/showcase" className={buttonClass("primary", "md")}>
-                      See everything
-                    </Link>
-                  }
-                />
+                sector ? (
+                  <EmptyState
+                    icon={<SearchIcon className="h-6 w-6" />}
+                    title={`No ${sector.node.name} apps match that yet`}
+                    body={
+                      filters.cross === false
+                        ? "General-purpose tools are hidden. Include cross-industry tools, loosen a filter, or showcase an app built for this sector."
+                        : "Loosen a filter, or be the first to showcase an app built for this sector."
+                    }
+                    action={
+                      <div className="flex flex-wrap justify-center gap-2.5">
+                        <Link href={showcaseHref({ ...filters, industry: null })} className={buttonClass("secondary", "md")}>
+                          All industries
+                        </Link>
+                        <Link href="/showcase/new" className={buttonClass("primary", "md")}>
+                          Showcase your app
+                        </Link>
+                      </div>
+                    }
+                  />
+                ) : (
+                  <EmptyState
+                    icon={<SearchIcon className="h-6 w-6" />}
+                    title="Nothing matches that yet"
+                    body="Try another collection or technology, or search for something broader."
+                    action={
+                      <Link href="/showcase" className={buttonClass("primary", "md")}>
+                        See everything
+                      </Link>
+                    }
+                  />
+                )
               ) : (
                 <EmptyState
                   icon={<RocketIcon className="h-6 w-6" />}

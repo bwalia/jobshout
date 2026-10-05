@@ -5,7 +5,7 @@ import { SignInPrompt } from "@/components/insights/SignInPrompt";
 import { AppForm } from "@/components/showcase/AppForm";
 import { Badge, cx } from "@/components/ui";
 import { isEditor } from "@/lib/insights";
-import { isKind, linkableJobs, type Kind } from "@/lib/showcase";
+import { isKind, linkableJobs, listIndustries, type IndustryNode, type Kind } from "@/lib/showcase";
 import { currentViewer } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -30,7 +30,11 @@ const HEADINGS: Record<Kind, { title: string; lead: string }> = {
 
 export default async function NewEntryPage({ searchParams }: { searchParams: { kind?: string } }) {
   const viewer = await currentViewer();
-  const [editor, jobs] = await Promise.all([isEditor(viewer), viewer ? linkableJobs(viewer) : Promise.resolve([])]);
+  const [editor, jobs, industries] = await Promise.all([
+    isEditor(viewer),
+    viewer ? linkableJobs(viewer) : Promise.resolve([]),
+    listIndustries().catch(() => [] as IndustryNode[]),
+  ]);
   const kind: Kind = isKind(searchParams.kind) ? searchParams.kind : "app";
 
   return (
@@ -89,7 +93,7 @@ export default async function NewEntryPage({ searchParams }: { searchParams: { k
           />
         ) : (
           // Keyed so switching kind starts a fresh form.
-          <AppForm key={kind} isStaff={editor} kind={kind} jobs={jobs} />
+          <AppForm key={kind} isStaff={editor} kind={kind} jobs={jobs} industries={industries} />
         )}
       </div>
     </div>
