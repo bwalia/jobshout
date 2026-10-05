@@ -58,6 +58,15 @@ type Config struct {
 	// long prompts rather than refusing them, so it is always sent explicitly.
 	OllamaNumCtx int `mapstructure:"OLLAMA_NUM_CTX"`
 
+	// OllamaFallback, when true (the default), re-runs a failed cloud-provider
+	// call on self-hosted Ollama if the provider is rate-limited/over quota or
+	// unavailable. Ollama has no quota, so agents keep working when Gemini (or
+	// any hosted provider) is exhausted.
+	OllamaFallback bool `mapstructure:"LLM_OLLAMA_FALLBACK"`
+	// OllamaFallbackModel is the Ollama model used for that retry. Empty uses
+	// OLLAMA_DEFAULT_MODEL (the Ollama client's own default).
+	OllamaFallbackModel string `mapstructure:"OLLAMA_FALLBACK_MODEL"`
+
 	// Chat model is pinned separately from worker OLLAMA_DEFAULT_MODEL so
 	// the conversational control surface can use a tool-capable model
 	// without changing article/research/pentest workers.
@@ -295,6 +304,7 @@ func Load() (*Config, error) {
 	// No OLLAMA_JWT_SECRET default on purpose — see the field comment.
 	viper.SetDefault("OLLAMA_TIMEOUT", "30m")
 	viper.SetDefault("OLLAMA_NUM_CTX", 8192)
+	viper.SetDefault("LLM_OLLAMA_FALLBACK", true)
 	viper.SetDefault("CHAT_MODEL", DefaultChatModel)
 	viper.SetDefault("CHAT_MODEL_FALLBACK", DefaultChatModelFallback)
 	viper.SetDefault("CHAT_NUM_CTX", DefaultChatNumCtx)
@@ -370,6 +380,8 @@ func Load() (*Config, error) {
 		OllamaJWTSecret:      viper.GetString("OLLAMA_JWT_SECRET"),
 		OllamaTimeout:        viper.GetDuration("OLLAMA_TIMEOUT"),
 		OllamaNumCtx:         viper.GetInt("OLLAMA_NUM_CTX"),
+		OllamaFallback:       viper.GetBool("LLM_OLLAMA_FALLBACK"),
+		OllamaFallbackModel:  viper.GetString("OLLAMA_FALLBACK_MODEL"),
 		ChatModel:            viper.GetString("CHAT_MODEL"),
 		ChatModelFallback:    viper.GetString("CHAT_MODEL_FALLBACK"),
 		ChatNumCtx:           viper.GetInt("CHAT_NUM_CTX"),

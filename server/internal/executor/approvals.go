@@ -198,7 +198,7 @@ func (e *Executor) Resume(ctx context.Context, approval *model.Approval) Result 
 		OrgID:       approval.OrgID.String(),
 	})
 
-	client, err := e.llmRouter.For(rs.Provider)
+	client, err := e.llmRouter.ForWithFallback(rs.Provider)
 	if err != nil {
 		return Result{Err: fmt.Errorf("executor: resume: resolve LLM client: %w", err)}
 	}

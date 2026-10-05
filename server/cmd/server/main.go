@@ -311,6 +311,14 @@ func main() {
 	llmBench := llmbench.New(llmBenchRepo, logger, llmbench.Options{})
 	llmRouter.WrapClients(llmBench.Wrap)
 	chatInner = llmBench.Wrap(chatInner)
+	// Self-hosted Ollama is the fallback when a cloud provider is over quota or
+	// unavailable: enabled after the benchmark/tracing wraps so the Ollama retry
+	// is recorded too. Set up last so For("ollama") resolves the wrapped client.
+	if cfg.OllamaFallback {
+		llmRouter.EnableOllamaFallback(cfg.OllamaFallbackModel, logger)
+		logger.Info("llm: ollama fallback enabled for cloud providers",
+			zap.String("fallback_model", firstNonEmptyStr(cfg.OllamaFallbackModel, cfg.OllamaDefaultModel)))
+	}
 	chatClient := llm.NewChatClient(chatInner, cfg.ChatModel, cfg.ChatModelFallback, logger)
 	logger.Info("chat LLM client",
 		zap.String("model", llm.SanitizeChatModel(cfg.ChatModel)),
@@ -697,10 +705,12 @@ func main() {
 	mailCfg.Provider = mailProvider
 	mailCfg.DraftModel = firstNonEmptyStr(mailModel, mailCfg.DraftModel)
 	var mailLLM llm.Client
-	if c, err := llmRouter.For(mailProvider); err != nil {
+	if _, err := llmRouter.For(mailProvider); err != nil {
 		logger.Warn("mail: llm router returned error — classify/draft will use heuristics", zap.Error(err))
 	} else {
-		mailLLM = c
+		// Routed, not the raw client, so mail inherits the Ollama fallback when
+		// its provider is over quota.
+		mailLLM = llmRouter.Routed(mailProvider)
 	}
 	var gmailAPI mail.GmailAPI
 	if mailCfg.Simulate {
@@ -776,10 +786,12 @@ func main() {
 
 	var careerLLM llm.Client
 	careerProvider, careerModel := agentLLM(cfg, model.BuiltinCareerOps)
-	if c, err := llmRouter.For(careerProvider); err != nil {
+	if _, err := llmRouter.For(careerProvider); err != nil {
 		logger.Warn("career: llm router returned error — evaluations use the deterministic scorer", zap.Error(err))
 	} else {
-		careerLLM = c
+		// Routed, not the raw client, so career inherits the Ollama fallback
+		// when its provider is over quota.
+		careerLLM = llmRouter.Routed(careerProvider)
 	}
 	careerSvc := service.NewCareerService(careerRepo, agentRepo, researchClient, careerLLM, careerModel, researchSvc, logger)
 	logger.Info("career ops agent initialised",
