@@ -179,6 +179,16 @@ function ModelRow({
     typeof agent.engine_config?.[STRUCTURED_MODEL_KEY] === "string"
       ? (agent.engine_config[STRUCTURED_MODEL_KEY] as string)
       : "";
+  // The whole run (research, outline, writing, review) goes to the agent's
+  // provider when it names one, else the server's. Picking an Ollama writing
+  // model therefore moves the run to Ollama, and the structured model must
+  // come from that same provider.
+  const runProvider =
+    agent.model_provider && agent.model_provider !== "auto"
+      ? agent.model_provider
+      : (blogConfig?.provider ?? "");
+  const onRunProvider = (r?: ModelRecommendation) =>
+    !r?.provider || r.provider === runProvider;
 
   return (
     <div className="flex flex-col gap-5">
@@ -193,14 +203,22 @@ function ModelRow({
               model: agent.model_name ?? "",
             }}
             disabled={isPending}
-            providerFilter={blogConfig?.provider}
             recommended={prose?.model}
+            recommendedProvider={prose?.provider}
             inheritedModel={blogConfig?.effective_models?.prose}
             includeAuto={false}
             onChange={(v) =>
               updateAgent({
                 id: agent.id,
-                payload: { model_provider: v.provider, model_name: v.model },
+                payload: {
+                  model_provider: v.provider,
+                  model_name: v.model,
+                  // A structured model names a model on one provider; when the
+                  // run moves to another, the old one would no longer exist.
+                  ...(v.provider !== (agent.model_provider ?? "") && structuredModel
+                    ? { engine_config: { ...(agent.engine_config ?? {}), [STRUCTURED_MODEL_KEY]: "" } }
+                    : {}),
+                },
               })
             }
             className={PICKER_CLASS}
@@ -212,18 +230,24 @@ function ModelRow({
         label={structured?.label ?? "Structured model"}
         covers={structured?.covers}
         advice={structured}
+        adviceNote={
+          structured && !onRunProvider(structured)
+            ? `This is a ${providerName(structured.provider ?? "")} model: choose a ${providerName(structured.provider ?? "")} writing model above to use it.`
+            : undefined
+        }
         picker={
           <ModelPicker
             // Only the model name is stored: the pipeline talks to one
             // provider, so a second provider field would be a setting that
             // never applies.
             value={{
-              provider: structuredModel ? (blogConfig?.provider ?? "") : "",
+              provider: structuredModel ? runProvider : "",
               model: structuredModel,
             }}
             disabled={isPending}
-            providerFilter={blogConfig?.provider}
-            recommended={structured?.model}
+            providerFilter={runProvider || undefined}
+            recommended={onRunProvider(structured) ? structured?.model : undefined}
+            recommendedProvider={structured?.provider}
             inheritedModel={blogConfig?.effective_models?.structured}
             includeAuto={false}
             onChange={(v) =>
@@ -250,11 +274,14 @@ function ModelSetting({
   label,
   covers,
   advice,
+  adviceNote,
   picker,
 }: {
   label: string;
   covers?: string;
   advice?: ModelRecommendation;
+  /** Why the advice cannot be taken on the current provider, if it cannot. */
+  adviceNote?: string;
   picker: React.ReactNode;
 }) {
   return (
@@ -269,12 +296,13 @@ function ModelSetting({
       {advice?.model && (
         <p className="text-xs text-muted-foreground sm:max-w-sm">
           <span className="font-medium text-foreground">
-            Recommended: {advice.model}
+            Recommended: {advice.provider ? `${providerName(advice.provider)} · ` : ""}{advice.model}
           </span>{" "}
           — {advice.reason}
           {advice.caveat && (
             <span className="text-muted-foreground"> {advice.caveat}</span>
           )}
+          {adviceNote && <span className="mt-1 block text-muted-foreground">{adviceNote}</span>}
         </p>
       )}
     </div>

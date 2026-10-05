@@ -261,4 +261,6 @@ export interface ModelRecommendation {
   caveat?: string;
   /** Which calls the setting governs. */
   covers: string;
+  /** The LLM provider the recommended model belongs to ("ollama"). */
+  provider?: string;
 }

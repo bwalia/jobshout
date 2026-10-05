@@ -37,6 +37,10 @@ type ModelRecommendation struct {
 	Caveat string `json:"caveat,omitempty"`
 	// Describes which calls the setting governs.
 	Covers string `json:"covers"`
+	// Provider is the LLM provider Model belongs to: the one the benchmark
+	// ran on. A run uses the agent's provider, so the UI needs this to say
+	// "an Ollama model" rather than imply it is missing from another provider.
+	Provider string `json:"provider"`
 }
 
 // EffectiveModels reports which model each role uses when neither the agent nor
@@ -67,19 +71,21 @@ func (r *Runner) ProviderName() string {
 func RecommendedModels() []ModelRecommendation {
 	return []ModelRecommendation{
 		{
-			Role:   RoleProse,
-			Label:  "Writing model",
-			Covers: "Writes the article, revises it, and draws the diagrams.",
-			Model:  "muse-glimmer:latest",
+			Role:     RoleProse,
+			Label:    "Writing model",
+			Covers:   "Writes the article, revises it, and draws the diagrams.",
+			Model:    "muse-glimmer:latest",
+			Provider: "ollama",
 			Reason: "Scored higher on clarity, accuracy and depth across three runs, " +
 				"and did not invent code the way the alternative did.",
 			Caveat: "Roughly seven minutes per article instead of one.",
 		},
 		{
-			Role:   RoleStructured,
-			Label:  "Structured model",
-			Covers: "Chooses the title and outline, and reviews the draft.",
-			Model:  "qwen3-coder:30b",
+			Role:     RoleStructured,
+			Label:    "Structured model",
+			Covers:   "Chooses the title and outline, and reviews the draft.",
+			Model:    "qwen3-coder:30b",
+			Provider: "ollama",
 			Reason: "Returned valid JSON on every one of six attempts, and is five " +
 				"to eight times faster on these calls.",
 		},
