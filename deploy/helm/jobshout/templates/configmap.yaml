@@ -126,3 +126,9 @@ data:
   # extraSecretRefs; kubeconfigs are files under SECRETS_ROT_KUBECONFIG_DIR.
   SECRETS_ROT_KUBECONFIG_DIR: {{ .Values.secretsRotation.kubeconfig.mountPath | default "/etc/secretsrot/kube" | quote }}
   RP_URL: {{ .Values.secretsRotation.rpURL | default "https://rp.workstation.co.uk" | quote }}
+  {{- /* Arbitrary extra config keys, e.g. the per-agent model scheme
+         (AGENT_MODEL__<BUILTIN> / AGENT_PROVIDER__<BUILTIN>). Lets a ring
+         repoint any agent at a different model without a chart change. */}}
+  {{- range $k, $v := .Values.extraConfig }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}

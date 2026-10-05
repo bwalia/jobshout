@@ -80,6 +80,17 @@ ai:
   # follow.
   blogCoverImages: true
 
+# ai.provider stays gemini (chat and auto-selection still exercise it), but the
+# heavy, long-running agents are pinned to Ollama: the shared Gemini free-tier
+# key hits its quota under their load (HTTP 429 storms seen 5 Oct), which failed
+# Article Writer and Research runs. The per-agent scheme (AGENT_PROVIDER__<BUILTIN>,
+# added in #242) repoints them without disturbing the global default.
+extraConfig:
+  AGENT_PROVIDER__ARTICLE_WRITER: ollama
+  AGENT_PROVIDER__JOBSHOUT_COM_WRITER: ollama
+  AGENT_PROVIDER__RESEARCHER: ollama
+  AGENT_PROVIDER__COURSE_GENERATOR: ollama
+
 # Penetration testing against the workstation strix-service. int is the proving
 # ring — other rings stay off until a scan has been watched end-to-end here,
 # including an API-pod restart mid-scan. The host must be registered on the

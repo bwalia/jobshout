@@ -67,6 +67,11 @@ extraSecretRefs: []
 # sync (or a rotation) for new values to take effect.
 vaultSecrets: []
 
+# Arbitrary extra config keys injected into jobshout-config (become env via
+# envFrom). Use for the per-agent model scheme, e.g.
+#   AGENT_PROVIDER__ARTICLE_WRITER: ollama
+extraConfig: {}
+
 # Fallback plaintext secrets, used ONLY when externalSecret.enabled=false.
 # On k3s1 that is every deploy, so these stay as placeholders: a real value
 # committed here would be public. Anything genuinely secret belongs in an
