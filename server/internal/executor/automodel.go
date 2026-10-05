@@ -53,7 +53,7 @@ func resolveModel(
 			if err != nil {
 				return modelChoice{}, fmt.Errorf("executor: auto model selection: %w", err)
 			}
-			client, err := router.For(dec.Provider)
+			client, err := router.ForWithFallback(dec.Provider)
 			if err != nil {
 				return modelChoice{}, fmt.Errorf("executor: auto-selected provider %q: %w", dec.Provider, err)
 			}
@@ -74,7 +74,7 @@ func resolveModel(
 		}
 	}
 
-	client, err := router.For(providerName)
+	client, err := router.ForWithFallback(providerName)
 	if err != nil {
 		return modelChoice{}, fmt.Errorf("executor: resolve LLM client: %w", err)
 	}

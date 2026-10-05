@@ -2,8 +2,11 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+
+	"go.uber.org/zap"
 
 	"github.com/jobshout/server/internal/config"
 )
@@ -15,6 +18,16 @@ type Router struct {
 	clients map[string]Client
 	// defaultProvider is used when no per-agent override is present.
 	defaultProvider string
+
+	// ollamaFallback, when set, re-runs a Routed() call on self-hosted Ollama
+	// if the chosen provider fails with a rate limit / quota error or is
+	// unavailable. Ollama has no quota, so it keeps agents working when a cloud
+	// provider is exhausted. ollamaFallbackModel is the model to use on the
+	// retry (empty = Ollama's own default); the original model name almost
+	// never exists on Ollama.
+	ollamaFallback      bool
+	ollamaFallbackModel string
+	logger              *zap.Logger
 
 	// embedders holds registered embedding providers, keyed by provider name.
 	embedders map[string]Embedder
@@ -183,6 +196,109 @@ func NormalizeProvider(p string) string {
 	return p
 }
 
+// EnableOllamaFallback makes every Routed() client fall back to self-hosted
+// Ollama when its chosen provider is rate-limited/over quota or unavailable.
+// model is the Ollama model for the retry (empty = Ollama's default). Call once
+// at startup; it is a no-op when the router has no Ollama client.
+func (r *Router) EnableOllamaFallback(model string, logger *zap.Logger) {
+	if _, ok := r.clients["ollama"]; !ok {
+		return
+	}
+	r.ollamaFallback = true
+	r.ollamaFallbackModel = strings.TrimSpace(model)
+	r.logger = logger
+}
+
+// ollamaFallbackFor returns the Ollama client to retry on, and true, when a
+// failed call to provider should fall back: fallback is enabled, the provider
+// was not already Ollama, the caller's context is still live (it did not give
+// up), and the error is a rate limit, a quota exhaustion, or the provider being
+// unavailable. Auth and bad-request errors never fall back — another provider
+// would fail them too.
+func (r *Router) ollamaFallbackFor(ctx context.Context, provider string, err error) (Client, bool) {
+	if !r.ollamaFallback || err == nil {
+		return nil, false
+	}
+	if NormalizeProvider(provider) == "ollama" {
+		return nil, false
+	}
+	if ctx.Err() != nil {
+		return nil, false
+	}
+	var pe *ProviderError
+	if !errors.As(err, &pe) {
+		return nil, false
+	}
+	if !(pe.Retryable() || pe.Kind == ErrProviderTimeout) {
+		return nil, false
+	}
+	ol, ferr := r.For("ollama")
+	if ferr != nil {
+		return nil, false
+	}
+	if r.logger != nil {
+		r.logger.Warn("llm: provider failed, falling back to ollama",
+			zap.String("provider", provider),
+			zap.String("fallback_model", r.ollamaFallbackModel),
+			zap.Error(err))
+	}
+	return ol, true
+}
+
+// ForWithFallback is For, but the returned client falls back to Ollama on a
+// rate-limit/quota or unavailable error (when fallback is enabled). Use it for
+// execution clients; discovery and introspection should use For so optional
+// interfaces like ModelLister are preserved.
+func (r *Router) ForWithFallback(providerName string) (Client, error) {
+	c, err := r.For(providerName)
+	if err != nil {
+		return nil, err
+	}
+	if !r.ollamaFallback {
+		return c, nil
+	}
+	name := providerName
+	if name == "" {
+		name = r.defaultProvider
+	}
+	if NormalizeProvider(name) == "ollama" {
+		return c, nil
+	}
+	return &fallbackClient{router: r, primary: c, provider: name}, nil
+}
+
+// fallbackClient wraps one provider's client and retries on Ollama when that
+// provider is over quota or unavailable. Unlike routedClient it is bound to a
+// fixed provider, for callers (the executor) that resolve a provider once.
+type fallbackClient struct {
+	router   *Router
+	primary  Client
+	provider string
+}
+
+func (c *fallbackClient) Generate(ctx context.Context, req GenerateRequest) (*GenerateResponse, error) {
+	resp, err := c.primary.Generate(ctx, req)
+	if err == nil {
+		return resp, nil
+	}
+	if fb, ok := c.router.ollamaFallbackFor(ctx, c.provider, err); ok {
+		fbReq := req
+		fbReq.Model = c.router.ollamaFallbackModel
+		return fb.Generate(ctx, fbReq)
+	}
+	return resp, err
+}
+
+func (c *fallbackClient) ProviderName() string { return c.primary.ProviderName() }
+
+// SupportsTools forwards the primary's native tool-calling capability so the
+// executor still builds a native-tools request. On a fallback the Ollama client
+// handles the tool definitions as its model allows.
+func (c *fallbackClient) SupportsTools() bool {
+	tc, ok := c.primary.(ToolCapableClient)
+	return ok && tc.SupportsTools()
+}
+
 // Routed returns a Client that resolves its provider on every call: the one in
 // the call's context (WithProvider), else fallback, else the router default.
 //
@@ -209,11 +325,21 @@ func (c *routedClient) provider(ctx context.Context) string {
 }
 
 func (c *routedClient) Generate(ctx context.Context, req GenerateRequest) (*GenerateResponse, error) {
-	inner, err := c.router.For(c.provider(ctx))
+	provider := c.provider(ctx)
+	inner, err := c.router.For(provider)
 	if err != nil {
 		return nil, err
 	}
-	return inner.Generate(ctx, req)
+	resp, err := inner.Generate(ctx, req)
+	if err == nil {
+		return resp, nil
+	}
+	if fb, ok := c.router.ollamaFallbackFor(ctx, provider, err); ok {
+		fbReq := req
+		fbReq.Model = c.router.ollamaFallbackModel
+		return fb.Generate(ctx, fbReq)
+	}
+	return resp, err
 }
 
 // ProviderName names the fallback provider. Per-call attribution comes from
