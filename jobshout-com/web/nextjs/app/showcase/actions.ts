@@ -15,6 +15,7 @@ import {
   linkCandidates,
   moderateApp,
   saveApp,
+  setIndustries,
   setStar,
   type Evidence,
   type LinkInput,
@@ -240,6 +241,21 @@ export async function moderateAppAction(_prev: FormState, form: FormData): Promi
     return { ok: true, message: done[action], result: { status: app.status } };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "Could not update." };
+  }
+}
+
+export async function setIndustriesAction(_prev: FormState, form: FormData): Promise<FormState> {
+  const viewer = await currentViewer();
+  if (!viewer) return { ok: false, message: "Sign in first." };
+  const industries = form.getAll("industries").map(String);
+  if (!industries.length) return { ok: false, message: "Pick at least one industry, or Works across industries." };
+  try {
+    const app = await setIndustries(viewer, text(form, "id"), industries);
+    refresh(app);
+    revalidatePath("/showcase/review");
+    return { ok: true, message: "Classified.", result: { status: app.status } };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Could not save the industries." };
   }
 }
 

@@ -466,6 +466,34 @@ impl ShowcaseService {
                 self.repo.replace_links(app.id, &resolved).await?;
             }
         }
+        // Sector samples, by slug, so an int seeded before industries
+        // existed still shows the industry filters working.
+        for input in seed::sector_samples() {
+            let slug = slugify(&input.name);
+            if self.repo.get_by_slug(&slug, None).await.is_ok() {
+                continue;
+            }
+            self.create(&editor, input).await?;
+            n += 1;
+        }
+        // Classify the editors' own older samples that predate industries.
+        let general = seed::samples()
+            .into_iter()
+            .map(|(i, _)| i)
+            .chain(seed::agents())
+            .chain(seed::teams());
+        for input in general {
+            let slug = slugify(&input.name);
+            let Ok(entry) = self.repo.get_by_slug(&slug, None).await else {
+                continue;
+            };
+            if !rules::owns(&editor, &entry) || !entry.industries.is_empty() {
+                continue;
+            }
+            if let Some(list) = input.industries {
+                self.set_industries(&editor, entry.id, list).await?;
+            }
+        }
         // Once, on an int with jobs on the board: show the sample entries
         // hiring, so "Open roles" and the Hiring filter have something in them.
         if self.repo.job_link_count().await? == 0 {

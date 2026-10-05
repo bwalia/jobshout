@@ -8,6 +8,7 @@ import {
   APP_TYPES,
   COLLECTIONS,
   findIndustry,
+  industryHref,
   industryNames,
   isAppType,
   isCollection,
@@ -42,11 +43,13 @@ export async function generateMetadata({
   searchParams: SearchParams;
 }): Promise<Metadata> {
   const collection = one(searchParams.collection);
+  // A sector filter's canonical page is the industry landing page.
+  const industry = one(searchParams.industry).toLowerCase();
   return {
     title: isCollection(collection) ? `${COLLECTIONS[collection].label} · AI Showcase` : "AI Showcase",
     description:
       "Discover applications, agents and production software built by people and AI. See what AI is building on JobShout.",
-    alternates: { canonical: "/showcase" },
+    alternates: { canonical: industry && industry !== "all" ? industryHref(industry) : "/showcase" },
   };
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { cx } from "@/components/ui";
 import { CROSS_INDUSTRY, MAX_INDUSTRIES, MAX_VERTICALS, type IndustryNode } from "@/lib/showcase";
 
@@ -25,6 +25,8 @@ export function IndustryPicker({
 }) {
   const [chosen, setChosen] = useState<Set<string>>(() => new Set(initial));
   const [said, setSaid] = useState("");
+  // Several pickers can share a page (the editors' queue).
+  const uid = useId();
   const sectors = tree.filter((n) => n.slug !== CROSS_INDUSTRY);
   const cross = tree.find((n) => n.slug === CROSS_INDUSTRY);
   const isCross = chosen.has(CROSS_INDUSTRY);
@@ -66,14 +68,14 @@ export function IndustryPicker({
       {[...chosen].map((s) => (
         <input key={s} type="hidden" name="industries" value={s} />
       ))}
-      <p className="text-sm font-semibold text-ink" id="industries-label">
+      <p className="text-sm font-semibold text-ink" id={`${uid}-label`}>
         Industries
       </p>
-      <p className="mt-1 text-sm text-mute" id="industries-hint">
+      <p className="mt-1 text-sm text-mute" id={`${uid}-hint`}>
         The sectors this {noun} was built for, not every sector it could serve. Up to {MAX_INDUSTRIES}, each with up to{" "}
         {MAX_VERTICALS} specialisms.
       </p>
-      <div role="group" aria-labelledby="industries-label" aria-describedby="industries-hint" className="mt-3 flex flex-wrap gap-2">
+      <div role="group" aria-labelledby={`${uid}-label`} aria-describedby={`${uid}-hint`} className="mt-3 flex flex-wrap gap-2">
         {sectors.map((n) => {
           const on = chosen.has(n.slug);
           return (
@@ -94,10 +96,10 @@ export function IndustryPicker({
       {parents.map((p) =>
         p.verticals.length ? (
           <div key={p.slug} className="mt-4 border-l-2 border-shout/30 pl-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-mute" id={`vert-${p.slug}`}>
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-mute" id={`${uid}-${p.slug}`}>
               Specialisms in {p.name} <span className="font-normal normal-case tracking-normal">(optional)</span>
             </p>
-            <div role="group" aria-labelledby={`vert-${p.slug}`} className="mt-2 flex flex-wrap gap-2">
+            <div role="group" aria-labelledby={`${uid}-${p.slug}`} className="mt-2 flex flex-wrap gap-2">
               {p.verticals.map((v) => {
                 const on = chosen.has(v.slug);
                 const picked = p.verticals.filter((x) => chosen.has(x.slug)).length;
