@@ -8,12 +8,15 @@ import (
 
 // Config holds SSH defaults for the Linux Patch agent.
 type Config struct {
-	SSHUser    string
-	SSHKeyPath string
-	SSHKeyPEM  string // raw PEM from env (optional)
+	SSHUser     string
+	SSHKeyPath  string
+	SSHKeyPEM   string // raw PEM from env (optional)
 	SSHPassword string
-	Timeout    time.Duration
-	KnownHosts string
+	Timeout     time.Duration
+	KnownHosts  string
+	// Model is the LLM model used for plan enrichment. Empty uses the
+	// provider's default. Set from the environment in main (AGENT_MODEL__LINUX_PATCH).
+	Model string
 }
 
 // LoadConfig from environment.

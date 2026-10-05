@@ -130,6 +130,17 @@ func firstNonEmptyStr(vals ...string) string {
 	return ""
 }
 
+// agentLLM resolves an agent's provider and model from the environment, so any
+// agent can be repointed at a different model by setting a variable and
+// restarting — no code change. See config.AgentModel for the naming scheme and
+// precedence. The returned provider is always concrete (falls back to
+// LLM_PROVIDER) so the router gets a real name; the model may be empty, meaning
+// "the provider's own default".
+func agentLLM(cfg *config.Config, builtin string) (provider, modelName string) {
+	al := config.AgentModel(builtin)
+	return firstNonEmptyStr(al.Provider, cfg.LLMProvider), al.Model
+}
+
 // providerDefaultModel names the model LLM_PROVIDER uses when a call names
 // none. It is for startup logs only; the client applies its own default.
 func providerDefaultModel(cfg *config.Config) string {
@@ -558,17 +569,25 @@ func main() {
 	// (llm.WithProvider) — so an agent set to Gemini uses it with no
 	// provider code of its own. The server's own provider must still resolve.
 	var researchAgent *research.Agent
-	if _, err := llmRouter.For(cfg.LLMProvider); err != nil {
+	researchProvider, researchModel := agentLLM(cfg, model.BuiltinResearcher)
+	if _, err := llmRouter.For(researchProvider); err != nil {
 		logger.Warn("research: llm router returned error — research agent disabled", zap.Error(err))
 	} else {
-		researchAgent = research.NewAgent(researchClient, llmRouter.Routed(cfg.LLMProvider), research.DefaultAgentConfig(), logger)
+		researchAgentCfg := research.DefaultAgentConfig()
+		researchAgentCfg.DefaultModel = researchModel
+		researchAgent = research.NewAgent(researchClient, llmRouter.Routed(researchProvider), researchAgentCfg, logger)
 		logger.Info("research agent initialised",
+			zap.String("provider", researchProvider),
+			zap.String("model", firstNonEmptyStr(researchModel, providerDefaultModel(cfg))),
 			zap.Int("max_sources", research.DefaultAgentConfig().MaxSources))
 	}
 	researchSvc := service.NewResearchService(researchAgent, researchClient, agentRepo, logger)
 
 	var blogRunner *blog.Runner
-	if _, err := llmRouter.For(cfg.LLMProvider); err != nil {
+	// article_writer sets the Article Writer's defaults; jobshout_com_writer
+	// reuses this pipeline and still routes per run via the agent's own model.
+	blogProvider, blogModel := agentLLM(cfg, model.BuiltinArticleWriter)
+	if _, err := llmRouter.For(blogProvider); err != nil {
 		logger.Warn("blog: llm router returned error — article generator disabled",
 			zap.Error(err))
 	} else {
@@ -576,12 +595,12 @@ func main() {
 			ContentDir:      cfg.BlogContentDir,
 			AuthorName:      cfg.BlogAuthorName,
 			PublicBaseURL:   cfg.FrontendBaseURL,
-			Model:           cfg.BlogModel,
+			Model:           firstNonEmptyStr(blogModel, cfg.BlogModel),
 			ProseModel:      cfg.BlogProseModel,
 			StructuredModel: cfg.BlogStructuredModel,
 			ProseNumCtx:     cfg.BlogProseNumCtx,
-			Provider:        cfg.LLMProvider,
-		}, llmRouter.Routed(cfg.LLMProvider), cmsClient, researchSvc, logger)
+			Provider:        blogProvider,
+		}, llmRouter.Routed(blogProvider), cmsClient, researchSvc, logger)
 		// Cover images and in-article illustrations are opt-in per environment:
 		// each costs tens of seconds on a single shared GPU, so an operator
 		// decides whether every article pays for one.
@@ -603,9 +622,9 @@ func main() {
 			Token:   cfg.JobshoutComAPIToken,
 			Agent:   model.AgentNameJobShoutComWriter,
 		}))
-		writingModel := firstNonEmptyStr(cfg.BlogModel, providerDefaultModel(cfg))
+		writingModel := firstNonEmptyStr(blogModel, cfg.BlogModel, providerDefaultModel(cfg))
 		logger.Info("article generator initialised",
-			zap.String("provider", cfg.LLMProvider),
+			zap.String("provider", blogProvider),
 			zap.String("prose_model", firstNonEmptyStr(cfg.BlogProseModel, writingModel)),
 			zap.String("structured_model", firstNonEmptyStr(cfg.BlogStructuredModel, writingModel)),
 			zap.String("cms_namespace", cfg.OpsAPINamespace),
@@ -661,10 +680,15 @@ func main() {
 	}
 
 	mailCfg := mail.LoadConfig()
+	// Resolve mail's provider and draft model from the environment (generic
+	// AGENT_*__MAIL, falling back to MAIL_PROVIDER / MAIL_MODEL). The model
+	// names a model on one provider, so mail resolves the provider that serves
+	// it rather than whatever the default is.
+	mailProvider, mailModel := agentLLM(cfg, model.BuiltinMail)
+	mailCfg.Provider = mailProvider
+	mailCfg.DraftModel = firstNonEmptyStr(mailModel, mailCfg.DraftModel)
 	var mailLLM llm.Client
-	// MAIL_MODEL names a model on one provider, so mail resolves the provider
-	// that serves it (MAIL_PROVIDER) rather than whatever the default is.
-	if c, err := llmRouter.For(firstNonEmptyStr(mailCfg.Provider, cfg.LLMProvider)); err != nil {
+	if c, err := llmRouter.For(mailProvider); err != nil {
 		logger.Warn("mail: llm router returned error — classify/draft will use heuristics", zap.Error(err))
 	} else {
 		mailLLM = c
@@ -742,13 +766,16 @@ func main() {
 	}
 
 	var careerLLM llm.Client
-	if c, err := llmRouter.For(firstNonEmptyStr(cfg.CareerProvider, cfg.LLMProvider)); err != nil {
+	careerProvider, careerModel := agentLLM(cfg, model.BuiltinCareerOps)
+	if c, err := llmRouter.For(careerProvider); err != nil {
 		logger.Warn("career: llm router returned error — evaluations use the deterministic scorer", zap.Error(err))
 	} else {
 		careerLLM = c
 	}
-	careerSvc := service.NewCareerService(careerRepo, agentRepo, researchClient, careerLLM, cfg.CareerModel, researchSvc, logger)
-	logger.Info("career ops agent initialised")
+	careerSvc := service.NewCareerService(careerRepo, agentRepo, researchClient, careerLLM, careerModel, researchSvc, logger)
+	logger.Info("career ops agent initialised",
+		zap.String("provider", careerProvider),
+		zap.String("model", firstNonEmptyStr(careerModel, providerDefaultModel(cfg))))
 
 	aivcCfg := creditcontroller.LoadConfig()
 	aivcClient := creditcontroller.NewClient(aivcCfg, logger)
@@ -771,10 +798,12 @@ func main() {
 	wafLabSvc := service.NewWAFLabServiceWithEvents(wafLabRunRepo, securityFindingEventRepo, agentRepo, wafLabCfg, wafLabClient, logger)
 	seoSvc := service.NewSEOService(seoRunRepo, agentRepo, logger)
 	courseCfg := course.LoadConfig()
-	courseCfg.Provider = cfg.LLMProvider
+	courseProvider, courseModel := agentLLM(cfg, model.BuiltinCourseGenerator)
+	courseCfg.Provider = courseProvider
+	courseCfg.Model = firstNonEmptyStr(courseModel, courseCfg.Model)
 	var courseLLM llm.Client
-	if _, err := llmRouter.For(cfg.LLMProvider); err == nil {
-		courseLLM = llmRouter.Routed(cfg.LLMProvider)
+	if _, err := llmRouter.For(courseProvider); err == nil {
+		courseLLM = llmRouter.Routed(courseProvider)
 	}
 	var courseResearcher course.Researcher
 	if researchAgent != nil {
@@ -797,11 +826,13 @@ func main() {
 	)
 	// ─── LinkedIn Poster ────────────────────────────────────────────────────
 	linkedInCfg := linkedin.LoadConfig()
-	linkedInCfg.Provider = cfg.LLMProvider
+	linkedInProvider, linkedInModel := agentLLM(cfg, model.BuiltinLinkedIn)
+	linkedInCfg.Provider = linkedInProvider
+	linkedInCfg.Model = firstNonEmptyStr(linkedInModel, linkedInCfg.Model)
 	linkedInCfg.InsightsSiteURL = cfg.JobshoutComSiteURL
 	var linkedInDrafter *linkedin.Drafter
-	if _, err := llmRouter.For(cfg.LLMProvider); err == nil {
-		linkedInDrafter = &linkedin.Drafter{LLM: llmRouter.Routed(cfg.LLMProvider), Cfg: linkedInCfg}
+	if _, err := llmRouter.For(linkedInProvider); err == nil {
+		linkedInDrafter = &linkedin.Drafter{LLM: llmRouter.Routed(linkedInProvider), Cfg: linkedInCfg}
 	}
 	linkedInSvc := service.NewLinkedInService(repository.NewLinkedInRepository(pool), agentRepo,
 		linkedin.NewClient(linkedInCfg.APIVersion), linkedInDrafter, linkedInCfg, logger)
@@ -820,8 +851,10 @@ func main() {
 		zap.String("vault_addr", secretsRotCfg.Addr),
 	)
 	linuxPatchCfg := linuxpatch.LoadConfig()
+	linuxPatchProvider, linuxPatchModel := agentLLM(cfg, model.BuiltinLinuxPatch)
+	linuxPatchCfg.Model = linuxPatchModel
 	var patchLLM llm.Client
-	if c, err := llmRouter.For(cfg.LLMProvider); err == nil {
+	if c, err := llmRouter.For(linuxPatchProvider); err == nil {
 		patchLLM = c
 	}
 	linuxPatchSvc := service.NewLinuxPatchService(linuxPatchRunRepo, agentRepo, linuxPatchCfg, secretsRotCfg, patchLLM, logger)

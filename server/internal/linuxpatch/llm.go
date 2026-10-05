@@ -10,8 +10,9 @@ import (
 	"github.com/jobshout/server/internal/model"
 )
 
-// EnrichPlanWithLLM asks the configured model to refine order/steps for zero downtime.
-func EnrichPlanWithLLM(ctx context.Context, client llm.Client, base model.LinuxPatchPlan, workload, instruction string, inventory []string) model.LinuxPatchPlan {
+// EnrichPlanWithLLM asks the configured model to refine order/steps for zero
+// downtime. modelName selects the model; empty uses the provider's default.
+func EnrichPlanWithLLM(ctx context.Context, client llm.Client, modelName string, base model.LinuxPatchPlan, workload, instruction string, inventory []string) model.LinuxPatchPlan {
 	if client == nil {
 		return base
 	}
@@ -22,6 +23,7 @@ Rules: never invent credentials; prefer one host at a time; for wslvault use HA/
 		workload, base.Strategy, base.ZeroDowntime, strings.Join(base.Order, ", "),
 		strings.Join(inventory, "\n"), instruction, strings.Join(base.WorkloadHints, "; "))
 	resp, err := client.Generate(ctx, llm.GenerateRequest{
+		Model: modelName,
 		Messages: []llm.Message{
 			{Role: llm.RoleSystem, Content: sys},
 			{Role: llm.RoleUser, Content: user},
