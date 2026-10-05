@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"go.uber.org/zap"
 
 	"github.com/jobshout/server/internal/integration/adapters/opsapi"
@@ -136,7 +138,7 @@ func TestGenerate_RendersHTML(t *testing.T) {
 
 func TestPublish_WithoutCMSIsRefused(t *testing.T) {
 	r := newTestRunner(nil)
-	_, err := r.Publish(context.Background(), []GeneratedArticle{{Topic: "x", Markdown: "# x"}}, nil)
+	_, err := r.Publish(context.Background(), uuid.Nil, []GeneratedArticle{{Topic: "x", Markdown: "# x"}}, nil)
 	if err == nil {
 		t.Fatal("expected Publish to be refused without a CMS")
 	}
@@ -147,7 +149,7 @@ func TestPublish_WithoutCMSIsRefused(t *testing.T) {
 
 func TestPublish_NothingToPublish(t *testing.T) {
 	r := newTestRunner(&fakeCMS{})
-	if _, err := r.Publish(context.Background(), nil, nil); err == nil {
+	if _, err := r.Publish(context.Background(), uuid.Nil, nil, nil); err == nil {
 		t.Fatal("expected an error when publishing zero articles")
 	}
 }
@@ -163,7 +165,7 @@ func TestPublish_AlwaysCreatesDrafts(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 
-	result, err := r.Publish(context.Background(), arts, nil)
+	result, err := r.Publish(context.Background(), uuid.Nil, arts, nil)
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -203,7 +205,7 @@ func TestPublish_SendsFeaturedImageURL(t *testing.T) {
 	cms := &fakeCMS{}
 	r := newTestRunner(cms)
 
-	_, err := r.Publish(context.Background(), []GeneratedArticle{{
+	_, err := r.Publish(context.Background(), uuid.Nil, []GeneratedArticle{{
 		Topic: "covered", Slug: "covered",
 		Title: "Covered", Excerpt: "Has a cover.",
 		HTML:          "<p>Body</p>",
@@ -221,13 +223,63 @@ func TestPublish_SendsFeaturedImageURL(t *testing.T) {
 	}
 }
 
+// A stored article with no cover gets one drawn at publish time, so the opsapi
+// draft still carries a featured image. The drawn cover is also reported back
+// so the caller can persist it.
+func TestPublish_BackfillsMissingCover(t *testing.T) {
+	cms := &fakeCMS{}
+	ill := &fakeIllustrator{enabled: true}
+	r := newTestRunner(cms).WithIllustrator(ill)
+
+	result, err := r.Publish(context.Background(), uuid.Nil, []GeneratedArticle{{
+		Topic: "coverless", Slug: "coverless",
+		Title: "Coverless", Excerpt: "No cover stored.",
+		HTML: "<p>Body</p>",
+		// CoverImageURL deliberately empty.
+	}}, nil)
+	if err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if len(ill.calls) == 0 {
+		t.Fatal("no cover was drawn for a coverless article")
+	}
+	if cms.posts[0].FeaturedImageURL == "" {
+		t.Fatal("opsapi draft got no featured image after backfill")
+	}
+	if result.Posts[0].CoverImageURL == "" {
+		t.Fatal("backfilled cover was not reported back for persistence")
+	}
+}
+
+// A publish must never fail just because a cover could not be drawn.
+func TestPublish_CoverFailureDoesNotFailPublish(t *testing.T) {
+	cms := &fakeCMS{}
+	// noURL: the generator "works" but has nowhere to store the image, so the
+	// cover cannot be used — the failure path backfill must tolerate.
+	ill := &fakeIllustrator{enabled: true, noURL: true}
+	r := newTestRunner(cms).WithIllustrator(ill)
+
+	_, err := r.Publish(context.Background(), uuid.Nil, []GeneratedArticle{{
+		Topic: "x", Slug: "x", Title: "X", Excerpt: "e", HTML: "<p>b</p>",
+	}}, nil)
+	if err != nil {
+		t.Fatalf("publish must succeed even when the cover cannot be drawn: %v", err)
+	}
+	if len(cms.posts) != 1 {
+		t.Fatalf("article was not published: %d posts", len(cms.posts))
+	}
+	if cms.posts[0].FeaturedImageURL != "" {
+		t.Errorf("expected no featured image when cover failed, got %q", cms.posts[0].FeaturedImageURL)
+	}
+}
+
 // Articles stored before HTML rendering existed have markdown and nothing else.
 // Publishing them must work rather than refusing on a missing field.
 func TestPublish_RendersArticlesWithoutHTML(t *testing.T) {
 	cms := &fakeCMS{}
 	r := newTestRunner(cms)
 
-	_, err := r.Publish(context.Background(), []GeneratedArticle{{
+	_, err := r.Publish(context.Background(), uuid.Nil, []GeneratedArticle{{
 		Topic: "legacy", Slug: "legacy", Markdown: "# Legacy\n\nStored before HTML existed.",
 	}}, nil)
 	if err != nil {
@@ -311,7 +363,7 @@ func TestPublish_RecomputesDerivedFieldsFromStoredArticle(t *testing.T) {
 		HTML:     "<p>Start with the events.</p>",
 	}
 
-	if _, err := r.Publish(context.Background(), []GeneratedArticle{stored}, nil); err != nil {
+	if _, err := r.Publish(context.Background(), uuid.Nil, []GeneratedArticle{stored}, nil); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	if len(cms.posts) != 1 {

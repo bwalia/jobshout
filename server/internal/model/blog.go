@@ -330,6 +330,9 @@ type BlogArticlePost struct {
 	ArticleID uuid.UUID
 	PostUUID  string
 	Status    string
+	// CoverImageURL, when non-empty, is a cover drawn at publish time to be
+	// written back to the article. Empty leaves the stored cover unchanged.
+	CoverImageURL string
 }
 
 // BlogArticleInsights is the result of filing one article in Insights,

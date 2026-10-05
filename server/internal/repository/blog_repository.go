@@ -586,12 +586,15 @@ func (r *blogRepository) MarkArticlesPosted(ctx context.Context, posts []model.B
 	}
 
 	batch := &pgx.Batch{}
+	// cover_image_url is updated only when a non-empty one is supplied (a cover
+	// backfilled at publish time); an empty value leaves the stored cover as is.
 	const sql = `
 		UPDATE blog_articles
-		SET post_uuid = $2, post_status = $3, posted_at = NOW()
+		SET post_uuid = $2, post_status = $3, posted_at = NOW(),
+		    cover_image_url = COALESCE(NULLIF($4, ''), cover_image_url)
 		WHERE id = $1`
 	for _, p := range posts {
-		batch.Queue(sql, p.ArticleID, p.PostUUID, p.Status)
+		batch.Queue(sql, p.ArticleID, p.PostUUID, p.Status, p.CoverImageURL)
 	}
 
 	br := r.pool.SendBatch(ctx, batch)
