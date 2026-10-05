@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -26,16 +27,41 @@ type ShellTool struct {
 	MaxOutputBytes int
 }
 
-// DefaultAllowedCmds is the baseline safe command set.
+// DefaultAllowedCmds is the baseline command set.
+//
+// It deliberately excludes commands that defeat an allowlist's purpose:
+//   - env, which prints the whole environment;
+//   - language interpreters (python3, pip3, node, go), which run arbitrary code
+//     and so can read any file the process can, open the network, or use the
+//     pod's service-account token — nullifying every other restriction here.
+//
+// Even with these gone, the command runs inside the API process, so Execute
+// also strips the server's secrets from the child's environment (see safeEnv).
 var DefaultAllowedCmds = []string{
-	"echo", "cat", "ls", "pwd", "date", "env",
+	"echo", "cat", "ls", "pwd", "date",
 	"curl", "wget",
 	"kubectl", "helm", "kustomize",
 	"docker", "docker-compose",
 	"git",
-	"go", "node", "python3", "pip3",
 	"jq", "yq", "sed", "awk", "grep", "sort", "uniq", "wc", "head", "tail",
 	"ping", "dig", "nslookup",
+}
+
+// safeEnvNames are the only environment variables passed to a shell child. The
+// server's secrets (JWT_SECRET, DATABASE_URL, API keys, …) are never among them,
+// so a command cannot read a secret out of its environment even if it tries.
+var safeEnvNames = []string{"PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "TZ", "TERM"}
+
+// safeEnv returns the minimal environment for a shell child: the safe names
+// above, and nothing else from the server's environment.
+func safeEnv() []string {
+	out := make([]string, 0, len(safeEnvNames))
+	for _, name := range safeEnvNames {
+		if v, ok := os.LookupEnv(name); ok {
+			out = append(out, name+"="+v)
+		}
+	}
+	return out
 }
 
 // NewShellTool creates a ShellTool with the default allowlist and a 30-second timeout.
@@ -108,6 +134,10 @@ func (t *ShellTool) Execute(ctx context.Context, input map[string]any) (string, 
 
 	// #nosec G204 — base command is validated against an explicit allowlist above.
 	cmd := exec.CommandContext(execCtx, tokens[0], tokens[1:]...)
+	// Run with a minimal environment, never the server's secrets. Without this
+	// the child inherits os.Environ(), which in production holds the JWT secret,
+	// database URL and every provider key.
+	cmd.Env = safeEnv()
 
 	var combined bytes.Buffer
 	cmd.Stdout = &combined
