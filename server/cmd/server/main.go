@@ -400,7 +400,16 @@ func main() {
 	// ─── Tool registry ───────────────────────────────────────────────────────
 	toolRegistry := tools.NewRegistry()
 	toolRegistry.Register(tools.NewHTTPTool())
-	toolRegistry.Register(tools.NewShellTool(nil))
+	// shell_command runs commands inside this API process, so it is registered
+	// only when an operator opts in (SHELL_TOOL_ENABLED). Off by default: an
+	// agent cannot be granted a tool the registry does not hold, which closes
+	// the path where an imported agent could run shell commands to read secrets.
+	if cfg.ShellToolEnabled {
+		toolRegistry.Register(tools.NewShellTool(nil))
+		logger.Warn("shell_command tool ENABLED (SHELL_TOOL_ENABLED): agents granted it can run commands in the API process")
+	} else {
+		logger.Info("shell_command tool disabled (set SHELL_TOOL_ENABLED=true to allow it)")
+	}
 	// knowledge_search performs semantic retrieval over an agent's knowledge
 	// base; it only works with a configured embedder, so register it only then.
 	if embedder != nil {

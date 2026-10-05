@@ -120,6 +120,13 @@ type Config struct {
 	// platform can draw.
 	BlogCoverImages bool `mapstructure:"BLOG_COVER_IMAGES"`
 
+	// ShellToolEnabled registers the shell_command tool, which runs commands in
+	// the API server process. It is OFF by default: with it off, no agent — not
+	// even one imported with the tool granted — can run shell commands, because
+	// the tool is not in the registry. Turn it on only in an environment where
+	// an operator accepts that risk. See internal/tools/shell_tool.go.
+	ShellToolEnabled bool `mapstructure:"SHELL_TOOL_ENABLED"`
+
 	// Embedding configuration (used for RAG / knowledge retrieval).
 	// The default provider is OpenAI with text-embedding-3-small (1536 dims).
 	// When EMBEDDING_PROVIDER=openai, OPENAI_API_KEY must be set for embeddings
@@ -384,6 +391,7 @@ func Load() (*Config, error) {
 		GeminiDefaultModel:   viper.GetString("GEMINI_DEFAULT_MODEL"),
 		GeminiTimeout:        viper.GetDuration("GEMINI_TIMEOUT"),
 		BlogCoverImages:      viper.GetBool("BLOG_COVER_IMAGES"),
+		ShellToolEnabled:     viper.GetBool("SHELL_TOOL_ENABLED"),
 		EmbeddingProvider:    viper.GetString("EMBEDDING_PROVIDER"),
 		EmbeddingModel:       viper.GetString("EMBEDDING_MODEL"),
 		EmbeddingDimensions:  viper.GetInt("EMBEDDING_DIMENSIONS"),
