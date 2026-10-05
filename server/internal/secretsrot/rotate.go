@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -267,14 +268,20 @@ func runPlan(ctx context.Context, client *Client, opt RunOptions, out *RunOutcom
 		setPhase("inventory", "completed", "Database engine plan (manual consumer cutover)")
 	default:
 		meta, err := client.MetadataKV2(ctx, opt.Mount, opt.Path)
-		if err != nil {
-			// Missing path is still a valid plan target
+		if errors.Is(err, ErrSecretNotFound) {
+			// A genuinely missing path is a valid plan target: create version 1.
 			steps = []string{
 				"Create KV v2 secret at " + opt.Mount + "/data/" + opt.Path + " (version 1)",
 				"Configure consumers to read latest version",
 			}
 			out.Result.Warnings = append(out.Result.Warnings, err.Error())
 			setPhase("inventory", "completed", "Path not yet present — create on first rotate")
+		} else if err != nil {
+			// Any other error — above all an auth failure — must fail the run.
+			// Reporting "completed, create version 1" here would be dishonest and
+			// could propose overwriting a secret we simply could not read.
+			setPhase("inventory", "failed", "Could not read "+opt.Path+": "+err.Error())
+			return out, err
 		} else {
 			out.Result.CurrentVersion = meta.Version
 			out.Result.PreviousVersion = meta.Version
