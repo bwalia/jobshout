@@ -7,7 +7,8 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use jobshout_domain::{
     DomainError, Job, ShowcaseApp, ShowcaseAppInput, ShowcaseAppType, ShowcaseBuildMethod,
-    ShowcaseKind, ShowcaseMaturity, ShowcasePricing, ShowcaseTag, AGENT_CAPABILITIES,
+    ShowcaseIndustryNode, ShowcaseKind, ShowcaseMaturity, ShowcasePricing, ShowcaseTag,
+    AGENT_CAPABILITIES,
 };
 use jobshout_showcase::{ListQuery, Moderation, Sort};
 use serde::{Deserialize, Serialize};
@@ -22,6 +23,8 @@ pub fn routes() -> Router<AppState> {
         .route("/api/v1/showcase/apps", get(list).post(create))
         .route("/api/v1/showcase/apps/mine", get(mine))
         .route("/api/v1/showcase/tags", get(tags))
+        .route("/api/v1/showcase/industries", get(industries))
+        .route("/api/v1/showcase/unclassified", get(unclassified))
         .route("/api/v1/showcase/review-queue", get(review_queue))
         .route("/api/v1/showcase/link-candidates", get(link_candidates))
         .route("/api/v1/showcase/linkable-jobs", get(linkable_jobs))
@@ -33,6 +36,10 @@ pub fn routes() -> Router<AppState> {
         .route("/api/v1/showcase/apps/{key}/related", get(related))
         .route("/api/v1/showcase/apps/{key}/used-in", get(used_in))
         .route("/api/v1/showcase/apps/{key}/moderate", post(moderate))
+        .route(
+            "/api/v1/showcase/apps/{key}/industries",
+            put(set_industries),
+        )
         .route("/api/v1/showcase/apps/{key}/star", put(star).delete(unstar))
 }
 
@@ -82,6 +89,12 @@ struct ListParams {
     tech: Option<String>,
     /// featured | production_ready | built_by_agents | open_source | hiring
     collection: Option<String>,
+    /// An industry or vertical slug from GET /api/v1/showcase/industries.
+    industry: Option<String>,
+    /// With `industry`: also list general-purpose (cross-industry) entries,
+    /// after the sector's own. Off unless asked for.
+    #[serde(default)]
+    include_cross_industry: bool,
     featured: Option<bool>,
     /// new (default) | stars | updated
     sort: Option<String>,
@@ -137,6 +150,8 @@ async fn list(
             .collect(),
         pricing: parse_opt("pricing", p.pricing.as_deref(), ShowcasePricing::parse)?,
         technology: p.tech,
+        industry: p.industry,
+        include_cross_industry: p.include_cross_industry,
         featured: p.featured,
         viewer_email: who.map(|a| a.email),
         sort: match p.sort.as_deref().unwrap_or("new") {
@@ -197,6 +212,57 @@ async fn tags(
             .await
             .map_err(err)?,
     }))
+}
+
+#[derive(Debug, Deserialize)]
+struct KindParam {
+    /// app | agent | team; absent counts every kind.
+    kind: Option<String>,
+}
+
+/// The industry taxonomy, with how many public entries each industry and
+/// vertical has: what the browse UI and the submission form show.
+async fn industries(
+    State(state): State<AppState>,
+    Query(p): Query<KindParam>,
+) -> Result<Json<DataResponse<Vec<ShowcaseIndustryNode>>>, ApiError> {
+    let kind = parse_opt("kind", p.kind.as_deref(), ShowcaseKind::parse)?;
+    Ok(Json(DataResponse {
+        data: state.showcase.industries(kind).await.map_err(err)?,
+    }))
+}
+
+/// Editors: published entries with no industry yet.
+async fn unclassified(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<DataResponse<Vec<ShowcaseApp>>>, ApiError> {
+    let who = signed_in(&state, &headers)?;
+    Ok(Json(DataResponse {
+        data: state.showcase.unclassified(&who).await.map_err(err)?,
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+struct IndustriesBody {
+    industries: Vec<String>,
+}
+
+/// Set only an entry's industries. A live entry stays live.
+async fn set_industries(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(key): Path<String>,
+    Json(body): Json<IndustriesBody>,
+) -> Result<Json<ShowcaseApp>, ApiError> {
+    let who = signed_in(&state, &headers)?;
+    Ok(Json(
+        state
+            .showcase
+            .set_industries(&who, parse_id(&key)?, body.industries)
+            .await
+            .map_err(err)?,
+    ))
 }
 
 async fn get_one(

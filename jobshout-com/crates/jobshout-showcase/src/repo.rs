@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 use chrono::{DateTime, Utc};
 use jobshout_domain::{
     DomainError, InsightSource, Job, ShowcaseApp, ShowcaseAppId, ShowcaseAppType,
-    ShowcaseBuildMethod, ShowcaseKind, ShowcaseLink, ShowcaseMaturity, ShowcasePricing,
-    ShowcaseStatus, ShowcaseTag, ShowcaseVerification, ShowcaseVisibility,
+    ShowcaseBuildMethod, ShowcaseIndustry, ShowcaseKind, ShowcaseLink, ShowcaseMaturity,
+    ShowcasePricing, ShowcaseStatus, ShowcaseTag, ShowcaseVerification, ShowcaseVisibility,
 };
 use jobshout_jobs::job_from_row;
 use sqlx::types::Json;
@@ -16,7 +16,7 @@ const COLUMNS: &str = r#"
     a.maturity, a.build_method, a.pricing, a.license, a.version, a.logo_url, a.screenshots,
     a.repo_url, a.demo_url, a.website_url, a.docs_url, a.technologies, a.ai_models, a.agents,
     a.human_oversight, a.evidence, a.team_name, a.model_provider, a.tools, a.mcp_servers,
-    a.capabilities, a.creator_email, a.creator_display_name, a.visibility, a.status,
+    a.capabilities, a.industries, a.creator_email, a.creator_display_name, a.visibility, a.status,
     a.verification, a.featured, a.review_note, a.star_count, a.published_at, a.created_at,
     a.updated_at
 "#;
@@ -91,6 +91,13 @@ pub struct ListQuery {
     pub pricing: Option<ShowcasePricing>,
     pub technology: Option<String>,
     pub capability: Option<String>,
+    /// An industry or vertical slug; entries tagged with it.
+    pub industry: Option<String>,
+    /// With `industry`: also general-purpose (`cross-industry`) entries,
+    /// listed after the sector's own.
+    pub include_cross_industry: bool,
+    /// Only entries with no industry yet (the editors' classification queue).
+    pub unclassified: bool,
     /// Entries that link to this one, directly or through a team.
     pub links_to: Option<ShowcaseAppId>,
     /// Only entries with at least one open (published) linked job.
@@ -118,11 +125,22 @@ impl ShowcaseRepository {
     }
 
     pub async fn list(&self, q: &ListQuery) -> Result<(Vec<ShowcaseApp>, i64), DomainError> {
-        let order = match q.sort {
+        let sort = match q.sort {
             Sort::Newest => "COALESCE(a.published_at, a.updated_at) DESC, a.created_at DESC",
             Sort::Stars => "a.star_count DESC, COALESCE(a.published_at, a.updated_at) DESC",
             Sort::Updated => "a.updated_at DESC",
         };
+        // A sector's own entries come before general-purpose ones, and a
+        // search ranks by relevance before the chosen sort.
+        let mut order = Vec::new();
+        if q.industry.is_some() && q.include_cross_industry {
+            order.push("(CASE WHEN $20::text = ANY(a.industries) THEN 0 ELSE 1 END)");
+        }
+        if q.q.is_some() {
+            order.push("ts_rank(a.search, websearch_to_tsquery('english', $4)) DESC");
+        }
+        order.push(sort);
+        let order = order.join(", ");
         let sql = format!(
             r#"
             SELECT {COLUMNS}, {STARRED} AS starred, {USED_IN} AS used_in,
@@ -152,6 +170,9 @@ impl ShowcaseRepository {
                     WHERE jl.entry_id = a.id AND j.status = 'published'))
               AND ($19::uuid IS NULL OR EXISTS (
                     SELECT 1 FROM showcase_job_links jl WHERE jl.entry_id = a.id AND jl.job_id = $19))
+              AND ($20::text IS NULL OR $20 = ANY(a.industries)
+                   OR ($21 AND 'cross-industry' = ANY(a.industries)))
+              AND (NOT $22 OR cardinality(a.industries) = 0)
             ORDER BY {order}
             LIMIT $13 OFFSET $14
             "#
@@ -181,6 +202,9 @@ impl ShowcaseRepository {
             .bind(q.links_to)
             .bind(q.hiring)
             .bind(q.for_job)
+            .bind(q.industry.as_deref())
+            .bind(q.include_cross_industry)
+            .bind(q.unclassified)
             .fetch_all(&self.pool)
             .await
             .map_err(db)?;
@@ -450,6 +474,71 @@ impl ShowcaseRepository {
             .collect())
     }
 
+    /// The industry taxonomy, in display order (industries, then verticals).
+    pub async fn industries(&self) -> Result<Vec<ShowcaseIndustry>, DomainError> {
+        let rows = sqlx::query(
+            "SELECT slug, name, parent_slug, description, position FROM showcase_industries
+             ORDER BY parent_slug NULLS FIRST, position, name",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db)?;
+        Ok(rows
+            .iter()
+            .map(|r| ShowcaseIndustry {
+                slug: r.get("slug"),
+                name: r.get("name"),
+                parent_slug: r.get("parent_slug"),
+                description: r.get("description"),
+                position: r.get("position"),
+            })
+            .collect())
+    }
+
+    /// Public, published entries per industry or vertical slug, optionally
+    /// of one kind.
+    pub async fn industry_counts(
+        &self,
+        kind: Option<ShowcaseKind>,
+    ) -> Result<HashMap<String, i64>, DomainError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT i AS slug, COUNT(*) AS count
+            FROM showcase_apps a, unnest(a.industries) i
+            WHERE a.status = 'published' AND a.visibility = 'public'
+              AND ($1::text IS NULL OR a.kind = $1)
+            GROUP BY i
+            "#,
+        )
+        .bind(kind.map(|k| k.as_str()))
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db)?;
+        Ok(rows
+            .iter()
+            .map(|r| (r.get("slug"), r.get("count")))
+            .collect())
+    }
+
+    /// Change only an entry's industries and its search text.
+    pub async fn set_industries(
+        &self,
+        id: ShowcaseAppId,
+        industries: &[String],
+        tags_text: &str,
+    ) -> Result<(), DomainError> {
+        sqlx::query(
+            "UPDATE showcase_apps SET industries = $2, tags_text = $3, updated_at = NOW() WHERE id = $1",
+        )
+        .bind(id)
+        .bind(industries)
+        .bind(tags_text)
+        .execute(&self.pool)
+        .await
+        .map_err(db)?;
+        Ok(())
+    }
+
     /// Slugs already taken that start with `base`, for picking a free one.
     pub async fn slugs_like(&self, base: &str) -> Result<HashSet<String>, DomainError> {
         let rows = sqlx::query("SELECT slug FROM showcase_apps WHERE slug = $1 OR slug LIKE $2")
@@ -494,9 +583,10 @@ impl ShowcaseRepository {
               build_method, pricing, license, version, logo_url, screenshots, repo_url, demo_url,
               website_url, docs_url, technologies, ai_models, agents, human_oversight, evidence,
               team_name, creator_email, creator_display_name, visibility, status, source,
-              tags_text, published_at, kind, model_provider, tools, mcp_servers, capabilities
+              tags_text, published_at, kind, model_provider, tools, mcp_servers, capabilities,
+              industries
             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-                      $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36)
+                      $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37)
             "#,
         )
         .bind(a.id)
@@ -535,6 +625,7 @@ impl ShowcaseRepository {
         .bind(&a.tools)
         .bind(&a.mcp_servers)
         .bind(&a.capabilities)
+        .bind(&a.industries)
         .execute(&mut *tx)
         .await;
         if let Err(sqlx::Error::Database(e)) = &res {
@@ -562,6 +653,7 @@ impl ShowcaseRepository {
               agents = $20, human_oversight = $21, evidence = $22, team_name = $23,
               visibility = $24, status = $25, tags_text = $26, published_at = $27,
               model_provider = $28, tools = $29, mcp_servers = $30, capabilities = $31,
+              industries = $32,
               featured = CASE WHEN $25 = 'published' THEN featured ELSE FALSE END,
               review_note = CASE WHEN $25 = 'pending_review' THEN '' ELSE review_note END,
               updated_at = NOW()
@@ -599,6 +691,7 @@ impl ShowcaseRepository {
         .bind(&a.tools)
         .bind(&a.mcp_servers)
         .bind(&a.capabilities)
+        .bind(&a.industries)
         .execute(&mut *tx)
         .await
         .map_err(db)?;
@@ -787,6 +880,7 @@ fn from_row(r: &sqlx::postgres::PgRow) -> Result<ShowcaseApp, DomainError> {
         tools: r.get("tools"),
         mcp_servers: r.get("mcp_servers"),
         capabilities: r.get("capabilities"),
+        industries: r.get("industries"),
         linked_agents: Vec::new(),
         linked_team: None,
         used_in: r.get("used_in"),

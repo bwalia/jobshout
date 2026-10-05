@@ -36,6 +36,8 @@ struct Sample<'a> {
     technologies: &'a [&'a str],
     models: &'a [&'a str],
     agents: &'a [(&'a str, &'a str)],
+    /// Taxonomy slugs, parents first, as the API stores them.
+    industries: &'a [&'a str],
 }
 
 fn app(s: Sample) -> ShowcaseAppInput {
@@ -59,6 +61,7 @@ fn app(s: Sample) -> ShowcaseAppInput {
         technologies: tags(s.technologies),
         ai_models: tags(s.models),
         agents: named_agents(s.agents),
+        industries: Some(tags(s.industries)),
         human_oversight:
             "A maintainer reviews every change before it is merged and approves each release."
                 .into(),
@@ -84,6 +87,7 @@ pub fn samples() -> Vec<(ShowcaseAppInput, bool)> {
             ("Backend Agent", "Wrote the ingestion service"),
             ("Testing Agent", "Built the evaluation set"),
         ],
+        industries: &["cross-industry"],
     });
     vector_store.evidence = ProductionEvidence {
         automated_tests: true,
@@ -107,6 +111,7 @@ pub fn samples() -> Vec<(ShowcaseAppInput, bool)> {
         technologies: &["TypeScript", "MCP", "Node.js"],
         models: &["Claude"],
         agents: &[],
+        industries: &["cross-industry"],
     });
 
     let ops = app(Sample {
@@ -125,6 +130,7 @@ pub fn samples() -> Vec<(ShowcaseAppInput, bool)> {
             ("Backend Agent", "Built the channel reader"),
             ("Security Agent", "Reviewed data handling"),
         ],
+        industries: &["telecoms-it"],
     });
 
     let game = app(Sample {
@@ -138,6 +144,7 @@ pub fn samples() -> Vec<(ShowcaseAppInput, bool)> {
         technologies: &["TypeScript", "Svelte"],
         models: &["Claude"],
         agents: &[],
+        industries: &["media-marketing"],
     });
 
     vec![
@@ -158,6 +165,7 @@ struct AgentSample<'a> {
     tools: &'a [&'a str],
     mcp: &'a [&'a str],
     capabilities: &'a [&'a str],
+    industries: &'a [&'a str],
 }
 
 fn agent(s: AgentSample) -> ShowcaseAppInput {
@@ -179,6 +187,7 @@ fn agent(s: AgentSample) -> ShowcaseAppInput {
         tools: tags(s.tools),
         mcp_servers: tags(s.mcp),
         capabilities: tags(s.capabilities),
+        industries: Some(tags(s.industries)),
         submit: true,
         ..Default::default()
     }
@@ -197,6 +206,7 @@ pub fn agents() -> Vec<ShowcaseAppInput> {
             tools: &["GitHub"],
             mcp: &["Filesystem"],
             capabilities: &["planning", "design"],
+            industries: &["cross-industry"],
         }),
         agent(AgentSample {
             name: "Rust Backend Agent",
@@ -208,6 +218,7 @@ pub fn agents() -> Vec<ShowcaseAppInput> {
             tools: &["GitHub", "Docker"],
             mcp: &["GitHub"],
             capabilities: &["code_generation", "testing", "debugging"],
+            industries: &["cross-industry"],
         }),
         agent(AgentSample {
             name: "Security Review Agent",
@@ -219,6 +230,7 @@ pub fn agents() -> Vec<ShowcaseAppInput> {
             tools: &["GitHub", "Semgrep"],
             mcp: &[],
             capabilities: &["security", "code_review"],
+            industries: &["cross-industry"],
         }),
         agent(AgentSample {
             name: "Docs Agent",
@@ -230,6 +242,118 @@ pub fn agents() -> Vec<ShowcaseAppInput> {
             tools: &["GitHub"],
             mcp: &["Filesystem"],
             capabilities: &["documentation"],
+            industries: &["cross-industry"],
+        }),
+    ]
+}
+
+/// Sector samples: an app and an agent for each of the industries int
+/// demonstrates. Seeded by slug, so an int that already has the general
+/// samples still gets these.
+pub fn sector_samples() -> Vec<ShowcaseAppInput> {
+    vec![
+        app(Sample {
+            name: "Referral Letter Drafter",
+            tagline: "Sample app. Drafts GP referral letters from a consultation note, for the clinician to check.",
+            body: "## What it does\n\nTurns a structured consultation note into a referral letter in the receiving service's format, with every clinical fact linked back to the note.\n\n## How it was built\n\nBuilt with an AI pair programmer. A clinician reviewed the letter templates, and nothing is sent without a person approving it.",
+            app_type: ShowcaseAppType::AiApplication,
+            maturity: ShowcaseMaturity::Beta,
+            build: ShowcaseBuildMethod::HumanAi,
+            pricing: ShowcasePricing::Commercial,
+            technologies: &["Python", "FHIR", "Next.js"],
+            models: &["Claude"],
+            agents: &[],
+            industries: &["healthcare", "primary-care"],
+        }),
+        app(Sample {
+            name: "Transaction Triage",
+            tagline: "Sample app. Ranks flagged card transactions so fraud analysts see the riskiest first.",
+            body: "## What it does\n\nScores each flagged transaction, explains the score in plain words, and queues the case for an analyst. It never blocks a payment on its own.\n\n## How it was built\n\nA backend agent wrote the scoring service and a testing agent built replay tests from anonymised history. An engineer approved every release.",
+            app_type: ShowcaseAppType::AiApplication,
+            maturity: ShowcaseMaturity::Alpha,
+            build: ShowcaseBuildMethod::AgentBuilt,
+            pricing: ShowcasePricing::Commercial,
+            technologies: &["Go", "Kafka", "PostgreSQL"],
+            models: &["Open-weight model"],
+            agents: &[
+                ("Backend Agent", "Wrote the scoring service"),
+                ("Testing Agent", "Built the replay tests"),
+            ],
+            industries: &["financial-services", "banking", "payments-fintech"],
+        }),
+        app(Sample {
+            name: "Receipt Ledger",
+            tagline: "Sample app. Reads receipts and invoices into draft bookkeeping entries.",
+            body: "## What it does\n\nExtracts supplier, date, VAT and totals from receipts and suggests the ledger entry. The bookkeeper accepts or corrects each one.\n\n## How it was built\n\nThe author designed the review screen and used an AI assistant for the extraction code and tests.",
+            app_type: ShowcaseAppType::Saas,
+            maturity: ShowcaseMaturity::Beta,
+            build: ShowcaseBuildMethod::AiAssisted,
+            pricing: ShowcasePricing::Freemium,
+            technologies: &["TypeScript", "PostgreSQL"],
+            models: &["Claude"],
+            agents: &[],
+            industries: &["accountancy", "bookkeeping", "tax"],
+        }),
+        app(Sample {
+            name: "Conveyancing Checklist",
+            tagline: "Sample app. Tracks a property purchase from instruction to completion, and flags missing searches.",
+            body: "## What it does\n\nReads the file for a residential purchase, builds the checklist, and flags searches and enquiries still outstanding. The conveyancer signs off every step.\n\n## How it was built\n\nBuilt by a solicitor with an AI pair programmer; the solicitor wrote the checklist rules.",
+            app_type: ShowcaseAppType::AiApplication,
+            maturity: ShowcaseMaturity::Beta,
+            build: ShowcaseBuildMethod::HumanAi,
+            pricing: ShowcasePricing::Commercial,
+            technologies: &["Rust", "Next.js"],
+            models: &["Claude"],
+            agents: &[],
+            industries: &["legal", "conveyancing", "law-firms"],
+        }),
+        agent(AgentSample {
+            name: "Clinical Coding Agent",
+            tagline: "Sample agent. Suggests clinical codes for a discharge summary, with the passage behind each.",
+            body: "## What it does\n\nReads a discharge summary and proposes diagnosis and procedure codes, quoting the text each one comes from.\n\n## Where people come in\n\nA clinical coder accepts or changes every code.",
+            provider: "Anthropic",
+            models: &["Claude"],
+            skills: &["Clinical coding", "FHIR"],
+            tools: &[],
+            mcp: &[],
+            capabilities: &["data_analysis"],
+            industries: &["healthcare", "hospitals-clinics"],
+        }),
+        agent(AgentSample {
+            name: "KYC Review Agent",
+            tagline: "Sample agent. Checks onboarding files against a KYC policy and lists what is missing.",
+            body: "## What it does\n\nCompares a customer's onboarding documents with the firm's policy and writes a short list of gaps for the analyst.\n\n## Where people come in\n\nAn analyst makes every onboarding decision.",
+            provider: "Anthropic",
+            models: &["Claude"],
+            skills: &["KYC", "AML"],
+            tools: &[],
+            mcp: &[],
+            capabilities: &["research", "data_analysis"],
+            industries: &["financial-services", "banking"],
+        }),
+        agent(AgentSample {
+            name: "Tax Return Prep Agent",
+            tagline: "Sample agent. Gathers a client's figures into a draft self-assessment return.",
+            body: "## What it does\n\nCollects income, expenses and allowances from the client's records into a draft return, and lists the questions to ask the client.\n\n## Where people come in\n\nAn accountant reviews and files every return.",
+            provider: "Open-weight model",
+            models: &["Open-weight model"],
+            skills: &["Self assessment", "Spreadsheets"],
+            tools: &[],
+            mcp: &["Filesystem"],
+            capabilities: &["data_analysis", "documentation"],
+            industries: &["accountancy", "tax"],
+        }),
+        agent(AgentSample {
+            name: "Contract Review Agent",
+            tagline: "Sample agent. Compares a contract with a playbook and marks clauses to negotiate.",
+            body: "## What it does\n\nReads a commercial contract, compares each clause with the team's playbook, and drafts suggested redlines with the reason.\n\n## Where people come in\n\nA lawyer decides every change.",
+            provider: "Anthropic",
+            models: &["Claude"],
+            skills: &["Contract review", "Redlining"],
+            tools: &[],
+            mcp: &[],
+            capabilities: &["research", "documentation"],
+            industries: &["legal", "in-house-legal", "compliance"],
         }),
     ]
 }
@@ -255,6 +379,7 @@ pub fn teams() -> Vec<ShowcaseAppInput> {
             link("sample-security-review-agent", "Reviews every change"),
             link("sample-docs-agent", "Documents it"),
         ],
+        industries: Some(vec!["cross-industry".into()]),
         submit: true,
         ..Default::default()
     }]
@@ -298,6 +423,44 @@ mod tests {
             .chain(agents())
             .chain(teams());
         for input in all {
+            assert!(input.name.starts_with("Sample: "), "{}", input.name);
+            assert!(input.description_md.contains("sample listing"));
+            let kind = input.kind.unwrap_or(ShowcaseKind::App);
+            validate(kind, &input).unwrap_or_else(|e| panic!("{}: {e}", input.name));
+        }
+    }
+
+    #[test]
+    fn every_sample_has_industries_and_the_sectors_int_shows_are_covered() {
+        let all: Vec<ShowcaseAppInput> = samples()
+            .into_iter()
+            .map(|(i, _)| i)
+            .chain(agents())
+            .chain(teams())
+            .chain(sector_samples())
+            .collect();
+        for input in &all {
+            let list = input.industries.clone().unwrap_or_default();
+            assert!(!list.is_empty(), "{} has no industries", input.name);
+            assert!(list.len() == 1 || !list.contains(&"cross-industry".to_string()));
+        }
+        for sector in ["healthcare", "financial-services", "accountancy", "legal"] {
+            for kind in [ShowcaseKind::App, ShowcaseKind::Agent] {
+                assert!(
+                    all.iter()
+                        .any(|i| i.kind.unwrap_or(ShowcaseKind::App) == kind
+                            && i.industries
+                                .as_ref()
+                                .is_some_and(|l| l.iter().any(|s| s == sector))),
+                    "no {kind:?} sample for {sector}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn sector_samples_are_valid_and_labelled() {
+        for input in sector_samples() {
             assert!(input.name.starts_with("Sample: "), "{}", input.name);
             assert!(input.description_md.contains("sample listing"));
             let kind = input.kind.unwrap_or(ShowcaseKind::App);

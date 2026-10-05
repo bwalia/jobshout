@@ -232,6 +232,9 @@ pub struct ShowcaseApp {
     pub mcp_servers: Vec<String>,
     /// Agents only: values from [`AGENT_CAPABILITIES`].
     pub capabilities: Vec<String>,
+    /// Industry and vertical slugs from `showcase_industries`, parents first.
+    /// A vertical is always stored with its industry.
+    pub industries: Vec<String>,
     /// Apps: directory agents that built it. Teams: members, in workflow order.
     pub linked_agents: Vec<ShowcaseLink>,
     /// Apps only: the directory team that built it.
@@ -311,6 +314,10 @@ pub struct ShowcaseAppInput {
     pub mcp_servers: Vec<String>,
     #[serde(default)]
     pub capabilities: Vec<String>,
+    /// Industry and vertical slugs. Absent keeps what the entry has, so a
+    /// client that predates industries cannot clear them by editing.
+    #[serde(default)]
+    pub industries: Option<Vec<String>>,
     /// Apps: directory agents that built it. Teams: members, in order.
     #[serde(default)]
     pub agent_links: Vec<ShowcaseLinkInput>,
@@ -331,4 +338,27 @@ pub struct ShowcaseAppInput {
 pub struct ShowcaseTag {
     pub name: String,
     pub count: i64,
+}
+
+/// One industry or vertical in the taxonomy, as stored.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ShowcaseIndustry {
+    pub slug: String,
+    pub name: String,
+    /// The industry a vertical belongs to; None for an industry.
+    pub parent_slug: Option<String>,
+    pub description: String,
+    pub position: i32,
+}
+
+/// An industry with its verticals and how many public entries each has, as
+/// the browse UI shows it.
+#[derive(Debug, Clone, Serialize)]
+pub struct ShowcaseIndustryNode {
+    pub slug: String,
+    pub name: String,
+    pub description: String,
+    /// Public, published entries tagged with it (verticals included).
+    pub count: i64,
+    pub verticals: Vec<ShowcaseIndustryNode>,
 }

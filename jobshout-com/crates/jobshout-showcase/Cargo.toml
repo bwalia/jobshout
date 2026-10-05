@@ -14,3 +14,7 @@ jobshout-jobs = { path = "../jobshout-jobs" }
 serde_json = { workspace = true }
 sqlx = { workspace = true }
 uuid = { workspace = true }
+
+[dev-dependencies]
+jobshout-storage = { path = "../jobshout-storage" }
+tokio = { workspace = true }

@@ -1,6 +1,6 @@
 import type { MetadataRoute } from "next";
 import { listInsights, siteUrl } from "@/lib/insights";
-import { entryHref, listApps } from "@/lib/showcase";
+import { CROSS_INDUSTRY, entryHref, industryHref, listApps, listIndustries } from "@/lib/showcase";
 
 export const dynamic = "force-dynamic";
 
@@ -28,8 +28,17 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
         if (seen >= page.total || page.data.length === 0) break;
       }
     }
+    // Industry pages with something on them; empty ones are thin content.
+    const tree = await listIndustries().catch(() => []);
+    const sectors = tree
+      .flatMap((n) => [n, ...n.verticals])
+      .filter((n) => n.count > 0 && n.slug !== CROSS_INDUSTRY);
     return [
       ...fixed,
+      ...sectors.map((n) => ({
+        url: `${base}${industryHref(n.slug)}`,
+        changeFrequency: "weekly" as const,
+      })),
       ...apps.map((a) => ({
         url: `${base}${entryHref(a)}`,
         lastModified: a.updated_at,

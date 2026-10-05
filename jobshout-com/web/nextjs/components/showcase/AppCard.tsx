@@ -8,8 +8,10 @@ import {
   KINDS,
   MATURITY,
   PRICING,
+  CROSS_INDUSTRY,
   entryHref,
   isCapability,
+  type IndustryNames,
   type ShowcaseApp,
 } from "@/lib/showcase";
 
@@ -69,7 +71,25 @@ export function BuildBadge({ app }: { app: ShowcaseApp }) {
   );
 }
 
-export function AppCard({ app }: { app: ShowcaseApp }) {
+/** Up to two of the entry's industries, then "+N"; verticals are left to the detail page. */
+function IndustryLine({ app, names }: { app: ShowcaseApp; names?: IndustryNames }) {
+  if (!names) return null;
+  if (app.industries.includes(CROSS_INDUSTRY)) {
+    return <p className="mt-3 text-xs font-medium text-mute">Works across industries</p>;
+  }
+  const top = app.industries.filter((s) => names[s]);
+  if (!top.length) return null;
+  const shown = top.slice(0, 2);
+  return (
+    <p className="mt-3 text-xs font-medium text-mute">
+      <span className="sr-only">Industries: </span>
+      {shown.map((s) => names[s]).join(" · ")}
+      {top.length > shown.length ? ` +${top.length - shown.length}` : ""}
+    </p>
+  );
+}
+
+export function AppCard({ app, industries }: { app: ShowcaseApp; industries?: IndustryNames }) {
   const tech = app.technologies.slice(0, 4);
   return (
     <article className="group relative h-full">
@@ -98,6 +118,7 @@ export function AppCard({ app }: { app: ShowcaseApp }) {
         {app.tagline ? (
           <p className="mt-3 line-clamp-2 text-sm leading-relaxed text-body">{app.tagline}</p>
         ) : null}
+        <IndustryLine app={app} names={industries} />
         <div className="mt-4 flex flex-wrap gap-1.5">
           <MaturityBadge app={app} />
           <BuildBadge app={app} />
@@ -133,7 +154,7 @@ export function AppRow({ app }: { app: ShowcaseApp }) {
 }
 
 /** Directory card for an agent or a team. */
-export function AgentCard({ app }: { app: ShowcaseApp }) {
+export function AgentCard({ app, industries }: { app: ShowcaseApp; industries?: IndustryNames }) {
   const caps = app.capabilities.filter(isCapability).slice(0, 3);
   const team = app.kind === "team";
   return (
@@ -162,6 +183,7 @@ export function AgentCard({ app }: { app: ShowcaseApp }) {
           </span>
         </div>
         {app.tagline ? <p className="mt-3 line-clamp-2 text-sm leading-relaxed text-body">{app.tagline}</p> : null}
+        <IndustryLine app={app} names={industries} />
         <div className="mt-4 flex flex-wrap gap-1.5">
           {team
             ? app.linked_agents.slice(0, 4).map((a) => <Badge key={a.slug}>{a.name.replace(/^Sample:\s*/, "")}</Badge>)

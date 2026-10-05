@@ -17,8 +17,8 @@ use jobshout_content::rules::{next_free_slug, slugify};
 use jobshout_content::Actor;
 use jobshout_domain::{
     DomainError, Job, ShowcaseApp, ShowcaseAppId, ShowcaseAppInput, ShowcaseAppType,
-    ShowcaseBuildMethod, ShowcaseKind, ShowcaseMaturity, ShowcasePricing, ShowcaseStatus,
-    ShowcaseTag, ShowcaseVerification, ShowcaseVisibility,
+    ShowcaseBuildMethod, ShowcaseIndustryNode, ShowcaseKind, ShowcaseMaturity, ShowcasePricing,
+    ShowcaseStatus, ShowcaseTag, ShowcaseVerification, ShowcaseVisibility,
 };
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -54,8 +54,80 @@ impl ShowcaseService {
         q.offset = q.offset.max(0);
         q.q = q.q.filter(|s| !s.trim().is_empty());
         q.technology = q.technology.filter(|s| !s.trim().is_empty());
+        q.industry = q
+            .industry
+            .map(|s| s.trim().to_ascii_lowercase())
+            .filter(|s| !s.is_empty() && s != "all");
+        q.unclassified = false;
         let (apps, total) = self.repo.list(&q).await?;
         Ok((apps.into_iter().map(public).collect(), total))
+    }
+
+    /// The industry taxonomy as a tree, with how many public entries (of
+    /// `kind`, or all kinds) each industry and vertical has.
+    pub async fn industries(
+        &self,
+        kind: Option<ShowcaseKind>,
+    ) -> Result<Vec<ShowcaseIndustryNode>, DomainError> {
+        let entries = self.repo.industries().await?;
+        let counts = self.repo.industry_counts(kind).await?;
+        let node = |e: &jobshout_domain::ShowcaseIndustry| ShowcaseIndustryNode {
+            slug: e.slug.clone(),
+            name: e.name.clone(),
+            description: e.description.clone(),
+            count: counts.get(&e.slug).copied().unwrap_or(0),
+            verticals: Vec::new(),
+        };
+        let mut tree: Vec<ShowcaseIndustryNode> = entries
+            .iter()
+            .filter(|e| e.parent_slug.is_none())
+            .map(node)
+            .collect();
+        for v in entries.iter().filter(|e| e.parent_slug.is_some()) {
+            if let Some(parent) = tree
+                .iter_mut()
+                .find(|p| Some(&p.slug) == v.parent_slug.as_ref())
+            {
+                parent.verticals.push(node(v));
+            }
+        }
+        Ok(tree)
+    }
+
+    /// Editors: published entries with no industry yet, oldest first, so the
+    /// back catalogue can be classified.
+    pub async fn unclassified(&self, actor: &Actor) -> Result<Vec<ShowcaseApp>, DomainError> {
+        require_staff(actor)?;
+        let (apps, _) = self
+            .repo
+            .list(&ListQuery {
+                status: Some(ShowcaseStatus::Published),
+                unclassified: true,
+                sort: Sort::Updated,
+                limit: 100,
+                ..Default::default()
+            })
+            .await?;
+        Ok(apps)
+    }
+
+    /// Set only an entry's industries (the editors' queue, or a creator's
+    /// quick fix). Like a text edit it keeps a live entry live.
+    pub async fn set_industries(
+        &self,
+        actor: &Actor,
+        id: ShowcaseAppId,
+        industries: Vec<String>,
+    ) -> Result<ShowcaseApp, DomainError> {
+        let existing = self.repo.get(id, Some(&actor.email)).await?;
+        rules::check_can_edit(actor, &existing)?;
+        let taxonomy = rules::Taxonomy::new(self.repo.industries().await?);
+        let industries = rules::clean_industries(&industries, &taxonomy)?;
+        let tags_text = rules::tags_text_for(&existing, &taxonomy.search_names(&industries));
+        self.repo
+            .set_industries(existing.id, &industries, &tags_text)
+            .await?;
+        self.repo.get(id, Some(&actor.email)).await
     }
 
     pub async fn tags(
@@ -153,27 +225,51 @@ impl ShowcaseService {
         )
     }
 
-    /// More public entries of the same kind that share the first
-    /// technology, topped up with the latest.
+    /// More public entries of the same kind: the same industry first, then
+    /// the same first technology, topped up with the latest.
     pub async fn related(&self, slug: &str, limit: i64) -> Result<Vec<ShowcaseApp>, DomainError> {
         let app = self.repo.get_by_slug(slug, None).await?;
-        let mut q = ListQuery {
+        let base = ListQuery {
             kind: Some(app.kind),
-            technology: app.technologies.first().cloned(),
             exclude: Some(app.id),
             sort: Sort::Stars,
             limit,
             ..Default::default()
         };
-        let (mut apps, _) = self.list_published(q.clone()).await?;
-        if apps.len() < limit as usize {
-            q.technology = None;
-            q.sort = Sort::Newest;
+        // A sector entry's closest neighbours share its industry; a
+        // general-purpose one has no sector to share.
+        let industry = app
+            .industries
+            .first()
+            .filter(|i| i.as_str() != rules::CROSS_INDUSTRY)
+            .cloned();
+        let passes = [
+            ListQuery {
+                industry,
+                ..base.clone()
+            },
+            ListQuery {
+                technology: app.technologies.first().cloned(),
+                ..base.clone()
+            },
+            ListQuery {
+                sort: Sort::Newest,
+                ..base
+            },
+        ];
+        let mut apps: Vec<ShowcaseApp> = Vec::new();
+        for q in passes {
+            if apps.len() >= limit as usize {
+                break;
+            }
+            if q.industry.is_none() && q.technology.is_none() && q.sort == Sort::Stars {
+                continue;
+            }
             let (more, _) = self.list_published(q).await?;
             let seen: Vec<_> = apps.iter().map(|a| a.id).collect();
             apps.extend(more.into_iter().filter(|a| !seen.contains(&a.id)));
-            apps.truncate(limit as usize);
         }
+        apps.truncate(limit as usize);
         Ok(apps)
     }
 
@@ -370,6 +466,34 @@ impl ShowcaseService {
                 self.repo.replace_links(app.id, &resolved).await?;
             }
         }
+        // Sector samples, by slug, so an int seeded before industries
+        // existed still shows the industry filters working.
+        for input in seed::sector_samples() {
+            let slug = slugify(&input.name);
+            if self.repo.get_by_slug(&slug, None).await.is_ok() {
+                continue;
+            }
+            self.create(&editor, input).await?;
+            n += 1;
+        }
+        // Classify the editors' own older samples that predate industries.
+        let general = seed::samples()
+            .into_iter()
+            .map(|(i, _)| i)
+            .chain(seed::agents())
+            .chain(seed::teams());
+        for input in general {
+            let slug = slugify(&input.name);
+            let Ok(entry) = self.repo.get_by_slug(&slug, None).await else {
+                continue;
+            };
+            if !rules::owns(&editor, &entry) || !entry.industries.is_empty() {
+                continue;
+            }
+            if let Some(list) = input.industries {
+                self.set_industries(&editor, entry.id, list).await?;
+            }
+        }
         // Once, on an int with jobs on the board: show the sample entries
         // hiring, so "Open roles" and the Hiring filter have something in them.
         if self.repo.job_link_count().await? == 0 {
@@ -400,7 +524,15 @@ impl ShowcaseService {
         status: ShowcaseStatus,
     ) -> Result<AppRecord, DomainError> {
         let self_id = existing.map(|e| e.id);
-        let cleaned = rules::validate(kind, input)?;
+        let mut cleaned = rules::validate(kind, input)?;
+        // Industries are checked against the stored taxonomy. Absent keeps
+        // what the entry has: older clients send the whole entry without them.
+        let taxonomy = rules::Taxonomy::new(self.repo.industries().await?);
+        cleaned.industries = match &input.industries {
+            Some(list) => rules::clean_industries(list, &taxonomy)?,
+            None => existing.map(|e| e.industries.clone()).unwrap_or_default(),
+        };
+        cleaned.industry_names = taxonomy.search_names(&cleaned.industries);
         let mut slugs: Vec<String> = cleaned.agent_links.iter().map(|l| l.slug.clone()).collect();
         slugs.extend(cleaned.team_slug.clone());
         let targets = self.repo.resolve_links(&slugs).await?;
@@ -541,6 +673,7 @@ fn record(
             tools: cleaned.tools,
             mcp_servers: cleaned.mcp_servers,
             capabilities: cleaned.capabilities,
+            industries: cleaned.industries,
             linked_agents: Vec::new(),
             linked_team: None,
             used_in: 0,

@@ -237,6 +237,8 @@ export interface ShowcaseApp {
   tools: string[];
   mcp_servers: string[];
   capabilities: string[];
+  /** Industry and vertical slugs, parents first; ["cross-industry"] for general tools. */
+  industries: string[];
   linked_agents: ShowcaseLink[];
   linked_team: ShowcaseLink | null;
   used_in: number;
@@ -276,15 +278,34 @@ export type ShowcaseAppInput = Omit<
   | "linked_team"
   | "used_in"
   | "jobs"
-> & { submit: boolean; agent_links: LinkInput[]; team_slug: string; job_ids: string[] };
+  | "industries"
+> & { industries?: string[]; submit: boolean; agent_links: LinkInput[]; team_slug: string; job_ids: string[] };
 
 export interface ShowcaseTag {
   name: string;
   count: number;
 }
 
+/** One industry, with its specialisms. The API owns the taxonomy. */
+export interface IndustryNode {
+  slug: string;
+  name: string;
+  description: string;
+  /** Public entries tagged with it (of the asked-for kind, when given). */
+  count: number;
+  verticals: IndustryNode[];
+}
+
+export const CROSS_INDUSTRY = "cross-industry";
+export const MAX_INDUSTRIES = 3;
+export const MAX_VERTICALS = 3;
+
 export type ShowcaseQuery = {
   kind?: Kind | null;
+  /** An industry or vertical slug. */
+  industry?: string | null;
+  /** With `industry`: also list cross-industry tools after the sector's own. Defaults to on. */
+  cross?: boolean;
   capability?: Capability | null;
   q?: string | null;
   type?: AppType | null;
@@ -321,6 +342,10 @@ export async function listApps(
   if (query.type) params.set("type", query.type);
   if (query.collection) params.set("collection", query.collection);
   if (query.tech) params.set("tech", query.tech);
+  if (query.industry) {
+    params.set("industry", query.industry);
+    if (query.cross !== false) params.set("include_cross_industry", "true");
+  }
   if (query.sort) params.set("sort", query.sort);
   params.set("limit", String(query.limit ?? 12));
   if (query.offset) params.set("offset", String(query.offset));
@@ -339,6 +364,69 @@ export async function listTags(limit = 24, kind: Kind = "app"): Promise<Showcase
   });
   if (!res.ok) throw await failure(res, "Failed to load technologies");
   return ((await res.json()) as { data: ShowcaseTag[] }).data;
+}
+
+export async function listIndustries(kind?: Kind): Promise<IndustryNode[]> {
+  const res = await fetch(`${API_BASE}/api/v1/showcase/industries${kind ? `?kind=${kind}` : ""}`, {
+    next: { revalidate: 300, tags: ["showcase"] },
+  });
+  if (!res.ok) throw await failure(res, "Failed to load industries");
+  return ((await res.json()) as { data: IndustryNode[] }).data;
+}
+
+/** Finds an industry or vertical, with the industry it belongs to. */
+export function findIndustry(
+  tree: IndustryNode[],
+  slug: string | null | undefined,
+): { node: IndustryNode; parent: IndustryNode | null } | null {
+  if (!slug) return null;
+  for (const n of tree) {
+    if (n.slug === slug) return { node: n, parent: null };
+    const v = n.verticals.find((x) => x.slug === slug);
+    if (v) return { node: v, parent: n };
+  }
+  return null;
+}
+
+/** Display names for an entry's industries, in stored order (parents first). */
+export function industryLabels(tree: IndustryNode[], slugs: string[]): Array<{ slug: string; name: string }> {
+  return slugs
+    .map((s) => findIndustry(tree, s))
+    .filter((f): f is { node: IndustryNode; parent: IndustryNode | null } => Boolean(f))
+    .map((f) => ({ slug: f.node.slug, name: f.node.name }));
+}
+
+/** Top-level industry names by slug, for the badges on cards. */
+export type IndustryNames = Record<string, string>;
+
+export function industryNames(tree: IndustryNode[]): IndustryNames {
+  return Object.fromEntries(tree.map((n) => [n.slug, n.name]));
+}
+
+export function industryHref(slug: string): string {
+  return `/showcase/industry/${encodeURIComponent(slug)}`;
+}
+
+/** Editors: published entries with no industry yet. Null when the viewer is not an editor. */
+export async function unclassifiedEntries(viewer: Viewer): Promise<ShowcaseApp[] | null> {
+  const res = await fetch(`${API_BASE}/api/v1/showcase/unclassified`, {
+    headers: headers(viewer),
+    cache: "no-store",
+  });
+  if (res.status === 403) return null;
+  if (!res.ok) throw await failure(res, "Failed to load unclassified entries");
+  return ((await res.json()) as { data: ShowcaseApp[] }).data;
+}
+
+export async function setIndustries(viewer: Viewer, id: string, industries: string[]): Promise<ShowcaseApp> {
+  const res = await fetch(`${API_BASE}/api/v1/showcase/apps/${id}/industries`, {
+    method: "PUT",
+    headers: headers(viewer),
+    body: JSON.stringify({ industries }),
+    cache: "no-store",
+  });
+  if (!res.ok) throw await failure(res, "Failed to set industries");
+  return (await res.json()) as ShowcaseApp;
 }
 
 export async function getApp(slug: string, viewer?: Viewer | null): Promise<ShowcaseApp | null> {
@@ -488,10 +576,21 @@ export function entryHref(e: { kind: Kind; slug: string }): string {
   return e.kind === "app" ? `/showcase/${e.slug}` : `/agents/${e.slug}`;
 }
 
-export function directoryHref(f: { kind?: Kind | null; capability?: Capability | null; q?: string | null; tech?: string | null; sort?: SortKey | null; page?: number }): string {
+export function directoryHref(f: {
+  kind?: Kind | null;
+  capability?: Capability | null;
+  industry?: string | null;
+  cross?: boolean;
+  q?: string | null;
+  tech?: string | null;
+  sort?: SortKey | null;
+  page?: number;
+}): string {
   const p = new URLSearchParams();
   if (f.kind === "team") p.set("kind", "team");
   if (f.capability) p.set("capability", f.capability);
+  if (f.industry) p.set("industry", f.industry);
+  if (f.industry && f.cross === false) p.set("cross", "0");
   if (f.tech) p.set("tech", f.tech);
   if (f.q) p.set("q", f.q);
   if (f.sort && f.sort !== "new") p.set("sort", f.sort);
@@ -508,6 +607,8 @@ export function displayUrl(url: string): string {
 export function showcaseHref(f: ShowcaseQuery & { page?: number }): string {
   const p = new URLSearchParams();
   if (f.collection) p.set("collection", f.collection);
+  if (f.industry) p.set("industry", f.industry);
+  if (f.industry && f.cross === false) p.set("cross", "0");
   if (f.type) p.set("type", f.type);
   if (f.tech) p.set("tech", f.tech);
   if (f.q) p.set("q", f.q);

@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { InboxIcon, ShieldIcon } from "@/components/icons";
 import { SignInPrompt } from "@/components/insights/SignInPrompt";
 import { AppLogo, BuildBadge, MaturityBadge } from "@/components/showcase/AppCard";
+import { ClassifyEntry } from "@/components/showcase/ClassifyEntry";
 import { ShowcaseReviewActions } from "@/components/showcase/ShowcaseReviewActions";
 import { Badge, EmptyState, ErrorNotice } from "@/components/ui";
 import { formatDate } from "@/lib/insights";
@@ -13,7 +14,10 @@ import {
   VISIBILITY,
   displayUrl,
   listApps,
+  listIndustries,
   showcaseReviewQueue,
+  unclassifiedEntries,
+  type IndustryNode,
   type ShowcaseApp,
 } from "@/lib/showcase";
 import { currentViewer } from "@/lib/session";
@@ -21,6 +25,29 @@ import { currentViewer } from "@/lib/session";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = { title: "Showcase review queue", robots: { index: false } };
+
+/** A published entry with no industry, with the picker inline. */
+function ClassifyItem({ app, tree }: { app: ShowcaseApp; tree: IndustryNode[] }) {
+  return (
+    <li className="surface-card p-5 sm:p-6">
+      <div className="flex gap-3.5">
+        <AppLogo app={app} size="sm" />
+        <div className="min-w-0">
+          <h3 className="break-words font-display text-lg font-semibold text-ink">
+            <Link href={entryHref(app)} className="hover:text-shout">
+              {app.name}
+            </Link>
+            <span className="ml-2 align-middle text-xs font-normal text-mute">{KINDS[app.kind].label}</span>
+          </h3>
+          {app.tagline ? <p className="mt-1 text-sm leading-relaxed text-body">{app.tagline}</p> : null}
+        </div>
+      </div>
+      <div className="mt-4 border-t border-line pt-4">
+        <ClassifyEntry id={app.id} kind={app.kind} tree={tree} />
+      </div>
+    </li>
+  );
+}
 
 function QueueItem({ app }: { app: ShowcaseApp }) {
   const links = [app.repo_url, app.demo_url, app.website_url, app.docs_url, ...app.screenshots].filter(Boolean);
@@ -87,12 +114,18 @@ export default async function ShowcaseReviewPage() {
 
   let queue: ShowcaseApp[] | null = null;
   let live: ShowcaseApp[] = [];
+  let unclassified: ShowcaseApp[] = [];
+  let tree: IndustryNode[] = [];
   let error = "";
   try {
-    [queue, { data: live }] = await Promise.all([
+    let pending: ShowcaseApp[] | null;
+    [queue, { data: live }, pending, tree] = await Promise.all([
       showcaseReviewQueue(viewer),
       listApps({ sort: "updated", limit: 12 }, viewer),
+      unclassifiedEntries(viewer).catch(() => [] as ShowcaseApp[]),
+      listIndustries().catch(() => [] as IndustryNode[]),
     ]);
+    unclassified = pending ?? [];
   } catch (e) {
     error = e instanceof Error ? e.message : "Could not load the queue";
   }
@@ -139,6 +172,27 @@ export default async function ShowcaseReviewPage() {
                 </div>
               )}
             </section>
+            {tree.length ? (
+              <section aria-labelledby="classify-heading">
+                <h2 id="classify-heading" className="font-display text-xl font-semibold text-ink">
+                  Needs industry <span className="text-mute">({unclassified.length})</span>
+                </h2>
+                <p className="mt-1 text-sm text-mute">
+                  Live entries with no industry never appear under an industry filter. Saving keeps them live.
+                </p>
+                {unclassified.length ? (
+                  <ul className="mt-5 space-y-4">
+                    {unclassified.map((app) => (
+                      <ClassifyItem key={app.id} app={app} tree={tree} />
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="mt-5">
+                    <EmptyState icon={<InboxIcon className="h-6 w-6" />} title="Everything is classified" body="Every live entry has at least one industry." />
+                  </div>
+                )}
+              </section>
+            ) : null}
             <section aria-labelledby="live-heading">
               <h2 id="live-heading" className="font-display text-xl font-semibold text-ink">
                 Recently updated

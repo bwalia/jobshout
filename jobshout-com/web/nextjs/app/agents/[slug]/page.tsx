@@ -18,6 +18,7 @@ import { AgentCard, AppCard, AppLogo } from "@/components/showcase/AppCard";
 import { ShowcaseReviewActions } from "@/components/showcase/ShowcaseReviewActions";
 import { StarButton } from "@/components/showcase/StarButton";
 import { Badge, buttonClass, cx } from "@/components/ui";
+import { IndustryLinks } from "@/components/showcase/IndustryLinks";
 import { formatDate, isEditor, siteUrl } from "@/lib/insights";
 import {
   CAPABILITIES,
@@ -29,7 +30,9 @@ import {
   directoryHref,
   getApp,
   isCapability,
+  listIndustries,
   usedIn,
+  type IndustryNode,
   type ShowcaseApp,
 } from "@/lib/showcase";
 import { currentViewer } from "@/lib/session";
@@ -125,9 +128,10 @@ export default async function AgentPage({ params }: Params) {
   if (e.kind === "app") redirect(`/showcase/${e.slug}`);
 
   const live = e.status === "published";
-  const [editor, used] = await Promise.all([
+  const [editor, used, tree] = await Promise.all([
     isEditor(viewer),
     live ? usedIn(e.slug, viewer) : Promise.resolve({ apps: [], teams: [] }),
+    listIndustries().catch(() => [] as IndustryNode[]),
   ]);
   const owner = Boolean(viewer && e.creator_email?.toLowerCase() === viewer.email.toLowerCase());
   const canEdit = editor || (owner && e.status !== "archived");
@@ -253,6 +257,8 @@ export default async function AgentPage({ params }: Params) {
           ) : (
             <p className="text-mute">No description yet.</p>
           )}
+
+          <IndustryLinks industries={e.industries} tree={tree} />
 
           {team ? (
             <Workflow team={e} />

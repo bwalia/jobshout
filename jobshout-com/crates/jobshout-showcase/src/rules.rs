@@ -7,8 +7,8 @@ use jobshout_content::render::word_count;
 use jobshout_content::Actor;
 use jobshout_domain::{
     DomainError, InsightSource, ProductionEvidence, ShowcaseAgent, ShowcaseApp, ShowcaseAppInput,
-    ShowcaseKind, ShowcaseLinkInput, ShowcaseMaturity, ShowcaseStatus, ShowcaseVisibility,
-    AGENT_CAPABILITIES,
+    ShowcaseIndustry, ShowcaseKind, ShowcaseLinkInput, ShowcaseMaturity, ShowcaseStatus,
+    ShowcaseVisibility, AGENT_CAPABILITIES,
 };
 
 pub const MAX_NAME: usize = 80;
@@ -26,6 +26,13 @@ pub const MAX_TOOLS: usize = 20;
 pub const MAX_MCP: usize = 15;
 pub const MIN_TEAM: usize = 2;
 pub const MAX_JOBS: usize = 10;
+/// Industries an entry may claim: the sectors it was built for, not every
+/// sector it could serve (marketplaces cap this for the same reason).
+pub const MAX_INDUSTRIES: usize = 3;
+/// Verticals within one industry.
+pub const MAX_VERTICALS: usize = 3;
+/// General-purpose tools: stored like an industry, never combined with one.
+pub const CROSS_INDUSTRY: &str = "cross-industry";
 /// Apps a community creator may add per rolling hour. Editors and agents are exempt.
 pub const CREATES_PER_HOUR: i64 = 10;
 
@@ -197,6 +204,11 @@ pub struct Cleaned {
     pub tools: Vec<String>,
     pub mcp_servers: Vec<String>,
     pub capabilities: Vec<String>,
+    /// Industry and vertical slugs, parents first. Set by the service from
+    /// [`clean_industries`], which needs the taxonomy.
+    pub industries: Vec<String>,
+    /// Their display names, for search.
+    pub industry_names: Vec<String>,
     /// Directory links, de-duplicated by slug, in the order given.
     pub agent_links: Vec<ShowcaseLinkInput>,
     pub team_slug: Option<String>,
@@ -399,6 +411,8 @@ pub fn validate(kind: ShowcaseKind, input: &ShowcaseAppInput) -> Result<Cleaned,
         tools,
         mcp_servers,
         capabilities,
+        industries: Vec::new(),
+        industry_names: Vec::new(),
         agent_links,
         team_slug,
         job_ids,
@@ -466,6 +480,109 @@ pub fn validate(kind: ShowcaseKind, input: &ShowcaseAppInput) -> Result<Cleaned,
     Ok(cleaned)
 }
 
+/// [`tags_text`] for a stored entry, with new industry names: used when only
+/// the industries change.
+pub fn tags_text_for(app: &ShowcaseApp, industry_names: &[String]) -> String {
+    tags_text(&Cleaned {
+        technologies: app.technologies.clone(),
+        ai_models: app.ai_models.clone(),
+        agents: app.agents.clone(),
+        tools: app.tools.clone(),
+        mcp_servers: app.mcp_servers.clone(),
+        industry_names: industry_names.to_vec(),
+        ..Default::default()
+    })
+}
+
+/// The industry list, as loaded from `showcase_industries`.
+#[derive(Debug, Clone, Default)]
+pub struct Taxonomy {
+    entries: Vec<ShowcaseIndustry>,
+}
+
+impl Taxonomy {
+    pub fn new(entries: Vec<ShowcaseIndustry>) -> Self {
+        Self { entries }
+    }
+
+    pub fn get(&self, slug: &str) -> Option<&ShowcaseIndustry> {
+        self.entries.iter().find(|e| e.slug == slug)
+    }
+
+    pub fn entries(&self) -> &[ShowcaseIndustry] {
+        &self.entries
+    }
+
+    /// Display names for stored slugs, skipping any no longer in the list.
+    /// A Healthcare entry also gets "NHS", which is how people search for it.
+    pub fn search_names(&self, slugs: &[String]) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        let mut add = |name: &str| {
+            if !out.iter().any(|o| o == name) {
+                out.push(name.to_string());
+            }
+        };
+        for s in slugs {
+            if let Some(e) = self.get(s) {
+                add(&e.name);
+                if matches!(
+                    s.as_str(),
+                    "healthcare" | "hospitals-clinics" | "primary-care"
+                ) {
+                    add("NHS");
+                }
+            }
+        }
+        out
+    }
+}
+
+/// Check and normalise an entry's industries: known slugs only, a vertical
+/// brings its industry with it, at most [`MAX_INDUSTRIES`] industries and
+/// [`MAX_VERTICALS`] verticals in each, and [`CROSS_INDUSTRY`] alone.
+/// Returns industries first, then verticals, each in the order given.
+pub fn clean_industries(raw: &[String], taxonomy: &Taxonomy) -> Result<Vec<String>, DomainError> {
+    let v = |m: String| Err(DomainError::Validation(m));
+    let mut industries: Vec<String> = Vec::new();
+    let mut verticals: Vec<(String, String)> = Vec::new();
+    for s in raw {
+        let slug = s.trim().to_ascii_lowercase();
+        if slug.is_empty() {
+            continue;
+        }
+        let Some(entry) = taxonomy.get(&slug) else {
+            return v(format!(
+                "‘{slug}’ is not an industry; see GET /api/v1/showcase/industries"
+            ));
+        };
+        let parent = entry.parent_slug.clone().unwrap_or_else(|| slug.clone());
+        if !industries.contains(&parent) {
+            industries.push(parent.clone());
+        }
+        if entry.parent_slug.is_some() && !verticals.iter().any(|(_, v)| *v == slug) {
+            verticals.push((parent, slug));
+        }
+    }
+    if industries.iter().any(|i| i == CROSS_INDUSTRY) && industries.len() > 1 {
+        return v("“Works across industries” can’t be combined with specific industries".into());
+    }
+    if industries.len() > MAX_INDUSTRIES {
+        return v(format!(
+            "pick at most {MAX_INDUSTRIES} industries — the sectors it was built for, not every sector it could serve"
+        ));
+    }
+    for i in &industries {
+        if verticals.iter().filter(|(p, _)| p == i).count() > MAX_VERTICALS {
+            let name = taxonomy.get(i).map(|e| e.name.as_str()).unwrap_or(i);
+            return v(format!(
+                "pick at most {MAX_VERTICALS} specialisms within {name}"
+            ));
+        }
+    }
+    industries.extend(verticals.into_iter().map(|(_, v)| v));
+    Ok(industries)
+}
+
 /// Words search should match beyond the name and description.
 pub fn tags_text(cleaned: &Cleaned) -> String {
     cleaned
@@ -475,6 +592,7 @@ pub fn tags_text(cleaned: &Cleaned) -> String {
         .chain(&cleaned.tools)
         .chain(&cleaned.mcp_servers)
         .chain(cleaned.agents.iter().map(|a| &a.name))
+        .chain(&cleaned.industry_names)
         .map(String::as_str)
         .collect::<Vec<_>>()
         .join(" ")
@@ -520,6 +638,7 @@ mod tests {
             tools: vec![],
             mcp_servers: vec![],
             capabilities: vec![],
+            industries: vec![],
             linked_agents: vec![],
             linked_team: None,
             used_in: 0,
@@ -926,5 +1045,103 @@ mod tests {
         let mut t = agent_input();
         t.job_ids = vec![a];
         assert!(validate(ShowcaseKind::Agent, &t).is_ok());
+    }
+
+    fn taxonomy() -> Taxonomy {
+        let e = |slug: &str, name: &str, parent: Option<&str>| ShowcaseIndustry {
+            slug: slug.into(),
+            name: name.into(),
+            parent_slug: parent.map(Into::into),
+            description: String::new(),
+            position: 0,
+        };
+        Taxonomy::new(vec![
+            e("healthcare", "Healthcare & life sciences", None),
+            e(
+                "hospitals-clinics",
+                "Hospitals & clinics",
+                Some("healthcare"),
+            ),
+            e("financial-services", "Financial services", None),
+            e("accountancy", "Accountancy & tax", None),
+            e("legal", "Legal", None),
+            e("law-firms", "Law firms", Some("legal")),
+            e("in-house-legal", "In-house legal", Some("legal")),
+            e("compliance", "Compliance & regulatory", Some("legal")),
+            e("conveyancing", "Conveyancing & property law", Some("legal")),
+            e("cross-industry", "Works across industries", None),
+        ])
+    }
+
+    fn s(v: &[&str]) -> Vec<String> {
+        v.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn industries_bring_their_parent_and_list_parents_first() {
+        let got =
+            clean_industries(&s(&["Conveyancing", " healthcare ", "legal"]), &taxonomy()).unwrap();
+        assert_eq!(got, s(&["legal", "healthcare", "conveyancing"]));
+    }
+
+    #[test]
+    fn unknown_industry_is_rejected_with_where_to_look() {
+        let err = clean_industries(&s(&["legl"]), &taxonomy()).unwrap_err();
+        assert!(
+            err.to_string().contains("‘legl’ is not an industry"),
+            "{err}"
+        );
+        assert!(
+            err.to_string().contains("/api/v1/showcase/industries"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn at_most_three_industries_and_three_verticals_each() {
+        let four = s(&["healthcare", "financial-services", "accountancy", "legal"]);
+        assert!(clean_industries(&four, &taxonomy()).is_err());
+        let three = s(&["healthcare", "financial-services", "legal"]);
+        assert_eq!(clean_industries(&three, &taxonomy()).unwrap().len(), 3);
+        let verticals = s(&["law-firms", "in-house-legal", "compliance", "conveyancing"]);
+        let err = clean_industries(&verticals, &taxonomy()).unwrap_err();
+        assert!(err.to_string().contains("within Legal"), "{err}");
+    }
+
+    #[test]
+    fn cross_industry_stands_alone() {
+        assert_eq!(
+            clean_industries(&s(&["cross-industry"]), &taxonomy()).unwrap(),
+            s(&["cross-industry"])
+        );
+        assert!(clean_industries(&s(&["cross-industry", "legal"]), &taxonomy()).is_err());
+    }
+
+    #[test]
+    fn search_text_includes_industry_names_and_nhs() {
+        let tax = taxonomy();
+        let mut c = Cleaned {
+            technologies: s(&["Rust"]),
+            ..Default::default()
+        };
+        c.industry_names = tax.search_names(&s(&["healthcare", "hospitals-clinics", "legal"]));
+        let text = tags_text(&c);
+        assert!(text.contains("Healthcare & life sciences"), "{text}");
+        assert!(text.contains("NHS"), "{text}");
+        assert!(text.contains("Legal"), "{text}");
+        assert_eq!(text.matches("NHS").count(), 1, "NHS once: {text}");
+    }
+
+    #[test]
+    fn changing_industries_keeps_a_published_entry_live() {
+        let me = actor("me@example.com", false);
+        let live = app(ShowcaseStatus::Published, "me@example.com");
+        let mut edit = input();
+        edit.repo_url = live.repo_url.clone();
+        edit.industries = Some(s(&["legal", "conveyancing"]));
+        assert_eq!(
+            status_on_update(&me, &live, &edit),
+            ShowcaseStatus::Published
+        );
     }
 }
