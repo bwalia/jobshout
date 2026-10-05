@@ -212,7 +212,10 @@ type PostedArticle struct {
 	// PostSlug is the slug opsapi settled on, which can differ from ours when
 	// it had to de-duplicate within the namespace.
 	PostSlug string `json:"post_slug"`
-	Status   string `json:"status"`
+	// CoverImageURL is set when a cover was drawn during publish (backfill), so
+	// the caller can write it back to the stored article. Empty otherwise.
+	CoverImageURL string `json:"cover_image_url,omitempty"`
+	Status        string `json:"status"`
 }
 
 // PublishResult is returned once articles have been posted to the CMS.
@@ -415,7 +418,7 @@ func (r *Runner) Generate(ctx context.Context, req GenerateRequest, progress Pro
 // nothing is visible to anyone, and deleting them to "clean up" would throw
 // away work the user can simply publish again — the alternative, an
 // all-or-nothing rollback, is not something the CMS API offers anyway.
-func (r *Runner) Publish(ctx context.Context, articles []GeneratedArticle, progress ProgressFunc) (*PublishResult, error) {
+func (r *Runner) Publish(ctx context.Context, orgID uuid.UUID, articles []GeneratedArticle, progress ProgressFunc) (*PublishResult, error) {
 	if !r.CanPublish() {
 		return nil, fmt.Errorf("blog: publishing is not configured (set OPSAPI_BASE_URL, OPSAPI_API_KEY and OPSAPI_NAMESPACE)")
 	}
@@ -448,6 +451,22 @@ func (r *Runner) Publish(ctx context.Context, articles []GeneratedArticle, progr
 			}
 			if a.Excerpt == "" {
 				a.Excerpt = articleExcerpt(a.HTML)
+			}
+		}
+
+		// Backfill a cover when the stored article has none. Covers are drawn at
+		// generation time, but if that attempt failed (a busy GPU, a provider
+		// over quota) the article is stored coverless and every publish would
+		// otherwise send opsapi a post with no featured image. Drawing it here
+		// means "push to opsapi" reliably carries an image. Best-effort: a cover
+		// that still cannot be drawn never fails the publish.
+		if a.CoverImageURL == "" && r.canIllustrate() {
+			report(progress, model.BlogStepIllustrating,
+				fmt.Sprintf("Drawing a cover for %q before publishing", a.Title),
+				model.AgentNameArticleWriter)
+			if err := r.generateCover(ctx, orgID, &a); err != nil {
+				r.logger.Warn("blog: could not backfill a cover at publish time",
+					zap.String("title", a.Title), zap.Error(err))
 			}
 		}
 
@@ -484,6 +503,10 @@ func (r *Runner) Publish(ctx context.Context, articles []GeneratedArticle, progr
 			PostUUID: post.UUID,
 			PostSlug: post.Slug,
 			Status:   post.Status,
+			// The article's cover, so the caller can persist a backfilled one.
+			// A pre-existing cover is the same value already stored, so writing
+			// it back is a no-op; empty leaves the stored row untouched.
+			CoverImageURL: a.CoverImageURL,
 		})
 	}
 

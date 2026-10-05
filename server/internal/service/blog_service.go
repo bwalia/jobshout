@@ -1114,7 +1114,7 @@ func (s *blogService) Publish(ctx context.Context, orgID uuid.UUID, runID uuid.U
 	run.Steps = append(run.Steps, publishSteps()...)
 	tracker := s.newTracker(run)
 
-	result, err := s.runner.Publish(ctx, articles, tracker.advance)
+	result, err := s.runner.Publish(ctx, orgID, articles, tracker.advance)
 	if err != nil {
 		// Drafts posted before the failure are recorded, so a retry skips
 		// them instead of posting them twice.
@@ -1154,6 +1154,7 @@ func (s *blogService) markPosted(ctx context.Context, articleIDs map[string]uuid
 		}
 		posted = append(posted, model.BlogArticlePost{
 			ArticleID: id, PostUUID: p.PostUUID, Status: p.Status,
+			CoverImageURL: p.CoverImageURL,
 		})
 	}
 	if len(posted) == 0 {
