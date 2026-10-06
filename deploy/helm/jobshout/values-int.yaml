@@ -38,6 +38,13 @@ extraSecretRefs:
   # ai.provider) and as the first-choice image backend.
   #   kubectl -n int create secret generic jobshout-gemini --from-literal=GEMINI_API_KEY=...
   - jobshout-gemini
+  # Shared workstation gateway secrets: OLLAMA_JWT_SECRET and IMAGE_JWT_SECRET.
+  # The chart renders jobshout-secrets with them empty, so without this the
+  # image gateway (images.workstation.co.uk) refuses every cover request (403)
+  # and articles publish without a featured image. Same values the other rings
+  # use — copy test's: kubectl -n test get secret jobshout-gateways -o yaml,
+  # strip metadata, re-apply in int. Created by hand on k3s1, never in git.
+  - jobshout-gateways
 
 # opsapi CMS — the Article Writer files generated articles there as drafts.
 # The host and namespace slug are not secret; the API key is, and comes from
