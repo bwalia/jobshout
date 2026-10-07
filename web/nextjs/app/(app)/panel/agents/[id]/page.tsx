@@ -15,6 +15,7 @@ import {
   Boxes,
   LayoutGrid,
   AlertTriangle,
+  Pencil,
 } from "lucide-react";
 import { useRunFailures } from "@/lib/hooks/useRunFailures";
 import { BuiltinAgentTab } from "@/components/task-manager/BuiltinAgentTab";
@@ -124,6 +125,82 @@ const PICKER_CLASS =
 
 /** The engine_config key the server reads the structured model from. */
 const STRUCTURED_MODEL_KEY = "structured_model";
+
+/**
+ * Click-to-edit agent display name. Saves via useUpdateAgent (Enter or blur);
+ * Escape cancels. Builtins can be renamed — only the label changes.
+ */
+function AgentNameEditor({
+  agentId,
+  name,
+}: {
+  agentId: string;
+  name: string;
+}) {
+  const { mutate: updateAgent, isPending } = useUpdateAgent();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(name);
+
+  function startEdit() {
+    setDraft(name);
+    setEditing(true);
+  }
+
+  function cancel() {
+    setDraft(name);
+    setEditing(false);
+  }
+
+  function save() {
+    const trimmed = draft.trim();
+    if (!trimmed || trimmed === name) {
+      cancel();
+      return;
+    }
+    updateAgent(
+      { id: agentId, payload: { name: trimmed } },
+      {
+        onSuccess: () => setEditing(false),
+        onError: () => setDraft(name),
+      },
+    );
+  }
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        value={draft}
+        disabled={isPending}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            save();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            cancel();
+          }
+        }}
+        aria-label="Agent name"
+        className="w-full max-w-md rounded-md border border-input bg-background px-2 py-1 text-xl font-bold text-foreground ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+      />
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={startEdit}
+      title="Rename agent"
+      className="group inline-flex max-w-full items-center gap-2 rounded-md text-left hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <h1 className="truncate text-xl font-bold text-foreground">{name}</h1>
+      <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />
+    </button>
+  );
+}
 
 /**
  * Editable model row. Saves on change — useUpdateAgent already invalidates the
@@ -1027,7 +1104,7 @@ export default function AgentProfilePage() {
             )}
 
             <div>
-              <h1 className="text-xl font-bold text-foreground">{agent.name}</h1>
+              <AgentNameEditor agentId={agent.id} name={agent.name} />
               <p className="text-sm text-muted-foreground">{agent.role}</p>
 
               <div className="mt-2 flex flex-wrap items-center gap-2">
