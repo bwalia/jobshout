@@ -124,7 +124,10 @@ public final class AppModel {
         userID = s.userID
         deviceID = s.deviceID
         phase = .signedIn
+        #if !os(watchOS)
+        // Watch uses push + short refresh while foregrounded — no WebSocket.
         startLive()
+        #endif
         Task {
             await refreshApprovalCount()
             await uploadPushToken()

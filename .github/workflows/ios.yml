@@ -19,9 +19,9 @@ concurrency:
 
 jobs:
   build-test:
-    name: iOS build & test
+    name: Apple build & test
     runs-on: macos-15
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -30,8 +30,8 @@ jobs:
           sudo xcode-select -s "$(ls -d /Applications/Xcode_16*.app | sort -V | tail -1)"
           xcodebuild -version
 
-      # Unit tests run on macOS: JobShoutKit builds for both platforms, which
-      # keeps them fast and simulator-free. This also regenerates the API
+      # Unit tests run on macOS: JobShoutKit builds for iOS, macOS and watchOS,
+      # which keeps them fast and simulator-free. This also regenerates the API
       # client from server/api/openapi.yaml, so a spec change that breaks the
       # app fails here.
       - name: Package tests
@@ -46,11 +46,29 @@ jobs:
 
       # Ad-hoc signed ("-") so entitlements apply without a team. No
       # credentials in CI; TestFlight lanes come with the App Store work.
-      - name: Build app (simulator)
+      - name: Build iOS (simulator)
         working-directory: ios
         run: |
           xcodebuild build \
             -project JobShout.xcodeproj -scheme JobShout -configuration Debug \
             -destination 'generic/platform=iOS Simulator' \
+            -skipPackagePluginValidation \
+            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=
+
+      - name: Build Mac
+        working-directory: ios
+        run: |
+          xcodebuild build \
+            -project JobShout.xcodeproj -scheme JobShoutMac -configuration Debug \
+            -destination 'generic/platform=macOS' \
+            -skipPackagePluginValidation \
+            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=
+
+      - name: Build Watch (simulator)
+        working-directory: ios
+        run: |
+          xcodebuild build \
+            -project JobShout.xcodeproj -scheme JobShoutWatch -configuration Debug \
+            -destination 'generic/platform=watchOS Simulator' \
             -skipPackagePluginValidation \
             CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=

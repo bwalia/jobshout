@@ -53,7 +53,7 @@ struct SignInView: View {
                     Picker("Mode", selection: $mode) {
                         ForEach(Mode.allCases) { Text($0.rawValue).tag($0) }
                     }
-                    .pickerStyle(.segmented)
+                    .segmentedPickerStyle()
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets())
                 }

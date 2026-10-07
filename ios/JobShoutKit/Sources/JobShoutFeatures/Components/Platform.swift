@@ -1,7 +1,6 @@
 import SwiftUI
 
-// iOS-only modifiers, no-ops on macOS so the package also builds and tests
-// there.
+// Platform-specific modifiers so Features builds on iOS, macOS and watchOS.
 extension View {
     func inlineTitle() -> some View {
         #if os(iOS)
@@ -32,6 +31,33 @@ extension View {
         textInputAutocapitalization(.never).autocorrectionDisabled()
         #else
         autocorrectionDisabled()
+        #endif
+    }
+
+    /// Segmented control on phone/Mac; default wheel/list style on watch.
+    func segmentedPickerStyle() -> some View {
+        #if os(watchOS)
+        self
+        #else
+        pickerStyle(.segmented)
+        #endif
+    }
+
+    /// Selectable text where the platform supports it.
+    func selectableText() -> some View {
+        #if os(watchOS)
+        self
+        #else
+        textSelection(.enabled)
+        #endif
+    }
+
+    /// Toolbar / inset chrome background (`.bar` is unavailable on watchOS).
+    func chromeBackground() -> some View {
+        #if os(watchOS)
+        background(.ultraThinMaterial)
+        #else
+        background(.bar)
         #endif
     }
 }

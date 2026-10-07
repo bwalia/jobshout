@@ -1,24 +1,28 @@
-# JobShout iOS
+# JobShout Apple apps
 
-Native SwiftUI client for the JobShout platform. Plan and scope:
-[`docs/plans/08-ios-app.md`](../docs/plans/08-ios-app.md).
+Native SwiftUI clients for the JobShout platform (iPhone/iPad, Mac, Watch).
+Plan and scope: [`docs/plans/08-ios-app.md`](../docs/plans/08-ios-app.md).
 
-Phase 1 covers the core loop: sign in (Sign in with Apple or email), browse
-agents, **call an agent** with its server-defined launch form, watch the work
-live, and **approve or reject** what agents ask to do.
+The iPhone app covers the core loop: sign in (Sign in with Apple or email),
+browse agents, **call an agent** with its server-defined launch form, watch
+the work live, and **approve or reject** what agents ask to do. Mac and Watch
+share `JobShoutKit` and the same Keychain access group so a session can move
+across devices of the same team.
 
 ## Layout
 
 ```
 ios/
 ├── project.yml        XcodeGen spec (the .xcodeproj is generated, not committed)
-├── App/               @main, push registration, assets, privacy manifest
+├── App/               iPhone/iPad @main, push registration, assets
+├── Mac/App/           macOS @main shell
+├── Watch/App/         watchOS @main shell (independent; no WebSocket)
 ├── UITests/           end-to-end test against a running API
 └── JobShoutKit/       Swift package: everything else, testable on macOS
     ├── JobShoutCore       environments, logging
     ├── JobShoutAPI        client generated from server/api/openapi.yaml (symlink) + auth middleware
     ├── JobShoutAuth       Keychain session, single-flight refresh, sign-in flows
-    ├── JobShoutLive       WebSocket live events with reconnect/backoff
+    ├── JobShoutLive       WebSocket live events with reconnect/backoff (not used on watchOS)
     └── JobShoutFeatures   screens and @Observable models
 ```
 
@@ -38,11 +42,13 @@ brew install xcodegen
 cd ios && xcodegen generate && open JobShout.xcodeproj
 ```
 
-| Configuration | Ring | Bundle id |
-|---|---|---|
-| Debug | int | `com.jobshout.app.dev` |
-| Staging | acc | `com.jobshout.app.staging` |
-| Release | prod | `com.jobshout.app` |
+Schemes: `JobShout` (iPhone/iPad), `JobShoutMac`, `JobShoutWatch`.
+
+| Configuration | Ring | iPhone/iPad | Mac | Watch |
+|---|---|---|---|---|
+| Debug | int | `com.jobshout.app.dev` | `com.jobshout.mac.dev` | `com.jobshout.app.watchkitapp.dev` |
+| Staging | acc | `com.jobshout.app.staging` | `com.jobshout.mac.staging` | `com.jobshout.app.watchkitapp.staging` |
+| Release | prod | `com.jobshout.app` | `com.jobshout.mac` | `com.jobshout.app.watchkitapp` |
 
 Set your team in Xcode (never commit `DEVELOPMENT_TEAM`). On the simulator,
 ad-hoc signing is enough: `CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual`.
@@ -57,8 +63,9 @@ SIMCTL_CHILD_JOBSHOUT_ENVIRONMENT=local SIMCTL_CHILD_JOBSHOUT_LOCAL_PORT=8190 \
   xcrun simctl launch booted com.jobshout.app.dev
 ```
 
-**Sign in with Apple** needs the bundle ids above in the ring's
-`APPLE_CLIENT_IDS` (Helm `apple.clientIds`) and the capability on the App ID.
+**Sign in with Apple** needs every bundle id above in the ring's
+`APPLE_CLIENT_IDS` (Helm `apple.clientIds`) and the capability on each App ID.
+Shared sessions use the Keychain access group `com.jobshout.shared`.
 
 ## Test
 

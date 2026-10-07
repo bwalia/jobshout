@@ -22,6 +22,25 @@ public protocol TokenStore: Sendable {
     func clear() throws
 }
 
+/// Shared Keychain access group for Mac / iPhone / Watch of the same team.
+/// Apps put the expanded value in Info.plist as `JobShoutKeychainAccessGroup`
+/// (`$(AppIdentifierPrefix)com.jobshout.shared`) and pass it into the store.
+public enum JobShoutKeychain {
+    public static let groupSuffix = "com.jobshout.shared"
+
+    public static var sharedAccessGroup: String? {
+        (Bundle.main.object(forInfoDictionaryKey: "JobShoutKeychainAccessGroup") as? String)?
+            .nilIfBlank
+    }
+}
+
+private extension String {
+    var nilIfBlank: String? {
+        let t = trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? nil : t
+    }
+}
+
 /// Keychain-backed store: one generic-password item per environment,
 /// readable after first unlock and never synced or migrated to another
 /// device (`ThisDeviceOnly`), because the session is bound to this install.
@@ -30,7 +49,11 @@ public struct KeychainTokenStore: TokenStore {
     let account: String
     let accessGroup: String?
 
-    public init(account: String, service: String = "com.jobshout.session", accessGroup: String? = nil) {
+    public init(
+        account: String,
+        service: String = "com.jobshout.session",
+        accessGroup: String? = JobShoutKeychain.sharedAccessGroup
+    ) {
         self.service = service
         self.account = account
         self.accessGroup = accessGroup
