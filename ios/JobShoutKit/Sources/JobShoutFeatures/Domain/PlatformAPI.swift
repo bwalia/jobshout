@@ -12,6 +12,7 @@ public typealias Project = Components.Schemas.Project
 public typealias Device = Components.Schemas.Device
 public typealias User = Components.Schemas.User
 public typealias LaunchResult = Components.Schemas.LaunchResult
+public typealias Schedule = Components.Schemas.Schedule
 
 /// The calls the screens make, each mapped to a value or an `APIError`.
 /// Screens never see generated output enums.
@@ -123,6 +124,44 @@ public struct PlatformAPI: Sendable {
         try await map {
             switch try await client.listTaskRuns(path: .init(taskID: taskID), query: .init(page: 1, perPage: 20)) {
             case .ok(let r): return try r.body.json.data
+            case .undocumented(let s, _): throw APIError.undocumented(s)
+            }
+        }
+    }
+
+    public func transitionTask(_ id: String, status: String) async throws -> WorkTask {
+        try await map {
+            guard let status = Components.Schemas.TaskStatus(rawValue: status) else {
+                throw APIError.server(400, nil)
+            }
+            switch try await client.transitionTask(
+                path: .init(taskID: id),
+                body: .json(.init(status: status))
+            ) {
+            case .ok(let r): return try r.body.json
+            case .badRequest(let r): throw APIError.server(400, try? r.body.json)
+            case .notFound(let r): throw APIError.server(404, try? r.body.json)
+            case .undocumented(let s, _): throw APIError.undocumented(s)
+            }
+        }
+    }
+
+    public func schedules(perPage: Int = 100) async throws -> [Schedule] {
+        try await map {
+            switch try await client.listSchedules(query: .init(page: 1, perPage: perPage)) {
+            case .ok(let r): return try r.body.json.data
+            case .undocumented(let s, _): throw APIError.undocumented(s)
+            }
+        }
+    }
+
+    public func setScheduleStatus(_ id: String, status: String) async throws -> Schedule {
+        try await map {
+            switch try await client.updateSchedule(
+                path: .init(taskID: id),
+                body: .json(.init(status: Components.Schemas.ScheduleUpdate.StatusPayload(rawValue: status)))
+            ) {
+            case .ok(let r): return try r.body.json
             case .undocumented(let s, _): throw APIError.undocumented(s)
             }
         }

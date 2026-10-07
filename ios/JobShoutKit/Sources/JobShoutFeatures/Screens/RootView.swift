@@ -13,7 +13,11 @@ public struct RootView: View {
             case .signedOut:
                 SignInView()
             case .signedIn:
+                #if os(macOS)
+                MacShellView()
+                #else
                 MainTabView()
+                #endif
             }
         }
         .animation(.default, value: app.phase)
