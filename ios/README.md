@@ -57,9 +57,10 @@ sign-in fails with "Couldn't store your sign-in securely".
 
 **Default API for Debug is int** (`https://int.jobshout.co.uk/api/v1`). Open
 the `JobShout`, `JobShoutMac`, or `JobShoutWatch` scheme, set your team, Run.
-Sign in with **email/password** against an int account — Sign in with Apple is
-not enabled on int (`GET /auth/apple/status` → `enabled: false`). The footer
-on the sign-in screen should say "Connected to Integration."
+On int, prefer **Continue with Google** (OAuth is enabled there). Email/password
+also works. Sign in with Apple is off on int. The footer should say "Connected
+to Integration." Google uses the `jobshout://` callback scheme (`native=1` on
+`/auth/google/start`); that server support must be deployed to the ring you hit.
 
 ```sh
 brew install xcodegen

@@ -59,10 +59,13 @@ type UpdateProfileRequest struct {
 
 // GoogleCompleteRequest exchanges a one-time OAuth ticket for JobShout tokens.
 type GoogleCompleteRequest struct {
-	Ticket string `json:"ticket" validate:"required"`
+	Ticket string      `json:"ticket" validate:"required"`
+	Device *DeviceInfo `json:"device,omitempty"`
 }
 
 // GoogleOAuthState is CSRF state for the Google login redirect.
+// Intent is "login" or "signup"; a "native_" prefix means the final redirect
+// should use the jobshout:// URL scheme for ASWebAuthenticationSession.
 type GoogleOAuthState struct {
 	State     string
 	Intent    string

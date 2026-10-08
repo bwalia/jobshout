@@ -160,12 +160,14 @@ func (h *AuthHandler) GoogleStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // GoogleStart handles GET /auth/google/start — the browser is sent to Google.
+// Pass native=1 so the final redirect uses jobshout:// for native apps.
 func (h *AuthHandler) GoogleStart(w http.ResponseWriter, r *http.Request) {
 	intent := r.URL.Query().Get("intent")
 	orgName := r.URL.Query().Get("org_name")
-	authURL, err := h.authSvc.StartGoogle(r.Context(), intent, orgName)
+	native := r.URL.Query().Get("native") == "1" || strings.EqualFold(r.URL.Query().Get("native"), "true")
+	authURL, err := h.authSvc.StartGoogle(r.Context(), intent, orgName, native)
 	if err != nil {
-		h.redirectGoogleError(w, r, intent, googleErrorCode(err))
+		h.redirectGoogleError(w, r, intent, native, googleErrorCode(err))
 		return
 	}
 	http.Redirect(w, r, authURL, http.StatusFound)
@@ -179,22 +181,25 @@ func (h *AuthHandler) GoogleCallback(w http.ResponseWriter, r *http.Request) {
 		if errParam != "access_denied" {
 			code = "failed"
 		}
-		intent := h.authSvc.AbandonGoogle(r.Context(), state)
-		h.redirectGoogleError(w, r, intent, code)
+		intent, native := h.authSvc.AbandonGoogle(r.Context(), state)
+		h.redirectGoogleError(w, r, intent, native, code)
 		return
 	}
 	code := r.URL.Query().Get("code")
 	if state == "" || code == "" {
-		intent := h.authSvc.AbandonGoogle(r.Context(), state)
-		h.redirectGoogleError(w, r, intent, "missing_code")
+		intent, native := h.authSvc.AbandonGoogle(r.Context(), state)
+		h.redirectGoogleError(w, r, intent, native, "missing_code")
 		return
 	}
-	ticket, gotIntent, err := h.authSvc.CompleteGoogle(r.Context(), state, code)
+	ticket, gotIntent, native, err := h.authSvc.CompleteGoogle(r.Context(), state, code)
 	if err != nil {
-		h.redirectGoogleError(w, r, gotIntent, googleErrorCode(err))
+		h.redirectGoogleError(w, r, gotIntent, native, googleErrorCode(err))
 		return
 	}
 	dest := h.frontendBaseURL + "/auth/google/callback?ticket=" + url.QueryEscape(ticket)
+	if native {
+		dest = service.NativeGoogleCallbackURL(ticket)
+	}
 	http.Redirect(w, r, dest, http.StatusFound)
 }
 
@@ -208,7 +213,7 @@ func (h *AuthHandler) GoogleComplete(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, http.StatusBadRequest, "validation failed: "+err.Error())
 		return
 	}
-	resp, err := h.authSvc.ExchangeGoogleTicket(r.Context(), req.Ticket)
+	resp, err := h.authSvc.ExchangeGoogleTicket(r.Context(), req.Ticket, req.Device)
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidGoogleTicket) || errors.Is(err, service.ErrUserNotFound) {
 			RespondError(w, http.StatusUnauthorized, err.Error())
@@ -220,7 +225,11 @@ func (h *AuthHandler) GoogleComplete(w http.ResponseWriter, r *http.Request) {
 	RespondJSON(w, http.StatusOK, resp)
 }
 
-func (h *AuthHandler) redirectGoogleError(w http.ResponseWriter, r *http.Request, intent, code string) {
+func (h *AuthHandler) redirectGoogleError(w http.ResponseWriter, r *http.Request, intent string, native bool, code string) {
+	if native {
+		http.Redirect(w, r, service.NativeGoogleErrorURL(code), http.StatusFound)
+		return
+	}
 	path := "/login"
 	if intent == "signup" {
 		path = "/signup"

@@ -124,6 +124,57 @@ paths:
                 required: [enabled]
                 properties:
                   enabled: { type: boolean }
+  /auth/google/status:
+    get:
+      operationId: googleStatus
+      tags: [auth]
+      security: []
+      responses:
+        '200':
+          description: Whether Google OAuth login is configured
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled]
+                properties:
+                  enabled: { type: boolean }
+  /auth/google/start:
+    get:
+      operationId: googleStart
+      tags: [auth]
+      security: []
+      description: |
+        Redirects the browser to Google. Native apps open this URL in
+        ASWebAuthenticationSession with `native=1` so the final hop is
+        `jobshout://auth/google?ticket=…`.
+      parameters:
+        - name: intent
+          in: query
+          schema: { type: string, enum: [login, signup], default: login }
+        - name: org_name
+          in: query
+          schema: { type: string }
+        - name: native
+          in: query
+          description: When `1` or `true`, finish with the jobshout:// URL scheme.
+          schema: { type: string, enum: ['1', 'true'] }
+      responses:
+        '302': { description: Redirect to Google or an error page }
+  /auth/google/complete:
+    post:
+      operationId: completeGoogle
+      tags: [auth]
+      security: []
+      description: Exchange the one-time ticket from the Google redirect for JWTs.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GoogleCompleteRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/Auth' }
+        '401': { $ref: '#/components/responses/Error' }
   /auth/apple/nonce:
     post:
       operationId: appleNonce
@@ -577,6 +628,12 @@ components:
         nonce: { type: string, description: The raw nonce from /auth/apple/nonce. }
         full_name: { type: string, description: Apple only provides it on the first authorization. }
         org_name: { type: string }
+        device: { $ref: '#/components/schemas/DeviceInfo' }
+    GoogleCompleteRequest:
+      type: object
+      required: [ticket]
+      properties:
+        ticket: { type: string, description: One-time ticket from the Google OAuth redirect. }
         device: { $ref: '#/components/schemas/DeviceInfo' }
     AuthResponse:
       type: object

@@ -26,10 +26,10 @@ type AuthService interface {
 	GetMe(ctx context.Context, userID uuid.UUID) (*model.User, error)
 	UpdateProfile(ctx context.Context, userID uuid.UUID, req model.UpdateProfileRequest) (*model.User, error)
 	GoogleEnabled() bool
-	StartGoogle(ctx context.Context, intent, orgName string) (authURL string, err error)
-	AbandonGoogle(ctx context.Context, state string) (intent string)
-	CompleteGoogle(ctx context.Context, state, code string) (ticket, intent string, err error)
-	ExchangeGoogleTicket(ctx context.Context, ticket string) (*model.AuthResponse, error)
+	StartGoogle(ctx context.Context, intent, orgName string, native bool) (authURL string, err error)
+	AbandonGoogle(ctx context.Context, state string) (intent string, native bool)
+	CompleteGoogle(ctx context.Context, state, code string) (ticket, intent string, native bool, err error)
+	ExchangeGoogleTicket(ctx context.Context, ticket string, device *model.DeviceInfo) (*model.AuthResponse, error)
 
 	// Native clients (auth_service_mobile.go).
 	Logout(ctx context.Context, refreshToken string) error

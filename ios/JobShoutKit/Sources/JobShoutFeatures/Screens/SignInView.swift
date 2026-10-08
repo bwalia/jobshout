@@ -1,6 +1,7 @@
 import AuthenticationServices
 import JobShoutAPI
 import JobShoutAuth
+import JobShoutCore
 import SwiftUI
 
 struct SignInView: View {
@@ -14,6 +15,7 @@ struct SignInView: View {
     @State private var error: String?
     @State private var appleEnabled = false
     @State private var appleNonce: String?
+    @State private var googleEnabled = false
 
     enum Mode: String, CaseIterable, Identifiable {
         case signIn = "Sign in", register = "Create account"
@@ -33,21 +35,40 @@ struct SignInView: View {
                     .listRowBackground(Color.clear)
                 }
 
-                if appleEnabled {
+                #if !os(watchOS)
+                if googleEnabled || appleEnabled {
                     Section {
-                        SignInWithAppleButton(mode == .signIn ? .signIn : .signUp) { request in
-                            request.requestedScopes = [.fullName, .email]
-                            if let appleNonce { request.nonce = AppleNonce.hash(appleNonce) }
-                        } onCompletion: { result in
-                            Task { await completeApple(result) }
+                        if googleEnabled {
+                            Button {
+                                Task { await signInGoogle() }
+                            } label: {
+                                HStack {
+                                    Spacer()
+                                    Image(systemName: "g.circle.fill")
+                                    Text(mode == .signIn ? "Continue with Google" : "Sign up with Google")
+                                        .bold()
+                                    Spacer()
+                                }
+                            }
+                            .disabled(busy)
+                            .accessibilityIdentifier("google-sign-in")
                         }
-                        .frame(height: 48)
-                        .disabled(appleNonce == nil || busy)
-                        .listRowInsets(EdgeInsets())
+                        if appleEnabled {
+                            SignInWithAppleButton(mode == .signIn ? .signIn : .signUp) { request in
+                                request.requestedScopes = [.fullName, .email]
+                                if let appleNonce { request.nonce = AppleNonce.hash(appleNonce) }
+                            } onCompletion: { result in
+                                Task { await completeApple(result) }
+                            }
+                            .frame(height: 48)
+                            .disabled(appleNonce == nil || busy)
+                            .listRowInsets(EdgeInsets())
+                        }
                     } footer: {
                         Text("Or use your email below.")
                     }
                 }
+                #endif
 
                 Section {
                     Picker("Mode", selection: $mode) {
@@ -94,7 +115,7 @@ struct SignInView: View {
                     Text("Connected to \(app.environment.displayName).")
                 }
             }
-            .task { await prepareApple() }
+            .task { await prepareProviders() }
         }
     }
 
@@ -117,17 +138,40 @@ struct SignInView: View {
         }
     }
 
-    /// The nonce must exist before the button is tapped, because the Apple
-    /// request is built synchronously. It is valid for ten minutes and
-    /// single-use, so fetch a fresh one after every attempt.
-    private func prepareApple() async {
-        appleEnabled = await app.appleEnabled()
-        guard appleEnabled else { return }
-        appleNonce = try? await app.appleNonce()
+    private func prepareProviders() async {
+        async let apple = app.appleEnabled()
+        async let google = app.googleEnabled()
+        appleEnabled = await apple
+        googleEnabled = await google
+        if appleEnabled {
+            appleNonce = try? await app.appleNonce()
+        }
+    }
+
+    #if !os(watchOS)
+    private func signInGoogle() async {
+        busy = true
+        error = nil
+        defer { busy = false }
+        let intent = mode == .register ? "signup" : "login"
+        let org = mode == .register ? orgName : nil
+        let start = app.environment.googleStartURL(intent: intent, orgName: org)
+        switch await GoogleSignIn.authorize(startURL: start) {
+        case .cancelled:
+            break
+        case .failed(let message):
+            error = message
+        case .ticket(let ticket):
+            do {
+                try await app.signInWithGoogle(ticket: ticket)
+            } catch {
+                self.error = APIError.from(error).message
+            }
+        }
     }
 
     private func completeApple(_ result: Result<ASAuthorization, Error>) async {
-        defer { Task { await prepareApple() } }
+        defer { Task { await prepareProviders() } }
         switch result {
         case .failure(let err):
             if (err as? ASAuthorizationError)?.code != .canceled {
@@ -151,4 +195,5 @@ struct SignInView: View {
             }
         }
     }
+    #endif
 }

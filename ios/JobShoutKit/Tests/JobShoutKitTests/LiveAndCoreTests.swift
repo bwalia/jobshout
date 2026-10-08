@@ -38,6 +38,9 @@ import Testing
     @Test func environmentURLs() {
         #expect(AppEnvironment.int.apiBaseURL.absoluteString == "https://int.jobshout.co.uk/api/v1")
         #expect(AppEnvironment.prod.liveEventsURL.absoluteString == "wss://jobshout.co.uk/api/v1/ws")
+        let google = AppEnvironment.int.googleStartURL(intent: "login")
+        #expect(google.absoluteString.contains("/auth/google/start"))
+        #expect(google.absoluteString.contains("native=1"))
     }
 
     @Test func parsesGoTimestamps() throws {

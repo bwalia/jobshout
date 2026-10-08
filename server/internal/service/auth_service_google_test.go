@@ -220,7 +220,7 @@ func TestGoogleSignupThenTicket(t *testing.T) {
 	}
 	svc := googleSvc(t, users, orgs, tokens, g)
 
-	authURL, err := svc.StartGoogle(context.Background(), "signup", "Acme")
+	authURL, err := svc.StartGoogle(context.Background(), "signup", "Acme", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func TestGoogleSignupThenTicket(t *testing.T) {
 		t.Fatal("expected stored state")
 	}
 
-	ticket, intent, err := svc.CompleteGoogle(context.Background(), state, "code")
+	ticket, intent, _, err := svc.CompleteGoogle(context.Background(), state, "code")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +246,7 @@ func TestGoogleSignupThenTicket(t *testing.T) {
 		t.Fatal("empty ticket")
 	}
 
-	resp, err := svc.ExchangeGoogleTicket(context.Background(), ticket)
+	resp, err := svc.ExchangeGoogleTicket(context.Background(), ticket, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,12 +262,12 @@ func TestGoogleSignupThenTicket(t *testing.T) {
 	if tokens.n != 1 {
 		t.Fatalf("refresh tokens saved: %d", tokens.n)
 	}
-	if _, err := svc.ExchangeGoogleTicket(context.Background(), ticket); err != ErrInvalidGoogleTicket {
+	if _, err := svc.ExchangeGoogleTicket(context.Background(), ticket, nil); err != ErrInvalidGoogleTicket {
 		t.Fatalf("ticket must be one-time, got %v", err)
 	}
 
 	// Second Google login finds the same user, does not create another org.
-	authURL, err = svc.StartGoogle(context.Background(), "login", "")
+	authURL, err = svc.StartGoogle(context.Background(), "login", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,11 +275,11 @@ func TestGoogleSignupThenTicket(t *testing.T) {
 	for s := range users.states {
 		state = s
 	}
-	ticket, _, err = svc.CompleteGoogle(context.Background(), state, "code")
+	ticket, _, _, err = svc.CompleteGoogle(context.Background(), state, "code")
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp2, err := svc.ExchangeGoogleTicket(context.Background(), ticket)
+	resp2, err := svc.ExchangeGoogleTicket(context.Background(), ticket, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,7 +310,7 @@ func TestGoogleLinksExistingPasswordUser(t *testing.T) {
 		},
 	}
 	svc := googleSvc(t, users, orgs, &memTokens{}, g)
-	_, err := svc.StartGoogle(context.Background(), "login", "")
+	_, err := svc.StartGoogle(context.Background(), "login", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,11 +318,11 @@ func TestGoogleLinksExistingPasswordUser(t *testing.T) {
 	for s := range users.states {
 		state = s
 	}
-	ticket, _, err := svc.CompleteGoogle(context.Background(), state, "code")
+	ticket, _, _, err := svc.CompleteGoogle(context.Background(), state, "code")
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := svc.ExchangeGoogleTicket(context.Background(), ticket)
+	resp, err := svc.ExchangeGoogleTicket(context.Background(), ticket, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +341,7 @@ func TestGoogleLinksExistingPasswordUser(t *testing.T) {
 func TestAbandonGoogleReturnsSignupIntent(t *testing.T) {
 	users := newMemUsers()
 	svc := googleSvc(t, users, &memOrgs{}, &memTokens{}, &fakeGoogle{url: "https://accounts.google.com"})
-	_, err := svc.StartGoogle(context.Background(), "signup", "Acme")
+	_, err := svc.StartGoogle(context.Background(), "signup", "Acme", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,8 +349,9 @@ func TestAbandonGoogleReturnsSignupIntent(t *testing.T) {
 	for s := range users.states {
 		state = s
 	}
-	if got := svc.AbandonGoogle(context.Background(), state); got != "signup" {
-		t.Fatalf("intent %s", got)
+	got, native := svc.AbandonGoogle(context.Background(), state)
+	if got != "signup" || native {
+		t.Fatalf("intent %s native %v", got, native)
 	}
 	if _, ok := users.states[state]; ok {
 		t.Fatal("state should be consumed")
@@ -362,9 +363,37 @@ func TestGoogleInvalidState(t *testing.T) {
 		url:     "https://accounts.google.com",
 		profile: googleauth.Profile{Sub: "x", Email: "a@b.com", EmailVerified: true},
 	})
-	_, _, err := svc.CompleteGoogle(context.Background(), "nope", "code")
+	_, _, _, err := svc.CompleteGoogle(context.Background(), "nope", "code")
 	if err != ErrInvalidGoogleState {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestGoogleNativeStartMarksState(t *testing.T) {
+	users := newMemUsers()
+	svc := googleSvc(t, users, &memOrgs{}, &memTokens{}, &fakeGoogle{
+		url:     "https://accounts.google.com",
+		profile: googleauth.Profile{Sub: "sub-n", Email: "n@example.com", Name: "Nat", EmailVerified: true},
+	})
+	if _, err := svc.StartGoogle(context.Background(), "login", "", true); err != nil {
+		t.Fatal(err)
+	}
+	var state string
+	for s, st := range users.states {
+		state = s
+		if st.Intent != "native_login" {
+			t.Fatalf("intent %s", st.Intent)
+		}
+	}
+	ticket, intent, native, err := svc.CompleteGoogle(context.Background(), state, "code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if intent != "login" || !native || ticket == "" {
+		t.Fatalf("intent=%s native=%v ticket=%q", intent, native, ticket)
+	}
+	if got := NativeGoogleCallbackURL(ticket); !strings.HasPrefix(got, "jobshout://auth/google?ticket=") {
+		t.Fatalf("callback %s", got)
 	}
 }
 
@@ -373,7 +402,7 @@ func TestGoogleNotConfigured(t *testing.T) {
 	if svc.GoogleEnabled() {
 		t.Fatal("expected disabled")
 	}
-	_, err := svc.StartGoogle(context.Background(), "login", "")
+	_, err := svc.StartGoogle(context.Background(), "login", "", false)
 	if err != ErrGoogleAuthNotConfigured {
 		t.Fatalf("got %v", err)
 	}

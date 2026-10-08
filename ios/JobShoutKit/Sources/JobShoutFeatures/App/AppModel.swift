@@ -65,9 +65,15 @@ public final class AppModel {
 
     public func appleEnabled() async -> Bool { await auth.appleEnabled() }
     public func appleNonce() async throws -> String { try await auth.appleNonce() }
+    public func googleEnabled() async -> Bool { await auth.googleEnabled() }
 
     public func signInWithApple(identityToken: String, rawNonce: String, fullName: String?) async throws {
         let s = try await auth.signInWithApple(identityToken: identityToken, rawNonce: rawNonce, fullName: fullName, knownDeviceID: deviceID)
+        try await begin(s)
+    }
+
+    public func signInWithGoogle(ticket: String) async throws {
+        let s = try await auth.completeGoogle(ticket: ticket, knownDeviceID: await session.current?.deviceID ?? deviceID)
         try await begin(s)
     }
 
