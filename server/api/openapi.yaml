@@ -340,6 +340,26 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Task' }
         '404': { $ref: '#/components/responses/Error' }
+  /tasks/{taskID}/transition:
+    patch:
+      operationId: transitionTask
+      tags: [work]
+      description: Move a task between board columns (backlog → done).
+      parameters:
+        - $ref: '#/components/parameters/TaskID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TransitionTaskRequest' }
+      responses:
+        '200':
+          description: Updated task
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
   /tasks/{taskID}/runs:
     get:
       operationId: listTaskRuns
@@ -687,6 +707,11 @@ components:
     TaskStatus:
       type: string
       enum: [backlog, todo, in_progress, review, done]
+    TransitionTaskRequest:
+      type: object
+      required: [status]
+      properties:
+        status: { $ref: '#/components/schemas/TaskStatus' }
     Task:
       type: object
       required: [id, project_id, title, status, priority, created_at, updated_at]

@@ -55,17 +55,41 @@ ad-hoc signing is enough: `CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual`.
 An unsigned build (`CODE_SIGNING_ALLOWED=NO`) has no Keychain access, so
 sign-in fails with "Couldn't store your sign-in securely".
 
-**Against a local server:** debug builds honour `JOBSHOUT_ENVIRONMENT=local`
+**Default API for Debug is int** (`https://int.jobshout.co.uk/api/v1`). Open
+the `JobShout`, `JobShoutMac`, or `JobShoutWatch` scheme, set your team, Run.
+Sign in with **email/password** against an int account — Sign in with Apple is
+not enabled on int (`GET /auth/apple/status` → `enabled: false`). The footer
+on the sign-in screen should say "Connected to Integration."
+
+```sh
+brew install xcodegen
+cd ios && xcodegen generate && open JobShout.xcodeproj
+# Xcode → scheme JobShoutMac (or JobShout) → Run
+# Sign in with your int.jobshout.co.uk email/password
+```
+
+CLI smoke (Mac, no signing team needed for a compile-only check):
+
+```sh
+cd ios && xcodegen generate
+xcodebuild build -project JobShout.xcodeproj -scheme JobShoutMac -configuration Debug \
+  -destination 'generic/platform=macOS' -skipPackagePluginValidation \
+  CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=
+```
+
+**Against a local server:** override with `JOBSHOUT_ENVIRONMENT=local`
 (and `JOBSHOUT_LOCAL_PORT`, default 8190):
 
 ```sh
 SIMCTL_CHILD_JOBSHOUT_ENVIRONMENT=local SIMCTL_CHILD_JOBSHOUT_LOCAL_PORT=8190 \
   xcrun simctl launch booted com.jobshout.app.dev
+# Mac: Product → Scheme → Edit Scheme → Run → Arguments → Environment Variables
+#   JOBSHOUT_ENVIRONMENT=local
 ```
 
-**Sign in with Apple** needs every bundle id above in the ring's
-`APPLE_CLIENT_IDS` (Helm `apple.clientIds`) and the capability on each App ID.
-Shared sessions use the Keychain access group `com.jobshout.shared`.
+**Sign in with Apple** (Staging/Release rings) needs every bundle id above in
+the ring's `APPLE_CLIENT_IDS` (Helm `apple.clientIds`) and the capability on
+each App ID. Shared sessions use the Keychain access group `com.jobshout.shared`.
 
 ## Test
 
