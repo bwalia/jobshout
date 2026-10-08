@@ -110,6 +110,7 @@ targets:
         product: JobShoutFeatures
     settings:
       base:
+        PRODUCT_NAME: JobShout
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         COMBINE_HIDPI_IMAGES: YES
@@ -124,6 +125,7 @@ targets:
       path: Mac/App/Info.plist
       properties:
         CFBundleDisplayName: JobShout
+        CFBundleName: JobShout
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         JobShoutEnvironment: $(JOBSHOUT_ENVIRONMENT)
@@ -194,6 +196,18 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: com.jobshout.app.uitests
 
+  JobShoutMacUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - MacUITests
+    dependencies:
+      - target: JobShoutMac
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.jobshout.mac.uitests
+
 schemes:
   JobShout:
     build:
@@ -219,8 +233,13 @@ schemes:
     build:
       targets:
         JobShoutMac: all
+        JobShoutMacUITests: [test]
     run:
       config: Debug
+    test:
+      config: Debug
+      targets:
+        - JobShoutMacUITests
     archive:
       config: Release
   JobShoutWatch:

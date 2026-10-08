@@ -11,27 +11,41 @@ struct MacShellView: View {
         NavigationSplitView {
             List(selection: $selection) {
                 Section {
-                    Label("Home", systemImage: "house").tag(MacDestination.home)
+                    Label("Home", systemImage: "house")
+                        .tag(MacDestination.home)
+                        .accessibilityIdentifier("sidebar-home")
                 }
                 Section("Work") {
-                    Label("Tasks", systemImage: "square.stack.3d.up").tag(MacDestination.tasks)
-                    Label("Board", systemImage: "rectangle.split.3x1").tag(MacDestination.board)
+                    Label("Tasks", systemImage: "square.stack.3d.up")
+                        .tag(MacDestination.tasks)
+                        .accessibilityIdentifier("sidebar-tasks")
+                    Label("Board", systemImage: "rectangle.split.3x1")
+                        .tag(MacDestination.board)
+                        .accessibilityIdentifier("sidebar-board")
                 }
                 Section("Agents") {
-                    Label("All agents", systemImage: "sparkles").tag(MacDestination.agents)
+                    Label("All agents", systemImage: "sparkles")
+                        .tag(MacDestination.agents)
+                        .accessibilityIdentifier("sidebar-agents")
                 }
                 Section("Automation") {
-                    Label("Schedules", systemImage: "clock").tag(MacDestination.schedules)
+                    Label("Schedules", systemImage: "clock")
+                        .tag(MacDestination.schedules)
+                        .accessibilityIdentifier("sidebar-schedules")
                 }
                 Section {
                     Label("Approvals", systemImage: "checkmark.shield")
                         .badge(app.pendingApprovals)
                         .tag(MacDestination.approvals)
-                    Label("Settings", systemImage: "gearshape").tag(MacDestination.settings)
+                        .accessibilityIdentifier("sidebar-approvals")
+                    Label("Settings", systemImage: "gearshape")
+                        .tag(MacDestination.settings)
+                        .accessibilityIdentifier("sidebar-settings")
                 }
             }
             .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 280)
             .listStyle(.sidebar)
+            .accessibilityIdentifier("mac-sidebar")
         } detail: {
             NavigationStack {
                 Group {

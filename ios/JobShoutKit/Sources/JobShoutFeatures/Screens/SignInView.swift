@@ -113,6 +113,7 @@ struct SignInView: View {
                     .accessibilityIdentifier("submit")
                 } footer: {
                     Text("Connected to \(app.environment.displayName).")
+                        .accessibilityIdentifier("connected-env")
                 }
             }
             .task { await prepareProviders() }
