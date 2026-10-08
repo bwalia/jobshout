@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JobShout Brand</title>
+<link rel="icon" href="logo-glyph-small.svg" type="image/svg+xml">
+<style>
+  @font-face { font-family: "Unbounded"; src: url("fonts/Unbounded-Variable.ttf") format("truetype"); font-weight: 200 900; }
+  :root {
+    --fuchsia: #E0218A; --rose: #FF3D6E; --amber: #FF9A3C; --live: #FFC23D; --raspberry: #CC3A63;
+    --plum: #1A0F18; --ink: #1C1714; --cream: #FFF7EB; --beige: #F9F0E0; --sage: #A2AB73;
+    --shout: linear-gradient(135deg, #E0218A 0%, #FF3D6E 50%, #FF9A3C 100%);
+    --bg: var(--beige); --fg: var(--ink); --muted: #6B5F55; --card: var(--cream); --line: #E8DCC6;
+    --do: #5E6B2A; --dont: #B3264E;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #140C12; --fg: #F6EEE4; --muted: #B5A69C; --card: #21151E; --line: #36242F; --do: #C3CC8F; --dont: #FF7FA0; }
+  }
+  :root[data-theme="dark"] { --bg: #140C12; --fg: #F6EEE4; --muted: #B5A69C; --card: #21151E; --line: #36242F; --do: #C3CC8F; --dont: #FF7FA0; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .display { font-family: "Unbounded", system-ui, sans-serif; }
+  main { max-width: 1080px; margin: 0 auto; padding: 0 16px 96px; }
+  .hero { position: relative; overflow: hidden; background: var(--plum); color: var(--cream); padding: 88px 16px 76px; }
+  .hero::before { content: ""; position: absolute; inset: -50% auto auto -15%; width: 70%; height: 150%;
+    background: radial-gradient(closest-side, rgba(224,33,138,.42), transparent); pointer-events: none; }
+  .hero::after { content: ""; position: absolute; inset: auto -10% -60% auto; width: 60%; height: 130%;
+    background: radial-gradient(closest-side, rgba(255,154,60,.22), transparent); pointer-events: none; }
+  .hero .inner { position: relative; z-index: 1; max-width: 1080px; margin: 0 auto; display: grid; grid-template-columns: 1fr auto; gap: 48px; align-items: center; }
+  .hero h1 { font-family: "Unbounded", system-ui, sans-serif; font-size: clamp(40px, 7vw, 80px); line-height: 1.02; letter-spacing: -0.03em; margin: 0 0 20px; font-weight: 700; }
+  .hero h1 span { background: var(--shout); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .hero p { font-size: 20px; color: #D9C9C4; margin: 0; max-width: 36ch; }
+  .hero img { width: min(300px, 40vw); filter: drop-shadow(0 30px 60px rgba(0,0,0,.5)); }
+  h2 { font-family: "Unbounded", system-ui, sans-serif; font-size: 26px; letter-spacing: -0.02em; margin: 72px 0 8px; font-weight: 700; }
+  h2 + p.lead { color: var(--muted); margin: 0 0 28px; max-width: 64ch; }
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+  .tile { border-radius: 18px; display: grid; place-items: center; padding: 28px; min-height: 200px; border: 1px solid var(--line); }
+  .tile.light { background: var(--cream); } .tile.dark { background: var(--plum); } .tile.shout { background: var(--shout); color: #fff; }
+  .tile img { max-width: 100%; max-height: 120px; }
+  .tile.shout img { filter: brightness(0) invert(1); }
+  .caption { font-size: 13px; color: var(--muted); margin-top: 8px; }
+  .swatch { border-radius: 18px; overflow: hidden; border: 1px solid var(--line); background: var(--card); }
+  .swatch .chip { height: 96px; }
+  .swatch .meta { padding: 12px 14px; font-size: 14px; }
+  .swatch .meta b { display: block; font-size: 15px; }
+  code, .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; }
+  .gradient-bar { height: 120px; border-radius: 18px; background: var(--shout); display: flex; align-items: flex-end; padding: 16px; color: #fff; font-weight: 700; }
+  .type-sample .big { font-family: "Unbounded", system-ui, sans-serif; font-size: clamp(34px, 6vw, 52px); font-weight: 700; letter-spacing: -0.03em; line-height: 1.08; }
+  .type-sample .mid { font-family: "Unbounded", system-ui, sans-serif; font-size: 22px; font-weight: 500; margin-top: 10px; }
+  .type-sample .body { color: var(--muted); margin-top: 10px; max-width: 60ch; }
+  .sizes { display: flex; gap: 28px; align-items: flex-end; flex-wrap: wrap; }
+  .sizes figure { margin: 0; text-align: center; } .sizes figcaption { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .table-wrap { overflow-x: auto; border-radius: 18px; border: 1px solid var(--line); }
+  table { width: 100%; border-collapse: collapse; background: var(--card); }
+  td, th { text-align: left; padding: 14px 16px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 13px; color: var(--muted); font-weight: 600; }
+  tr:last-child td { border-bottom: none; }
+  .do { color: var(--do); } .dont { color: var(--dont); }
+  .anatomy { display: grid; grid-template-columns: 260px 1fr; gap: 28px; align-items: center; background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 24px; }
+  .anatomy ol { margin: 0; padding-left: 20px; } .anatomy li { margin: 6px 0; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+  footer { color: var(--muted); font-size: 13px; margin-top: 72px; }
+  @media (max-width: 700px) {
+    .hero .inner { grid-template-columns: 1fr; } .hero img { width: 160px; }
+    .anatomy { grid-template-columns: 1fr; } .anatomy img { max-width: 200px; margin: 0 auto; }
+  }
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="inner">
+    <div>
+      <h1>Say it.<br><span>Your agents ship it.</span></h1>
+      <p>JobShout is mission control for AI teams. You say what needs doing; a team of agents plans it, runs it and reports back.</p>
+    </div>
+    <img src="png/icon-mac-1024.png" alt="The JobShout app icon: the Shout wheel on a plum field">
+  </div>
+</header>
+<main>
+  <h2>The Shout wheel</h2>
+  <p class="lead">A hub (you) broadcasting to a team of agents. Four long spokes reach the orbit and four short ones sit inside it, so the wheel has a beat. The top-right agent is live.</p>
+  <div class="anatomy">
+    <img src="logo-glyph.svg" alt="The Shout wheel" width="260" height="260">
+    <ol>
+      <li><b>Hub with a cream core</b>: you, the one giving the instruction.</li>
+      <li><b>Four long spokes</b>: the lead agents, out on the orbit.</li>
+      <li><b>Four short spokes</b>: specialists working closer in.</li>
+      <li><b>The orbit</b>, broken at each lead so it never cuts through a node: the team.</li>
+      <li><span class="dot" style="background:var(--live)"></span><b>The live agent</b>, amber with a halo, always top right: something is running.</li>
+    </ol>
+  </div>
+
+  <h2>Logo</h2>
+  <p class="lead">The lockup is the default. Use the wheel alone where the name is already nearby, and the one-colour mark on photos or in print.</p>
+  <div class="grid">
+    <div><div class="tile light"><img src="lockup.svg" alt="JobShout lockup on cream"></div><div class="caption"><code>lockup.svg</code></div></div>
+    <div><div class="tile dark"><img src="lockup-on-dark.svg" alt="JobShout lockup on plum"></div><div class="caption"><code>lockup-on-dark.svg</code></div></div>
+    <div><div class="tile light"><img src="logo-glyph.svg" alt="The wheel"></div><div class="caption"><code>logo-glyph.svg</code></div></div>
+    <div><div class="tile shout"><img src="logo-mono.svg" alt="One-colour wheel on the Shout gradient"></div><div class="caption"><code>logo-mono.svg</code> (currentColor)</div></div>
+    <div><div class="tile light"><img src="wordmark.svg" alt="JobShout wordmark"></div><div class="caption"><code>wordmark.svg</code></div></div>
+    <div><div class="tile dark"><img src="wordmark-on-dark.svg" alt="JobShout wordmark on plum"></div><div class="caption"><code>wordmark-on-dark.svg</code></div></div>
+  </div>
+
+  <h2>App icons</h2>
+  <p class="lead">JobShout.app ships two masters. The Mac icon has the rounded-square body, rim and shadow baked in; the iPhone, iPad and Watch icon is full-bleed and the system masks it. Under 32 px the Mac uses a four-spoke wheel.</p>
+  <div class="grid">
+    <div><div class="tile dark" style="background:#2A2226"><img src="png/icon-mac-1024.png" alt="Mac app icon" style="max-height:180px"></div><div class="caption"><code>logo-icon.svg</code> (Mac)</div></div>
+    <div><div class="tile dark" style="background:#2A2226"><img src="png/icon-ios-1024.png" alt="iPhone app icon" style="max-height:170px;border-radius:22.5%"></div><div class="caption"><code>logo-icon-ios.svg</code> (shown with the iOS mask)</div></div>
+    <div><div class="tile dark" style="background:#2A2226"><img src="png/icon-mac-small-1024.png" alt="Small Mac app icon" style="max-height:180px"></div><div class="caption"><code>logo-icon-small.svg</code> (16–32 px)</div></div>
+  </div>
+
+  <h2>Sizes</h2>
+  <p class="lead">The full wheel holds up to 32 px. Below that, the simplified wheel drops the orbit and short spokes.</p>
+  <div class="sizes">
+    <figure><img src="logo-glyph-small.svg" width="16" height="16" alt=""><figcaption>16 · small</figcaption></figure>
+    <figure><img src="logo-glyph-small.svg" width="24" height="24" alt=""><figcaption>24 · small</figcaption></figure>
+    <figure><img src="logo-glyph.svg" width="32" height="32" alt=""><figcaption>32</figcaption></figure>
+    <figure><img src="logo-glyph.svg" width="48" height="48" alt=""><figcaption>48</figcaption></figure>
+    <figure><img src="logo-glyph.svg" width="96" height="96" alt=""><figcaption>96</figcaption></figure>
+    <figure><img src="png/icon-mac-1024.png" width="128" height="128" alt=""><figcaption>128 · icon</figcaption></figure>
+  </div>
+
+  <h2>Colour</h2>
+  <p class="lead">The Shout gradient is for the mark, the "Shout" in the wordmark and hero moments, never for body text. Amber means live and nothing else.</p>
+  <div class="gradient-bar">Shout · 135° · #E0218A → #FF3D6E → #FF9A3C</div>
+  <div class="grid" style="margin-top:16px">
+    <div class="swatch"><div class="chip" style="background:#E0218A"></div><div class="meta"><b>Fuchsia</b><span class="mono">#E0218A</span> · gradient start</div></div>
+    <div class="swatch"><div class="chip" style="background:#FF3D6E"></div><div class="meta"><b>Rose</b><span class="mono">#FF3D6E</span> · the mark's core</div></div>
+    <div class="swatch"><div class="chip" style="background:#FF9A3C"></div><div class="meta"><b>Amber</b><span class="mono">#FF9A3C</span> · gradient end</div></div>
+    <div class="swatch"><div class="chip" style="background:#FFC23D"></div><div class="meta"><b>Live</b><span class="mono">#FFC23D</span> · running agents only</div></div>
+    <div class="swatch"><div class="chip" style="background:#CC3A63"></div><div class="meta"><b>Raspberry</b><span class="mono">#CC3A63</span> · UI primary</div></div>
+    <div class="swatch"><div class="chip" style="background:#1A0F18"></div><div class="meta"><b>Plum</b><span class="mono">#1A0F18</span> · icon field, dark heroes</div></div>
+    <div class="swatch"><div class="chip" style="background:#1C1714"></div><div class="meta"><b>Ink</b><span class="mono">#1C1714</span> · text on light</div></div>
+    <div class="swatch"><div class="chip" style="background:#FFF7EB;border-bottom:1px solid var(--line)"></div><div class="meta"><b>Cream</b><span class="mono">#FFF7EB</span> · cards, text on colour</div></div>
+    <div class="swatch"><div class="chip" style="background:#F9F0E0;border-bottom:1px solid var(--line)"></div><div class="meta"><b>Beige</b><span class="mono">#F9F0E0</span> · page ground</div></div>
+    <div class="swatch"><div class="chip" style="background:#A2AB73"></div><div class="meta"><b>Sage</b><span class="mono">#A2AB73</span> · success / done</div></div>
+  </div>
+
+  <h2>Type</h2>
+  <p class="lead">Unbounded for display and the wordmark, Poppins for UI and body, JetBrains Mono for logs and run output.</p>
+  <div class="type-sample">
+    <div class="big">Research done. Draft ready.</div>
+    <div class="mid">Three agents, one brief, 26 minutes.</div>
+    <div class="body">Body text sits in the UI font at 16 px. Keep sentences short and say what happened, then what's next.</div>
+  </div>
+
+  <h2>Voice</h2>
+  <p class="lead">Plain, confident, warm. Say what happened and what's next.</p>
+  <div class="table-wrap">
+    <table>
+      <tr><th>Do</th><th>Don't</th></tr>
+      <tr><td class="do">"Research done. 12 sources, 3 worth reading."</td><td class="dont">"Your amazing research has been successfully completed!"</td></tr>
+      <tr><td class="do">"The writer agent is waiting on your approval."</td><td class="dont">"Error: approval_required (code 412)."</td></tr>
+      <tr><td class="do">"Drafted the article. Want it shorter?"</td><td class="dont">"As an AI, I have generated content for you."</td></tr>
+    </table>
+  </div>
+
+  <footer>Generated assets come from <code>docs/brand/tools/build-brand.py</code>. Rules and file list: <code>docs/brand/BRAND.md</code>.</footer>
+</main>
+</body>
+</html>

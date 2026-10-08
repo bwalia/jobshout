@@ -1,43 +1,24 @@
-# JobShout brand
+# JobShout brand (Apple)
 
-Evolved from the original magenta “wheel”: **eight** spokes (not sixteen), thicker tapered rays, soft broadcast ring, dark field for Dock contrast.
-
-## Mark
-
-**Broadcast burst** — hub + tapered spokes + terminal nodes. Reads as network pulse / shout from a centre.
-
-## Palette
-
-| Token | Hex | Use |
-|---|---|---|
-| Ink | `#0A0C10` → `#1C2028` | Icon field (radial) |
-| Rose | `#FF2B6B` | Primary mark & UI accent |
-| Rose soft | `#FF5C91` | Dark-mode accent / highlight |
-| Near black | `#111111` | Wordmark on light |
-| Paper | `#FFFFFF` | Light surfaces |
-
-## Wordmark
-
-**JobShout** (capital J and S). On Apple platforms prefer SF Pro Display Bold.
-
-## Files
+The brand lives in [`docs/brand/`](../../docs/brand/BRAND.md): the Shout wheel,
+palette, type and voice. This folder holds the Apple masters it generates.
 
 | File | Purpose |
 |---|---|
-| `AppIcon-1024.png` | App Store / asset-catalog master (full-bleed square, no mask) |
-| `Mark.svg` | Vector source |
-| `Mark-rose-transparent.png` | Overlays |
-| `DockPreview-squircle.png` | Docs / marketing only (Apple applies the real mask) |
-| `Wordmark-light.png` / `Wordmark-dark.png` | Lockups |
+| `AppIcon-1024.png` | iPhone, iPad and Watch master: full-bleed, opaque, no corners (the system masks it) |
+| `AppIcon-mac-1024.png` | Mac master: 824 px rounded-square body with rim and shadow on a 1024 canvas |
+| `Lockup-light.png` / `Lockup-dark.png` | Wheel + wordmark, for App Store and marketing artwork |
+| `APP_STORE.md` | Mac App Store packaging notes |
 
-Regenerate masters:
+The Mac asset catalog also carries `AppIcon-small.png` (four spokes, no orbit)
+for the 16 and 32 px slots, where the full wheel turns to mush.
+
+Regenerate everything, including these files and the asset catalogs:
 
 ```sh
-python3 ios/Brand/generate_icon.py
+python3 -m pip install fonttools pillow && brew install librsvg   # once
+python3 docs/brand/tools/build-brand.py
 ```
 
-## App icon rules (Apple)
-
-- Ship **full-bleed** 1024×1024 RGB (no rounded corners, no transparency).
-- Keep the mark optically centred with ~12% padding.
-- Same master for iPhone, iPad, Mac, Watch asset catalogs.
+For Liquid Glass (macOS 26 / iOS 26), build an `AppIcon.icon` in Icon Composer
+from `docs/brand/icon-layers/`.

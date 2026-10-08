@@ -1,6 +1,6 @@
-import { Zap } from "lucide-react";
 import { BetaBanner } from "@/components/layout/BetaBanner";
 import { LoginBrand } from "@/components/layout/LoginBrand";
+import { BrandLockup } from "@/components/brand/BrandMark";
 
 export default function AuthLayout({
   children,
@@ -15,13 +15,8 @@ export default function AuthLayout({
 
         <div className="flex flex-1 flex-col items-center justify-center px-6 py-12">
           <div className="w-full max-w-md">
-            <div className="mb-8 flex items-center justify-center gap-2.5 lg:hidden">
-              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                <Zap className="h-5 w-5" />
-              </span>
-              <span className="text-lg font-semibold tracking-tight text-foreground">
-                Jobshout
-              </span>
+            <div className="mb-8 flex justify-center lg:hidden">
+              <BrandLockup />
             </div>
             {children}
           </div>
