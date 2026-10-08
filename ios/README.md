@@ -3,6 +3,9 @@
 Native SwiftUI clients for the JobShout platform (iPhone/iPad, Mac, Watch).
 Plan and scope: [`docs/plans/08-ios-app.md`](../docs/plans/08-ios-app.md).
 
+Brand masters (icon, wordmark, App Store notes): [`Brand/`](Brand/).
+Mac shipping target builds as **JobShout.app** (scheme `JobShoutMac`).
+
 The iPhone app covers the core loop: sign in (Sign in with Apple or email),
 browse agents, **call an agent** with its server-defined launch form, watch
 the work live, and **approve or reject** what agents ask to do. Mac and Watch
