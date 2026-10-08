@@ -62,7 +62,11 @@ jobs:
             -project JobShout.xcodeproj -scheme JobShoutMac -configuration Debug \
             -destination 'generic/platform=macOS' \
             -skipPackagePluginValidation \
-            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=
+            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= \
+            CODE_SIGNING_ALLOWED=NO
+
+      # Mac XCUITests need a Development Team; unsigned runners are rejected by
+      # Gatekeeper ("damaged"). Run JobShoutMacUITests locally in Xcode instead.
 
       - name: Build Watch (simulator)
         working-directory: ios

@@ -96,7 +96,12 @@ each App ID. Shared sessions use the Keychain access group `com.jobshout.shared`
 
 ```sh
 cd ios/JobShoutKit && swift test            # unit tests, macOS, no simulator
+./scripts/test-mac.sh                       # build JobShoutMac (ad-hoc compile check)
 ```
+
+Mac UI tests (`JobShoutMacUITests`) need your Apple team: open the project in
+Xcode, set the team on **JobShoutMac**, Product → Test. Do not run them with
+`CODE_SIGNING_ALLOWED=NO` — Gatekeeper reports the runner as “damaged”.
 
 The UI test signs in and walks Home → Agents → Call agent → Work → task →
 Approvals → Me against a real server. It skips unless given an account:
