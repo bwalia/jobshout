@@ -28,5 +28,5 @@ export async function updateOrgChart(
   orgId: string,
   entries: OrgChartEntry[]
 ): Promise<void> {
-  await apiClient.put(`/organizations/${orgId}/chart`, { entries });
+  await apiClient.put(`/organizations/${orgId}/chart`, { agents: entries });
 }
