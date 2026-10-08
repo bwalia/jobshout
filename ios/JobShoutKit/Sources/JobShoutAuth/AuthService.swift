@@ -39,6 +39,21 @@ public struct AuthService: Sendable {
         return (try? ok.body.json.enabled) ?? false
     }
 
+    public func googleEnabled() async -> Bool {
+        guard case .ok(let ok) = try? await client.googleStatus() else { return false }
+        return (try? ok.body.json.enabled) ?? false
+    }
+
+    public func completeGoogle(ticket: String, knownDeviceID: String?) async throws -> StoredSession {
+        let out = try await client.completeGoogle(body: .json(.init(
+            ticket: ticket, device: device.info(knownID: knownDeviceID))))
+        switch out {
+        case .ok(let ok): return try Self.session(from: ok.body.json)
+        case .unauthorized(let r): throw APIError.server(401, try? r.body.json)
+        case .undocumented(let status, _): throw APIError.undocumented(status)
+        }
+    }
+
     /// A one-time nonce from the server. Give Apple `AppleNonce.hash(raw)`.
     public func appleNonce() async throws -> String {
         switch try await client.appleNonce() {

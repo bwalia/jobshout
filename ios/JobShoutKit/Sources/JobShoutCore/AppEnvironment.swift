@@ -21,6 +21,20 @@ public enum AppEnvironment: String, CaseIterable, Sendable, Codable {
     public var apiBaseURL: URL { URL(string: "\(self == .local ? "http" : "https")://\(host)/api/v1")! }
     public var liveEventsURL: URL { URL(string: "\(self == .local ? "ws" : "wss")://\(host)/api/v1/ws")! }
 
+    /// Google OAuth start URL for native apps (`native=1` → `jobshout://` finish).
+    public func googleStartURL(intent: String = "login", orgName: String? = nil) -> URL {
+        var comps = URLComponents(url: apiBaseURL.appending(path: "auth/google/start"), resolvingAgainstBaseURL: false)!
+        var items = [
+            URLQueryItem(name: "intent", value: intent),
+            URLQueryItem(name: "native", value: "1"),
+        ]
+        if let orgName, !orgName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            items.append(URLQueryItem(name: "org_name", value: orgName))
+        }
+        comps.queryItems = items
+        return comps.url!
+    }
+
     public var displayName: String {
         switch self {
         case .int: "Integration"

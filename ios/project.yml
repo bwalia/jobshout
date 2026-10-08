@@ -89,6 +89,9 @@ targets:
         NSFaceIDUsageDescription: Confirm it's you before approving an agent's action.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+        CFBundleURLTypes:
+          - CFBundleURLName: com.jobshout.oauth
+            CFBundleURLSchemes: [jobshout]
     entitlements:
       path: App/JobShout.entitlements
       properties:
@@ -129,6 +132,9 @@ targets:
         LSMinimumSystemVersion: "15.0"
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+        CFBundleURLTypes:
+          - CFBundleURLName: com.jobshout.oauth
+            CFBundleURLSchemes: [jobshout]
     entitlements:
       path: Mac/App/JobShoutMac.entitlements
       properties:

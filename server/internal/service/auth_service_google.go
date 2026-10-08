@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -17,15 +18,19 @@ import (
 	"github.com/jobshout/server/internal/model"
 )
 
+// NativeGoogleRedirectScheme is the URL scheme ASWebAuthenticationSession
+// waits for after Google OAuth when start was called with native=1.
+const NativeGoogleRedirectScheme = "jobshout"
+
 func (s *authService) GoogleEnabled() bool {
 	return s.google != nil && s.googleCfg.Configured()
 }
 
-func (s *authService) StartGoogle(ctx context.Context, intent, orgName string) (string, error) {
+func (s *authService) StartGoogle(ctx context.Context, intent, orgName string, native bool) (string, error) {
 	if !s.GoogleEnabled() {
 		return "", ErrGoogleAuthNotConfigured
 	}
-	intent = normalizeGoogleIntent(intent)
+	intent = encodeGoogleIntent(intent, native)
 	orgName = clipString(strings.TrimSpace(orgName), 255)
 
 	buf := make([]byte, 16)
@@ -47,47 +52,47 @@ func (s *authService) StartGoogle(ctx context.Context, intent, orgName string) (
 
 // AbandonGoogle consumes CSRF state after Google returns an error so a later
 // retry cannot reuse it, and so the UI can send the user back to signup vs login.
-func (s *authService) AbandonGoogle(ctx context.Context, state string) string {
+func (s *authService) AbandonGoogle(ctx context.Context, state string) (intent string, native bool) {
 	if strings.TrimSpace(state) == "" {
-		return "login"
+		return "login", false
 	}
 	st, err := s.userRepo.ConsumeGoogleOAuthState(ctx, state)
 	if err != nil || st == nil {
-		return "login"
+		return "login", false
 	}
-	return normalizeGoogleIntent(st.Intent)
+	return decodeGoogleIntent(st.Intent)
 }
 
-func (s *authService) CompleteGoogle(ctx context.Context, state, code string) (ticket, intent string, err error) {
+func (s *authService) CompleteGoogle(ctx context.Context, state, code string) (ticket, intent string, native bool, err error) {
 	if !s.GoogleEnabled() {
-		return "", "login", ErrGoogleAuthNotConfigured
+		return "", "login", false, ErrGoogleAuthNotConfigured
 	}
 	st, err := s.userRepo.ConsumeGoogleOAuthState(ctx, state)
 	if err != nil {
-		return "", "login", err
+		return "", "login", false, err
 	}
 	if st == nil {
-		return "", "login", ErrInvalidGoogleState
+		return "", "login", false, ErrInvalidGoogleState
 	}
-	intent = normalizeGoogleIntent(st.Intent)
+	intent, native = decodeGoogleIntent(st.Intent)
 
 	profile, err := s.google.ProfileFromCode(ctx, code)
 	if err != nil {
 		if errors.Is(err, googleauth.ErrEmailNotVerified) {
-			return "", intent, ErrGoogleEmailNotVerified
+			return "", intent, native, ErrGoogleEmailNotVerified
 		}
 		s.logger.Warn("google oauth: profile exchange failed", zap.Error(err))
-		return "", intent, fmt.Errorf("google sign-in failed")
+		return "", intent, native, fmt.Errorf("google sign-in failed")
 	}
 
 	user, err := s.userFromGoogleProfile(ctx, profile, st.OrgName)
 	if err != nil {
-		return "", intent, err
+		return "", intent, native, err
 	}
 
 	tbuf := make([]byte, 32)
 	if _, err := rand.Read(tbuf); err != nil {
-		return "", intent, fmt.Errorf("google oauth ticket: %w", err)
+		return "", intent, native, fmt.Errorf("google oauth ticket: %w", err)
 	}
 	ticket = hex.EncodeToString(tbuf)
 	if err := s.userRepo.PutGoogleOAuthTicket(ctx, &model.GoogleOAuthTicket{
@@ -95,12 +100,12 @@ func (s *authService) CompleteGoogle(ctx context.Context, state, code string) (t
 		UserID:    user.ID,
 		ExpiresAt: time.Now().Add(2 * time.Minute),
 	}); err != nil {
-		return "", intent, err
+		return "", intent, native, err
 	}
-	return ticket, intent, nil
+	return ticket, intent, native, nil
 }
 
-func (s *authService) ExchangeGoogleTicket(ctx context.Context, ticket string) (*model.AuthResponse, error) {
+func (s *authService) ExchangeGoogleTicket(ctx context.Context, ticket string, device *model.DeviceInfo) (*model.AuthResponse, error) {
 	if strings.TrimSpace(ticket) == "" {
 		return nil, ErrInvalidGoogleTicket
 	}
@@ -117,6 +122,9 @@ func (s *authService) ExchangeGoogleTicket(ctx context.Context, ticket string) (
 	}
 	if user == nil {
 		return nil, ErrUserNotFound
+	}
+	if device != nil {
+		return s.authResponseForDevice(ctx, user, device)
 	}
 	return s.generateAuthResponse(ctx, user)
 }
@@ -237,6 +245,35 @@ func normalizeGoogleIntent(intent string) string {
 		return "signup"
 	}
 	return "login"
+}
+
+const nativeGoogleIntentPrefix = "native_"
+
+func encodeGoogleIntent(intent string, native bool) string {
+	base := normalizeGoogleIntent(intent)
+	if native {
+		return nativeGoogleIntentPrefix + base
+	}
+	return base
+}
+
+func decodeGoogleIntent(raw string) (intent string, native bool) {
+	raw = strings.TrimSpace(raw)
+	if strings.HasPrefix(raw, nativeGoogleIntentPrefix) {
+		return normalizeGoogleIntent(strings.TrimPrefix(raw, nativeGoogleIntentPrefix)), true
+	}
+	return normalizeGoogleIntent(raw), false
+}
+
+// NativeGoogleCallbackURL is the final hop after a successful native Google
+// sign-in. ASWebAuthenticationSession completes when this scheme loads.
+func NativeGoogleCallbackURL(ticket string) string {
+	return NativeGoogleRedirectScheme + "://auth/google?ticket=" + url.QueryEscape(ticket)
+}
+
+// NativeGoogleErrorURL is the final hop when native Google sign-in fails.
+func NativeGoogleErrorURL(code string) string {
+	return NativeGoogleRedirectScheme + "://auth/google?error=" + url.QueryEscape(code)
 }
 
 func clipString(s string, max int) string {
