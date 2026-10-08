@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="JobShout">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="45%" r="70%">
+      <stop offset="0%" stop-color="#1C2028"/>
+      <stop offset="100%" stop-color="#0A0C10"/>
+    </radialGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <g fill="#FF2B6B" transform="translate(512 512)">
+    <circle r="430" fill="none" stroke="#FF2B6B" stroke-opacity="0.22" stroke-width="8"/>
+    <circle r="92"/>
+    <g transform="rotate(-90)">
+      <path d="M-12,-108 L12,-108 L7,-330 L-7,-330 Z"/>
+      <circle cy="-372" r="58"/>
+    </g>
+    <g transform="rotate(-45)">
+      <path d="M-12,-108 L12,-108 L7,-330 L-7,-330 Z"/>
+      <circle cy="-372" r="58"/>
+    </g>
+    <g transform="rotate(0)">
+      <path d="M-12,-108 L12,-108 L7,-330 L-7,-330 Z"/>
+      <circle cy="-372" r="58"/>
+    </g>
+    <g transform="rotate(45)">
+      <path d="M-12,-108 L12,-108 L7,-330 L-7,-330 Z"/>
+      <circle cy="-372" r="58"/>
+    </g>
+    <g transform="rotate(90)">
+      <path d="M-12,-108 L12,-108 L7,-330 L-7,-330 Z"/>
+      <circle cy="-372" r="58"/>
+    </g>
+    <g transform="rotate(135)">
+      <path d="M-12,-108 L12,-108 L7,-330 L-7,-330 Z"/>
+      <circle cy="-372" r="58"/>
+    </g>
+    <g transform="rotate(180)">
+      <path d="M-12,-108 L12,-108 L7,-330 L-7,-330 Z"/>
+      <circle cy="-372" r="58"/>
+    </g>
+    <g transform="rotate(225)">
+      <path d="M-12,-108 L12,-108 L7,-330 L-7,-330 Z"/>
+      <circle cy="-372" r="58"/>
+    </g>
+    <circle r="32" fill="#FF5C91" fill-opacity="0.85" cy="-12"/>
+  </g>
+</svg>
