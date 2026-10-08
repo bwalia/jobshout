@@ -5,12 +5,14 @@ options:
   bundleIdPrefix: com.jobshout
   deploymentTarget:
     iOS: "18.0"
+    macOS: "15.0"
+    watchOS: "11.0"
   createIntermediateGroups: true
   defaultConfig: Debug
 
-# Debug talks to int, Staging to acc, Release to prod. Each has its own bundle
-# id so all three install side by side; every one must be listed in the
-# ring's APPLE_CLIENT_IDS for Sign in with Apple to accept its tokens.
+# Debug talks to int, Staging to acc, Release to prod. Each platform × config
+# has its own bundle id so installs sit side by side; every one must be listed
+# in the ring's APPLE_CLIENT_IDS for Sign in with Apple.
 configs:
   Debug: debug
   Staging: release
@@ -29,15 +31,12 @@ settings:
   configs:
     Debug:
       JOBSHOUT_ENVIRONMENT: int
-      PRODUCT_BUNDLE_IDENTIFIER: com.jobshout.app.dev
       APS_ENVIRONMENT: development
     Staging:
       JOBSHOUT_ENVIRONMENT: acc
-      PRODUCT_BUNDLE_IDENTIFIER: com.jobshout.app.staging
       APS_ENVIRONMENT: production
     Release:
       JOBSHOUT_ENVIRONMENT: prod
-      PRODUCT_BUNDLE_IDENTIFIER: com.jobshout.app
       APS_ENVIRONMENT: production
 
 packages:
@@ -57,7 +56,14 @@ targets:
       base:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
-        TARGETED_DEVICE_FAMILY: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
+      configs:
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: com.jobshout.app.dev
+        Staging:
+          PRODUCT_BUNDLE_IDENTIFIER: com.jobshout.app.staging
+        Release:
+          PRODUCT_BUNDLE_IDENTIFIER: com.jobshout.app
     info:
       path: App/Info.plist
       properties:
@@ -65,14 +71,22 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         JobShoutEnvironment: $(JOBSHOUT_ENVIRONMENT)
+        JobShoutKeychainAccessGroup: $(AppIdentifierPrefix)com.jobshout.shared
         ITSAppUsesNonExemptEncryption: false
         LSRequiresIPhoneOS: true
         UILaunchScreen:
           UIColorName: AccentColor
         UIBackgroundModes: [remote-notification]
-        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         NSFaceIDUsageDescription: Confirm it's you before approving an agent's action.
-        # Only for the debug "local" environment (a server on this Mac).
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
     entitlements:
@@ -80,6 +94,87 @@ targets:
       properties:
         com.apple.developer.applesignin: [Default]
         aps-environment: $(APS_ENVIRONMENT)
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.jobshout.shared
+
+  JobShoutMac:
+    type: application
+    platform: macOS
+    sources:
+      - path: Mac/App
+    dependencies:
+      - package: JobShoutKit
+        product: JobShoutFeatures
+    settings:
+      base:
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        COMBINE_HIDPI_IMAGES: YES
+      configs:
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: com.jobshout.mac.dev
+        Staging:
+          PRODUCT_BUNDLE_IDENTIFIER: com.jobshout.mac.staging
+        Release:
+          PRODUCT_BUNDLE_IDENTIFIER: com.jobshout.mac
+    info:
+      path: Mac/App/Info.plist
+      properties:
+        CFBundleDisplayName: JobShout
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        JobShoutEnvironment: $(JOBSHOUT_ENVIRONMENT)
+        JobShoutKeychainAccessGroup: $(AppIdentifierPrefix)com.jobshout.shared
+        ITSAppUsesNonExemptEncryption: false
+        LSMinimumSystemVersion: "15.0"
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    entitlements:
+      path: Mac/App/JobShoutMac.entitlements
+      properties:
+        com.apple.developer.applesignin: [Default]
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.jobshout.shared
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+
+  JobShoutWatch:
+    type: application
+    platform: watchOS
+    sources:
+      - path: Watch/App
+    dependencies:
+      - package: JobShoutKit
+        product: JobShoutFeatures
+    settings:
+      base:
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        TARGETED_DEVICE_FAMILY: "4"
+        SDKROOT: watchos
+      configs:
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: com.jobshout.app.watchkitapp.dev
+        Staging:
+          PRODUCT_BUNDLE_IDENTIFIER: com.jobshout.app.watchkitapp.staging
+        Release:
+          PRODUCT_BUNDLE_IDENTIFIER: com.jobshout.app.watchkitapp
+    info:
+      path: Watch/App/Info.plist
+      properties:
+        CFBundleDisplayName: JobShout
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        JobShoutEnvironment: $(JOBSHOUT_ENVIRONMENT)
+        JobShoutKeychainAccessGroup: $(AppIdentifierPrefix)com.jobshout.shared
+        WKWatchOnly: true
+        ITSAppUsesNonExemptEncryption: false
+    entitlements:
+      path: Watch/App/JobShoutWatch.entitlements
+      properties:
+        com.apple.developer.applesignin: [Default]
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.jobshout.shared
 
   JobShoutUITests:
     type: bundle.ui-testing
@@ -114,3 +209,19 @@ schemes:
       config: Staging
     archive:
       config: Staging
+  JobShoutMac:
+    build:
+      targets:
+        JobShoutMac: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+  JobShoutWatch:
+    build:
+      targets:
+        JobShoutWatch: all
+    run:
+      config: Debug
+    archive:
+      config: Release

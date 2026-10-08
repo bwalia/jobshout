@@ -76,7 +76,7 @@ struct ApprovalDetailView: View {
                     Section("What it will send") {
                         Text(input)
                             .font(.system(.footnote, design: .monospaced))
-                            .textSelection(.enabled)
+                            .selectableText()
                     }
                 }
                 if let reason = approval.reason, !reason.isEmpty {
@@ -101,7 +101,7 @@ struct ApprovalDetailView: View {
                     .controlSize(.large)
                     .disabled(deciding)
                     .padding()
-                    .background(.bar)
+                    .chromeBackground()
                 }
             }
             .alert("Reject this action?", isPresented: $rejecting) {

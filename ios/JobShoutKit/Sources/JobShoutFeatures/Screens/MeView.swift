@@ -89,7 +89,7 @@ struct DeviceRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: device.platform == "ios" ? "iphone" : "desktopcomputer")
+            Image(systemName: Self.symbol(for: device.platform))
                 .font(.title3)
                 .foregroundStyle(.secondary)
                 .frame(width: 28)
@@ -107,6 +107,16 @@ struct DeviceRow: View {
             if device.hasPush {
                 Image(systemName: "bell.fill").foregroundStyle(.secondary).accessibilityLabel("Notifications on")
             }
+        }
+    }
+
+    private static func symbol(for platform: String) -> String {
+        switch platform {
+        case "ios": "iphone"
+        case "macos": "desktopcomputer"
+        case "watchos": "applewatch"
+        case "android": "smartphone"
+        default: "laptopcomputer"
         }
     }
 }

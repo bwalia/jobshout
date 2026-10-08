@@ -26,7 +26,7 @@ struct WorkView: View {
                     Picker("Filter", selection: $filter) {
                         ForEach(Filter.allCases) { Text($0.rawValue).tag($0) }
                     }
-                    .pickerStyle(.segmented)
+                    .segmentedPickerStyle()
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets())
                 }
@@ -166,7 +166,7 @@ struct RunCard: View {
                 Text(output)
                     .font(.callout)
                     .lineLimit(expanded ? nil : 6)
-                    .textSelection(.enabled)
+                    .selectableText()
                 Button(expanded ? "Show less" : "Show all") { expanded.toggle() }
                     .font(.caption.bold())
             }

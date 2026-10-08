@@ -11,7 +11,7 @@ import PackageDescription
 //   JobShoutFeatures  SwiftUI screens and their @Observable models
 let package = Package(
     name: "JobShoutKit",
-    platforms: [.iOS(.v18), .macOS(.v15)],
+    platforms: [.iOS(.v18), .macOS(.v15), .watchOS(.v11)],
     products: [
         .library(name: "JobShoutFeatures", targets: ["JobShoutFeatures"]),
     ],

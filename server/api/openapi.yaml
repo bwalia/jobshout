@@ -530,7 +530,7 @@ components:
       required: [platform]
       properties:
         id: { type: string, format: uuid, description: 'The device_id from an earlier sign-in, if kept.' }
-        platform: { type: string, enum: [ios, android] }
+        platform: { type: string, enum: [ios, android, macos, watchos] }
         name: { type: string, maxLength: 255 }
         app_version: { type: string, maxLength: 64 }
     LoginRequest:

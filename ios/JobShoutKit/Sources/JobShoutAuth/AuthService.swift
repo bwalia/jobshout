@@ -91,19 +91,41 @@ public enum AppleNonce {
 public struct DeviceDescriptor: Sendable {
     public let name: String
     public let appVersion: String
+    public let platform: Components.Schemas.DeviceInfo.PlatformPayload
 
-    public init(name: String, appVersion: String) {
+    public init(
+        name: String,
+        appVersion: String,
+        platform: Components.Schemas.DeviceInfo.PlatformPayload = .current
+    ) {
         self.name = name
         self.appVersion = appVersion
+        self.platform = platform
     }
 
     public static func current(bundle: Bundle = .main, name: String) -> DeviceDescriptor {
         let version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
         let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
-        return DeviceDescriptor(name: name, appVersion: "\(version) (\(build))")
+        return DeviceDescriptor(
+            name: name,
+            appVersion: "\(version) (\(build))",
+            platform: .current)
     }
 
     func info(knownID: String?) -> Components.Schemas.DeviceInfo {
-        .init(id: knownID, platform: .ios, name: name, appVersion: appVersion)
+        .init(id: knownID, platform: platform, name: name, appVersion: appVersion)
+    }
+}
+
+extension Components.Schemas.DeviceInfo.PlatformPayload {
+    /// Platform this binary was compiled for.
+    public static var current: Self {
+        #if os(watchOS)
+        .watchos
+        #elseif os(macOS)
+        .macos
+        #else
+        .ios
+        #endif
     }
 }

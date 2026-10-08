@@ -26,7 +26,7 @@ type Device struct {
 // ignores it unless it belongs to the same user.
 type DeviceInfo struct {
 	ID         string `json:"id,omitempty"`
-	Platform   string `json:"platform" validate:"required,oneof=ios android"`
+	Platform   string `json:"platform" validate:"required,oneof=ios android macos watchos"`
 	Name       string `json:"name" validate:"max=255"`
 	AppVersion string `json:"app_version" validate:"max=64"`
 }

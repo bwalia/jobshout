@@ -37,7 +37,9 @@ struct MainTabView: View {
             Tab("Approvals", systemImage: "checkmark.shield") {
                 NavigationStack { ApprovalsView().detailDestinations() }
             }
+            #if !os(watchOS)
             .badge(app.pendingApprovals)
+            #endif
             Tab("Me", systemImage: "person.crop.circle") {
                 NavigationStack { MeView().detailDestinations() }
             }
