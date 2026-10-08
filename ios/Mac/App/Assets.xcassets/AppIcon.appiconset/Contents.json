@@ -1,19 +1,19 @@
 {
   "images" : [
     {
-      "filename" : "AppIcon.png",
+      "filename" : "AppIcon-small.png",
       "idiom" : "mac",
       "scale" : "1x",
       "size" : "16x16"
     },
     {
-      "filename" : "AppIcon.png",
+      "filename" : "AppIcon-small.png",
       "idiom" : "mac",
       "scale" : "2x",
       "size" : "16x16"
     },
     {
-      "filename" : "AppIcon.png",
+      "filename" : "AppIcon-small.png",
       "idiom" : "mac",
       "scale" : "1x",
       "size" : "32x32"
@@ -61,5 +61,8 @@
       "size" : "512x512"
     }
   ],
-  "info" : { "author" : "xcode", "version" : 1 }
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
 }

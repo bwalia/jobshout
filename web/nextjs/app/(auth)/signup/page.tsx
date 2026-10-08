@@ -56,7 +56,7 @@ export default function SignupPage() {
           Create your account
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Start managing your AI teams with Jobshout
+          Start managing your AI teams with JobShout
         </p>
       </div>
 

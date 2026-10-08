@@ -1,6 +1,6 @@
 "use client";
 
-import { Zap } from "lucide-react";
+import { BrandLockup } from "@/components/brand/BrandMark";
 import { useHealth } from "@/lib/hooks/useHealth";
 
 function formatDeployed(iso?: string): string | null {
@@ -22,7 +22,7 @@ export function LoginBrand() {
   const version = health.data?.version;
   const deployed = formatDeployed(health.data?.deployed_at);
   const stamp = [
-    version ? `Jobshout ${version}` : null,
+    version ? `JobShout ${version}` : null,
     health.data?.env,
     deployed ? `Deployed ${deployed}` : null,
   ]
@@ -31,14 +31,7 @@ export function LoginBrand() {
 
   return (
     <div className="hidden lg:flex lg:w-1/2 lg:flex-col lg:justify-between bg-sidebar p-10">
-      <div className="flex items-center gap-2.5">
-        <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-          <Zap className="h-5 w-5" />
-        </span>
-        <span className="text-lg font-semibold tracking-tight text-foreground">
-          Jobshout
-        </span>
-      </div>
+      <BrandLockup />
       <div className="max-w-md">
         <h2 className="text-3xl font-bold tracking-tight text-foreground">
           AI Team Command Center
@@ -48,7 +41,7 @@ export function LoginBrand() {
           projects, track work, and automate workflows.
         </p>
       </div>
-      <p className="text-xs text-muted-foreground">{stamp || "Jobshout"}</p>
+      <p className="text-xs text-muted-foreground">{stamp || "JobShout"}</p>
     </div>
   );
 }

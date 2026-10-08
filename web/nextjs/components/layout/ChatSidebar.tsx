@@ -11,7 +11,6 @@ import {
   Trash2,
   ChevronLeft,
   ChevronDown,
-  Box,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { sessionTitle, type ChatSession } from "@/lib/types/chat";
@@ -21,6 +20,7 @@ import {
 } from "@/lib/hooks/useChat";
 import { useUiStore } from "@/lib/store/ui-store";
 import { SidebarFooter } from "./SidebarFooter";
+import { BrandMark } from "@/components/brand/BrandMark";
 import { panelFromPath, rememberPanelTransition } from "@/lib/panels";
 import {
   NAV_BOTTOM,
@@ -191,7 +191,7 @@ function SidebarBody({
           aria-label="JobShout home"
           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-foreground hover:bg-sidebar-muted"
         >
-          <Box className="h-6 w-6" />
+          <BrandMark size={26} />
         </Link>
         {!collapsed ? (
           <button

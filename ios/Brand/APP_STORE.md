@@ -13,7 +13,7 @@
 
 ## Brand assets
 
-Masters live in [`ios/Brand/`](./). Asset catalogs for App / Mac / Watch all use the same 1024 master.
+Masters are built from [`docs/brand/`](../../docs/brand/BRAND.md) by `docs/brand/tools/build-brand.py`. iPhone, iPad and Watch use the full-bleed `AppIcon-1024.png`; the Mac uses `AppIcon-mac-1024.png`, which has the macOS rounded-square body and shadow baked in, plus a simplified small icon for 16–32 px.
 
 ## Local signed `.app` (not App Store yet)
 
