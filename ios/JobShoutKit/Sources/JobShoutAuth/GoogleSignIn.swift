@@ -20,45 +20,55 @@ public enum GoogleSignIn {
         case failed(String)
     }
 
-    @MainActor
+    /// ASWebAuthenticationSession delivers its completion off the main actor.
+    /// Keep that callback nonisolated and only hop to MainActor for presentation.
     public static func authorize(startURL: URL) async -> Outcome {
         await withCheckedContinuation { continuation in
+            let holder = SessionHolder()
+            holder.finish = { outcome in
+                holder.finish = nil
+                holder.session = nil
+                continuation.resume(returning: outcome)
+            }
+
             let session = ASWebAuthenticationSession(
                 url: startURL,
                 callbackURLScheme: callbackScheme
             ) { callbackURL, error in
-                if let error {
-                    if let auth = error as? ASWebAuthenticationSessionError,
-                       auth.code == .canceledLogin {
-                        continuation.resume(returning: .cancelled)
-                    } else {
-                        continuation.resume(returning: .failed(error.localizedDescription))
-                    }
-                    return
-                }
-                guard let callbackURL,
-                      let comps = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false) else {
-                    continuation.resume(returning: .failed("Google didn't return a sign-in ticket."))
-                    return
-                }
-                if let err = comps.queryItems?.first(where: { $0.name == "error" })?.value, !err.isEmpty {
-                    continuation.resume(returning: .failed(googleErrorMessage(err)))
-                    return
-                }
-                guard let ticket = comps.queryItems?.first(where: { $0.name == "ticket" })?.value,
-                      !ticket.isEmpty else {
-                    continuation.resume(returning: .failed("Google didn't return a sign-in ticket."))
-                    return
-                }
-                continuation.resume(returning: .ticket(ticket))
+                holder.finish?(outcome(from: callbackURL, error: error))
             }
             session.prefersEphemeralWebBrowserSession = false
-            let presenter = Presenter.shared
-            session.presentationContextProvider = presenter
-            if !session.start() {
-                continuation.resume(returning: .failed("Couldn't open Google sign-in."))
+            holder.session = session
+
+            Task { @MainActor in
+                session.presentationContextProvider = Presenter.shared
+                if !session.start() {
+                    holder.finish?(.failed("Couldn't open Google sign-in."))
+                }
             }
         }
+    }
+
+    private static func outcome(from callbackURL: URL?, error: Error?) -> Outcome {
+        if let error {
+            if let auth = error as? ASWebAuthenticationSessionError,
+               auth.code == .canceledLogin {
+                return .cancelled
+            }
+            return .failed(error.localizedDescription)
+        }
+        guard let callbackURL,
+              let comps = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false) else {
+            return .failed("Google didn't return a sign-in ticket.")
+        }
+        if let err = comps.queryItems?.first(where: { $0.name == "error" })?.value, !err.isEmpty {
+            return .failed(googleErrorMessage(err))
+        }
+        guard let ticket = comps.queryItems?.first(where: { $0.name == "ticket" })?.value,
+              !ticket.isEmpty else {
+            return .failed("Google didn't return a sign-in ticket.")
+        }
+        return .ticket(ticket)
     }
 
     private static func googleErrorMessage(_ code: String) -> String {
@@ -68,6 +78,12 @@ public enum GoogleSignIn {
         default: "Google sign-in failed (\(code))."
         }
     }
+}
+
+/// Keeps the auth session alive until the callback fires, and makes resume once-only.
+private final class SessionHolder: @unchecked Sendable {
+    var session: ASWebAuthenticationSession?
+    var finish: ((GoogleSignIn.Outcome) -> Void)?
 }
 
 @MainActor
