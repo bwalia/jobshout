@@ -45,6 +45,19 @@ extraSecretRefs:
   # use — copy test's: kubectl -n test get secret jobshout-gateways -o yaml,
   # strip metadata, re-apply in int. Created by hand on k3s1, never in git.
   - jobshout-gateways
+  # STRIX_JWT_SECRET for the pentest gateway (strix.workstation.co.uk). The chart
+  # only wires it through .Values.secrets.strixJwtSecret into the Helm-owned
+  # jobshout-secrets (empty, and wiped every deploy), so without this the gateway
+  # 403s every request ("the token did not verify") and the Security Tester shows
+  # the workstation as unreachable. Kept in its own secret, not jobshout-gateways,
+  # on purpose: this fronts a vulnerability scanner, and the code keeps its secret
+  # distinct from the Ollama/image ones so leaking one does not hand over all three
+  # (server/internal/strix/config.go). pentest is int-only, so there is no other
+  # ring to copy from; the value must match the secret the strix edge vhost verifies:
+  #   kubectl -n int create secret generic jobshout-strix \
+  #     --from-literal=STRIX_JWT_SECRET=<secret the strix.workstation.co.uk gateway checks>
+  # then restart jobshout-api so it picks the secret up. Created by hand, never in git.
+  - jobshout-strix
 
 # opsapi CMS — the Article Writer files generated articles there as drafts.
 # The host and namespace slug are not secret; the API key is, and comes from
