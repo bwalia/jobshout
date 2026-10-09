@@ -31,6 +31,9 @@ type OllamaClient struct {
 	// models caches what ListModels learned, so per-model capability and
 	// context questions can be answered without another round trip.
 	models ollamaModelCache
+	// retryWait overrides the pause before re-sending after a gateway error;
+	// zero uses defaultOllamaGatewayRetryWait. Tests shorten it.
+	retryWait time.Duration
 }
 
 // NewOllamaClient creates an OllamaClient talking to a plain Ollama server.
@@ -316,25 +319,51 @@ func (c *OllamaClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 		return nil, fmt.Errorf("ollama: marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/chat", bytes.NewReader(payload))
-	if err != nil {
-		return nil, fmt.Errorf("ollama: build request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	if err := c.auth.apply(httpReq); err != nil {
-		return nil, err
-	}
+	// A gateway in front of Ollama answers 502/503/504 before any of the reply
+	// has been sent, so the request can safely go again. On the shared CPU host
+	// the usual cause is a cold model that did not produce its first token
+	// inside the proxy's read timeout; the load carries on after the proxy
+	// gives up, so the second attempt usually finds the model resident.
+	var (
+		resp    *http.Response
+		attempt *apiAttempt
+	)
+	for try := 1; ; try++ {
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/chat", bytes.NewReader(payload))
+		if err != nil {
+			return nil, fmt.Errorf("ollama: build request: %w", err)
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		if err := c.auth.apply(httpReq); err != nil {
+			return nil, err
+		}
 
-	// The attempt lasts until the stream is fully read.
-	attempt := beginAttempt(ctx)
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		err = fmt.Errorf("ollama: HTTP error: %w", err)
-		attempt.end(err)
-		return nil, err
+		// The attempt lasts until the stream is fully read.
+		attempt = beginAttempt(ctx)
+		resp, err = c.httpClient.Do(httpReq)
+		if err != nil {
+			err = fmt.Errorf("ollama: HTTP error: %w", err)
+			attempt.end(err)
+			return nil, err
+		}
+		attempt.response(resp)
+		if !isGatewayStatus(resp.StatusCode) || try >= ollamaGatewayAttempts {
+			break
+		}
+
+		rawBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+		resp.Body.Close()
+		attempt.end(fmt.Errorf("ollama: unexpected status %d: %s", resp.StatusCode, upstreamSnippet(rawBody)))
+		t := time.NewTimer(c.gatewayRetryWait())
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return nil, ctx.Err()
+		case <-t.C:
+		}
+		noteRetry(ctx)
 	}
 	defer resp.Body.Close()
-	attempt.response(resp)
 
 	if isAuthStatus(resp.StatusCode) {
 		rawBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
@@ -352,6 +381,28 @@ func (c *OllamaClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 	out, err := c.readStream(ctx, resp.Body, model, opts.NumPredict, req.OnToken)
 	attempt.end(err)
 	return out, err
+}
+
+// ollamaGatewayAttempts is how many times Generate sends a request that a
+// gateway answered with 502/503/504, counting the first. Each attempt can cost
+// the proxy's full read timeout, so one retry is the most that is worth it.
+const ollamaGatewayAttempts = 2
+
+// defaultOllamaGatewayRetryWait is the pause before re-sending after a gateway
+// error, long enough for a model load the first attempt started to settle.
+const defaultOllamaGatewayRetryWait = 5 * time.Second
+
+func (c *OllamaClient) gatewayRetryWait() time.Duration {
+	if c.retryWait > 0 {
+		return c.retryWait
+	}
+	return defaultOllamaGatewayRetryWait
+}
+
+// isGatewayStatus reports whether status is a gateway or overload answer that
+// arrived instead of a reply.
+func isGatewayStatus(status int) bool {
+	return status == http.StatusBadGateway || status == http.StatusServiceUnavailable || status == http.StatusGatewayTimeout
 }
 
 // readStream accumulates an Ollama NDJSON chat stream into one GenerateResponse.
