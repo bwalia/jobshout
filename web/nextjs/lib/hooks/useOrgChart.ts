@@ -2,7 +2,7 @@ import { useCallback, useMemo } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNodes, useEdges } from "reactflow";
 import { toast } from "sonner";
-import { apiClient } from "@/lib/api/client";
+import { updateOrgChart, type OrgChartEntry } from "@/lib/api/organizations";
 import { useAgents } from "@/lib/hooks/useAgents";
 import { useAuthStore } from "@/lib/store/auth-store";
 import { applyDagreLayout } from "@/lib/utils/org-chart-layout";
@@ -16,11 +16,6 @@ import type { Node, Edge } from "reactflow";
 /** Data payload stored on each agentNode */
 export interface AgentNodeData {
   agent: Agent;
-}
-
-/** Shape of the PUT /organizations/{orgId}/chart request body */
-interface OrgChartSavePayload {
-  edges: Array<{ source: string; target: string }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -62,15 +57,16 @@ function agentsToFlowElements(agents: Agent[]): {
   return { nodes, edges };
 }
 
-// ---------------------------------------------------------------------------
-// API mutation
-// ---------------------------------------------------------------------------
-
-async function saveOrgChart(
-  orgId: string,
-  payload: OrgChartSavePayload
-): Promise<void> {
-  await apiClient.put(`/organizations/${orgId}/chart`, payload);
+/**
+ * Converts the canvas edges back into one reporting line per agent. Every
+ * agent is included so that a deleted edge clears its manager_id.
+ */
+function edgesToChartEntries(agents: Agent[], edges: Edge[]): OrgChartEntry[] {
+  const managerOf = new Map(edges.map((edge) => [edge.target, edge.source]));
+  return agents.map((agent) => ({
+    agent_id: agent.id,
+    manager_id: managerOf.get(agent.id) ?? null,
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -99,12 +95,7 @@ export function useOrgChart() {
   // Mutation that serialises the current edges and sends them to the backend
   const saveMutation = useMutation({
     mutationFn: (edges: Edge[]) =>
-      saveOrgChart(orgId, {
-        edges: edges.map((edge) => ({
-          source: edge.source,
-          target: edge.target,
-        })),
-      }),
+      updateOrgChart(orgId, edgesToChartEntries(agents, edges)),
     onSuccess: () => {
       toast.success("Organisation chart saved.");
       // Invalidate agents so manager_id values stay fresh
