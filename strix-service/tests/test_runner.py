@@ -108,6 +108,53 @@ def test_plain_failure_carries_the_output(runner):
     assert "daemon not running" in error
 
 
+# ─── hollow-run hardening (issue #148) ───────────────────────────────────────
+
+class _Run:
+    """Just the two attributes _hollow_reason reads off a run."""
+    def __init__(self, scan_mode="deep", target="https://acc.diytaxreturn.co.uk"):
+        self.scan_mode = scan_mode
+        self.target = target
+
+
+def test_a_scan_too_fast_for_its_mode_fails_closed(runner, monkeypatch):
+    monkeypatch.setattr(runner_module.config, "MIN_RUNTIME_BY_MODE", {"deep": 180})
+    # Engaged and cleared the baseline gate, but a 12s "deep" scan is fabricated.
+    status, error = runner._classify(0, "", [], engaged=True,
+                                     run=_Run("deep"), report="", elapsed=12)
+    assert status == FAILED
+    assert "too fast" in error
+
+
+def test_a_scan_that_took_a_plausible_time_completes(runner, monkeypatch):
+    monkeypatch.setattr(runner_module.config, "MIN_RUNTIME_BY_MODE", {"deep": 180})
+    status, _ = runner._classify(0, "", [], engaged=True,
+                                 run=_Run("deep"), report="", elapsed=600)
+    assert status == COMPLETED
+
+
+def test_an_unknown_mode_has_no_duration_floor(runner, monkeypatch):
+    monkeypatch.setattr(runner_module.config, "MIN_RUNTIME_BY_MODE", {"deep": 180})
+    status, _ = runner._classify(0, "", [], engaged=True,
+                                 run=_Run("audit"), report="", elapsed=1)
+    assert status == COMPLETED
+
+
+def test_a_report_about_an_invented_host_fails_closed(runner):
+    report = "# Report\nThe acme.example admin portal leaked credentials.\n"
+    status, error = runner._classify(0, "", [], engaged=True,
+                                     run=_Run("quick"), report=report, elapsed=600)
+    assert status == FAILED
+    assert "acme.example" in error
+
+
+def test_a_report_about_the_real_target_completes(runner):
+    report = "# Report\nFetched https://acc.diytaxreturn.co.uk/ — one weak header.\n"
+    status, _ = runner._classify(0, "", [], engaged=True,
+                                 run=_Run("quick"), report=report, elapsed=600)
+    assert status == COMPLETED
+
+
 # ─── execution ──────────────────────────────────────────────────────────────
 
 def make_run(store, target="https://example.com", **kw):
