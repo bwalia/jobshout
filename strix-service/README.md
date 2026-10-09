@@ -179,6 +179,9 @@ cannot find `strix` or `docker` once it is an agent.
 | `STRIX_MAX_RUNTIME_QUICK` | `900` | Quick-mode ceiling (15 min). |
 | `STRIX_MAX_RUNTIME_STANDARD` | `2700` | Standard-mode ceiling (45 min). |
 | `STRIX_MAX_RUNTIME_DEEP` | `7200` | Deep-mode ceiling (2 h). |
+| `STRIX_MIN_RUNTIME_QUICK` | `20` | Hollow-run floor: a quick scan faster than this is treated as fabricated. `0` disables. |
+| `STRIX_MIN_RUNTIME_STANDARD` | `90` | Standard-mode floor. |
+| `STRIX_MIN_RUNTIME_DEEP` | `180` | Deep-mode floor — a "deep" scan under 3 min did not do deep work (issue #148). |
 | `STRIX_RETENTION_DAYS` | `14` | How long artifacts are kept. |
 | `STRIX_PORT` | `11436` | Listen port. |
 
@@ -200,6 +203,19 @@ than hanging for the full deep-scan budget; `STRIX_MAX_RUNTIME_SECONDS` is the
 fallback for an unrecognised mode. The ceiling terminates the process group;
 containers Strix left behind may need clearing with `docker ps`, and the run's
 error message says so.
+
+**Fabricated-run guards.** A local model that cannot drive the agent loop tends
+to "finish" in under a minute and write a report from imagination — historically
+returned as a clean scan (issue #148). Three fail-closed checks now stop that: the
+engagement gate (no HTTP evidence of touching the target → `failed`), a per-mode
+*minimum* duration (`STRIX_MIN_RUNTIME_*`; a run faster than its floor did not do
+the work its mode implies), and a placeholder-domain check (a report about
+`example.com` / `acme.example` rather than the target is a hallucination). Set a
+floor to `0` to disable it. Together they mean a model not up to the job produces
+a loud `failed`, never a fake "Clean". If a genuinely good run keeps tripping a
+floor, raise that floor; if a weak local model keeps tripping them, the honest fix
+is a more capable model — local (larger context via Ollama `num_ctx`, or a
+stronger model) or hosted — not loosening the guards.
 
 The model is warmed on start (`STRIX_WARM_MODEL`) and held resident between scans
 (`STRIX_MODEL_KEEP_ALIVE`), so the first scan of the day does not pay the 30–60 s

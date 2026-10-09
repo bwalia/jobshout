@@ -13,6 +13,12 @@ os.environ.setdefault("STRIX_RUNS_DIR", tempfile.mkdtemp(prefix="strix-test-runs
 os.environ.setdefault("STRIX_JWT_SECRET", "")
 os.environ.setdefault("STRIX_TARGET_ALLOWLIST", "")
 os.environ.setdefault("STRIX_MAX_RUNTIME_SECONDS", "10")
+# The fake Strix binary returns in milliseconds; a real duration floor would
+# fail every execution test as "too fast". Tests that exercise the floor set it
+# explicitly (see test_runner.py).
+os.environ.setdefault("STRIX_MIN_RUNTIME_QUICK", "0")
+os.environ.setdefault("STRIX_MIN_RUNTIME_STANDARD", "0")
+os.environ.setdefault("STRIX_MIN_RUNTIME_DEEP", "0")
 
 import pytest  # noqa: E402
 

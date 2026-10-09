@@ -110,6 +110,23 @@ def runtime_for(scan_mode: str) -> int:
     """The wall-clock ceiling for a scan mode, falling back to the flat ceiling."""
     return RUNTIME_BY_MODE.get(scan_mode, MAX_RUNTIME_SECONDS)
 
+# Per-mode *minimum* plausible wall-clock. A scan that finishes faster than its
+# floor did not do the recon-probe-exploit work its mode implies — the signature
+# of a model writing a report from imagination rather than testing (issue #148:
+# a "deep" run hallucinated a report in 50s–2min). This is a secondary tell; the
+# engagement gate (engagement.py) catches a hollow run that also left no HTTP
+# evidence, and this catches the ones that are merely too fast. 0 disables the
+# floor for a mode, and an unknown mode has no floor (we don't guess its shape).
+MIN_RUNTIME_QUICK = int(os.getenv("STRIX_MIN_RUNTIME_QUICK", "20"))
+MIN_RUNTIME_STANDARD = int(os.getenv("STRIX_MIN_RUNTIME_STANDARD", "90"))
+MIN_RUNTIME_DEEP = int(os.getenv("STRIX_MIN_RUNTIME_DEEP", "180"))
+
+MIN_RUNTIME_BY_MODE = {
+    "quick": MIN_RUNTIME_QUICK,
+    "standard": MIN_RUNTIME_STANDARD,
+    "deep": MIN_RUNTIME_DEEP,
+}
+
 # How long the process gets to exit after SIGTERM before it is killed outright.
 TERM_GRACE_SECONDS = float(os.getenv("STRIX_TERM_GRACE_SECONDS", "20"))
 

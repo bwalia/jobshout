@@ -36,6 +36,35 @@ STANDING_ENGAGEMENT = (
 )
 
 
+# RFC 2606 / RFC 6761 reserved documentation & test domains, plus the
+# "acme.example" shape the local model hallucinated on int (issue #148). The
+# reserved TLDs (.example/.test/.invalid) are matched only as the final label —
+# a lookbehind/lookahead keeps "foo.test.realco.com" and "notexample.com" from
+# tripping it. A real scan target is never one of these, so any such hostname in
+# a report is a fabricated narrative, not a finding against the target.
+_PLACEHOLDER_HOST = re.compile(
+    r"(?<![a-z0-9.-])"
+    r"(?:(?:[a-z0-9-]+\.)+(?:example|test|invalid)"
+    r"|(?:[a-z0-9-]+\.)*example\.(?:com|net|org|edu))"
+    r"(?![a-z0-9.-])",
+    re.IGNORECASE,
+)
+
+
+def fabricated_domain(report: str, target_host: str = "") -> str:
+    """A placeholder/reserved hostname the report invented, or "" if none.
+
+    Skips the check when the operator is deliberately scanning a reserved domain
+    (the test suite scans ``*.example.com``) — there such hostnames are in scope.
+    """
+    if not report:
+        return ""
+    if target_host and _PLACEHOLDER_HOST.search(target_host):
+        return ""
+    match = _PLACEHOLDER_HOST.search(report)
+    return match.group(0) if match else ""
+
+
 def host_of(target: str) -> str:
     raw = (target or "").strip()
     if not raw:

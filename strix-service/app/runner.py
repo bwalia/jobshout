@@ -17,10 +17,17 @@ import json
 import logging
 import os
 import signal
+import time
 from pathlib import Path
 
 from app import config, store as store_module
-from app.engagement import compose_instruction, read_report_markdown, target_engaged
+from app.engagement import (
+    compose_instruction,
+    fabricated_domain,
+    host_of,
+    read_report_markdown,
+    target_engaged,
+)
 from app.store import BUDGET_EXCEEDED, CANCELLED, COMPLETED, FAILED, RUNNING, Finding, Run
 
 logger = logging.getLogger(__name__)
@@ -223,6 +230,9 @@ class Runner:
         self.store.update(run, status=RUNNING, started_at=store_module.now())
         logger.info("scan %s starting (%s, cap %ss): %s", run.run_id, run.scan_mode, runtime, " ".join(args))
 
+        # Monotonic, so a wall-clock adjustment mid-scan cannot make a run look
+        # implausibly fast (or slow) to the hollow-run floor below.
+        started = time.monotonic()
         try:
             proc = await asyncio.create_subprocess_exec(
                 *args,
@@ -277,10 +287,14 @@ class Runner:
             )
             return
 
+        elapsed = time.monotonic() - started
         findings = parse_findings(run_dir)
         report = read_report_markdown(run_dir)
         engaged = target_engaged(run_dir, run.target, tail)
-        status, error = self._classify(exit_code, tail, findings, engaged)
+        status, error = self._classify(
+            exit_code, tail, findings, engaged,
+            run=run, report=report, elapsed=elapsed,
+        )
         self.store.finish(
             run, status,
             exit_code=exit_code,
@@ -292,12 +306,14 @@ class Runner:
             target_engaged=engaged,
         )
         logger.info(
-            "scan %s finished: status=%s exit=%s findings=%d engaged=%s",
-            run.run_id, status, exit_code, len(findings), engaged,
+            "scan %s finished: status=%s exit=%s findings=%d engaged=%s elapsed=%.0fs",
+            run.run_id, status, exit_code, len(findings), engaged, elapsed,
         )
 
     def _classify(self, exit_code: int | None, output: str,
-                  findings: list[Finding], engaged: bool) -> tuple[str, str | None]:
+                  findings: list[Finding], engaged: bool,
+                  *, run: Run | None = None, report: str = "",
+                  elapsed: float | None = None) -> tuple[str, str | None]:
         """Turn an exit code into a status.
 
         Strix documents 0 as a clean scan and 2 as "vulnerabilities found" —
@@ -305,7 +321,10 @@ class Runner:
         every scan that actually found something as broken.
 
         A clean exit with zero findings and no evidence the target was reached
-        is a hollow run — fail closed so History never shows fake "Clean".
+        is a hollow run — fail closed so History never shows fake "Clean". A run
+        that did clear that gate is still failed closed when it looks fabricated
+        rather than performed (too fast, or about an invented host) — see
+        _hollow_reason and issue #148.
         """
         if exit_code in (0, 2):
             if not engaged and not findings:
@@ -314,6 +333,9 @@ class Runner:
                     "interaction with the host was recorded. Re-run the scan; if "
                     "this persists, check Docker networking and the model."
                 )
+            reason = self._hollow_reason(run, elapsed, report)
+            if reason:
+                return FAILED, reason
             return COMPLETED, None
 
         lowered = output.lower()
@@ -326,6 +348,38 @@ class Runner:
         snippet = output.strip()[-400:]
         return FAILED, f"strix exited with code {exit_code}: {snippet}" if snippet else \
             f"strix exited with code {exit_code} and produced no output"
+
+    def _hollow_reason(self, run: Run | None, elapsed: float | None,
+                       report: str) -> str | None:
+        """Why a run that cleared the engagement gate is still fabricated, if so.
+
+        target_engaged proves the target was touched; it cannot tell a real
+        assessment from one the model wrote from imagination after a token
+        request. Two deterministic tells catch that (issue #148): a run far too
+        fast for its scan mode, and a report about an invented placeholder host
+        instead of the target. Returns the failure reason, or None to complete.
+        """
+        if run is not None and elapsed is not None:
+            floor = config.MIN_RUNTIME_BY_MODE.get(run.scan_mode, 0)
+            if floor and elapsed < floor:
+                return (
+                    f"scan finished in {elapsed:.0f}s, under the {floor}s floor for "
+                    f"{run.scan_mode} mode — too fast to have done the recon and "
+                    f"probing the mode implies, so the result is treated as a "
+                    f"fabricated report rather than a real assessment. Re-run; if it "
+                    f"persists the model is not driving the agent loop "
+                    f"(see docs/pentest-agent.md)."
+                )
+        target_host = host_of(run.target) if run is not None else ""
+        bogus = fabricated_domain(report, target_host)
+        if bogus:
+            return (
+                f"report references {bogus!r}, a placeholder domain that is not the "
+                f"scan target — the model wrote about an invented host instead of "
+                f"testing the target. Failing closed rather than returning a fake "
+                f"result."
+            )
+        return None
 
     async def _pump(self, proc: asyncio.subprocess.Process, log_path: Path) -> str:
         """Stream the process output to disk, keeping the tail in memory.
