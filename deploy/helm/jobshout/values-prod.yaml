@@ -5,6 +5,11 @@ hostAliases:
   - www.jobshout.co.uk
 logLevel: info
 
+# Google sign-in returns via www: that callback is the one registered on the
+# shared OAuth client. Login state is server-side, so apex starts still work.
+googleAuth:
+  callbackHost: www.jobshout.co.uk
+
 ai:
   enabled: true
   ollamaBaseURL: "https://ollama.workstation.co.uk"
@@ -63,7 +68,8 @@ wafLab:
 #
 # jobshout-google: "Continue with Google" on /login and /signup
 # (GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET). The OAuth client must
-# list https://jobshout.co.uk/api/v1/auth/google/callback as a redirect URI.
+# list https://www.jobshout.co.uk/api/v1/auth/google/callback as a redirect URI
+# (googleAuth.callbackHost below; the apex URI was never accepted by Google).
 # Refs are optional, so until the secret exists the button just stays hidden.
 #   kubectl -n prod create secret generic jobshout-google \
 #     --from-literal=GOOGLE_OAUTH_CLIENT_ID=... \
