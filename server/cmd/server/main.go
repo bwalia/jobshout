@@ -654,9 +654,13 @@ func main() {
 				"(set OPSAPI_BASE_URL, OPSAPI_API_KEY and OPSAPI_NAMESPACE)")
 		}
 	}
+	if cfg.BlogAutoFileCMS && !blogRunner.CanPublish() {
+		logger.Warn("blog: BLOG_AUTO_FILE_CMS is on but the opsapi CMS is not configured — " +
+			"finished articles will not be filed (set OPSAPI_BASE_URL, OPSAPI_API_KEY and OPSAPI_NAMESPACE)")
+	}
 	blogSvc := service.NewBlogService(
 		blogRunner, blogRepo, researchSvc, agentRepo, logger,
-		cfg.BlogOrphanTimeout, cfg.BlogMaxRuntime,
+		cfg.BlogOrphanTimeout, cfg.BlogMaxRuntime, cfg.BlogAutoFileCMS,
 	)
 	blogReconciler := service.NewBlogReconciler(blogSvc, 0, logger)
 

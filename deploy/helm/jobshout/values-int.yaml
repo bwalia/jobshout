@@ -66,6 +66,9 @@ extraSecretRefs:
 cms:
   baseURL: "https://int-opsapi.workstation.co.uk"
   namespace: "workstation"
+  # Every finished article lands in the dashboard as a draft without anyone
+  # pressing Publish. Drafts only; going live is still done in the CMS.
+  autoFile: true
 
 ai:
   enabled: true

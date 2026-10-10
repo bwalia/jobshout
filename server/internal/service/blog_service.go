@@ -120,6 +120,10 @@ type blogService struct {
 
 	orphanTimeout time.Duration
 	maxRuntime    time.Duration
+	// autoFileCMS files every completed run in the CMS as drafts, however it
+	// was launched — the ring-wide form of a run's auto_publish, limited to the
+	// CMS. See BLOG_AUTO_FILE_CMS.
+	autoFileCMS bool
 }
 
 // NewBlogService creates a BlogService.
@@ -131,6 +135,7 @@ func NewBlogService(
 	logger *zap.Logger,
 	orphanTimeout time.Duration,
 	maxRuntime time.Duration,
+	autoFileCMS bool,
 ) BlogService {
 	if orphanTimeout <= 0 {
 		orphanTimeout = 45 * time.Minute
@@ -147,6 +152,7 @@ func NewBlogService(
 		active:        make(map[uuid.UUID]*trackedRun),
 		orphanTimeout: orphanTimeout,
 		maxRuntime:    maxRuntime,
+		autoFileCMS:   autoFileCMS,
 	}
 }
 
@@ -940,32 +946,43 @@ func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, age
 	// written, stored and are readable in the UI into a failed run — the work
 	// survives and someone can press the button later.
 	//
-	// Every configured destination gets them, each independently: one being
-	// down does not stop the other.
-	if req.AutoPublish {
-		if s.CanPublish() {
-			if _, perr := s.Publish(persistCtx(), run.OrgID, run.ID); perr != nil {
-				log.Warn("blog: automatic filing to the CMS failed, the articles are still here",
-					zap.Error(perr))
-			} else {
-				log.Info("blog: filed articles in the CMS as drafts automatically",
-					zap.Int("articles", len(run.Articles)))
-			}
+	s.fileCompletedRun(run, req, log)
+}
+
+// fileCompletedRun sends a completed run's articles to the destinations it
+// should reach without anyone pressing a button. Every configured destination
+// gets them, each independently: one being down does not stop the other.
+//
+// The CMS gets them when the run asked (auto_publish) or the ring files every
+// run (BLOG_AUTO_FILE_CMS). Insights only ever on the run's own auto_publish:
+// the ring setting is about the CMS, and must not start filling the Insights
+// review queue on rings that never asked for it.
+func (s *blogService) fileCompletedRun(run *model.BlogRun, req model.GenerateBlogRequest, log *zap.Logger) {
+	if (req.AutoPublish || s.autoFileCMS) && s.CanPublish() {
+		if _, perr := s.Publish(persistCtx(), run.OrgID, run.ID); perr != nil {
+			log.Warn("blog: automatic filing to the CMS failed, the articles are still here",
+				zap.Error(perr))
+		} else {
+			log.Info("blog: filed articles in the CMS as drafts automatically",
+				zap.Int("articles", len(run.Articles)))
 		}
-		// Other writers reach jobshout.com only when someone publishes live, so
-		// their drafts are not filed for review here.
-		if s.CanPublishInsights() && req.Writer == "" {
-			if _, perr := s.PublishInsights(persistCtx(), run.OrgID, run.ID); perr != nil {
-				log.Warn("blog: automatic filing to Insights failed, the articles are still here",
-					zap.Error(perr))
-			} else {
-				log.Info("blog: filed articles for review in Insights automatically",
-					zap.Int("articles", len(run.Articles)))
-			}
+	}
+	if !req.AutoPublish {
+		return
+	}
+	// Other writers reach jobshout.com only when someone publishes live, so
+	// their drafts are not filed for review here.
+	if s.CanPublishInsights() && req.Writer == "" {
+		if _, perr := s.PublishInsights(persistCtx(), run.OrgID, run.ID); perr != nil {
+			log.Warn("blog: automatic filing to Insights failed, the articles are still here",
+				zap.Error(perr))
+		} else {
+			log.Info("blog: filed articles for review in Insights automatically",
+				zap.Int("articles", len(run.Articles)))
 		}
-		if !s.CanPublish() && !s.CanPublishInsights() {
-			log.Warn("blog: auto-publish was requested but no destination is configured")
-		}
+	}
+	if !s.CanPublish() && !s.CanPublishInsights() {
+		log.Warn("blog: auto-publish was requested but no destination is configured")
 	}
 }
 

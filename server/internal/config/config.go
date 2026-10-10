@@ -181,6 +181,11 @@ type Config struct {
 	OpsAPIKey       string        `mapstructure:"OPSAPI_API_KEY"`
 	OpsAPINamespace string        `mapstructure:"OPSAPI_NAMESPACE"`
 	OpsAPITimeout   time.Duration `mapstructure:"OPSAPI_TIMEOUT"`
+	// BlogAutoFileCMS files every completed article run in the CMS as drafts,
+	// whichever way it was launched (Articles page, Task Manager, chat,
+	// schedule), instead of waiting for the Publish button. Drafts only: going
+	// live stays a person's call in the CMS. Needs the three OPSAPI_* above.
+	BlogAutoFileCMS bool `mapstructure:"BLOG_AUTO_FILE_CMS"`
 
 	// JobShout.com Insights — a second place the Article Writer can file
 	// articles, for editor review on jobshout.com. Both are needed; either
@@ -356,6 +361,7 @@ func Load() (*Config, error) {
 	// publishing stays disabled until an operator supplies all three, and a
 	// default URL would only produce confusing failures against the wrong host.
 	viper.SetDefault("OPSAPI_TIMEOUT", "30s")
+	viper.SetDefault("BLOG_AUTO_FILE_CMS", false)
 	viper.SetDefault("BLOG_CONTENT_DIR", "content/blogs")
 	viper.SetDefault("BLOG_AUTHOR_NAME", "JobShout Article Writer")
 	viper.SetDefault("BLOG_ORPHAN_TIMEOUT", "45m")
@@ -422,6 +428,7 @@ func Load() (*Config, error) {
 		OpsAPIKey:            viper.GetString("OPSAPI_API_KEY"),
 		OpsAPINamespace:      viper.GetString("OPSAPI_NAMESPACE"),
 		OpsAPITimeout:        viper.GetDuration("OPSAPI_TIMEOUT"),
+		BlogAutoFileCMS:      viper.GetBool("BLOG_AUTO_FILE_CMS"),
 		JobshoutComAPIURL:    viper.GetString("JOBSHOUT_COM_API_URL"),
 		JobshoutComAPIToken:  viper.GetString("JOBSHOUT_INTERNAL_TOKEN"),
 		JobshoutComSiteURL:   viper.GetString("JOBSHOUT_COM_SITE_URL"),
