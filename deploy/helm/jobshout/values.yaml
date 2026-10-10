@@ -102,6 +102,10 @@ cms:
   namespace: ""
   timeout: "30s"
   authorName: "JobShout Article Writer"
+  # autoFile files every finished article run in the CMS as drafts, however it
+  # was launched, instead of waiting for the Publish button. Off by default:
+  # a ring opts in once its CMS key is in place.
+  autoFile: false
 
 # JobShout.com Insights (jobshout.com/insights). The jobshout-com chart is
 # installed into the same ring namespace, so its API is reachable by Service

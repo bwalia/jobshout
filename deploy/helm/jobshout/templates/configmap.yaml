@@ -60,6 +60,7 @@ data:
   OPSAPI_BASE_URL: {{ .Values.cms.baseURL | quote }}
   OPSAPI_NAMESPACE: {{ .Values.cms.namespace | quote }}
   OPSAPI_TIMEOUT: {{ .Values.cms.timeout | default "30s" | quote }}
+  BLOG_AUTO_FILE_CMS: {{ .Values.cms.autoFile | default false | quote }}
   BLOG_AUTHOR_NAME: {{ .Values.cms.authorName | default "JobShout Article Writer" | quote }}
   # JobShout.com Insights — a second destination for the Article Writer. The
   # token arrives from jobshout-com's own Secret (see api.yaml); without it
