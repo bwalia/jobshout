@@ -69,6 +69,11 @@ func (h *AgentHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, http.StatusInternalServerError, "failed to get agent")
 		return
 	}
+	// Another org's agent reads exactly like a missing one.
+	if orgID := middleware.GetOrgID(r.Context()); agent == nil || orgID == "" || agent.OrgID.String() != orgID {
+		RespondError(w, http.StatusNotFound, service.ErrAgentNotFound.Error())
+		return
+	}
 	RespondJSON(w, http.StatusOK, agent)
 }
 

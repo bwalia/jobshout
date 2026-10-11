@@ -22,6 +22,7 @@ import (
 	"github.com/jobshout/server/internal/agentmodule"
 	"github.com/jobshout/server/internal/agentmodules"
 	"github.com/jobshout/server/internal/agentschema"
+	"github.com/jobshout/server/internal/apikey"
 	"github.com/jobshout/server/internal/appleauth"
 	"github.com/jobshout/server/internal/blog"
 	"github.com/jobshout/server/internal/bridge"
@@ -39,6 +40,7 @@ import (
 	"github.com/jobshout/server/internal/secretsrot"
 	"github.com/jobshout/server/internal/simpro"
 	"github.com/jobshout/server/internal/waflab"
+	"github.com/jobshout/server/internal/webhook"
 	"github.com/jobshout/server/internal/wslproxymcp"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
@@ -68,10 +70,12 @@ import (
 	"github.com/jobshout/server/internal/middleware"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/modelselect"
+	"github.com/jobshout/server/internal/orgroute"
 	"github.com/jobshout/server/internal/platformtools"
 	"github.com/jobshout/server/internal/repository"
 	"github.com/jobshout/server/internal/research"
 	"github.com/jobshout/server/internal/reviewbot"
+	"github.com/jobshout/server/internal/secretbox"
 	"github.com/jobshout/server/internal/selector"
 	"github.com/jobshout/server/internal/service"
 	"github.com/jobshout/server/internal/strix"
@@ -232,7 +236,16 @@ func main() {
 	execRepo := repository.NewExecutionRepository(pool)
 	toolPermRepo := repository.NewAgentToolRepository(pool)
 	approvalRepo := repository.NewApprovalRepository(pool)
-	llmProviderRepo := repository.NewLLMProviderRepository(pool)
+	// Tenant secrets (org LLM provider keys, webhook signing secrets) are
+	// sealed at rest when SECRETS_ENCRYPTION_KEY is set.
+	secretBox, err := secretbox.New(cfg.SecretsEncryptionKey)
+	if err != nil {
+		logger.Fatal("invalid SECRETS_ENCRYPTION_KEY", zap.Error(err))
+	}
+	if !secretBox.Enabled() {
+		logger.Warn("SECRETS_ENCRYPTION_KEY not set: org LLM provider keys and webhook secrets are stored in plaintext")
+	}
+	llmProviderRepo := repository.NewLLMProviderRepositoryWithBox(pool, secretBox)
 	schedulerRepo := repository.NewSchedulerRepository(pool)
 	sessionRepo := repository.NewSessionRepository(pool)
 	pluginRepo := repository.NewPluginRepository(pool)
@@ -267,6 +280,18 @@ func main() {
 	linuxPatchRunRepo := repository.NewLinuxPatchRunRepository(pool)
 	reviewRunRepo := repository.NewReviewRunRepository(pool)
 	taskRunRepo := repository.NewTaskRunRepository(pool)
+	// Role context (role, user_ref, workspace_ref) stored beside each run.
+	taskRunRepo = &repository.TaskRunContexts{TaskRunRepository: taskRunRepo, Pool: pool}
+
+	// Outbound webhooks: org endpoints get run.completed / run.failed /
+	// approval.requested / approval.decided, signed and retried with backoff.
+	// Emitted from the repositories where those state changes are recorded,
+	// so every path (fresh runs, resumes after a decision) is covered.
+	webhookRepo := repository.NewWebhookRepository(pool, secretBox)
+	webhookDisp := webhook.NewDispatcher(webhookRepo, webhook.Options{Logger: logger})
+	go webhookDisp.Run(ctx, 5*time.Second)
+	approvalRepo = &webhook.Approvals{ApprovalRepository: approvalRepo, Emitter: webhookDisp, Runs: taskRunRepo}
+	taskRunRepo = &webhook.TaskRuns{TaskRunRepository: taskRunRepo, Emitter: webhookDisp}
 	mailRepo := repository.NewMailRepository(pool)
 	careerRepo := repository.NewCareerRepository(pool)
 
@@ -312,6 +337,16 @@ func main() {
 	llmBench := llmbench.New(llmBenchRepo, logger, llmbench.Options{})
 	llmRouter.WrapClients(llmBench.Wrap)
 	chatInner = llmBench.Wrap(chatInner)
+	// Per-org model routing: an org with active llm_provider_configs has its
+	// calls sent down its own ordered chain instead of the env providers.
+	// Installed last so it is the outermost wrapper; the org's own clients
+	// get the same tracing + benchmark decorators.
+	orgRoutingRepo := repository.NewOrgLLMRoutingRepository(pool)
+	orgResolver := orgroute.NewResolver(orgroute.Stores{Providers: llmProviderRepo, Routing: orgRoutingRepo}, orgroute.Options{
+		Decorate: func(c llm.Client) llm.Client { return llmBench.Wrap(tracing.Wrap(c)) },
+		Logger:   logger,
+	})
+	llmRouter.WrapClients(orgResolver.Wrap)
 	// Self-hosted Ollama is the fallback when a cloud provider is over quota or
 	// unavailable: enabled after the benchmark/tracing wraps so the Ollama retry
 	// is recorded too. Set up last so For("ollama") resolves the wrapped client.
@@ -1110,6 +1145,8 @@ func main() {
 	pluginHandler := handler.NewPluginHandler(pluginSvc)
 	streamHandler := handler.NewStreamHandler(bridgeClient, logger)
 	llmProviderHandler := handler.NewLLMProviderHandler(llmProviderRepo, llmRouter, cfg.AutoModelSelection)
+	llmProviderHandler.OnChange(orgResolver.Invalidate)
+	llmRoutingHandler := handler.NewLLMRoutingHandler(orgRoutingRepo, llmProviderRepo, orgResolver)
 	schedulerHandler := handler.NewSchedulerHandler(schedulerRepo)
 	sessionHandler := handler.NewSessionHandler(sessionRepo)
 	integHandler := handler.NewIntegrationHandler(integSvc)
@@ -1157,8 +1194,15 @@ func main() {
 	agentSelector := selector.New(pool, logger)
 	selectorHandler := handler.NewSelectorHandler(agentSelector)
 
+	// Org API keys (service principals, e.g. OpsAPI). The auth middleware
+	// accepts "Bearer jsk_..." alongside JWTs; a key may only call the
+	// allow-listed routes its scopes cover (middleware.APIKeyRouteScope).
+	apiKeySvc := apikey.NewService(repository.NewAPIKeyRepository(pool))
+	apiKeyHandler := handler.NewAPIKeyHandler(apiKeySvc)
+	webhookEndpointHandler := handler.NewWebhookEndpointHandler(webhookRepo, webhookDisp)
+
 	// Auth middleware
-	requireAuth := middleware.RequireAuth(jwtSvc)
+	requireAuth := middleware.RequireAuthOrAPIKey(jwtSvc, apiKeySvc)
 
 	r := chi.NewRouter()
 
@@ -1602,10 +1646,39 @@ func main() {
 					r.Get("/", llmProviderHandler.GetByID)
 					r.Put("/", llmProviderHandler.Update)
 					r.Delete("/", llmProviderHandler.Delete)
+					r.Post("/test", llmProviderHandler.Test)
 				})
 			})
 
 			// Scheduled Tasks
+			// Org API keys — org admins only. API keys themselves can never
+			// reach these routes (not on the API-key allow-list).
+			r.Route("/api-keys", func(r chi.Router) {
+				r.Use(middleware.RequirePermission(rbacSvc, model.PermOrgManage))
+				r.Get("/", apiKeyHandler.List)
+				r.Post("/", apiKeyHandler.Create)
+				r.Delete("/{keyID}", apiKeyHandler.Revoke)
+			})
+
+			// Outbound webhook endpoints — org admins only.
+			r.Route("/webhook-endpoints", func(r chi.Router) {
+				r.Use(middleware.RequirePermission(rbacSvc, model.PermOrgManage))
+				r.Get("/", webhookEndpointHandler.List)
+				r.Post("/", webhookEndpointHandler.Create)
+				r.Route("/{endpointID}", func(r chi.Router) {
+					r.Get("/", webhookEndpointHandler.Get)
+					r.Put("/", webhookEndpointHandler.Update)
+					r.Delete("/", webhookEndpointHandler.Delete)
+					r.Get("/deliveries", webhookEndpointHandler.Deliveries)
+					r.Post("/test", webhookEndpointHandler.Test)
+				})
+			})
+
+			// Per-org model routing (ordered fallback chain over the org's
+			// provider configs). Changing it is an org-admin action.
+			r.Get("/llm-routing", llmRoutingHandler.Get)
+			r.With(middleware.RequirePermission(rbacSvc, model.PermOrgManage)).Put("/llm-routing", llmRoutingHandler.Put)
+
 			r.Route("/scheduled-tasks", func(r chi.Router) {
 				r.Get("/", schedulerHandler.List)
 				r.Post("/", schedulerHandler.Create)

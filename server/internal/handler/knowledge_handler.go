@@ -2,8 +2,8 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -11,12 +11,15 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/jobshout/server/internal/middleware"
+	"github.com/jobshout/server/internal/repository"
 	"github.com/jobshout/server/internal/service"
 )
 
-// KnowledgeHandler handles agent knowledge file endpoints.
+// KnowledgeHandler handles agent knowledge file endpoints. Every endpoint is
+// scoped to the caller's org through the route's agent: a file of another org
+// (or of another agent) is a 404, never a read or a write.
 type KnowledgeHandler struct {
-	pool   *pgxpool.Pool
+	store  repository.KnowledgeFileStore
 	ingest service.KnowledgeIngestService
 	logger *zap.Logger
 }
@@ -24,60 +27,73 @@ type KnowledgeHandler struct {
 // NewKnowledgeHandler constructs a KnowledgeHandler. ingest may be nil, in which
 // case knowledge files are stored without vector ingestion.
 func NewKnowledgeHandler(pool *pgxpool.Pool, ingest service.KnowledgeIngestService, logger *zap.Logger) *KnowledgeHandler {
-	return &KnowledgeHandler{pool: pool, ingest: ingest, logger: logger}
+	return NewKnowledgeHandlerWithStore(repository.NewKnowledgeFileStore(pool), ingest, logger)
 }
 
-type knowledgeFileRow struct {
-	ID        string    `json:"id"`
-	AgentID   string    `json:"agent_id"`
-	Filename  string    `json:"filename"`
-	Content   string    `json:"content"`
-	SizeBytes int       `json:"size_bytes"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+// NewKnowledgeHandlerWithStore constructs a KnowledgeHandler over any store.
+func NewKnowledgeHandlerWithStore(store repository.KnowledgeFileStore, ingest service.KnowledgeIngestService, logger *zap.Logger) *KnowledgeHandler {
+	return &KnowledgeHandler{store: store, ingest: ingest, logger: logger}
 }
 
-// ListByAgent returns all knowledge files for a given agent.
+// scope reads the caller's org and the route's agent (and, when wantFile, the
+// file) ids, validating them as UUIDs. It writes the error response itself.
+func (h *KnowledgeHandler) scope(w http.ResponseWriter, r *http.Request, wantFile bool) (orgID, agentID, fileID string, ok bool) {
+	orgID = middleware.GetOrgID(r.Context())
+	if _, err := uuid.Parse(orgID); err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid org_id")
+		return "", "", "", false
+	}
+	agentID = chi.URLParam(r, "agentID")
+	if _, err := uuid.Parse(agentID); err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid agent id")
+		return "", "", "", false
+	}
+	if wantFile {
+		fileID = chi.URLParam(r, "fileID")
+		if _, err := uuid.Parse(fileID); err != nil {
+			RespondError(w, http.StatusBadRequest, "invalid file id")
+			return "", "", "", false
+		}
+	}
+	return orgID, agentID, fileID, true
+}
+
+// ListByAgent returns all knowledge files for a given agent of the caller's org.
 func (h *KnowledgeHandler) ListByAgent(w http.ResponseWriter, r *http.Request) {
-	agentID := chi.URLParam(r, "agentID")
-
-	rows, err := h.pool.Query(r.Context(),
-		`SELECT id, agent_id, filename, content, size_bytes, created_at, updated_at
-			FROM knowledge_files WHERE agent_id = $1 ORDER BY filename`, agentID)
+	orgID, agentID, _, ok := h.scope(w, r, false)
+	if !ok {
+		return
+	}
+	inOrg, err := h.store.AgentInOrg(r.Context(), orgID, agentID)
+	if err != nil {
+		h.logger.Error("failed to check knowledge agent", zap.Error(err))
+		RespondError(w, http.StatusInternalServerError, "failed to list knowledge files")
+		return
+	}
+	if !inOrg {
+		RespondError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	files, err := h.store.ListByAgent(r.Context(), orgID, agentID)
 	if err != nil {
 		h.logger.Error("failed to list knowledge files", zap.Error(err))
 		RespondError(w, http.StatusInternalServerError, "failed to list knowledge files")
 		return
 	}
-	defer rows.Close()
-
-	files := []knowledgeFileRow{}
-	for rows.Next() {
-		var f knowledgeFileRow
-		if err := rows.Scan(&f.ID, &f.AgentID, &f.Filename, &f.Content, &f.SizeBytes, &f.CreatedAt, &f.UpdatedAt); err != nil {
-			h.logger.Error("failed to scan knowledge file", zap.Error(err))
-			continue
-		}
-		files = append(files, f)
-	}
-
 	RespondJSON(w, http.StatusOK, files)
 }
 
 // GetFile returns a single knowledge file.
 func (h *KnowledgeHandler) GetFile(w http.ResponseWriter, r *http.Request) {
-	fileID := chi.URLParam(r, "fileID")
-
-	var f knowledgeFileRow
-	err := h.pool.QueryRow(r.Context(),
-		`SELECT id, agent_id, filename, content, size_bytes, created_at, updated_at
-			FROM knowledge_files WHERE id = $1`, fileID,
-	).Scan(&f.ID, &f.AgentID, &f.Filename, &f.Content, &f.SizeBytes, &f.CreatedAt, &f.UpdatedAt)
-	if err != nil {
-		RespondError(w, http.StatusNotFound, "knowledge file not found")
+	orgID, agentID, fileID, ok := h.scope(w, r, true)
+	if !ok {
 		return
 	}
-
+	f, err := h.store.Get(r.Context(), orgID, agentID, fileID)
+	if err != nil {
+		h.respondStoreErr(w, err, "failed to get knowledge file")
+		return
+	}
 	RespondJSON(w, http.StatusOK, f)
 }
 
@@ -88,36 +104,27 @@ type createKnowledgeFileRequest struct {
 
 // CreateFile creates a new knowledge file for an agent.
 func (h *KnowledgeHandler) CreateFile(w http.ResponseWriter, r *http.Request) {
-	agentID := chi.URLParam(r, "agentID")
-	orgID, _ := r.Context().Value(middleware.ContextKeyOrgID).(string)
+	orgID, agentID, _, ok := h.scope(w, r, false)
+	if !ok {
+		return
+	}
 
 	var req createKnowledgeFileRequest
 	if !DecodeJSON(w, r, &req) {
 		return
 	}
-
 	if req.Filename == "" {
 		RespondError(w, http.StatusBadRequest, "filename is required")
 		return
 	}
 
-	// Verify agent belongs to user's org
-	var agentOrgID string
-	err := h.pool.QueryRow(r.Context(),
-		`SELECT org_id FROM agents WHERE id = $1`, agentID).Scan(&agentOrgID)
-	if err != nil || agentOrgID != orgID {
+	inOrg, err := h.store.AgentInOrg(r.Context(), orgID, agentID)
+	if err != nil || !inOrg {
 		RespondError(w, http.StatusNotFound, "agent not found")
 		return
 	}
 
-	sizeBytes := len([]byte(req.Content))
-
-	var id string
-	err = h.pool.QueryRow(r.Context(),
-		`INSERT INTO knowledge_files (agent_id, filename, content, size_bytes)
-			VALUES ($1, $2, $3, $4) RETURNING id`,
-		agentID, req.Filename, req.Content, sizeBytes,
-	).Scan(&id)
+	id, err := h.store.Create(r.Context(), agentID, req.Filename, req.Content)
 	if err != nil {
 		h.logger.Error("failed to create knowledge file", zap.Error(err))
 		RespondError(w, http.StatusInternalServerError, "failed to create knowledge file")
@@ -165,62 +172,45 @@ type updateKnowledgeFileRequest struct {
 
 // UpdateFile updates the content of an existing knowledge file.
 func (h *KnowledgeHandler) UpdateFile(w http.ResponseWriter, r *http.Request) {
-	fileID := chi.URLParam(r, "fileID")
+	orgID, agentID, fileID, ok := h.scope(w, r, true)
+	if !ok {
+		return
+	}
 
 	var req updateKnowledgeFileRequest
 	if !DecodeJSON(w, r, &req) {
 		return
 	}
 
-	sizeBytes := len([]byte(req.Content))
-
-	// Fetch the owning agent + org so the re-ingested chunks are scoped
-	// correctly. A missing row is reported as not found below.
-	var agentID, orgID string
-	ownerErr := h.pool.QueryRow(r.Context(),
-		`SELECT kf.agent_id, a.org_id
-			FROM knowledge_files kf JOIN agents a ON a.id = kf.agent_id
-			WHERE kf.id = $1`, fileID,
-	).Scan(&agentID, &orgID)
-
-	tag, err := h.pool.Exec(r.Context(),
-		`UPDATE knowledge_files SET content = $1, size_bytes = $2, updated_at = NOW()
-			WHERE id = $3`,
-		req.Content, sizeBytes, fileID,
-	)
-	if err != nil {
-		h.logger.Error("failed to update knowledge file", zap.Error(err))
-		RespondError(w, http.StatusInternalServerError, "failed to update knowledge file")
-		return
-	}
-	if tag.RowsAffected() == 0 {
-		RespondError(w, http.StatusNotFound, "knowledge file not found")
+	if err := h.store.UpdateContent(r.Context(), orgID, agentID, fileID, req.Content); err != nil {
+		h.respondStoreErr(w, err, "failed to update knowledge file")
 		return
 	}
 
 	// Best-effort re-ingestion — never blocks the CRUD response.
-	if ownerErr == nil {
-		h.ingestFile(r.Context(), orgID, agentID, fileID, req.Content)
-	}
+	h.ingestFile(r.Context(), orgID, agentID, fileID, req.Content)
 
 	RespondJSON(w, http.StatusOK, map[string]string{"message": "updated"})
 }
 
 // DeleteFile deletes a knowledge file.
 func (h *KnowledgeHandler) DeleteFile(w http.ResponseWriter, r *http.Request) {
-	fileID := chi.URLParam(r, "fileID")
-
-	tag, err := h.pool.Exec(r.Context(),
-		`DELETE FROM knowledge_files WHERE id = $1`, fileID)
-	if err != nil {
-		h.logger.Error("failed to delete knowledge file", zap.Error(err))
-		RespondError(w, http.StatusInternalServerError, "failed to delete knowledge file")
+	orgID, agentID, fileID, ok := h.scope(w, r, true)
+	if !ok {
 		return
 	}
-	if tag.RowsAffected() == 0 {
+	if err := h.store.Delete(r.Context(), orgID, agentID, fileID); err != nil {
+		h.respondStoreErr(w, err, "failed to delete knowledge file")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *KnowledgeHandler) respondStoreErr(w http.ResponseWriter, err error, msg string) {
+	if errors.Is(err, repository.ErrKnowledgeNotFound) {
 		RespondError(w, http.StatusNotFound, "knowledge file not found")
 		return
 	}
-
-	w.WriteHeader(http.StatusNoContent)
+	h.logger.Error(msg, zap.Error(err))
+	RespondError(w, http.StatusInternalServerError, msg)
 }

@@ -25,6 +25,7 @@ type TaskRun struct {
 	ModelName     *string        `json:"model_name"`
 	SkillSlugs    []string       `json:"skill_slugs"`
 	Inputs        map[string]any `json:"inputs"`
+	Context       *RunContext    `json:"context,omitempty"` // caller's role context
 	Debug         bool           `json:"debug"`
 	Output        *string        `json:"output"`
 	ErrorMessage  *string        `json:"error_message"`
@@ -79,4 +80,8 @@ type CreateTaskRunRequest struct {
 	Inputs map[string]any `json:"inputs"`
 	// Debug requests the full engine trace be surfaced for this run.
 	Debug bool `json:"debug"`
+	// Context is the role context the agent runs under (role, user_ref,
+	// workspace_ref). Stored on the run and added to Inputs, so one agent
+	// can serve several roles. Optional.
+	Context *RunContext `json:"context"`
 }

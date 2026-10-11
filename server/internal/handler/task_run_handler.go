@@ -54,7 +54,16 @@ func (h *TaskRunHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		requestedBy = &userID
 	}
 
-	run, err := h.svc.CreateRun(r.Context(), taskID, req, orgID, requestedBy)
+	// Role context: rendered into the prompt's Inputs block and stored on
+	// the run (the task-run repository reads it from the context).
+	ctx := r.Context()
+	if rc := req.Context.Normalize(); rc != nil {
+		req.Context = rc
+		req.Inputs = rc.MergeInto(req.Inputs)
+		ctx = model.WithRunContext(ctx, rc)
+	}
+
+	run, err := h.svc.CreateRun(ctx, taskID, req, orgID, requestedBy)
 	if err != nil {
 		if errors.Is(err, service.ErrTaskRunNotFound) {
 			RespondError(w, http.StatusNotFound, "task not found")

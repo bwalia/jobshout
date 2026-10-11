@@ -10,6 +10,7 @@ import (
 	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/middleware"
 	"github.com/jobshout/server/internal/model"
+	"github.com/jobshout/server/internal/orgroute"
 	"github.com/jobshout/server/internal/repository"
 )
 
@@ -20,7 +21,13 @@ type LLMProviderHandler struct {
 	// autoEnabled mirrors AUTO_MODEL_SELECTION so the model picker only offers
 	// "Auto" when the server would actually honour it.
 	autoEnabled bool
+	// onChange, when set, is called after a provider config of an org is
+	// created, updated or deleted (cache invalidation for org routing).
+	onChange func(orgID uuid.UUID)
 }
+
+// OnChange registers a hook run after an org's provider configs change.
+func (h *LLMProviderHandler) OnChange(fn func(orgID uuid.UUID)) { h.onChange = fn }
 
 func NewLLMProviderHandler(repo repository.LLMProviderRepository, router *llm.Router, autoEnabled bool) *LLMProviderHandler {
 	return &LLMProviderHandler{repo: repo, router: router, validate: validator.New(), autoEnabled: autoEnabled}
@@ -181,35 +188,47 @@ func (h *LLMProviderHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.changed(orgID)
 	maskProviderKey(p)
 
 	RespondJSON(w, http.StatusCreated, p)
 }
 
-// GetByID returns a single provider config.
-func (h *LLMProviderHandler) GetByID(w http.ResponseWriter, r *http.Request) {
+// ownedProvider resolves {providerID} to a provider config of the caller's
+// org. Another org's config is a 404 — it holds that org's API key.
+func (h *LLMProviderHandler) ownedProvider(w http.ResponseWriter, r *http.Request) (*model.LLMProviderConfig, bool) {
 	id, err := uuid.Parse(chi.URLParam(r, "providerID"))
 	if err != nil {
 		RespondError(w, http.StatusBadRequest, "invalid provider ID")
-		return
+		return nil, false
 	}
-
-	p, err := h.repo.GetByID(r.Context(), id)
+	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
 	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid org_id")
+		return nil, false
+	}
+	p, err := h.repo.GetByID(r.Context(), id)
+	if err != nil || p == nil || p.OrgID != orgID {
 		RespondError(w, http.StatusNotFound, "provider not found")
+		return nil, false
+	}
+	return p, true
+}
+
+// GetByID returns a single provider config.
+func (h *LLMProviderHandler) GetByID(w http.ResponseWriter, r *http.Request) {
+	p, ok := h.ownedProvider(w, r)
+	if !ok {
 		return
 	}
-
 	maskProviderKey(p)
-
 	RespondJSON(w, http.StatusOK, p)
 }
 
 // Update modifies a provider config.
 func (h *LLMProviderHandler) Update(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "providerID"))
-	if err != nil {
-		RespondError(w, http.StatusBadRequest, "invalid provider ID")
+	existing, ok := h.ownedProvider(w, r)
+	if !ok {
 		return
 	}
 
@@ -219,30 +238,54 @@ func (h *LLMProviderHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.IsDefault != nil && *req.IsDefault {
-		orgID, _ := uuid.Parse(middleware.GetOrgID(r.Context()))
-		_ = h.repo.ClearDefault(r.Context(), orgID)
+		_ = h.repo.ClearDefault(r.Context(), existing.OrgID)
 	}
 
-	p, err := h.repo.Update(r.Context(), id, req)
+	p, err := h.repo.Update(r.Context(), existing.ID, req)
 	if err != nil {
 		RespondError(w, http.StatusInternalServerError, "failed to update provider")
 		return
 	}
+	h.changed(existing.OrgID)
 	maskProviderKey(p)
 	RespondJSON(w, http.StatusOK, p)
 }
 
 // Delete removes a provider config.
 func (h *LLMProviderHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "providerID"))
-	if err != nil {
-		RespondError(w, http.StatusBadRequest, "invalid provider ID")
+	existing, ok := h.ownedProvider(w, r)
+	if !ok {
 		return
 	}
-
-	if err := h.repo.Delete(r.Context(), id); err != nil {
+	if err := h.repo.Delete(r.Context(), existing.ID); err != nil {
 		RespondError(w, http.StatusInternalServerError, "failed to delete provider")
 		return
 	}
+	h.changed(existing.OrgID)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// Test sends one tiny prompt through a provider config of the caller's org
+// (POST /api/v1/llm-providers/{providerID}/test, optional body {"model": "..."})
+// and reports whether it answered. Costs ~10 tokens each way.
+func (h *LLMProviderHandler) Test(w http.ResponseWriter, r *http.Request) {
+	p, ok := h.ownedProvider(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Model string `json:"model"`
+	}
+	if r.ContentLength > 0 && !DecodeJSON(w, r, &body) {
+		return
+	}
+	RespondJSON(w, http.StatusOK, orgroute.Test(r.Context(), *p, body.Model))
+}
+
+// changed tells the org model router (when wired) that this org's provider
+// set moved, so its next call re-reads the chain instead of a cached one.
+func (h *LLMProviderHandler) changed(orgID uuid.UUID) {
+	if h.onChange != nil {
+		h.onChange(orgID)
+	}
 }
