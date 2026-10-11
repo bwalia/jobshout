@@ -168,6 +168,11 @@ var providerKeyEnv = map[string]string{
 	"gemini": "GEMINI_API_KEY",
 }
 
+// ErrOrgChainExhausted marks a failure of an org's own provider chain
+// (package orgroute) once every hop failed. The env Ollama fallback never
+// applies to it: the org's chain is the whole fallback policy for that org.
+var ErrOrgChainExhausted = errors.New("llm: every provider in the org's routing chain failed")
+
 // ─── Per-run provider selection ─────────────────────────────────────────────
 
 type providerCtxKey struct{}
@@ -220,6 +225,11 @@ func (r *Router) ollamaFallbackFor(ctx context.Context, provider string, err err
 		return nil, false
 	}
 	if NormalizeProvider(provider) == "ollama" {
+		return nil, false
+	}
+	// An org that routes through its own provider chain chose its providers;
+	// the platform's Ollama is not silently added as an extra hop.
+	if errors.Is(err, ErrOrgChainExhausted) {
 		return nil, false
 	}
 	if ctx.Err() != nil {

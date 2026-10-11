@@ -10,6 +10,7 @@ import (
 	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/middleware"
 	"github.com/jobshout/server/internal/model"
+	"github.com/jobshout/server/internal/orgroute"
 	"github.com/jobshout/server/internal/repository"
 )
 
@@ -262,6 +263,23 @@ func (h *LLMProviderHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 	h.changed(existing.OrgID)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// Test sends one tiny prompt through a provider config of the caller's org
+// (POST /api/v1/llm-providers/{providerID}/test, optional body {"model": "..."})
+// and reports whether it answered. Costs ~10 tokens each way.
+func (h *LLMProviderHandler) Test(w http.ResponseWriter, r *http.Request) {
+	p, ok := h.ownedProvider(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Model string `json:"model"`
+	}
+	if r.ContentLength > 0 && !DecodeJSON(w, r, &body) {
+		return
+	}
+	RespondJSON(w, http.StatusOK, orgroute.Test(r.Context(), *p, body.Model))
 }
 
 // changed tells the org model router (when wired) that this org's provider

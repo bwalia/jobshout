@@ -68,6 +68,7 @@ import (
 	"github.com/jobshout/server/internal/middleware"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/modelselect"
+	"github.com/jobshout/server/internal/orgroute"
 	"github.com/jobshout/server/internal/platformtools"
 	"github.com/jobshout/server/internal/repository"
 	"github.com/jobshout/server/internal/research"
@@ -322,6 +323,16 @@ func main() {
 	llmBench := llmbench.New(llmBenchRepo, logger, llmbench.Options{})
 	llmRouter.WrapClients(llmBench.Wrap)
 	chatInner = llmBench.Wrap(chatInner)
+	// Per-org model routing: an org with active llm_provider_configs has its
+	// calls sent down its own ordered chain instead of the env providers.
+	// Installed last so it is the outermost wrapper; the org's own clients
+	// get the same tracing + benchmark decorators.
+	orgRoutingRepo := repository.NewOrgLLMRoutingRepository(pool)
+	orgResolver := orgroute.NewResolver(orgroute.Stores{Providers: llmProviderRepo, Routing: orgRoutingRepo}, orgroute.Options{
+		Decorate: func(c llm.Client) llm.Client { return llmBench.Wrap(tracing.Wrap(c)) },
+		Logger:   logger,
+	})
+	llmRouter.WrapClients(orgResolver.Wrap)
 	// Self-hosted Ollama is the fallback when a cloud provider is over quota or
 	// unavailable: enabled after the benchmark/tracing wraps so the Ollama retry
 	// is recorded too. Set up last so For("ollama") resolves the wrapped client.
@@ -1114,6 +1125,8 @@ func main() {
 	pluginHandler := handler.NewPluginHandler(pluginSvc)
 	streamHandler := handler.NewStreamHandler(bridgeClient, logger)
 	llmProviderHandler := handler.NewLLMProviderHandler(llmProviderRepo, llmRouter, cfg.AutoModelSelection)
+	llmProviderHandler.OnChange(orgResolver.Invalidate)
+	llmRoutingHandler := handler.NewLLMRoutingHandler(orgRoutingRepo, llmProviderRepo, orgResolver)
 	schedulerHandler := handler.NewSchedulerHandler(schedulerRepo)
 	sessionHandler := handler.NewSessionHandler(sessionRepo)
 	integHandler := handler.NewIntegrationHandler(integSvc)
@@ -1606,10 +1619,16 @@ func main() {
 					r.Get("/", llmProviderHandler.GetByID)
 					r.Put("/", llmProviderHandler.Update)
 					r.Delete("/", llmProviderHandler.Delete)
+					r.Post("/test", llmProviderHandler.Test)
 				})
 			})
 
 			// Scheduled Tasks
+			// Per-org model routing (ordered fallback chain over the org's
+			// provider configs). Changing it is an org-admin action.
+			r.Get("/llm-routing", llmRoutingHandler.Get)
+			r.With(middleware.RequirePermission(rbacSvc, model.PermOrgManage)).Put("/llm-routing", llmRoutingHandler.Put)
+
 			r.Route("/scheduled-tasks", func(r chi.Router) {
 				r.Get("/", schedulerHandler.List)
 				r.Post("/", schedulerHandler.Create)
