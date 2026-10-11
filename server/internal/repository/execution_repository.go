@@ -20,6 +20,13 @@ type ExecutionRepository interface {
 	MarkCompleted(ctx context.Context, id uuid.UUID, output string, totalTokens int, iterations int) error
 	MarkFailed(ctx context.Context, id uuid.UUID, errMsg string, totalTokens int, iterations int) error
 	MarkCancelled(ctx context.Context, id uuid.UUID) error
+	// MarkAwaitingApproval records a run paused on a gated tool: status
+	// awaiting_approval, metering so far, no output and no completed_at.
+	MarkAwaitingApproval(ctx context.Context, id uuid.UUID, totalTokens int, iterations int) error
+	// MarkResuming moves a paused (or interrupted-while-resuming) execution
+	// back to running. It reports false when the execution is in neither
+	// state — cancelled or already finished — and must not be resumed.
+	MarkResuming(ctx context.Context, id uuid.UUID) (bool, error)
 	RecordToolCall(ctx context.Context, call *model.ExecutionToolCall) error
 	GetByID(ctx context.Context, id uuid.UUID) (*model.AgentExecution, error)
 	ListByAgent(ctx context.Context, agentID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.AgentExecution], error)
@@ -102,13 +109,37 @@ func (r *executionRepository) MarkCancelled(ctx context.Context, id uuid.UUID) e
 	const sql = `
 		UPDATE agent_executions
 		SET status = $2, error_message = $3, completed_at = $4
-		WHERE id = $1 AND status IN ($5, $6)`
+		WHERE id = $1 AND status IN ($5, $6, $7)`
 	_, err := r.pool.Exec(ctx, sql, id, model.ExecutionStatusCancelled, "cancelled by user", time.Now(),
-		model.ExecutionStatusPending, model.ExecutionStatusRunning)
+		model.ExecutionStatusPending, model.ExecutionStatusRunning, model.ExecutionStatusAwaitingApproval)
 	if err != nil {
 		return fmt.Errorf("execution_repo: mark cancelled: %w", err)
 	}
 	return nil
+}
+
+func (r *executionRepository) MarkAwaitingApproval(ctx context.Context, id uuid.UUID, totalTokens int, iterations int) error {
+	const sql = `
+		UPDATE agent_executions
+		SET status = $2, output = NULL, error_message = NULL, total_tokens = $3, iterations = $4,
+		    completed_at = NULL
+		WHERE id = $1`
+	_, err := r.pool.Exec(ctx, sql, id, model.ExecutionStatusAwaitingApproval, totalTokens, iterations)
+	if err != nil {
+		return fmt.Errorf("execution_repo: mark awaiting approval: %w", err)
+	}
+	return nil
+}
+
+func (r *executionRepository) MarkResuming(ctx context.Context, id uuid.UUID) (bool, error) {
+	const sql = `
+		UPDATE agent_executions SET status = $2
+		WHERE id = $1 AND status IN ($3, $2)`
+	tag, err := r.pool.Exec(ctx, sql, id, model.ExecutionStatusRunning, model.ExecutionStatusAwaitingApproval)
+	if err != nil {
+		return false, fmt.Errorf("execution_repo: mark resuming: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 // UpdateCostFields sets the cost-tracking columns on an execution after completion.
@@ -247,8 +278,15 @@ func (r *executionRepository) ListByAgent(ctx context.Context, agentID uuid.UUID
 	}, nil
 }
 
+// PersistResult writes a run's outcome. A run paused for approval is recorded as
+// awaiting_approval (never completed-with-empty-output). Tool calls the run
+// already persisted when it paused (res.PriorToolCalls) are not written again.
 func (r *executionRepository) PersistResult(ctx context.Context, execID uuid.UUID, res executor.Result) error {
-	if res.Err != nil {
+	if res.Status == executor.StatusAwaitingApproval && res.Err == nil {
+		if err := r.MarkAwaitingApproval(ctx, execID, res.TotalTokens, res.Iterations); err != nil {
+			return err
+		}
+	} else if res.Err != nil {
 		errMsg := res.Err.Error()
 		if err := r.MarkFailed(ctx, execID, errMsg, res.TotalTokens, res.Iterations); err != nil {
 			return err
@@ -259,8 +297,8 @@ func (r *executionRepository) PersistResult(ctx context.Context, execID uuid.UUI
 		}
 	}
 
-	// Persist tool call records.
-	for _, tc := range res.ToolCalls {
+	// Persist tool call records made since the last pause.
+	for _, tc := range newToolCalls(res) {
 		call := &model.ExecutionToolCall{
 			ID:          uuid.New(),
 			ExecutionID: execID,
@@ -279,6 +317,15 @@ func (r *executionRepository) PersistResult(ctx context.Context, execID uuid.UUI
 		_ = r.RecordToolCall(ctx, call)
 	}
 	return nil
+}
+
+// newToolCalls is the part of res.ToolCalls not yet persisted.
+func newToolCalls(res executor.Result) []executor.ToolCallRecord {
+	n := res.PriorToolCalls
+	if n < 0 || n > len(res.ToolCalls) {
+		n = 0
+	}
+	return res.ToolCalls[n:]
 }
 
 // --- LangChain trace methods ---

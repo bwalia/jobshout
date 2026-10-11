@@ -120,7 +120,8 @@ func (t *Tasks) published(ctx context.Context, before *model.Task, status string
 }
 
 // Executions wraps an ExecutionRepository and publishes
-// execution.status_changed on start, completion, failure and cancellation.
+// execution.status_changed on start, completion, failure, cancellation, a
+// pause for approval and the resume after it.
 type Executions struct {
 	repository.ExecutionRepository
 	pub publisher
@@ -145,6 +146,18 @@ func (e *Executions) MarkFailed(ctx context.Context, id uuid.UUID, errMsg string
 
 func (e *Executions) MarkCancelled(ctx context.Context, id uuid.UUID) error {
 	return e.after(ctx, id, e.ExecutionRepository.MarkCancelled(ctx, id))
+}
+
+func (e *Executions) MarkAwaitingApproval(ctx context.Context, id uuid.UUID, totalTokens int, iterations int) error {
+	return e.after(ctx, id, e.ExecutionRepository.MarkAwaitingApproval(ctx, id, totalTokens, iterations))
+}
+
+func (e *Executions) MarkResuming(ctx context.Context, id uuid.UUID) (bool, error) {
+	ok, err := e.ExecutionRepository.MarkResuming(ctx, id)
+	if err != nil || !ok {
+		return ok, err
+	}
+	return true, e.after(ctx, id, nil)
 }
 
 func (e *Executions) after(ctx context.Context, id uuid.UUID, err error) error {

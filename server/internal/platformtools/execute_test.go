@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/jobshout/server/internal/executor"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/repository"
 	"github.com/jobshout/server/internal/service"
@@ -94,6 +95,10 @@ func (s *stubExec) ListLangChainTraces(context.Context, uuid.UUID) ([]model.Lang
 	return nil, nil
 }
 func (s *stubExec) ListLangGraphSnapshots(context.Context, uuid.UUID) ([]model.LangGraphStateSnapshot, error) {
+	return nil, nil
+}
+func (s *stubExec) MarkResuming(context.Context, uuid.UUID) (bool, error) { return false, nil }
+func (s *stubExec) CompleteResumed(context.Context, uuid.UUID, executor.Result) (*model.AgentExecution, error) {
 	return nil, nil
 }
 

@@ -335,27 +335,281 @@ func TestExecutor_ResumeOnReject(t *testing.T) {
 	}
 }
 
-// TestExecutor_NativePathGatedToolFailsClearly verifies the documented native-path
-// fallback: a gated tool on the native tool-calling path fails with a clear error
-// rather than silently bypassing the gate.
-func TestExecutor_NativePathGatedToolFailsClearly(t *testing.T) {
-	client := &fakeToolClient{} // tool-capable => native path, scripts an "echo" call
+// nativeScriptClient is a tool-capable client that returns scripted native
+// turns, recording the requests it saw.
+type nativeScriptClient struct {
+	turns    []llm.GenerateResponse
+	call     int
+	requests []llm.GenerateRequest
+}
+
+func (c *nativeScriptClient) ProviderName() string { return "fake" }
+func (c *nativeScriptClient) SupportsTools() bool  { return true }
+
+func (c *nativeScriptClient) Generate(_ context.Context, req llm.GenerateRequest) (*llm.GenerateResponse, error) {
+	c.requests = append(c.requests, req)
+	idx := c.call
+	if idx >= len(c.turns) {
+		idx = len(c.turns) - 1
+	}
+	c.call++
+	out := c.turns[idx]
+	return &out, nil
+}
+
+// schemaTool is a schema-advertising (native-path) tool that records inputs.
+type schemaTool struct {
+	name   string
+	output string
+	inputs []map[string]any
+}
+
+func (t *schemaTool) Name() string        { return t.name }
+func (t *schemaTool) Description() string { return "records inputs" }
+func (t *schemaTool) Parameters() tools.ParameterSchema {
+	return tools.ObjectSchema(map[string]any{"target": map[string]any{"type": "string"}})
+}
+func (t *schemaTool) Execute(_ context.Context, input map[string]any) (string, error) {
+	t.inputs = append(t.inputs, input)
+	return t.output, nil
+}
+
+func approvalFor(paused Result, agent *model.Agent, execID uuid.UUID, gc gateCall, status string) *model.Approval {
+	return &model.Approval{
+		ID:          paused.ApprovalID,
+		OrgID:       agent.OrgID,
+		ExecutionID: execID,
+		AgentID:     agent.ID,
+		ToolName:    gc.toolName,
+		Status:      status,
+		DeciderName: "Alice",
+		ResumeState: gc.resumeState,
+	}
+}
+
+// toolMessageFor returns the RoleTool message answering a tool call id.
+func toolMessageFor(msgs []llm.Message, id string) (llm.Message, bool) {
+	for _, m := range msgs {
+		if m.Role == llm.RoleTool && m.ToolCallID == id {
+			return m, true
+		}
+	}
+	return llm.Message{}, false
+}
+
+// TestExecutor_NativePath_PauseAndResume covers the native tool-calling path end
+// to end: one model turn asks for an ungated tool, then a gated one, then
+// another ungated one. The run must execute the first, pause on the gated one
+// (running neither it nor the third), and on resume either execute (approve) or
+// refuse (reject) the gated call, then finish the rest of the turn and the run.
+func TestExecutor_NativePath_PauseAndResume(t *testing.T) {
+	cases := []struct {
+		name           string
+		decision       string
+		wantDangerRuns int
+		wantGatedReply string
+	}{
+		{"approve executes the gated tool", model.ApprovalStatusApproved, 1, "danger-output"},
+		{"reject feeds the rejection back", model.ApprovalStatusRejected, 0, "Action rejected by Alice"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &nativeScriptClient{turns: []llm.GenerateResponse{
+				{ToolCalls: []llm.ToolCall{
+					{ID: "c1", Name: "safe", Arguments: map[string]any{"target": "a"}},
+					{ID: "c2", Name: "danger", Arguments: map[string]any{"target": "prod"}},
+					{ID: "c3", Name: "safe", Arguments: map[string]any{"target": "b"}},
+				}, InputTokens: 10, OutputTokens: 5},
+				{Content: "native done", InputTokens: 7, OutputTokens: 3},
+			}}
+			router := llm.NewTestRouter("fake", map[string]llm.Client{"fake": client})
+			registry := tools.NewRegistry()
+			safe := &schemaTool{name: "safe", output: "safe-output"}
+			danger := &schemaTool{name: "danger", output: "danger-output"}
+			registry.Register(safe)
+			registry.Register(danger)
+
+			gate := &fakeGate{gated: map[string]bool{"danger": true}}
+			exec := New(router, registry, zap.NewNop()).WithApprovalGate(gate)
+			agent := gatedAgent()
+			execID := uuid.New()
+
+			paused := exec.Run(context.Background(), execID, agent, "go", []string{"safe", "danger"})
+			if paused.Err != nil {
+				t.Fatalf("native run should pause, not fail: %v", paused.Err)
+			}
+			if paused.Status != StatusAwaitingApproval || paused.ApprovalID == uuid.Nil {
+				t.Fatalf("expected awaiting_approval with an approval id, got %q / %s", paused.Status, paused.ApprovalID)
+			}
+			if len(danger.inputs) != 0 {
+				t.Fatal("gated tool must not run before approval")
+			}
+			if len(safe.inputs) != 1 || safe.inputs[0]["target"] != "a" {
+				t.Fatalf("only the call before the gated one may run before the pause, got %#v", safe.inputs)
+			}
+			if len(paused.ToolCalls) != 1 || paused.TotalTokens != 15 {
+				t.Fatalf("paused metering: calls=%d tokens=%d", len(paused.ToolCalls), paused.TotalTokens)
+			}
+
+			var rs resumableState
+			if err := json.Unmarshal(gate.created[0].resumeState, &rs); err != nil {
+				t.Fatalf("resume state does not decode: %v", err)
+			}
+			if rs.Mode != loopModeNative || rs.PendingToolCallID != "c2" || len(rs.RemainingToolCalls) != 1 {
+				t.Fatalf("native resume state incomplete: mode=%q pending=%q remaining=%d",
+					rs.Mode, rs.PendingToolCallID, len(rs.RemainingToolCalls))
+			}
+
+			res := exec.Resume(context.Background(), approvalFor(paused, agent, execID, gate.created[0], tc.decision))
+			if res.Err != nil || res.Status != "" {
+				t.Fatalf("resumed run should complete: status=%q err=%v", res.Status, res.Err)
+			}
+			if res.FinalAnswer != "native done" {
+				t.Fatalf("final answer: %q", res.FinalAnswer)
+			}
+			if len(danger.inputs) != tc.wantDangerRuns {
+				t.Fatalf("gated tool ran %d times, want %d", len(danger.inputs), tc.wantDangerRuns)
+			}
+			if len(safe.inputs) != 2 || safe.inputs[1]["target"] != "b" {
+				t.Fatalf("the rest of the paused turn must run after resume, got %#v", safe.inputs)
+			}
+			if res.TotalTokens != 25 {
+				t.Fatalf("tokens must be cumulative across the pause: got %d want 25", res.TotalTokens)
+			}
+			if res.PriorToolCalls != 1 {
+				t.Fatalf("PriorToolCalls: got %d want 1", res.PriorToolCalls)
+			}
+
+			// The follow-up request must answer every tool call of the paused
+			// turn, by id, with the assistant turn's tool calls preserved.
+			last := client.requests[len(client.requests)-1]
+			for _, id := range []string{"c1", "c2", "c3"} {
+				if _, ok := toolMessageFor(last.Messages, id); !ok {
+					t.Fatalf("no tool result for call %s in the resumed conversation", id)
+				}
+			}
+			gm, _ := toolMessageFor(last.Messages, "c2")
+			if !strings.Contains(gm.Content, tc.wantGatedReply) {
+				t.Fatalf("gated call result %q should contain %q", gm.Content, tc.wantGatedReply)
+			}
+			var sawAssistantCalls bool
+			for _, m := range last.Messages {
+				if m.Role == llm.RoleAssistant && len(m.ToolCalls) == 3 {
+					sawAssistantCalls = true
+				}
+			}
+			if !sawAssistantCalls {
+				t.Fatal("assistant tool_use turn lost its tool calls across the pause")
+			}
+			if len(last.ToolDefs) == 0 {
+				t.Fatal("resumed native turn must still send tool definitions")
+			}
+		})
+	}
+}
+
+// TestExecutor_NativePath_SecondGateInSameTurn pauses twice in one model turn:
+// resuming the first approval runs into the second gated call, which must pause
+// again (not fail) with its own resume state.
+func TestExecutor_NativePath_SecondGateInSameTurn(t *testing.T) {
+	client := &nativeScriptClient{turns: []llm.GenerateResponse{
+		{ToolCalls: []llm.ToolCall{
+			{ID: "c1", Name: "danger", Arguments: map[string]any{"target": "one"}},
+			{ID: "c2", Name: "danger", Arguments: map[string]any{"target": "two"}},
+		}},
+		{Content: "both done"},
+	}}
 	router := llm.NewTestRouter("fake", map[string]llm.Client{"fake": client})
 	registry := tools.NewRegistry()
-	tool := &echoTool{}
-	registry.Register(tool)
-
-	gate := &fakeGate{gated: map[string]bool{"echo": true}}
+	danger := &schemaTool{name: "danger", output: "ok"}
+	registry.Register(danger)
+	gate := &fakeGate{gated: map[string]bool{"danger": true}}
 	exec := New(router, registry, zap.NewNop()).WithApprovalGate(gate)
+	agent := gatedAgent()
+	execID := uuid.New()
 
-	res := exec.Run(context.Background(), uuid.New(), gatedAgent(), "do it", []string{"echo"})
-	if res.Err == nil {
-		t.Fatal("expected an error for a gated tool on the native path")
+	first := exec.Run(context.Background(), execID, agent, "go", []string{"danger"})
+	if first.Status != StatusAwaitingApproval {
+		t.Fatalf("expected first pause, got %q (%v)", first.Status, first.Err)
 	}
-	if !strings.Contains(res.Err.Error(), "native tool-calling path") {
-		t.Fatalf("error should explain the native-path limitation, got: %v", res.Err)
+	gate.nextID = uuid.New()
+	second := exec.Resume(context.Background(), approvalFor(first, agent, execID, gate.created[0], model.ApprovalStatusApproved))
+	if second.Status != StatusAwaitingApproval || second.Err != nil {
+		t.Fatalf("expected a second pause, got %q (%v)", second.Status, second.Err)
 	}
-	if tool.lastInput != nil {
-		t.Fatal("gated tool must not execute on the native path either")
+	if len(gate.created) != 2 || gate.created[1].toolInput["target"] != "two" {
+		t.Fatalf("second pending approval wrong: %#v", gate.created)
+	}
+	if second.PriorToolCalls != 0 || len(second.ToolCalls) != 1 {
+		t.Fatalf("second pause metering: prior=%d calls=%d", second.PriorToolCalls, len(second.ToolCalls))
+	}
+	done := exec.Resume(context.Background(), approvalFor(second, agent, execID, gate.created[1], model.ApprovalStatusApproved))
+	if done.Err != nil || done.FinalAnswer != "both done" {
+		t.Fatalf("final resume: %q (%v)", done.FinalAnswer, done.Err)
+	}
+	if len(danger.inputs) != 2 || done.PriorToolCalls != 1 || len(done.ToolCalls) != 2 {
+		t.Fatalf("runs=%d prior=%d calls=%d", len(danger.inputs), done.PriorToolCalls, len(done.ToolCalls))
+	}
+}
+
+// TestExecutor_Resume_LatencyExcludesHumanWait: the resumed result's latency is
+// the run's compute time before the pause plus after it, not the wall time the
+// approval sat waiting for a human.
+func TestExecutor_Resume_LatencyExcludesHumanWait(t *testing.T) {
+	client := &reactScriptClient{turns: []string{finalTurn("done")}}
+	router := llm.NewTestRouter("fake", map[string]llm.Client{"fake": client})
+	registry := tools.NewRegistry()
+	registry.Register(&recordingTool{name: "danger", output: "ran"})
+	exec := New(router, registry, zap.NewNop())
+
+	state, _ := json.Marshal(resumableState{
+		Provider:    "fake",
+		ModelName:   "fake-model",
+		AgentTools:  []string{"danger"},
+		Messages:    []persistedMessage{{Role: llm.RoleUser, Content: "go"}},
+		Iteration:   1,
+		PendingTool: "danger",
+		ElapsedMs:   4000,
+	})
+	res := exec.Resume(context.Background(), &model.Approval{
+		ID: uuid.New(), ExecutionID: uuid.New(), AgentID: uuid.New(), OrgID: uuid.New(),
+		Status: model.ApprovalStatusApproved, ResumeState: state,
+	})
+	if res.Err != nil {
+		t.Fatalf("resume: %v", res.Err)
+	}
+	if res.LatencyMs < 4000 || res.LatencyMs > 60000 {
+		t.Fatalf("latency should carry the 4s before the pause and little else, got %dms", res.LatencyMs)
+	}
+}
+
+// TestExecutor_Resume_LegacyReActState: a resume state written before the
+// native path could pause (no mode, messages with only role+content) still
+// resumes on the ReAct loop.
+func TestExecutor_Resume_LegacyReActState(t *testing.T) {
+	client := &reactScriptClient{turns: []string{finalTurn("legacy ok")}}
+	router := llm.NewTestRouter("fake", map[string]llm.Client{"fake": client})
+	registry := tools.NewRegistry()
+	tool := &recordingTool{name: "danger", output: "ran"}
+	registry.Register(tool)
+	exec := New(router, registry, zap.NewNop())
+
+	legacy := []byte(`{"provider":"fake","model_name":"m","agent_tools":["danger"],
+		"messages":[{"role":"system","content":"sys"},{"role":"user","content":"go"}],
+		"iteration":1,"input_tokens":1,"output_tokens":1,"total_tokens":2,
+		"tool_calls":[{"tool_name":"x","input":{},"output":"o","duration_ms":1}],
+		"pending_tool":"danger","pending_input":{"k":"v"}}`)
+	res := exec.Resume(context.Background(), &model.Approval{
+		ID: uuid.New(), ExecutionID: uuid.New(), AgentID: uuid.New(), OrgID: uuid.New(),
+		Status: model.ApprovalStatusApproved, ResumeState: legacy,
+	})
+	if res.Err != nil || res.FinalAnswer != "legacy ok" {
+		t.Fatalf("legacy resume: %q (%v)", res.FinalAnswer, res.Err)
+	}
+	if len(tool.inputs) != 1 || tool.inputs[0]["k"] != "v" {
+		t.Fatalf("legacy pending tool should run with its input, got %#v", tool.inputs)
+	}
+	if res.PriorToolCalls != 1 || len(res.ToolCalls) != 2 {
+		t.Fatalf("prior=%d calls=%d", res.PriorToolCalls, len(res.ToolCalls))
 	}
 }

@@ -61,6 +61,7 @@ func TestBoardStatusForRun(t *testing.T) {
 		{model.TaskRunStatusRunning, "in_progress", true},
 		{model.TaskRunStatusCompleted, "done", true},
 		{model.TaskRunStatusFailed, "", false},
+		{model.TaskRunStatusAwaitingApproval, "in_progress", true},
 	}
 	for _, tc := range cases {
 		got, ok := boardStatusForRun(tc.run)

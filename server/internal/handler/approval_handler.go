@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -41,22 +42,42 @@ func (h *ApprovalHandler) List(w http.ResponseWriter, r *http.Request) {
 	RespondJSON(w, http.StatusOK, out)
 }
 
-// Get returns a single approval by id.
+// Get returns a single approval by id, scoped to the caller's org.
 func (h *ApprovalHandler) Get(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "approvalID"))
 	if err != nil {
 		RespondError(w, http.StatusBadRequest, "invalid approval id")
 		return
 	}
-	out, err := h.svc.Get(r.Context(), id)
-	if err != nil {
-		RespondError(w, http.StatusNotFound, "approval not found")
+	out, ok := h.load(w, r, id)
+	if !ok {
 		return
 	}
 	RespondJSON(w, http.StatusOK, out)
 }
 
-// Decide records an approve/reject decision and resumes the paused execution.
+// load fetches an approval and hides one from another org as not found.
+func (h *ApprovalHandler) load(w http.ResponseWriter, r *http.Request, id uuid.UUID) (*model.Approval, bool) {
+	out, err := h.svc.Get(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, service.ErrApprovalNotFound) {
+			RespondError(w, http.StatusNotFound, "approval not found")
+		} else {
+			RespondError(w, http.StatusInternalServerError, err.Error())
+		}
+		return nil, false
+	}
+	if orgID, err := uuid.Parse(middleware.GetOrgID(r.Context())); err == nil && out.OrgID != orgID {
+		RespondError(w, http.StatusNotFound, "approval not found")
+		return nil, false
+	}
+	return out, true
+}
+
+// Decide records an approve/reject decision and answers 202 Accepted with the
+// decided approval at once. The paused execution resumes in the background;
+// poll GET /task-runs/{id} (or the execution) for its outcome. Deciding an
+// approval that is already decided answers 409 Conflict.
 func (h *ApprovalHandler) Decide(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "approvalID"))
 	if err != nil {
@@ -77,11 +98,21 @@ func (h *ApprovalHandler) Decide(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, http.StatusBadRequest, "validation: "+err.Error())
 		return
 	}
-
-	out, err := h.svc.Decide(r.Context(), id, deciderID, req.Decision, req.Reason)
-	if err != nil {
-		RespondError(w, http.StatusBadRequest, err.Error())
+	if _, ok := h.load(w, r, id); !ok {
 		return
 	}
-	RespondJSON(w, http.StatusOK, out)
+
+	out, err := h.svc.Decide(r.Context(), id, deciderID, req.Decision, req.Reason)
+	switch {
+	case errors.Is(err, service.ErrApprovalAlreadyDecided):
+		RespondError(w, http.StatusConflict, err.Error())
+		return
+	case errors.Is(err, service.ErrApprovalNotFound):
+		RespondError(w, http.StatusNotFound, "approval not found")
+		return
+	case err != nil:
+		RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	RespondJSON(w, http.StatusAccepted, out)
 }

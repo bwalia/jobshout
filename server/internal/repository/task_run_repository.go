@@ -20,9 +20,12 @@ type TaskRunRepository interface {
 	Update(ctx context.Context, run *model.TaskRun) error
 	ListByTask(ctx context.Context, taskID uuid.UUID, pagination model.PaginationParams) (*model.PaginatedResponse[model.TaskRun], error)
 	ListByOrg(ctx context.Context, orgID uuid.UUID, pagination model.PaginationParams) (*model.PaginatedResponse[model.TaskRun], error)
-	// CountActiveByTask is queued+running runs for a board card. Used so a
+	// CountActiveByTask is queued+running+awaiting_approval runs for a board card. Used so a
 	// finished run does not mark the card Done while another run is still live.
 	CountActiveByTask(ctx context.Context, taskID uuid.UUID) (int, error)
+	// GetByExecutionID returns the run linked to an agent execution, or
+	// (nil, nil) when the execution was not launched as a task run.
+	GetByExecutionID(ctx context.Context, executionID uuid.UUID) (*model.TaskRun, error)
 }
 
 type taskRunRepository struct {
@@ -37,7 +40,7 @@ const taskRunColumns = `
 	id, task_id, agent_id, org_id, execution_id, status, prompt, engine,
 	model_provider, model_name, skill_slugs, inputs, debug, output, error_message,
 	total_tokens, cost_usd, latency_ms, iterations, requested_by,
-	started_at, completed_at, created_at, updated_at`
+	started_at, completed_at, created_at, updated_at, pending_approval_id`
 
 func scanTaskRun(row pgx.Row) (*model.TaskRun, error) {
 	run := &model.TaskRun{}
@@ -47,7 +50,7 @@ func scanTaskRun(row pgx.Row) (*model.TaskRun, error) {
 		&run.Prompt, &run.Engine, &run.ModelProvider, &run.ModelName, &run.SkillSlugs,
 		&inputsRaw, &run.Debug, &run.Output, &run.ErrorMessage,
 		&run.TotalTokens, &run.CostUSD, &run.LatencyMs, &run.Iterations, &run.RequestedBy,
-		&run.StartedAt, &run.CompletedAt, &run.CreatedAt, &run.UpdatedAt,
+		&run.StartedAt, &run.CompletedAt, &run.CreatedAt, &run.UpdatedAt, &run.PendingApprovalID,
 	); err != nil {
 		return nil, err
 	}
@@ -70,9 +73,9 @@ func (r *taskRunRepository) Create(ctx context.Context, run *model.TaskRun) erro
 			id, task_id, agent_id, org_id, execution_id, status, prompt, engine,
 			model_provider, model_name, skill_slugs, inputs, debug, output, error_message,
 			total_tokens, cost_usd, latency_ms, iterations, requested_by,
-			started_at, completed_at, created_at, updated_at
+			started_at, completed_at, created_at, updated_at, pending_approval_id
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-			$16, $17, $18, $19, $20, $21, $22, NOW(), NOW())
+			$16, $17, $18, $19, $20, $21, $22, NOW(), NOW(), $23)
 		RETURNING created_at, updated_at`
 
 	return r.pool.QueryRow(ctx, query,
@@ -80,7 +83,7 @@ func (r *taskRunRepository) Create(ctx context.Context, run *model.TaskRun) erro
 		run.Prompt, run.Engine, run.ModelProvider, run.ModelName, run.SkillSlugs,
 		inputs, run.Debug, run.Output, run.ErrorMessage,
 		run.TotalTokens, run.CostUSD, run.LatencyMs, run.Iterations, run.RequestedBy,
-		run.StartedAt, run.CompletedAt,
+		run.StartedAt, run.CompletedAt, run.PendingApprovalID,
 	).Scan(&run.CreatedAt, &run.UpdatedAt)
 }
 
@@ -110,7 +113,7 @@ func (r *taskRunRepository) Update(ctx context.Context, run *model.TaskRun) erro
 		    model_provider = $6, model_name = $7, skill_slugs = $8, inputs = $9,
 		    debug = $10, output = $11, error_message = $12, total_tokens = $13,
 		    cost_usd = $14, latency_ms = $15, iterations = $16,
-		    started_at = $17, completed_at = $18, updated_at = NOW()
+		    started_at = $17, completed_at = $18, pending_approval_id = $19, updated_at = NOW()
 		WHERE id = $1
 		RETURNING created_at, updated_at`
 
@@ -119,15 +122,28 @@ func (r *taskRunRepository) Update(ctx context.Context, run *model.TaskRun) erro
 		run.ModelProvider, run.ModelName, run.SkillSlugs, inputs,
 		run.Debug, run.Output, run.ErrorMessage, run.TotalTokens,
 		run.CostUSD, run.LatencyMs, run.Iterations,
-		run.StartedAt, run.CompletedAt,
+		run.StartedAt, run.CompletedAt, run.PendingApprovalID,
 	).Scan(&run.CreatedAt, &run.UpdatedAt)
+}
+
+func (r *taskRunRepository) GetByExecutionID(ctx context.Context, executionID uuid.UUID) (*model.TaskRun, error) {
+	query := `SELECT ` + taskRunColumns + ` FROM task_runs WHERE execution_id = $1
+		ORDER BY created_at DESC LIMIT 1`
+	run, err := scanTaskRun(r.pool.QueryRow(ctx, query, executionID))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("finding task run by execution: %w", err)
+	}
+	return run, nil
 }
 
 func (r *taskRunRepository) CountActiveByTask(ctx context.Context, taskID uuid.UUID) (int, error) {
 	var n int
 	err := r.pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM task_runs
-		WHERE task_id = $1 AND status IN ('queued', 'running')`, taskID).Scan(&n)
+		WHERE task_id = $1 AND status IN ('queued', 'running', 'awaiting_approval')`, taskID).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("counting active task runs: %w", err)
 	}
