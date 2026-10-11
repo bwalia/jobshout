@@ -555,6 +555,141 @@ paths:
       responses:
         '204': { description: Deleted }
 
+  # ─── OpsAPI integration (see docs/opsapi-integration.md) ──────────────────
+  /api-keys:
+    get:
+      operationId: listAPIKeys
+      tags: [platform]
+      description: Org API keys (prefix and metadata only). Requires org:manage.
+      responses:
+        '200': { description: Keys }
+    post:
+      operationId: createAPIKey
+      tags: [platform]
+      description: >-
+        Create an org API key. The response carries the full key ONCE
+        (`key`, "jsk_..."); only its hash is stored. Scopes - runs, approvals,
+        agents:read, knowledge. Requires org:manage.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, scopes]
+              properties:
+                name: { type: string }
+                scopes: { type: array, items: { type: string } }
+                expires_at: { type: string, format: date-time }
+      responses:
+        '201': { description: Created key (with `key`) }
+        '400': { $ref: '#/components/responses/Error' }
+  /api-keys/{keyID}:
+    delete:
+      operationId: revokeAPIKey
+      tags: [platform]
+      parameters:
+        - { name: keyID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Revoked }
+        '404': { $ref: '#/components/responses/Error' }
+  /webhook-endpoints:
+    get:
+      operationId: listWebhookEndpoints
+      tags: [platform]
+      responses:
+        '200': { description: Endpoints (secrets omitted) }
+    post:
+      operationId: createWebhookEndpoint
+      tags: [platform]
+      description: >-
+        Subscribe a URL to run.completed, run.failed, approval.requested,
+        approval.decided (or "*"). The secret (generated when omitted) is
+        returned only here. Requires org:manage.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url, events]
+              properties:
+                url: { type: string }
+                secret: { type: string }
+                events: { type: array, items: { type: string } }
+                description: { type: string }
+      responses:
+        '201': { description: Created endpoint (with `secret`) }
+        '400': { $ref: '#/components/responses/Error' }
+  /webhook-endpoints/{endpointID}:
+    get:
+      operationId: getWebhookEndpoint
+      tags: [platform]
+      parameters:
+        - { name: endpointID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Endpoint }
+        '404': { $ref: '#/components/responses/Error' }
+    put:
+      operationId: updateWebhookEndpoint
+      tags: [platform]
+      description: Partial update - url, events, description, enabled, rotate_secret.
+      parameters:
+        - { name: endpointID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Endpoint (with the new `secret` when rotated) }
+        '404': { $ref: '#/components/responses/Error' }
+    delete:
+      operationId: deleteWebhookEndpoint
+      tags: [platform]
+      parameters:
+        - { name: endpointID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Deleted }
+  /webhook-endpoints/{endpointID}/deliveries:
+    get:
+      operationId: listWebhookDeliveries
+      tags: [platform]
+      parameters:
+        - { name: endpointID, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer } }
+      responses:
+        '200': { description: Delivery log, newest first }
+  /webhook-endpoints/{endpointID}/test:
+    post:
+      operationId: testWebhookEndpoint
+      tags: [platform]
+      parameters:
+        - { name: endpointID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: The ping delivery after its first attempt }
+  /llm-routing:
+    get:
+      operationId: getLLMRouting
+      tags: [platform]
+      description: The org's model routing settings and effective chain (`source` org|env).
+      responses:
+        '200': { description: Routing }
+    put:
+      operationId: putLLMRouting
+      tags: [platform]
+      description: >-
+        Set `enabled` and/or the ordered `chain` of {provider_config_id, model}.
+        Requires org:manage.
+      responses:
+        '200': { description: Routing }
+        '400': { $ref: '#/components/responses/Error' }
+  /llm-providers/{providerID}/test:
+    post:
+      operationId: testLLMProvider
+      tags: [platform]
+      description: One ~10-token call through the provider config; reports ok, latency and reply.
+      parameters:
+        - { name: providerID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Test result }
+        '404': { $ref: '#/components/responses/Error' }
+
   /ws:
     get:
       operationId: liveEvents
