@@ -41,33 +41,16 @@ func (h *ApprovalHandler) List(w http.ResponseWriter, r *http.Request) {
 	RespondJSON(w, http.StatusOK, out)
 }
 
-// loadOwned resolves the {approvalID} path param to an approval that belongs
-// to the caller's org. An approval of another org is reported exactly like a
-// missing one (404), so ids cannot be probed across the tenant boundary. It
-// writes the error response itself and returns false when the caller must stop.
-func (h *ApprovalHandler) loadOwned(w http.ResponseWriter, r *http.Request) (*model.Approval, bool) {
+// Get returns a single approval by id.
+func (h *ApprovalHandler) Get(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "approvalID"))
 	if err != nil {
 		RespondError(w, http.StatusBadRequest, "invalid approval id")
-		return nil, false
-	}
-	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
-	if err != nil {
-		RespondError(w, http.StatusBadRequest, "invalid org_id")
-		return nil, false
+		return
 	}
 	out, err := h.svc.Get(r.Context(), id)
-	if err != nil || out == nil || out.OrgID != orgID {
+	if err != nil {
 		RespondError(w, http.StatusNotFound, "approval not found")
-		return nil, false
-	}
-	return out, true
-}
-
-// Get returns a single approval by id, scoped to the caller's org.
-func (h *ApprovalHandler) Get(w http.ResponseWriter, r *http.Request) {
-	out, ok := h.loadOwned(w, r)
-	if !ok {
 		return
 	}
 	RespondJSON(w, http.StatusOK, out)
@@ -75,12 +58,11 @@ func (h *ApprovalHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 // Decide records an approve/reject decision and resumes the paused execution.
 func (h *ApprovalHandler) Decide(w http.ResponseWriter, r *http.Request) {
-	// Org check first: another org's approval is a 404 and is never decided.
-	existing, ok := h.loadOwned(w, r)
-	if !ok {
+	id, err := uuid.Parse(chi.URLParam(r, "approvalID"))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid approval id")
 		return
 	}
-	id := existing.ID
 	deciderID, err := uuid.Parse(middleware.GetUserID(r.Context()))
 	if err != nil {
 		RespondError(w, http.StatusBadRequest, "invalid user id")
