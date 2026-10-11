@@ -978,8 +978,12 @@ func main() {
 	// approve/reject decisions. Wire it as the go-native executor's gate now that
 	// notifSvc exists; the gate is read at run time, so setting it post-construction
 	// is safe and keeps runs default-off when no rule is configured.
-	approvalSvc := service.NewApprovalService(approvalRepo, execRepo, agentRepo, userRepo, goNativeExec, notifSvc, logger)
+	// Decisions resume the paused run in the background and write the outcome
+	// to the execution and its task run; RunRecovery picks up resumes a restart
+	// interrupted.
+	approvalSvc := service.NewApprovalService(approvalRepo, execSvc, agentRepo, userRepo, goNativeExec, notifSvc, taskRunSvc, logger)
 	goNativeExec.WithApprovalGate(approvalSvc)
+	go approvalSvc.RunRecovery(ctx, 5*time.Minute)
 	logger.Info("human-in-the-loop approvals initialised")
 	logger.Info("integration framework initialised",
 		zap.Int("task_adapters", 2),
