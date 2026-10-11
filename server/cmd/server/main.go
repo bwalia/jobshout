@@ -980,9 +980,11 @@ func main() {
 	// is safe and keeps runs default-off when no rule is configured.
 	// Decisions resume the paused run in the background and write the outcome
 	// to the execution and its task run; RunRecovery picks up resumes a restart
-	// interrupted.
+	// interrupted. The sidecar engines (LangChain/LangGraph) cannot pause, so
+	// they refuse agents that have gated tools instead of bypassing the gate.
 	approvalSvc := service.NewApprovalService(approvalRepo, execSvc, agentRepo, userRepo, goNativeExec, notifSvc, taskRunSvc, logger)
 	goNativeExec.WithApprovalGate(approvalSvc)
+	engineRouter.WithApprovalGate(approvalSvc)
 	go approvalSvc.RunRecovery(ctx, 5*time.Minute)
 	logger.Info("human-in-the-loop approvals initialised")
 	logger.Info("integration framework initialised",
