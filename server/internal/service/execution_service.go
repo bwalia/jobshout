@@ -31,6 +31,16 @@ type ExecutionService interface {
 	ListByAgent(ctx context.Context, agentID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.AgentExecution], error)
 	ListLangChainTraces(ctx context.Context, executionID uuid.UUID) ([]model.LangChainRunTrace, error)
 	ListLangGraphSnapshots(ctx context.Context, executionID uuid.UUID) ([]model.LangGraphStateSnapshot, error)
+
+	// MarkResuming moves an execution paused for approval back to running as
+	// its resume starts. It reports false when the execution is no longer
+	// paused (cancelled or finished) and must not be resumed.
+	MarkResuming(ctx context.Context, execID uuid.UUID) (bool, error)
+	// CompleteResumed persists the outcome of a resumed run exactly as a fresh
+	// run's outcome is persisted (status, output, metering, usage and cost) and
+	// returns the stored execution. A run that paused again is stored as
+	// awaiting_approval with PendingApprovalID set.
+	CompleteResumed(ctx context.Context, execID uuid.UUID, result executor.Result) (*model.AgentExecution, error)
 }
 
 type executionService struct {
@@ -213,17 +223,32 @@ func (s *executionService) finish(ctx context.Context, st *startedExec) (*model.
 		result.LatencyMs = int(time.Since(runStart).Milliseconds())
 	}
 
-	_ = s.agentRepo.UpdateStatus(ctx, st.agentID, "idle")
+	return s.persistOutcome(ctx, st.exec, result)
+}
 
-	if err := s.execRepo.PersistResult(ctx, st.exec.ID, result); err != nil {
+// persistOutcome stores a run's result — fresh or resumed — and returns the
+// execution as stored. base carries the execution's identity (ID, agent, org)
+// and is the fallback returned if the stored row cannot be re-read.
+//
+// Usage (cost, token split, latency, rollups) is recorded synchronously once
+// the run is terminal, so the returned execution — and the task run that
+// mirrors it — carries the cost. A run paused for approval records no usage
+// yet: its resume reports the cumulative figures once, when it ends.
+func (s *executionService) persistOutcome(ctx context.Context, base *model.AgentExecution, result executor.Result) (*model.AgentExecution, error) {
+	paused := result.Status == executor.StatusAwaitingApproval && result.Err == nil
+
+	_ = s.agentRepo.UpdateStatus(ctx, base.AgentID, "idle")
+
+	if err := s.execRepo.PersistResult(ctx, base.ID, result); err != nil {
 		s.logger.Error("failed to persist execution result", zap.Error(err))
 	}
 
-	if s.govSvc != nil {
+	costUSD := 0.0
+	if s.govSvc != nil && !paused {
 		usageExec := &model.AgentExecution{
-			ID:           st.exec.ID,
-			AgentID:      st.agentID,
-			OrgID:        st.orgID,
+			ID:           base.ID,
+			AgentID:      base.AgentID,
+			OrgID:        base.OrgID,
 			TotalTokens:  result.TotalTokens,
 			InputTokens:  result.InputTokens,
 			OutputTokens: result.OutputTokens,
@@ -239,43 +264,74 @@ func (s *executionService) finish(ctx context.Context, st *startedExec) (*model.
 		if result.Err != nil {
 			usageExec.Status = model.ExecutionStatusFailed
 		}
-		go func() {
-			if err := s.govSvc.RecordUsage(context.Background(), usageExec); err != nil {
-				s.logger.Error("failed to record usage", zap.Error(err))
-			}
-		}()
+		// Detached from the caller's cancellation: the run already happened
+		// and its spend must be recorded even if the caller has gone.
+		if err := s.govSvc.RecordUsage(context.WithoutCancel(ctx), usageExec); err != nil {
+			s.logger.Error("failed to record usage", zap.Error(err))
+		}
+		costUSD = usageExec.CostUSD
 	}
 
-	completed, err := s.execRepo.GetByID(ctx, st.exec.ID)
-	if err == nil && completed != nil {
-		// latency_ms and the token split reach the row through RecordUsage,
-		// which runs in the background — the read above usually beats it and
-		// saw zeros, which the task run then copied ("0 ms"). The measured
-		// values are already in hand.
-		if completed.LatencyMs == 0 {
-			completed.LatencyMs = result.LatencyMs
+	stored, err := s.execRepo.GetByID(ctx, base.ID)
+	if err == nil && stored != nil {
+		// The measured values are already in hand; prefer them over a row
+		// whose usage columns were not (or not yet) written.
+		if stored.LatencyMs == 0 {
+			stored.LatencyMs = result.LatencyMs
 		}
-		if completed.InputTokens == 0 && completed.OutputTokens == 0 {
-			completed.InputTokens, completed.OutputTokens = result.InputTokens, result.OutputTokens
+		if stored.InputTokens == 0 && stored.OutputTokens == 0 {
+			stored.InputTokens, stored.OutputTokens = result.InputTokens, result.OutputTokens
 		}
-		return completed, nil
+		if stored.CostUSD == 0 {
+			stored.CostUSD = costUSD
+		}
+		if paused {
+			stored.Status = model.ExecutionStatusAwaitingApproval
+			id := result.ApprovalID
+			stored.PendingApprovalID = &id
+		}
+		return stored, nil
 	}
+
+	out := *base
 	completedAt := time.Now()
-	st.exec.CompletedAt = &completedAt
-	if result.Err != nil {
+	switch {
+	case paused:
+		out.Status = model.ExecutionStatusAwaitingApproval
+		id := result.ApprovalID
+		out.PendingApprovalID = &id
+	case result.Err != nil:
 		errMsg := result.Err.Error()
-		st.exec.Status = model.ExecutionStatusFailed
-		st.exec.ErrorMessage = &errMsg
-	} else {
-		st.exec.Status = model.ExecutionStatusCompleted
-		st.exec.Output = &result.FinalAnswer
+		out.Status = model.ExecutionStatusFailed
+		out.ErrorMessage = &errMsg
+		out.CompletedAt = &completedAt
+	default:
+		out.Status = model.ExecutionStatusCompleted
+		out.Output = &result.FinalAnswer
+		out.CompletedAt = &completedAt
 	}
-	st.exec.TotalTokens = result.TotalTokens
-	st.exec.InputTokens = result.InputTokens
-	st.exec.OutputTokens = result.OutputTokens
-	st.exec.LatencyMs = result.LatencyMs
-	st.exec.Iterations = result.Iterations
-	return st.exec, nil
+	out.TotalTokens = result.TotalTokens
+	out.InputTokens = result.InputTokens
+	out.OutputTokens = result.OutputTokens
+	out.LatencyMs = result.LatencyMs
+	out.Iterations = result.Iterations
+	out.CostUSD = costUSD
+	return &out, nil
+}
+
+func (s *executionService) MarkResuming(ctx context.Context, execID uuid.UUID) (bool, error) {
+	return s.execRepo.MarkResuming(ctx, execID)
+}
+
+func (s *executionService) CompleteResumed(ctx context.Context, execID uuid.UUID, result executor.Result) (*model.AgentExecution, error) {
+	exec, err := s.execRepo.GetByID(ctx, execID)
+	if err != nil {
+		return nil, fmt.Errorf("execution_svc: complete resumed: %w", err)
+	}
+	if exec == nil {
+		return nil, ErrExecutionNotFound
+	}
+	return s.persistOutcome(ctx, exec, result)
 }
 
 func (s *executionService) GetByID(ctx context.Context, id uuid.UUID) (*model.AgentExecution, error) {

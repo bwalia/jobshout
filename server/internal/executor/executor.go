@@ -66,6 +66,10 @@ type Result struct {
 	// ApprovalID is the pending approval created when Status ==
 	// StatusAwaitingApproval; it is the zero UUID otherwise.
 	ApprovalID uuid.UUID
+	// PriorToolCalls is how many leading entries of ToolCalls were already
+	// persisted when the run paused for approval. Resume sets it so a persister
+	// records only the calls made since the pause; it is 0 for a fresh run.
+	PriorToolCalls int
 }
 
 // knowledgeTopK is the number of knowledge chunks the executor retrieves and
@@ -372,8 +376,21 @@ func (e *Executor) Run(
 	if toolDefs, ok := buildToolDefs(toolRegistry); ok && len(toolDefs) > 0 && clientSupportsTools(client) {
 		log.Info("using native tool-calling path", zap.Int("tools", len(toolDefs)))
 		nativeSystem := llm.BuildNativeSystemPrompt(agent.Name, agent.Role, systemPromptText)
-		return e.runNative(ctx, log, agent.ID, client, modelName, resolvedProvider,
-			nativeSystem, taskPrompt, knowledgeMsg, toolDefs, toolRegistry)
+		return e.nativeLoop(ctx, &reactLoopState{
+			client:       client,
+			modelName:    modelName,
+			provider:     resolvedProvider,
+			toolRegistry: toolRegistry,
+			toolDefs:     toolDefs,
+			agentID:      agent.ID,
+			orgID:        agent.OrgID,
+			execID:       execID,
+			agentTools:   agentTools,
+			messages:     seedMessages(nativeSystem, knowledgeMsg, taskPrompt),
+			iteration:    0,
+			runStart:     time.Now(),
+			log:          log,
+		})
 	}
 
 	// Seed the conversation and drive the ReAct loop from a fresh state.
@@ -493,42 +510,10 @@ func (e *Executor) reactLoop(ctx context.Context, st *reactLoopState) Result {
 		// conversation, so Resume can execute the tool and continue cleanly.
 		if e.gate != nil && e.gate.RequiresApproval(st.agentID, toolName) {
 			st.iteration = iteration
-			return e.pauseForApproval(ctx, st, toolName, toolInput)
+			return e.pauseForApproval(ctx, st, pendingCall{name: toolName, input: toolInput}, nil)
 		}
 
-		// Execute the tool with a 60-second timeout.
-		chatstream.Emit(ctx, chatstream.Event{Type: chatstream.EventTool, Data: map[string]any{"name": toolName, "state": "start"}})
-		toolCtx, toolCancel := context.WithTimeout(ctx, 60*time.Second)
-		start := time.Now()
-		toolOutput, toolErr := tool.Execute(toolCtx, toolInput)
-		toolCancel()
-		durationMs := int(time.Since(start).Milliseconds())
-		chatstream.Emit(ctx, chatstream.Event{Type: chatstream.EventTool, Data: map[string]any{"name": toolName, "state": "end", "duration_ms": durationMs, "ok": toolErr == nil}})
-
-		record := ToolCallRecord{
-			ToolName:   toolName,
-			Input:      toolInput,
-			Output:     toolOutput,
-			Err:        toolErr,
-			DurationMs: durationMs,
-		}
-		st.toolCalls = append(st.toolCalls, record)
-
-		var toolResultMsg string
-		if toolErr != nil {
-			toolResultMsg = fmt.Sprintf("Error executing tool: %v", toolErr)
-			st.log.Warn("tool execution error",
-				zap.String("tool", toolName),
-				zap.Error(toolErr),
-			)
-		} else {
-			toolResultMsg = toolOutput
-			st.log.Info("tool executed",
-				zap.String("tool", toolName),
-				zap.Int("duration_ms", durationMs),
-			)
-		}
-
+		toolResultMsg := e.executeTool(ctx, st, tool, toolName, toolInput)
 		st.messages = append(st.messages, llm.Message{
 			Role:    llm.RoleUser,
 			Content: llm.BuildToolResultMessage(toolName, toolResultMsg),
@@ -751,142 +736,102 @@ func buildToolDefs(reg *tools.Registry) ([]llm.ToolDef, bool) {
 	return defs, true
 }
 
-// runNative drives the agent loop using the provider's native tool-calling
+// nativeLoop drives the agent loop using the provider's native tool-calling
 // mechanism. On each turn it sends the tool definitions; when the model returns
 // tool calls it executes them via the registry and appends the results in the
 // provider-agnostic Message shape (each client translates that to its own wire
 // format), repeating up to MaxIterations. Metering and ToolCallRecord/Result
-// handling mirror the ReAct path exactly.
-func (e *Executor) runNative(
-	ctx context.Context,
-	log *zap.Logger,
-	agentID uuid.UUID,
-	client llm.Client,
-	modelName, resolvedProvider, systemPrompt, taskPrompt, knowledgeMsg string,
-	toolDefs []llm.ToolDef,
-	toolRegistry *tools.Registry,
-) Result {
-	messages := seedMessages(systemPrompt, knowledgeMsg, taskPrompt)
+// handling mirror the ReAct path exactly, and like the ReAct loop it is shared
+// by a fresh Run and by Resume, starting at st.iteration+1. A gated tool pauses
+// the run via pauseForApproval, exactly as on the ReAct path.
+func (e *Executor) nativeLoop(ctx context.Context, st *reactLoopState) Result {
+	for iteration := st.iteration + 1; iteration <= MaxIterations; iteration++ {
+		st.log.Info("native tool-calling iteration", zap.Int("iteration", iteration))
 
-	runStart := time.Now()
-
-	var (
-		toolCalls    []ToolCallRecord
-		totalTokens  int
-		inputTokens  int
-		outputTokens int
-	)
-
-	for iteration := 1; iteration <= MaxIterations; iteration++ {
-		log.Info("native tool-calling iteration", zap.Int("iteration", iteration))
-
-		if err := e.costCapExceeded(ctx, resolvedProvider, modelName,
-			inputTokens, outputTokens, runStart); err != nil {
-			log.Warn("stopping run: cost cap reached", zap.Error(err))
-			return buildResult("", iteration-1, totalTokens, inputTokens, outputTokens,
-				runStart, resolvedProvider, modelName, toolCalls, err)
+		if err := e.costCapExceeded(ctx, st.provider, st.modelName,
+			st.inputTokens, st.outputTokens, st.runStart); err != nil {
+			st.log.Warn("stopping run: cost cap reached", zap.Error(err))
+			return st.result("", iteration-1, err)
 		}
 
-		llmResp, err := client.Generate(ctx, llm.GenerateRequest{
-			Messages:    messages,
-			Model:       modelName,
+		llmResp, err := st.client.Generate(ctx, llm.GenerateRequest{
+			Messages:    st.messages,
+			Model:       st.modelName,
 			MaxTokens:   capTokens(ctx, 4096),
 			Temperature: 0.2,
-			ToolDefs:    toolDefs,
+			ToolDefs:    st.toolDefs,
 		})
 		if err != nil {
-			return buildResult("", iteration, totalTokens, inputTokens, outputTokens,
-				runStart, resolvedProvider, modelName, toolCalls,
+			return st.result("", iteration,
 				fmt.Errorf("executor: LLM generate (iteration %d): %w", iteration, err))
 		}
 
-		inputTokens += llmResp.InputTokens
-		outputTokens += llmResp.OutputTokens
-		totalTokens += llmResp.InputTokens + llmResp.OutputTokens
+		st.inputTokens += llmResp.InputTokens
+		st.outputTokens += llmResp.OutputTokens
+		st.totalTokens += llmResp.InputTokens + llmResp.OutputTokens
 
 		// No tool calls => the message content is the final answer.
 		if len(llmResp.ToolCalls) == 0 {
-			return buildResult(llmResp.Content, iteration, totalTokens, inputTokens, outputTokens,
-				runStart, resolvedProvider, modelName, toolCalls, nil)
+			return st.result(llmResp.Content, iteration, nil)
 		}
 
 		// Echo the assistant turn (optional text + the tool_use blocks) so the
 		// follow-up request preserves conversation shape for the provider.
-		messages = append(messages, llm.Message{
+		st.messages = append(st.messages, llm.Message{
 			Role:      llm.RoleAssistant,
 			Content:   llmResp.Content,
 			ToolCalls: llmResp.ToolCalls,
 		})
 
-		// Execute each requested tool and append its result as a RoleTool message.
-		for _, tc := range llmResp.ToolCalls {
-			input := tc.Arguments
-			if input == nil {
-				input = map[string]any{}
-			}
-
-			tool, ok := toolRegistry.Get(tc.Name)
-			if !ok {
-				resultMsg := fmt.Sprintf("Error: tool %q is not available to this agent.", tc.Name)
-				log.Warn("agent requested unavailable tool", zap.String("tool", tc.Name))
-				messages = append(messages, llm.Message{
-					Role:       llm.RoleTool,
-					ToolCallID: tc.ID,
-					Content:    resultMsg,
-				})
-				toolCalls = append(toolCalls, ToolCallRecord{
-					ToolName: tc.Name,
-					Input:    input,
-					Err:      fmt.Errorf("tool not available"),
-				})
-				continue
-			}
-
-			// Approval gate on the native path is not yet supported: pausing
-			// mid-turn would require serialising provider-native tool_call state.
-			// Fail fast with a clear message rather than silently bypassing the
-			// gate. The ReAct path supports pause/resume fully. (Follow-up.)
-			if e.gate != nil && e.gate.RequiresApproval(agentID, tc.Name) {
-				return buildResult("", iteration, totalTokens, inputTokens, outputTokens,
-					runStart, resolvedProvider, modelName, toolCalls,
-					fmt.Errorf("executor: tool %q requires human approval, but pause/resume is not yet supported on the native tool-calling path", tc.Name))
-			}
-
-			// Execute the tool with a 60-second timeout.
-			chatstream.Emit(ctx, chatstream.Event{Type: chatstream.EventTool, Data: map[string]any{"name": tc.Name, "state": "start"}})
-			toolCtx, toolCancel := context.WithTimeout(ctx, 60*time.Second)
-			start := time.Now()
-			toolOutput, toolErr := tool.Execute(toolCtx, input)
-			toolCancel()
-			durationMs := int(time.Since(start).Milliseconds())
-			chatstream.Emit(ctx, chatstream.Event{Type: chatstream.EventTool, Data: map[string]any{"name": tc.Name, "state": "end", "duration_ms": durationMs, "ok": toolErr == nil}})
-
-			toolCalls = append(toolCalls, ToolCallRecord{
-				ToolName:   tc.Name,
-				Input:      input,
-				Output:     toolOutput,
-				Err:        toolErr,
-				DurationMs: durationMs,
-			})
-
-			resultMsg := toolOutput
-			if toolErr != nil {
-				resultMsg = fmt.Sprintf("Error executing tool: %v", toolErr)
-				log.Warn("tool execution error", zap.String("tool", tc.Name), zap.Error(toolErr))
-			} else {
-				log.Info("tool executed", zap.String("tool", tc.Name), zap.Int("duration_ms", durationMs))
-			}
-
-			messages = append(messages, llm.Message{
-				Role:       llm.RoleTool,
-				ToolCallID: tc.ID,
-				Content:    resultMsg,
-			})
+		st.iteration = iteration
+		if res, paused := e.runNativeToolCalls(ctx, st, llmResp.ToolCalls); paused {
+			return res
 		}
 	}
 
 	// Exceeded max iterations without a final answer.
-	return buildResult("", MaxIterations, totalTokens, inputTokens, outputTokens,
-		runStart, resolvedProvider, modelName, toolCalls,
+	return st.result("", MaxIterations,
 		fmt.Errorf("executor: exceeded maximum iterations (%d) without a final answer", MaxIterations))
+}
+
+// runNativeToolCalls executes the tool calls of one model turn in order,
+// appending each result as a RoleTool message. When it reaches a gated tool it
+// pauses the run — keeping the calls after it for Resume — and returns the
+// paused Result with true. st.iteration must be the turn's iteration.
+func (e *Executor) runNativeToolCalls(ctx context.Context, st *reactLoopState, calls []llm.ToolCall) (Result, bool) {
+	for i, tc := range calls {
+		input := tc.Arguments
+		if input == nil {
+			input = map[string]any{}
+		}
+
+		tool, ok := st.toolRegistry.Get(tc.Name)
+		if !ok {
+			st.log.Warn("agent requested unavailable tool", zap.String("tool", tc.Name))
+			st.messages = append(st.messages, llm.Message{
+				Role:       llm.RoleTool,
+				ToolCallID: tc.ID,
+				Content:    fmt.Sprintf("Error: tool %q is not available to this agent.", tc.Name),
+			})
+			st.toolCalls = append(st.toolCalls, ToolCallRecord{
+				ToolName: tc.Name,
+				Input:    input,
+				Err:      fmt.Errorf("tool not available"),
+			})
+			continue
+		}
+
+		if e.gate != nil && e.gate.RequiresApproval(st.agentID, tc.Name) {
+			return e.pauseForApproval(ctx, st,
+				pendingCall{id: tc.ID, name: tc.Name, input: input}, calls[i+1:]), true
+		}
+
+		resultMsg := e.executeTool(ctx, st, tool, tc.Name, input)
+		st.messages = append(st.messages, llm.Message{
+			Role:       llm.RoleTool,
+			ToolCallID: tc.ID,
+			Content:    resultMsg,
+		})
+	}
+	return Result{}, false
 }

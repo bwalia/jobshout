@@ -483,12 +483,17 @@ paths:
                 decision: { type: string, enum: [approve, reject] }
                 reason: { type: string }
       responses:
-        '200':
-          description: Decided; the paused execution resumes
+        '202':
+          description: >-
+            Decided. The paused execution resumes in the background; poll the
+            task run (or execution) for its outcome. The body is the decided
+            approval.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Approval' }
         '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
 
   /scheduled-tasks:
     get:
@@ -940,7 +945,16 @@ components:
         task_id: { type: string, format: uuid }
         agent_id: { type: string, format: uuid }
         execution_id: { type: [string, 'null'], format: uuid }
-        status: { type: string, description: 'queued, running, completed or failed.' }
+        status:
+          type: string
+          description: >-
+            queued, running, awaiting_approval, completed or failed.
+            awaiting_approval is not terminal: the run paused on a gated tool
+            and resumes once pending_approval_id is decided.
+        pending_approval_id:
+          type: [string, 'null']
+          format: uuid
+          description: The approval the run waits on while awaiting_approval.
         output: { type: [string, 'null'] }
         error_message: { type: [string, 'null'] }
         total_tokens: { type: integer }
@@ -995,6 +1009,10 @@ components:
         requested_at: { type: string, format: date-time }
         decided_by: { type: [string, 'null'], format: uuid }
         decided_at: { type: [string, 'null'], format: date-time }
+        resumed_at:
+          type: [string, 'null']
+          format: date-time
+          description: When the paused run finished resuming after the decision.
 
     Schedule:
       type: object

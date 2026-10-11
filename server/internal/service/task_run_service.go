@@ -32,6 +32,10 @@ type TaskRunService interface {
 	GetRun(ctx context.Context, runID, orgID uuid.UUID) (*model.TaskRun, error)
 	// ListRuns lists the runs of a task, scoped to orgID.
 	ListRuns(ctx context.Context, taskID, orgID uuid.UUID, pagination model.PaginationParams) (*model.PaginatedResponse[model.TaskRun], error)
+	// SyncFromExecution mirrors an execution's state onto the task run that
+	// launched it, if any: used when a run paused for approval resumes
+	// (running) and when the resume ends (completed, failed, or paused again).
+	SyncFromExecution(ctx context.Context, exec *model.AgentExecution) error
 }
 
 type taskRunService struct {
@@ -154,10 +158,9 @@ func (s *taskRunService) execute(ctx context.Context, run *model.TaskRun, agentI
 		SkillSlugs:     run.SkillSlugs,
 	})
 
-	completedAt := time.Now()
-	run.CompletedAt = &completedAt
-
 	if err != nil {
+		completedAt := time.Now()
+		run.CompletedAt = &completedAt
 		run.Status = model.TaskRunStatusFailed
 		msg := err.Error()
 		run.ErrorMessage = &msg
@@ -165,8 +168,15 @@ func (s *taskRunService) execute(ctx context.Context, run *model.TaskRun, agentI
 		return
 	}
 
-	// Mirror the execution's summary onto the run so the runs list renders
-	// without a join; the full tool-call trace stays on the execution record.
+	applyExecution(run, exec)
+	s.finalize(ctx, run)
+}
+
+// applyExecution mirrors the execution's summary onto the run so the runs list
+// renders without a join; the full tool-call trace stays on the execution
+// record. A paused execution makes the run awaiting_approval (not terminal, no
+// completed_at) with the pending approval's id; a resuming one makes it running.
+func applyExecution(run *model.TaskRun, exec *model.AgentExecution) {
 	run.ExecutionID = &exec.ID
 	run.Output = exec.Output
 	run.ErrorMessage = exec.ErrorMessage
@@ -174,12 +184,47 @@ func (s *taskRunService) execute(ctx context.Context, run *model.TaskRun, agentI
 	run.CostUSD = exec.CostUSD
 	run.LatencyMs = exec.LatencyMs
 	run.Iterations = exec.Iterations
-	if exec.Status == model.ExecutionStatusFailed || exec.ErrorMessage != nil {
+	run.PendingApprovalID = nil
+
+	switch {
+	case exec.Status == model.ExecutionStatusAwaitingApproval:
+		run.Status = model.TaskRunStatusAwaitingApproval
+		run.PendingApprovalID = exec.PendingApprovalID
+		run.CompletedAt = nil
+	case exec.Status == model.ExecutionStatusRunning || exec.Status == model.ExecutionStatusPending:
+		run.Status = model.TaskRunStatusRunning
+		run.CompletedAt = nil
+	case exec.Status == model.ExecutionStatusFailed || exec.Status == model.ExecutionStatusCancelled || exec.ErrorMessage != nil:
 		run.Status = model.TaskRunStatusFailed
-	} else {
+		run.CompletedAt = completedAt(exec)
+	default:
 		run.Status = model.TaskRunStatusCompleted
+		run.CompletedAt = completedAt(exec)
 	}
+}
+
+func completedAt(exec *model.AgentExecution) *time.Time {
+	if exec.CompletedAt != nil {
+		return exec.CompletedAt
+	}
+	now := time.Now()
+	return &now
+}
+
+func (s *taskRunService) SyncFromExecution(ctx context.Context, exec *model.AgentExecution) error {
+	if exec == nil {
+		return nil
+	}
+	run, err := s.runRepo.GetByExecutionID(ctx, exec.ID)
+	if err != nil {
+		return fmt.Errorf("task_run_svc: find run for execution %s: %w", exec.ID, err)
+	}
+	if run == nil {
+		return nil // not launched as a task run (chat, workflow, API execute)
+	}
+	applyExecution(run, exec)
 	s.finalize(ctx, run)
+	return nil
 }
 
 func (s *taskRunService) finalize(ctx context.Context, run *model.TaskRun) {
@@ -194,11 +239,11 @@ func (s *taskRunService) finalize(ctx context.Context, run *model.TaskRun) {
 }
 
 // boardStatusForRun maps a generic task-run status onto the board column.
-// Failed runs stay where they are (in_progress after start) so the card does
+// A run paused for approval keeps the card in progress. Failed runs stay where they are (in_progress after start) so the card does
 // not pretend the work is finished.
 func boardStatusForRun(runStatus string) (taskStatus string, ok bool) {
 	switch runStatus {
-	case model.TaskRunStatusQueued, model.TaskRunStatusRunning:
+	case model.TaskRunStatusQueued, model.TaskRunStatusRunning, model.TaskRunStatusAwaitingApproval:
 		return "in_progress", true
 	case model.TaskRunStatusCompleted:
 		return "done", true

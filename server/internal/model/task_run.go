@@ -18,7 +18,7 @@ type TaskRun struct {
 	AgentID       uuid.UUID      `json:"agent_id"`
 	OrgID         uuid.UUID      `json:"org_id"`
 	ExecutionID   *uuid.UUID     `json:"execution_id"`
-	Status        string         `json:"status"` // queued|running|completed|failed
+	Status        string         `json:"status"` // queued|running|awaiting_approval|completed|failed
 	Prompt        string         `json:"prompt"`
 	Engine        *string        `json:"engine"`
 	ModelProvider *string        `json:"model_provider"`
@@ -34,18 +34,24 @@ type TaskRun struct {
 	LatencyMs     int            `json:"latency_ms"`
 	Iterations    int            `json:"iterations"`
 	RequestedBy   *uuid.UUID     `json:"requested_by"`
-	StartedAt     *time.Time     `json:"started_at"`
-	CompletedAt   *time.Time     `json:"completed_at"`
-	CreatedAt     time.Time      `json:"created_at"`
-	UpdatedAt     time.Time      `json:"updated_at"`
+	// PendingApprovalID is the approval the run waits on while Status is
+	// awaiting_approval (decide it via POST /approvals/{id}/decide); nil otherwise.
+	PendingApprovalID *uuid.UUID `json:"pending_approval_id"`
+	StartedAt         *time.Time `json:"started_at"`
+	CompletedAt       *time.Time `json:"completed_at"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
-// TaskRun status values (mirror the CHECK constraint in migration 000027).
+// TaskRun status values (mirror the CHECK constraint, widened in migration 000062).
 const (
 	TaskRunStatusQueued    = "queued"
 	TaskRunStatusRunning   = "running"
 	TaskRunStatusCompleted = "completed"
 	TaskRunStatusFailed    = "failed"
+	// TaskRunStatusAwaitingApproval: the run paused on a gated tool and waits
+	// for a human decision on PendingApprovalID. Not terminal.
+	TaskRunStatusAwaitingApproval = "awaiting_approval"
 )
 
 // CreateTaskRunRequest is the body of POST /api/v1/tasks/{taskID}/run. Every

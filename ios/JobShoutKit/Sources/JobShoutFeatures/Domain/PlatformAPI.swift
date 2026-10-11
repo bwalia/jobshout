@@ -191,9 +191,12 @@ public struct PlatformAPI: Sendable {
         try await map {
             let body = Operations.DecideApproval.Input.Body.JsonPayload(
                 decision: approve ? .approve : .reject, reason: reason?.nilIfBlank)
+            // 202: decided; the paused run resumes on the server in the background.
             switch try await client.decideApproval(path: .init(approvalID: approvalID), body: .json(body)) {
-            case .ok(let r): return try r.body.json
+            case .accepted(let r): return try r.body.json
             case .badRequest(let r): throw APIError.server(400, try? r.body.json)
+            case .notFound(let r): throw APIError.server(404, try? r.body.json)
+            case .conflict(let r): throw APIError.server(409, try? r.body.json)
             case .undocumented(let s, _): throw APIError.undocumented(s)
             }
         }

@@ -29,6 +29,9 @@ type Approval struct {
 	RequestedAt time.Time      `json:"requested_at"`
 	DecidedBy   *uuid.UUID     `json:"decided_by"`
 	DecidedAt   *time.Time     `json:"decided_at"`
+	// ResumedAt is when the paused run finished resuming after the decision
+	// (whatever the outcome); nil while pending or while the resume is in flight.
+	ResumedAt *time.Time `json:"resumed_at"`
 
 	// ResumeState is the JSONB-serialised executor state used to resume the
 	// paused run. It is never exposed over the API.
