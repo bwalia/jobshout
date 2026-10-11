@@ -70,6 +70,8 @@ var apiKeyRoutes = []apiKeyRoute{
 	route("GET", "/agent-schemas/generic", model.ScopeAgentsRead),
 	route("GET POST", "/agents/{id}/knowledge", model.ScopeKnowledge),
 	route("GET PUT DELETE", "/agents/{id}/knowledge/{id}", model.ScopeKnowledge),
+	route("PUT DELETE", "/agents/{id}/knowledge/external/[A-Za-z0-9][A-Za-z0-9._-]{0,99}", model.ScopeKnowledge),
+	route("GET", "/property-pa/agents", model.ScopeAgentsRead),
 }
 
 // APIKeyRouteScope returns the scope an API key needs for method+path, and

@@ -72,6 +72,7 @@ import (
 	"github.com/jobshout/server/internal/modelselect"
 	"github.com/jobshout/server/internal/orgroute"
 	"github.com/jobshout/server/internal/platformtools"
+	"github.com/jobshout/server/internal/propertypa"
 	"github.com/jobshout/server/internal/repository"
 	"github.com/jobshout/server/internal/research"
 	"github.com/jobshout/server/internal/reviewbot"
@@ -291,7 +292,7 @@ func main() {
 	webhookDisp := webhook.NewDispatcher(webhookRepo, webhook.Options{Logger: logger})
 	go webhookDisp.Run(ctx, 5*time.Second)
 	approvalRepo = &webhook.Approvals{ApprovalRepository: approvalRepo, Emitter: webhookDisp, Runs: taskRunRepo}
-	taskRunRepo = &webhook.TaskRuns{TaskRunRepository: taskRunRepo, Emitter: webhookDisp}
+	taskRunRepo = &webhook.TaskRuns{TaskRunRepository: taskRunRepo, Emitter: webhookDisp, Agents: agentRepo}
 	mailRepo := repository.NewMailRepository(pool)
 	careerRepo := repository.NewCareerRepository(pool)
 
@@ -993,6 +994,13 @@ func main() {
 	}
 	logger.Info("integration tools registered", zap.Int("count", 7))
 
+	// Property PA: opsapi_get / opsapi_post read and write the org's OpsAPI
+	// workspace (the system of record) with the org's own "opsapi"
+	// integration credentials. The model supplies only an allow-listed path.
+	for _, it := range tools.NewOpsAPITools(integRepo, agentRepo) {
+		toolRegistry.Register(it)
+	}
+
 	// Phase 1.2: make the org's configured MCP (Model Context Protocol) servers
 	// agent-callable. mcp_list_tools and mcp_call resolve the calling org (from
 	// the execution context) to its own enabled MCP servers at call time, so
@@ -1137,6 +1145,17 @@ func main() {
 	orgHandler := handler.NewOrganizationHandler(orgRepo)
 	marketplaceHandler := handler.NewMarketplaceHandler(pool, logger)
 	knowledgeHandler := handler.NewKnowledgeHandler(pool, knowledgeIngestSvc, logger)
+	// Property PA: install/upgrade the Seller PA and Manager PA agents per org.
+	propertyPAHandler := handler.NewPropertyPAHandler(&propertypa.Installer{
+		Agents:    repository.NewPAAgentStore(pool, agentRepo),
+		Tools:     toolPermRepo,
+		Approvals: approvalRepo,
+		Skills:    skillRepo,
+		HasTool: func(name string) bool {
+			_, ok := toolRegistry.Get(name)
+			return ok
+		},
+	}, logger)
 	metricsHandler := handler.NewMetricsHandler(pool, logger)
 	wsHandler := handler.NewWSHandler(hub, logger)
 	execHandler := handler.NewExecutionHandler(execSvc)
@@ -1374,6 +1393,9 @@ func main() {
 			r.Route("/agents/{agentID}/knowledge", func(r chi.Router) {
 				r.Get("/", knowledgeHandler.ListByAgent)
 				r.Post("/", knowledgeHandler.CreateFile)
+				// Externally keyed, versioned items (OpsAPI's approved rules).
+				r.Put("/external/{key}", knowledgeHandler.PutExternal)
+				r.Delete("/external/{key}", knowledgeHandler.DeleteExternal)
 				r.Route("/{fileID}", func(r chi.Router) {
 					r.Get("/", knowledgeHandler.GetFile)
 					r.Put("/", knowledgeHandler.UpdateFile)
@@ -1658,6 +1680,12 @@ func main() {
 				r.Get("/", apiKeyHandler.List)
 				r.Post("/", apiKeyHandler.Create)
 				r.Delete("/{keyID}", apiKeyHandler.Revoke)
+			})
+
+			// Property PA agents (docs/property-pa-agents.md).
+			r.Route("/property-pa", func(r chi.Router) {
+				r.Get("/agents", propertyPAHandler.List)
+				r.With(middleware.RequirePermission(rbacSvc, model.PermOrgManage)).Post("/install", propertyPAHandler.Install)
 			})
 
 			// Outbound webhook endpoints — org admins only.

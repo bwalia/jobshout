@@ -33,19 +33,27 @@ type RunData struct {
 	Context         *model.RunContext `json:"context,omitempty"`
 	SkillSlugs      []string          `json:"skill_slugs"`
 	Inputs          map[string]any    `json:"inputs,omitempty"`
-	TotalTokens     int               `json:"total_tokens"`
-	CostUSD         float64           `json:"cost_usd"`
-	LatencyMs       int               `json:"latency_ms"`
-	StartedAt       *time.Time        `json:"started_at"`
-	CompletedAt     *time.Time        `json:"completed_at"`
+	// ModelProvider / ModelName are the run's requested model (the agent's
+	// or the run's override); an org routing chain may have served it.
+	ModelProvider *string `json:"model_provider,omitempty"`
+	ModelName     *string `json:"model_name,omitempty"`
+	// PromptVersion is the agent's metadata.prompt_version when it has one
+	// (e.g. the Property PA agents), read when the event is emitted.
+	PromptVersion string     `json:"prompt_version,omitempty"`
+	TotalTokens   int        `json:"total_tokens"`
+	CostUSD       float64    `json:"cost_usd"`
+	LatencyMs     int        `json:"latency_ms"`
+	StartedAt     *time.Time `json:"started_at"`
+	CompletedAt   *time.Time `json:"completed_at"`
 }
 
 func runData(run *model.TaskRun) RunData {
 	d := RunData{
 		RunID: run.ID, TaskID: run.TaskID, AgentID: run.AgentID, ExecutionID: run.ExecutionID,
 		Status: run.Status, Output: run.Output, ErrorMessage: run.ErrorMessage, Context: run.Context,
-		SkillSlugs: run.SkillSlugs, Inputs: run.Inputs, TotalTokens: run.TotalTokens,
-		CostUSD: run.CostUSD, LatencyMs: run.LatencyMs, StartedAt: run.StartedAt, CompletedAt: run.CompletedAt,
+		SkillSlugs: run.SkillSlugs, Inputs: run.Inputs, ModelProvider: run.ModelProvider, ModelName: run.ModelName,
+		TotalTokens: run.TotalTokens,
+		CostUSD:     run.CostUSD, LatencyMs: run.LatencyMs, StartedAt: run.StartedAt, CompletedAt: run.CompletedAt,
 	}
 	if d.Output != nil && len(*d.Output) > maxOutput {
 		cut := (*d.Output)[:maxOutput]
@@ -59,6 +67,23 @@ func runData(run *model.TaskRun) RunData {
 type TaskRuns struct {
 	repository.TaskRunRepository
 	Emitter Emitter
+	// Agents, optional, resolves the agent's prompt_version for run events.
+	Agents AgentFinder
+}
+
+// AgentFinder looks up an agent (repository.AgentRepository).
+type AgentFinder interface {
+	FindByID(ctx context.Context, id uuid.UUID) (*model.Agent, error)
+}
+
+func (t *TaskRuns) runData(ctx context.Context, run *model.TaskRun) RunData {
+	d := runData(run)
+	if t.Agents != nil && run.AgentID != uuid.Nil {
+		if a, err := t.Agents.FindByID(ctx, run.AgentID); err == nil && a != nil && a.OrgID == run.OrgID {
+			d.PromptVersion, _ = a.Metadata["prompt_version"].(string)
+		}
+	}
+	return d
 }
 
 // Update persists the run, then emits when its status became terminal.
@@ -75,9 +100,9 @@ func (t *TaskRuns) Update(ctx context.Context, run *model.TaskRun) error {
 	}
 	switch run.Status {
 	case model.TaskRunStatusCompleted:
-		t.Emitter.Emit(ctx, run.OrgID, model.WebhookEventRunCompleted, runData(run))
+		t.Emitter.Emit(ctx, run.OrgID, model.WebhookEventRunCompleted, t.runData(ctx, run))
 	case model.TaskRunStatusFailed:
-		t.Emitter.Emit(ctx, run.OrgID, model.WebhookEventRunFailed, runData(run))
+		t.Emitter.Emit(ctx, run.OrgID, model.WebhookEventRunFailed, t.runData(ctx, run))
 	}
 	return nil
 }
