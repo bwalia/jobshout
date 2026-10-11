@@ -659,7 +659,7 @@ paths:
         - { name: endpointID, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: limit, in: query, schema: { type: integer } }
       responses:
-        '200': { description: Delivery log, newest first }
+        '200': { description: "Delivery log, newest first" }
   /webhook-endpoints/{endpointID}/test:
     post:
       operationId: testWebhookEndpoint
