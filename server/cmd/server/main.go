@@ -72,6 +72,7 @@ import (
 	"github.com/jobshout/server/internal/repository"
 	"github.com/jobshout/server/internal/research"
 	"github.com/jobshout/server/internal/reviewbot"
+	"github.com/jobshout/server/internal/secretbox"
 	"github.com/jobshout/server/internal/selector"
 	"github.com/jobshout/server/internal/service"
 	"github.com/jobshout/server/internal/strix"
@@ -232,7 +233,16 @@ func main() {
 	execRepo := repository.NewExecutionRepository(pool)
 	toolPermRepo := repository.NewAgentToolRepository(pool)
 	approvalRepo := repository.NewApprovalRepository(pool)
-	llmProviderRepo := repository.NewLLMProviderRepository(pool)
+	// Tenant secrets (org LLM provider keys, webhook signing secrets) are
+	// sealed at rest when SECRETS_ENCRYPTION_KEY is set.
+	secretBox, err := secretbox.New(cfg.SecretsEncryptionKey)
+	if err != nil {
+		logger.Fatal("invalid SECRETS_ENCRYPTION_KEY", zap.Error(err))
+	}
+	if !secretBox.Enabled() {
+		logger.Warn("SECRETS_ENCRYPTION_KEY not set: org LLM provider keys and webhook secrets are stored in plaintext")
+	}
+	llmProviderRepo := repository.NewLLMProviderRepositoryWithBox(pool, secretBox)
 	schedulerRepo := repository.NewSchedulerRepository(pool)
 	sessionRepo := repository.NewSessionRepository(pool)
 	pluginRepo := repository.NewPluginRepository(pool)

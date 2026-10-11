@@ -67,6 +67,12 @@ type Config struct {
 	// OLLAMA_DEFAULT_MODEL (the Ollama client's own default).
 	OllamaFallbackModel string `mapstructure:"OLLAMA_FALLBACK_MODEL"`
 
+	// SecretsEncryptionKey seals tenant secrets at rest (org LLM provider API
+	// keys, outbound webhook signing secrets) with AES-256-GCM. A 64-char hex
+	// value is used as the raw key; anything else is SHA-256 hashed. Empty
+	// keeps the legacy plaintext storage (logged as a warning at boot).
+	SecretsEncryptionKey string `mapstructure:"SECRETS_ENCRYPTION_KEY"`
+
 	// Chat model is pinned separately from worker OLLAMA_DEFAULT_MODEL so
 	// the conversational control surface can use a tool-capable model
 	// without changing article/research/pentest workers.
@@ -388,6 +394,7 @@ func Load() (*Config, error) {
 		OllamaNumCtx:         viper.GetInt("OLLAMA_NUM_CTX"),
 		OllamaFallback:       viper.GetBool("LLM_OLLAMA_FALLBACK"),
 		OllamaFallbackModel:  viper.GetString("OLLAMA_FALLBACK_MODEL"),
+		SecretsEncryptionKey: viper.GetString("SECRETS_ENCRYPTION_KEY"),
 		ChatModel:            viper.GetString("CHAT_MODEL"),
 		ChatModelFallback:    viper.GetString("CHAT_MODEL_FALLBACK"),
 		ChatNumCtx:           viper.GetInt("CHAT_NUM_CTX"),
