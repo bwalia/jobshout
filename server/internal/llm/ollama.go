@@ -347,14 +347,27 @@ func (c *OllamaClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 			return nil, err
 		}
 		attempt.response(resp)
-		if !isGatewayStatus(resp.StatusCode) || try >= ollamaGatewayAttempts {
+		if !isGatewayStatus(resp.StatusCode) {
 			break
 		}
 
 		rawBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
 		resp.Body.Close()
-		attempt.end(fmt.Errorf("ollama: unexpected status %d: %s", resp.StatusCode, upstreamSnippet(rawBody)))
-		t := time.NewTimer(c.gatewayRetryWait())
+		err = fmt.Errorf("ollama: unexpected status %d: %s", resp.StatusCode, upstreamSnippet(rawBody))
+		attempt.end(err)
+
+		// Ollama's own "server busy" is a full request queue on a shared host,
+		// answered at once: other callers' work has to drain, so it is worth
+		// several, longer waits. A gateway timeout already cost the proxy's
+		// whole read timeout, so it gets one quick retry.
+		limit, wait := ollamaGatewayAttempts, c.gatewayRetryWait()
+		if isServerBusy(resp.StatusCode, rawBody) {
+			limit, wait = ollamaBusyAttempts, c.busyRetryWait(try)
+		}
+		if try >= limit {
+			return nil, err
+		}
+		t := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
 			t.Stop()
@@ -397,6 +410,29 @@ func (c *OllamaClient) gatewayRetryWait() time.Duration {
 		return c.retryWait
 	}
 	return defaultOllamaGatewayRetryWait
+}
+
+// ollamaBusyAttempts is how many times Generate sends a request Ollama turned
+// away with "server busy" (its queue of pending requests was full), counting
+// the first. The waits double from defaultOllamaBusyWait: 30s, 1m, 2m.
+const ollamaBusyAttempts = 4
+
+// defaultOllamaBusyWait is the first pause after a "server busy" answer.
+const defaultOllamaBusyWait = 30 * time.Second
+
+func (c *OllamaClient) busyRetryWait(try int) time.Duration {
+	if c.retryWait > 0 {
+		return c.retryWait
+	}
+	return defaultOllamaBusyWait << (try - 1)
+}
+
+// isServerBusy reports whether Ollama refused the request because its queue
+// of pending requests was full (OLLAMA_MAX_QUEUE), rather than a gateway
+// timing out: {"error":"server busy, please try again. maximum pending
+// requests exceeded"}.
+func isServerBusy(status int, body []byte) bool {
+	return status == http.StatusServiceUnavailable && bytes.Contains(bytes.ToLower(body), []byte("server busy"))
 }
 
 // isGatewayStatus reports whether status is a gateway or overload answer that
