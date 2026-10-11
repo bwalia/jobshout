@@ -12,6 +12,10 @@ const (
 	ProviderGitHub = "github"
 	ProviderSlack  = "slack"
 	ProviderTeams  = "teams"
+	// ProviderOpsAPI is an OpsAPI workspace (Property PA system of record):
+	// base_url, credentials.api_key ("opsk_..."), config.namespace_id or
+	// config.namespace_slug. Read by the opsapi_get / opsapi_post tools.
+	ProviderOpsAPI = "opsapi"
 )
 
 // Integration represents a configured connection to an external system.
@@ -33,7 +37,7 @@ type Integration struct {
 // CreateIntegrationRequest is the payload for creating an integration.
 type CreateIntegrationRequest struct {
 	Name        string         `json:"name" validate:"required"`
-	Provider    string         `json:"provider" validate:"required,oneof=jira github slack teams"`
+	Provider    string         `json:"provider" validate:"required,oneof=jira github slack teams opsapi"`
 	BaseURL     string         `json:"base_url"`
 	Credentials map[string]any `json:"credentials" validate:"required"`
 	Config      map[string]any `json:"config"`

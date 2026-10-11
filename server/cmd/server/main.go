@@ -993,6 +993,13 @@ func main() {
 	}
 	logger.Info("integration tools registered", zap.Int("count", 7))
 
+	// Property PA: opsapi_get / opsapi_post read and write the org's OpsAPI
+	// workspace (the system of record) with the org's own "opsapi"
+	// integration credentials. The model supplies only an allow-listed path.
+	for _, it := range tools.NewOpsAPITools(integRepo, agentRepo) {
+		toolRegistry.Register(it)
+	}
+
 	// Phase 1.2: make the org's configured MCP (Model Context Protocol) servers
 	// agent-callable. mcp_list_tools and mcp_call resolve the calling org (from
 	// the execution context) to its own enabled MCP servers at call time, so
