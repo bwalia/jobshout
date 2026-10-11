@@ -40,11 +40,11 @@ today and `GET /integrations` returns them to org members (pre-existing; see ope
 ```
 POST /property-pa/install
 → {"agents": [{"key":"seller","agent_id":"…","name":"Seller PA","context_role":"seller_agent",
-               "prompt_version":"seller-pa@1.1.0","prompt_sha256":"…","tools":["opsapi_get","knowledge_search","opsapi_post","email_send"],
+               "prompt_version":"seller-pa@1.2.0","prompt_sha256":"…","tools":["opsapi_get","knowledge_search","opsapi_post","email_send"],
                "approval_tools":["email_send","slack_send_message","teams_send_message"],
                "skills":["pa-today","pa-prepare-me","pa-capture","pa-coach","pa-handoff"],"status":"created"},
               {"key":"manager", …}],
-   "skills": [{"slug":"pa-today","id":"…","version":"1.1.0","status":"created"}, …]}
+   "skills": [{"slug":"pa-today","id":"…","version":"1.2.0","status":"created"}, …]}
 ```
 
 - Agents are found again by `metadata.property_pa` (`seller` / `manager`), not by name, so admins may
@@ -93,8 +93,8 @@ The allow-list is code (`OpsAPIReadPrefixes`, `OpsAPIWritePaths`); widening it i
 
 | Key | Name | `context.role` | Prompt version | Skills |
 |---|---|---|---|---|
-| `seller` | Seller PA | `seller_agent` | `seller-pa@1.1.0` | `pa-today`, `pa-prepare-me`, `pa-capture`, `pa-coach`, `pa-handoff` |
-| `manager` | Manager PA | `manager` | `manager-pa@1.1.0` | `pa-manager-today`, `pa-handoff`, `pa-teach` |
+| `seller` | Seller PA | `seller_agent` | `seller-pa@1.2.0` | `pa-today`, `pa-prepare-me`, `pa-capture`, `pa-coach`, `pa-handoff` |
+| `manager` | Manager PA | `manager` | `manager-pa@1.2.0` | `pa-manager-today`, `pa-handoff`, `pa-teach` |
 
 Prompt text: `server/internal/propertypa/prompts/{seller_pa,manager_pa,common}.md` (each agent's prompt
 is its own file followed by `common.md`). The common part carries the rules both share:

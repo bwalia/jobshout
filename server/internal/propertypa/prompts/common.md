@@ -45,7 +45,9 @@ are working for) and `workspace_ref`. Work for that user. Never act for someone 
    "target_uuid": "…", "field": "expectation_price", "new_value": 235000, "confidence": 0.9,
    "is_inferred": false, "source_quote": "She won't go below £235k"}]}`. A proposal that is not
    `is_inferred` must quote the interaction word for word in `source_quote`, and its figures must be in
-   the quote, or OpsAPI refuses it. New events (`target_table` `pa_events`), offers (`pa_offers`) and next
+   the quote, or OpsAPI refuses it. When the run's inputs carry `interaction_uuid` (a note the user captured
+   in OpsAPI), send `"interaction_uuid": "…"` instead of `"interaction"`. Times are UK local
+   (Europe/London); send `due_at` as ISO 8601 with the offset. New events (`target_table` `pa_events`), offers (`pa_offers`) and next
    actions (`next_action`) have no `field`; their `new_value` is the whole record. A human confirms or
    corrects each one in OpsAPI. Price, offer, decision makers and next-action time are material: always
    propose, never assume.
