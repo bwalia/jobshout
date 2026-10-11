@@ -209,6 +209,8 @@ export interface GenerateBlogRequest {
   industry?: string;
   /** Which builtin agent the run belongs to; omitted is the Article Writer. */
   writer?: string;
+  /** The writer agent (the original or a clone) that writes and owns the run. */
+  agent_id?: string;
   /** Discover a trending topic instead of taking one from `briefs`. */
   trending?: boolean;
   trending_count?: number;
@@ -264,3 +266,25 @@ export interface ModelRecommendation {
   /** The LLM provider the recommended model belongs to ("ollama"). */
   provider?: string;
 }
+
+/** A website a writer agent can file to — an opsapi integration, never its key. */
+export interface BlogDestination {
+  name: string;
+  base_url: string;
+  namespace: string;
+  /** False when the integration is missing its key, namespace or URL. */
+  ready: boolean;
+}
+
+/**
+ * A writer agent's settings, stored in its engine_config. They are how one
+ * writer is set up for a website or project without code, and they travel with
+ * the agent when it is exported from one ring and imported into another.
+ */
+export const WRITER_SETTING_KEYS = {
+  style: "writer_style",
+  audience: "writer_audience",
+  industry: "writer_industry",
+  focus: "writer_focus",
+  destination: "writer_destination",
+} as const;

@@ -66,6 +66,8 @@ export interface CreateScheduledTaskRequest {
 
 export interface UpdateScheduledTaskRequest {
   name?: string;
+  /** Which agent runs the task — for article schedules, the writer. "" clears. */
+  agent_id?: string;
   description?: string;
   input_prompt?: string;
   /**

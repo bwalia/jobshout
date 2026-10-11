@@ -252,6 +252,22 @@ func (h *BlogHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
 	params := model.PaginationParams{Page: page, PerPage: perPage}
 
+	// ?agent_id= lists one writer agent's runs — the original or a clone.
+	if raw := strings.TrimSpace(r.URL.Query().Get("agent_id")); raw != "" {
+		agentID, err := uuid.Parse(raw)
+		if err != nil {
+			RespondError(w, http.StatusBadRequest, "invalid agent_id")
+			return
+		}
+		result, err := h.svc.ListByAgentID(r.Context(), orgID, agentID, params)
+		if err != nil {
+			RespondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		RespondJSON(w, http.StatusOK, result)
+		return
+	}
+
 	// ?writer= lists one writer's runs; without it, the Article Writer's, so
 	// its tab is unchanged by other writers sharing the tables.
 	writer := strings.TrimSpace(r.URL.Query().Get("writer"))
@@ -303,4 +319,21 @@ func (h *BlogHandler) GetArticle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	RespondJSON(w, http.StatusOK, article)
+}
+
+// Destinations handles GET /api/v1/blogs/destinations — the websites (opsapi
+// integrations) a writer agent can be pointed at. Credentials are never
+// returned.
+func (h *BlogHandler) Destinations(w http.ResponseWriter, r *http.Request) {
+	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid org_id in token")
+		return
+	}
+	list, err := h.svc.ListDestinations(r.Context(), orgID)
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, "failed to list destinations")
+		return
+	}
+	RespondJSON(w, http.StatusOK, list)
 }

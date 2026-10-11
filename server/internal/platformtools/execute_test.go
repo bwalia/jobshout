@@ -42,6 +42,10 @@ func (s *stubAgents) UpdateStatus(context.Context, uuid.UUID, string) error {
 	return nil
 }
 
+func (s *stubAgents) Clone(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) (*model.Agent, error) {
+	return nil, nil
+}
+
 var _ service.AgentService = (*stubAgents)(nil)
 
 type stubExec struct {

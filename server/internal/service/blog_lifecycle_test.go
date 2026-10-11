@@ -571,3 +571,11 @@ func TestDiscoveryRetryRequest_ReplaysTheOriginalSteering(t *testing.T) {
 		t.Errorf("replayed request does not validate: %v", err)
 	}
 }
+
+func (a *retryAgents) FindBuiltinNamed(ctx context.Context, orgID uuid.UUID, builtin, name string) (*model.Agent, error) {
+	ag, err := a.FindBuiltin(ctx, orgID, builtin)
+	if err != nil || ag == nil || !strings.EqualFold(ag.Name, name) {
+		return nil, err
+	}
+	return ag, nil
+}

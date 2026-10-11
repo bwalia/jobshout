@@ -299,6 +299,11 @@ func (r *Runner) dispatchBlog(ctx context.Context, t model.ScheduledTask, runRec
 	if err != nil {
 		return err
 	}
+	// A schedule pointed at a writer agent — the Article Writer or a clone of
+	// it — runs as that agent, with its model, style and keywords.
+	if t.AgentID != nil && req.AgentID == nil {
+		req.AgentID = t.AgentID
+	}
 	run, err := r.blogSvc.Generate(ctx, t.OrgID, t.CreatedBy, "schedule", req)
 	if err != nil {
 		return err

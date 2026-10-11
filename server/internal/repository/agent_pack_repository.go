@@ -291,6 +291,11 @@ func insertPackedAgent(ctx context.Context, tx pgx.Tx, orgID, userID uuid.UUID, 
 		engineJSON = []byte("{}")
 	}
 	meta := map[string]any{}
+	// A clone of a writer keeps the builtin marker, or it would import as a
+	// generic agent that cannot write anything.
+	if b := strings.TrimSpace(pkg.Agent.Builtin); agentpack.Clonable(b) {
+		meta[model.MetadataKeyBuiltin] = b
+	}
 	metaJSON, _ := json.Marshal(meta)
 	createdBy := userID
 	a := &model.Agent{

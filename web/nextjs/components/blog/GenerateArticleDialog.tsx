@@ -39,9 +39,12 @@ function newRow(): BriefRow {
 export function GenerateArticleDialog({
   open,
   onClose,
+  agentId,
 }: {
   open: boolean;
   onClose: () => void;
+  /** The writer agent to run as — the original or a clone. */
+  agentId?: string;
 }) {
   const router = useRouter();
   const generate = useGenerateBlog();
@@ -95,6 +98,7 @@ export function GenerateArticleDialog({
         model: model.trim() || undefined,
         audience: runAudience || undefined,
         industry: industry.trim() || undefined,
+        agent_id: agentId,
       },
       {
         onSuccess: (run) => {

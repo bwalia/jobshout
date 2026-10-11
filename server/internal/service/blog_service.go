@@ -76,6 +76,15 @@ type BlogService interface {
 	GetArticle(ctx context.Context, id uuid.UUID) (*model.BlogArticle, error)
 	// BindTasks updates the Task Manager card when a launched run finishes.
 	BindTasks(tasks TaskService)
+	// BindIntegrations lets a writer agent file to its own website: the named
+	// opsapi integration in its settings, instead of the ring's CMS.
+	BindIntegrations(store IntegrationLister)
+	// ListByAgentID lists the runs of one writer agent — the original or a
+	// clone of it.
+	ListByAgentID(ctx context.Context, orgID, agentID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.BlogRun], error)
+	// ListDestinations lists the websites a writer can be pointed at — the
+	// org's opsapi integrations — without their credentials.
+	ListDestinations(ctx context.Context, orgID uuid.UUID) ([]model.BlogDestination, error)
 	// CanPublish reports whether the CMS connection is configured, so the UI
 	// can disable the action instead of offering a button that always fails.
 	CanPublish() bool
@@ -124,6 +133,14 @@ type blogService struct {
 	// was launched — the ring-wide form of a run's auto_publish, limited to the
 	// CMS. See BLOG_AUTO_FILE_CMS.
 	autoFileCMS bool
+	// integrations resolves a writer's named destination; nil means every
+	// writer files to the ring's CMS.
+	integrations IntegrationLister
+}
+
+// IntegrationLister reads an org's integrations.
+type IntegrationLister interface {
+	ListByOrg(ctx context.Context, orgID uuid.UUID) ([]model.Integration, error)
 }
 
 // NewBlogService creates a BlogService.
@@ -153,6 +170,12 @@ func NewBlogService(
 		orphanTimeout: orphanTimeout,
 		maxRuntime:    maxRuntime,
 		autoFileCMS:   autoFileCMS,
+	}
+}
+
+func (s *blogService) BindIntegrations(store IntegrationLister) {
+	if s != nil {
+		s.integrations = store
 	}
 }
 
@@ -391,6 +414,86 @@ func (s *blogService) ensureWriter(ctx context.Context, orgID uuid.UUID, builtin
 	return agent, nil
 }
 
+// writerAgent is the agent a run is written by: the one the request names, or
+// the org's original agent for the writer builtin.
+//
+// A named agent must belong to the org and be the same kind of writer — a
+// clone of the Article Writer carries the article_writer builtin — so a run
+// cannot be filed under, or take its settings from, some unrelated agent.
+func (s *blogService) writerAgent(ctx context.Context, orgID uuid.UUID, builtin string, agentID *uuid.UUID) (*model.Agent, error) {
+	if agentID == nil || *agentID == uuid.Nil {
+		return s.ensureWriter(ctx, orgID, builtin)
+	}
+	a, err := s.agentRepo.FindByID(ctx, *agentID)
+	if err != nil {
+		return nil, err
+	}
+	if a == nil || a.OrgID != orgID {
+		return nil, fmt.Errorf("blog_svc: writer agent %s was not found in this organization", agentID)
+	}
+	if b, _ := a.Metadata[model.MetadataKeyBuiltin].(string); b != builtin {
+		return nil, fmt.Errorf("blog_svc: agent %q is not a %s", a.Name, model.BlogWriters[builtin])
+	}
+	return a, nil
+}
+
+// runAgent is the agent an existing run belongs to, for a retry: the agent it
+// was filed under while that agent exists, else the writer's original.
+func (s *blogService) runAgent(ctx context.Context, run *model.BlogRun) (*model.Agent, error) {
+	builtin := model.BlogWriterBuiltin(run.Options.Writer)
+	if run.AgentID != nil {
+		if a, err := s.agentRepo.FindByID(ctx, *run.AgentID); err == nil && a != nil && a.OrgID == run.OrgID {
+			if b, _ := a.Metadata[model.MetadataKeyBuiltin].(string); b == builtin {
+				return a, nil
+			}
+		}
+	}
+	return s.ensureWriter(ctx, run.OrgID, builtin)
+}
+
+// destination is the CMS a run's articles are filed in: its agent's named
+// opsapi integration when it has one, else nil for the ring's CMS.
+//
+// A named destination that cannot be resolved is an error rather than a quiet
+// fall-back to the ring's CMS: filing a Workstation article on some other site
+// is worse than not filing it.
+func (s *blogService) destination(ctx context.Context, run *model.BlogRun) (CMSDestination, error) {
+	if run.AgentID == nil {
+		return nil, nil
+	}
+	agent, err := s.agentRepo.FindByID(ctx, *run.AgentID)
+	if err != nil || agent == nil {
+		return nil, err
+	}
+	name := model.WriterSettingsOf(agent).Destination
+	if name == "" {
+		return nil, nil
+	}
+	if s.integrations == nil {
+		return nil, fmt.Errorf("blog_svc: %s files to %q, but integrations are not available", agent.Name, name)
+	}
+	list, err := s.integrations.ListByOrg(ctx, run.OrgID)
+	if err != nil {
+		return nil, fmt.Errorf("blog_svc: list integrations: %w", err)
+	}
+	for _, in := range list {
+		if !strings.EqualFold(strings.TrimSpace(in.Name), name) {
+			continue
+		}
+		return opsapiDestination(in)
+	}
+	return nil, fmt.Errorf("blog_svc: %s files to %q, but this organization has no integration of that name — add an opsapi integration called %q", agent.Name, name, name)
+}
+
+// hasDestination reports whether the run's agent names a website of its own.
+func (s *blogService) hasDestination(ctx context.Context, run *model.BlogRun) bool {
+	if run.AgentID == nil {
+		return false
+	}
+	agent, err := s.agentRepo.FindByID(ctx, *run.AgentID)
+	return err == nil && model.WriterSettingsOf(agent).Destination != ""
+}
+
 // initialSteps is the trace a run starts with. Steps are pre-seeded as pending
 // so the UI can render the whole pipeline up front and light each one up as it
 // happens, rather than growing a list from nothing.
@@ -594,13 +697,16 @@ func (s *blogService) Generate(
 	// handler already did — and guarantees the briefs are populated for callers
 	// that build the request directly, like the scheduler.
 	req.Normalize()
-	if err := req.Validate(); err != nil {
-		return nil, fmt.Errorf("blog_svc: %w", err)
-	}
-
-	agent, err := s.ensureWriter(ctx, orgID, model.BlogWriterBuiltin(req.Writer))
+	agent, err := s.writerAgent(ctx, orgID, model.BlogWriterBuiltin(req.Writer), req.AgentID)
 	if err != nil {
 		return nil, err
+	}
+	// The agent's own settings fill whatever the launch or schedule left
+	// unset, then the request is normalized again so its briefs inherit them.
+	req.ApplyWriterSettings(model.WriterSettingsOf(agent))
+	req.Normalize()
+	if err := req.Validate(); err != nil {
+		return nil, fmt.Errorf("blog_svc: %w", err)
 	}
 
 	startedAt := time.Now()
@@ -614,7 +720,7 @@ func (s *blogService) Generate(
 		Briefs:      req.Briefs,
 		Topics:      req.Topics,
 		Options:     req.RunOptions(),
-		Steps:       attributeSteps(initialSteps(req.Trending), model.BlogWriters[model.BlogWriterBuiltin(req.Writer)]),
+		Steps:       attributeSteps(initialSteps(req.Trending), agent.Name),
 		Articles:    []model.BlogRunArticle{},
 		StartedAt:   &startedAt,
 	}
@@ -958,7 +1064,9 @@ func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, age
 // the ring setting is about the CMS, and must not start filling the Insights
 // review queue on rings that never asked for it.
 func (s *blogService) fileCompletedRun(run *model.BlogRun, req model.GenerateBlogRequest, log *zap.Logger) {
-	if (req.AutoPublish || s.autoFileCMS) && s.CanPublish() {
+	// A writer with a website of its own files there, and only there.
+	ownSite := s.hasDestination(persistCtx(), run)
+	if (req.AutoPublish || s.autoFileCMS) && (ownSite || s.CanPublish()) {
 		if _, perr := s.Publish(persistCtx(), run.OrgID, run.ID); perr != nil {
 			log.Warn("blog: automatic filing to the CMS failed, the articles are still here",
 				zap.Error(perr))
@@ -972,7 +1080,7 @@ func (s *blogService) fileCompletedRun(run *model.BlogRun, req model.GenerateBlo
 	}
 	// Other writers reach jobshout.com only when someone publishes live, so
 	// their drafts are not filed for review here.
-	if s.CanPublishInsights() && req.Writer == "" {
+	if s.CanPublishInsights() && req.Writer == "" && !ownSite {
 		if _, perr := s.PublishInsights(persistCtx(), run.OrgID, run.ID); perr != nil {
 			log.Warn("blog: automatic filing to Insights failed, the articles are still here",
 				zap.Error(perr))
@@ -981,7 +1089,7 @@ func (s *blogService) fileCompletedRun(run *model.BlogRun, req model.GenerateBlo
 				zap.Int("articles", len(run.Articles)))
 		}
 	}
-	if !s.CanPublish() && !s.CanPublishInsights() {
+	if !ownSite && !s.CanPublish() && !s.CanPublishInsights() {
 		log.Warn("blog: auto-publish was requested but no destination is configured")
 	}
 }
@@ -1065,16 +1173,27 @@ func (s *blogService) interruptCause(runID uuid.UUID, err error) error {
 }
 
 func (s *blogService) Publish(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) (*model.BlogRun, error) {
-	if !s.CanPublish() {
-		return nil, fmt.Errorf("blog_svc: publishing is not configured (OPSAPI_BASE_URL, OPSAPI_API_KEY and OPSAPI_NAMESPACE must all be set)")
+	if s.runner == nil {
+		return nil, fmt.Errorf("blog_svc: generator not configured")
 	}
-
 	run, err := s.repo.GetByID(ctx, runID)
 	if err != nil {
 		return nil, err
 	}
 	if run.OrgID != orgID {
 		return nil, fmt.Errorf("blog_svc: run does not belong to this organization")
+	}
+	// The writer's own website when it names one, else the ring's CMS.
+	dest, err := s.destination(ctx, run)
+	if err != nil {
+		return nil, err
+	}
+	if dest == nil && !s.CanPublish() {
+		return nil, fmt.Errorf("blog_svc: publishing is not configured (OPSAPI_BASE_URL, OPSAPI_API_KEY and OPSAPI_NAMESPACE must all be set, or give the writer agent a destination)")
+	}
+	namespace := s.runner.CMSNamespace()
+	if dest != nil {
+		namespace = dest.Namespace()
 	}
 	if run.Status != model.BlogRunStatusCompleted {
 		return nil, fmt.Errorf("blog_svc: only a completed run can be published (status is %q)", run.Status)
@@ -1125,13 +1244,18 @@ func (s *blogService) Publish(ctx context.Context, orgID uuid.UUID, runID uuid.U
 	if len(articles) == 0 {
 		s.logger.Info("blog_svc: all articles already posted, finalising run",
 			zap.String("blog_run_id", run.ID.String()), zap.Int("articles", alreadyPosted))
-		return s.finalizePublished(ctx, run, s.runner.CMSNamespace(), time.Now())
+		return s.finalizePublished(ctx, run, namespace, time.Now())
 	}
 
 	run.Steps = append(run.Steps, publishSteps()...)
 	tracker := s.newTracker(run)
 
-	result, err := s.runner.Publish(ctx, orgID, articles, tracker.advance)
+	var result *blog.PublishResult
+	if dest != nil {
+		result, err = s.runner.PublishTo(ctx, orgID, dest, articles, tracker.advance)
+	} else {
+		result, err = s.runner.Publish(ctx, orgID, articles, tracker.advance)
+	}
 	if err != nil {
 		// Drafts posted before the failure are recorded, so a retry skips
 		// them instead of posting them twice.
@@ -1373,7 +1497,7 @@ func (s *blogService) Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUI
 		return nil, fmt.Errorf("blog_svc: every topic already has an article")
 	}
 
-	agent, err := s.ensureWriter(ctx, orgID, model.BlogWriterBuiltin(run.Options.Writer))
+	agent, err := s.runAgent(ctx, run)
 	if err != nil {
 		return nil, err
 	}
@@ -1413,6 +1537,8 @@ func (s *blogService) Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUI
 		Audience: run.Options.Audience,
 		Industry: run.Options.Industry,
 		Writer:   run.Options.Writer,
+		Style:    run.Options.Style,
+		AgentID:  run.AgentID,
 	}
 	req.Normalize()
 	if run.Model != nil {
@@ -1427,7 +1553,7 @@ func (s *blogService) Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUI
 // retryDiscovery restarts a trending run that never got as far as choosing a
 // topic. Nothing was written, so the run starts over from discovery.
 func (s *blogService) retryDiscovery(ctx context.Context, run *model.BlogRun) (*model.BlogRun, error) {
-	agent, err := s.ensureWriter(ctx, run.OrgID, model.BlogWriterBuiltin(run.Options.Writer))
+	agent, err := s.runAgent(ctx, run)
 	if err != nil {
 		return nil, err
 	}
@@ -1485,6 +1611,8 @@ func discoveryRetryRequest(run *model.BlogRun) model.GenerateBlogRequest {
 		Audience:      run.Options.Audience,
 		Industry:      run.Options.Industry,
 		Writer:        run.Options.Writer,
+		Style:         run.Options.Style,
+		AgentID:       run.AgentID,
 	}
 	req.Normalize()
 	if run.Model != nil {
@@ -1673,6 +1801,50 @@ func (s *blogService) ListByWriter(ctx context.Context, orgID uuid.UUID, builtin
 		return &model.PaginatedResponse[model.BlogRun]{Data: []model.BlogRun{}, Page: params.Page, PerPage: params.PerPage}, nil
 	}
 	return s.repo.ListByAgent(ctx, orgID, agentID, builtin == model.BuiltinArticleWriter, params)
+}
+
+func (s *blogService) ListByAgentID(ctx context.Context, orgID, agentID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.BlogRun], error) {
+	a, err := s.agentRepo.FindByID(ctx, agentID)
+	if err != nil {
+		return nil, err
+	}
+	if a == nil || a.OrgID != orgID {
+		return nil, fmt.Errorf("blog_svc: agent not found")
+	}
+	builtin, _ := a.Metadata[model.MetadataKeyBuiltin].(string)
+	if _, ok := model.BlogWriters[builtin]; !ok {
+		return nil, fmt.Errorf("blog_svc: agent %q is not a writer", a.Name)
+	}
+	// The original agent's list also holds runs stored before runs were
+	// attributed; a clone's never does.
+	original, err := s.agentRepo.FindBuiltin(ctx, orgID, builtin)
+	if err != nil {
+		return nil, err
+	}
+	legacy := builtin == model.BuiltinArticleWriter && original != nil && original.ID == a.ID
+	return s.repo.ListByAgent(ctx, orgID, &a.ID, legacy, params)
+}
+
+func (s *blogService) ListDestinations(ctx context.Context, orgID uuid.UUID) ([]model.BlogDestination, error) {
+	out := []model.BlogDestination{}
+	if s.integrations == nil {
+		return out, nil
+	}
+	list, err := s.integrations.ListByOrg(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	for _, in := range list {
+		if in.Provider != model.ProviderOpsAPI {
+			continue
+		}
+		ns, _ := in.Config["namespace_slug"].(string)
+		_, derr := opsapiDestination(in)
+		out = append(out, model.BlogDestination{
+			Name: in.Name, BaseURL: in.BaseURL, Namespace: ns, Ready: derr == nil,
+		})
+	}
+	return out, nil
 }
 
 func (s *blogService) ListArticles(ctx context.Context, runID uuid.UUID) ([]model.BlogArticle, error) {

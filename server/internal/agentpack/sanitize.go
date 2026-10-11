@@ -12,6 +12,14 @@ var secretKey = regexp.MustCompile(`(?i)(secret|token|password|api[_-]?key|apike
 var engineAllow = map[string]bool{
 	"structured_model": true,
 	"graph_definition": true,
+	// Writer settings (model.EngineConfigWriter*). The destination is the
+	// name of an integration, never its key, so it is safe to carry and
+	// resolves to the importing ring's own integration.
+	"writer_style":       true,
+	"writer_audience":    true,
+	"writer_industry":    true,
+	"writer_focus":       true,
+	"writer_destination": true,
 }
 
 func isSecretKey(k string) bool {

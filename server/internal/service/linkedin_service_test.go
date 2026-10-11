@@ -526,3 +526,11 @@ func TestLinkedInNilDrafterIsNotConfigured(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func (f fakeBuiltinAgents) FindBuiltinNamed(ctx context.Context, orgID uuid.UUID, builtin, name string) (*model.Agent, error) {
+	ag, err := f.FindBuiltin(ctx, orgID, builtin)
+	if err != nil || ag == nil || !strings.EqualFold(ag.Name, name) {
+		return nil, err
+	}
+	return ag, nil
+}

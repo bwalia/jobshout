@@ -112,7 +112,15 @@ func launch(w Writer) agentmodule.LaunchFunc {
 		}
 		uid := in.UserID
 		tid := in.Task.ID
+		// The launched agent writes the run: the Article Writer or a clone of
+		// it, each with its own settings.
+		var agentID *uuid.UUID
+		if in.Agent != nil {
+			id := in.Agent.ID
+			agentID = &id
+		}
 		run, err := w.Generate(ctx, in.OrgID, &uid, in.Source, model.GenerateBlogRequest{
+			AgentID: agentID,
 			Briefs: []model.BlogBrief{{
 				Topic:   strings.TrimSpace(in.Values["topic"]),
 				Context: strings.TrimSpace(in.Values["context"]),

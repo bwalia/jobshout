@@ -422,11 +422,21 @@ func (r *Runner) Publish(ctx context.Context, orgID uuid.UUID, articles []Genera
 	if !r.CanPublish() {
 		return nil, fmt.Errorf("blog: publishing is not configured (set OPSAPI_BASE_URL, OPSAPI_API_KEY and OPSAPI_NAMESPACE)")
 	}
+	return r.PublishTo(ctx, orgID, r.cms, articles, progress)
+}
+
+// PublishTo files articles in cms rather than the ring's CMS. It is how a
+// writer agent configured for its own website — a named opsapi integration —
+// reaches that site instead of the one the ring was deployed with.
+func (r *Runner) PublishTo(ctx context.Context, orgID uuid.UUID, cms CMSPublisher, articles []GeneratedArticle, progress ProgressFunc) (*PublishResult, error) {
+	if cms == nil {
+		return nil, fmt.Errorf("blog: no CMS to publish to")
+	}
 	if len(articles) == 0 {
 		return nil, fmt.Errorf("blog: nothing to publish")
 	}
 
-	namespace := r.cms.Namespace()
+	namespace := cms.Namespace()
 	posts := make([]PostedArticle, 0, len(articles))
 
 	for i, a := range articles {
@@ -470,7 +480,7 @@ func (r *Runner) Publish(ctx context.Context, orgID uuid.UUID, articles []Genera
 			}
 		}
 
-		post, err := r.cms.CreatePost(ctx, opsapi.CreatePostRequest{
+		post, err := cms.CreatePost(ctx, opsapi.CreatePostRequest{
 			Title:       a.Title,
 			Slug:        a.Slug,
 			Excerpt:     a.Excerpt,

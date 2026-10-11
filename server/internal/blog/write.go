@@ -543,10 +543,24 @@ const (
 // heading on the runs — the overwhelming majority — that name no industry.
 func industryBlock(brief model.BlogBrief) string {
 	s := audience.IndustryBrief(brief.Industry)
-	if s == "" {
+	if s != "" {
+		s = "\n" + s + "\n"
+	}
+	return s + styleBlock(brief)
+}
+
+// styleBlock is the writer agent's own style instructions, when it has any.
+// It rides with the industry framing into every prompt that shapes the piece,
+// and is told plainly that it cannot override the rules on sources: a style
+// is how to write, never licence to assert what the research did not find.
+func styleBlock(brief model.BlogBrief) string {
+	style := strings.TrimSpace(brief.Style)
+	if style == "" {
 		return ""
 	}
-	return "\n" + s + "\n"
+	return "\nHOUSE STYLE — this writer's own instructions. Follow them for tone, length,\n" +
+		"structure and what to include; they never override the rules on sources and\n" +
+		"citations:\n" + style + "\n"
 }
 
 // expand fills out an article that came in under the target length.

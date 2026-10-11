@@ -147,6 +147,9 @@ func (r *schedulerRepository) UpdateTask(ctx context.Context, id uuid.UUID, req 
 		    priority = COALESCE($9, priority),
 		    model_override = COALESCE($10, model_override),
 		    input_json = COALESCE($11, input_json),
+		    agent_id = CASE WHEN $12::text IS NULL THEN agent_id
+		                    WHEN $12::text = '' THEN NULL
+		                    ELSE $12::uuid END,
 		    updated_at = NOW()
 		WHERE id = $1`
 
@@ -166,7 +169,7 @@ func (r *schedulerRepository) UpdateTask(ctx context.Context, id uuid.UUID, req 
 	_, err := r.pool.Exec(ctx, sql,
 		id, req.Name, req.Description, req.InputPrompt,
 		req.CronExpression, req.IntervalSeconds, req.Status,
-		req.MaxRuns, req.Priority, req.ModelOverride, inputJSON,
+		req.MaxRuns, req.Priority, req.ModelOverride, inputJSON, req.AgentID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("scheduler_repo: update: %w", err)

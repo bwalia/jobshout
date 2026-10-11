@@ -25,6 +25,9 @@ type AgentRepository interface {
 	// FindBuiltin resolves a platform-seeded agent by its metadata marker,
 	// returning (nil, nil) when the org has none.
 	FindBuiltin(ctx context.Context, orgID uuid.UUID, builtin string) (*model.Agent, error)
+	// FindBuiltinNamed finds the org's agent of a builtin with this name
+	// (case-insensitive) — the original or a clone of it — or nil.
+	FindBuiltinNamed(ctx context.Context, orgID uuid.UUID, builtin, name string) (*model.Agent, error)
 	ListByOrg(ctx context.Context, orgID uuid.UUID, params model.PaginationParams, filter AgentListFilter) (*model.PaginatedResponse[model.Agent], error)
 	Update(ctx context.Context, agent *model.Agent) error
 	Delete(ctx context.Context, id uuid.UUID) error
@@ -70,6 +73,23 @@ func (r *agentRepository) Create(ctx context.Context, agent *model.Agent) error 
 // FindBuiltin returns the org's platform-seeded agent carrying the given
 // builtin marker, or nil when the org has none. Used to resolve the Article
 // Writer without hardcoding an ID.
+func (r *agentRepository) FindBuiltinNamed(ctx context.Context, orgID uuid.UUID, builtin, name string) (*model.Agent, error) {
+	query := `SELECT ` + agentColumns + `
+		FROM agents
+		WHERE org_id = $1 AND metadata->>'builtin' = $2 AND lower(name) = lower($3)
+		ORDER BY created_at ASC
+		LIMIT 1`
+
+	a, err := scanAgent(r.pool.QueryRow(ctx, query, orgID, builtin, strings.TrimSpace(name)))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("finding builtin agent %q named %q: %w", builtin, name, err)
+	}
+	return a, nil
+}
+
 func (r *agentRepository) FindBuiltin(ctx context.Context, orgID uuid.UUID, builtin string) (*model.Agent, error) {
 	query := `SELECT ` + agentColumns + `
 		FROM agents

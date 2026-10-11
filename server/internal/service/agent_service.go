@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/jobshout/server/internal/agentpack"
+	"strings"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -22,6 +24,10 @@ type AgentService interface {
 	Update(ctx context.Context, id uuid.UUID, req model.UpdateAgentRequest) (*model.Agent, error)
 	Delete(ctx context.Context, id uuid.UUID) error
 	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
+	// Clone copies an agent of the org under a new name: prompt, model and
+	// configuration. A clonable builtin (a writer) keeps its builtin marker,
+	// so the copy runs as that specialist with its own settings.
+	Clone(ctx context.Context, orgID, createdBy, id uuid.UUID, name string) (*model.Agent, error)
 }
 
 type agentService struct {
@@ -145,3 +151,44 @@ var ErrAgentNotFound = agentError("agent not found")
 type agentError string
 
 func (e agentError) Error() string { return string(e) }
+
+func (s *agentService) Clone(ctx context.Context, orgID, createdBy, id uuid.UUID, name string) (*model.Agent, error) {
+	src, err := s.repo.FindByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("finding agent: %w", err)
+	}
+	if src == nil || src.OrgID != orgID {
+		return nil, ErrAgentNotFound
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = src.Name + " (copy)"
+	}
+	cfg := make(map[string]any, len(src.EngineConfig))
+	for k, v := range src.EngineConfig {
+		cfg[k] = v
+	}
+	meta := map[string]any{}
+	if b, _ := src.Metadata[model.MetadataKeyBuiltin].(string); agentpack.Clonable(b) {
+		meta[model.MetadataKeyBuiltin] = b
+	}
+	clone := &model.Agent{
+		ID:            uuid.New(),
+		OrgID:         orgID,
+		Name:          name,
+		Role:          src.Role,
+		Description:   src.Description,
+		Status:        "idle",
+		ModelProvider: src.ModelProvider,
+		ModelName:     src.ModelName,
+		SystemPrompt:  src.SystemPrompt,
+		CreatedBy:     &createdBy,
+		EngineType:    src.EngineType,
+		EngineConfig:  cfg,
+		Metadata:      meta,
+	}
+	if err := s.repo.Create(ctx, clone); err != nil {
+		return nil, fmt.Errorf("cloning agent: %w", err)
+	}
+	return clone, nil
+}

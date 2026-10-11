@@ -3,6 +3,7 @@ import type { PaginatedResponse, PaginationParams } from "@/lib/types/common";
 import type {
   BlogArticle,
   BlogConfig,
+  BlogDestination,
   BlogRun,
   GenerateBlogRequest,
 } from "@/lib/types/blog";
@@ -12,8 +13,17 @@ export async function getBlogConfig(): Promise<BlogConfig> {
   return data;
 }
 
-/** List params; `writer` lists another writer's runs instead of the Article Writer's. */
-export type BlogRunListParams = PaginationParams & { writer?: string };
+/**
+ * List params; `writer` lists another writer's runs instead of the Article
+ * Writer's, and `agent_id` one writer agent's — the original or a clone.
+ */
+export type BlogRunListParams = PaginationParams & { writer?: string; agent_id?: string };
+
+/** The websites a writer agent can be pointed at. */
+export async function getBlogDestinations(): Promise<BlogDestination[]> {
+  const { data } = await apiClient.get<BlogDestination[]>("/blogs/destinations");
+  return data;
+}
 
 export async function getBlogRuns(
   params: BlogRunListParams = {}

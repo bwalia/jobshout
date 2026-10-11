@@ -23,6 +23,7 @@ const previewTTL = 15 * time.Minute
 // builtinFinder is the slice of AgentRepository import/export needs.
 type builtinFinder interface {
 	FindBuiltin(ctx context.Context, orgID uuid.UUID, builtin string) (*model.Agent, error)
+	FindBuiltinNamed(ctx context.Context, orgID uuid.UUID, builtin, name string) (*model.Agent, error)
 }
 
 type AgentPackService interface {
@@ -346,6 +347,19 @@ func (s *agentPackService) dest(ctx context.Context, orgID uuid.UUID, pkg *agent
 			return d, err
 		}
 		d.ExistingBuiltin = existing
+		// A clonable writer is matched by name too: importing "Workstation
+		// Blog Writer" updates that clone, or creates it, and never overwrites
+		// the org's original Article Writer.
+		if agentpack.Clonable(builtin) {
+			named, err := s.agents.FindBuiltinNamed(ctx, orgID, builtin, pkg.Agent.Name)
+			if err != nil {
+				return d, err
+			}
+			d.ExistingNamed = named
+			if named != nil {
+				existing = named
+			}
+		}
 		if existing != nil {
 			b, err := s.store.LoadBundle(ctx, orgID, existing.ID)
 			if err == nil {
