@@ -32,6 +32,10 @@ type AgentExecution struct {
 	CreatedAt     time.Time  `json:"created_at"`
 	// ToolCalls is populated on read — not stored inline.
 	ToolCalls []ExecutionToolCall `json:"tool_calls,omitempty"`
+	// PendingApprovalID is set when Status is awaiting_approval: the approval
+	// the run is waiting on. Not stored on the row (approvals reference the
+	// execution); filled in where the pause is known.
+	PendingApprovalID *uuid.UUID `json:"pending_approval_id,omitempty"`
 }
 
 // ExecutionToolCall records a single tool invocation during an execution.
@@ -53,6 +57,9 @@ const (
 	ExecutionStatusCompleted = "completed"
 	ExecutionStatusFailed    = "failed"
 	ExecutionStatusCancelled = "cancelled"
+	// ExecutionStatusAwaitingApproval: the run paused on a gated tool call and
+	// waits for a human decision. Not terminal — it resumes after the decision.
+	ExecutionStatusAwaitingApproval = "awaiting_approval"
 )
 
 // Workflow run status values.

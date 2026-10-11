@@ -3,13 +3,23 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/jobshout/server/internal/model"
 )
+
+// ErrApprovalNotFound is returned when no approval has the given id.
+var ErrApprovalNotFound = errors.New("approval not found")
+
+// ErrApprovalNotPending is returned by UpdateDecision when the approval exists
+// but has already been decided — the loser of a double decide.
+var ErrApprovalNotPending = errors.New("approval already decided")
 
 // ApprovalRepository persists human-in-the-loop approvals for gated agent tool
 // calls, plus the per-agent gate rules that decide which tools require approval.
@@ -21,7 +31,20 @@ type ApprovalRepository interface {
 	ListByOrg(ctx context.Context, orgID uuid.UUID, status string) ([]model.Approval, error)
 	// UpdateDecision records a human's decision (status must be approved or
 	// rejected) together with the reason and decider.
+	// It returns ErrApprovalNotPending if the approval was already decided and
+	// ErrApprovalNotFound if it does not exist.
 	UpdateDecision(ctx context.Context, id uuid.UUID, status string, reason string, decidedBy uuid.UUID) error
+
+	// ClaimResume atomically claims a decided, not-yet-resumed approval for one
+	// resume worker. A claim older than staleAfter is treated as abandoned (its
+	// worker died) and can be taken over. It reports whether the claim was won.
+	ClaimResume(ctx context.Context, id uuid.UUID, staleAfter time.Duration) (bool, error)
+	// MarkResumed records that the paused run finished resuming after the
+	// decision, whatever the outcome, so it is never resumed again.
+	MarkResumed(ctx context.Context, id uuid.UUID) error
+	// ListUnresumed returns decided approvals whose resume never finished and
+	// is not claimed (or whose claim is older than staleAfter), oldest first.
+	ListUnresumed(ctx context.Context, staleAfter time.Duration, limit int) ([]model.Approval, error)
 
 	// IsGated reports whether the given tool requires approval for this agent.
 	IsGated(ctx context.Context, agentID uuid.UUID, toolName string) (bool, error)
@@ -41,13 +64,13 @@ func NewApprovalRepository(pool *pgxpool.Pool) ApprovalRepository {
 }
 
 const approvalColumns = `id, org_id, execution_id, agent_id, tool_name, tool_input,
-	status, reason, resume_state, requested_at, decided_by, decided_at`
+	status, reason, resume_state, requested_at, decided_by, decided_at, resumed_at`
 
 func scanApproval(s rowScanner, out *model.Approval) error {
 	var inputRaw, resumeRaw []byte
 	if err := s.Scan(
 		&out.ID, &out.OrgID, &out.ExecutionID, &out.AgentID, &out.ToolName, &inputRaw,
-		&out.Status, &out.Reason, &resumeRaw, &out.RequestedAt, &out.DecidedBy, &out.DecidedAt,
+		&out.Status, &out.Reason, &resumeRaw, &out.RequestedAt, &out.DecidedBy, &out.DecidedAt, &out.ResumedAt,
 	); err != nil {
 		return err
 	}
@@ -95,6 +118,9 @@ func (r *approvalRepository) FindByID(ctx context.Context, id uuid.UUID) (*model
 	sql := `SELECT ` + approvalColumns + ` FROM approvals WHERE id = $1`
 	out := &model.Approval{}
 	if err := scanApproval(r.pool.QueryRow(ctx, sql, id), out); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrApprovalNotFound
+		}
 		return nil, fmt.Errorf("approval_repo: find by id: %w", err)
 	}
 	return out, nil
@@ -148,9 +174,54 @@ func (r *approvalRepository) UpdateDecision(ctx context.Context, id uuid.UUID, s
 		return fmt.Errorf("approval_repo: update decision: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("approval_repo: approval %s not found or already decided", id)
+		var exists bool
+		if err := r.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM approvals WHERE id = $1)`, id).Scan(&exists); err == nil && !exists {
+			return ErrApprovalNotFound
+		}
+		return ErrApprovalNotPending
 	}
 	return nil
+}
+
+func (r *approvalRepository) ClaimResume(ctx context.Context, id uuid.UUID, staleAfter time.Duration) (bool, error) {
+	const sql = `
+		UPDATE approvals SET resume_claimed_at = NOW()
+		WHERE id = $1 AND status <> 'pending' AND resumed_at IS NULL
+		  AND (resume_claimed_at IS NULL OR resume_claimed_at < NOW() - make_interval(secs => $2))`
+	tag, err := r.pool.Exec(ctx, sql, id, staleAfter.Seconds())
+	if err != nil {
+		return false, fmt.Errorf("approval_repo: claim resume: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+func (r *approvalRepository) MarkResumed(ctx context.Context, id uuid.UUID) error {
+	if _, err := r.pool.Exec(ctx, `UPDATE approvals SET resumed_at = NOW() WHERE id = $1`, id); err != nil {
+		return fmt.Errorf("approval_repo: mark resumed: %w", err)
+	}
+	return nil
+}
+
+func (r *approvalRepository) ListUnresumed(ctx context.Context, staleAfter time.Duration, limit int) ([]model.Approval, error) {
+	sql := `SELECT ` + approvalColumns + ` FROM approvals
+		WHERE status <> 'pending' AND resumed_at IS NULL
+		  AND (resume_claimed_at IS NULL OR resume_claimed_at < NOW() - make_interval(secs => $1))
+		ORDER BY decided_at LIMIT $2`
+	rows, err := r.pool.Query(ctx, sql, staleAfter.Seconds(), limit)
+	if err != nil {
+		return nil, fmt.Errorf("approval_repo: list unresumed: %w", err)
+	}
+	defer rows.Close()
+
+	out := []model.Approval{}
+	for rows.Next() {
+		var a model.Approval
+		if err := scanApproval(rows, &a); err != nil {
+			return nil, fmt.Errorf("approval_repo: list unresumed scan: %w", err)
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
 }
 
 func (r *approvalRepository) IsGated(ctx context.Context, agentID uuid.UUID, toolName string) (bool, error) {

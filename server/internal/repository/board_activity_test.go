@@ -54,6 +54,7 @@ func TestBoardActivity(t *testing.T) {
 		{"task run running", ptr("task_run"), ptr(model.TaskRunStatusRunning), nil, model.ActivityExecuting},
 		{"task run failed", ptr("task_run"), ptr(model.TaskRunStatusFailed), nil, model.ActivityFailed},
 		{"task run completed frees the agent", ptr("task_run"), ptr(model.TaskRunStatusCompleted), nil, model.ActivityIdle},
+		{"task run awaiting approval is in review", ptr("task_run"), ptr(model.TaskRunStatusAwaitingApproval), nil, model.ActivityReviewing},
 
 		// A source we do not know about must not invent a column.
 		{"unknown kind", ptr("mystery"), ptr("running"), nil, model.ActivityIdle},
@@ -92,7 +93,7 @@ func TestBoardActivityValuesAreKnownColumns(t *testing.T) {
 		model.MailThreadDraftReady, model.MailThreadSent, model.MailThreadRejected,
 		model.MailThreadIgnored, model.MailThreadFailed,
 		model.TaskRunStatusQueued, model.TaskRunStatusRunning,
-		model.TaskRunStatusCompleted, model.TaskRunStatusFailed,
+		model.TaskRunStatusCompleted, model.TaskRunStatusFailed, model.TaskRunStatusAwaitingApproval,
 	}
 	steps := []*string{
 		nil,

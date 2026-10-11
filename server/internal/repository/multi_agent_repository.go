@@ -344,6 +344,9 @@ func boardActivity(kind, status, stepKey *string) string {
 			return model.ActivityFailed
 		case model.TaskRunStatusQueued, model.TaskRunStatusRunning:
 			return model.ActivityExecuting
+		case model.TaskRunStatusAwaitingApproval:
+			// Waiting on a human decision, like a mail draft awaiting review.
+			return model.ActivityReviewing
 		}
 		return model.ActivityIdle
 	}

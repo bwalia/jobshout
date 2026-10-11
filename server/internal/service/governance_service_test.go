@@ -100,6 +100,10 @@ func (m *mockExecRepo) MarkFailed(_ context.Context, _ uuid.UUID, _ string, _ in
 	return nil
 }
 func (m *mockExecRepo) MarkCancelled(_ context.Context, _ uuid.UUID) error { return nil }
+func (m *mockExecRepo) MarkAwaitingApproval(_ context.Context, _ uuid.UUID, _ int, _ int) error {
+	return nil
+}
+func (m *mockExecRepo) MarkResuming(_ context.Context, _ uuid.UUID) (bool, error) { return true, nil }
 func (m *mockExecRepo) RecordToolCall(_ context.Context, _ *model.ExecutionToolCall) error {
 	return nil
 }
