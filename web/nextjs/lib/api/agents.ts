@@ -51,6 +51,12 @@ export async function updateAgent(
 /**
  * Delete an agent by its ID.
  */
+/** Copies an agent under a new name; a writer keeps its specialist role. */
+export async function cloneAgent(id: string, name: string): Promise<Agent> {
+  const { data } = await apiClient.post<Agent>(`/agents/${id}/clone`, { name });
+  return data;
+}
+
 export async function deleteAgent(id: string): Promise<void> {
   await apiClient.delete(`/agents/${id}`);
 }

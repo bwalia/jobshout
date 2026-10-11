@@ -132,6 +132,10 @@ type BlogBrief struct {
 	// Audience: the same sector is briefed differently to an engineer and to a
 	// manager.
 	Industry string `json:"industry,omitempty"`
+	// Style is the writing-style instructions of the agent that writes this
+	// brief — tone, length, what to include. It rides on the brief so a retry
+	// writes the same way, and is free text for the same reason Context is.
+	Style string `json:"style,omitempty"`
 }
 
 // BlogRun records a single invocation of the article pipeline.
@@ -196,6 +200,9 @@ type BlogRunOptions struct {
 	// Writer is the builtin the run belongs to, so a retry is attributed to the
 	// same agent. Empty is the Article Writer.
 	Writer string `json:"writer,omitempty"`
+	// Style is the writing style the run was asked for, so a trending run's
+	// discovered briefs — and a retry — are written the same way.
+	Style string `json:"style,omitempty"`
 }
 
 // RunOptions extracts what a run records about how it was asked to work.
@@ -209,6 +216,7 @@ func (r *GenerateBlogRequest) RunOptions() BlogRunOptions {
 		Audience:      r.Audience,
 		Industry:      r.Industry,
 		Writer:        r.Writer,
+		Style:         r.Style,
 	}
 }
 
@@ -396,6 +404,14 @@ type GenerateBlogRequest struct {
 	// what happens after writing, so an unknown value is rejected rather than
 	// quietly filed under the Article Writer.
 	Writer string `json:"writer,omitempty"`
+	// AgentID is the writer agent the run is written by and filed under. Empty
+	// is the org's original agent for Writer. Naming one lets an org clone a
+	// writer per website or project and configure each clone — model, style,
+	// keywords, destination — without any of it being code.
+	AgentID *uuid.UUID `json:"agent_id,omitempty"`
+	// Style is free-text writing-style instructions for every brief in the run.
+	// A run usually takes it from its agent's settings rather than naming it.
+	Style string `json:"style,omitempty"`
 }
 
 // Normalize folds the legacy Topics field into Briefs and trims empties, so
@@ -415,6 +431,7 @@ func (r *GenerateBlogRequest) Normalize() {
 		r.Audience = audience.InsightsKey
 	}
 	r.Industry = audience.NormalizeIndustry(r.Industry)
+	r.Style = strings.TrimSpace(r.Style)
 
 	briefs := make([]BlogBrief, 0, len(r.Briefs)+len(r.Topics))
 	for _, b := range r.Briefs {
@@ -427,6 +444,7 @@ func (r *GenerateBlogRequest) Normalize() {
 			Context:  strings.TrimSpace(b.Context),
 			Audience: r.resolveAudience(b.Audience),
 			Industry: r.resolveIndustry(b.Industry),
+			Style:    firstNonEmpty(b.Style, r.Style),
 			Seeds:    b.Seeds,
 			Focus:    b.Focus,
 		})
@@ -458,6 +476,7 @@ func (r *GenerateBlogRequest) Normalize() {
 			Topic:    topic,
 			Audience: r.Audience,
 			Industry: r.Industry,
+			Style:    r.Style,
 		})
 	}
 	r.Briefs = briefs
@@ -589,4 +608,13 @@ func (r *GenerateBlogRequest) ResolvedTrendingCount(hardMax int) int {
 		n = hardMax
 	}
 	return n
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v = strings.TrimSpace(v); v != "" {
+			return v
+		}
+	}
+	return ""
 }

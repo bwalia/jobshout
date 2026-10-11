@@ -11,6 +11,10 @@ import (
 type Dest struct {
 	NameTaken       bool
 	ExistingBuiltin *model.Agent
+	// ExistingNamed is, for a clonable builtin, the org's agent of that
+	// builtin with the package's name — the one to update — or nil to create
+	// the package as a new clone.
+	ExistingNamed *model.Agent
 	ModuleOK        bool
 	ToolNames       map[string]bool
 	SkillSlugs      map[string]bool
@@ -51,33 +55,44 @@ func Evaluate(pkg *Package, dest Dest) Report {
 	}
 
 	builtin := strings.TrimSpace(pkg.Agent.Builtin)
-	if builtin != "" {
-		if !dest.ModuleOK {
-			rep.Issues = append(rep.Issues, Issue{
-				Severity: "error", Code: "specialist_missing",
-				Message: "this JobShout does not have the " + builtin + " specialist. Upgrade the destination instead of importing as a generic agent.",
-			})
-			return rep
-		}
-		if dest.ExistingBuiltin == nil {
-			rep.Issues = append(rep.Issues, Issue{
-				Severity: "error", Code: "builtin_not_seeded",
-				Message: "this organisation has no seeded " + builtin + " agent to update.",
-			})
-			return rep
-		}
+	target := dest.ExistingBuiltin
+	if Clonable(builtin) {
+		target = dest.ExistingNamed
+	}
+	switch {
+	case builtin != "" && !dest.ModuleOK:
+		rep.Issues = append(rep.Issues, Issue{
+			Severity: "error", Code: "specialist_missing",
+			Message: "this JobShout does not have the " + builtin + " specialist. Upgrade the destination instead of importing as a generic agent.",
+		})
+		return rep
+	case builtin != "" && target == nil && Clonable(builtin):
+		// A new clone: created with the builtin marker, so it runs as that
+		// specialist, under the package's own name.
+		rep.Bindings.Name = pkg.Agent.Name
+		rep.Issues = append(rep.Issues, Issue{
+			Severity: "info", Code: "clone",
+			Message: "Import will add " + pkg.Agent.Name + " as a new " + builtin + " agent beside the existing ones.",
+		})
+	case builtin != "" && target == nil:
+		rep.Issues = append(rep.Issues, Issue{
+			Severity: "error", Code: "builtin_not_seeded",
+			Message: "this organisation has no seeded " + builtin + " agent to update.",
+		})
+		return rep
+	case builtin != "":
 		rep.Mode = ModeOverlay
-		id := dest.ExistingBuiltin.ID
+		id := target.ID
 		rep.TargetAgentID = &id
-		rep.TargetName = dest.ExistingBuiltin.Name
+		rep.TargetName = target.Name
 		rep.CanUndo = false
-		rep.Bindings.Name = dest.ExistingBuiltin.Name
-		rep.Diff = overlayDiff(pkg, dest.ExistingBuiltin, dest.ExistingTools)
+		rep.Bindings.Name = target.Name
+		rep.Diff = overlayDiff(pkg, target, dest.ExistingTools)
 		rep.Issues = append(rep.Issues, Issue{
 			Severity: "info", Code: "overlay",
-			Message: "This organisation already has " + dest.ExistingBuiltin.Name + ". Import will update its prompt, model, tools, skills, and knowledge. This cannot be undone from the import dialog.",
+			Message: "This organisation already has " + target.Name + ". Import will update its prompt, model, tools, skills, and knowledge. This cannot be undone from the import dialog.",
 		})
-	} else if dest.NameTaken {
+	case dest.NameTaken:
 		rep.Issues = append(rep.Issues, Issue{
 			Severity: "info", Code: "name_conflict",
 			Message: "An agent named " + pkg.Agent.Name + " already exists. It will be imported as " + rep.Bindings.Name + ".",
@@ -245,4 +260,12 @@ func EffectiveTools(pkg *Package, bindings Bindings, known map[string]bool) []st
 // DestFieldKeys is a helper for the service.
 func DestFieldKeys(builtin string) []string {
 	return schemaFieldKeys(builtin)
+}
+
+// Clonable reports whether an org may hold several agents of a builtin, each
+// configured differently — the writers, cloned per website or project. Their
+// packages import by name: onto the clone of that name, or as a new clone.
+func Clonable(builtin string) bool {
+	_, ok := model.BlogWriters[builtin]
+	return ok
 }

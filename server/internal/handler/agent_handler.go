@@ -165,3 +165,40 @@ func (h *AgentHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	RespondJSON(w, http.StatusOK, map[string]string{"status": req.Status})
 }
+
+// Clone handles POST /api/v1/agents/{agentID}/clone — {"name": "..."}. It is
+// how a writer is set up for another website or project: clone, then change
+// the copy's settings.
+func (h *AgentHandler) Clone(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "agentID"))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid agent ID")
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	if !DecodeJSON(w, r, &req) {
+		return
+	}
+	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid org_id in token")
+		return
+	}
+	userID, err := uuid.Parse(middleware.GetUserID(r.Context()))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid user_id in token")
+		return
+	}
+	agent, err := h.svc.Clone(r.Context(), orgID, userID, id, req.Name)
+	if err != nil {
+		if errors.Is(err, service.ErrAgentNotFound) {
+			RespondError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		RespondError(w, http.StatusInternalServerError, "failed to clone agent")
+		return
+	}
+	RespondJSON(w, http.StatusCreated, agent)
+}

@@ -1,0 +1,48 @@
+package service
+
+import (
+	"fmt"
+	"net/url"
+	"strings"
+
+	"github.com/jobshout/server/internal/blog"
+	"github.com/jobshout/server/internal/integration/adapters/opsapi"
+	"github.com/jobshout/server/internal/model"
+)
+
+// CMSDestination is a website a writer agent files articles in.
+type CMSDestination = blog.CMSPublisher
+
+// opsapiDestination builds the CMS client for a named opsapi integration:
+//
+//	base_url              the opsapi API root, e.g. https://opsapi.workstation.co.uk
+//	credentials.api_key   a namespace-scoped key with cms create/update/read
+//	config.namespace_slug the namespace that owns the site's posts
+//
+// The key stays on the integration — server-side, per ring — and the agent
+// refers to the integration only by name.
+func opsapiDestination(in model.Integration) (CMSDestination, error) {
+	if in.Provider != model.ProviderOpsAPI {
+		return nil, fmt.Errorf("blog_svc: integration %q is a %s integration, not opsapi", in.Name, in.Provider)
+	}
+	if in.Status != "" && in.Status != "active" {
+		return nil, fmt.Errorf("blog_svc: integration %q is %s", in.Name, in.Status)
+	}
+	base := strings.TrimRight(strings.TrimSpace(in.BaseURL), "/")
+	if u, err := url.Parse(base); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+		return nil, fmt.Errorf("blog_svc: integration %q has no valid base_url", in.Name)
+	}
+	key, _ := in.Credentials["api_key"].(string)
+	if strings.TrimSpace(key) == "" {
+		return nil, fmt.Errorf("blog_svc: integration %q has no credentials.api_key", in.Name)
+	}
+	ns, _ := in.Config["namespace_slug"].(string)
+	if strings.TrimSpace(ns) == "" {
+		return nil, fmt.Errorf("blog_svc: integration %q has no config.namespace_slug", in.Name)
+	}
+	return opsapi.NewClient(opsapi.Config{
+		BaseURL:   base,
+		APIKey:    strings.TrimSpace(key),
+		Namespace: strings.TrimSpace(ns),
+	}), nil
+}

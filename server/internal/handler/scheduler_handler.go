@@ -239,6 +239,12 @@ func (h *SchedulerHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if !DecodeJSON(w, r, &req) {
 		return
 	}
+	if req.AgentID != nil && *req.AgentID != "" {
+		if _, perr := uuid.Parse(*req.AgentID); perr != nil {
+			RespondError(w, http.StatusBadRequest, "invalid agent_id")
+			return
+		}
+	}
 
 	// Checked before the write, so a typo is refused rather than stored and
 	// then discovered by a dispatcher that can no longer schedule the task.

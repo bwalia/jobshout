@@ -129,6 +129,9 @@ export default function SchedulerPage() {
   });
 
   const agents = agentsResponse?.data ?? [];
+  // The Article Writer and its clones — one per website or project, each with
+  // its own model, style, keywords and destination.
+  const writers = agents.filter((a) => a.metadata?.builtin === "article_writer");
   const tasks = tasksResponse?.data ?? [];
   const catalog = agentCatalog ?? [];
   const audiences = fieldOptions(catalog, ARTICLE_WRITER, "audience");
@@ -273,6 +276,7 @@ export default function SchedulerPage() {
             ? { interval_seconds: form.interval_seconds }
             : {}),
           priority: form.priority,
+          ...(form.task_type === "blog" ? { agent_id: form.agent_id ?? "" } : {}),
         },
       });
     } else {
@@ -370,6 +374,27 @@ export default function SchedulerPage() {
                       </option>
                     ))}
                   </select>
+                </div>
+              )}
+
+              {form.task_type === "blog" && writers.length > 1 && (
+                <div className="space-y-2 sm:col-span-2">
+                  <label className="text-sm font-medium">Writer</label>
+                  <select
+                    value={form.agent_id ?? ""}
+                    onChange={(e) => setForm({ ...form, agent_id: e.target.value || undefined })}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <option value="">Article Writer (default)</option>
+                    {writers.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-muted-foreground">
+                    The writer&apos;s own style, keywords and website apply unless this schedule sets them.
+                  </p>
                 </div>
               )}
 

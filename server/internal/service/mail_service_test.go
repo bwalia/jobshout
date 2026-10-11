@@ -290,6 +290,14 @@ func (a *mailTestAgents) Create(ctx context.Context, agent *model.Agent) error {
 	return nil
 }
 
+func (a *mailTestAgents) FindBuiltinNamed(ctx context.Context, orgID uuid.UUID, builtin, name string) (*model.Agent, error) {
+	ag, err := a.FindBuiltin(ctx, orgID, builtin)
+	if err != nil || ag == nil || !strings.EqualFold(ag.Name, name) {
+		return nil, err
+	}
+	return ag, nil
+}
+
 func (a *mailTestAgents) FindBuiltin(ctx context.Context, orgID uuid.UUID, builtin string) (*model.Agent, error) {
 	ag, ok := a.byBuiltin[orgID.String()+":"+builtin]
 	if !ok {

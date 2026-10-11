@@ -77,6 +77,21 @@ wafLab:
 extraSecretRefs:
   - jobshout-gateways
   - jobshout-google
+  # jobshout-cms: OPSAPI_API_KEY for the Workstation CMS below. Minted with
+  # scripts/opsapi-api-key.sh against https://opsapi.workstation.co.uk
+  # (namespace workstation, scope cms create/update/read) and created by hand:
+  #   kubectl -n prod create secret generic jobshout-cms --from-literal=OPSAPI_API_KEY=...
+  # Optional: until it exists the Article Writer writes but files nothing.
+  - jobshout-cms
+
+# Workstation CMS — articles reach www.workstation.co.uk through it, as int's
+# reach int.workstation.co.uk through int-opsapi. Drafts only: going live is
+# done in the CMS (opsapi-ui.workstation.co.uk). A writer agent with a website
+# of its own (Writer settings → Website) files there instead.
+cms:
+  baseURL: "https://opsapi.workstation.co.uk"
+  namespace: "workstation"
+  autoFile: true
 
 insights:
   siteURL: "https://www.jobshout.com"

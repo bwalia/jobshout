@@ -233,6 +233,13 @@ func (f *fakeBuiltinFinder) FindBuiltin(context.Context, uuid.UUID, string) (*mo
 	return f.agent, nil
 }
 
+func (f *fakeBuiltinFinder) FindBuiltinNamed(_ context.Context, _ uuid.UUID, _, name string) (*model.Agent, error) {
+	if f.agent != nil && strings.EqualFold(f.agent.Name, name) {
+		return f.agent, nil
+	}
+	return nil, nil
+}
+
 func TestAgentPackRoundTripNewIDNoSecrets(t *testing.T) {
 	orgA := uuid.New()
 	orgB := uuid.New()

@@ -91,9 +91,9 @@ type CreateScheduledTaskRequest struct {
 	// were accepted here, so a schedule for either could not be created through
 	// the API at all. career_apply prepares materials; it does not submit —
 	// see Runner.dispatchCareerApply.
-	TaskType    string  `json:"task_type" validate:"required,oneof=agent workflow multi_agent blog career_scan career_apply"`
-	AgentID     *string `json:"agent_id"`
-	WorkflowID  *string `json:"workflow_id"`
+	TaskType   string  `json:"task_type" validate:"required,oneof=agent workflow multi_agent blog career_scan career_apply"`
+	AgentID    *string `json:"agent_id"`
+	WorkflowID *string `json:"workflow_id"`
 	// Multi-agent fields (required when task_type = "multi_agent").
 	PlannerID        *string        `json:"planner_id"`
 	ExecutorID       *string        `json:"executor_id"`
@@ -119,7 +119,10 @@ type CreateScheduledTaskRequest struct {
 }
 
 type UpdateScheduledTaskRequest struct {
-	Name             *string        `json:"name"`
+	Name *string `json:"name"`
+	// AgentID repoints the task at another agent — for an article schedule,
+	// which writer runs it. Nil leaves it; "" clears it.
+	AgentID          *string        `json:"agent_id"`
 	Description      *string        `json:"description"`
 	InputPrompt      *string        `json:"input_prompt"`
 	InputJSON        map[string]any `json:"input_json"`

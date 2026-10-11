@@ -766,6 +766,7 @@ func main() {
 		researchSvc, mailCfg, logger,
 	)
 	blogSvc.BindTasks(taskSvc)
+	blogSvc.BindIntegrations(integRepo)
 	mailSvc.BindTasks(taskSvc)
 	pentestReconciler.BindTasks(taskSvc)
 	reviewReconciler.BindTasks(taskSvc)
@@ -1311,6 +1312,7 @@ func main() {
 					r.Put("/", agentHandler.Update)
 					r.Delete("/", agentHandler.Delete)
 					r.Patch("/status", agentHandler.UpdateStatus)
+					r.With(middleware.RequirePermission(rbacSvc, model.PermAgentsCreate)).Post("/clone", agentHandler.Clone)
 					r.With(middleware.RequirePermission(rbacSvc, model.PermAgentsRead)).Get("/export", agentPackHandler.Export)
 					r.With(middleware.RequireAnyPermission(rbacSvc, model.PermAgentsCreate, model.PermAgentsDelete)).Post("/import/undo", agentPackHandler.Undo)
 
@@ -1440,6 +1442,7 @@ func main() {
 			// UI before it reaches the content repository.
 			r.Route("/blogs", func(r chi.Router) {
 				r.Get("/config", blogHandler.Config)
+				r.Get("/destinations", blogHandler.Destinations)
 				r.Post("/generate", blogHandler.Generate)
 				r.Get("/runs", blogHandler.ListRuns)
 				r.Route("/runs/{runID}", func(r chi.Router) {

@@ -22,6 +22,7 @@ import {
   useRetryBlogRun,
 } from "@/lib/hooks/useBlog";
 import { GenerateArticleDialog } from "@/components/blog/GenerateArticleDialog";
+import { WriterSettings } from "@/components/articles/WriterSettings";
 import { useAgentSchemas } from "@/lib/hooks/useAgentSchemas";
 import { fieldOptions } from "@/lib/agents/input-schemas";
 import { SignalDot } from "@/components/ui/signal-dot";
@@ -243,12 +244,17 @@ function RunCard({ run }: { run: BlogRun }) {
 
 export function ArticlesView({
   hideHeader = false,
+  agentId,
 }: {
   hideHeader?: boolean;
+  /** One writer agent — the original or a clone: its runs, its settings. */
+  agentId?: string;
 }) {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const { data, isLoading, isError } = useBlogRuns({ per_page: 50 });
+  const { data, isLoading, isError } = useBlogRuns(
+    agentId ? { per_page: 50, agent_id: agentId } : { per_page: 50 }
+  );
 
   const runs = (data?.data ?? []).filter((run) =>
     searchQuery
@@ -282,6 +288,8 @@ export function ArticlesView({
             Write articles
           </button>
         </div>
+
+        {agentId && <WriterSettings agentId={agentId} />}
 
         <div className="relative max-w-md">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -341,6 +349,7 @@ export function ArticlesView({
       <GenerateArticleDialog
         open={isCreateOpen}
         onClose={() => setIsCreateOpen(false)}
+        agentId={agentId}
       />
     </>
   );
