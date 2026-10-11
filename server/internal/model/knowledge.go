@@ -23,3 +23,15 @@ type KnowledgeChunk struct {
 	// more similar). It is zero-valued outside of search results.
 	Distance float64 `json:"distance,omitempty"`
 }
+
+// KnowledgeFile is one agent knowledge document (the knowledge_files table).
+// Files carry no org_id of their own: the tenant boundary is the owning agent.
+type KnowledgeFile struct {
+	ID        string    `json:"id"`
+	AgentID   string    `json:"agent_id"`
+	Filename  string    `json:"filename"`
+	Content   string    `json:"content"`
+	SizeBytes int       `json:"size_bytes"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
