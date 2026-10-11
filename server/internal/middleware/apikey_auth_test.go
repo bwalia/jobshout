@@ -96,7 +96,7 @@ func TestRequireAuthOrAPIKey(t *testing.T) {
 		{"DELETE", "/api/v1/agents/" + id},
 		{"PUT", "/api/v1/agents/" + id},
 		{"GET", "/api/v1/tasks/" + id},
-		{"GET", "/api/v1/webhooks"},
+		{"GET", "/api/v1/webhook-endpoints"},
 	} {
 		if c := call(p[0], p[1], allKey); c != 403 {
 			t.Errorf("%s %s with all scopes = %d, want 403", p[0], p[1], c)

@@ -40,6 +40,7 @@ import (
 	"github.com/jobshout/server/internal/secretsrot"
 	"github.com/jobshout/server/internal/simpro"
 	"github.com/jobshout/server/internal/waflab"
+	"github.com/jobshout/server/internal/webhook"
 	"github.com/jobshout/server/internal/wslproxymcp"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
@@ -279,6 +280,16 @@ func main() {
 	linuxPatchRunRepo := repository.NewLinuxPatchRunRepository(pool)
 	reviewRunRepo := repository.NewReviewRunRepository(pool)
 	taskRunRepo := repository.NewTaskRunRepository(pool)
+
+	// Outbound webhooks: org endpoints get run.completed / run.failed /
+	// approval.requested / approval.decided, signed and retried with backoff.
+	// Emitted from the repositories where those state changes are recorded,
+	// so every path (fresh runs, resumes after a decision) is covered.
+	webhookRepo := repository.NewWebhookRepository(pool, secretBox)
+	webhookDisp := webhook.NewDispatcher(webhookRepo, webhook.Options{Logger: logger})
+	go webhookDisp.Run(ctx, 5*time.Second)
+	approvalRepo = &webhook.Approvals{ApprovalRepository: approvalRepo, Emitter: webhookDisp, Runs: taskRunRepo}
+	taskRunRepo = &webhook.TaskRuns{TaskRunRepository: taskRunRepo, Emitter: webhookDisp}
 	mailRepo := repository.NewMailRepository(pool)
 	careerRepo := repository.NewCareerRepository(pool)
 
@@ -1180,6 +1191,7 @@ func main() {
 	// allow-listed routes its scopes cover (middleware.APIKeyRouteScope).
 	apiKeySvc := apikey.NewService(repository.NewAPIKeyRepository(pool))
 	apiKeyHandler := handler.NewAPIKeyHandler(apiKeySvc)
+	webhookEndpointHandler := handler.NewWebhookEndpointHandler(webhookRepo, webhookDisp)
 
 	// Auth middleware
 	requireAuth := middleware.RequireAuthOrAPIKey(jwtSvc, apiKeySvc)
@@ -1638,6 +1650,20 @@ func main() {
 				r.Get("/", apiKeyHandler.List)
 				r.Post("/", apiKeyHandler.Create)
 				r.Delete("/{keyID}", apiKeyHandler.Revoke)
+			})
+
+			// Outbound webhook endpoints — org admins only.
+			r.Route("/webhook-endpoints", func(r chi.Router) {
+				r.Use(middleware.RequirePermission(rbacSvc, model.PermOrgManage))
+				r.Get("/", webhookEndpointHandler.List)
+				r.Post("/", webhookEndpointHandler.Create)
+				r.Route("/{endpointID}", func(r chi.Router) {
+					r.Get("/", webhookEndpointHandler.Get)
+					r.Put("/", webhookEndpointHandler.Update)
+					r.Delete("/", webhookEndpointHandler.Delete)
+					r.Get("/deliveries", webhookEndpointHandler.Deliveries)
+					r.Post("/test", webhookEndpointHandler.Test)
+				})
 			})
 
 			// Per-org model routing (ordered fallback chain over the org's
