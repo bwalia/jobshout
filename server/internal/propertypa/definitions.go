@@ -31,8 +31,8 @@ const (
 // Prompt versions. Bump the version whenever the prompt text (common.md or the
 // agent's own file) changes; TestPromptVersionsTrackPromptText fails until you do.
 const (
-	SellerPromptVersion  = "seller-pa@1.2.0"
-	ManagerPromptVersion = "manager-pa@1.2.0"
+	SellerPromptVersion  = "seller-pa@1.3.0"
+	ManagerPromptVersion = "manager-pa@1.3.0"
 )
 
 // ExternalApprovalTools are tools that reach people outside the firm. Every
@@ -153,7 +153,7 @@ const (
 )
 
 // SkillsVersion is the version written on every mode skill.
-const SkillsVersion = "1.2.0"
+const SkillsVersion = "1.3.0"
 
 // Skills returns the mode skills.
 func Skills() []Skill {
@@ -161,12 +161,12 @@ func Skills() []Skill {
 		return Skill{Slug: slug, Name: name, Description: "Property PA mode: " + name, Prompt: prompt, Version: SkillsVersion}
 	}
 	return []Skill{
-		s(SkillToday, "Today", `Mode "today". Read /api/v2/property-pa/briefing first. Give a two-line brief, then the ranked priority cards: who, property, recommended action, why now, objective. Keep OpsAPI's order. If the user gives a time budget, fit the list to it and say what waits.`),
-		s(SkillPrepare, "Prepare me", `Mode "prepare". Resolve the person or property (/api/v2/property-pa/people?q=), then read /api/v2/property-pa/context/{opportunity_id} and the timeline. Brief in 30 to 60 seconds of reading: snapshot, motivation, last meaningful interaction, price and offer position, decision makers, promises, likely objections, questions to establish, the playbook rule, the objective. Every fact cited; unknowns listed.`),
+		s(SkillToday, "Today", `Mode "today". Read /api/v2/property-pa/today (add ?minutes=N when the user gives a time budget). OpsAPI's rules engine has already ranked the cards: keep its order exactly. Give a two-line brief, then the cards: who, property, recommended action, why now, objective. For "why #1?" read /api/v2/property-pa/today/why/{opportunity_id} and list its signals with their weights. With a budget, show budget.fits and say what waits.`),
+		s(SkillPrepare, "Prepare me", `Mode "prepare". Resolve the person or property (/api/v2/property-pa/people?q=), then read /api/v2/property-pa/prepare/{opportunity_id}: it is the brief, built from the record, every line with its ref. Phrase it; do not add facts it doesn't have. Cite each line's ref as its source. Brief in 30 to 60 seconds of reading: snapshot, motivation, last meaningful interaction, price and offer position, decision makers, promises, likely objections, questions to establish, the playbook rule, the objective. Every fact cited; unknowns listed.`),
 		s(SkillCapture, "Capture", `Mode "capture". The input is a note or transcript of something that happened. Resolve the person and property with /api/v2/property-pa/people?q= (ask if ambiguous), then read /api/v2/property-pa/context/{opportunity_id}. If inputs.interaction_uuid is set, the note is already logged in OpsAPI: send "interaction_uuid" and do not send an "interaction". Otherwise send the interaction. Post one capture to /api/v2/property-pa/captures with each field change as a separate proposal with confidence, is_inferred and an exact source_quote, and the next action (owner, due time, reason). List what you proposed so the user can confirm or correct it.`),
-		s(SkillCoach, "Coach", `Mode "coach". Separate what is known (cited) from what is assumed. Ask the questions that would change the decision before discussing any figure. Point to the relevant approved rule. Recommend one next step. Never default to a higher offer or a price cut.`),
+		s(SkillCoach, "Coach", `Mode "coach". Read /api/v2/property-pa/coach/{opportunity_id} first. Separate what is known (cited) from what is assumed. Ask the questions that would change the decision before discussing any figure. Point to the relevant approved rule. Recommend one next step. Never default to a higher offer or a price cut.`),
 		s(SkillHandoff, "Handoff", `Mode "handoff". Package the context (three lines, cited), the exact question and your recommendation into one handoff via /api/v2/property-pa/handoffs. If you are the manager's PA and the manager has given a reply in this conversation, record it; otherwise present the decision.`),
 		s(SkillManagerToday, "Manager today", `Mode "manager_today". Exceptions only: handoffs waiting, unusual negotiations, relationship risks, deal risks, top opportunities. End with "Everything else is being handled." Do not list routine work.`),
-		s(SkillTeach, "Teach", `Mode "teach". Turn the manager's statement into one rule proposal (rule, rationale, category, scope, triggers) via POST /api/v2/property-pa/knowledge (proposed_by_ai true). It takes effect only after approval in OpsAPI.`),
+		s(SkillTeach, "Teach", `Mode "teach". Turn the manager's statement into one rule proposal (rule, rationale, category, scope, triggers) via POST /api/v2/property-pa/knowledge (proposed_by_ai true). Do not approve it: the manager approves it in OpsAPI, or teaches it directly with /knowledge/teach. It takes effect only after approval in OpsAPI.`),
 	}
 }

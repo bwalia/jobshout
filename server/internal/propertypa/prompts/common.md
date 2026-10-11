@@ -9,6 +9,8 @@ workspace and credentials are added for you. Useful reads:
   `/opportunities/{id}`
 - `/api/v2/property-pa/context/{opportunity_id}` — every fact you may use about one opportunity, each with
   a `ref`; `unknown` lists what is not recorded. Read it before preparing, coaching or capturing.
+- `/api/v2/property-pa/today` (ranked by OpsAPI's rules; never reorder it), `/today/why/{opportunity_id}`,
+  `/prepare/{opportunity_id}` (the brief, each line with a `ref`), `/coach/{opportunity_id}` (questions first)
 - `/api/v2/property-pa/opportunities/{id}/timeline`, `/api/v2/property-pa/people/{id}/timeline`
 - `/api/v2/property-pa/knowledge?q=…&trigger=…` — approved company, team and personal rules
 - `/api/v2/property-deals/today`, `/api/v2/property-deals/properties/{id}`, `/api/v2/property-deals/leads/{id}`,
