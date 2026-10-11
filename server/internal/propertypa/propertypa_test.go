@@ -18,6 +18,8 @@ import (
 var promptHashes = map[string]string{
 	"seller-pa@1.0.0":  "7441de042d5c08335cc5b0fac0ae955f0170d02a8b67c419ae5ae8a595bcb97a",
 	"manager-pa@1.0.0": "2cb1791ca5164000df21fd17df25cb93fe7b1c7ea9d3079ca54553b4204559d6",
+	"seller-pa@1.1.0":  "5a4567b2200b71368bed79f6dc735d02a0361577250d5107a0fa87bd1bd7bfd0",
+	"manager-pa@1.1.0": "6d59fd934d29a514c17adc3fb765267706c91186706f4fb6673dec551e2ea661",
 }
 
 func TestPromptVersionsTrackPromptText(t *testing.T) {

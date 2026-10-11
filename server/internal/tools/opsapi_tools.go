@@ -48,16 +48,17 @@ var OpsAPIReadPrefixes = []string{
 }
 
 // OpsAPIWritePaths are the exact paths opsapi_post may call. None of them is
-// external-facing: each records something inside OpsAPI (a timeline entry, a
-// proposed field change a human confirms, a next action, a handoff card, a
-// draft rule a manager approves). Anything that reaches a client goes through
-// a separate, approval-gated tool.
+// external-facing or applies a change by itself: a capture logs the interaction
+// and stores proposed field changes and next actions that a human confirms; a
+// handoff is a card for a manager; a knowledge post is a draft rule a manager
+// approves; a grounding check only reads. Anything that reaches a client goes
+// through a separate, approval-gated tool. (OpsAPI's pd_agent role also refuses
+// confirming proposals, so the agent can never approve its own changes.)
 var OpsAPIWritePaths = []string{
-	"/api/v2/property-pa/interactions",
-	"/api/v2/property-pa/proposed-updates",
-	"/api/v2/property-pa/tasks",
+	"/api/v2/property-pa/captures",
 	"/api/v2/property-pa/handoffs",
-	"/api/v2/property-pa/knowledge/proposals",
+	"/api/v2/property-pa/knowledge",
+	"/api/v2/property-pa/grounding/check",
 }
 
 const (
@@ -413,11 +414,11 @@ func (t *opsapiPostTool) Description() string {
 	paths := append([]string(nil), OpsAPIWritePaths...)
 	sort.Strings(paths)
 	return `Record something in OpsAPI. Internal records only, never a message to a client:
-  /api/v2/property-pa/interactions      log a call, note or message that happened
-  /api/v2/property-pa/proposed-updates  propose field changes (with confidence and is_inferred); a human confirms
-  /api/v2/property-pa/tasks             propose a next action with owner, due time and reason
-  /api/v2/property-pa/handoffs          ask a manager a question (decision card)
-  /api/v2/property-pa/knowledge/proposals  propose a rule; a manager approves it
+  /api/v2/property-pa/captures         log what happened and propose field changes, events, offers and the
+                                       next action (confidence, is_inferred, exact source_quote); a human confirms
+  /api/v2/property-pa/handoffs         ask a manager a question (decision card)
+  /api/v2/property-pa/knowledge        propose a rule (proposed_by_ai true); a manager approves it
+  /api/v2/property-pa/grounding/check  check a draft answer's figures against the refs it cites (reads only)
 Input parameters:
   path (string, required) - one of: ` + strings.Join(paths, ", ") + `
   body (object, required) - the JSON body

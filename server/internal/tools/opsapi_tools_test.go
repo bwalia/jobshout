@@ -168,7 +168,7 @@ func TestOpsAPIRejectsPathsOffTheAllowList(t *testing.T) {
 		}
 	}
 	// Reads are not writes: a read prefix is not a write path.
-	for _, p := range []string{"/api/v2/property-pa/people", "/api/v2/property-deals/deals", "/api/v2/property-pa/interactions/1"} {
+	for _, p := range []string{"/api/v2/property-pa/people", "/api/v2/property-deals/deals", "/api/v2/property-pa/captures/1"} {
 		if _, err := post.Execute(ctx, map[string]any{"path": p, "body": map[string]any{"x": 1}}); err == nil {
 			t.Errorf("opsapi_post allowed %q", p)
 		}
@@ -185,14 +185,14 @@ func TestOpsAPIPostWritesAllowedPath(t *testing.T) {
 	ctx, _ := orgAgentCtx()
 
 	out, err := post.Execute(ctx, map[string]any{
-		"path": "/api/v2/property-pa/interactions/",
+		"path": "/api/v2/property-pa/captures/",
 		"body": `{"person_id":"p_1","channel":"call","summary":"Spoke to Sarah"}`,
 	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	r := f.last(t)
-	if r.method != http.MethodPost || r.path != "/api/v2/property-pa/interactions" {
+	if r.method != http.MethodPost || r.path != "/api/v2/property-pa/captures" {
 		t.Fatalf("request = %s %s", r.method, r.path)
 	}
 	if r.header.Get("Content-Type") != "application/json" || !strings.Contains(r.body, `"channel":"call"`) {
@@ -201,7 +201,7 @@ func TestOpsAPIPostWritesAllowedPath(t *testing.T) {
 	if !strings.Contains(out, `"int_9"`) {
 		t.Fatalf("created id missing: %s", out)
 	}
-	if _, err := post.Execute(ctx, map[string]any{"path": "/api/v2/property-pa/tasks", "body": "not json"}); err == nil {
+	if _, err := post.Execute(ctx, map[string]any{"path": "/api/v2/property-pa/handoffs", "body": "not json"}); err == nil {
 		t.Fatal("non-object body accepted")
 	}
 }

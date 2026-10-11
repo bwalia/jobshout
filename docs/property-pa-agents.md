@@ -40,11 +40,11 @@ today and `GET /integrations` returns them to org members (pre-existing; see ope
 ```
 POST /property-pa/install
 → {"agents": [{"key":"seller","agent_id":"…","name":"Seller PA","context_role":"seller_agent",
-               "prompt_version":"seller-pa@1.0.0","prompt_sha256":"…","tools":["opsapi_get","knowledge_search","opsapi_post","email_send"],
+               "prompt_version":"seller-pa@1.1.0","prompt_sha256":"…","tools":["opsapi_get","knowledge_search","opsapi_post","email_send"],
                "approval_tools":["email_send","slack_send_message","teams_send_message"],
                "skills":["pa-today","pa-prepare-me","pa-capture","pa-coach","pa-handoff"],"status":"created"},
               {"key":"manager", …}],
-   "skills": [{"slug":"pa-today","id":"…","version":"1.0.0","status":"created"}, …]}
+   "skills": [{"slug":"pa-today","id":"…","version":"1.1.0","status":"created"}, …]}
 ```
 
 - Agents are found again by `metadata.property_pa` (`seller` / `manager`), not by name, so admins may
@@ -66,7 +66,7 @@ slugs. OpsAPI should call it at start-up to learn the agent ids.
 | Tool | What it may call | Notes |
 |---|---|---|
 | `opsapi_get` | `GET` on any path under `/api/v2/property-pa/` or `/api/v2/property-deals/` | Input `{path, query}`. |
-| `opsapi_post` | `POST` to exactly: `/api/v2/property-pa/interactions`, `/proposed-updates`, `/tasks`, `/handoffs`, `/knowledge/proposals` | Input `{path, body}` (object, ≤ 32 KiB). All internal records; nothing reaches a client. |
+| `opsapi_post` | `POST` to exactly: `/api/v2/property-pa/captures`, `/handoffs`, `/knowledge`, `/grounding/check` | Input `{path, body}` (object, ≤ 32 KiB). All internal records; nothing reaches a client. |
 | `knowledge_search` | The agent's own knowledge (pgvector) | Present when embeddings are configured. |
 | `email_send` | The org's email notification channel | **Approval-gated** (authority level 4). |
 
@@ -93,8 +93,8 @@ The allow-list is code (`OpsAPIReadPrefixes`, `OpsAPIWritePaths`); widening it i
 
 | Key | Name | `context.role` | Prompt version | Skills |
 |---|---|---|---|---|
-| `seller` | Seller PA | `seller_agent` | `seller-pa@1.0.0` | `pa-today`, `pa-prepare-me`, `pa-capture`, `pa-coach`, `pa-handoff` |
-| `manager` | Manager PA | `manager` | `manager-pa@1.0.0` | `pa-manager-today`, `pa-handoff`, `pa-teach` |
+| `seller` | Seller PA | `seller_agent` | `seller-pa@1.1.0` | `pa-today`, `pa-prepare-me`, `pa-capture`, `pa-coach`, `pa-handoff` |
+| `manager` | Manager PA | `manager` | `manager-pa@1.1.0` | `pa-manager-today`, `pa-handoff`, `pa-teach` |
 
 Prompt text: `server/internal/propertypa/prompts/{seller_pa,manager_pa,common}.md` (each agent's prompt
 is its own file followed by `common.md`). The common part carries the rules both share:
@@ -104,7 +104,7 @@ is its own file followed by `common.md`). The common part carries the rules both
 2. **Fact vs inference** labelled ("(inference)", "UNCONFIRMED").
 3. **Authority**: observe, recommend, prepare; record internal things in OpsAPI; anything external is a
    draft that needs approval; never offers, commitments, legal/financial/compliance judgements.
-4. **Proposed, not changed**: field changes go to `proposed-updates` with `confidence` and `is_inferred`;
+4. **Proposed, not changed**: one `captures` call logs the interaction and proposes each change with `confidence`, `is_inferred` and an exact `source_quote`;
    material fields always need human confirmation.
 5. Next actions carry owner, due time and reason.
 6. Knowledge is cited; new rules are proposals for a manager.
@@ -245,6 +245,6 @@ rule; re-install keeps the rule.
 - **Routed model per run**: `model_provider`/`model_name` are the requested model; the hop that actually
   served the call under an org chain is not recorded on the run.
 - **Per-user knowledge** (personal rules) needs either per-run knowledge or a user-scoped filter.
-- **Write paths** `handoffs` and `knowledge/proposals` are assumed; confirm them with the OpsAPI side.
+- **Write paths** match OpsAPI's property_pa plugin (`captures`, `handoffs`, `knowledge`, `grounding/check`); the agent's OpsAPI user has the `pd_agent` role, which can propose but never confirm.
 - **Idempotency** of `opsapi_post`: no idempotency key is sent. If a write may be repeated (a retried
   turn), OpsAPI should dedupe, or we add an `Idempotency-Key` derived from run and tool call.
