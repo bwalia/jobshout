@@ -292,7 +292,7 @@ func main() {
 	webhookDisp := webhook.NewDispatcher(webhookRepo, webhook.Options{Logger: logger})
 	go webhookDisp.Run(ctx, 5*time.Second)
 	approvalRepo = &webhook.Approvals{ApprovalRepository: approvalRepo, Emitter: webhookDisp, Runs: taskRunRepo}
-	taskRunRepo = &webhook.TaskRuns{TaskRunRepository: taskRunRepo, Emitter: webhookDisp}
+	taskRunRepo = &webhook.TaskRuns{TaskRunRepository: taskRunRepo, Emitter: webhookDisp, Agents: agentRepo}
 	mailRepo := repository.NewMailRepository(pool)
 	careerRepo := repository.NewCareerRepository(pool)
 

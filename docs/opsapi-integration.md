@@ -87,6 +87,7 @@ Each delivery is a `POST` with this body:
   - IDs: `run_id`, `task_id`, `agent_id`, `execution_id`.
   - Result: `status`, `output` (truncated at 64 KiB, with `output_truncated: true`), `error_message`.
   - Request: `context`, `skill_slugs`, `inputs`.
+  - Model and prompt: `model_provider`, `model_name` (the run's requested model; an org routing chain may have served it), `prompt_version` (the agent's `metadata.prompt_version`, when it has one).
   - Usage: `total_tokens`, `cost_usd`, `latency_ms`.
   - Timing: `started_at`, `completed_at`.
 - **Approval `data` fields:**

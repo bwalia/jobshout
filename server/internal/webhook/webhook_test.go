@@ -288,6 +288,38 @@ func TestTaskRunsHook_EmitsOncePerTerminalTransition(t *testing.T) {
 	}
 }
 
+type oneAgent struct{ a *model.Agent }
+
+func (o oneAgent) FindByID(context.Context, uuid.UUID) (*model.Agent, error) { return o.a, nil }
+
+func TestTaskRunsHook_CarriesPromptVersionAndModel(t *testing.T) {
+	em := &recEmitter{}
+	org, agentID := uuid.New(), uuid.New()
+	provider, name := "openai", "qwen3"
+	run := model.TaskRun{ID: uuid.New(), OrgID: org, AgentID: agentID, Status: model.TaskRunStatusRunning,
+		ModelProvider: &provider, ModelName: &name}
+	inner := &memRuns{rows: map[uuid.UUID]model.TaskRun{run.ID: run}}
+	agent := &model.Agent{ID: agentID, OrgID: org, Metadata: map[string]any{"prompt_version": "seller-pa@1.0.0"}}
+	h := &TaskRuns{TaskRunRepository: inner, Emitter: em, Agents: oneAgent{agent}}
+
+	run.Status = model.TaskRunStatusCompleted
+	_ = h.Update(context.Background(), &run)
+	d := em.data[0].(RunData)
+	if d.PromptVersion != "seller-pa@1.0.0" || d.ModelName == nil || *d.ModelName != "qwen3" {
+		t.Fatalf("run data = %+v", d)
+	}
+
+	// An agent of another org never lends its metadata.
+	agent.OrgID = uuid.New()
+	run2 := model.TaskRun{ID: uuid.New(), OrgID: org, AgentID: agentID, Status: model.TaskRunStatusRunning}
+	inner.rows[run2.ID] = run2
+	run2.Status = model.TaskRunStatusFailed
+	_ = h.Update(context.Background(), &run2)
+	if d := em.data[1].(RunData); d.PromptVersion != "" {
+		t.Fatalf("cross-org prompt version leaked: %q", d.PromptVersion)
+	}
+}
+
 type memApprovals struct {
 	repository.ApprovalRepository
 	rows map[uuid.UUID]model.Approval
