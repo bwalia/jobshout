@@ -3,6 +3,8 @@ package tools
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -291,6 +293,9 @@ func (c *OpsAPIClient) do(ctx context.Context, toolName, method, path string, qu
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+		// A model or the executor may repeat a write; OpsAPI answers a repeated
+		// Idempotency-Key with the first response, so nothing is stored twice.
+		req.Header.Set("Idempotency-Key", opsapiIdempotencyKey(ctx, method, path, body))
 	}
 	c.auditHeaders(ctx, req)
 
@@ -305,6 +310,23 @@ func (c *OpsAPIClient) do(ctx context.Context, toolName, method, path string, qu
 		raw = raw[:opsapiMaxResponseBytes]
 	}
 	return fenceOpsAPIResult(toolName, method, path, resp.StatusCode, raw, truncated), nil
+}
+
+// opsapiIdempotencyKey is stable for the same org, agent, request and body.
+func opsapiIdempotencyKey(ctx context.Context, method, path string, body []byte) string {
+	h := sha256.New()
+	if org, ok := OrgFromContext(ctx); ok {
+		h.Write([]byte(org.String()))
+	}
+	h.Write([]byte{0})
+	if agent, ok := AgentFromContext(ctx); ok {
+		h.Write([]byte(agent.String()))
+	}
+	h.Write([]byte{0})
+	h.Write([]byte(method + " " + path))
+	h.Write([]byte{0})
+	h.Write(body)
+	return "jobshout-" + hex.EncodeToString(h.Sum(nil))[:48]
 }
 
 // auditHeaders tells OpsAPI which JobShout agent (and prompt version) made the

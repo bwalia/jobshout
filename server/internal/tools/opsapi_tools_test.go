@@ -201,6 +201,25 @@ func TestOpsAPIPostWritesAllowedPath(t *testing.T) {
 	if !strings.Contains(out, `"int_9"`) {
 		t.Fatalf("created id missing: %s", out)
 	}
+	key := r.header.Get("Idempotency-Key")
+	if !strings.HasPrefix(key, "jobshout-") || len(key) != len("jobshout-")+48 {
+		t.Fatalf("idempotency key missing or malformed: %q", key)
+	}
+	// The same write again carries the same key (OpsAPI returns the first answer); a different body doesn't.
+	if _, err := post.Execute(ctx, map[string]any{"path": "/api/v2/property-pa/captures",
+		"body": map[string]any{"person_id": "p_1", "channel": "call", "summary": "Spoke to Sarah"}}); err != nil {
+		t.Fatalf("repeat: %v", err)
+	}
+	if again := f.last(t).header.Get("Idempotency-Key"); again != key {
+		t.Fatalf("repeated write got a new key: %q vs %q", again, key)
+	}
+	if _, err := post.Execute(ctx, map[string]any{"path": "/api/v2/property-pa/captures",
+		"body": map[string]any{"person_id": "p_1", "channel": "call", "summary": "Spoke to Sarah again"}}); err != nil {
+		t.Fatalf("different: %v", err)
+	}
+	if other := f.last(t).header.Get("Idempotency-Key"); other == key {
+		t.Fatal("a different write reused the key")
+	}
 	if _, err := post.Execute(ctx, map[string]any{"path": "/api/v2/property-pa/handoffs", "body": "not json"}); err == nil {
 		t.Fatal("non-object body accepted")
 	}
