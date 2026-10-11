@@ -695,6 +695,64 @@ paths:
         '200': { description: Test result }
         '404': { $ref: '#/components/responses/Error' }
 
+  # ─── Property PA (see docs/property-pa-agents.md) ─────────────────────────
+  /property-pa/agents:
+    get:
+      operationId: listPropertyPAAgents
+      tags: [platform]
+      description: >-
+        The org's Seller PA and Manager PA - agent ids, installed and
+        available prompt versions, mode skill slugs. API keys need agents:read.
+      responses:
+        '200': { description: PA agents }
+  /property-pa/install:
+    post:
+      operationId: installPropertyPAAgents
+      tags: [platform]
+      description: >-
+        Create or upgrade the Property PA agents, their tool allow-lists,
+        approval rules and mode skills. Idempotent. Requires org:manage.
+      responses:
+        '200': { description: Install result }
+  /agents/{agentID}/knowledge/external/{key}:
+    put:
+      operationId: putExternalKnowledge
+      tags: [platform]
+      description: >-
+        Upsert an externally versioned knowledge item. A newer version
+        replaces older ones; an older version is refused with 409.
+      parameters:
+        - { name: agentID, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: key, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version, content]
+              properties:
+                version: { type: integer, minimum: 1 }
+                title: { type: string }
+                content: { type: string }
+                scope: { type: string }
+                source: { type: string }
+      responses:
+        '200': { description: Same version refreshed }
+        '201': { description: Stored (created or replaced older versions) }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { description: A newer version is already stored }
+    delete:
+      operationId: deleteExternalKnowledge
+      tags: [platform]
+      parameters:
+        - { name: agentID, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: key, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Every version removed }
+        '404': { $ref: '#/components/responses/Error' }
+
   /ws:
     get:
       operationId: liveEvents
