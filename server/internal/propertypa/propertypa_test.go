@@ -186,7 +186,9 @@ func (f *fakeTools) Set(_ context.Context, id uuid.UUID, names []string) error {
 
 type fakeRules struct{ rules map[uuid.UUID][]string }
 
-func (f *fakeRules) ListRules(_ context.Context, id uuid.UUID) ([]string, error) { return f.rules[id], nil }
+func (f *fakeRules) ListRules(_ context.Context, id uuid.UUID) ([]string, error) {
+	return f.rules[id], nil
+}
 func (f *fakeRules) SetRules(_ context.Context, id uuid.UUID, names []string) error {
 	f.rules[id] = names
 	return nil

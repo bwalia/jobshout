@@ -107,21 +107,24 @@ func TestRequireAuthOrAPIKey(t *testing.T) {
 func TestAPIKeyRouteScope_OpsAPIRoutes(t *testing.T) {
 	id, id2 := uuid.NewString(), uuid.NewString()
 	want := map[[2]string]string{
-		{"POST", "/api/v1/tasks/launch"}:                         model.ScopeRuns,
-		{"POST", "/api/v1/tasks/" + id + "/run"}:                 model.ScopeRuns,
-		{"GET", "/api/v1/tasks/" + id + "/runs"}:                 model.ScopeRuns,
-		{"GET", "/api/v1/task-runs/" + id}:                       model.ScopeRuns,
-		{"GET", "/api/v1/approvals"}:                             model.ScopeApprovals,
-		{"GET", "/api/v1/approvals/"}:                            model.ScopeApprovals,
-		{"GET", "/api/v1/approvals/" + id}:                       model.ScopeApprovals,
-		{"POST", "/api/v1/approvals/" + id + "/decide"}:          model.ScopeApprovals,
-		{"GET", "/api/v1/agents"}:                                model.ScopeAgentsRead,
-		{"GET", "/api/v1/agents/" + id}:                          model.ScopeAgentsRead,
-		{"GET", "/api/v1/agents/" + id + "/knowledge"}:           model.ScopeKnowledge,
-		{"POST", "/api/v1/agents/" + id + "/knowledge"}:          model.ScopeKnowledge,
-		{"GET", "/api/v1/agents/" + id + "/knowledge/" + id2}:    model.ScopeKnowledge,
-		{"PUT", "/api/v1/agents/" + id + "/knowledge/" + id2}:    model.ScopeKnowledge,
-		{"DELETE", "/api/v1/agents/" + id + "/knowledge/" + id2}: model.ScopeKnowledge,
+		{"POST", "/api/v1/tasks/launch"}:                                 model.ScopeRuns,
+		{"POST", "/api/v1/tasks/" + id + "/run"}:                         model.ScopeRuns,
+		{"GET", "/api/v1/tasks/" + id + "/runs"}:                         model.ScopeRuns,
+		{"GET", "/api/v1/task-runs/" + id}:                               model.ScopeRuns,
+		{"GET", "/api/v1/approvals"}:                                     model.ScopeApprovals,
+		{"GET", "/api/v1/approvals/"}:                                    model.ScopeApprovals,
+		{"GET", "/api/v1/approvals/" + id}:                               model.ScopeApprovals,
+		{"POST", "/api/v1/approvals/" + id + "/decide"}:                  model.ScopeApprovals,
+		{"GET", "/api/v1/agents"}:                                        model.ScopeAgentsRead,
+		{"GET", "/api/v1/agents/" + id}:                                  model.ScopeAgentsRead,
+		{"GET", "/api/v1/agents/" + id + "/knowledge"}:                   model.ScopeKnowledge,
+		{"POST", "/api/v1/agents/" + id + "/knowledge"}:                  model.ScopeKnowledge,
+		{"GET", "/api/v1/agents/" + id + "/knowledge/" + id2}:            model.ScopeKnowledge,
+		{"PUT", "/api/v1/agents/" + id + "/knowledge/" + id2}:            model.ScopeKnowledge,
+		{"DELETE", "/api/v1/agents/" + id + "/knowledge/" + id2}:         model.ScopeKnowledge,
+		{"PUT", "/api/v1/agents/" + id + "/knowledge/external/kb-17"}:    model.ScopeKnowledge,
+		{"DELETE", "/api/v1/agents/" + id + "/knowledge/external/kb-17"}: model.ScopeKnowledge,
+		{"GET", "/api/v1/property-pa/agents"}:                            model.ScopeAgentsRead,
 	}
 	for k, scope := range want {
 		got, ok := APIKeyRouteScope(k[0], k[1])
@@ -131,6 +134,12 @@ func TestAPIKeyRouteScope_OpsAPIRoutes(t *testing.T) {
 	}
 	if _, ok := APIKeyRouteScope("GET", "/api/v1/tasks/launch/../../api-keys"); ok {
 		t.Error("path traversal-looking path matched")
+	}
+	if _, ok := APIKeyRouteScope("POST", "/api/v1/property-pa/install"); ok {
+		t.Error("an API key may not install agents")
+	}
+	if _, ok := APIKeyRouteScope("PUT", "/api/v1/agents/"+id+"/knowledge/external/../x"); ok {
+		t.Error("dot-segment external key matched")
 	}
 	if _, ok := APIKeyRouteScope("POST", "/api/v1/approvals/not-a-uuid/decide"); ok {
 		t.Error("non-uuid id matched")

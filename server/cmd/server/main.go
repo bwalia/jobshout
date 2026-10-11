@@ -72,6 +72,7 @@ import (
 	"github.com/jobshout/server/internal/modelselect"
 	"github.com/jobshout/server/internal/orgroute"
 	"github.com/jobshout/server/internal/platformtools"
+	"github.com/jobshout/server/internal/propertypa"
 	"github.com/jobshout/server/internal/repository"
 	"github.com/jobshout/server/internal/research"
 	"github.com/jobshout/server/internal/reviewbot"
@@ -1144,6 +1145,17 @@ func main() {
 	orgHandler := handler.NewOrganizationHandler(orgRepo)
 	marketplaceHandler := handler.NewMarketplaceHandler(pool, logger)
 	knowledgeHandler := handler.NewKnowledgeHandler(pool, knowledgeIngestSvc, logger)
+	// Property PA: install/upgrade the Seller PA and Manager PA agents per org.
+	propertyPAHandler := handler.NewPropertyPAHandler(&propertypa.Installer{
+		Agents:    repository.NewPAAgentStore(pool, agentRepo),
+		Tools:     toolPermRepo,
+		Approvals: approvalRepo,
+		Skills:    skillRepo,
+		HasTool: func(name string) bool {
+			_, ok := toolRegistry.Get(name)
+			return ok
+		},
+	}, logger)
 	metricsHandler := handler.NewMetricsHandler(pool, logger)
 	wsHandler := handler.NewWSHandler(hub, logger)
 	execHandler := handler.NewExecutionHandler(execSvc)
@@ -1381,6 +1393,9 @@ func main() {
 			r.Route("/agents/{agentID}/knowledge", func(r chi.Router) {
 				r.Get("/", knowledgeHandler.ListByAgent)
 				r.Post("/", knowledgeHandler.CreateFile)
+				// Externally keyed, versioned items (OpsAPI's approved rules).
+				r.Put("/external/{key}", knowledgeHandler.PutExternal)
+				r.Delete("/external/{key}", knowledgeHandler.DeleteExternal)
 				r.Route("/{fileID}", func(r chi.Router) {
 					r.Get("/", knowledgeHandler.GetFile)
 					r.Put("/", knowledgeHandler.UpdateFile)
@@ -1665,6 +1680,12 @@ func main() {
 				r.Get("/", apiKeyHandler.List)
 				r.Post("/", apiKeyHandler.Create)
 				r.Delete("/{keyID}", apiKeyHandler.Revoke)
+			})
+
+			// Property PA agents (docs/property-pa-agents.md).
+			r.Route("/property-pa", func(r chi.Router) {
+				r.Get("/agents", propertyPAHandler.List)
+				r.With(middleware.RequirePermission(rbacSvc, model.PermOrgManage)).Post("/install", propertyPAHandler.Install)
 			})
 
 			// Outbound webhook endpoints — org admins only.
