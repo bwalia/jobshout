@@ -26,6 +26,11 @@ type Request struct {
 	TaskID    *uuid.UUID
 	Values    map[string]string
 	Source    string // "task_manager" | "chat"
+	// RunContext and SkillSlugs apply to the generic task run (agents with
+	// no specialist module): the context is stored on the run and added to
+	// its inputs; the skills are loaded for that run only.
+	RunContext *model.RunContext
+	SkillSlugs []string
 }
 
 // Result is returned to the HTTP handler and chat tools.
@@ -192,9 +197,13 @@ func (s *Service) Launch(ctx context.Context, req Request) (*Result, error) {
 			}
 		}
 	}
-	run, rerr := s.TaskRuns.CreateRun(ctx, task.ID, model.CreateTaskRunRequest{
-		AgentID: &agent.ID,
-		Prompt:  &prompt,
+	rc := req.RunContext.Normalize()
+	run, rerr := s.TaskRuns.CreateRun(model.WithRunContext(ctx, rc), task.ID, model.CreateTaskRunRequest{
+		AgentID:    &agent.ID,
+		Prompt:     &prompt,
+		SkillSlugs: req.SkillSlugs,
+		Inputs:     rc.MergeInto(nil),
+		Context:    rc,
 	}, req.OrgID, &req.UserID)
 	if rerr != nil {
 		return nil, rerr

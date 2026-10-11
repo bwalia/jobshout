@@ -22,27 +22,28 @@ const maxOutput = 64 << 10
 
 // RunData is the data of run.completed / run.failed.
 type RunData struct {
-	RunID           uuid.UUID      `json:"run_id"`
-	TaskID          uuid.UUID      `json:"task_id"`
-	AgentID         uuid.UUID      `json:"agent_id"`
-	ExecutionID     *uuid.UUID     `json:"execution_id"`
-	Status          string         `json:"status"`
-	Output          *string        `json:"output"`
-	OutputTruncated bool           `json:"output_truncated,omitempty"`
-	ErrorMessage    *string        `json:"error_message"`
-	SkillSlugs      []string       `json:"skill_slugs"`
-	Inputs          map[string]any `json:"inputs,omitempty"`
-	TotalTokens     int            `json:"total_tokens"`
-	CostUSD         float64        `json:"cost_usd"`
-	LatencyMs       int            `json:"latency_ms"`
-	StartedAt       *time.Time     `json:"started_at"`
-	CompletedAt     *time.Time     `json:"completed_at"`
+	RunID           uuid.UUID         `json:"run_id"`
+	TaskID          uuid.UUID         `json:"task_id"`
+	AgentID         uuid.UUID         `json:"agent_id"`
+	ExecutionID     *uuid.UUID        `json:"execution_id"`
+	Status          string            `json:"status"`
+	Output          *string           `json:"output"`
+	OutputTruncated bool              `json:"output_truncated,omitempty"`
+	ErrorMessage    *string           `json:"error_message"`
+	Context         *model.RunContext `json:"context,omitempty"`
+	SkillSlugs      []string          `json:"skill_slugs"`
+	Inputs          map[string]any    `json:"inputs,omitempty"`
+	TotalTokens     int               `json:"total_tokens"`
+	CostUSD         float64           `json:"cost_usd"`
+	LatencyMs       int               `json:"latency_ms"`
+	StartedAt       *time.Time        `json:"started_at"`
+	CompletedAt     *time.Time        `json:"completed_at"`
 }
 
 func runData(run *model.TaskRun) RunData {
 	d := RunData{
 		RunID: run.ID, TaskID: run.TaskID, AgentID: run.AgentID, ExecutionID: run.ExecutionID,
-		Status: run.Status, Output: run.Output, ErrorMessage: run.ErrorMessage,
+		Status: run.Status, Output: run.Output, ErrorMessage: run.ErrorMessage, Context: run.Context,
 		SkillSlugs: run.SkillSlugs, Inputs: run.Inputs, TotalTokens: run.TotalTokens,
 		CostUSD: run.CostUSD, LatencyMs: run.LatencyMs, StartedAt: run.StartedAt, CompletedAt: run.CompletedAt,
 	}

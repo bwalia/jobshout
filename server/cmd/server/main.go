@@ -280,6 +280,8 @@ func main() {
 	linuxPatchRunRepo := repository.NewLinuxPatchRunRepository(pool)
 	reviewRunRepo := repository.NewReviewRunRepository(pool)
 	taskRunRepo := repository.NewTaskRunRepository(pool)
+	// Role context (role, user_ref, workspace_ref) stored beside each run.
+	taskRunRepo = &repository.TaskRunContexts{TaskRunRepository: taskRunRepo, Pool: pool}
 
 	// Outbound webhooks: org endpoints get run.completed / run.failed /
 	// approval.requested / approval.decided, signed and retried with backoff.

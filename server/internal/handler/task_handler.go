@@ -30,6 +30,12 @@ type launchTaskBody struct {
 	ProjectID string            `json:"project_id" validate:"omitempty,uuid"`
 	TaskID    string            `json:"task_id" validate:"omitempty,uuid"`
 	Values    map[string]string `json:"values"`
+	// Context is the role context (role, user_ref, workspace_ref) for the
+	// run this launch starts. Honoured for generic agents (task runs);
+	// specialist modules ignore it.
+	Context *model.RunContext `json:"context"`
+	// SkillSlugs are extra skills for this run only (generic agents).
+	SkillSlugs []string `json:"skill_slugs"`
 }
 
 // Launch POST /api/v1/tasks/launch — create or reuse a board task and start the agent.
@@ -56,6 +62,7 @@ func (h *TaskHandler) Launch(w http.ResponseWriter, r *http.Request) {
 	req := tasklaunch.Request{
 		OrgID: orgID, UserID: userID, AgentID: agentID,
 		Values: body.Values, Source: "task_manager",
+		RunContext: body.Context.Normalize(), SkillSlugs: body.SkillSlugs,
 	}
 	if body.ProjectID != "" {
 		req.ProjectID, _ = uuid.Parse(body.ProjectID)
@@ -74,7 +81,7 @@ func (h *TaskHandler) Launch(w http.ResponseWriter, r *http.Request) {
 		}
 		req.ProjectID = task.ProjectID
 	}
-	result, err := h.launch.Launch(r.Context(), req)
+	result, err := h.launch.Launch(model.WithRunContext(r.Context(), req.RunContext), req)
 	if err != nil {
 		RespondError(w, http.StatusBadRequest, err.Error())
 		return
