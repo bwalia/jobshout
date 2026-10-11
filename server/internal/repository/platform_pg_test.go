@@ -88,3 +88,15 @@ func seedOrgAgent(t *testing.T, pool *pgxpool.Pool) (orgID, agentID uuid.UUID) {
 func TestPlatformPG_MigrationsReplay(t *testing.T) {
 	_ = platformPG(t)
 }
+
+// seedUser inserts a user in orgID.
+func seedUser(t *testing.T, pool *pgxpool.Pool, orgID uuid.UUID) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	if _, err := pool.Exec(context.Background(),
+		`INSERT INTO users (id, email, password, full_name, org_id) VALUES ($1, $2, 'x', 'u', $3)`,
+		id, id.String()+"@example.test", orgID); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	return id
+}

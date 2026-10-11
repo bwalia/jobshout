@@ -117,6 +117,10 @@ func (s *Service) Launch(ctx context.Context, req Request) (*Result, error) {
 		if err != nil {
 			return nil, err
 		}
+		// Never relaunch (and rewrite) another org's task.
+		if task == nil || !s.projectInOrg(ctx, task.ProjectID, req.OrgID) {
+			return nil, fmt.Errorf("task not found")
+		}
 		upd := model.UpdateTaskRequest{
 			Title:           &title,
 			AssignedAgentID: model.OptionalString{Set: true, Value: &agentID},
@@ -132,6 +136,9 @@ func (s *Service) Launch(ctx context.Context, req Request) (*Result, error) {
 	} else {
 		if req.ProjectID == uuid.Nil {
 			return nil, fmt.Errorf("project is required")
+		}
+		if !s.projectInOrg(ctx, req.ProjectID, req.OrgID) {
+			return nil, fmt.Errorf("project not found")
 		}
 		var descPtr *string
 		if desc != "" {
@@ -205,6 +212,16 @@ func (s *Service) Launch(ctx context.Context, req Request) (*Result, error) {
 		out.Task.Metadata = meta
 	}
 	return out, nil
+}
+
+// projectInOrg reports whether the project exists and belongs to orgID. Tasks
+// carry no org of their own; the project is the tenant boundary.
+func (s *Service) projectInOrg(ctx context.Context, projectID, orgID uuid.UUID) bool {
+	if s.Projects == nil || projectID == uuid.Nil {
+		return false
+	}
+	p, err := s.Projects.GetByID(ctx, projectID)
+	return err == nil && p != nil && p.OrgID == orgID
 }
 
 func applyLaunch(s *Service, ctx context.Context, task *model.Task, meta map[string]any, out *Result, lo *agentmodule.LaunchOutput) {

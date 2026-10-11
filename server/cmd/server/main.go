@@ -22,6 +22,7 @@ import (
 	"github.com/jobshout/server/internal/agentmodule"
 	"github.com/jobshout/server/internal/agentmodules"
 	"github.com/jobshout/server/internal/agentschema"
+	"github.com/jobshout/server/internal/apikey"
 	"github.com/jobshout/server/internal/appleauth"
 	"github.com/jobshout/server/internal/blog"
 	"github.com/jobshout/server/internal/bridge"
@@ -1174,8 +1175,14 @@ func main() {
 	agentSelector := selector.New(pool, logger)
 	selectorHandler := handler.NewSelectorHandler(agentSelector)
 
+	// Org API keys (service principals, e.g. OpsAPI). The auth middleware
+	// accepts "Bearer jsk_..." alongside JWTs; a key may only call the
+	// allow-listed routes its scopes cover (middleware.APIKeyRouteScope).
+	apiKeySvc := apikey.NewService(repository.NewAPIKeyRepository(pool))
+	apiKeyHandler := handler.NewAPIKeyHandler(apiKeySvc)
+
 	// Auth middleware
-	requireAuth := middleware.RequireAuth(jwtSvc)
+	requireAuth := middleware.RequireAuthOrAPIKey(jwtSvc, apiKeySvc)
 
 	r := chi.NewRouter()
 
@@ -1624,6 +1631,15 @@ func main() {
 			})
 
 			// Scheduled Tasks
+			// Org API keys — org admins only. API keys themselves can never
+			// reach these routes (not on the API-key allow-list).
+			r.Route("/api-keys", func(r chi.Router) {
+				r.Use(middleware.RequirePermission(rbacSvc, model.PermOrgManage))
+				r.Get("/", apiKeyHandler.List)
+				r.Post("/", apiKeyHandler.Create)
+				r.Delete("/{keyID}", apiKeyHandler.Revoke)
+			})
+
 			// Per-org model routing (ordered fallback chain over the org's
 			// provider configs). Changing it is an org-admin action.
 			r.Get("/llm-routing", llmRoutingHandler.Get)
