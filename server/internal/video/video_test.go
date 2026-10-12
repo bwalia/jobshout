@@ -64,6 +64,17 @@ func TestShotCountAndLanguageFollowTheBrief(t *testing.T) {
 	}
 }
 
+func TestTheRunBudgetGrowsWithTheVideo(t *testing.T) {
+	s := &Service{cfg: Config{MaxRuntime: 4 * time.Hour}}
+	if got := s.budget(3, false); got != 4*time.Hour {
+		t.Fatalf("a short stills video should get the floor, got %s", got)
+	}
+	// A 3-minute animated video is ~30 shots of ~11.5 min: far past a flat 4 h.
+	if got := s.budget(30, true); got < 11*time.Hour {
+		t.Fatalf("a long animated video would be abandoned mid-render: %s", got)
+	}
+}
+
 // ─── service flow ────────────────────────────────────────────────────────────
 
 type fakeWriter struct{}

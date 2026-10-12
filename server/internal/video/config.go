@@ -22,8 +22,9 @@ type Config struct {
 	// PublicBaseURL makes the finished video's link absolute on the board,
 	// where a relative path is not clickable.
 	PublicBaseURL string
-	// MaxRuntime bounds a whole run, script to stored file. An animated
-	// two-minute video is about an hour of GPU; a queue ahead of it adds more.
+	// MaxRuntime is the least time a run gets, script to stored file. Longer
+	// videos get more (Service.budget): an animated three-minute video is
+	// about six hours of GPU.
 	MaxRuntime time.Duration
 	// PollInterval is how often a render's progress is checked.
 	PollInterval time.Duration

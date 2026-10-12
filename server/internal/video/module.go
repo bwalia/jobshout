@@ -64,7 +64,7 @@ func Module(run Runner) agentmodule.Module {
 func schema() agentschema.Schema {
 	return agentschema.Schema{
 		Builtin: model.BuiltinVideoProducer,
-		Hint:    "A topic in, a narrated video out. Animated videos take about 5 minutes per shot of workstation time.",
+		Hint:    "A topic in, a narrated video out. Stills: ~15 min per minute of video; animated: ~2 h per minute.",
 		Fields: []agentschema.Field{
 			{Key: "topic", Label: "What is the video about?", Type: "textarea", Required: true, MinLength: 3,
 				Placeholder: "Why lighthouses still matter in the age of GPS",
@@ -84,8 +84,8 @@ func schema() agentschema.Schema {
 				}},
 			{Key: "motion", Label: "Pictures", Type: "select", Default: "animated",
 				Options: []model.ClarifyOption{
-					{Label: "Animated (slower, ~5 min per shot)", Value: "animated"},
-					{Label: "Still images with camera moves (fast)", Value: "stills"},
+					{Label: "Animated (slow: ~12 min per shot, a 1-minute video ≈ 2 h)", Value: "animated"},
+					{Label: "Still images with camera moves (fast: a 1-minute video ≈ 15 min)", Value: "stills"},
 				}},
 			{Key: "voice", Label: "Narrator voice", Type: "select", Default: defaultVoice, Options: voices},
 			{Key: "style", Label: "Visual style (optional)", Type: "text",

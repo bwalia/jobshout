@@ -195,6 +195,9 @@ def capabilities() -> dict:
 
 def _tool_env() -> dict:
     env = dict(os.environ)
+    # ltx-2-mlx shells out to `ffmpeg` by name. ffmpeg-full is keg-only (not on
+    # PATH), and launchd's PATH is minimal anyway, so put ours first.
+    env["PATH"] = f"{os.path.dirname(config.VIDEO_FFMPEG)}:{env.get('PATH', '/usr/bin:/bin')}"
     # Weights are installed ahead of time by install-video-tools.sh. Offline, a
     # missing model fails in a second with a clear error instead of starting a
     # 30 GB download inside somebody's render.

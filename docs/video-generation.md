@@ -59,14 +59,15 @@ about …").
 | Topic | Required. One sentence is enough. |
 | Length | 30 s – 3 min. About 2.5 words of narration per second, one shot per ~6 s. |
 | Format | Landscape 16:9, or portrait 9:16 for Shorts, Reels and TikTok. |
-| Pictures | **Animated** (LTX, ~5 min of GPU per shot) or **stills** with camera moves (~1.5 min per shot). |
+| Pictures | **Animated** (LTX, ~12 min of GPU per shot) or **stills** with camera moves (~1.5 min per shot). |
 | Voice | Kokoro voices in US English, UK English and Hindi. The voice also picks the script's language. |
 | Style | Appended to every shot, so the whole video looks the same. |
 | Captions | Burned in, timed to the narration. |
 
 The task first gets the script and an estimate. When the video is ready, it gets
-a link and moves to **done**. A one-minute animated video is about 45 minutes;
-the same video as stills is about 15.
+a link and moves to **done**. A one-minute video (10 shots) takes about
+**15 minutes as stills** and about **2 hours animated**. Animation is the slow
+part, so stills are the right choice for drafts.
 
 ## Measured on the workstation (M4 Max, 128 GB)
 
@@ -75,7 +76,15 @@ the same video as stills is about 15.
 | Script (platform LLM) | 1–3 min | (Ollama) |
 | Narration, per shot (Kokoro, warm) | ~6 s | < 1 GB |
 | Keyframe, 1024×576, 8 steps (z-image-turbo) | ~80 s | ~29 GB |
+| Animated clip, 5 s (121 frames) at 1024×576, LTX-2.3 distilled two-stage | ~9.8 min | ~38 GB |
+| Animated clip, 1 s (25 frames), same settings | ~2.7 min | — |
 | Stills video, 3 shots end to end | 4 min 40 s | — |
+
+An animated clip costs about 25 s of fixed overhead (model load, text encoding).
+The rest is two denoising passes: about 8 s per step at half resolution, then
+about 23 s per step for the full-resolution refine. Both scale with clip length.
+LTX-2.5 ranks higher for motion quality, but its speed on this Mac is not yet
+measured. Switching to it is described below.
 
 ## Operating it
 
@@ -117,7 +126,7 @@ Go server (all optional):
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `VIDEO_MODEL` | provider default | LLM model that writes scripts (per-agent model settings also apply). |
-| `VIDEO_MAX_RUNTIME` | `4h` | Deadline for one run, from script to stored file. |
+| `VIDEO_MAX_RUNTIME` | `4h` | Minimum deadline for one run. A long video gets twice its expected render time plus 15 minutes, so a 3-minute animated video is not abandoned mid-render. |
 | `VIDEO_POLL_INTERVAL` | `20s` | How often a render's progress is checked. |
 
 The agent reuses `IMAGE_BASE_URL`, `IMAGE_JWT_SECRET`, MinIO and

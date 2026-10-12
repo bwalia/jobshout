@@ -130,7 +130,8 @@ func (s *Service) Start(ctx context.Context, req StartRequest) (uuid.UUID, error
 
 func (s *Service) run(runID uuid.UUID, req StartRequest, motionInstalled bool) {
 	defer s.release(runID.String())
-	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.MaxRuntime)
+	animated := req.Brief.Motion && motionInstalled
+	ctx, cancel := context.WithTimeout(context.Background(), s.budget(ShotCount(req.Brief.Seconds), animated))
 	defer cancel()
 	trace := llmtrace.TraceInfo{
 		TraceName: "go-video-script",
@@ -150,7 +151,6 @@ func (s *Service) run(runID uuid.UUID, req StartRequest, motionInstalled bool) {
 		s.note(req.TaskID, "Video failed while writing the script: "+err.Error(), "")
 		return
 	}
-	animated := req.Brief.Motion && motionInstalled
 	s.note(req.TaskID, scriptNote(script, animated, req.Brief.Motion && !motionInstalled), "")
 
 	ref := map[string]string{"org_id": req.OrgID.String()}
@@ -200,7 +200,7 @@ func (s *Service) follow(ctx context.Context, jobID string, orgID uuid.UUID, tas
 		}
 		select {
 		case <-ctx.Done():
-			s.note(taskID, fmt.Sprintf("Video failed: the render did not finish within %s.", s.cfg.MaxRuntime), "")
+			s.note(taskID, "Video failed: the render did not finish in time. It may still complete on the workstation; launch again to retry.", "")
 			return
 		case <-ticker.C:
 		}
@@ -265,7 +265,9 @@ func (s *Service) StartResumer(ctx context.Context) {
 		s.logger.Info("video: resuming", zap.String("video_run", job.ID), zap.String("status", job.Status))
 		go func(job Job) {
 			defer s.release(job.ID)
-			rctx, cancel := context.WithTimeout(context.Background(), s.cfg.MaxRuntime)
+			// The workstation does not say whether a resumed render is
+			// animated; budget as if it is.
+			rctx, cancel := context.WithTimeout(context.Background(), s.budget(job.Shots, true))
 			defer cancel()
 			s.follow(rctx, job.ID, orgID, &taskID, job.Title)
 		}(job)
@@ -308,11 +310,23 @@ func (s *Service) note(taskID *uuid.UUID, note, status string) {
 	}
 }
 
+// budget is how long a run may take: twice the expected render time, plus the
+// script, never less than VIDEO_MAX_RUNTIME. A flat cap sized for a short
+// video would abandon a long animated one that is still rendering.
+func (s *Service) budget(shots int, animated bool) time.Duration {
+	per := minutesPerStill
+	if animated {
+		per += minutesPerAnimated
+	}
+	expected := time.Duration(per * float64(shots) * float64(time.Minute))
+	return max(s.cfg.MaxRuntime, 15*time.Minute+2*expected)
+}
+
 // Minutes of workstation time per shot, measured on the M4 Max: a keyframe is
-// about 1.5 min, an animated clip about 3 more.
+// about 1.5 min; animating it (LTX-2.3 distilled, 5 s at 1024x576) about 10 more.
 const (
 	minutesPerStill    = 1.5
-	minutesPerAnimated = 3.0
+	minutesPerAnimated = 10.0
 )
 
 func scriptNote(script *Script, animated, motionMissing bool) string {
