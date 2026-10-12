@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jobshout/server/internal/llm"
 )
@@ -105,6 +106,9 @@ Rules for "visual":
 	return sb.String()
 }
 
+// writeRetryWait is the base pause between script attempts. A variable for tests.
+var writeRetryWait = time.Minute
+
 // Writer turns a brief into a script with an LLM.
 type Writer struct {
 	LLM   llm.Client
@@ -117,7 +121,16 @@ func (w *Writer) Write(ctx context.Context, b Brief) (*Script, error) {
 		return nil, errors.New("video: no LLM configured to write the script")
 	}
 	var lastErr error
-	for attempt := 0; attempt < 2; attempt++ {
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			// A shared Ollama at capacity answers "server busy" for minutes at
+			// a time; the client's own single quick retry does not outlast it.
+			select {
+			case <-ctx.Done():
+				return nil, fmt.Errorf("video: script writing failed: %w", lastErr)
+			case <-time.After(time.Duration(attempt) * writeRetryWait):
+			}
+		}
 		resp, err := w.LLM.Generate(llm.WithStage(ctx, "video_script"), llm.GenerateRequest{
 			Model:       w.Model,
 			MaxTokens:   8000,

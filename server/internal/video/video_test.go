@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/model"
 )
 
@@ -51,6 +52,29 @@ func TestParseScriptRejectsUnusableReplies(t *testing.T) {
 		if _, err := ParseScript(reply); err == nil {
 			t.Errorf("accepted %q", reply)
 		}
+	}
+}
+
+type busyLLM struct{ calls int }
+
+func (*busyLLM) ProviderName() string { return "busy" }
+
+func (b *busyLLM) Generate(context.Context, llm.GenerateRequest) (*llm.GenerateResponse, error) {
+	b.calls++
+	if b.calls < 3 {
+		return nil, errors.New("ollama: server busy, please try again")
+	}
+	return &llm.GenerateResponse{Content: `{"title": "Tides", "shots": [{"narration": "The sea breathes.", "visual": "A tidal flat"}]}`}, nil
+}
+
+func TestTheWriterOutlastsABusyLLM(t *testing.T) {
+	old := writeRetryWait
+	writeRetryWait = time.Millisecond
+	defer func() { writeRetryWait = old }()
+	model := &busyLLM{}
+	got, err := (&Writer{LLM: model}).Write(context.Background(), Brief{Topic: "tides", Seconds: 30})
+	if err != nil || got.Title != "Tides" || model.calls != 3 {
+		t.Fatalf("calls %d, script %+v, err %v", model.calls, got, err)
 	}
 }
 
