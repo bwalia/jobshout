@@ -14,10 +14,12 @@ import {
   ArrowRight,
   MessageSquare,
   Plus,
+  Play,
 } from "lucide-react";
 import { getDashboardSummary, getTaskCompletion } from "@/lib/api/metrics";
 import { getProject } from "@/lib/api/projects";
 import { useAgents } from "@/lib/hooks/useAgents";
+import { useUiStore } from "@/lib/store/ui-store";
 import { useTasks } from "@/lib/hooks/useTasks";
 import { useAuthStore } from "@/lib/store/auth-store";
 import { ThroughputChart } from "@/components/dashboard/ThroughputChart";
@@ -161,6 +163,7 @@ function Skeleton({ className }: { className?: string }) {
 }
 
 export function DashboardPanel() {
+  const openRunDialog = useUiStore((s) => s.openRunDialog);
   const user = useAuthStore((s) => s.user);
   const [range, setRange] = useState<DateRange>("7d");
   const days = RANGES.find((r) => r.value === range)?.days ?? 7;
@@ -284,10 +287,17 @@ export function DashboardPanel() {
           </Link>
           <Link
             href="/chat"
-            className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3.5 text-sm font-medium text-primary-foreground hover:opacity-90"
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-sm font-medium hover:bg-secondary"
           >
             <MessageSquare className="h-4 w-4" /> New chat
           </Link>
+          <button
+            type="button"
+            onClick={() => openRunDialog()}
+            className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3.5 text-sm font-medium text-primary-foreground hover:opacity-90"
+          >
+            <Play className="h-4 w-4" /> Run a task
+          </button>
         </div>
       </div>
 

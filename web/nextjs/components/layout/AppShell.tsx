@@ -2,7 +2,8 @@
 
 import { Suspense } from "react";
 import { usePathname } from "next/navigation";
-import { Menu } from "lucide-react";
+import { Menu, Play } from "lucide-react";
+import { RunAgentDialog } from "@/components/run/RunAgentDialog";
 import { BetaBanner } from "./BetaBanner";
 import { Breadcrumbs } from "./Breadcrumbs";
 import { ChatSidebar } from "./ChatSidebar";
@@ -23,7 +24,7 @@ function needsLegacyGutter(pathname: string): boolean {
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const { sidebarCollapsed, setMobileSidebarOpen } = useUiStore();
+  const { sidebarCollapsed, setMobileSidebarOpen, openRunDialog } = useUiStore();
   const pathname = usePathname();
   const gutter = needsLegacyGutter(pathname);
 
@@ -53,6 +54,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <Suspense fallback={null}>
             <Breadcrumbs />
           </Suspense>
+          <div className="ml-auto" />
+          {/* One way to run any agent, from every screen. */}
+          <button
+            type="button"
+            onClick={() => openRunDialog()}
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:opacity-90"
+            title="Run a task (⌘K, then Run an agent)"
+          >
+            <Play className="h-3.5 w-3.5" />
+            Run a task
+          </button>
         </header>
 
         <main className="relative min-h-0 flex-1 overflow-y-auto scrollbar-thin">
@@ -63,6 +75,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </div>
 
       <CommandPalette />
+      <RunAgentDialog />
     </div>
   );
 }
