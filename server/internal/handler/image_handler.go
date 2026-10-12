@@ -199,6 +199,9 @@ func (h *ImageHandler) Serve(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	// ServeContent, not Write: it answers Range requests, without which Safari
 	// will not play a video at all and no browser can seek one.
+	// ponytail: Fetch reads the whole object for each request, ranges
+	// included. Fine at today's sizes (a 1-minute 720p video is ~6 MB); stream
+	// the MinIO object (an io.ReadSeeker) here if videos grow past tens of MB.
 	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(data))
 }
 

@@ -101,6 +101,17 @@ class QueueTests(unittest.TestCase):
         self.assertIsNone(r.get("job-old00001"))
         self.assertFalse((self.root / "job-old00001").exists())
 
+    def test_one_collector_at_a_time_until_its_lease_runs_out(self) -> None:
+        r = video.VideoRenderer(self.root)
+        job, _ = r.submit(request("job-claim001"))
+        self.assertIsNone(r.claim("job-claim001", "a", 60), "nothing to collect before it is done")
+        r._update(job, status=video.DONE)
+        self.assertTrue(r.claim("job-claim001", "a", 60))
+        self.assertFalse(r.claim("job-claim001", "b", 60), "a second replica must stand down")
+        self.assertTrue(r.claim("job-claim001", "a", 60), "the holder may renew")
+        r._update(job, claim_until=time.time() - 1)
+        self.assertTrue(r.claim("job-claim001", "b", 60), "an expired lease is up for grabs")
+
     def test_the_api_view_hides_the_request(self) -> None:
         job, _ = video.VideoRenderer(self.root).submit(request("job-public01"))
         self.assertNotIn("request", video.public(job))

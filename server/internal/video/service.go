@@ -23,6 +23,7 @@ type Media interface {
 	Job(ctx context.Context, id string) (*Job, error)
 	Jobs(ctx context.Context) ([]Job, error)
 	Download(ctx context.Context, id string) ([]byte, error)
+	Claim(ctx context.Context, id, holder string) error
 }
 
 // ScriptWriter turns a brief into a script.
@@ -66,6 +67,10 @@ type Service struct {
 	cfg    Config
 	logger *zap.Logger
 
+	// holder names this process when it claims a finished render, so of the
+	// replicas that may all be following one render, one collects it.
+	holder string
+
 	mu        sync.Mutex
 	following map[string]bool
 }
@@ -83,7 +88,8 @@ func NewService(writer ScriptWriter, media Media, store Store, cfg Config, logge
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &Service{writer: writer, media: media, store: store, cfg: cfg, logger: logger, following: map[string]bool{}}
+	return &Service{writer: writer, media: media, store: store, cfg: cfg, logger: logger,
+		holder: uuid.NewString(), following: map[string]bool{}}
 }
 
 // BindTasks lets runs report to the board.
@@ -131,7 +137,7 @@ func (s *Service) Start(ctx context.Context, req StartRequest) (uuid.UUID, error
 func (s *Service) run(runID uuid.UUID, req StartRequest, motionInstalled bool) {
 	defer s.release(runID.String())
 	animated := req.Brief.Motion && motionInstalled
-	ctx, cancel := context.WithTimeout(context.Background(), s.budget(ShotCount(req.Brief.Seconds), animated))
+	ctx, cancel := context.WithTimeout(context.Background(), maxFollow)
 	defer cancel()
 	trace := llmtrace.TraceInfo{
 		TraceName: "go-video-script",
@@ -145,7 +151,9 @@ func (s *Service) run(runID uuid.UUID, req StartRequest, motionInstalled bool) {
 	ctx = llmtrace.WithTrace(ctx, trace)
 	log := s.logger.With(zap.String("video_run", runID.String()))
 
-	script, err := s.writer.Write(ctx, req.Brief)
+	sctx, scancel := context.WithTimeout(ctx, scriptTimeout)
+	script, err := s.writer.Write(sctx, req.Brief)
+	scancel()
 	if err != nil {
 		log.Warn("video: script failed", zap.Error(err))
 		s.note(req.TaskID, "Video failed while writing the script: "+err.Error(), "")
@@ -157,7 +165,7 @@ func (s *Service) run(runID uuid.UUID, req StartRequest, motionInstalled bool) {
 	if req.TaskID != nil {
 		ref["task_id"] = req.TaskID.String()
 	}
-	if _, err := s.media.Submit(ctx, SubmitRequest{
+	sub := SubmitRequest{
 		ID:       runID.String(),
 		Title:    script.Title,
 		Shots:    script.Shots,
@@ -167,22 +175,46 @@ func (s *Service) run(runID uuid.UUID, req StartRequest, motionInstalled bool) {
 		Motion:   animated,
 		Captions: req.Brief.Captions,
 		Ref:      ref,
-	}); err != nil {
-		log.Warn("video: submit failed", zap.Error(err))
+	}
+	// The id is ours, so a resubmission finds the job a lost response already
+	// created: retrying is safe. A full queue is not worth retrying for.
+	for attempt := 1; ; attempt++ {
+		_, err = s.media.Submit(ctx, sub)
+		if err == nil || errors.Is(err, ErrBusy) || attempt == 3 {
+			break
+		}
+		log.Warn("video: submit failed; retrying", zap.Error(err))
+		time.Sleep(submitRetryDelay)
+	}
+	if err != nil {
 		s.note(req.TaskID, "Video failed: the workstation did not accept the render: "+err.Error(), "")
 		return
 	}
 	log.Info("video: rendering", zap.Int("shots", len(script.Shots)), zap.Bool("animated", animated))
-	s.follow(ctx, runID.String(), req.OrgID, req.TaskID, script.Title)
+	s.follow(ctx, runID.String(), req.OrgID, req.TaskID, script.Title, s.budget(len(script.Shots), animated))
 }
 
+const (
+	// scriptTimeout bounds writing the script.
+	scriptTimeout = 20 * time.Minute
+	// maxFollow is the most time spent on one video, queue included. The
+	// render budget (budget) starts only once rendering does; this cap is for
+	// a workstation that never answers again.
+	maxFollow = 48 * time.Hour
+)
+
+// submitRetryDelay spaces submission retries. A variable for tests.
+var submitRetryDelay = 15 * time.Second
+
 // follow polls a render until it ends, then collects it. A workstation that
-// is briefly unreachable (restarting, network) is waited out; only the run's
-// deadline ends the wait.
-func (s *Service) follow(ctx context.Context, jobID string, orgID uuid.UUID, taskID *uuid.UUID, title string) {
+// is briefly unreachable (restarting, network) is waited out. The render
+// budget runs from when rendering starts, not from submission: time spent
+// queued behind other videos is not this video running late.
+func (s *Service) follow(ctx context.Context, jobID string, orgID uuid.UUID, taskID *uuid.UUID, title string, budget time.Duration) {
 	log := s.logger.With(zap.String("video_run", jobID))
 	ticker := time.NewTicker(s.cfg.PollInterval)
 	defer ticker.Stop()
+	var rendering time.Time
 	for {
 		job, err := s.media.Job(ctx, jobID)
 		switch {
@@ -192,15 +224,30 @@ func (s *Service) follow(ctx context.Context, jobID string, orgID uuid.UUID, tas
 		case err != nil:
 			log.Warn("video: progress check failed; retrying", zap.Error(err))
 		case job.Status == JobDone:
-			s.collect(ctx, job, orgID, taskID, firstNonEmpty(title, job.Title))
-			return
+			// Several replicas may be following this render (each resumes
+			// it after a deploy); the workstation lets one collect it.
+			cerr := s.media.Claim(ctx, job.ID, s.holder)
+			if cerr == nil {
+				s.collect(ctx, job, orgID, taskID, firstNonEmpty(title, job.Title))
+				return
+			}
+			if errors.Is(cerr, ErrClaimed) || errors.Is(cerr, ErrNotFound) {
+				return
+			}
+			log.Warn("video: claim failed; retrying", zap.Error(cerr))
 		case job.Status == JobFailed:
 			s.note(taskID, "Video failed while rendering: "+job.Error, "")
+			return
+		case job.Status == JobRunning && rendering.IsZero():
+			rendering = time.Now()
+		}
+		if !rendering.IsZero() && time.Since(rendering) > budget {
+			s.note(taskID, fmt.Sprintf("Video failed: rendering took longer than %s. It may still finish on the workstation; launch again to retry.", budget.Round(time.Minute)), "")
 			return
 		}
 		select {
 		case <-ctx.Done():
-			s.note(taskID, "Video failed: the render did not finish in time. It may still complete on the workstation; launch again to retry.", "")
+			s.note(taskID, "Video failed: the workstation did not finish the render in time.", "")
 			return
 		case <-ticker.C:
 		}
@@ -259,25 +306,29 @@ func (s *Service) StartResumer(ctx context.Context) {
 			continue
 		}
 		task, err := s.tasks.GetByID(ctx, taskID)
-		if err != nil || task == nil || task.Status != "in_progress" || !s.claim(job.ID) {
+		if err != nil || task == nil || task.Status != "in_progress" {
+			continue
+		}
+		// A task launched again carries the new run's id. An older render of
+		// it — still kept on the workstation — is not this task's video.
+		if runID, _ := task.Metadata[model.TaskMetaRunID].(string); runID != job.ID || !s.claim(job.ID) {
 			continue
 		}
 		s.logger.Info("video: resuming", zap.String("video_run", job.ID), zap.String("status", job.Status))
 		go func(job Job) {
 			defer s.release(job.ID)
+			rctx, cancel := context.WithTimeout(context.Background(), maxFollow)
+			defer cancel()
 			// The workstation does not say whether a resumed render is
 			// animated; budget as if it is.
-			rctx, cancel := context.WithTimeout(context.Background(), s.budget(job.Shots, true))
-			defer cancel()
-			s.follow(rctx, job.ID, orgID, &taskID, job.Title)
+			s.follow(rctx, job.ID, orgID, &taskID, job.Title, s.budget(job.Shots, true))
 		}(job)
 	}
 }
 
 // claim marks a render as followed by this process; false if it already is.
-// ponytail: per process only — two replicas booting together can both resume
-// one render and store it twice. Harmless (a duplicate object), and int runs
-// one replica.
+// Per process only: across replicas, the workstation's collect claim (Media.
+// Claim) is what keeps a render from being stored twice.
 func (s *Service) claim(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -310,8 +361,8 @@ func (s *Service) note(taskID *uuid.UUID, note, status string) {
 	}
 }
 
-// budget is how long a run may take: twice the expected render time, plus the
-// script, never less than VIDEO_MAX_RUNTIME. A flat cap sized for a short
+// budget is how long a render may run: twice the expected time plus slack,
+// never less than VIDEO_MAX_RUNTIME. A flat cap sized for a short
 // video would abandon a long animated one that is still rendering.
 func (s *Service) budget(shots int, animated bool) time.Duration {
 	per := minutesPerStill

@@ -56,7 +56,12 @@ DIMENSION_MULTIPLE = 16
 # because the queue is expected to be short and a real generation takes tens of
 # seconds; bounded, because a caller blocked forever is worse than one told to
 # come back.
-QUEUE_TIMEOUT_SECONDS = float(os.getenv("IMAGE_QUEUE_TIMEOUT", "600"))
+#
+# Twenty minutes, because a video render holds the GPU for one animated clip at
+# a time (~10 min each, see video.py) and a cover image requested meanwhile
+# should wait that clip out rather than fail. The platform's own image timeout
+# (IMAGE_TIMEOUT, 30 min) is longer still.
+QUEUE_TIMEOUT_SECONDS = float(os.getenv("IMAGE_QUEUE_TIMEOUT", "1200"))
 
 # How many loaded models stay resident. One, by default, because a single image
 # model peaks near the memory of the whole machine and a second resident copy is

@@ -211,7 +211,13 @@ class VideoRequest(BaseModel):
 
 @app.on_event("startup")
 async def start_video_worker() -> None:
-    video.renderer.start()
+    # Video is the newer, optional half of this service. A disk it cannot
+    # write to, or a corrupt job file, must not take image generation down
+    # with it — log, and serve images without video.
+    try:
+        video.renderer.start()
+    except Exception:  # noqa: BLE001
+        logger.exception("video worker failed to start; serving images only")
 
 
 @app.get("/api/videos/capabilities")
@@ -248,6 +254,22 @@ async def get_video(job_id: str, caller: str = Depends(require_auth)):
     if job is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "no such video")
     return video.public(job)
+
+
+class ClaimRequest(BaseModel):
+    holder: str = Field(min_length=1, max_length=100)
+    lease_seconds: float = Field(default=900, gt=0, le=3600)
+
+
+@app.post("/api/videos/{job_id}/claim")
+async def claim_video(job_id: str, req: ClaimRequest, caller: str = Depends(require_auth)):
+    """Let exactly one caller collect a finished video (see VideoRenderer.claim)."""
+    granted = video.renderer.claim(job_id, req.holder, req.lease_seconds)
+    if granted is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no finished video with that id")
+    if not granted:
+        raise HTTPException(status.HTTP_409_CONFLICT, "another caller is collecting this video")
+    return {"claimed": True}
 
 
 @app.get("/api/videos/{job_id}/file")

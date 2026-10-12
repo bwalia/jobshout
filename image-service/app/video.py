@@ -42,7 +42,7 @@ import uuid
 from pathlib import Path
 
 from app import config, models
-from app.generator import generator
+from app.generator import GenerationBusy, generator
 
 logger = logging.getLogger(__name__)
 
@@ -308,11 +308,19 @@ class _Render:
         end = 0.35 if self.motion else 0.80
         for i, shot in enumerate(self.shots):
             self._progress(0.05, end, i, "keyframes", f"Drawing shot {i + 1} of {len(self.shots)}")
-            result = generator.generate(
-                prompt=self._visual(shot), model_name=name,
-                width=self.mw, height=self.mh, steps=models.default_steps(name),
-                seed=self.seed + i, guidance=None, negative_prompt="",
-            )
+            for attempt in range(3):
+                try:
+                    result = generator.generate(
+                        prompt=self._visual(shot), model_name=name,
+                        width=self.mw, height=self.mh, steps=models.default_steps(name),
+                        seed=self.seed + i, guidance=None, negative_prompt="",
+                    )
+                    break
+                except GenerationBusy:
+                    # Image requests queued ahead of this still; they are
+                    # short, so waiting again is right, not failing a video.
+                    if attempt == 2:
+                        raise
             (self.dir / f"still_{i:02d}.png").write_bytes(base64.b64decode(result.image_base64))
 
     def animate(self, seconds: list[float]) -> list[Path | None]:
@@ -332,6 +340,10 @@ class _Render:
             try:
                 with generator.exclusive_gpu():
                     _run(cmd, timeout=config.VIDEO_CLIP_TIMEOUT)
+                # threading.Lock is not fair: without a pause this thread takes
+                # the GPU straight back for the next clip, and a cover image
+                # that waited through this one would wait through them all.
+                time.sleep(1)
                 if not clip.exists() or clip.stat().st_size == 0:
                     raise RenderError("no clip was written")
                 clips.append(clip)
@@ -455,14 +467,37 @@ class VideoRenderer:
                 "attempts": 0, "duration_seconds": 0.0, "shots": len(request["shots"]),
                 "title": request.get("title", ""),
                 "motion_model": "", "ref": request.get("ref") or {}, "request": request,
+                "claim_holder": "", "claim_until": 0.0,
             }
-            self._jobs[job_id] = job
+            # Saved before it is listed: a job that could not be written must
+            # not be reported as queued and then never run.
             self._save(job)
+            self._jobs[job_id] = job
         self._queue.put(job_id)
         return job, True
 
     def get(self, job_id: str) -> dict | None:
         return self._jobs.get(job_id)
+
+    def claim(self, job_id: str, holder: str, lease_seconds: float) -> bool | None:
+        """Grant one caller the right to collect a finished video, for a lease.
+
+        Several API replicas can follow the same render after a deploy. The
+        first to claim it collects it; the others stand down. A lease rather
+        than a flag, so a collector that dies mid-way does not strand the
+        video: once the lease runs out, the next one may claim it. None means
+        there is no finished job to claim.
+        """
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None or job["status"] != DONE:
+                return None
+            now = time.time()
+            if job.get("claim_until", 0) > now and job.get("claim_holder") != holder:
+                return False
+            job.update(claim_holder=holder, claim_until=now + lease_seconds)
+            self._save(job)
+            return True
 
     def list(self) -> list[dict]:
         return sorted(self._jobs.values(), key=lambda j: j["created_at"], reverse=True)

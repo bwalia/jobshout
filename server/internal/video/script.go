@@ -37,8 +37,12 @@ const wordsPerSecond = 2.5
 // animated clip covers well (~5 s, held a little longer by a still frame).
 const secondsPerShot = 6
 
-// maxShots matches the workstation's own ceiling (VIDEO_MAX_SHOTS).
-const maxShots = 30
+// These match the workstation's request limits, which reject anything longer.
+const (
+	maxShots = 30 // VIDEO_MAX_SHOTS
+	maxTitle = 200
+	maxStyle = 500
+)
 
 // ShotCount is how many shots a video of this length is written in.
 func ShotCount(seconds int) int {
@@ -203,7 +207,7 @@ func ParseScript(content string) (*Script, error) {
 	if len(raw.Shots) == 0 {
 		raw.Shots = raw.Scenes
 	}
-	script := &Script{Title: strings.TrimSpace(string(raw.Title))}
+	script := &Script{Title: truncate(string(raw.Title), maxTitle)}
 	for _, s := range raw.Shots {
 		narration := firstText(s.Narration, s.Voiceover, s.Text)
 		visual := firstText(s.Visual, s.VisualPrompt, s.ImagePrompt, s.Description)

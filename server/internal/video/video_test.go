@@ -36,6 +36,16 @@ func TestParseScriptAcceptsDriftedFieldNamesAndDropsHalfShots(t *testing.T) {
 	}
 }
 
+func TestParseScriptKeepsTheTitleWithinTheWorkstationLimit(t *testing.T) {
+	got, err := ParseScript(`{"title": "` + strings.Repeat("long ", 100) + `", "shots": [{"narration": "a", "visual": "b"}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len([]rune(got.Title)); n > maxTitle {
+		t.Fatalf("title is %d runes", n)
+	}
+}
+
 func TestParseScriptRejectsUnusableReplies(t *testing.T) {
 	for _, reply := range []string{"", "no json here", `{"title": "x", "shots": []}`, `{"shots": [{"narration": "only words"}]}`} {
 		if _, err := ParseScript(reply); err == nil {
@@ -89,6 +99,11 @@ type fakeMedia struct {
 	submitted []SubmitRequest
 	polls     int
 	jobs      []Job
+	// statuses is what successive polls report; the last one repeats.
+	// Empty means running once, then done.
+	statuses  []string
+	claimErr  error
+	submitErr []error
 }
 
 func (m *fakeMedia) Capabilities(context.Context) (*Capabilities, error) { return &m.caps, nil }
@@ -97,18 +112,27 @@ func (m *fakeMedia) Submit(_ context.Context, req SubmitRequest) (*Job, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.submitted = append(m.submitted, req)
+	if len(m.submitErr) > 0 {
+		err := m.submitErr[0]
+		m.submitErr = m.submitErr[1:]
+		return nil, err
+	}
 	return &Job{ID: req.ID, Status: JobQueued}, nil
 }
 
 func (m *fakeMedia) Job(_ context.Context, id string) (*Job, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.polls++
-	if m.polls < 2 {
-		return &Job{ID: id, Status: JobRunning}, nil
+	statuses := m.statuses
+	if len(statuses) == 0 {
+		statuses = []string{JobRunning, JobDone}
 	}
-	return &Job{ID: id, Status: JobDone, Shots: 1, DurationSeconds: 65, Notes: []string{"shot 1: animation failed, used a still"}}, nil
+	status := statuses[min(m.polls, len(statuses)-1)]
+	m.polls++
+	return &Job{ID: id, Status: status, Shots: 1, DurationSeconds: 65, Notes: []string{"shot 1: animation failed, used a still"}}, nil
 }
+
+func (m *fakeMedia) Claim(context.Context, string, string) error { return m.claimErr }
 
 func (m *fakeMedia) Jobs(context.Context) ([]Job, error) { return m.jobs, nil }
 
@@ -246,8 +270,13 @@ func TestTheResumerCollectsARenderItsServerLost(t *testing.T) {
 
 	taskID, orgID := uuid.New(), uuid.New()
 	tasks := newFakeTasks(taskID)
+	tasks.task.Metadata = map[string]any{model.TaskMetaRunID: "lost-render"}
+	ref := map[string]string{"task_id": taskID.String(), "org_id": orgID.String()}
 	media := &fakeMedia{jobs: []Job{
-		{ID: "lost-render", Title: "Tides", Status: JobRunning, Ref: map[string]string{"task_id": taskID.String(), "org_id": orgID.String()}},
+		// An earlier run of the same task, finished and still on disk: not
+		// this task's current video, so it must not close the task.
+		{ID: "previous-run", Title: "Old", Status: JobDone, Ref: ref},
+		{ID: "lost-render", Title: "Tides", Status: JobRunning, Ref: ref},
 		// Another ring's render: its task is not in this database.
 		{ID: "other-ring", Status: JobDone, Ref: map[string]string{"task_id": uuid.NewString(), "org_id": orgID.String()}},
 	}}
@@ -259,7 +288,61 @@ func TestTheResumerCollectsARenderItsServerLost(t *testing.T) {
 	if got := waitStatus(t, tasks); got != "done" {
 		t.Fatalf("status %q", got)
 	}
-	if !strings.Contains(tasks.description(), "Video ready: Tides") {
+	if d := tasks.description(); !strings.Contains(d, "Video ready: Tides") || strings.Contains(d, "Old") {
+		t.Fatalf("description: %s", d)
+	}
+}
+
+func TestAReplicaThatLosesTheCollectClaimStandsDown(t *testing.T) {
+	taskID := uuid.New()
+	tasks := newFakeTasks(taskID)
+	media := &fakeMedia{statuses: []string{JobDone}, claimErr: ErrClaimed}
+	store := &fakeStore{}
+	svc := NewService(fakeWriter{}, media, store, testConfig(), nil)
+	svc.BindTasks(tasks)
+	svc.follow(context.Background(), "render", uuid.New(), &taskID, "Tides", time.Hour)
+	if store.ext != "" || tasks.description() != "" {
+		t.Fatalf("collected anyway: stored %q, note %q", store.ext, tasks.description())
+	}
+}
+
+func TestTimeQueuedIsNotCountedAgainstTheRender(t *testing.T) {
+	taskID := uuid.New()
+	tasks := newFakeTasks(taskID)
+	media := &fakeMedia{statuses: []string{JobQueued, JobQueued, JobQueued, JobRunning}}
+	svc := NewService(fakeWriter{}, media, &fakeStore{}, testConfig(), nil)
+	svc.BindTasks(tasks)
+	// A budget shorter than the time spent queued: only rendering counts.
+	svc.follow(context.Background(), "render", uuid.New(), &taskID, "Tides", 12*time.Millisecond)
+	media.mu.Lock()
+	polls := media.polls
+	media.mu.Unlock()
+	if polls < 5 {
+		t.Fatalf("gave up after %d polls, while still queued", polls)
+	}
+	if !strings.Contains(tasks.description(), "rendering took longer") {
 		t.Fatalf("description: %s", tasks.description())
+	}
+}
+
+func TestASubmitLostInTransitIsRetried(t *testing.T) {
+	old := submitRetryDelay
+	submitRetryDelay = 0
+	defer func() { submitRetryDelay = old }()
+
+	taskID := uuid.New()
+	tasks := newFakeTasks(taskID)
+	media := &fakeMedia{caps: Capabilities{FFmpeg: true, Narration: true}, submitErr: []error{errors.New("connection reset")}}
+	svc := NewService(fakeWriter{}, media, &fakeStore{}, testConfig(), nil)
+	svc.BindTasks(tasks)
+	if _, err := svc.Start(context.Background(), StartRequest{OrgID: uuid.New(), TaskID: &taskID,
+		Brief: Brief{Topic: "tides", Seconds: 30}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := waitStatus(t, tasks); got != "done" {
+		t.Fatalf("status %q", got)
+	}
+	if len(media.submitted) != 2 || media.submitted[0].ID != media.submitted[1].ID {
+		t.Fatalf("expected one retry with the same id, got %+v", media.submitted)
 	}
 }

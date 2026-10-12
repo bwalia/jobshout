@@ -19,6 +19,8 @@ var (
 	ErrBusy = errors.New("the video workstation is busy")
 	// ErrNotFound: the workstation has no such job (pruned, or another host).
 	ErrNotFound = errors.New("the video workstation has no such job")
+	// ErrClaimed: another caller is collecting this finished render.
+	ErrClaimed = errors.New("another server is collecting this video")
 )
 
 // Job statuses reported by the workstation.
@@ -128,6 +130,8 @@ func (c *Client) do(ctx context.Context, timeout time.Duration, method, path str
 		return nil, fmt.Errorf("%w: %s", ErrBusy, snippet(data))
 	case resp.StatusCode == http.StatusNotFound:
 		return nil, fmt.Errorf("%w: %s", ErrNotFound, snippet(data))
+	case resp.StatusCode == http.StatusConflict:
+		return nil, fmt.Errorf("%w: %s", ErrClaimed, snippet(data))
 	case resp.StatusCode < 200 || resp.StatusCode >= 300:
 		return nil, fmt.Errorf("video: the workstation returned %d: %s", resp.StatusCode, snippet(data))
 	}
@@ -169,6 +173,14 @@ func (c *Client) Jobs(ctx context.Context) ([]Job, error) {
 		Videos []Job `json:"videos"`
 	}
 	return out.Videos, c.json(ctx, http.MethodGet, "/api/videos", nil, &out)
+}
+
+// Claim asks to be the one caller that collects a finished render, for a
+// 15-minute lease. ErrClaimed means another caller holds it.
+func (c *Client) Claim(ctx context.Context, id, holder string) error {
+	_, err := c.do(ctx, 2*time.Minute, http.MethodPost, "/api/videos/"+id+"/claim",
+		map[string]any{"holder": holder, "lease_seconds": 900})
+	return err
 }
 
 // Download fetches a finished render's MP4.

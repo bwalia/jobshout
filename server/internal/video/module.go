@@ -138,7 +138,7 @@ func BriefFromValues(v map[string]string) Brief {
 		Seconds:  seconds,
 		Format:   format,
 		Voice:    voice,
-		Style:    strings.TrimSpace(v["style"]),
+		Style:    truncate(v["style"], maxStyle),
 		Motion:   strings.TrimSpace(v["motion"]) != "stills",
 		Captions: strings.TrimSpace(v["captions"]) != "no",
 		Notes:    strings.TrimSpace(v["notes"]),
