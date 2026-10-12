@@ -12,6 +12,8 @@
 ## Rings and deploys (Ring Promoter, k3s1)
 
 - A merge to master deploys int. Ring Promoter auto-promotes int → test → acc when healthy; prod is manual and needs the production password.
+- RP's `auto_promote` on a ring means promotion *out of* it: acc on means acc → prod is automatic. Keep it off on acc for both `jobshout` and `jobshout-com` (`jobshout-com` acc had it on until 2026-10-12, so v1.0.140 reached jobshout.com prod unattended). Check with `GET /api/apps/{app}/rings`; toggle with `PUT /api/apps/{app}/rings/{ring}/auto-promote` `{"enabled":false}` — disabling needs no password, enabling into prod does.
+- `jobshout-com` shares the platform's version line: `deploy-k3s.yml` cuts the tag and calls `deploy-jobshout-com.yml`, which rebuilds only when `jobshout-com/` changed. A jobshout.com-only merge still deploys through the platform run, not a run of its own.
 - An int deploy that fails with `UPGRADE FAILED: context deadline exceeded` means a pod in the release never became Ready; `helm --wait` covers Langfuse too, not just the API. Find it with `kubectl -n int get pods | grep -v Running` before suspecting the chart. Failed int deploys stop promotion to every later ring.
 - `jobshout` uses RP's **k8sjob** deployer (a Job in `ring-exec` runs `helm upgrade`). Re-seeding the running version is a no-op; to pick up changed secrets use `POST /api/apps/jobshout/rings/{ring}/restart` with an explicit `deployments` list. `app.kubernetes.io/instance=jobshout` also matches redis/langfuse/minio — never restart by that label.
 
