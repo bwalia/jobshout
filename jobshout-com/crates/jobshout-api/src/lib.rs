@@ -6,6 +6,7 @@ mod applications;
 mod error;
 mod insights;
 mod jobs;
+mod members;
 mod profiles;
 mod showcase;
 mod state;
@@ -33,6 +34,7 @@ pub fn router(state: AppState) -> Router {
         .merge(applications::routes())
         .merge(insights::routes())
         .merge(showcase::routes())
+        .merge(members::routes())
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
         .with_state(state)

@@ -17,6 +17,8 @@ import { ShareLinks } from "@/components/insights/ShareLinks";
 import { AgentCard, AppCard, AppLogo } from "@/components/showcase/AppCard";
 import { ShowcaseReviewActions } from "@/components/showcase/ShowcaseReviewActions";
 import { StarButton } from "@/components/showcase/StarButton";
+import { FollowButton } from "@/components/FollowButton";
+import { CreatorLink } from "@/components/members/MemberCard";
 import { Badge, buttonClass, cx } from "@/components/ui";
 import { IndustryLinks } from "@/components/showcase/IndustryLinks";
 import { formatDate, isEditor, siteUrl } from "@/lib/insights";
@@ -208,7 +210,7 @@ export default async function AgentPage({ params }: Params) {
               </Badge>
             </div>
             <p className="mt-3 text-sm text-mute">
-              by <span className="font-semibold text-ink">{e.creator_display_name}</span>
+              by <CreatorLink name={e.creator_display_name} handle={e.creator_handle} />
               {e.team_name ? <> · {e.team_name}</> : null}
               {" · "}used in {e.used_in} {e.used_in === 1 ? "app" : "apps"}
             </p>
@@ -217,6 +219,13 @@ export default async function AgentPage({ params }: Params) {
         {live ? (
           <div className="flex shrink-0 flex-wrap items-start gap-2.5">
             <StarButton slug={e.slug} starred={e.starred} count={e.star_count} signedIn={Boolean(viewer)} />
+            <FollowButton
+              target={{ type: "entry", slug: e.slug }}
+              following={e.following}
+              count={e.follower_count}
+              signedIn={Boolean(viewer)}
+              returnTo={`/agents/${e.slug}`}
+            />
           </div>
         ) : null}
       </header>

@@ -7,6 +7,7 @@ const LINKS = [
   { href: "/showcase", label: "AI Showcase" },
   { href: "/agents", label: "Agents" },
   { href: "/insights", label: "Insights" },
+  { href: "/members", label: "Members" },
   { href: "/jobs", label: "Find jobs" },
   { href: "/post-job", label: "Post a job" },
   { href: "/profile", label: "Profile" },

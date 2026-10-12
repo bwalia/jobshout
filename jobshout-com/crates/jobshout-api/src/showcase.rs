@@ -6,9 +6,9 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use jobshout_domain::{
-    DomainError, Job, ShowcaseApp, ShowcaseAppInput, ShowcaseAppType, ShowcaseBuildMethod,
-    ShowcaseIndustryNode, ShowcaseKind, ShowcaseMaturity, ShowcasePricing, ShowcaseTag,
-    AGENT_CAPABILITIES,
+    DomainError, FollowState, Job, ShowcaseApp, ShowcaseAppInput, ShowcaseAppType,
+    ShowcaseBuildMethod, ShowcaseIndustryNode, ShowcaseKind, ShowcaseMaturity, ShowcasePricing,
+    ShowcaseTag, AGENT_CAPABILITIES,
 };
 use jobshout_showcase::{ListQuery, Moderation, Sort};
 use serde::{Deserialize, Serialize};
@@ -41,6 +41,10 @@ pub fn routes() -> Router<AppState> {
             put(set_industries),
         )
         .route("/api/v1/showcase/apps/{key}/star", put(star).delete(unstar))
+        .route(
+            "/api/v1/showcase/apps/{key}/follow",
+            put(follow).delete(unfollow),
+        )
 }
 
 fn err(e: DomainError) -> ApiError {
@@ -384,6 +388,7 @@ async fn create(
     Json(body): Json<ShowcaseAppInput>,
 ) -> Result<(StatusCode, Json<ShowcaseApp>), ApiError> {
     let who = signed_in(&state, &headers)?;
+    crate::members::ensure_member(&state, &who).await;
     let app = state.showcase.create(&who, body).await.map_err(err)?;
     Ok((StatusCode::CREATED, Json(app)))
 }
@@ -484,4 +489,34 @@ async fn unstar(
     Path(key): Path<String>,
 ) -> Result<Json<StarResponse>, ApiError> {
     set_star(state, headers, key, false).await
+}
+
+async fn set_follow(
+    state: AppState,
+    headers: HeaderMap,
+    slug: String,
+    on: bool,
+) -> Result<Json<FollowState>, ApiError> {
+    let who = signed_in(&state, &headers)?;
+    let follower_count = state.showcase.follow(&who, &slug, on).await.map_err(err)?;
+    Ok(Json(FollowState {
+        following: on,
+        follower_count,
+    }))
+}
+
+async fn follow(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(key): Path<String>,
+) -> Result<Json<FollowState>, ApiError> {
+    set_follow(state, headers, key, true).await
+}
+
+async fn unfollow(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(key): Path<String>,
+) -> Result<Json<FollowState>, ApiError> {
+    set_follow(state, headers, key, false).await
 }

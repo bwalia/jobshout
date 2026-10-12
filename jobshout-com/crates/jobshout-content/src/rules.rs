@@ -343,6 +343,7 @@ pub(crate) mod tests {
             transcript: String::new(),
             author_email: Some(author.into()),
             author_display_name: "A".into(),
+            author_handle: None,
             status,
             source: InsightSource::Community,
             featured: false,

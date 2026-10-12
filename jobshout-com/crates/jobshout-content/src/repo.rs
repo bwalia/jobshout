@@ -13,7 +13,8 @@ const COLUMNS: &str = r#"
     i.cover_image_url, i.cover_image_alt, i.link_url, i.media_url, i.embed_provider,
     i.embed_url, i.duration_seconds, i.transcript, i.author_email, i.author_display_name,
     i.status, i.source, i.featured, i.review_note, i.reading_minutes,
-    i.published_at, i.created_at, i.updated_at
+    i.published_at, i.created_at, i.updated_at,
+    (SELECT m.handle FROM members m WHERE m.email = lower(i.author_email)) AS author_handle
 "#;
 
 fn db(e: sqlx::Error) -> DomainError {
@@ -431,6 +432,7 @@ fn from_row(r: &sqlx::postgres::PgRow) -> Result<Insight, DomainError> {
         transcript: r.get("transcript"),
         author_email: Some(r.get("author_email")),
         author_display_name: r.get("author_display_name"),
+        author_handle: r.get("author_handle"),
         status: InsightStatus::parse(r.get::<&str, _>("status")).ok_or_else(|| bad("status"))?,
         source: InsightSource::parse(r.get::<&str, _>("source")).ok_or_else(|| bad("source"))?,
         featured: r.get("featured"),

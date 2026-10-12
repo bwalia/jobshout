@@ -417,6 +417,40 @@ impl ShowcaseService {
         self.repo.set_star(app.id, &actor.email, on).await
     }
 
+    /// Follow or unfollow an entry the viewer can see, for updates in their
+    /// feed. Returns the new follower count.
+    pub async fn follow(&self, actor: &Actor, slug: &str, on: bool) -> Result<i32, DomainError> {
+        let app = self.get_by_slug(slug, Some(actor)).await?;
+        if on && app.status != ShowcaseStatus::Published {
+            return Err(DomainError::Conflict(format!(
+                "only published {}s can be followed",
+                rules::noun(app.kind)
+            )));
+        }
+        self.repo.set_follow(app.id, &actor.email, on).await
+    }
+
+    /// A member's public, published entries of every kind, for their profile.
+    pub async fn published_by(
+        &self,
+        creator_email: &str,
+        viewer_email: Option<&str>,
+    ) -> Result<Vec<ShowcaseApp>, DomainError> {
+        let (apps, _) = self
+            .repo
+            .list(&ListQuery {
+                status: Some(ShowcaseStatus::Published),
+                public_only: true,
+                creator_email: Some(creator_email.to_string()),
+                viewer_email: viewer_email.map(str::to_string),
+                sort: Sort::Newest,
+                limit: 60,
+                ..Default::default()
+            })
+            .await?;
+        Ok(apps.into_iter().map(public).collect())
+    }
+
     /// Dev/int only: fill an empty showcase with clearly-labelled samples.
     /// Each kind seeds on its own, so an int that already has sample apps
     /// still gets sample agents, and the sample apps are linked to them.
@@ -680,6 +714,7 @@ fn record(
             jobs: Vec::new(),
             creator_email: None,
             creator_display_name: String::new(),
+            creator_handle: None,
             visibility: input.visibility.unwrap_or(ShowcaseVisibility::Public),
             status,
             verification: ShowcaseVerification::Unverified,
@@ -687,6 +722,8 @@ fn record(
             review_note: String::new(),
             star_count: 0,
             starred: false,
+            follower_count: 0,
+            following: false,
             published_at: (status == ShowcaseStatus::Published).then_some(now),
             created_at: now,
             updated_at: now,

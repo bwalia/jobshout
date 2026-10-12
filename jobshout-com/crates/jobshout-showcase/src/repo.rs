@@ -17,8 +17,9 @@ const COLUMNS: &str = r#"
     a.repo_url, a.demo_url, a.website_url, a.docs_url, a.technologies, a.ai_models, a.agents,
     a.human_oversight, a.evidence, a.team_name, a.model_provider, a.tools, a.mcp_servers,
     a.capabilities, a.industries, a.creator_email, a.creator_display_name, a.visibility, a.status,
-    a.verification, a.featured, a.review_note, a.star_count, a.published_at, a.created_at,
-    a.updated_at
+    a.verification, a.featured, a.review_note, a.star_count, a.follower_count, a.published_at,
+    a.created_at, a.updated_at,
+    (SELECT m.handle FROM members m WHERE m.email = lower(a.creator_email)) AS creator_handle
 "#;
 
 /// Public, published apps that link to `a`: directly, or (for an agent)
@@ -143,7 +144,7 @@ impl ShowcaseRepository {
         let order = order.join(", ");
         let sql = format!(
             r#"
-            SELECT {COLUMNS}, {STARRED} AS starred, {USED_IN} AS used_in,
+            SELECT {COLUMNS}, {STARRED} AS starred, {FOLLOWING} AS following, {USED_IN} AS used_in,
                    COUNT(*) OVER() AS total
             FROM showcase_apps a
             WHERE ($1::text IS NULL OR a.status = $1)
@@ -222,7 +223,7 @@ impl ShowcaseRepository {
         viewer_email: Option<&str>,
     ) -> Result<ShowcaseApp, DomainError> {
         let sql = format!(
-            "SELECT {COLUMNS}, {STARRED_1} AS starred, {USED_IN} AS used_in
+            "SELECT {COLUMNS}, {STARRED_1} AS starred, {FOLLOWING_1} AS following, {USED_IN} AS used_in
              FROM showcase_apps a WHERE a.slug = $2"
         );
         self.fetch_one(&sql, viewer_email, slug.to_string()).await
@@ -235,7 +236,7 @@ impl ShowcaseRepository {
         viewer_email: Option<&str>,
     ) -> Result<ShowcaseApp, DomainError> {
         let sql = format!(
-            "SELECT {COLUMNS}, {STARRED_1} AS starred, {USED_IN} AS used_in
+            "SELECT {COLUMNS}, {STARRED_1} AS starred, {FOLLOWING_1} AS following, {USED_IN} AS used_in
              FROM showcase_apps a WHERE a.id = $2"
         );
         self.fetch_one(&sql, viewer_email, id).await
@@ -656,6 +657,10 @@ impl ShowcaseRepository {
               industries = $32,
               featured = CASE WHEN $25 = 'published' THEN featured ELSE FALSE END,
               review_note = CASE WHEN $25 = 'pending_review' THEN '' ELSE review_note END,
+              -- A live entry edited and still live: news for its followers.
+              -- (`status` here is the value before this update.)
+              revised_at = CASE WHEN $25 = 'published' AND status = 'published'
+                                THEN NOW() ELSE revised_at END,
               updated_at = NOW()
             WHERE id = $1
             "#,
@@ -781,6 +786,42 @@ impl ShowcaseRepository {
         tx.commit().await.map_err(db)?;
         Ok(count)
     }
+
+    /// Follow or unfollow an entry and return its new follower count,
+    /// recomputed in the same transaction as stars are.
+    pub async fn set_follow(
+        &self,
+        id: ShowcaseAppId,
+        email: &str,
+        on: bool,
+    ) -> Result<i32, DomainError> {
+        let mut tx = self.pool.begin().await.map_err(db)?;
+        let change = if on {
+            "INSERT INTO showcase_follows (app_id, user_email) VALUES ($1, lower($2)) ON CONFLICT DO NOTHING"
+        } else {
+            "DELETE FROM showcase_follows WHERE app_id = $1 AND user_email = lower($2)"
+        };
+        sqlx::query(change)
+            .bind(id)
+            .bind(email)
+            .execute(&mut *tx)
+            .await
+            .map_err(db)?;
+        let count: i32 = sqlx::query_scalar(
+            r#"
+            UPDATE showcase_apps
+            SET follower_count = (SELECT COUNT(*) FROM showcase_follows WHERE app_id = $1)
+            WHERE id = $1
+            RETURNING follower_count
+            "#,
+        )
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db)?;
+        tx.commit().await.map_err(db)?;
+        Ok(count)
+    }
 }
 
 async fn set_job_links(
@@ -838,6 +879,12 @@ const STARRED: &str = "($12::text IS NOT NULL AND EXISTS (
 /// The same for single-entry lookups, where the viewer is parameter 1.
 const STARRED_1: &str = "($1::text IS NOT NULL AND EXISTS (
     SELECT 1 FROM showcase_stars s WHERE s.app_id = a.id AND s.user_email = lower($1)))";
+/// `following` for list queries; the viewer is bind parameter 12.
+const FOLLOWING: &str = "($12::text IS NOT NULL AND EXISTS (
+    SELECT 1 FROM showcase_follows f WHERE f.app_id = a.id AND f.user_email = lower($12)))";
+/// The same for single-entry lookups, where the viewer is parameter 1.
+const FOLLOWING_1: &str = "($1::text IS NOT NULL AND EXISTS (
+    SELECT 1 FROM showcase_follows f WHERE f.app_id = a.id AND f.user_email = lower($1)))";
 
 fn from_row(r: &sqlx::postgres::PgRow) -> Result<ShowcaseApp, DomainError> {
     let bad = |what: &str| DomainError::Other(anyhow::anyhow!("invalid {what} in showcase_apps"));
@@ -887,6 +934,7 @@ fn from_row(r: &sqlx::postgres::PgRow) -> Result<ShowcaseApp, DomainError> {
         jobs: Vec::new(),
         creator_email: Some(r.get("creator_email")),
         creator_display_name: r.get("creator_display_name"),
+        creator_handle: r.get("creator_handle"),
         visibility: ShowcaseVisibility::parse(text("visibility"))
             .ok_or_else(|| bad("visibility"))?,
         status: ShowcaseStatus::parse(text("status")).ok_or_else(|| bad("status"))?,
@@ -896,6 +944,8 @@ fn from_row(r: &sqlx::postgres::PgRow) -> Result<ShowcaseApp, DomainError> {
         review_note: r.get("review_note"),
         star_count: r.get("star_count"),
         starred: r.get("starred"),
+        follower_count: r.get("follower_count"),
+        following: r.get("following"),
         published_at: r.get("published_at"),
         created_at: r.get("created_at"),
         updated_at: r.get("updated_at"),

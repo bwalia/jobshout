@@ -249,6 +249,8 @@ pub struct ShowcaseApp {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub creator_email: Option<String>,
     pub creator_display_name: String,
+    /// The creator's member handle (`/members/{handle}`); None until they have one.
+    pub creator_handle: Option<String>,
     pub visibility: ShowcaseVisibility,
     pub status: ShowcaseStatus,
     pub verification: ShowcaseVerification,
@@ -257,6 +259,9 @@ pub struct ShowcaseApp {
     pub star_count: i32,
     /// Whether the viewer has starred it; false for anonymous viewers.
     pub starred: bool,
+    pub follower_count: i32,
+    /// Whether the viewer follows it for updates; false for anonymous viewers.
+    pub following: bool,
     pub published_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,

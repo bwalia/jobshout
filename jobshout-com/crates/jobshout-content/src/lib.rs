@@ -164,6 +164,20 @@ impl InsightService {
         Ok(items)
     }
 
+    /// A member's published items, for their profile.
+    pub async fn published_by(&self, author_email: &str) -> Result<Vec<Insight>, DomainError> {
+        let (items, _) = self
+            .repo
+            .list(&ListQuery {
+                status: Some(InsightStatus::Published),
+                author_email: Some(author_email.to_string()),
+                limit: 60,
+                ..Default::default()
+            })
+            .await?;
+        Ok(items.into_iter().map(public).collect())
+    }
+
     pub async fn list_mine(&self, actor: &Actor) -> Result<Vec<Insight>, DomainError> {
         let (items, _) = self
             .repo
