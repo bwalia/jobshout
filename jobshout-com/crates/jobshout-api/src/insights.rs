@@ -336,6 +336,7 @@ async fn create(
     Json(body): Json<InsightInput>,
 ) -> Result<(StatusCode, Json<Insight>), ApiError> {
     let who = signed_in(&state, &headers)?;
+    crate::members::ensure_member(&state, &who).await;
     let item = state.insights.create(&who, body).await.map_err(err)?;
     Ok((StatusCode::CREATED, Json(item)))
 }

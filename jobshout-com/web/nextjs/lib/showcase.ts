@@ -246,6 +246,8 @@ export interface ShowcaseApp {
   jobs: Job[];
   creator_email?: string;
   creator_display_name: string;
+  /** The creator's member handle (/members/{handle}); null until they have one. */
+  creator_handle?: string | null;
   visibility: Visibility;
   status: AppStatus;
   verification: Verification;
@@ -253,6 +255,9 @@ export interface ShowcaseApp {
   review_note: string;
   star_count: number;
   starred: boolean;
+  follower_count: number;
+  /** Whether the viewer follows it for updates. */
+  following: boolean;
   published_at?: string | null;
   created_at: string;
   updated_at: string;
@@ -265,6 +270,9 @@ export type ShowcaseAppInput = Omit<
   | "description_html"
   | "creator_email"
   | "creator_display_name"
+  | "creator_handle"
+  | "follower_count"
+  | "following"
   | "status"
   | "verification"
   | "featured"

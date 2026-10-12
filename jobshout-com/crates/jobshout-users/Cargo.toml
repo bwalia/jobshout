@@ -1,8 +1,20 @@
 [package]
 name = "jobshout-users"
-description = "User accounts"
+description = "Members and follows: public profiles, following, and the following feed"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
+anyhow = { workspace = true }
+chrono = { workspace = true }
+jobshout-content = { path = "../jobshout-content" }
+jobshout-domain = { path = "../jobshout-domain" }
+sqlx = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+jobshout-showcase = { path = "../jobshout-showcase" }
+jobshout-storage = { path = "../jobshout-storage" }
+tokio = { workspace = true }

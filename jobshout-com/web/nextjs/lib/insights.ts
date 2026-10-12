@@ -57,6 +57,8 @@ export interface Insight {
   transcript: string;
   author_email?: string;
   author_display_name: string;
+  /** The author's member handle (/members/{handle}); null until they have one. */
+  author_handle?: string | null;
   status: InsightStatus;
   source: InsightSource;
   featured: boolean;

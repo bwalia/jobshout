@@ -22,6 +22,8 @@ import { AppLogo, AppRow, BuildBadge, MaturityBadge } from "@/components/showcas
 import { IndustryLinks, industryAudience } from "@/components/showcase/IndustryLinks";
 import { ShowcaseReviewActions } from "@/components/showcase/ShowcaseReviewActions";
 import { StarButton } from "@/components/showcase/StarButton";
+import { FollowButton } from "@/components/FollowButton";
+import { CreatorLink } from "@/components/members/MemberCard";
 import { Badge, buttonClass, cx } from "@/components/ui";
 import { listJobs, type Job } from "@/lib/api";
 import { jobCategory } from "@/lib/format";
@@ -347,7 +349,7 @@ export default async function ShowcaseAppPage({ params }: Params) {
               </Badge>
             </div>
             <p className="mt-3 text-sm text-mute">
-              by <span className="font-semibold text-ink">{app.creator_display_name}</span>
+              by <CreatorLink name={app.creator_display_name} handle={app.creator_handle} />
               {app.team_name ? <> · {app.team_name}</> : null}
             </p>
           </div>
@@ -355,6 +357,13 @@ export default async function ShowcaseAppPage({ params }: Params) {
         {live ? (
           <div className="flex shrink-0 flex-wrap items-start gap-2.5">
             <StarButton slug={app.slug} starred={app.starred} count={app.star_count} signedIn={Boolean(viewer)} />
+            <FollowButton
+              target={{ type: "entry", slug: app.slug }}
+              following={app.following}
+              count={app.follower_count}
+              signedIn={Boolean(viewer)}
+              returnTo={`/showcase/${app.slug}`}
+            />
           </div>
         ) : null}
       </header>

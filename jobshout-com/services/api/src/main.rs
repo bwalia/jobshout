@@ -5,6 +5,7 @@ use jobshout_candidates::CandidateService;
 use jobshout_content::InsightService;
 use jobshout_jobs::{seed_organisation_id, JobService};
 use jobshout_showcase::ShowcaseService;
+use jobshout_users::MemberService;
 use std::net::SocketAddr;
 
 #[tokio::main]
@@ -48,6 +49,14 @@ async fn main() -> anyhow::Result<()> {
             tracing::info!(count = n, "seeded sample showcase apps");
         }
     }
+    // After seeding, so sample creators get profiles too. Profiles are a
+    // nicety: a failure here must not keep the site down.
+    let members = MemberService::new(pool.clone());
+    match members.backfill().await {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(count = n, "created members for existing creators"),
+        Err(e) => tracing::warn!(error = ?e, "could not backfill members"),
+    }
     let site_url = std::env::var("PUBLIC_SITE_URL")
         .ok()
         .filter(|s| !s.trim().is_empty())
@@ -77,6 +86,7 @@ async fn main() -> anyhow::Result<()> {
         applications: ApplicationService::new(pool),
         insights,
         showcase,
+        members,
         site_url: site_url.trim_end_matches('/').into(),
         internal_token: internal_token.map(Into::into),
     };

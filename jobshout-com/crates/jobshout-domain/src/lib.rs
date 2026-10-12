@@ -40,8 +40,10 @@ macro_rules! string_enum {
 }
 
 mod insights;
+mod members;
 mod showcase;
 pub use insights::*;
+pub use members::*;
 pub use showcase::*;
 
 pub type OrganisationId = Uuid;

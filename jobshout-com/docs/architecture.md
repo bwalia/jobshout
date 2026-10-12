@@ -82,6 +82,25 @@ Implemented:
   off entries without an edit. Entry pages show "Open roles", job pages show "What
   you'd work on", and `collection=hiring` lists entries with at least one open role.
 
+- **Members and following** (`/members`, `/members/{handle}`, `/following`), in
+  `jobshout-users`. A `members` row is the public face of an account: a handle (from the
+  sign-in name, never the email), a name, a one-line headline and a follower count. The
+  email is the private join key to `creator_email` / `author_email` and is never
+  returned. Members are created when someone signs in to follow or publishes, and
+  backfilled at API startup for everyone who already has public work (platform agents
+  such as the Article Writer included, flagged `is_agent`).
+  - Follows: `member_follows` (people and platform agents) and `showcase_follows` (any
+    published app, agent or team). Counts are recomputed in the follow transaction, as
+    stars are. Nobody can follow themselves.
+  - Feed (`GET /api/v1/following/feed`): read on demand from the showcase and Insights
+    tables, 90 days back, nothing written at publish time. Followed members' new public
+    entries and Insights; followed entries revised while live (`revised_at`, set only by
+    a creator's edit, not by moderation or classification); and new public apps or teams
+    that link a followed agent or team. A followed member's new app that also uses a
+    followed agent shows once.
+  - Profiles list only public, published work. Bylines on showcase, agent and Insight
+    pages link to them. There are no notifications yet: the feed is pull-only.
+
 Deferred: full auth identity linking, employer-side application review UI, MCP, agents
 runtime, interviews, iOS app screens, billing.
 

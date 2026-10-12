@@ -8,6 +8,7 @@ import { MediaPlayer, Transcript } from "@/components/insights/MediaPlayer";
 import { NewsletterSignup } from "@/components/insights/NewsletterSignup";
 import { ReviewActions } from "@/components/insights/ReviewActions";
 import { ShareLinks } from "@/components/insights/ShareLinks";
+import { CreatorLink } from "@/components/members/MemberCard";
 import { Badge, buttonClass } from "@/components/ui";
 import { listJobs, type Job } from "@/lib/api";
 import { jobCategory } from "@/lib/format";
@@ -197,7 +198,7 @@ export default async function InsightPage({ params }: Params) {
             <div className="mt-6 flex flex-wrap items-center justify-between gap-4 border-y border-line py-4">
               <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-sm text-mute">
                 {item.author_display_name ? (
-                  <span className="font-semibold text-ink">{item.author_display_name}</span>
+                  <CreatorLink name={item.author_display_name} handle={item.author_handle} />
                 ) : null}
                 {item.published_at ? (
                   <>

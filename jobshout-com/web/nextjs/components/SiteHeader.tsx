@@ -5,7 +5,7 @@ import { MobileMenu } from "@/components/MobileMenu";
 import { NavLinks } from "@/components/NavLinks";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { buttonClass } from "@/components/ui";
-import { UserIcon } from "@/components/icons";
+import { UserCheckIcon, UserIcon } from "@/components/icons";
 import { authOptions } from "@/lib/auth";
 
 export async function SiteHeader() {
@@ -25,6 +25,13 @@ export async function SiteHeader() {
     </Link>
   );
 
+  const following = session ? (
+    <Link href="/following" className={buttonClass("ghost", "sm", "w-full xl:w-auto")}>
+      <UserCheckIcon className="h-4 w-4" />
+      Following
+    </Link>
+  ) : null;
+
   return (
     <header className="sticky top-0 z-40 border-b border-line bg-bg/85 backdrop-blur-xl">
       <div className="mx-auto flex h-[4.25rem] max-w-board items-center gap-4 px-5 sm:px-8">
@@ -42,11 +49,15 @@ export async function SiteHeader() {
             </span>
           ) : null}
           <ThemeToggle />
+          {following ? <div className="hidden xl:block">{following}</div> : null}
           <div className="hidden xl:block">{authControl}</div>
           <Link href="/post-job" className={buttonClass("primary", "sm", "hidden sm:inline-flex")}>
             Post a job
           </Link>
-          <MobileMenu>{authControl}</MobileMenu>
+          <MobileMenu>
+            {following}
+            {authControl}
+          </MobileMenu>
         </div>
       </div>
     </header>

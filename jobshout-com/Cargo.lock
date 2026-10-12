@@ -843,6 +843,7 @@ dependencies = [
  "jobshout-jobs",
  "jobshout-matching",
  "jobshout-showcase",
+ "jobshout-users",
  "serde",
  "serde_json",
  "tower-http",
@@ -912,6 +913,7 @@ dependencies = [
  "jobshout-observability",
  "jobshout-showcase",
  "jobshout-storage",
+ "jobshout-users",
  "tokio",
  "tracing",
 ]
@@ -1114,6 +1116,18 @@ version = "0.1.0"
 [[package]]
 name = "jobshout-users"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "jobshout-content",
+ "jobshout-domain",
+ "jobshout-showcase",
+ "jobshout-storage",
+ "sqlx",
+ "tokio",
+ "tracing",
+ "uuid",
+]
 
 [[package]]
 name = "jobshout-workflows"

@@ -74,6 +74,8 @@ pub struct Insight {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub author_email: Option<String>,
     pub author_display_name: String,
+    /// The author's member handle (`/members/{handle}`); None until they have one.
+    pub author_handle: Option<String>,
     pub status: InsightStatus,
     pub source: InsightSource,
     pub featured: bool,

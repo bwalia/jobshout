@@ -5,6 +5,7 @@ use jobshout_candidates::CandidateService;
 use jobshout_content::InsightService;
 use jobshout_jobs::JobService;
 use jobshout_showcase::ShowcaseService;
+use jobshout_users::MemberService;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -13,6 +14,7 @@ pub struct AppState {
     pub applications: ApplicationService,
     pub insights: InsightService,
     pub showcase: ShowcaseService,
+    pub members: MemberService,
     /// Public origin used in feed links and newsletter confirmation links.
     pub site_url: Arc<str>,
     /// Identity headers are only trusted alongside this token. `None` means

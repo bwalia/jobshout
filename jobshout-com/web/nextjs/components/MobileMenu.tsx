@@ -56,7 +56,7 @@ export function MobileMenu({ children }: { children?: React.ReactNode }) {
             <nav className="flex flex-col gap-1">
               <MobileNavLinks onNavigate={() => setOpen(false)} />
             </nav>
-            <div className="mt-3 border-t border-line pt-3">{children}</div>
+            <div className="mt-3 flex flex-col gap-2 border-t border-line pt-3">{children}</div>
           </div>
         </div>
       ) : null}
