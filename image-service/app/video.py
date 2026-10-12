@@ -165,10 +165,13 @@ def caption_style(portrait: bool) -> str:
     # SRT is rendered on a 384x288 canvas scaled to the frame's height, so the
     # same number is far larger relative to a portrait frame's width.
     size = 11 if portrait else 17
+    # Shorts, Reels and TikTok lay their own buttons and caption over the
+    # bottom fifth of a portrait video; captions sit above that.
+    margin = 60 if portrait else 26
     return (
         f"FontName=Helvetica,FontSize={size},Bold=1,PrimaryColour=&H00FFFFFF,"
         "OutlineColour=&H00000000,BackColour=&H80000000,BorderStyle=1,Outline=1.6,"
-        "Shadow=0,Alignment=2,MarginV=26"
+        f"Shadow=0,Alignment=2,MarginV={margin}"
     )
 
 

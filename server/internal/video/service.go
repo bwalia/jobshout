@@ -112,6 +112,9 @@ func (s *Service) Start(ctx context.Context, req StartRequest) (uuid.UUID, error
 	checkCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	caps, err := s.media.Capabilities(checkCtx)
 	cancel()
+	if errors.Is(err, ErrNotFound) {
+		return uuid.Nil, errors.New("the workstation image service has no video support yet — deploy image-service from this release there")
+	}
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("the video workstation is not reachable: %w", err)
 	}
