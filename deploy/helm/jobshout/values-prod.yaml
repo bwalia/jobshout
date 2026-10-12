@@ -79,10 +79,19 @@ extraSecretRefs:
   - jobshout-google
   # jobshout-cms: OPSAPI_API_KEY for the Workstation CMS below. Minted with
   # scripts/opsapi-api-key.sh against https://opsapi.workstation.co.uk
-  # (namespace workstation, scope cms create/update/read) and created by hand:
-  #   kubectl -n prod create secret generic jobshout-cms --from-literal=OPSAPI_API_KEY=...
-  # Optional: until it exists the Article Writer writes but files nothing.
+  # (namespace workstation, scope cms create/update/read) and stored in
+  # WSLVault at kv/jobshout/prod/cms (field OPSAPI_API_KEY); ESO syncs it via
+  # vaultSecrets below. Optional: until it exists the Article Writer writes
+  # but files nothing.
   - jobshout-cms
+
+# ESO copies kv/jobshout/prod/cms into the jobshout-cms Secret. To rotate,
+# update the Vault value, wait a minute for the sync, then restart
+# jobshout-api through Ring Promoter.
+vaultSecrets:
+  - name: jobshout-cms
+    store: wslvault-backend
+    key: jobshout/prod/cms
 
 # Workstation CMS — articles reach www.workstation.co.uk through it, as int's
 # reach int.workstation.co.uk through int-opsapi. Drafts only: going live is
