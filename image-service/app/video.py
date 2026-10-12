@@ -266,10 +266,15 @@ class _Render:
             out = self.dir / f"voice_{i:02d}"
             shutil.rmtree(out, ignore_errors=True)
             out.mkdir()
+            text = shot["narration"]
+            if self.voice.startswith("h"):
+                # Kokoro's Hindi front end (espeak) does not chunk, and
+                # truncates long input; one sentence per line it handles.
+                text = re.sub(r"([।.!?])\s+", "\\1\n", text)
             said = _run([
                 config.VIDEO_TTS_BIN, "--model", config.VIDEO_TTS_MODEL,
                 "--voice", self.voice, "--lang_code", self.voice[0],
-                "--text", shot["narration"], "--output_path", str(out),
+                "--text", text, "--output_path", str(out),
                 "--file_prefix", "voice", "--audio_format", "wav", "--join_audio",
             ], timeout=600)
             wavs = sorted(out.glob("*.wav"))
