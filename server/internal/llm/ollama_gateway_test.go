@@ -164,3 +164,17 @@ func TestBusyRetryWaitDoubles(t *testing.T) {
 		}
 	}
 }
+
+// With a fallback chain waiting, a busy host is not retried: the chain answers.
+func TestOllamaGenerate_FailsFastWhenFallbackAvailable(t *testing.T) {
+	srv, calls := busyServer(t, 99)
+	_, err := gatewayClient(srv.URL).Generate(WithFallbackAvailable(context.Background()), GenerateRequest{
+		Messages: []Message{{Role: RoleUser, Content: "write"}},
+	})
+	if err == nil {
+		t.Fatal("want the busy error")
+	}
+	if got := calls.Load(); got != 1 {
+		t.Errorf("requests = %d, want 1", got)
+	}
+}

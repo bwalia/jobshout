@@ -13,6 +13,10 @@ import (
 // OpenAIClient calls the OpenAI chat completions API (or any compatible
 // endpoint such as LM Studio, vLLM, or Groq).
 type OpenAIClient struct {
+	// Name is the provider this client reports as (ProviderName); empty is
+	// "openai". OpenAI-compatible providers — Mistral, xAI Grok — share this
+	// client and are told apart by it in usage and benchmarks.
+	Name         string
 	BaseURL      string
 	APIKey       string
 	DefaultModel string
@@ -32,7 +36,20 @@ func NewOpenAIClient(baseURL, apiKey, defaultModel string) *OpenAIClient {
 	}
 }
 
-func (c *OpenAIClient) ProviderName() string { return "openai" }
+// NewOpenAICompatibleClient is an OpenAIClient for another provider serving the
+// OpenAI chat-completions API, reporting itself as name.
+func NewOpenAICompatibleClient(name, baseURL, apiKey, defaultModel string) *OpenAIClient {
+	c := NewOpenAIClient(baseURL, apiKey, defaultModel)
+	c.Name = name
+	return c
+}
+
+func (c *OpenAIClient) ProviderName() string {
+	if c.Name != "" {
+		return c.Name
+	}
+	return "openai"
+}
 
 // ModelName is the model a call without an explicit Model will use.
 func (c *OpenAIClient) ModelName() string { return c.DefaultModel }
