@@ -106,3 +106,61 @@ func TestOllamaGenerate_GatewayRetryStopsOnCancel(t *testing.T) {
 		t.Errorf("requests = %d, want 1", got)
 	}
 }
+
+// busyServer answers the first fail requests as Ollama does when its queue of
+// pending requests is full, then a reply.
+func busyServer(t *testing.T, fail int) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if int(calls.Add(1)) <= fail {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":"server busy, please try again. maximum pending requests exceeded"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"draft"},"done":true}` + "\n"))
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &calls
+}
+
+// A full queue on the shared host drains; the draft that met it on int
+// (run dc532afb) needed more than one quick retry.
+func TestOllamaGenerate_WaitsOutServerBusy(t *testing.T) {
+	srv, calls := busyServer(t, ollamaBusyAttempts-1)
+	resp, err := gatewayClient(srv.URL).Generate(context.Background(), GenerateRequest{
+		Messages: []Message{{Role: RoleUser, Content: "write"}},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if resp.Content != "draft" {
+		t.Errorf("content = %q", resp.Content)
+	}
+	if got := calls.Load(); got != ollamaBusyAttempts {
+		t.Errorf("requests = %d, want %d", got, ollamaBusyAttempts)
+	}
+}
+
+func TestOllamaGenerate_GivesUpWhenAlwaysBusy(t *testing.T) {
+	srv, calls := busyServer(t, 99)
+	_, err := gatewayClient(srv.URL).Generate(context.Background(), GenerateRequest{
+		Messages: []Message{{Role: RoleUser, Content: "write"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "server busy") {
+		t.Fatalf("err = %v, want the server-busy error", err)
+	}
+	if got := calls.Load(); got != ollamaBusyAttempts {
+		t.Errorf("requests = %d, want %d", got, ollamaBusyAttempts)
+	}
+}
+
+func TestBusyRetryWaitDoubles(t *testing.T) {
+	c := NewOllamaClient("http://x", "m")
+	for try, want := range map[int]time.Duration{1: 30 * time.Second, 2: time.Minute, 3: 2 * time.Minute} {
+		if got := c.busyRetryWait(try); got != want {
+			t.Errorf("try %d: wait = %s, want %s", try, got, want)
+		}
+	}
+}
