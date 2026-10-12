@@ -30,7 +30,12 @@ mkdir -p "$TOOLS"
 
 echo "── narration (mlx-audio + Kokoro)"
 [[ -x "$TOOLS/tts/.venv/bin/python" ]] || uv venv --quiet --python 3.12 "$TOOLS/tts/.venv"
-uv pip install --quiet --python "$TOOLS/tts/.venv/bin/python" "mlx-audio==0.5.8" "misaki[en]==0.9.4"
+uv pip install --quiet --python "$TOOLS/tts/.venv/bin/python" "mlx-audio==0.5.8" "misaki[en]==0.9.4" \
+  "en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"
+# Installed above rather than left to misaki, which installs a missing spaCy
+# model on first use with a bare `uv pip install` — into whatever virtualenv
+# the current directory implies, which here is none.
+export VIRTUAL_ENV="$TOOLS/tts/.venv"
 # One throwaway line per offered voice (video.VOICES) downloads that voice and
 # its language's text front end now. Kokoro fetches each voice on first use,
 # and renders run offline, so a voice not warmed here fails mid-render.
