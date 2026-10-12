@@ -27,6 +27,10 @@ const URLPrefix = "/api/v1/images/file/"
 type Store interface {
 	// Put stores png and returns the URL it will be served from.
 	Put(ctx context.Context, orgID uuid.UUID, png []byte) (string, error)
+	// PutFile stores any generated media (a rendered video) the same way; ext
+	// becomes the key's extension, which is what the file route serves its
+	// content type from.
+	PutFile(ctx context.Context, orgID uuid.UUID, data []byte, ext, contentType string) (string, error)
 	// Get returns a stored image by the object key embedded in its URL.
 	Get(ctx context.Context, key string) ([]byte, error)
 }
@@ -78,22 +82,31 @@ func (s *MinIOStore) ensureBucket(ctx context.Context) error {
 // bucket that grows for years from becoming one flat directory of a million
 // objects.
 func (s *MinIOStore) Put(ctx context.Context, orgID uuid.UUID, png []byte) (string, error) {
-	if len(png) == 0 {
-		return "", fmt.Errorf("imagestore: refusing to store an empty image")
+	return s.PutFile(ctx, orgID, png, "png", "image/png")
+}
+
+// PutFile implements Store.
+func (s *MinIOStore) PutFile(ctx context.Context, orgID uuid.UUID, data []byte, ext, contentType string) (string, error) {
+	if len(data) == 0 {
+		return "", fmt.Errorf("imagestore: refusing to store an empty file")
 	}
 	if err := s.ensureBucket(ctx); err != nil {
 		return "", err
 	}
 
-	key := fmt.Sprintf("%s/%s/%s.png", orgID, time.Now().UTC().Format("2006/01"), uuid.New())
+	key := newKey(orgID, ext)
 
-	_, err := s.client.PutObject(ctx, s.bucket, key, bytes.NewReader(png), int64(len(png)),
-		minio.PutObjectOptions{ContentType: "image/png"})
+	_, err := s.client.PutObject(ctx, s.bucket, key, bytes.NewReader(data), int64(len(data)),
+		minio.PutObjectOptions{ContentType: contentType})
 	if err != nil {
-		return "", fmt.Errorf("imagestore: store image: %w", err)
+		return "", fmt.Errorf("imagestore: store %s: %w", ext, err)
 	}
 
 	return URLPrefix + key, nil
+}
+
+func newKey(orgID uuid.UUID, ext string) string {
+	return fmt.Sprintf("%s/%s/%s.%s", orgID, time.Now().UTC().Format("2006/01"), uuid.New(), ext)
 }
 
 // Get implements Store.

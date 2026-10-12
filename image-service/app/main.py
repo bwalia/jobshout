@@ -6,15 +6,17 @@ See README.md for why this runs on the workstation rather than in the cluster.
 import asyncio
 import logging
 import random
+from typing import Literal
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Response, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 # models is needed for default_steps below. It is safe to call from the request
 # thread — unlike catalogue(), it derives the count from the model name and never
 # touches mflux or the Hugging Face cache, so it does not belong on the dedicated
 # MLX thread that the rest of this module now routes work to.
-from app import config, models
+from app import config, models, video
 from app.auth import require_auth
 from app.generator import GenerationBusy, UnknownModel, generator
 
@@ -178,3 +180,79 @@ async def generate(req: GenerateRequest, caller: str = Depends(require_auth)):
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"generation failed: {exc}")
 
     return GenerateResponse(**vars(result))
+
+
+# ─── Video ───────────────────────────────────────────────────────────────────
+# Same process as images on purpose: one GPU, one lock, one gateway host. See
+# video.py for the pipeline.
+
+
+class VideoShot(BaseModel):
+    narration: str = Field(min_length=1, max_length=800)
+    visual: str = Field(min_length=1, max_length=2000)
+
+
+class VideoRequest(BaseModel):
+    # Caller-chosen, so a retried submission after a dropped response finds the
+    # job it already started instead of rendering the video twice.
+    id: str = ""
+    title: str = Field(default="", max_length=200)
+    shots: list[VideoShot] = Field(min_length=1)
+    format: Literal["landscape", "portrait"] = "landscape"
+    voice: str = ""
+    style: str = Field(default="", max_length=500)
+    motion: bool = True
+    captions: bool = True
+    seed: int = -1
+    # Opaque to this service and handed back on every read: lets a caller that
+    # restarted find which of its tasks a job belongs to.
+    ref: dict[str, str] = Field(default_factory=dict)
+
+
+@app.on_event("startup")
+async def start_video_worker() -> None:
+    video.renderer.start()
+
+
+@app.get("/api/videos/capabilities")
+async def video_capabilities(caller: str = Depends(require_auth)):
+    return video.capabilities()
+
+
+@app.post("/api/videos", status_code=status.HTTP_202_ACCEPTED)
+async def submit_video(req: VideoRequest, response: Response, caller: str = Depends(require_auth)):
+    if req.id and not video.valid_id(req.id):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "id must be 8–64 letters, digits or dashes")
+    if req.voice and not video.valid_voice(req.voice):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"unknown voice {req.voice!r}")
+    if len(req.shots) > config.VIDEO_MAX_SHOTS:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"at most {config.VIDEO_MAX_SHOTS} shots per video")
+    try:
+        job, created = video.renderer.submit(req.model_dump())
+    except video.QueueFull as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc), headers={"Retry-After": "300"})
+    if not created:
+        response.status_code = status.HTTP_200_OK
+    logger.info("video %s: caller=%s shots=%d created=%s", job["id"], caller, len(req.shots), created)
+    return video.public(job)
+
+
+@app.get("/api/videos")
+async def list_videos(caller: str = Depends(require_auth)):
+    return {"videos": [video.public(j) for j in video.renderer.list()]}
+
+
+@app.get("/api/videos/{job_id}")
+async def get_video(job_id: str, caller: str = Depends(require_auth)):
+    job = video.renderer.get(job_id)
+    if job is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no such video")
+    return video.public(job)
+
+
+@app.get("/api/videos/{job_id}/file")
+async def video_file(job_id: str, caller: str = Depends(require_auth)):
+    path = video.renderer.file(job_id)
+    if path is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "video is not ready")
+    return FileResponse(path, media_type="video/mp4", filename=f"{job_id}.mp4")

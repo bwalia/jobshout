@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/base64"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -185,12 +187,19 @@ func (h *ImageHandler) Serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "image/png")
+	contentType := "image/png"
+	if strings.HasSuffix(key, ".mp4") {
+		// Rendered videos (the Video Producer) share this store and route.
+		contentType = "video/mp4"
+	}
+	w.Header().Set("Content-Type", contentType)
 	// Generated images never change: the key contains a UUID, so a new image is
 	// a new key. Caching hard is safe and keeps an article's cover off the
 	// storage backend on every page view.
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-	_, _ = w.Write(data)
+	// ServeContent, not Write: it answers Range requests, without which Safari
+	// will not play a video at all and no browser can seek one.
+	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(data))
 }
 
 // orgFromRequest resolves the calling organization, answering the request with
