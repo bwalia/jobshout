@@ -74,7 +74,7 @@ export default function SessionsPage() {
     <div className="mx-auto max-w-5xl space-y-8">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Session Manager</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Model sessions</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Manage conversation sessions, copy context across LLMs, and save snapshots.
           </p>
@@ -86,6 +86,18 @@ export default function SessionsPage() {
           {showForm ? "Cancel" : "New Session"}
         </button>
       </div>
+
+      {/* Nothing else in the app reads or writes these yet, so say so rather
+          than let the page imply chats or agent runs end up here. */}
+      <p className="rounded-xl border border-border bg-muted/40 p-4 text-sm text-muted-foreground">
+        A model session is a saved bundle of conversation context (messages and
+        token count) tied to a model provider. You can copy context from one
+        session into another — for example when moving work to a different
+        model — and snapshot a session to restore it later. Sessions are kept
+        separate from your chats and agent runs: neither reads from nor writes
+        to a session yet, so a new session starts empty and fills only by
+        copying context or restoring a snapshot.
+      </p>
 
       {/* Create form */}
       {showForm && (
