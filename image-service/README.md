@@ -28,6 +28,7 @@ already reach one Ollama.
 | `POST` | `/api/videos`  | yes  | Queue a narrated video render. See [Video](#video). |
 | `GET`  | `/api/videos[/{id}[/file]]` | yes | List renders, read one, download its MP4. |
 | `GET`  | `/api/videos/capabilities` | yes | Which video stages are installed. |
+| `DELETE` | `/api/videos/{id}` | yes | Cancel a render: queued at once, running at its next step. |
 
 `/health` is deliberately unauthenticated and deliberately does not touch the
 model: a health check that can fail for two different reasons cannot be used to

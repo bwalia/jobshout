@@ -256,6 +256,16 @@ async def get_video(job_id: str, caller: str = Depends(require_auth)):
     return video.public(job)
 
 
+@app.delete("/api/videos/{job_id}")
+async def cancel_video(job_id: str, caller: str = Depends(require_auth)):
+    """Cancel a render (queued: at once; running: at its next step)."""
+    job = video.renderer.cancel(job_id)
+    if job is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no such video")
+    logger.info("video %s: cancel requested by %s (status %s)", job_id, caller, job["status"])
+    return video.public(job)
+
+
 class ClaimRequest(BaseModel):
     holder: str = Field(min_length=1, max_length=100)
     lease_seconds: float = Field(default=900, gt=0, le=3600)

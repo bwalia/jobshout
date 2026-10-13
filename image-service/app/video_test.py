@@ -112,6 +112,35 @@ class QueueTests(unittest.TestCase):
         r._update(job, claim_until=time.time() - 1)
         self.assertTrue(r.claim("job-claim001", "b", 60), "an expired lease is up for grabs")
 
+    def test_cancelling_a_queued_job_means_it_never_renders(self) -> None:
+        r = video.VideoRenderer(self.root)
+        r.submit(request("job-cancel01"))
+        self.assertEqual(r.cancel("job-cancel01")["status"], video.CANCELLED)
+        self.assertIsNone(r.cancel("job-unknown1"))
+        # The worker skips anything no longer queued; the queue limit no longer counts it.
+        waiting = [j for j in r.list() if j["status"] in (video.QUEUED, video.RUNNING)]
+        self.assertEqual(waiting, [])
+
+    def test_a_running_job_is_flagged_and_stops_at_its_next_step(self) -> None:
+        r = video.VideoRenderer(self.root)
+        job, _ = r.submit(request("job-cancel02"))
+        r._update(job, status=video.RUNNING)
+        r.cancel("job-cancel02")
+        self.assertTrue(job["cancel_requested"])
+        render = video._Render(job, self.root / "job-cancel02", lambda **kw: None)
+        with self.assertRaises(video.Cancelled):
+            render._progress(0, 1, 0, "narration", "x")
+
+    def test_a_cancel_survives_a_restart(self) -> None:
+        r = video.VideoRenderer(self.root)
+        job, _ = r.submit(request("job-cancel03"))
+        r._update(job, status=video.RUNNING, attempts=1)
+        r.cancel("job-cancel03")
+        after = video.VideoRenderer(self.root)
+        after._load()
+        self.assertEqual(after.get("job-cancel03")["status"], video.CANCELLED)
+        self.assertTrue(after._queue.empty(), "a cancelled job must not be requeued")
+
     def test_the_api_view_hides_the_request(self) -> None:
         job, _ = video.VideoRenderer(self.root).submit(request("job-public01"))
         self.assertNotIn("request", video.public(job))

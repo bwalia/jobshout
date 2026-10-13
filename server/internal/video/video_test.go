@@ -128,6 +128,7 @@ type fakeMedia struct {
 	statuses  []string
 	claimErr  error
 	submitErr []error
+	cancelled []string
 }
 
 func (m *fakeMedia) Capabilities(context.Context) (*Capabilities, error) { return &m.caps, nil }
@@ -157,6 +158,13 @@ func (m *fakeMedia) Job(_ context.Context, id string) (*Job, error) {
 }
 
 func (m *fakeMedia) Claim(context.Context, string, string) error { return m.claimErr }
+
+func (m *fakeMedia) Cancel(_ context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.cancelled = append(m.cancelled, id)
+	return nil
+}
 
 func (m *fakeMedia) Jobs(context.Context) ([]Job, error) { return m.jobs, nil }
 
@@ -261,6 +269,37 @@ func TestARunWritesRendersStoresAndClosesTheTask(t *testing.T) {
 		if !strings.Contains(desc, want) {
 			t.Errorf("description lacks %q:\n%s", want, desc)
 		}
+	}
+}
+
+func TestRelaunchingATaskCancelsItsPreviousRender(t *testing.T) {
+	taskID := uuid.New()
+	tasks := newFakeTasks(taskID)
+	tasks.task.Metadata = map[string]any{model.TaskMetaRunID: "previous-render"}
+	media := &fakeMedia{caps: Capabilities{FFmpeg: true, Narration: true}}
+	svc := NewService(fakeWriter{}, media, &fakeStore{}, testConfig(), nil)
+	svc.BindTasks(tasks)
+	if _, err := svc.Start(context.Background(), StartRequest{OrgID: uuid.New(), TaskID: &taskID,
+		Brief: Brief{Topic: "tides", Seconds: 30}}); err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, tasks)
+	media.mu.Lock()
+	defer media.mu.Unlock()
+	if len(media.cancelled) != 1 || media.cancelled[0] != "previous-render" {
+		t.Fatalf("cancelled %v, want the task's previous run", media.cancelled)
+	}
+}
+
+func TestAFollowedRenderThatIsCancelledStandsDownQuietly(t *testing.T) {
+	taskID := uuid.New()
+	tasks := newFakeTasks(taskID)
+	media := &fakeMedia{statuses: []string{JobRunning, JobCancelled}}
+	svc := NewService(fakeWriter{}, media, &fakeStore{}, testConfig(), nil)
+	svc.BindTasks(tasks)
+	svc.follow(context.Background(), "superseded", uuid.New(), &taskID, "Tides", time.Hour)
+	if d := tasks.description(); d != "" {
+		t.Fatalf("a superseded render must not write to the task: %q", d)
 	}
 }
 
