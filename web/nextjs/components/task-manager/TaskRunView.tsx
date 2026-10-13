@@ -20,6 +20,8 @@ import { LLMCallsTable } from "@/components/benchmarks/LLMCallsTable";
 function specialistLaunch(task: Task): {
   label: string;
   href: string | null;
+  linkText: string;
+  note: string;
 } | null {
   const meta = task.metadata ?? {};
   const runId = typeof meta.run_id === "string" ? meta.run_id : "";
@@ -41,9 +43,25 @@ function specialistLaunch(task: Task): {
     pr_reviewer: "/panel/task-manager?agent=review",
     mail: "/panel/task-manager?agent=mail",
   };
+  const label = labels[kind] ?? "Specialist run";
+  const own = hrefByKind[kind];
+  if (own) {
+    return {
+      label,
+      href: own,
+      linkText: `Open ${label.toLowerCase()}`,
+      note: "Open the launch to see progress and output.",
+    };
+  }
+  // A specialist without a page of its own (Video Producer, Course Generator,
+  // LinkedIn Poster…) posts progress and its result to this task's
+  // description. The fallback used to guess /articles/{run_id}, which only
+  // exists for the Article Writer and showed "could not load this run".
   return {
-    label: labels[kind] ?? "Specialist run",
-    href: hrefByKind[kind] ?? (runId ? `/articles/${runId}` : null),
+    label,
+    href: task.assigned_agent_id ? `/panel/agents/${task.assigned_agent_id}` : null,
+    linkText: "Open the agent",
+    note: "Progress and the result are posted to this task's description as the run goes.",
   };
 }
 
@@ -146,15 +164,15 @@ export function TaskRunView({ task, agents, focusRunId }: TaskRunViewProps) {
         <div className="rounded-lg border border-border bg-card/50 p-6 text-sm">
           <p className="font-medium text-foreground">{launch.label} started</p>
           <p className="mt-1 text-muted-foreground">
-            This specialist does not write a generic task-run row. Open the
-            launch to see progress and output.
+            This specialist does not write a generic task-run row.{" "}
+            {launch.note}
           </p>
           {launch.href && (
             <Link
               href={launch.href}
               className="mt-3 inline-flex text-sm font-medium text-primary hover:underline"
             >
-              Open {launch.label.toLowerCase()}
+              {launch.linkText}
             </Link>
           )}
         </div>
