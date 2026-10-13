@@ -62,7 +62,7 @@ export function CreditControllerAgentClient() {
   const [error, setError] = useState("");
   // Why each invoice is held for approval, from the queue (keyed by invoice id).
   const [reasons, setReasons] = useState<Record<string, string>>({});
-  const approver = useAuthStore((s) => s.user?.email);
+  const userEmail = useAuthStore((s) => s.user?.email);
 
   const refresh = useCallback(async () => {
     setError("");
@@ -152,11 +152,15 @@ export function CreditControllerAgentClient() {
       return;
     }
     void run(`${approved ? "approve" : "reject"}-${runId}`, async () => {
+      // ponytail: the decision is recorded under the server's default
+      // controller. Sending the signed-in user needs aivc-agents (outside this
+      // repo) confirmed to accept arbitrary approver names first — a live
+      // approval that starts failing is worse than a generic approver. The
+      // user's email goes in the note so the audit trail still says who.
       await approveCreditRun({
         runId,
         approved,
-        approver,
-        note: `${approved ? "approved" : "rejected"} from Credit Controller tab`,
+        note: `${approved ? "approved" : "rejected"} from Credit Controller tab${userEmail ? ` by ${userEmail}` : ""}`,
       });
       toast.success(`${approved ? "Approved" : "Rejected"} ${inv.invoice_id}`);
     });
