@@ -8,6 +8,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { updateTask, getTaskComments, addTaskComment } from "@/lib/api/tasks";
 import { useAgents } from "@/lib/hooks/useAgents";
+import { useProject } from "@/lib/hooks/useProjects";
 import { taskKeys } from "@/lib/hooks/useTasks";
 import { useAuthStore } from "@/lib/store/auth-store";
 import { PRIORITY_OPTIONS, STATUS_OPTIONS } from "@/lib/task-labels";
@@ -55,6 +56,7 @@ export function TaskDetailModal({
 }: TaskDetailModalProps) {
   const queryClient = useQueryClient();
   const { data: agentsResp } = useAgents({ per_page: 100 });
+  const { data: project } = useProject(task.project_id);
   const agents = agentsResp?.data ?? [];
   const currentUserId = useAuthStore((s) => s.user?.id ?? null);
 
@@ -203,6 +205,13 @@ export function TaskDetailModal({
 
         {/* Form body */}
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5 scrollbar-thin">
+          {/* Where this task lives — it was not shown anywhere on the task. */}
+          <p className="text-xs text-muted-foreground">
+            Project:{" "}
+            <Link href={`/panel/projects?project=${task.project_id}`} className="font-medium text-foreground hover:underline">
+              {project?.name ?? "Open project"}
+            </Link>
+          </p>
           {/* Title */}
           <div className="space-y-1.5">
             <label htmlFor="task-title" className="text-sm font-medium">

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ComponentType } from "react";
+import Link from "next/link";
 import { Loader2, Rocket } from "lucide-react";
 import { toast } from "sonner";
 
@@ -8,7 +9,6 @@ import { AgentInputFields } from "@/components/task-manager/AgentInputFields";
 import {
   defaultValuesForSchema,
   schemaFromWire,
-  schemaValuesValid,
   validateSchemaValues,
   type WireSchema,
 } from "@/lib/agents/input-schemas";
@@ -79,8 +79,9 @@ export function BuiltinAgentTab({
   }, [projectId, projects]);
 
   const mailReady = schema.prefill !== "mailbox" || mailboxLoad === "ready";
-  const ready =
-    Boolean(agent) && Boolean(projectId) && mailReady && schemaValuesValid(schema, values);
+  // Invalid fields do not disable Run: clicking it is what shows the user
+  // which fields need fixing (handleRun sets the field errors).
+  const ready = Boolean(agent) && Boolean(projectId) && mailReady;
 
   async function handleRun() {
     if (!agent || launching) return;
@@ -111,7 +112,11 @@ export function BuiltinAgentTab({
             This agent is not in the organisation yet.
           </p>
         ) : (
-          <Client />
+          <>
+            {/* What the agent does, before its own screen. */}
+            {schema.hint ? <p className="text-sm text-muted-foreground">{schema.hint}</p> : null}
+            <Client />
+          </>
         )
       ) : (
         <>
@@ -149,19 +154,31 @@ export function BuiltinAgentTab({
                   <label className="text-sm font-medium" htmlFor="tab-project">
                     Project
                   </label>
-                  <select
-                    id="tab-project"
-                    value={projectId}
-                    onChange={(e) => setProjectId(e.target.value)}
-                    className={inputCls}
-                    disabled={launching}
-                  >
-                    {projects.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
+                  {projects.length === 0 ? (
+                    // Every run is filed as a task in a project; with none,
+                    // Run can only be disabled — say why and where to fix it.
+                    <p className="text-sm text-muted-foreground">
+                      No projects yet.{" "}
+                      <Link href="/panel/projects" className="font-medium text-primary hover:underline">
+                        Create a project
+                      </Link>{" "}
+                      first — each run is saved as a task in one.
+                    </p>
+                  ) : (
+                    <select
+                      id="tab-project"
+                      value={projectId}
+                      onChange={(e) => setProjectId(e.target.value)}
+                      className={inputCls}
+                      disabled={launching}
+                    >
+                      {projects.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
                 <button
                   type="button"

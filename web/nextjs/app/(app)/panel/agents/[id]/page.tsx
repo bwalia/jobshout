@@ -16,6 +16,7 @@ import {
   LayoutGrid,
   AlertTriangle,
   Pencil,
+  ChevronRight,
 } from "lucide-react";
 import { useRunFailures } from "@/lib/hooks/useRunFailures";
 import { BuiltinAgentTab } from "@/components/task-manager/BuiltinAgentTab";
@@ -36,7 +37,7 @@ import { useAgent, useUpdateAgent } from "@/lib/hooks/useAgents";
 import { ModelPicker } from "@/components/agent/ModelPicker";
 import { useBlogConfig } from "@/lib/hooks/useBlog";
 import type { ModelRecommendation, ModelRole } from "@/lib/types/blog";
-import { useTasks } from "@/lib/hooks/useTasks";
+import { useAllTasks } from "@/lib/hooks/useTasks";
 import { KnowledgeFileList } from "@/components/agent/KnowledgeFileList";
 import { KnowledgeEditor } from "@/components/agent/KnowledgeEditor";
 import {
@@ -461,7 +462,7 @@ function ModelsTab({ agent }: { agent: NonNullable<ReturnType<typeof useAgent>["
 function WorkspaceTab({ agent }: { agent: NonNullable<ReturnType<typeof useAgent>["data"]> }) {
   const router = useRouter();
   const qc = useQueryClient();
-  const { data: catalog } = useAgentSchemas();
+  const { data: catalog, isError: catalogFailed, refetch: refetchCatalog } = useAgentSchemas();
   const { data: projectsResp } = useProjects({ per_page: 100 });
   const builtin = agent.metadata?.builtin;
   const wire = catalog?.find((w) => w.builtin === builtin);
@@ -475,6 +476,24 @@ function WorkspaceTab({ agent }: { agent: NonNullable<ReturnType<typeof useAgent
   }
 
   if (!wire) {
+    if (catalogFailed) {
+      return (
+        <p className="text-sm text-muted-foreground">
+          Couldn&apos;t load this agent&apos;s workspace.{" "}
+          <button type="button" onClick={() => void refetchCatalog()} className="font-medium text-primary hover:underline">
+            Try again
+          </button>
+        </p>
+      );
+    }
+    if (catalog) {
+      return (
+        <p className="text-sm text-muted-foreground">
+          This agent has no workspace screen. Give it work with <span className="font-medium text-foreground">New task</span>{" "}
+          above; its results appear on the task.
+        </p>
+      );
+    }
     return <p className="text-sm text-muted-foreground">Loading this agent&apos;s workspace…</p>;
   }
   return (
@@ -564,15 +583,11 @@ function formatStatus(status: string) {
 
 /** Placeholder tasks tab – fetches tasks assigned to this agent. */
 function TasksTab({ agentId }: { agentId: string }) {
-  // Fetch all org tasks and filter by agent id on the client side since the
-  // API does not expose a dedicated /agents/:id/tasks endpoint.
-  const { data, isLoading, isError } = useTasks();
-
-  // Filter tasks by this agent (graceful fallback – empty array if data is
-  // unavailable or the endpoint is unimplemented).
-  const agentTasks: Task[] = (data?.data ?? []).filter(
-    (t) => t.assigned_agent_id === agentId
-  );
+  // Every page of this agent's tasks: the list filters by agent on the
+  // server. One page of all the org's tasks, filtered here, missed an agent's
+  // older tasks entirely.
+  const { data, isLoading, isError } = useAllTasks({ assigned_agent_id: agentId });
+  const agentTasks: Task[] = (data?.data ?? []).filter((t) => t.assigned_agent_id === agentId);
 
   if (isLoading) {
     return (
@@ -594,37 +609,53 @@ function TasksTab({ agentId }: { agentId: string }) {
     return (
       <div className="rounded-lg border border-dashed border-border px-6 py-10 text-center">
         <p className="text-sm text-muted-foreground">
-          This agent has no assigned tasks yet.
+          This agent has no tasks yet. Use <span className="font-medium text-foreground">New task</span>{" "}
+          above to give it one; every task it works on is listed here.
         </p>
       </div>
     );
   }
 
   return (
-    <ul className="divide-y divide-border rounded-lg border border-border bg-card">
-      {agentTasks.map((task) => (
-        <li
-          key={task.id}
-          className="flex items-center justify-between gap-4 px-4 py-3"
-        >
-          <p className="flex-1 truncate text-sm text-foreground">{task.title}</p>
-          <span
-            className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-              STATUS_CLASSES[task.status] ?? "bg-muted text-muted-foreground"
-            }`}
-          >
-            {formatStatus(task.status)}
-          </span>
-          <span
-            className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-              PRIORITY_CLASSES[task.priority] ?? ""
-            }`}
-          >
-            {task.priority}
-          </span>
-        </li>
-      ))}
-    </ul>
+    <div className="space-y-2">
+      <p className="text-xs text-muted-foreground">
+        Every task assigned to this agent, newest first. Open one to see its description, progress and results.
+      </p>
+      <ul className="divide-y divide-border rounded-lg border border-border bg-card">
+        {[...agentTasks]
+          .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))
+          .map((task) => (
+            <li key={task.id}>
+              <Link
+                href={`/panel/tasks?task=${task.id}`}
+                className="group flex items-center justify-between gap-4 px-4 py-3 transition-colors hover:bg-muted/50"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm text-foreground group-hover:text-primary">{task.title}</p>
+                  <p className="text-xs text-muted-foreground">
+                    Updated {new Date(task.updated_at).toLocaleString()}
+                  </p>
+                </div>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                    STATUS_CLASSES[task.status] ?? "bg-muted text-muted-foreground"
+                  }`}
+                >
+                  {formatStatus(task.status)}
+                </span>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                    PRIORITY_CLASSES[task.priority] ?? ""
+                  }`}
+                >
+                  {task.priority}
+                </span>
+                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground group-hover:text-foreground" />
+              </Link>
+            </li>
+          ))}
+      </ul>
+    </div>
   );
 }
 
@@ -749,149 +780,175 @@ function KnowledgeTab({ agentId }: { agentId: string }) {
   }
 
   return (
-    <div className="flex gap-0 overflow-hidden rounded-lg border border-border bg-card" style={{ minHeight: "520px" }}>
-      {/* Sidebar: file list + actions */}
-      <div className="flex w-56 flex-shrink-0 flex-col border-r border-border">
-        {/* New File button */}
-        <div className="border-b border-border px-3 py-2.5">
-          <button
-            type="button"
-            onClick={handleNewFile}
-            className="inline-flex w-full items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            + New File
-          </button>
-        </div>
-
-        {/* File list */}
-        <div className="flex-1 overflow-y-auto">
-          <KnowledgeFileList
-            files={fileListItems}
-            selectedFileId={selectedFileId}
-            onSelectFile={handleSelectFile}
-          />
-        </div>
-
-        {/* Delete selected file */}
-        {selectedFileId && (
-          <div className="border-t border-border px-3 py-2">
+    <div className="space-y-3">
+      <p className="text-sm text-muted-foreground">
+        Reference files for this agent — product facts, policies, house style, anything it should know. While it
+        works it can search these files and use what it finds. Create or edit a file on the left.
+      </p>
+      <div className="flex gap-0 overflow-hidden rounded-lg border border-border bg-card" style={{ minHeight: "520px" }}>
+        {/* Sidebar: file list + actions */}
+        <div className="flex w-56 flex-shrink-0 flex-col border-r border-border">
+          {/* New File button */}
+          <div className="border-b border-border px-3 py-2.5">
             <button
               type="button"
-              onClick={handleDeleteSelected}
-              disabled={deleteMutation.isPending}
-              className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/20 disabled:pointer-events-none disabled:opacity-50"
+              onClick={handleNewFile}
+              className="inline-flex w-full items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              {deleteMutation.isPending ? "Deleting…" : "Delete File"}
+              + New File
             </button>
           </div>
-        )}
-      </div>
 
-      {/* Editor pane */}
-      <div className="flex flex-1 flex-col">
-        {selectedFileId ? (
-          <KnowledgeEditor
-            value={editorContent}
-            onChange={setEditorContent}
-            onSave={() => saveMutation.mutate()}
-          />
-        ) : (
-          <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-            Select a file to edit or create a new one.
-          </div>
-        )}
-      </div>
-
-      {/* New file name dialog (simple inline overlay) */}
-      {newFileDialog.open && (
-        <div
-          className="absolute inset-0 z-10 flex items-center justify-center bg-black/40"
-          onClick={() => setNewFileDialog({ open: false, filename: "" })}
-        >
-          <div
-            className="w-80 rounded-lg border border-border bg-card p-5 shadow-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="mb-3 text-sm font-semibold">New Knowledge File</h3>
-            <input
-              type="text"
-              autoFocus
-              value={newFileDialog.filename}
-              onChange={(e) =>
-                setNewFileDialog((prev) => ({
-                  ...prev,
-                  filename: e.target.value,
-                }))
-              }
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleCreateConfirm();
-                if (e.key === "Escape")
-                  setNewFileDialog({ open: false, filename: "" });
-              }}
-              placeholder="e.g. overview.md"
-              className="mb-4 flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          {/* File list */}
+          <div className="flex-1 overflow-y-auto">
+            <KnowledgeFileList
+              files={fileListItems}
+              selectedFileId={selectedFileId}
+              onSelectFile={handleSelectFile}
             />
-            <div className="flex justify-end gap-2">
+          </div>
+
+          {/* Delete selected file */}
+          {selectedFileId && (
+            <div className="border-t border-border px-3 py-2">
               <button
                 type="button"
-                onClick={() => setNewFileDialog({ open: false, filename: "" })}
-                className="inline-flex h-8 items-center rounded-md border border-border bg-background px-3 text-xs hover:bg-accent"
+                onClick={handleDeleteSelected}
+                disabled={deleteMutation.isPending}
+                className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/20 disabled:pointer-events-none disabled:opacity-50"
               >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleCreateConfirm}
-                disabled={
-                  !newFileDialog.filename.trim() || createMutation.isPending
-                }
-                className="inline-flex h-8 items-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
-              >
-                {createMutation.isPending ? "Creating…" : "Create"}
+                {deleteMutation.isPending ? "Deleting…" : "Delete File"}
               </button>
             </div>
-          </div>
+          )}
         </div>
-      )}
+
+        {/* Editor pane */}
+        <div className="flex flex-1 flex-col">
+          {selectedFileId ? (
+            <KnowledgeEditor
+              value={editorContent}
+              onChange={setEditorContent}
+              onSave={() => saveMutation.mutate()}
+            />
+          ) : (
+            <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+              Select a file to edit or create a new one.
+            </div>
+          )}
+        </div>
+
+        {/* New file name dialog (simple inline overlay) */}
+        {newFileDialog.open && (
+          <div
+            className="absolute inset-0 z-10 flex items-center justify-center bg-black/40"
+            onClick={() => setNewFileDialog({ open: false, filename: "" })}
+          >
+            <div
+              className="w-80 rounded-lg border border-border bg-card p-5 shadow-xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="mb-3 text-sm font-semibold">New Knowledge File</h3>
+              <input
+                type="text"
+                autoFocus
+                value={newFileDialog.filename}
+                onChange={(e) =>
+                  setNewFileDialog((prev) => ({
+                    ...prev,
+                    filename: e.target.value,
+                  }))
+                }
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleCreateConfirm();
+                  if (e.key === "Escape")
+                    setNewFileDialog({ open: false, filename: "" });
+                }}
+                placeholder="e.g. overview.md"
+                className="mb-4 flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setNewFileDialog({ open: false, filename: "" })}
+                  className="inline-flex h-8 items-center rounded-md border border-border bg-background px-3 text-xs hover:bg-accent"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCreateConfirm}
+                  disabled={
+                    !newFileDialog.filename.trim() || createMutation.isPending
+                  }
+                  className="inline-flex h-8 items-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+                >
+                  {createMutation.isPending ? "Creating…" : "Create"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
 /** Placeholder metrics tab. */
-function MetricsTab({
-  performanceScore,
-}: {
-  performanceScore: number;
-}) {
-  // A simple visual representation of the performance score.
-  return (
-    <div className="space-y-6">
-      <div className="rounded-lg border border-border bg-card p-5">
-        <p className="mb-4 text-sm font-medium text-muted-foreground">
-          Performance Score
-        </p>
-        <div className="flex items-end gap-4">
-          <span className="text-4xl font-bold text-foreground">
-            {performanceScore}
-            <span className="text-xl text-muted-foreground">%</span>
-          </span>
-        </div>
-        <div className="mt-4 h-2 w-full rounded-full bg-muted overflow-hidden">
-          <div
-            className="h-full rounded-full bg-emerald-500"
-            style={{ width: `${performanceScore}%` }}
-            role="progressbar"
-            aria-valuenow={performanceScore}
-            aria-valuemin={0}
-            aria-valuemax={100}
-          />
-        </div>
-      </div>
+function MetricsTab({ agentId }: { agentId: string }) {
+  // Numbers from the agent's own tasks. (agents.performance_score is never
+  // computed — it read 0% for every agent — so it is not shown.)
+  const { data, isLoading } = useAllTasks({ assigned_agent_id: agentId });
+  const { byAgent } = useRunFailures();
+  const tasks = (data?.data ?? []).filter((t) => t.assigned_agent_id === agentId);
+  const done = tasks.filter((t) => t.status === "done").length;
+  const active = tasks.filter((t) => t.status === "in_progress").length;
+  const failedRuns = byAgent.get(agentId)?.failed ?? 0;
+  const last = tasks.reduce<string | null>(
+    (latest, t) => (!latest || Date.parse(t.updated_at) > Date.parse(latest) ? t.updated_at : latest),
+    null
+  );
 
+  if (isLoading) {
+    return <div className="h-24 animate-pulse rounded-lg bg-muted" />;
+  }
+  const stats: { label: string; value: string; hint: string; href?: string }[] = [
+    { label: "Tasks", value: String(tasks.length), hint: "Assigned to this agent", href: "?tab=tasks" },
+    { label: "Done", value: String(done), hint: tasks.length ? `${Math.round((done / tasks.length) * 100)}% of its tasks` : "None yet" },
+    { label: "In progress", value: String(active), hint: "Being worked on now" },
+    {
+      label: "Failed runs",
+      value: String(failedRuns),
+      hint: "In the last two weeks",
+      href: failedRuns > 0 ? `/panel/tasks?agent=${agentId}&failed=1` : undefined,
+    },
+  ];
+  return (
+    <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Detailed metrics and activity charts will appear here as the agent
-        completes tasks.
+        How much this agent has done and how it is going, from its tasks.
+        {last ? ` Last activity ${new Date(last).toLocaleString()}.` : " It has not worked on anything yet."}
       </p>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {stats.map((s) => {
+          const body = (
+            <>
+              <p className="text-xs text-muted-foreground">{s.label}</p>
+              <p className="mt-1 text-2xl font-bold text-foreground">{s.value}</p>
+              <p className="text-xs text-muted-foreground">{s.hint}</p>
+            </>
+          );
+          return s.href ? (
+            <Link key={s.label} href={s.href} className="rounded-lg border border-border bg-card p-4 transition-colors hover:bg-muted/50">
+              {body}
+            </Link>
+          ) : (
+            <div key={s.label} className="rounded-lg border border-border bg-card p-4">
+              {body}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -1003,7 +1060,7 @@ function SkillsTab({ agentId }: { agentId: string }) {
                     : "bg-primary text-primary-foreground hover:bg-primary/90"
                 }`}
               >
-                {on ? "Enabled" : "Enable"}
+                {on ? "Turn off" : "Turn on"}
               </button>
             </div>
           );
@@ -1133,7 +1190,8 @@ export default function AgentProfilePage() {
             </div>
           </div>
 
-          {/* Performance score badge */}
+          {/* Actions. (A "performance" score used to sit here; nothing ever
+              computed it, so it read 0% for every agent — see the Metrics tab.) */}
           <div className="flex flex-col items-start gap-2 sm:items-end">
             <div className="flex flex-wrap justify-end gap-2">
               <Link
@@ -1148,16 +1206,7 @@ export default function AgentProfilePage() {
                 onRemoved={() => router.push("/panel/agents")}
               />
             </div>
-            <span className="text-xs text-muted-foreground">Performance</span>
-            {failed > 0 && Math.round(agent.performance_score) === 0 ? (
-              <span className="text-lg font-bold text-destructive">
-                {failed} failed run{failed === 1 ? "" : "s"}
-              </span>
-            ) : (
-              <span className="text-2xl font-bold text-foreground">
-                {agent.performance_score}%
-              </span>
-            )}
+
           </div>
         </div>
       </div>
@@ -1170,7 +1219,14 @@ export default function AgentProfilePage() {
               <span className="font-semibold text-destructive">
                 {failed} failed run{failed === 1 ? "" : "s"} in the last two weeks.
               </span>{" "}
-              {latestFailure && <span className="text-muted-foreground">Latest: {latestFailure.error}</span>}
+              {latestFailure &&
+                (latestFailure.taskId ? (
+                  <Link href={`/panel/tasks?task=${latestFailure.taskId}`} className="text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
+                    Latest: {latestFailure.error}
+                  </Link>
+                ) : (
+                  <span className="text-muted-foreground">Latest: {latestFailure.error}</span>
+                ))}
             </span>
           </p>
           <div className="flex shrink-0 gap-2">
@@ -1226,7 +1282,7 @@ export default function AgentProfilePage() {
         {activeTab === "workspace" && <WorkspaceTab agent={agent} />}
         {activeTab === "tasks" && <TasksTab agentId={agent.id} />}
         {activeTab === "metrics" && (
-          <MetricsTab performanceScore={agent.performance_score} />
+          <MetricsTab agentId={agent.id} />
         )}
         {activeTab === "knowledge" && <KnowledgeTab agentId={agent.id} />}
         {activeTab === "skills" && <SkillsTab agentId={agent.id} />}

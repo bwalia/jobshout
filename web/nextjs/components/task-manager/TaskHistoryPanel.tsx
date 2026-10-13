@@ -25,7 +25,7 @@ function formatWhen(iso: string | null | undefined): string {
   return d.toLocaleString();
 }
 
-function eventSummary(e: TaskHistoryEvent): string {
+function eventSummary(e: TaskHistoryEvent, agentName?: string): string {
   if (e.kind === "status") {
     const from = e.old_status ? statusLabel(e.old_status) : "—";
     const to = e.new_status ? statusLabel(e.new_status) : "—";
@@ -33,7 +33,9 @@ function eventSummary(e: TaskHistoryEvent): string {
   }
   if (e.kind === "specialist") {
     const kind = e.launch_kind ?? "";
-    return SPECIALIST_LABELS[kind] ?? "Specialist launch";
+    // Name the agent for specialists without a label of their own, rather
+    // than a generic "Specialist launch".
+    return SPECIALIST_LABELS[kind] ?? (agentName ? `${agentName} launched` : "Specialist launch");
   }
   const runStatus = e.status ? statusLabel(e.status) : "run";
   return `Agent run · ${runStatus}`;
@@ -120,7 +122,9 @@ export function TaskHistoryPanel({
                     key={`${e.kind}-${e.id}`}
                     className="rounded-md border border-border bg-muted/30 px-3 py-2"
                   >
-                    <p className="text-sm">{eventSummary(e)}</p>
+                    <p className="text-sm">
+                      {eventSummary(e, agents.find((a) => a.id === task.assigned_agent_id)?.name)}
+                    </p>
                     <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
                       {formatWhen(e.changed_at ?? e.completed_at ?? e.created_at)}
                     </p>
