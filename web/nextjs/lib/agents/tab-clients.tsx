@@ -18,6 +18,7 @@ import { ImagesView } from "@/components/image/ImagesView";
 import { CourseGeneratorClient } from "@/components/courses/CourseGeneratorClient";
 import { InsightsWriterClient } from "@/components/insights-writer/InsightsWriterClient";
 import { LinkedInClient } from "@/components/linkedin/LinkedInClient";
+import { VideoProducerClient } from "@/components/video/VideoProducerClient";
 
 /**
  * Optional product UI that owns an agent's Workspace tab (replaces the schema form).
@@ -50,4 +51,5 @@ export const AGENT_CLIENTS: Record<string, ComponentType> = {
   course_generator: CourseGeneratorClient,
   jobshout_com_writer: InsightsWriterClient,
   linkedin_poster: LinkedInClient,
+  video_producer: VideoProducerClient,
 };

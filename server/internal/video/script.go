@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jobshout/server/internal/llm"
+	"github.com/jobshout/server/internal/model"
 )
 
 // Brief is a launch's values, resolved.
@@ -253,4 +254,10 @@ func truncate(s string, n int) string {
 		return string(r)
 	}
 	return strings.TrimSpace(string(r[:n-1])) + "…"
+}
+
+// model is the brief as a run records it.
+func (b Brief) model() model.VideoBrief {
+	return model.VideoBrief{Seconds: b.Seconds, Format: b.Format, Voice: b.Voice, Style: b.Style,
+		Motion: b.Motion, Captions: b.Captions, Notes: b.Notes}
 }
