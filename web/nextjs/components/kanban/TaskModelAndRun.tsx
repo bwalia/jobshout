@@ -4,6 +4,7 @@ import Link from "next/link";
 import { AlertTriangle, CheckCircle2, Cpu, Loader2, RotateCcw } from "lucide-react";
 import { ModelPicker, providerName, type ModelSelection } from "@/components/agent/ModelPicker";
 import { agentHref } from "@/lib/agents/links";
+import { hasAgentClient, specialistKind } from "@/lib/agents/specialist";
 import { useBlogConfig, useRetryBlogRun } from "@/lib/hooks/useBlog";
 import { useRunFailures } from "@/lib/hooks/useRunFailures";
 import { useCreateTaskRun, useTaskRun } from "@/lib/hooks/useTaskRuns";
@@ -24,7 +25,7 @@ export function savedModelOverride(task: Task): TaskModelOverride {
  * flow, which reads the agent's models, not a task override.
  */
 export function isSpecialistTask(task: Task, agent?: Agent): boolean {
-  return Boolean(agent?.metadata?.builtin) || typeof task.metadata?.launch_kind === "string";
+  return Boolean(agent?.metadata?.builtin) || specialistKind(task) !== "";
 }
 
 function describe(sel: { provider?: string | null; model?: string | null }, inherited?: string): string {
@@ -138,7 +139,15 @@ export function TaskLatestRun({ task, agent }: { task: Task; agent?: Agent }) {
             ? () => retryArticle.mutate(specialistFailure.runId)
             : undefined
         }
-        openHref={agent ? agentHref(agent.id, "workspace") : undefined}
+        openHref={
+          // An article run has its own page; other specialists show runs on
+          // their Workspace tab only when they have a screen of their own.
+          specialistFailure.kind === "article"
+            ? `/articles/${specialistFailure.runId}`
+            : agent && hasAgentClient(agent.metadata?.builtin)
+              ? `${agentHref(agent.id, "workspace")}&run=${encodeURIComponent(specialistFailure.runId)}`
+              : undefined
+        }
       />
     );
   }
@@ -161,6 +170,7 @@ export function TaskLatestRun({ task, agent }: { task: Task; agent?: Agent }) {
         <Loader2 className="h-4 w-4 animate-spin" />
       )}
       Last run {task.last_run_status === "completed" ? "succeeded" : task.last_run_status} {relative(task.last_run_at)}
+      {" "}· its output is under Runs &amp; history
     </p>
   );
 }

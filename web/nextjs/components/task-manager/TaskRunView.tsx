@@ -14,19 +14,32 @@ import type { Agent } from "@/lib/types/agent";
 import type { Task } from "@/lib/types/project";
 import type { TaskRun, TaskRunStatus } from "@/lib/types/task-run";
 import Link from "next/link";
+import { agentHref } from "@/lib/agents/links";
+import { hasAgentClient, specialistKind } from "@/lib/agents/specialist";
 import { useLLMRun } from "@/lib/hooks/useLLMBenchmarks";
 import { LLMCallsTable } from "@/components/benchmarks/LLMCallsTable";
 
-function specialistLaunch(task: Task): {
+/** Plain names for the agent runtimes a run can use. */
+const ENGINE_LABELS: Record<string, string> = {
+  go_native: "Built-in",
+  langchain: "LangChain",
+  langgraph: "LangGraph",
+  "": "agent default",
+};
+
+function specialistLaunch(task: Task, agents: Agent[]): {
   label: string;
   href: string | null;
   linkText: string;
   note: string;
 } | null {
   const meta = task.metadata ?? {};
+  // An ordinary task run is not a specialist launch, whatever else is set.
+  if (meta.launch_kind === "task_run") return null;
   const runId = typeof meta.run_id === "string" ? meta.run_id : "";
-  const kind = typeof meta.launch_kind === "string" ? meta.launch_kind : "";
+  const kind = specialistKind(task);
   if (!runId && !kind) return null;
+  const agent = agents.find((a) => a.id === task.assigned_agent_id);
 
   const labels: Record<string, string> = {
     article_writer: "Article run",
@@ -43,7 +56,7 @@ function specialistLaunch(task: Task): {
     pr_reviewer: "/panel/task-manager?agent=review",
     mail: "/panel/task-manager?agent=mail",
   };
-  const label = labels[kind] ?? "Specialist run";
+  const label = labels[kind] ?? (agent ? `${agent.name} run` : "Specialist run");
   const own = hrefByKind[kind];
   if (own) {
     return {
@@ -53,18 +66,23 @@ function specialistLaunch(task: Task): {
       note: "Open the launch to see progress and output.",
     };
   }
-  // A specialist without a page of its own (Video Producer, Course Generator,
-  // LinkedIn Poster…) posts progress and its result to this task's
-  // description. The fallback used to guess /articles/{run_id}, which only
-  // exists for the Article Writer and showed "could not load this run".
+  // Other specialists post progress and their result to this task's
+  // description. Those with a screen of their own also show it on their
+  // Workspace tab, focused on this launch; for the rest that tab is only the
+  // launch form, so linking there would send the user round in a circle.
+  if (task.assigned_agent_id && hasAgentClient(agent?.metadata?.builtin ?? kind)) {
+    return {
+      label,
+      href: `${agentHref(task.assigned_agent_id, "workspace")}${runId ? `&run=${encodeURIComponent(runId)}` : ""}`,
+      linkText: "Open the agent",
+      note: "Its progress and result are on the agent's Workspace tab, and posted to this task's description.",
+    };
+  }
   return {
     label,
-    // Workspace tab, focused on this launch when the agent's tab lists runs.
-    href: task.assigned_agent_id
-      ? `/panel/agents/${task.assigned_agent_id}?tab=workspace${runId ? `&run=${encodeURIComponent(runId)}` : ""}`
-      : null,
-    linkText: "Open the agent",
-    note: "Its progress and result are on the agent's Workspace tab, and posted to this task's description.",
+    href: null,
+    linkText: "",
+    note: "This agent posts its progress and result to this task's description — check the description above.",
   };
 }
 
@@ -161,7 +179,7 @@ export function TaskRunView({ task, agents, focusRunId }: TaskRunViewProps) {
   }
 
   if (runs.length === 0) {
-    const launch = specialistLaunch(task);
+    const launch = specialistLaunch(task, agents);
     if (launch) {
       return (
         <div className="rounded-lg border border-border bg-card/50 p-6 text-sm">
@@ -251,8 +269,8 @@ function RunDetail({
   if (isError || !run) {
     return (
       <div className="rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
-        Couldn’t load this run. It may be a specialist launch — open it from the
-        timeline above.
+        Couldn’t load this run’s details. If a specialist agent ran this task,
+        its progress and result are in the task’s description.
       </div>
     );
   }
@@ -271,16 +289,16 @@ function RunDetail({
           </span>
         </div>
         <div className="flex flex-wrap gap-3 font-mono text-xs text-muted-foreground">
-          <span>{run.total_tokens} tok</span>
+          <span>{run.total_tokens.toLocaleString()} tokens</span>
           <span>${run.cost_usd.toFixed(4)}</span>
-          <span>{run.latency_ms} ms</span>
-          <span>{run.iterations} iter</span>
+          <span>{(run.latency_ms / 1000).toFixed(1)} s</span>
+          <span>{run.iterations} {run.iterations === 1 ? "step" : "steps"}</span>
         </div>
       </div>
 
       {/* Config chips */}
       <div className="flex flex-wrap gap-1.5">
-        <ConfigChip label="engine" value={run.engine ?? "default"} />
+        <ConfigChip label="runtime" value={ENGINE_LABELS[run.engine ?? ""] ?? run.engine ?? "agent default"} />
         <ConfigChip
           label="model"
           value={run.model_name ?? run.model_provider ?? "agent default"}

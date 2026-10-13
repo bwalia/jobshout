@@ -40,7 +40,7 @@ export function TaskActions({
         className={secondary}
       >
         <History className={compact ? "h-3 w-3" : "h-4 w-4"} />
-        Show History
+        Runs & history
       </button>
       {canRunTask(task) && onRun ? (
         <button

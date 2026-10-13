@@ -146,6 +146,9 @@ export function KanbanColumn({
           projectId={projectId}
           initialStatus={status}
           onClose={() => setShowCreateDialog(false)}
+          // Open the new task straight away: a quick-added task has no agent
+          // yet, and its detail is where one is assigned and run.
+          onCreated={(created) => (onOpenTask ? onOpenTask(created) : setSelectedTask(created))}
         />
       )}
 

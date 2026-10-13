@@ -93,7 +93,7 @@ export function CreateTaskDialog({
       >
         {/* Header */}
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">New Task</h2>
+          <h2 className="text-lg font-semibold">Quick add task</h2>
           <button
             type="button"
             onClick={onClose}
@@ -113,6 +113,10 @@ export function CreateTaskDialog({
             </svg>
           </button>
         </div>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Adds the task to this column without an agent; it opens next so you can assign one and run it.
+          For an agent&apos;s full form, use <span className="font-medium">New task</span> at the top.
+        </p>
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-4">
           {/* Title */}

@@ -5,6 +5,7 @@ import { Bug, Loader2, Plus, Rocket, X } from "lucide-react";
 
 import { AgentInputFields } from "@/components/task-manager/AgentInputFields";
 import { AgentCatalogNotice } from "@/components/task-manager/AgentCatalogNotice";
+import { ModelPicker } from "@/components/agent/ModelPicker";
 import {
   agentBuiltin,
   catalogHasBuiltin,
@@ -244,8 +245,8 @@ export function RunTaskDialog({
 
     setLaunching(true);
     try {
+      // useCreateTaskRun already toasts "Run started."
       const run = await createRun.mutateAsync({ taskId: task.id, payload });
-      toast.success("Agent run started");
       onLaunched(run);
       onClose();
     } catch (err) {
@@ -402,7 +403,7 @@ export function RunTaskDialog({
 
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div className="space-y-1.5">
-                  <label className="text-sm font-medium">Engine</label>
+                  <label className="text-sm font-medium">Runtime</label>
                   <select
                     value={engine ?? ""}
                     onChange={(e) =>
@@ -414,32 +415,31 @@ export function RunTaskDialog({
                     className={inputCls}
                   >
                     <option value="">Agent default</option>
-                    <option value="go_native">go_native</option>
-                    <option value="langchain">langchain</option>
-                    <option value="langgraph">langgraph</option>
+                    <option value="go_native">Built-in</option>
+                    <option value="langchain">LangChain</option>
+                    <option value="langgraph">LangGraph</option>
                   </select>
+                  <p className="text-xs text-muted-foreground">
+                    How the agent reasons and calls tools. Keep the default unless you are comparing runtimes.
+                  </p>
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium">Model provider</label>
-                  <input
-                    type="text"
-                    value={modelProvider}
-                    onChange={(e) => setModelProvider(e.target.value)}
-                    placeholder="agent default"
+                <div className="space-y-1.5 sm:col-span-2">
+                  <label className="text-sm font-medium" htmlFor="run-model">
+                    Model
+                  </label>
+                  <ModelPicker
+                    id="run-model"
+                    value={{ provider: modelProvider, model: modelName }}
+                    onChange={(v) => {
+                      setModelProvider(v.provider);
+                      setModelName(v.model);
+                    }}
+                    includeAuto={false}
+                    defaultLabel="Agent default"
                     disabled={busy}
-                    className={inputCls + " font-mono"}
+                    className={inputCls}
                   />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium">Model name</label>
-                  <input
-                    type="text"
-                    value={modelName}
-                    onChange={(e) => setModelName(e.target.value)}
-                    placeholder="agent default"
-                    disabled={busy}
-                    className={inputCls + " font-mono"}
-                  />
+                  <p className="text-xs text-muted-foreground">For this run only; the agent keeps its own model.</p>
                 </div>
               </div>
 

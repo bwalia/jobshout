@@ -18,6 +18,7 @@ import { STATUS_DOT } from "@/lib/status-colors";
 import { PRIORITY_OPTIONS, STATUS_OPTIONS, priorityLabel, statusLabel } from "@/lib/task-labels";
 import type { Task } from "@/lib/types/project";
 import { cn } from "@/lib/utils/cn";
+import { toast } from "sonner";
 import { useLocalState } from "@/lib/utils/local-state";
 
 type Layout = "board" | "list";
@@ -67,7 +68,7 @@ export function TasksView({ lockedProjectId }: { lockedProjectId?: string }) {
   const { data: agentsResp } = useAgents({ per_page: 100 });
   const { data: projectsResp } = useProjects({ per_page: 100 });
   const { failedTaskIds } = useRunFailures();
-  const { data: deepTask } = useTask(taskParam ?? "");
+  const { data: deepTask, isError: deepTaskMissing } = useTask(taskParam ?? "");
 
   const agents = useMemo(() => agentsResp?.data ?? [], [agentsResp]);
   const projects = useMemo(() => projectsResp?.data ?? [], [projectsResp]);
@@ -94,6 +95,13 @@ export function TasksView({ lockedProjectId }: { lockedProjectId?: string }) {
     const t = allTasks.find((x) => x.id === taskParam) ?? deepTask ?? null;
     setSelected((prev) => t ?? (prev?.id === taskParam ? prev : null));
   }, [taskParam, allTasks, deepTask]);
+
+  // A link to a task that is gone (deleted, or another org's) used to open
+  // nothing and say nothing.
+  const taskMissing = Boolean(taskParam) && deepTaskMissing && !allTasks.some((x) => x.id === taskParam);
+  useEffect(() => {
+    if (taskMissing) toast.error("That task no longer exists, or you don't have access to it.");
+  }, [taskMissing]);
 
   function setParams(next: Partial<Record<(typeof KEYS)[number] | "project" | "view", string | null>>) {
     const p = new URLSearchParams(params.toString());
@@ -249,6 +257,10 @@ export function TasksView({ lockedProjectId }: { lockedProjectId?: string }) {
         <p className="px-6 pt-2 text-xs text-muted-foreground">
           {filtered ? `${tasks.length} matching · ` : ""}
           <TaskCountLabel loaded={allTasks.length} total={tasksResp.total} />
+          {layout === "board" && group === "status" && !dragBoard && tasks.length > 0 && (
+            // Otherwise the board just refuses drags with no reason given.
+            <> · To drag cards between columns, choose one project{filtered ? " and clear the filters" : ""}.</>
+          )}
         </p>
       )}
 
@@ -340,7 +352,19 @@ export function TasksView({ lockedProjectId }: { lockedProjectId?: string }) {
                           </button>
                         </td>
                         {!lockedProjectId && (
-                          <td className="px-4 py-2.5 text-muted-foreground">{projectName.get(t.project_id) ?? "—"}</td>
+                          <td className="px-4 py-2.5 text-muted-foreground">
+                            {projectName.has(t.project_id) ? (
+                              <Link
+                                href={`/panel/projects?project=${t.project_id}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="hover:text-foreground hover:underline"
+                              >
+                                {projectName.get(t.project_id)}
+                              </Link>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
                         )}
                         <td className="px-4 py-2.5">
                           {t.assigned_agent_id ? (
