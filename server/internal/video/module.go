@@ -48,6 +48,7 @@ func Module(run Runner) agentmodule.Module {
 		Builtin:  model.BuiltinVideoProducer,
 		Label:    model.AgentNameVideo,
 		Icon:     "clapperboard",
+		TabSlug:  "video",
 		Hint:     "Give it a topic: it writes a narrated script, then draws, animates, voices and edits it into an MP4 on the board task.",
 		ChatHint: "To make a video, call agent_execute on the Video Producer with the topic; add length, format (landscape or portrait), voice and style when the user gives them. It runs for minutes to an hour and posts the finished video on the board task.",
 		Schema:   schema(),
