@@ -14,6 +14,7 @@ import (
 
 	"github.com/jobshout/server/internal/llmtrace"
 	"github.com/jobshout/server/internal/model"
+	"github.com/jobshout/server/internal/repository"
 )
 
 // Media is the slice of the workstation client the service uses.
@@ -44,6 +45,10 @@ type Tasks interface {
 	Transition(ctx context.Context, id uuid.UUID, status string, changedBy *uuid.UUID) error
 }
 
+// Runs records every launch and where it has got to: what the Video Producer
+// tab shows. Satisfied by repository.VideoRunRepository.
+type Runs = repository.VideoRunRepository
+
 // StartRequest is a launch, resolved.
 type StartRequest struct {
 	OrgID   uuid.UUID
@@ -56,15 +61,16 @@ type StartRequest struct {
 // Service runs Video Producer launches: script here, pictures and sound on the
 // workstation, the finished file back into object storage.
 //
-// It keeps no table of its own. The workstation holds each render's state and
-// hands back the task it belongs to (Job.Ref), and the board task holds the
-// rest, so a server that restarts mid-render finds its work again by asking
-// the workstation (StartResumer).
+// Each launch is a run row (Runs), updated at every step so the agent's tab
+// can show what it is doing. The workstation holds the render itself and hands
+// back the task it belongs to (Job.Ref), so a server that restarts mid-render
+// picks its runs up again (StartResumer).
 type Service struct {
 	writer ScriptWriter
 	media  Media
 	store  Store
 	tasks  Tasks
+	runs   Runs
 	cfg    Config
 	logger *zap.Logger
 
@@ -96,9 +102,55 @@ func NewService(writer ScriptWriter, media Media, store Store, cfg Config, logge
 // BindTasks lets runs report to the board.
 func (s *Service) BindTasks(tasks Tasks) { s.tasks = tasks }
 
+// BindRuns lets runs be recorded for the agent's tab.
+func (s *Service) BindRuns(runs Runs) { s.runs = runs }
+
 // Configured reports whether a launch can run at all.
 func (s *Service) Configured() bool {
 	return s != nil && s.writer != nil && s.media != nil && s.store != nil
+}
+
+// ErrNoRuns: the server keeps no run records (no database wired).
+var ErrNoRuns = errors.New("video runs are not recorded on this server")
+
+// List returns an org's runs, newest first.
+func (s *Service) List(ctx context.Context, orgID uuid.UUID, limit int) ([]model.VideoRun, error) {
+	if s == nil || s.runs == nil {
+		return nil, ErrNoRuns
+	}
+	return s.runs.List(ctx, orgID, limit)
+}
+
+// Get returns one of an org's runs.
+func (s *Service) Get(ctx context.Context, orgID, id uuid.UUID) (*model.VideoRun, error) {
+	if s == nil || s.runs == nil {
+		return nil, ErrNoRuns
+	}
+	return s.runs.Get(ctx, orgID, id)
+}
+
+// Cancel stops a run: the workstation drops or stops the render, and the run
+// and its task say so. A run that has already finished is returned as is.
+func (s *Service) Cancel(ctx context.Context, orgID, id uuid.UUID) (*model.VideoRun, error) {
+	run, err := s.Get(ctx, orgID, id)
+	if err != nil || !run.Unfinished() {
+		return run, err
+	}
+	s.cancelRun(ctx, run, "Cancelled.")
+	s.note(run.TaskID, "Video cancelled.", "")
+	return run, nil
+}
+
+// cancelRun cancels the render (if it reached the workstation) and records it.
+func (s *Service) cancelRun(ctx context.Context, run *model.VideoRun, message string) {
+	if s.media != nil && run.Status != model.VideoRunScripting {
+		cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		if err := s.media.Cancel(cctx, run.ID.String()); err != nil && !errors.Is(err, ErrNotFound) {
+			s.logger.Warn("video: could not cancel the render", zap.String("video_run", run.ID.String()), zap.Error(err))
+		}
+		cancel()
+	}
+	s.finish(run, model.VideoRunCancelled, message, "")
 }
 
 // Start checks the workstation can render, then makes the video in the
@@ -131,19 +183,54 @@ func (s *Service) Start(ctx context.Context, req StartRequest) (uuid.UUID, error
 
 	s.cancelSuperseded(ctx, req.TaskID)
 
-	runID := uuid.New()
-	s.claim(runID.String())
-	go s.run(runID, req, caps.Motion)
-	return runID, nil
+	animated := req.Brief.Motion && caps.Motion
+	userID := req.UserID
+	run := &model.VideoRun{
+		ID:              uuid.New(),
+		OrgID:           req.OrgID,
+		TaskID:          req.TaskID,
+		RequestedBy:     &userID,
+		Topic:           req.Brief.Topic,
+		Brief:           req.Brief.model(),
+		Status:          model.VideoRunScripting,
+		Stage:           "script",
+		Message:         "Writing the script",
+		EstimateMinutes: estimateMinutes(ShotCount(req.Brief.Seconds), animated),
+		Shots:           []model.VideoShot{},
+		Notes:           []string{},
+	}
+	if req.AgentID != uuid.Nil {
+		agentID := req.AgentID
+		run.AgentID = &agentID
+	}
+	if s.runs != nil {
+		if err := s.runs.Create(ctx, run); err != nil {
+			return uuid.Nil, fmt.Errorf("video: record the run: %w", err)
+		}
+	}
+	s.claim(run.ID.String())
+	go s.run(run, req, caps.Motion)
+	return run.ID, nil
 }
 
-// cancelSuperseded cancels the render of a task's previous launch. A relaunch
-// replaces it — the resumer only collects the task's current run — so left
-// alone it would hold the shared GPU for hours for a video nobody collects,
-// and queue ahead of the one the user is waiting for. The task still carries
-// the previous run's id here: the new one is written after Start returns.
+// cancelSuperseded cancels the renders of a task's earlier launches. A
+// relaunch replaces them — only a task's latest run is collected — so left
+// alone they would hold the shared GPU for hours for videos nobody collects,
+// and queue ahead of the one the user is waiting for.
 func (s *Service) cancelSuperseded(ctx context.Context, taskID *uuid.UUID) {
-	if taskID == nil || s.tasks == nil {
+	if taskID == nil {
+		return
+	}
+	if s.runs != nil {
+		if older, err := s.runs.UnfinishedForTask(ctx, *taskID); err == nil {
+			for i := range older {
+				s.cancelRun(ctx, &older[i], "Replaced by a newer launch of this task.")
+			}
+		}
+	}
+	// Runs launched before runs were recorded are known only by the task's
+	// run_id (the new one is written after Start returns).
+	if s.tasks == nil {
 		return
 	}
 	task, err := s.tasks.GetByID(ctx, *taskID)
@@ -163,14 +250,14 @@ func (s *Service) cancelSuperseded(ctx context.Context, taskID *uuid.UUID) {
 	}
 }
 
-func (s *Service) run(runID uuid.UUID, req StartRequest, motionInstalled bool) {
-	defer s.release(runID.String())
+func (s *Service) run(run *model.VideoRun, req StartRequest, motionInstalled bool) {
+	defer s.release(run.ID.String())
 	animated := req.Brief.Motion && motionInstalled
 	ctx, cancel := context.WithTimeout(context.Background(), maxFollow)
 	defer cancel()
 	trace := llmtrace.TraceInfo{
 		TraceName: "go-video-script",
-		SessionID: runID.String(),
+		SessionID: run.ID.String(),
 		AgentID:   req.AgentID.String(),
 		OrgID:     req.OrgID.String(),
 	}
@@ -178,16 +265,28 @@ func (s *Service) run(runID uuid.UUID, req StartRequest, motionInstalled bool) {
 		trace.TaskID = req.TaskID.String()
 	}
 	ctx = llmtrace.WithTrace(ctx, trace)
-	log := s.logger.With(zap.String("video_run", runID.String()))
+	log := s.logger.With(zap.String("video_run", run.ID.String()))
 
 	sctx, scancel := context.WithTimeout(ctx, scriptTimeout)
 	script, err := s.writer.Write(sctx, req.Brief)
 	scancel()
 	if err != nil {
 		log.Warn("video: script failed", zap.Error(err))
-		s.note(req.TaskID, "Video failed while writing the script: "+err.Error(), "")
+		s.fail(run, "Writing the script failed: "+err.Error())
 		return
 	}
+	// Cancelled while the script was being written (from the tab, or by a
+	// relaunch): stop before the workstation spends hours on it.
+	if s.cancelledMeanwhile(ctx, run) {
+		return
+	}
+	run.Title = script.Title
+	run.Shots = script.Shots
+	run.Status = model.VideoRunQueued
+	run.Stage = "queued"
+	run.Message = "Script written; sending it to the workstation"
+	run.EstimateMinutes = estimateMinutes(len(script.Shots), animated)
+	s.save(run)
 	s.note(req.TaskID, scriptNote(script, animated, req.Brief.Motion && !motionInstalled), "")
 
 	ref := map[string]string{"org_id": req.OrgID.String()}
@@ -195,7 +294,7 @@ func (s *Service) run(runID uuid.UUID, req StartRequest, motionInstalled bool) {
 		ref["task_id"] = req.TaskID.String()
 	}
 	sub := SubmitRequest{
-		ID:       runID.String(),
+		ID:       run.ID.String(),
 		Title:    script.Title,
 		Shots:    script.Shots,
 		Format:   req.Brief.Format,
@@ -216,11 +315,21 @@ func (s *Service) run(runID uuid.UUID, req StartRequest, motionInstalled bool) {
 		time.Sleep(submitRetryDelay)
 	}
 	if err != nil {
-		s.note(req.TaskID, "Video failed: the workstation did not accept the render: "+err.Error(), "")
+		s.fail(run, "The workstation did not accept the render: "+err.Error())
 		return
 	}
 	log.Info("video: rendering", zap.Int("shots", len(script.Shots)), zap.Bool("animated", animated))
-	s.follow(ctx, runID.String(), req.OrgID, req.TaskID, script.Title, s.budget(len(script.Shots), animated))
+	s.follow(ctx, run, s.budget(len(script.Shots), animated))
+}
+
+// cancelledMeanwhile reports whether the run's record says it was cancelled
+// by someone else while this process was working on it.
+func (s *Service) cancelledMeanwhile(ctx context.Context, run *model.VideoRun) bool {
+	if s.runs == nil {
+		return false
+	}
+	latest, err := s.runs.Get(ctx, run.OrgID, run.ID)
+	return err == nil && latest.Status == model.VideoRunCancelled
 }
 
 const (
@@ -235,20 +344,21 @@ const (
 // submitRetryDelay spaces submission retries. A variable for tests.
 var submitRetryDelay = 15 * time.Second
 
-// follow polls a render until it ends, then collects it. A workstation that
-// is briefly unreachable (restarting, network) is waited out. The render
-// budget runs from when rendering starts, not from submission: time spent
-// queued behind other videos is not this video running late.
-func (s *Service) follow(ctx context.Context, jobID string, orgID uuid.UUID, taskID *uuid.UUID, title string, budget time.Duration) {
-	log := s.logger.With(zap.String("video_run", jobID))
+// follow polls a render until it ends, recording its progress, then collects
+// it. A workstation that is briefly unreachable (restarting, network) is
+// waited out. The render budget runs from when rendering starts, not from
+// submission: time spent queued behind other videos is not this video running
+// late.
+func (s *Service) follow(ctx context.Context, run *model.VideoRun, budget time.Duration) {
+	log := s.logger.With(zap.String("video_run", run.ID.String()))
 	ticker := time.NewTicker(s.cfg.PollInterval)
 	defer ticker.Stop()
 	var rendering time.Time
 	for {
-		job, err := s.media.Job(ctx, jobID)
+		job, err := s.media.Job(ctx, run.ID.String())
 		switch {
 		case errors.Is(err, ErrNotFound):
-			s.note(taskID, "Video failed: the workstation no longer has this render.", "")
+			s.fail(run, "The workstation no longer has this render.")
 			return
 		case err != nil:
 			log.Warn("video: progress check failed; retrying", zap.Error(err))
@@ -257,68 +367,141 @@ func (s *Service) follow(ctx context.Context, jobID string, orgID uuid.UUID, tas
 			// it after a deploy); the workstation lets one collect it.
 			cerr := s.media.Claim(ctx, job.ID, s.holder)
 			if cerr == nil {
-				s.collect(ctx, job, orgID, taskID, firstNonEmpty(title, job.Title))
-				return
+				if s.collect(ctx, run, job) {
+					return
+				}
+				break // not saved yet: try again next tick
 			}
 			if errors.Is(cerr, ErrClaimed) || errors.Is(cerr, ErrNotFound) {
 				return
 			}
 			log.Warn("video: claim failed; retrying", zap.Error(cerr))
 		case job.Status == JobFailed:
-			s.note(taskID, "Video failed while rendering: "+job.Error, "")
+			s.fail(run, "Rendering failed: "+job.Error)
 			return
 		case job.Status == JobCancelled:
-			// Superseded by a relaunch of the task, which reports for itself.
+			// Superseded or cancelled from the tab; whoever cancelled it
+			// recorded why.
+			if run.Status != model.VideoRunCancelled {
+				s.finish(run, model.VideoRunCancelled, "Cancelled.", "")
+			}
 			return
-		case job.Status == JobRunning && rendering.IsZero():
-			rendering = time.Now()
+		default:
+			if job.Status == JobRunning && rendering.IsZero() {
+				rendering = time.Now()
+			}
+			s.track(run, job)
 		}
 		if !rendering.IsZero() && time.Since(rendering) > budget {
-			s.note(taskID, fmt.Sprintf("Video failed: rendering took longer than %s. It may still finish on the workstation; launch again to retry.", budget.Round(time.Minute)), "")
+			s.fail(run, fmt.Sprintf("Rendering took longer than %s. It may still finish on the workstation; launch again to retry.", budget.Round(time.Minute)))
 			return
 		}
 		select {
 		case <-ctx.Done():
-			s.note(taskID, "Video failed: the workstation did not finish the render in time.", "")
+			s.fail(run, "The workstation did not finish the render in time.")
 			return
 		case <-ticker.C:
 		}
 	}
 }
 
-// collect copies the finished file into object storage and closes the task.
-// A failure here leaves the task in progress, so the next server start
-// collects it again (the render is still on the workstation).
-func (s *Service) collect(ctx context.Context, job *Job, orgID uuid.UUID, taskID *uuid.UUID, title string) {
+// track records what the workstation says it is doing, when it changed.
+func (s *Service) track(run *model.VideoRun, job *Job) {
+	status, stage, message := model.VideoRunQueued, "queued", "Waiting for the workstation — another video is rendering"
+	if job.Status == JobRunning {
+		status, stage, message = model.VideoRunRendering, job.Stage, job.Message
+	}
+	progress := math.Round(job.Progress*1000) / 1000
+	if run.Status == status && run.Stage == stage && run.Message == message && run.Progress == progress {
+		return
+	}
+	if status == model.VideoRunRendering && run.StartedAt == nil {
+		now := time.Now()
+		run.StartedAt = &now
+	}
+	run.Status, run.Stage, run.Message, run.Progress = status, stage, message, progress
+	if job.Title != "" && run.Title == "" {
+		run.Title = job.Title
+	}
+	s.save(run)
+}
+
+// collect copies the finished file into object storage and closes the run and
+// its task. False means it could not yet (the caller retries; the render stays
+// on the workstation).
+func (s *Service) collect(ctx context.Context, run *model.VideoRun, job *Job) bool {
+	run.Status, run.Stage, run.Progress, run.Message = model.VideoRunRendering, "saving", 1, "Saving the video"
+	s.save(run)
 	data, err := s.media.Download(ctx, job.ID)
 	if err == nil && len(data) == 0 {
 		err = errors.New("the file was empty")
 	}
 	if err != nil {
-		s.note(taskID, "The video rendered but could not be fetched from the workstation: "+err.Error(), "")
-		return
+		run.Message = "Rendered; fetching it from the workstation failed, retrying: " + err.Error()
+		s.save(run)
+		return false
 	}
-	url, err := s.store.PutFile(ctx, orgID, data, "mp4", "video/mp4")
+	url, err := s.store.PutFile(ctx, run.OrgID, data, "mp4", "video/mp4")
 	if err != nil {
-		s.note(taskID, "The video rendered but could not be stored: "+err.Error(), "")
-		return
+		run.Message = "Rendered; storing it failed, retrying: " + err.Error()
+		s.save(run)
+		return false
 	}
 	if s.cfg.PublicBaseURL != "" {
 		url = strings.TrimRight(s.cfg.PublicBaseURL, "/") + url
 	}
+	run.VideoURL = url
+	run.DurationSeconds = job.DurationSeconds
+	run.MotionModel = job.MotionModel
+	run.Notes = append([]string{}, job.Notes...)
+	if run.Title == "" {
+		run.Title = job.Title
+	}
 	s.logger.Info("video: ready", zap.String("video_run", job.ID), zap.Float64("seconds", job.DurationSeconds))
-	s.note(taskID, doneNote(title, url, job), "done")
+	s.finish(run, model.VideoRunDone, "Ready", "")
+	s.note(run.TaskID, doneNote(run.Title, url, job), "done")
+	return true
+}
+
+// fail records a run's failure and tells its task.
+func (s *Service) fail(run *model.VideoRun, why string) {
+	s.finish(run, model.VideoRunFailed, why, why)
+	s.note(run.TaskID, "Video failed: "+why, "")
+}
+
+func (s *Service) finish(run *model.VideoRun, status, message, errMsg string) {
+	now := time.Now()
+	run.Status, run.Message, run.Error, run.FinishedAt = status, message, errMsg, &now
+	// A failed or cancelled run keeps the stage it stopped at, so the tab can
+	// show where.
+	if status == model.VideoRunDone {
+		run.Stage, run.Progress = "done", 1
+	}
+	s.save(run)
+}
+
+func (s *Service) save(run *model.VideoRun) {
+	if s.runs == nil {
+		return
+	}
+	if err := s.runs.Save(context.Background(), run); err != nil {
+		s.logger.Warn("video: could not record run progress", zap.String("video_run", run.ID.String()), zap.Error(err))
+	}
 }
 
 // resumeDelay lets the database and the workstation route settle after boot
 // before the resumer asks about lost renders. A variable for tests.
 var resumeDelay = 30 * time.Second
 
-// StartResumer follows renders whose server restarted while they ran. Rings
-// share the workstation, so it sees every ring's renders; a task this ring's
-// database does not hold, or that is no longer in progress, is skipped.
+// StartResumer goes back to the runs a restarted server was following.
+//
+// The workstation is asked for every render it holds — rings share it, so it
+// holds every ring's — and each is matched to this ring's runs. A render
+// launched before runs were recorded is adopted into a run when its task is
+// still waiting for it. Runs this server never got to hand over (cut off while
+// writing the script) are failed: nothing else would ever finish them.
 func (s *Service) StartResumer(ctx context.Context) {
-	if s == nil || s.media == nil || s.store == nil || s.tasks == nil {
+	if s == nil || s.media == nil || s.store == nil {
 		return
 	}
 	select {
@@ -326,36 +509,96 @@ func (s *Service) StartResumer(ctx context.Context) {
 		return
 	case <-time.After(resumeDelay):
 	}
+	if s.runs != nil {
+		if n, err := s.runs.FailStaleScripting(ctx, time.Now().Add(-scriptTimeout-time.Minute),
+			"Interrupted by a server restart while writing the script — launch it again."); err == nil && n > 0 {
+			s.logger.Info("video: failed runs cut off while scripting", zap.Int("runs", n))
+		}
+	}
 	jobs, err := s.media.Jobs(ctx)
 	if err != nil {
 		s.logger.Info("video: resume check skipped — workstation unreachable", zap.Error(err))
 		return
 	}
+	held := make(map[string]bool, len(jobs))
 	for _, job := range jobs {
-		taskID, terr := uuid.Parse(job.Ref["task_id"])
-		orgID, oerr := uuid.Parse(job.Ref["org_id"])
-		if terr != nil || oerr != nil || job.Status == JobFailed || job.Status == JobCancelled {
-			continue
+		held[job.ID] = true
+		if run := s.resumable(ctx, job); run != nil {
+			s.resume(run)
 		}
-		task, err := s.tasks.GetByID(ctx, taskID)
-		if err != nil || task == nil || task.Status != "in_progress" {
-			continue
-		}
-		// A task launched again carries the new run's id. An older render of
-		// it — still kept on the workstation — is not this task's video.
-		if runID, _ := task.Metadata[model.TaskMetaRunID].(string); runID != job.ID || !s.claim(job.ID) {
-			continue
-		}
-		s.logger.Info("video: resuming", zap.String("video_run", job.ID), zap.String("status", job.Status))
-		go func(job Job) {
-			defer s.release(job.ID)
-			rctx, cancel := context.WithTimeout(context.Background(), maxFollow)
-			defer cancel()
-			// The workstation does not say whether a resumed render is
-			// animated; budget as if it is.
-			s.follow(rctx, job.ID, orgID, &taskID, job.Title, s.budget(job.Shots, true))
-		}(job)
 	}
+	// A run the workstation no longer holds (pruned, or lost with its disk)
+	// is followed once more so it is recorded as failed, not left spinning.
+	if s.runs != nil {
+		if open, err := s.runs.Rendering(ctx); err == nil {
+			for i := range open {
+				if !held[open[i].ID.String()] {
+					s.resume(&open[i])
+				}
+			}
+		}
+	}
+}
+
+// resumable returns the run a workstation render belongs to in this ring, or
+// nil when it is not this ring's, is finished, or was replaced.
+func (s *Service) resumable(ctx context.Context, job Job) *model.VideoRun {
+	orgID, oerr := uuid.Parse(job.Ref["org_id"])
+	jobID, jerr := uuid.Parse(job.ID)
+	if oerr != nil || jerr != nil || job.Status == JobFailed || job.Status == JobCancelled {
+		return nil
+	}
+	if s.runs != nil {
+		run, err := s.runs.Get(ctx, orgID, jobID)
+		if err == nil {
+			if run.Unfinished() {
+				return run
+			}
+			return nil
+		}
+		if !errors.Is(err, repository.ErrVideoRunNotFound) {
+			return nil
+		}
+	}
+	// Launched before runs were recorded: follow it only while its task is
+	// still in progress and still on this launch (a relaunch moved it on).
+	taskID, terr := uuid.Parse(job.Ref["task_id"])
+	if terr != nil || s.tasks == nil {
+		return nil
+	}
+	task, err := s.tasks.GetByID(ctx, taskID)
+	if err != nil || task == nil || task.Status != "in_progress" {
+		return nil
+	}
+	if current, _ := task.Metadata[model.TaskMetaRunID].(string); current != job.ID {
+		return nil
+	}
+	run := &model.VideoRun{
+		ID: jobID, OrgID: orgID, TaskID: &taskID, Topic: job.Title, Title: job.Title,
+		Status: model.VideoRunQueued, Stage: "queued", Message: "Picked up after a server restart",
+		Brief: model.VideoBrief{Motion: true}, EstimateMinutes: estimateMinutes(job.Shots, true),
+		Shots: []model.VideoShot{}, Notes: []string{},
+	}
+	if s.runs != nil {
+		if err := s.runs.Create(ctx, run); err != nil {
+			s.logger.Warn("video: could not record an adopted render", zap.String("video_run", job.ID), zap.Error(err))
+		}
+	}
+	return run
+}
+
+func (s *Service) resume(run *model.VideoRun) {
+	if !s.claim(run.ID.String()) {
+		return
+	}
+	s.logger.Info("video: resuming", zap.String("video_run", run.ID.String()), zap.String("status", run.Status))
+	go func() {
+		defer s.release(run.ID.String())
+		ctx, cancel := context.WithTimeout(context.Background(), maxFollow)
+		defer cancel()
+		shots := max(len(run.Shots), 1)
+		s.follow(ctx, run, s.budget(shots, run.Brief.Motion))
+	}()
 }
 
 // claim marks a render as followed by this process; false if it already is.
@@ -397,11 +640,7 @@ func (s *Service) note(taskID *uuid.UUID, note, status string) {
 // never less than VIDEO_MAX_RUNTIME. A flat cap sized for a short
 // video would abandon a long animated one that is still rendering.
 func (s *Service) budget(shots int, animated bool) time.Duration {
-	per := minutesPerStill
-	if animated {
-		per += minutesPerAnimated
-	}
-	expected := time.Duration(per * float64(shots) * float64(time.Minute))
+	expected := time.Duration(estimateMinutes(shots, animated)) * time.Minute
 	return max(s.cfg.MaxRuntime, 15*time.Minute+2*expected)
 }
 
@@ -412,16 +651,23 @@ const (
 	minutesPerAnimated = 10.0
 )
 
-func scriptNote(script *Script, animated, motionMissing bool) string {
+// estimateMinutes is the expected workstation time for a render.
+func estimateMinutes(shots int, animated bool) int {
 	per := minutesPerStill
-	how := "still pictures with slow camera moves"
 	if animated {
 		per += minutesPerAnimated
+	}
+	return int(math.Ceil(per * float64(shots)))
+}
+
+func scriptNote(script *Script, animated, motionMissing bool) string {
+	how := "still pictures with slow camera moves"
+	if animated {
 		how = "animated shots"
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "Script written: %q, %d shots. Rendering %s on the workstation — about %d minutes.",
-		script.Title, len(script.Shots), how, int(math.Ceil(per*float64(len(script.Shots)))))
+	fmt.Fprintf(&b, "Script written: %q, %d shots. Rendering %s on the workstation — about %d minutes. Follow it on the Video Producer's Workspace tab.",
+		script.Title, len(script.Shots), how, estimateMinutes(len(script.Shots), animated))
 	if motionMissing {
 		b.WriteString(" (Animation is not installed on the workstation, so stills are used.)")
 	}
@@ -444,13 +690,4 @@ func doneNote(title, url string, job *Job) string {
 		b.WriteString("\nNote: " + n)
 	}
 	return b.String()
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
 }

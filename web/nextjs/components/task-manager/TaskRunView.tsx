@@ -59,9 +59,12 @@ function specialistLaunch(task: Task): {
   // exists for the Article Writer and showed "could not load this run".
   return {
     label,
-    href: task.assigned_agent_id ? `/panel/agents/${task.assigned_agent_id}` : null,
+    // Workspace tab, focused on this launch when the agent's tab lists runs.
+    href: task.assigned_agent_id
+      ? `/panel/agents/${task.assigned_agent_id}?tab=workspace${runId ? `&run=${encodeURIComponent(runId)}` : ""}`
+      : null,
     linkText: "Open the agent",
-    note: "Progress and the result are posted to this task's description as the run goes.",
+    note: "Its progress and result are on the agent's Workspace tab, and posted to this task's description.",
   };
 }
 

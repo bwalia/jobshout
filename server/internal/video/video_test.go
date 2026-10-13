@@ -13,6 +13,7 @@ import (
 
 	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/model"
+	"github.com/jobshout/server/internal/repository"
 )
 
 func TestParseScriptAcceptsDriftedFieldNamesAndDropsHalfShots(t *testing.T) {
@@ -154,7 +155,11 @@ func (m *fakeMedia) Job(_ context.Context, id string) (*Job, error) {
 	}
 	status := statuses[min(m.polls, len(statuses)-1)]
 	m.polls++
-	return &Job{ID: id, Status: status, Shots: 1, DurationSeconds: 65, Notes: []string{"shot 1: animation failed, used a still"}}, nil
+	job := &Job{ID: id, Title: "Tides", Status: status, Shots: 1, DurationSeconds: 65, Notes: []string{"shot 1: animation failed, used a still"}}
+	if status == JobRunning {
+		job.Stage, job.Message, job.Progress = "motion", "Animating shot 1 of 1", 0.5
+	}
+	return job, nil
 }
 
 func (m *fakeMedia) Claim(context.Context, string, string) error { return m.claimErr }
@@ -297,7 +302,7 @@ func TestAFollowedRenderThatIsCancelledStandsDownQuietly(t *testing.T) {
 	media := &fakeMedia{statuses: []string{JobRunning, JobCancelled}}
 	svc := NewService(fakeWriter{}, media, &fakeStore{}, testConfig(), nil)
 	svc.BindTasks(tasks)
-	svc.follow(context.Background(), "superseded", uuid.New(), &taskID, "Tides", time.Hour)
+	svc.follow(context.Background(), &model.VideoRun{ID: uuid.New(), TaskID: &taskID, Title: "Tides"}, time.Hour)
 	if d := tasks.description(); d != "" {
 		t.Fatalf("a superseded render must not write to the task: %q", d)
 	}
@@ -331,17 +336,17 @@ func TestTheResumerCollectsARenderItsServerLost(t *testing.T) {
 	resumeDelay = 0
 	defer func() { resumeDelay = old }()
 
-	taskID, orgID := uuid.New(), uuid.New()
+	taskID, orgID, lost := uuid.New(), uuid.New(), uuid.NewString()
 	tasks := newFakeTasks(taskID)
-	tasks.task.Metadata = map[string]any{model.TaskMetaRunID: "lost-render"}
+	tasks.task.Metadata = map[string]any{model.TaskMetaRunID: lost}
 	ref := map[string]string{"task_id": taskID.String(), "org_id": orgID.String()}
 	media := &fakeMedia{jobs: []Job{
 		// An earlier run of the same task, finished and still on disk: not
 		// this task's current video, so it must not close the task.
-		{ID: "previous-run", Title: "Old", Status: JobDone, Ref: ref},
-		{ID: "lost-render", Title: "Tides", Status: JobRunning, Ref: ref},
+		{ID: uuid.NewString(), Title: "Old", Status: JobDone, Ref: ref},
+		{ID: lost, Title: "Tides", Status: JobRunning, Ref: ref},
 		// Another ring's render: its task is not in this database.
-		{ID: "other-ring", Status: JobDone, Ref: map[string]string{"task_id": uuid.NewString(), "org_id": orgID.String()}},
+		{ID: uuid.NewString(), Status: JobDone, Ref: map[string]string{"task_id": uuid.NewString(), "org_id": orgID.String()}},
 	}}
 	store := &fakeStore{}
 	svc := NewService(fakeWriter{}, media, store, testConfig(), nil)
@@ -363,7 +368,7 @@ func TestAReplicaThatLosesTheCollectClaimStandsDown(t *testing.T) {
 	store := &fakeStore{}
 	svc := NewService(fakeWriter{}, media, store, testConfig(), nil)
 	svc.BindTasks(tasks)
-	svc.follow(context.Background(), "render", uuid.New(), &taskID, "Tides", time.Hour)
+	svc.follow(context.Background(), &model.VideoRun{ID: uuid.New(), TaskID: &taskID, Title: "Tides"}, time.Hour)
 	if store.ext != "" || tasks.description() != "" {
 		t.Fatalf("collected anyway: stored %q, note %q", store.ext, tasks.description())
 	}
@@ -376,14 +381,14 @@ func TestTimeQueuedIsNotCountedAgainstTheRender(t *testing.T) {
 	svc := NewService(fakeWriter{}, media, &fakeStore{}, testConfig(), nil)
 	svc.BindTasks(tasks)
 	// A budget shorter than the time spent queued: only rendering counts.
-	svc.follow(context.Background(), "render", uuid.New(), &taskID, "Tides", 12*time.Millisecond)
+	svc.follow(context.Background(), &model.VideoRun{ID: uuid.New(), TaskID: &taskID, Title: "Tides"}, 12*time.Millisecond)
 	media.mu.Lock()
 	polls := media.polls
 	media.mu.Unlock()
 	if polls < 5 {
 		t.Fatalf("gave up after %d polls, while still queued", polls)
 	}
-	if !strings.Contains(tasks.description(), "rendering took longer") {
+	if !strings.Contains(tasks.description(), "Rendering took longer") {
 		t.Fatalf("description: %s", tasks.description())
 	}
 }
@@ -407,5 +412,235 @@ func TestASubmitLostInTransitIsRetried(t *testing.T) {
 	}
 	if len(media.submitted) != 2 || media.submitted[0].ID != media.submitted[1].ID {
 		t.Fatalf("expected one retry with the same id, got %+v", media.submitted)
+	}
+}
+
+// ─── run records (the Video Producer tab) ───────────────────────────────────
+
+type fakeRuns struct {
+	mu          sync.Mutex
+	runs        map[uuid.UUID]model.VideoRun
+	steps       []string // "status/stage" at every write, in order
+	staleCalled bool
+}
+
+func newFakeRuns() *fakeRuns { return &fakeRuns{runs: map[uuid.UUID]model.VideoRun{}} }
+
+func (f *fakeRuns) put(r *model.VideoRun) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.runs[r.ID] = *r
+	f.steps = append(f.steps, r.Status+"/"+r.Stage)
+}
+
+func (f *fakeRuns) Create(_ context.Context, r *model.VideoRun) error { f.put(r); return nil }
+func (f *fakeRuns) Save(_ context.Context, r *model.VideoRun) error   { f.put(r); return nil }
+
+func (f *fakeRuns) Get(_ context.Context, orgID, id uuid.UUID) (*model.VideoRun, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	r, ok := f.runs[id]
+	if !ok || r.OrgID != orgID {
+		return nil, repository.ErrVideoRunNotFound
+	}
+	return &r, nil
+}
+
+func (f *fakeRuns) List(_ context.Context, orgID uuid.UUID, _ int) ([]model.VideoRun, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []model.VideoRun
+	for _, r := range f.runs {
+		if r.OrgID == orgID {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeRuns) Rendering(context.Context) ([]model.VideoRun, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []model.VideoRun
+	for _, r := range f.runs {
+		if r.Status == model.VideoRunQueued || r.Status == model.VideoRunRendering {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeRuns) UnfinishedForTask(_ context.Context, taskID uuid.UUID) ([]model.VideoRun, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []model.VideoRun
+	for _, r := range f.runs {
+		if r.TaskID != nil && *r.TaskID == taskID && r.Unfinished() {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeRuns) FailStaleScripting(context.Context, time.Time, string) (int, error) {
+	f.mu.Lock()
+	f.staleCalled = true
+	f.mu.Unlock()
+	return 0, nil
+}
+
+func (f *fakeRuns) get(id uuid.UUID) model.VideoRun {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.runs[id]
+}
+
+func (f *fakeRuns) history() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return strings.Join(f.steps, " → ")
+}
+
+func TestARunRecordsEveryStepForTheTab(t *testing.T) {
+	taskID, orgID := uuid.New(), uuid.New()
+	tasks := newFakeTasks(taskID)
+	runs := newFakeRuns()
+	media := &fakeMedia{caps: Capabilities{FFmpeg: true, Narration: true, Motion: true}}
+	svc := NewService(fakeWriter{}, media, &fakeStore{}, testConfig(), nil)
+	svc.BindTasks(tasks)
+	svc.BindRuns(runs)
+	runID, err := svc.Start(context.Background(), StartRequest{OrgID: orgID, TaskID: &taskID,
+		Brief: Brief{Topic: "tides", Seconds: 30, Motion: true, Captions: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, tasks)
+
+	// What the tab shows, in order: writing the script, waiting its turn, the
+	// workstation's own stage, saving, done.
+	h := runs.history()
+	for _, step := range []string{"scripting/script", "queued/queued", "rendering/motion", "rendering/saving", "done/done"} {
+		if !strings.Contains(h, step) {
+			t.Errorf("history lacks %s: %s", step, h)
+		}
+	}
+	got := runs.get(runID)
+	if got.Title != "Tides" || len(got.Shots) != 1 || got.Topic != "tides" || !got.Brief.Motion ||
+		got.VideoURL == "" || got.StartedAt == nil || got.FinishedAt == nil || got.EstimateMinutes == 0 {
+		t.Fatalf("final run %+v", got)
+	}
+}
+
+func TestCancellingFromTheTabStopsTheRender(t *testing.T) {
+	taskID, orgID := uuid.New(), uuid.New()
+	tasks := newFakeTasks(taskID)
+	runs := newFakeRuns()
+	run := &model.VideoRun{ID: uuid.New(), OrgID: orgID, TaskID: &taskID, Status: model.VideoRunRendering}
+	runs.put(run)
+	media := &fakeMedia{}
+	svc := NewService(fakeWriter{}, media, &fakeStore{}, testConfig(), nil)
+	svc.BindTasks(tasks)
+	svc.BindRuns(runs)
+
+	got, err := svc.Cancel(context.Background(), orgID, run.ID)
+	if err != nil || got.Status != model.VideoRunCancelled {
+		t.Fatalf("cancel: %+v %v", got, err)
+	}
+	if len(media.cancelled) != 1 || media.cancelled[0] != run.ID.String() {
+		t.Fatalf("workstation not told: %v", media.cancelled)
+	}
+	if !strings.Contains(tasks.description(), "Video cancelled") {
+		t.Fatalf("task not told: %q", tasks.description())
+	}
+	if _, err := svc.Cancel(context.Background(), uuid.New(), run.ID); !errors.Is(err, repository.ErrVideoRunNotFound) {
+		t.Fatalf("another org cancelled it: %v", err)
+	}
+}
+
+type gatedWriter struct{ release chan struct{} }
+
+func (g gatedWriter) Write(ctx context.Context, b Brief) (*Script, error) {
+	<-g.release
+	return fakeWriter{}.Write(ctx, b)
+}
+
+func TestACancelWhileScriptingNeverReachesTheWorkstation(t *testing.T) {
+	orgID := uuid.New()
+	runs := newFakeRuns()
+	media := &fakeMedia{caps: Capabilities{FFmpeg: true, Narration: true}}
+	writer := gatedWriter{release: make(chan struct{})}
+	svc := NewService(writer, media, &fakeStore{}, testConfig(), nil)
+	svc.BindRuns(runs)
+	runID, err := svc.Start(context.Background(), StartRequest{OrgID: orgID, Brief: Brief{Topic: "tides", Seconds: 30}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Cancel(context.Background(), orgID, runID); err != nil {
+		t.Fatal(err)
+	}
+	close(writer.release)
+	time.Sleep(50 * time.Millisecond)
+	media.mu.Lock()
+	defer media.mu.Unlock()
+	if len(media.submitted) != 0 {
+		t.Fatal("a cancelled run was sent to the workstation")
+	}
+	if runs.get(runID).Status != model.VideoRunCancelled {
+		t.Fatalf("status %s", runs.get(runID).Status)
+	}
+}
+
+func TestARelaunchCancelsTheTasksEarlierRuns(t *testing.T) {
+	taskID, orgID := uuid.New(), uuid.New()
+	tasks := newFakeTasks(taskID)
+	runs := newFakeRuns()
+	older := &model.VideoRun{ID: uuid.New(), OrgID: orgID, TaskID: &taskID, Status: model.VideoRunRendering}
+	runs.put(older)
+	media := &fakeMedia{caps: Capabilities{FFmpeg: true, Narration: true}}
+	svc := NewService(fakeWriter{}, media, &fakeStore{}, testConfig(), nil)
+	svc.BindTasks(tasks)
+	svc.BindRuns(runs)
+	if _, err := svc.Start(context.Background(), StartRequest{OrgID: orgID, TaskID: &taskID,
+		Brief: Brief{Topic: "tides", Seconds: 30}}); err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, tasks)
+	if runs.get(older.ID).Status != model.VideoRunCancelled {
+		t.Fatalf("older run left %s", runs.get(older.ID).Status)
+	}
+	media.mu.Lock()
+	defer media.mu.Unlock()
+	if len(media.cancelled) == 0 || media.cancelled[0] != older.ID.String() {
+		t.Fatalf("workstation not told: %v", media.cancelled)
+	}
+}
+
+func TestTheResumerAdoptsARenderFromBeforeRunsWereRecorded(t *testing.T) {
+	old := resumeDelay
+	resumeDelay = 0
+	defer func() { resumeDelay = old }()
+
+	taskID, orgID, legacy := uuid.New(), uuid.New(), uuid.New()
+	tasks := newFakeTasks(taskID)
+	tasks.task.Metadata = map[string]any{model.TaskMetaRunID: legacy.String()}
+	runs := newFakeRuns()
+	media := &fakeMedia{jobs: []Job{{ID: legacy.String(), Title: "Tides", Status: JobRunning, Shots: 10,
+		Ref: map[string]string{"task_id": taskID.String(), "org_id": orgID.String()}}}}
+	svc := NewService(fakeWriter{}, media, &fakeStore{}, testConfig(), nil)
+	svc.BindTasks(tasks)
+	svc.BindRuns(runs)
+
+	go svc.StartResumer(context.Background())
+	if got := waitStatus(t, tasks); got != "done" {
+		t.Fatalf("status %q", got)
+	}
+	got := runs.get(legacy)
+	if got.Status != model.VideoRunDone || got.Title != "Tides" || got.TaskID == nil || *got.TaskID != taskID {
+		t.Fatalf("adopted run %+v", got)
+	}
+	runs.mu.Lock()
+	defer runs.mu.Unlock()
+	if !runs.staleCalled {
+		t.Fatal("runs cut off while scripting were not failed")
 	}
 }

@@ -924,6 +924,7 @@ func main() {
 	}
 	videoSvc := video.NewService(videoWriter, video.NewClient(videoCfg.BaseURL, videoCfg.JWTSecret), imgStore, videoCfg, logger)
 	videoSvc.BindTasks(taskSvc)
+	videoSvc.BindRuns(repository.NewVideoRunRepository(pool))
 	logger.Info("video producer initialised",
 		zap.Bool("configured", videoSvc.Configured()),
 		zap.String("workstation", videoCfg.BaseURL),
@@ -1217,6 +1218,7 @@ func main() {
 	wafLabHandler := handler.NewWAFLabHandler(wafLabSvc)
 	seoHandler := handler.NewSEOHandler(seoSvc)
 	courseHandler := handler.NewCourseHandler(courseSvc)
+	videoHandler := handler.NewVideoHandler(videoSvc)
 	linkedInHandler := handler.NewLinkedInHandler(linkedInSvc, cfg.FrontendBaseURL)
 	secretsRotHandler := handler.NewSecretsRotationHandler(secretsRotSvc)
 	linuxPatchHandler := handler.NewLinuxPatchHandler(linuxPatchSvc)
@@ -1629,6 +1631,12 @@ func main() {
 				r.Get("/runs/{runID}", courseHandler.GetRun)
 				r.Get("/runs/{runID}/chapters", courseHandler.ListChapters)
 				r.Post("/runs/{runID}/cancel", courseHandler.CancelRun)
+			})
+
+			r.Route("/videos", func(r chi.Router) {
+				r.Get("/runs", videoHandler.ListRuns)
+				r.Get("/runs/{runID}", videoHandler.GetRun)
+				r.Post("/runs/{runID}/cancel", videoHandler.CancelRun)
 			})
 
 			r.Route("/linkedin", func(r chi.Router) {

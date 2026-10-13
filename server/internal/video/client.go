@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jobshout/server/internal/gatewayauth"
+	"github.com/jobshout/server/internal/model"
 )
 
 var (
@@ -34,10 +35,7 @@ const (
 )
 
 // Shot is one beat of the film: what is said, and what is seen while it is.
-type Shot struct {
-	Narration string `json:"narration"`
-	Visual    string `json:"visual"`
-}
+type Shot = model.VideoShot
 
 // SubmitRequest asks the workstation to render a video.
 type SubmitRequest struct {

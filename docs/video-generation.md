@@ -64,6 +64,14 @@ about …").
 | Style | Appended to every shot, so the whole video looks the same. |
 | Captions | Burned in, timed to the narration. |
 
+**Watch it work:** Agents → **Video Producer** → **Workspace**. Every video is
+listed, and the selected one shows what the agent is doing right now — writing
+the script, waiting for the workstation, recording narration, drawing each
+shot, animating each shot ("Animating shot 4 of 10"), editing, saving — with a
+progress bar, time spent and time left, the script, a Cancel button, and the
+finished video with a download link. It refreshes every few seconds while
+anything is running. A task's "Open the agent" link lands on that task's video.
+
 The task first gets the script and an estimate. When the video is ready, it gets
 a link and moves to **done**. A one-minute video (10 shots) takes about
 **15 minutes as stills** and about **2 hours animated**. Animation is the slow
@@ -127,6 +135,19 @@ dropped at once; a running one stops at its next step (its tool is killed).
   finds the ones whose board task is still in progress, and resumes following
   them. Every ring shares the workstation, so each ring only resumes tasks in
   its own database.
+
+## How progress is recorded
+
+Each launch is a `video_runs` row (migration 068), written at every step: the
+Go service records the script and the waiting; while the workstation renders,
+the service's 20-second progress check copies the workstation's own stage and
+message into the row. The tab reads `GET /api/v1/videos/runs` (org-scoped) and
+cancels with `POST /api/v1/videos/runs/{id}/cancel`.
+
+A run cut off by a server restart while writing its script is failed at the
+next boot (nothing else would finish it); one cut off while rendering is
+followed again. Renders launched before runs were recorded are adopted into a
+row when their task is still waiting for them.
 
 ## Configuration
 
