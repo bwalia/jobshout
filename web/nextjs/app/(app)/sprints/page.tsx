@@ -1,7 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Plus, Target, CalendarDays, Users, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+import { agentHref } from "@/lib/agents/links";
 import {
   useSprints,
   useSprint,
@@ -21,7 +24,13 @@ import { cn } from "@/lib/utils/cn";
 
 export default function SprintsPage() {
   const { data: sprints = [], isLoading: sprintsLoading } = useSprints();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // The selection lives in ?sprint= so a sprint can be linked to and survives
+  // a reload.
+  const router = useRouter();
+  const pathname = usePathname();
+  const selectedId = useSearchParams().get("sprint");
+  const setSelectedId = (id: string) =>
+    router.replace(`${pathname}?sprint=${id}`, { scroll: false });
 
   // Auto-select the first sprint once data arrives so the right pane never
   // shows an empty placeholder when content exists.
@@ -121,7 +130,12 @@ function SprintList({
       </div>
 
       {showCreate ? (
-        <CreateSprintInline onDone={() => setShowCreate(false)} />
+        <CreateSprintInline
+          onDone={(created) => {
+            setShowCreate(false);
+            if (created) onSelect(created.id);
+          }}
+        />
       ) : null}
     </aside>
   );
@@ -284,9 +298,12 @@ function SprintStatusActions({
 function SprintAgents({ agents }: { agents: SprintDetail["agents"] }) {
   if (agents.length === 0) {
     return (
+      // Honest about the gap: nothing in the app assigns a squad yet, only
+      // POST /sprints/{id}/agents.
       <div className="rounded-lg border border-dashed border-border bg-card px-4 py-3 text-xs text-muted-foreground">
         <Users className="mr-1.5 inline h-3.5 w-3.5" /> No agents assigned to
-        this sprint yet.
+        this sprint. Assigning a squad from this page isn&apos;t available yet —
+        today agents are added to a sprint through the API.
       </div>
     );
   }
@@ -297,17 +314,19 @@ function SprintAgents({ agents }: { agents: SprintDetail["agents"] }) {
       </h3>
       <ul className="flex flex-wrap gap-2">
         {agents.map((a) => (
-          <li
-            key={`${a.agent_id}-${a.role_label}`}
-            className="flex items-center gap-2 rounded-full border border-border bg-background px-2 py-1 text-xs"
-          >
-            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent text-2xs font-semibold text-accent-foreground">
-              {a.name.charAt(0).toUpperCase()}
-            </span>
-            <span className="font-medium text-foreground">{a.name}</span>
-            <span className="rounded bg-muted px-1.5 py-0.5 text-2xs font-medium uppercase tracking-wide text-muted-foreground">
-              {a.role_label}
-            </span>
+          <li key={`${a.agent_id}-${a.role_label}`}>
+            <Link
+              href={agentHref(a.agent_id)}
+              className="flex items-center gap-2 rounded-full border border-border bg-background px-2 py-1 text-xs transition-colors hover:border-primary/40 hover:bg-muted"
+            >
+              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent text-2xs font-semibold text-accent-foreground">
+                {a.name.charAt(0).toUpperCase()}
+              </span>
+              <span className="font-medium text-foreground">{a.name}</span>
+              <span className="rounded bg-muted px-1.5 py-0.5 text-2xs font-medium uppercase tracking-wide text-muted-foreground">
+                {a.role_label}
+              </span>
+            </Link>
           </li>
         ))}
       </ul>
@@ -357,6 +376,22 @@ function SprintBoard({ jobs }: { jobs: SprintJob[] }) {
     return JOB_COLUMNS.map((c) => ({ ...c, jobs: jobs.filter(c.matcher) }));
   }, [jobs]);
 
+  // Five "Empty" columns explain nothing. Nothing on this page adds a job
+  // yet; they arrive through the chat assistant's sprint tool or the API.
+  if (jobs.length === 0) {
+    return (
+      <section className="rounded-lg border border-dashed border-border bg-card px-4 py-6 text-center text-sm text-muted-foreground">
+        <p className="font-medium text-foreground">No jobs in this sprint yet.</p>
+        <p className="mx-auto mt-1 max-w-lg text-xs">
+          A sprint tracks multi-agent jobs (plan → execute → review). This board
+          shows jobs added to the sprint elsewhere — by asking the chat assistant
+          to add a job to it, or through the API. Adding jobs from this page is
+          still in progress.
+        </p>
+      </section>
+    );
+  }
+
   return (
     <section className="flex flex-1 gap-3 overflow-x-auto pb-4 scrollbar-thin">
       {grouped.map((col) => (
@@ -394,6 +429,11 @@ function JobCard({ job }: { job: SprintJob }) {
   return (
     <article className="rounded-md border border-border bg-card p-3 shadow-card">
       <p className="line-clamp-3 text-xs text-foreground/90">{job.task_prompt}</p>
+      {job.status === "failed" && job.error_msg ? (
+        <p className="mt-2 line-clamp-3 text-2xs text-status-blocked" title={job.error_msg}>
+          {job.error_msg}
+        </p>
+      ) : null}
       <footer className="mt-2 flex items-center justify-between text-2xs text-muted-foreground">
         <span>
           {job.iterations}/{job.max_review} cycles
@@ -439,7 +479,7 @@ function SprintStatusBadge({ status }: { status: SprintStatus }) {
   );
 }
 
-function CreateSprintInline({ onDone }: { onDone: () => void }) {
+function CreateSprintInline({ onDone }: { onDone: (created?: Sprint) => void }) {
   const [name, setName] = useState("");
   const [goal, setGoal] = useState("");
   const create = useCreateSprint();
@@ -452,10 +492,10 @@ function CreateSprintInline({ onDone }: { onDone: () => void }) {
         create.mutate(
           { name: name.trim(), goal: goal.trim() || undefined },
           {
-            onSuccess: () => {
+            onSuccess: (created) => {
               setName("");
               setGoal("");
-              onDone();
+              onDone(created);
             },
           }
         );
@@ -485,7 +525,7 @@ function CreateSprintInline({ onDone }: { onDone: () => void }) {
         </button>
         <button
           type="button"
-          onClick={onDone}
+          onClick={() => onDone()}
           className="rounded-md border border-border px-2 py-1 text-xs"
         >
           Cancel

@@ -16,7 +16,8 @@ export function SecurityTesterPanel() {
           <h1 className="text-2xl font-semibold tracking-tight">Security Tester</h1>
         </div>
         <p className="text-sm text-muted-foreground">
-          Autonomous security testing powered by Strix. Tests live APIs and applications for
+          Autonomous security testing powered by Strix — an open-source AI penetration-testing
+          engine that runs on the JobShout workstation. Tests live APIs and applications for
           OWASP Top 10 issues and beyond — authorized targets only.
         </p>
       </div>

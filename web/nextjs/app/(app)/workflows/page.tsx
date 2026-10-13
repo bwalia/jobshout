@@ -56,7 +56,11 @@ function WorkflowCard({ workflow }: { workflow: Workflow }) {
       <div className="mt-3 flex items-center gap-2 border-t border-border pt-3">
         <button
           onClick={() =>
-            executeWorkflow.mutate({ id: workflow.id, payload: {} })
+            executeWorkflow.mutate(
+              { id: workflow.id, payload: {} },
+              // A run is only useful if you can watch it; open it.
+              { onSuccess: (run) => router.push(`/workflows/${workflow.id}?run=${run.id}`) }
+            )
           }
           disabled={executeWorkflow.isPending}
           className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/20 transition-colors disabled:opacity-50"

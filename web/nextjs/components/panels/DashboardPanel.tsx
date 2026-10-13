@@ -88,6 +88,7 @@ function KpiCard({
   icon: Icon,
   tint,
   progress,
+  href,
 }: {
   label: string;
   value: string;
@@ -95,9 +96,14 @@ function KpiCard({
   icon: React.ElementType;
   tint: string;
   progress?: number;
+  /** The list behind the number. */
+  href: string;
 }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-5 shadow-card transition-shadow hover:shadow-card-hover">
+    <Link
+      href={href}
+      className="block rounded-xl border border-border bg-card p-5 shadow-card transition-shadow hover:shadow-card-hover"
+    >
       <div className="flex items-start justify-between">
         <p className="text-sm font-medium text-muted-foreground">{label}</p>
         <span
@@ -119,7 +125,7 @@ function KpiCard({
           />
         </div>
       )}
-    </div>
+    </Link>
   );
 }
 
@@ -271,7 +277,7 @@ export function DashboardPanel() {
         </div>
         <div className="flex items-center gap-2">
           <Link
-            href="/panel/agents"
+            href="/panel/agents?new=1"
             className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-sm font-medium hover:bg-secondary"
           >
             <Plus className="h-4 w-4" /> New agent
@@ -300,6 +306,7 @@ export function DashboardPanel() {
             label="Total tasks"
             value={(summary?.total_tasks ?? 0).toLocaleString()}
             hint={`across ${summary?.total_projects ?? 0} projects`}
+            href="/panel/tasks"
             icon={ListChecks}
             tint="bg-blue-500/10 text-blue-600 dark:text-blue-400"
           />
@@ -307,6 +314,7 @@ export function DashboardPanel() {
             label="Completed"
             value={(summary?.tasks_completed ?? 0).toLocaleString()}
             hint={`${completionRate}% completion rate`}
+            href="/panel/tasks?status=done"
             icon={CheckCircle2}
             tint="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
             progress={completionRate}
@@ -315,6 +323,7 @@ export function DashboardPanel() {
             label="In progress"
             value={(summary?.tasks_in_progress ?? 0).toLocaleString()}
             hint="being worked on right now"
+            href="/panel/tasks?status=in_progress"
             icon={Activity}
             tint="bg-orange-500/10 text-orange-600 dark:text-orange-400"
           />
@@ -322,6 +331,7 @@ export function DashboardPanel() {
             label="Active agents"
             value={String(summary?.active_agents ?? 0)}
             hint={`of ${summary?.total_agents ?? 0} agents total`}
+            href="/panel/agents"
             icon={Bot}
             tint="bg-violet-500/10 text-violet-600 dark:text-violet-400"
           />
@@ -390,7 +400,7 @@ export function DashboardPanel() {
               href="/panel/tasks"
               className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
             >
-              Task Board <ArrowRight className="h-3 w-3" />
+              Tasks <ArrowRight className="h-3 w-3" />
             </Link>
           }
         >
@@ -471,7 +481,7 @@ export function DashboardPanel() {
             <div className="flex h-40 flex-col items-center justify-center gap-2 text-center">
               <p className="text-sm text-muted-foreground">No agents yet.</p>
               <Link
-                href="/panel/agents"
+                href="/panel/agents?new=1"
                 className="text-sm font-medium text-primary hover:underline"
               >
                 Create your first agent

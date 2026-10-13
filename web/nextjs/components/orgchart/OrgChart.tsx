@@ -10,6 +10,7 @@ import ReactFlow, {
   useEdgesState,
   type Connection,
   type Edge,
+  type EdgeChange,
   type Node,
   type NodeTypes,
 } from "reactflow";
@@ -32,12 +33,13 @@ const nodeTypes: NodeTypes = {
 
 interface SaveStatusProps {
   isSaving: boolean;
+  dirty: boolean;
 }
 
-function SaveStatus({ isSaving }: SaveStatusProps) {
+function SaveStatus({ isSaving, dirty }: SaveStatusProps) {
   return (
-    <span className="text-xs text-muted-foreground">
-      {isSaving ? "Saving…" : "All changes saved"}
+    <span className={dirty && !isSaving ? "text-xs font-medium text-foreground" : "text-xs text-muted-foreground"}>
+      {isSaving ? "Saving…" : dirty ? "Unsaved changes" : "All changes saved"}
     </span>
   );
 }
@@ -65,6 +67,9 @@ export function OrgChart({ agents: _agents }: OrgChartProps) {
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  // True from the first reporting-line edit until a save succeeds. Only edges
+  // are persisted, so moving nodes around does not count.
+  const [dirty, setDirty] = useState(false);
 
   // useNodesState is plain useState underneath, so it ignores later values of
   // initialNodes — e.g. the fresh layout after a save invalidates the agents
@@ -86,16 +91,19 @@ export function OrgChart({ agents: _agents }: OrgChartProps) {
     [initialNodes, initialEdges]
   );
   const appliedSignature = useRef(chartSignature);
+  // A refetch while edits are pending (an agent's status changed, say) must
+  // not wipe them; it is applied once they are saved.
   useEffect(() => {
-    if (appliedSignature.current === chartSignature) return;
+    if (dirty || appliedSignature.current === chartSignature) return;
     appliedSignature.current = chartSignature;
     setNodes(initialNodes);
     setEdges(initialEdges);
-  }, [chartSignature, initialNodes, initialEdges, setNodes, setEdges]);
+  }, [dirty, chartSignature, initialNodes, initialEdges, setNodes, setEdges]);
 
   // Called when the user drags a connection between two Handles
   const onConnect = useCallback(
     (connection: Connection) => {
+      setDirty(true);
       setEdges((currentEdges) =>
         addEdge(
           {
@@ -108,6 +116,15 @@ export function OrgChart({ agents: _agents }: OrgChartProps) {
       );
     },
     [setEdges]
+  );
+
+  // Selection changes also arrive here; only a removal is an edit.
+  const handleEdgesChange = useCallback(
+    (changes: EdgeChange[]) => {
+      if (changes.some((c) => c.type === "remove")) setDirty(true);
+      onEdgesChange(changes);
+    },
+    [onEdgesChange]
   );
 
   // Called when the user selects an edge and presses Delete / Backspace
@@ -137,13 +154,14 @@ export function OrgChart({ agents: _agents }: OrgChartProps) {
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
       if (dragged.current) return;
+      if (dirty && !confirm("You have unsaved changes to the org chart. Leave without saving?")) return;
       router.push(agentHref(node.id));
     },
-    [router]
+    [router, dirty]
   );
 
   function handleSave() {
-    saveChart(edges);
+    saveChart(edges, () => setDirty(false));
   }
 
   return (
@@ -184,7 +202,7 @@ export function OrgChart({ agents: _agents }: OrgChartProps) {
             "Save"
           )}
         </button>
-        <SaveStatus isSaving={isSaving} />
+        <SaveStatus isSaving={isSaving} dirty={dirty} />
       </div>
 
       <ReactFlow
@@ -192,7 +210,7 @@ export function OrgChart({ agents: _agents }: OrgChartProps) {
         edges={edges}
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
+        onEdgesChange={handleEdgesChange}
         onConnect={onConnect}
         onEdgesDelete={onEdgesDelete}
         onNodeClick={onNodeClick}

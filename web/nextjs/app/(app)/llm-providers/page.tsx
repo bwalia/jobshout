@@ -144,7 +144,7 @@ function ProvidersTab() {
     <div className="max-w-4xl space-y-8">
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
-          Configure LLM providers (local and cloud) for your agents and workflows. Click a system
+          Configure LLM providers (local and cloud) for your agents and workflows. Click a built-in
           provider to see the models it offers.
         </p>
         <button
@@ -158,9 +158,10 @@ function ProvidersTab() {
       {/* Builtin (env-based) providers */}
       {builtinProviders && builtinProviders.length > 0 && (
         <section className="rounded-xl border border-border bg-card p-6">
-          <h2 className="text-base font-semibold">System Providers (Environment)</h2>
+          <h2 className="text-base font-semibold">Built-in providers</h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            These providers are configured via environment variables and always available.
+            Set up by whoever runs this JobShout server, so every agent can use them with no setup
+            here. They are changed in the server&apos;s settings, not on this page.
           </p>
           <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
             {builtinProviders.map((bp) => {
@@ -183,7 +184,12 @@ function ProvidersTab() {
                       <p className="text-sm font-medium capitalize">{bp.name}</p>
                       <p className={cn("text-xs", problem ? "text-destructive" : "text-muted-foreground")}>
                         {problem ? (
-                          <span className="inline-flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> {problem}</span>
+                          <span
+                            className="inline-flex items-center gap-1"
+                            title={group?.error ?? undefined}
+                          >
+                            <AlertTriangle className="h-3 w-3" /> {problem}
+                          </span>
                         ) : (
                           <>
                             {bp.is_default ? "Default" : "Available"}
@@ -191,6 +197,11 @@ function ProvidersTab() {
                           </>
                         )}
                       </p>
+                      {group?.error && (
+                        <p className="text-xs text-muted-foreground">
+                          Check the service is running and its base URL is right.
+                        </p>
+                      )}
                     </div>
                   </div>
                   <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -310,6 +321,15 @@ function ProvidersTab() {
             <p className="text-sm text-muted-foreground">
               No custom providers configured. Add one to get started.
             </p>
+            {!showForm && (
+              <button
+                type="button"
+                onClick={() => setShowForm(true)}
+                className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
+              >
+                Add provider
+              </button>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4">

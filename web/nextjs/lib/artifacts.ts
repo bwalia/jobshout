@@ -1,3 +1,4 @@
+import { resolveStoredImageSrc } from "@/lib/api/images";
 import type { ArtifactItem } from "@/lib/types/artifact";
 import type { BlogRun } from "@/lib/types/blog";
 import type { GeneratedImage } from "@/lib/types/image";
@@ -56,12 +57,16 @@ export function artifactsFromBlogRuns(runs: BlogRun[]): ArtifactItem[] {
   return items;
 }
 
+/**
+ * An image card opens the image itself. The image record carries no link to
+ * the article it was made for, so a cover cannot open its article yet.
+ */
 export function artifactsFromImages(images: GeneratedImage[]): ArtifactItem[] {
   return images.map((image) => ({
     id: `image:${image.id}`,
     kind: "image",
     title: image.prompt,
-    href: "/panel/artifacts?kind=image",
+    href: image.url ? resolveStoredImageSrc(image.url) : undefined,
     createdAt: image.created_at,
     imageUrl: image.url,
     meta: [IMAGE_SOURCE_LABELS[image.source] ?? image.source, image.model]

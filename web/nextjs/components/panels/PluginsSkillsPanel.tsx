@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils/cn";
 import { PluginsView } from "@/components/plugins/PluginsView";
 import { SkillsView } from "@/components/skills/SkillsView";
@@ -8,14 +8,20 @@ import { SkillsView } from "@/components/skills/SkillsView";
 type Tab = "plugins" | "skills";
 
 export function PluginsSkillsPanel() {
-  const [tab, setTab] = useState<Tab>("plugins");
+  // The tab lives in ?tab= so a link can open Skills directly.
+  const router = useRouter();
+  const pathname = usePathname();
+  const tab: Tab = useSearchParams().get("tab") === "skills" ? "skills" : "plugins";
+  const setTab = (t: Tab) =>
+    router.replace(t === "plugins" ? pathname : `${pathname}?tab=${t}`, { scroll: false });
 
   return (
     <div className="space-y-4 p-6">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Plugins & Skills</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Skills & plugins</h1>
         <p className="text-sm text-muted-foreground">
-          Capability bundles and executable plugins for your agents
+          A skill is a tool or prompt pattern you switch on for an agent to shape how it works; a
+          plugin is a packaged workflow that runs on its own, sandboxed, when you execute it.
         </p>
       </div>
       <div className="flex gap-1 border-b border-border">

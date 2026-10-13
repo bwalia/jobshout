@@ -29,11 +29,14 @@ function FailureRow({ f, agentName }: { f: RunFailure; agentName?: string }) {
       : f.kind === "task" && f.taskId
         ? () => createRun.mutate({ taskId: f.taskId as string, payload: {} })
         : undefined;
+  // An article run has its own page; prefer it to the agent's workspace.
   const openHref = f.taskId
     ? `/panel/tasks?task=${f.taskId}`
-    : f.agentId
-      ? agentHref(f.agentId, "workspace")
-      : undefined;
+    : f.kind === "article"
+      ? `/articles/${f.runId}`
+      : f.agentId
+        ? agentHref(f.agentId, "workspace")
+        : undefined;
 
   return (
     <li className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -119,9 +122,9 @@ export function NeedsAttention() {
         ))}
       </ul>
       {failures.length > SHOWN && (
-        <p className="pt-2 text-xs text-muted-foreground">
-          And {failures.length - SHOWN} more.
-        </p>
+        <Link href="/panel/tasks?failed=1" className="block pt-2 text-xs text-primary hover:underline">
+          And {failures.length - SHOWN} more →
+        </Link>
       )}
     </section>
   );
