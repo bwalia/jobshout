@@ -5,6 +5,10 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { AlertTriangle, ChevronRight } from "lucide-react";
 import { LLMBenchmarksPanel } from "@/components/panels/LLMBenchmarksPanel";
 import { ProviderDrawer } from "@/components/llm/ProviderDrawer";
+import { FallbackChainCard } from "@/components/llm/FallbackChainCard";
+import { testLLMProvider } from "@/lib/api/llm-providers";
+import { apiErrorMessage } from "@/lib/api/client";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils/cn";
 import {
   useAvailableModels,
@@ -14,7 +18,12 @@ import {
   useUpdateLLMProvider,
   useDeleteLLMProvider,
 } from "@/lib/hooks/useLLMProviders";
-import type { CreateLLMProviderRequest, LLMProviderType } from "@/lib/types/llm-provider";
+import type {
+  CreateLLMProviderRequest,
+  LLMProviderConfig,
+  LLMProviderType,
+  UpdateLLMProviderRequest,
+} from "@/lib/types/llm-provider";
 
 const PROVIDER_PRESETS: Record<LLMProviderType, { base_url: string; models: string[]; key_placeholder?: string }> = {
   ollama: {
@@ -27,18 +36,41 @@ const PROVIDER_PRESETS: Record<LLMProviderType, { base_url: string; models: stri
   },
   claude: {
     base_url: "https://api.anthropic.com",
-    models: [
-      "claude-sonnet-4-20250514",
-      "claude-opus-4-20250514",
-      "claude-haiku-4-20250514",
-      "claude-3-5-sonnet-20241022",
-    ],
+    models: ["claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-5-5", "claude-fable-5-1"],
+    key_placeholder: "sk-ant-...",
   },
   gemini: {
     base_url: "https://generativelanguage.googleapis.com",
     models: ["gemini-flash-latest", "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"],
     key_placeholder: "AIza...",
   },
+  mistral: {
+    base_url: "https://api.mistral.ai",
+    models: ["mistral-large-latest", "mistral-medium-latest", "mistral-small-latest", "codestral-latest"],
+  },
+  grok: {
+    base_url: "https://api.x.ai",
+    models: ["grok-4", "grok-3", "grok-3-mini"],
+    key_placeholder: "xai-...",
+  },
+};
+
+const PROVIDER_LABELS: Record<LLMProviderType, string> = {
+  ollama: "Ollama (self-hosted)",
+  openai: "OpenAI / compatible",
+  claude: "Claude (Anthropic)",
+  gemini: "Gemini (Google)",
+  mistral: "Mistral",
+  grok: "Grok (xAI)",
+};
+
+const PROVIDER_BADGE: Record<LLMProviderType, string> = {
+  ollama: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+  openai: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+  claude: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
+  gemini: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
+  mistral: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+  grok: "bg-zinc-200 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-200",
 };
 
 /**
@@ -103,8 +135,6 @@ function ProvidersTab() {
   const [openProvider, setOpenProvider] = useState<string | null>(null);
   const { data: providers, isLoading } = useLLMProviders();
   const createMutation = useCreateLLMProvider();
-  const updateMutation = useUpdateLLMProvider();
-  const deleteMutation = useDeleteLLMProvider();
 
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<CreateLLMProviderRequest>({
@@ -239,10 +269,11 @@ function ProvidersTab() {
                   }
                   className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
-                  <option value="ollama">Ollama (Local)</option>
-                  <option value="openai">OpenAI / Compatible</option>
-                  <option value="claude">Claude (Anthropic)</option>
-                  <option value="gemini">Gemini (Google)</option>
+                  {(Object.keys(PROVIDER_LABELS) as LLMProviderType[]).map((t) => (
+                    <option key={t} value={t}>
+                      {PROVIDER_LABELS[t]}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -258,17 +289,18 @@ function ProvidersTab() {
 
               <div className="space-y-2">
                 <label className="text-sm font-medium">Default Model</label>
-                <select
+                <input
+                  list="provider-model-presets"
                   value={form.default_model}
                   onChange={(e) => setForm({ ...form, default_model: e.target.value })}
+                  required
                   className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
+                />
+                <datalist id="provider-model-presets">
                   {PROVIDER_PRESETS[form.provider_type]?.models.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
+                    <option key={m} value={m} />
                   ))}
-                </select>
+                </datalist>
               </div>
 
               {form.provider_type !== "ollama" && (
@@ -334,91 +366,172 @@ function ProvidersTab() {
         ) : (
           <div className="grid grid-cols-1 gap-4">
             {providers.map((p) => (
-              <div
-                key={p.id}
-                className="flex items-center justify-between rounded-xl border border-border bg-card p-5"
-              >
-                <div className="flex items-center gap-4">
-                  <div
-                    className={`flex h-12 w-12 items-center justify-center rounded-lg text-lg font-bold uppercase ${
-                      p.provider_type === "ollama"
-                        ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
-                        : p.provider_type === "claude"
-                        ? "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400"
-                        : p.provider_type === "gemini"
-                        ? "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400"
-                        : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                    }`}
-                  >
-                    {p.provider_type.charAt(0)}
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold">{p.name}</p>
-                      {p.is_default && (
-                        <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">
-                          Default
-                        </span>
-                      )}
-                      {!p.is_active && (
-                        <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400">
-                          Inactive
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      {p.provider_type} &middot; {p.default_model} &middot; {p.base_url}
-                    </p>
-                    {p.api_key && (
-                      <p className="text-xs text-muted-foreground">
-                        Key: {maskedKey(p.api_key)}
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {!p.is_default && (
-                    <button
-                      onClick={() =>
-                        updateMutation.mutate({
-                          id: p.id,
-                          payload: { is_default: true },
-                        })
-                      }
-                      className="inline-flex h-8 items-center rounded-md border border-input bg-background px-3 text-xs font-medium hover:bg-accent"
-                    >
-                      Set Default
-                    </button>
-                  )}
-                  <button
-                    onClick={() =>
-                      updateMutation.mutate({
-                        id: p.id,
-                        payload: { is_active: !p.is_active },
-                      })
-                    }
-                    className="inline-flex h-8 items-center rounded-md border border-input bg-background px-3 text-xs font-medium hover:bg-accent"
-                  >
-                    {p.is_active ? "Disable" : "Enable"}
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (confirm("Delete this provider?")) {
-                        deleteMutation.mutate(p.id);
-                      }
-                    }}
-                    className="inline-flex h-8 items-center rounded-md border border-red-200 bg-background px-3 text-xs font-medium text-red-600 hover:bg-red-50 dark:border-red-800 dark:hover:bg-red-900/20"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
+              <ProviderRow key={p.id} provider={p} />
             ))}
           </div>
         )}
       </section>
+
+      <FallbackChainCard providers={providers ?? []} />
       {openProvider && <ProviderDrawer provider={openProvider} onClose={() => setOpenProvider(null)} />}
+    </div>
+  );
+}
+
+const fieldClass =
+  "flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+
+/**
+ * One configured provider: what it is, whether it answers (Test), and its
+ * settings — including a new API key, which replaces the stored one. The key
+ * itself is never shown; leaving the field empty keeps it.
+ */
+function ProviderRow({ provider: p }: { provider: LLMProviderConfig }) {
+  const updateMutation = useUpdateLLMProvider();
+  const deleteMutation = useDeleteLLMProvider();
+  const [editing, setEditing] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [edit, setEdit] = useState({ name: p.name, base_url: p.base_url, default_model: p.default_model, api_key: "" });
+
+  async function runTest() {
+    setTesting(true);
+    try {
+      const r = await testLLMProvider(p.id);
+      if (r.ok) toast.success(`${p.name} answered in ${(r.latency_ms / 1000).toFixed(1)}s (${r.model}).`);
+      else toast.error(`${p.name} did not answer: ${r.error ?? "unknown error"}`);
+    } catch (err) {
+      toast.error(`Test failed: ${apiErrorMessage(err, "the provider could not be reached")}`);
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  function saveEdit(e: React.FormEvent) {
+    e.preventDefault();
+    const payload: UpdateLLMProviderRequest = {
+      name: edit.name.trim(),
+      base_url: edit.base_url.trim(),
+      default_model: edit.default_model.trim(),
+    };
+    if (edit.api_key.trim()) payload.api_key = edit.api_key.trim();
+    updateMutation.mutate(
+      { id: p.id, payload },
+      {
+        onSuccess: () => {
+          setEditing(false);
+          setEdit((v) => ({ ...v, api_key: "" }));
+        },
+      }
+    );
+  }
+
+  const button = "inline-flex h-8 items-center rounded-md border border-input bg-background px-3 text-xs font-medium hover:bg-accent disabled:opacity-50";
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-4">
+          <div className={cn("flex h-12 w-12 items-center justify-center rounded-lg text-lg font-bold uppercase", PROVIDER_BADGE[p.provider_type] ?? PROVIDER_BADGE.openai)}>
+            {p.provider_type.charAt(0)}
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-semibold">{p.name}</p>
+              {p.is_default && (
+                <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                  Default
+                </span>
+              )}
+              {!p.is_active && (
+                <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400">
+                  Inactive
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {PROVIDER_LABELS[p.provider_type] ?? p.provider_type} &middot; {p.default_model}
+              {p.base_url ? <> &middot; {p.base_url}</> : null}
+            </p>
+            {p.api_key && <p className="text-xs text-muted-foreground">Key: {maskedKey(p.api_key)}</p>}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={runTest} disabled={testing} className={button}>
+            {testing ? "Testing…" : "Test"}
+          </button>
+          <button type="button" onClick={() => setEditing((v) => !v)} className={button}>
+            {editing ? "Close" : "Edit"}
+          </button>
+          {!p.is_default && (
+            <button type="button" onClick={() => updateMutation.mutate({ id: p.id, payload: { is_default: true } })} className={button}>
+              Set default
+            </button>
+          )}
+          <button type="button" onClick={() => updateMutation.mutate({ id: p.id, payload: { is_active: !p.is_active } })} className={button}>
+            {p.is_active ? "Disable" : "Enable"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (confirm(`Delete ${p.name}?`)) deleteMutation.mutate(p.id);
+            }}
+            className="inline-flex h-8 items-center rounded-md border border-red-200 bg-background px-3 text-xs font-medium text-red-600 hover:bg-red-50 dark:border-red-800 dark:hover:bg-red-900/20"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+
+      {editing && (
+        <form onSubmit={saveEdit} className="mt-4 grid grid-cols-1 gap-3 border-t border-border pt-4 sm:grid-cols-2">
+          <label className="space-y-1 text-xs text-muted-foreground">
+            Name
+            <input value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} required className={fieldClass} />
+          </label>
+          <label className="space-y-1 text-xs text-muted-foreground">
+            Default model
+            <input
+              list={`models-${p.id}`}
+              value={edit.default_model}
+              onChange={(e) => setEdit({ ...edit, default_model: e.target.value })}
+              required
+              className={fieldClass}
+            />
+            <datalist id={`models-${p.id}`}>
+              {PROVIDER_PRESETS[p.provider_type]?.models.map((m) => (
+                <option key={m} value={m} />
+              ))}
+            </datalist>
+          </label>
+          <label className="space-y-1 text-xs text-muted-foreground">
+            Base URL
+            <input value={edit.base_url} onChange={(e) => setEdit({ ...edit, base_url: e.target.value })} className={fieldClass} />
+          </label>
+          {p.provider_type !== "ollama" && (
+            <label className="space-y-1 text-xs text-muted-foreground">
+              New API key
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={edit.api_key}
+                onChange={(e) => setEdit({ ...edit, api_key: e.target.value })}
+                placeholder="Leave empty to keep the current key"
+                className={fieldClass}
+              />
+            </label>
+          )}
+          <div className="sm:col-span-2">
+            <button
+              type="submit"
+              disabled={updateMutation.isPending}
+              className="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              {updateMutation.isPending ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </form>
+      )}
     </div>
   );
 }

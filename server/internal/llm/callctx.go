@@ -212,3 +212,18 @@ func firstNonEmpty(vals ...string) string {
 	}
 	return ""
 }
+
+type fallbackAvailableKey struct{}
+
+// WithFallbackAvailable marks a call as having somewhere else to go when this
+// provider cannot answer — an org fallback chain. Providers then fail fast on
+// a busy or timed-out host instead of spending minutes on their own retries.
+func WithFallbackAvailable(ctx context.Context) context.Context {
+	return context.WithValue(ctx, fallbackAvailableKey{}, true)
+}
+
+// FallbackAvailable reports whether WithFallbackAvailable marked ctx.
+func FallbackAvailable(ctx context.Context) bool {
+	v, _ := ctx.Value(fallbackAvailableKey{}).(bool)
+	return v
+}

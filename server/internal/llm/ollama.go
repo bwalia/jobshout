@@ -364,6 +364,11 @@ func (c *OllamaClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 		if isServerBusy(resp.StatusCode, rawBody) {
 			limit, wait = ollamaBusyAttempts, c.busyRetryWait(try)
 		}
+		// A fallback chain is waiting: let it answer now rather than after
+		// minutes of retrying a host that is already refusing.
+		if FallbackAvailable(ctx) {
+			limit = 1
+		}
 		if try >= limit {
 			return nil, err
 		}

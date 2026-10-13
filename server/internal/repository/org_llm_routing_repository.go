@@ -32,8 +32,8 @@ func (r *orgLLMRoutingRepository) Get(ctx context.Context, orgID uuid.UUID) (*mo
 	out := &model.OrgLLMRouting{}
 	var chainRaw []byte
 	err := r.pool.QueryRow(ctx,
-		`SELECT org_id, enabled, chain, updated_by, updated_at FROM org_llm_routing WHERE org_id = $1`, orgID,
-	).Scan(&out.OrgID, &out.Enabled, &chainRaw, &out.UpdatedBy, &out.UpdatedAt)
+		`SELECT org_id, enabled, mode, chain, updated_by, updated_at FROM org_llm_routing WHERE org_id = $1`, orgID,
+	).Scan(&out.OrgID, &out.Enabled, &out.Mode, &chainRaw, &out.UpdatedBy, &out.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -53,17 +53,20 @@ func (r *orgLLMRoutingRepository) Upsert(ctx context.Context, in *model.OrgLLMRo
 	if in.Chain == nil {
 		in.Chain = []model.LLMRouteStep{}
 	}
+	if in.Mode == "" {
+		in.Mode = model.RoutingModeReplace
+	}
 	chain, err := json.Marshal(in.Chain)
 	if err != nil {
 		return fmt.Errorf("org_llm_routing: encode chain: %w", err)
 	}
 	return r.pool.QueryRow(ctx, `
-		INSERT INTO org_llm_routing (org_id, enabled, chain, updated_by)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO org_llm_routing (org_id, enabled, mode, chain, updated_by)
+		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (org_id) DO UPDATE
-		SET enabled = EXCLUDED.enabled, chain = EXCLUDED.chain,
+		SET enabled = EXCLUDED.enabled, mode = EXCLUDED.mode, chain = EXCLUDED.chain,
 		    updated_by = EXCLUDED.updated_by, updated_at = NOW()
 		RETURNING updated_at`,
-		in.OrgID, in.Enabled, chain, in.UpdatedBy,
+		in.OrgID, in.Enabled, in.Mode, chain, in.UpdatedBy,
 	).Scan(&in.UpdatedAt)
 }

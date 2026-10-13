@@ -74,8 +74,11 @@ type Resolver struct {
 }
 
 type cachedChain struct {
-	steps   []Step
-	expires time.Time
+	steps []Step
+	// agentFirst is routing mode "fallback": the caller's own provider and
+	// model answer first, and the chain only takes over when that fails.
+	agentFirst bool
+	expires    time.Time
 }
 
 type cachedClient struct {
@@ -113,28 +116,38 @@ func (r *Resolver) Invalidate(orgID uuid.UUID) {
 // Chain returns the org's effective chain, or nil when the org's calls should
 // use the env providers (no active configs, or routing disabled).
 func (r *Resolver) Chain(ctx context.Context, orgID uuid.UUID) ([]Step, error) {
+	c, err := r.chain(ctx, orgID)
+	return c.steps, err
+}
+
+func (r *Resolver) chain(ctx context.Context, orgID uuid.UUID) (cachedChain, error) {
 	r.mu.Lock()
 	if c, ok := r.chains[orgID]; ok && r.now().Before(c.expires) {
 		r.mu.Unlock()
-		return c.steps, nil
+		return c, nil
 	}
 	r.mu.Unlock()
 
-	steps, err := r.resolve(ctx, orgID)
-	if err != nil {
-		return nil, err
-	}
-	r.mu.Lock()
-	r.chains[orgID] = cachedChain{steps: steps, expires: r.now().Add(r.opts.TTL)}
-	r.mu.Unlock()
-	return steps, nil
-}
-
-func (r *Resolver) resolve(ctx context.Context, orgID uuid.UUID) ([]Step, error) {
 	routing, err := r.store.Get(ctx, orgID)
 	if err != nil {
-		return nil, err
+		return cachedChain{}, err
 	}
+	steps, err := r.resolve(ctx, orgID, routing)
+	if err != nil {
+		return cachedChain{}, err
+	}
+	c := cachedChain{
+		steps:      steps,
+		agentFirst: routing != nil && routing.Mode == model.RoutingModeFallback,
+		expires:    r.now().Add(r.opts.TTL),
+	}
+	r.mu.Lock()
+	r.chains[orgID] = c
+	r.mu.Unlock()
+	return c, nil
+}
+
+func (r *Resolver) resolve(ctx context.Context, orgID uuid.UUID, routing *model.OrgLLMRouting) ([]Step, error) {
 	if routing != nil && !routing.Enabled {
 		return nil, nil
 	}
@@ -290,7 +303,7 @@ func (c *orgClient) Generate(ctx context.Context, req llm.GenerateRequest) (*llm
 	if !ok {
 		return c.inner.Generate(ctx, req)
 	}
-	steps, err := c.res.Chain(ctx, orgID)
+	chain, err := c.res.chain(ctx, orgID)
 	if err != nil {
 		// A lookup failure must not break the run; the org then behaves as
 		// if it had no configs (env routing), which is today's behaviour.
@@ -298,10 +311,25 @@ func (c *orgClient) Generate(ctx context.Context, req llm.GenerateRequest) (*llm
 			zap.String("org_id", orgID.String()), zap.Error(err))
 		return c.inner.Generate(ctx, req)
 	}
-	if len(steps) == 0 {
+	if len(chain.steps) == 0 {
 		return c.inner.Generate(ctx, req)
 	}
-	return c.res.Generate(ctx, orgID, steps, req)
+	if chain.agentFirst {
+		// Fallback mode: the agent's own provider and model answer when they
+		// can. The chain is what keeps the run going when they cannot — a
+		// self-hosted model that is busy or unreachable, a key over quota.
+		resp, err := c.inner.Generate(llm.WithFallbackAvailable(ctx), req)
+		if err == nil || ctx.Err() != nil {
+			return resp, err
+		}
+		c.res.opts.Logger.Warn("orgroute: agent's provider failed, falling back to the org chain",
+			zap.String("org_id", orgID.String()),
+			zap.String("provider", c.inner.ProviderName()),
+			zap.String("model", req.Model),
+			zap.String("next", chain.steps[0].Name),
+			zap.Error(err))
+	}
+	return c.res.Generate(ctx, orgID, chain.steps, req)
 }
 
 func (c *orgClient) ProviderName() string { return c.inner.ProviderName() }
@@ -321,6 +349,13 @@ func (c *orgListerClient) ListModels(ctx context.Context) ([]llm.ModelInfo, erro
 }
 
 // ─── Client construction ────────────────────────────────────────────────────
+
+// defaultBaseURL is where an OpenAI-compatible provider lives when its config
+// names no base_url.
+var defaultBaseURL = map[string]string{
+	"mistral": "https://api.mistral.ai",
+	"grok":    "https://api.x.ai",
+}
 
 // ErrUnsupportedProvider is returned for a provider_type with no client.
 var ErrUnsupportedProvider = errors.New("orgroute: unsupported provider_type")
@@ -343,6 +378,17 @@ func BuildClient(cfg model.LLMProviderConfig) (llm.Client, error) {
 			return nil, fmt.Errorf("orgroute: openai config %s has no api_key", cfg.ID)
 		}
 		return llm.NewOpenAIClient(base, cfg.APIKey, cfg.DefaultModel), nil
+	case "mistral", "grok":
+		// Both serve the OpenAI chat-completions API. The client is named for
+		// the provider so usage and benchmarks say which one answered.
+		pt := strings.ToLower(strings.TrimSpace(cfg.ProviderType))
+		if base == "" {
+			base = defaultBaseURL[pt]
+		}
+		if cfg.APIKey == "" {
+			return nil, fmt.Errorf("orgroute: %s config %s has no api_key", pt, cfg.ID)
+		}
+		return llm.NewOpenAICompatibleClient(pt, strings.TrimSuffix(base, "/v1"), cfg.APIKey, cfg.DefaultModel), nil
 	case "claude":
 		if cfg.APIKey == "" {
 			return nil, fmt.Errorf("orgroute: claude config %s has no api_key", cfg.ID)

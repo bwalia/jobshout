@@ -47,8 +47,11 @@ func NewLLMRoutingHandler(
 type llmRoutingResponse struct {
 	// Source is "org" when this org's calls go through its own chain, "env"
 	// when they use the server's env providers.
-	Source    string               `json:"source"`
-	Enabled   bool                 `json:"enabled"`
+	Source  string `json:"source"`
+	Enabled bool   `json:"enabled"`
+	// Mode is "replace" (the chain answers every call) or "fallback" (each
+	// agent's own model first, the chain when it fails).
+	Mode      string               `json:"mode"`
 	Chain     []model.LLMRouteStep `json:"chain"`
 	Effective []orgroute.Step      `json:"effective"`
 }
@@ -59,9 +62,10 @@ func (h *LLMRoutingHandler) respond(w http.ResponseWriter, r *http.Request, orgI
 		RespondError(w, http.StatusInternalServerError, "failed to load routing")
 		return
 	}
-	out := llmRoutingResponse{Source: "env", Enabled: true, Chain: []model.LLMRouteStep{}, Effective: []orgroute.Step{}}
+	out := llmRoutingResponse{Source: "env", Enabled: true, Mode: model.RoutingModeReplace, Chain: []model.LLMRouteStep{}, Effective: []orgroute.Step{}}
 	if routing != nil {
 		out.Enabled = routing.Enabled
+		out.Mode = routing.Mode
 		out.Chain = routing.Chain
 	}
 	if h.resolver != nil {
@@ -107,12 +111,15 @@ func (h *LLMRoutingHandler) Put(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, http.StatusInternalServerError, "failed to load routing")
 		return
 	}
-	next := &model.OrgLLMRouting{OrgID: orgID, Enabled: true, Chain: []model.LLMRouteStep{}}
+	next := &model.OrgLLMRouting{OrgID: orgID, Enabled: true, Mode: model.RoutingModeReplace, Chain: []model.LLMRouteStep{}}
 	if existing != nil {
-		next.Enabled, next.Chain = existing.Enabled, existing.Chain
+		next.Enabled, next.Mode, next.Chain = existing.Enabled, existing.Mode, existing.Chain
 	}
 	if req.Enabled != nil {
 		next.Enabled = *req.Enabled
+	}
+	if req.Mode != nil {
+		next.Mode = *req.Mode
 	}
 	if req.Chain != nil {
 		active, err := h.providers.ListActiveWithSecrets(r.Context(), orgID)

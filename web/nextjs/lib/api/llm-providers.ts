@@ -5,6 +5,9 @@ import type {
   CreateLLMProviderRequest,
   UpdateLLMProviderRequest,
   BuiltinProvider,
+  LLMRouting,
+  ProviderTestResult,
+  PutLLMRoutingRequest,
 } from "@/lib/types/llm-provider";
 
 export async function getBuiltinProviders(): Promise<BuiltinProvider[]> {
@@ -47,5 +50,21 @@ export async function deleteLLMProvider(id: string): Promise<void> {
  */
 export async function getAvailableProviderModels(): Promise<AvailableModelsResponse> {
   const { data } = await apiClient.get<AvailableModelsResponse>("/llm-providers/models");
+  return data;
+}
+
+/** Sends one tiny prompt to a configured provider and reports whether it answered. */
+export async function testLLMProvider(id: string, model?: string): Promise<ProviderTestResult> {
+  const { data } = await apiClient.post<ProviderTestResult>(`/llm-providers/${id}/test`, model ? { model } : {});
+  return data;
+}
+
+export async function getLLMRouting(): Promise<LLMRouting> {
+  const { data } = await apiClient.get<LLMRouting>("/llm-routing");
+  return data;
+}
+
+export async function putLLMRouting(payload: PutLLMRoutingRequest): Promise<LLMRouting> {
+  const { data } = await apiClient.put<LLMRouting>("/llm-routing", payload);
   return data;
 }
