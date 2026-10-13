@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Check, Loader2, Minus, X } from "lucide-react";
-import { useSearchParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { apiClient, apiErrorMessage } from "@/lib/api/client";
 import {
@@ -20,6 +20,7 @@ type Tab = "run" | "history";
 
 const inputClass =
   "mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50";
+const hintClass = "mt-1 block text-xs font-normal text-muted-foreground";
 
 interface AgentSummary {
   id: string;
@@ -37,6 +38,8 @@ function PhaseIcon({ status }: { status?: string }) {
 export function SecretsRotationAgentClient() {
   const searchParams = useSearchParams();
   const runParam = searchParams.get("run");
+  // On the agent profile's Workspace tab, run as that agent (it may be a clone).
+  const pageAgentId = useParams<{ id?: string }>()?.id;
 
   const [agentId, setAgentId] = useState("");
   const [loadError, setLoadError] = useState("");
@@ -54,7 +57,8 @@ export function SecretsRotationAgentClient() {
   const [keys, setKeys] = useState("");
   const [grace, setGrace] = useState("300");
   const [retireOld, setRetireOld] = useState("false");
-  const [dryRun, setDryRun] = useState("false");
+  // Dry run first: a live rotate writes a new secret version.
+  const [dryRun, setDryRun] = useState("true");
   const [instruction, setInstruction] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
@@ -62,17 +66,20 @@ export function SecretsRotationAgentClient() {
   useEffect(() => {
     void (async () => {
       try {
-        const [{ data }, st] = await Promise.all([
-          apiClient.get<{ data: AgentSummary[] }>("/agents", { params: { per_page: 100 } }),
+        const [agents, st] = await Promise.all([
+          pageAgentId
+            ? null
+            : apiClient
+                .get<{ data: AgentSummary[] }>("/agents", { params: { per_page: 100 } })
+                .then((r) => (Array.isArray(r.data.data) ? r.data.data : [])),
           secretsRotationStatus().catch(() => null),
         ]);
-        const agents = Array.isArray(data.data) ? data.data : [];
-        const agent = agents.find((a) => a.metadata?.builtin === "secrets_rotation");
-        if (!agent) {
+        const id = pageAgentId ?? agents?.find((a) => a.metadata?.builtin === "secrets_rotation")?.id;
+        if (!id) {
           setLoadError("No Secrets Rotation agent found for this organization.");
           return;
         }
-        setAgentId(agent.id);
+        setAgentId(id);
         if (st) {
           if (typeof st.vault_addr === "string" && st.vault_addr) {
             setVaultAddr(st.vault_addr);
@@ -83,7 +90,7 @@ export function SecretsRotationAgentClient() {
         setLoadError("Failed to load the Secrets Rotation agent.");
       }
     })();
-  }, []);
+  }, [pageAgentId]);
 
   useEffect(() => {
     if (!runParam) return;
@@ -149,6 +156,15 @@ export function SecretsRotationAgentClient() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!agentId) return;
+    const target = `${mount.trim() || "secret"}/${path.trim()}`;
+    const live =
+      dryRun === "false" &&
+      (mode === "rotate"
+        ? `Rotate ${target} for real?\n\nA new version is written to ${vaultAddr.trim() || "the vault"}. Old and new stay valid for ${grace || 0}s${retireOld === "true" ? ", then the old version is soft-deleted" : ""}.`
+        : mode === "rollback"
+          ? `Roll back ${target} for real?\n\nThe previous version becomes current again in ${vaultAddr.trim() || "the vault"}.`
+          : "");
+    if (live && !window.confirm(live)) return;
     setFormError("");
     setSubmitting(true);
     try {
@@ -278,6 +294,9 @@ export function SecretsRotationAgentClient() {
                   <option value="transit">Transit</option>
                   <option value="database">Database (plan)</option>
                 </select>
+                <span className={hintClass}>
+                  KV v2: stored secrets. Transit: encryption keys. Database: plan only.
+                </span>
               </label>
               <label className="block text-sm font-medium">
                 Mount
@@ -286,6 +305,7 @@ export function SecretsRotationAgentClient() {
                   value={mount}
                   onChange={(e) => setMount(e.target.value)}
                 />
+                <span className={hintClass}>Where the engine is mounted in Vault, usually “secret”.</span>
               </label>
             </div>
             <label className="block text-sm font-medium">
@@ -315,6 +335,7 @@ export function SecretsRotationAgentClient() {
                   value={grace}
                   onChange={(e) => setGrace(e.target.value)}
                 />
+                <span className={hintClass}>Seconds old and new versions both stay valid.</span>
               </label>
               <label className="block text-sm font-medium">
                 Retire old
@@ -326,6 +347,9 @@ export function SecretsRotationAgentClient() {
                   <option value="false">Keep</option>
                   <option value="true">Soft-delete</option>
                 </select>
+                <span className={hintClass}>
+                  Soft-delete hides the old version after the window; it can be undeleted.
+                </span>
               </label>
               <label className="block text-sm font-medium">
                 Dry run
@@ -334,8 +358,8 @@ export function SecretsRotationAgentClient() {
                   value={dryRun}
                   onChange={(e) => setDryRun(e.target.value)}
                 >
-                  <option value="false">Live</option>
                   <option value="true">Dry run</option>
+                  <option value="false">Live</option>
                 </select>
               </label>
             </div>

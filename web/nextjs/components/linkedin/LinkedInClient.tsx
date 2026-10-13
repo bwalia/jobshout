@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { useParams, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
   AlertTriangle,
@@ -24,6 +25,7 @@ import {
   useUpdateLinkedInPost,
 } from "@/lib/hooks/useLinkedIn";
 import { cn } from "@/lib/utils/cn";
+import { newTaskHref } from "@/lib/agents/links";
 import {
   LINKEDIN_COMMENTARY_MAX,
   LINKEDIN_VARIANT_LABEL,
@@ -285,6 +287,7 @@ function groupByArticle(posts: LinkedInPost[]): ArticleGroup[] {
  */
 export function LinkedInClient() {
   const search = useSearchParams();
+  const agentId = useParams<{ id?: string }>()?.id;
   const { data: status } = useLinkedInStatus();
   const { data: posts, isLoading } = useLinkedInPosts();
   const groups = useMemo(() => groupByArticle(posts ?? []), [posts]);
@@ -313,7 +316,11 @@ export function LinkedInClient() {
       ) : groups.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
           <Newspaper className="mx-auto mb-2 h-6 w-6" />
-          No drafts yet. Launch the LinkedIn Poster from <span className="font-medium">New task</span> for a
+          No drafts yet. Launch the LinkedIn Poster from{" "}
+          <Link href={newTaskHref(agentId)} className="font-medium text-primary hover:underline">
+            New task
+          </Link>{" "}
+          for a
           published article{status?.auto_draft ? ", or connect LinkedIn and new articles are drafted when they are published" : ""}.
         </div>
       ) : (

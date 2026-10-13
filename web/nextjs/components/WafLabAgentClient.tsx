@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Check, FileDown, Loader2, Minus, X } from "lucide-react";
-import { useSearchParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { apiClient, apiErrorMessage } from "@/lib/api/client";
 import {
@@ -48,6 +48,8 @@ interface AgentSummary {
 export function WafLabAgentClient() {
   const searchParams = useSearchParams();
   const runParam = searchParams.get("run");
+  // On the agent profile's Workspace tab, run as that agent (it may be a clone).
+  const pageAgentId = useParams<{ id?: string }>()?.id;
 
   const [agentId, setAgentId] = useState("");
   const [loadError, setLoadError] = useState("");
@@ -65,17 +67,20 @@ export function WafLabAgentClient() {
   useEffect(() => {
     void (async () => {
       try {
-        const [{ data }, st] = await Promise.all([
-          apiClient.get<{ data: AgentSummary[] }>("/agents", { params: { per_page: 100 } }),
+        const [agents, st] = await Promise.all([
+          pageAgentId
+            ? null
+            : apiClient
+                .get<{ data: AgentSummary[] }>("/agents", { params: { per_page: 100 } })
+                .then((r) => (Array.isArray(r.data.data) ? r.data.data : [])),
           wafLabStatus().catch(() => null),
         ]);
-        const agents = Array.isArray(data.data) ? data.data : [];
-        const agent = agents.find((a) => a.metadata?.builtin === "waf_lab");
-        if (!agent) {
+        const id = pageAgentId ?? agents?.find((a) => a.metadata?.builtin === "waf_lab")?.id;
+        if (!id) {
           setLoadError("No WAF Efficacy Lab agent found for this organization.");
           return;
         }
-        setAgentId(agent.id);
+        setAgentId(id);
         if (st) {
           setStatusLine(
             st.enabled
@@ -87,7 +92,7 @@ export function WafLabAgentClient() {
         setLoadError("Failed to load the WAF Efficacy Lab agent.");
       }
     })();
-  }, []);
+  }, [pageAgentId]);
 
   useEffect(() => {
     if (!runParam) return;
@@ -230,7 +235,11 @@ export function WafLabAgentClient() {
                   <button
                     type="button"
                     className="text-sm text-destructive hover:underline"
-                    onClick={() => void cancelWafLabRun(selected.id).then(setSelected)}
+                    onClick={() =>
+                      void cancelWafLabRun(selected.id)
+                        .then(setSelected)
+                        .catch((err) => toast.error(apiErrorMessage(err, "Cancel failed")))
+                    }
                   >
                     Cancel
                   </button>

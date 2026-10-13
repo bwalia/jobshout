@@ -115,7 +115,10 @@ export function CourseViewer({ runId }: { runId: string }) {
         {active ? (
           <button
             type="button"
-            onClick={() => cancel.mutate(run.id)}
+            onClick={() => {
+              // A cancelled course is terminal; it can't be resumed.
+              if (confirm("Stop this course? It can't be resumed afterwards.")) cancel.mutate(run.id);
+            }}
             disabled={cancel.isPending}
             className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-sm hover:bg-secondary disabled:opacity-50"
           >

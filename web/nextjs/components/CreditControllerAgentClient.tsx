@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { apiErrorMessage } from "@/lib/api/client";
+import { useAuthStore } from "@/lib/store/auth-store";
 import {
   approveCreditRun,
+  creditControllerQueue,
   creditControllerStatus,
   creditControllerSummary,
   generateCreditInvoices,
@@ -26,16 +28,23 @@ const SCENARIO_LABELS: Record<string, string> = {
   BANK_DETAIL_CHANGE: "Bank change",
 };
 
-const PROCESS = [
-  "Intake",
-  "Extract",
-  "3-way match",
-  "Classify",
-  "Policy",
-  "Approve",
-  "Post",
-  "Audit",
+const PROCESS: [string, string][] = [
+  ["Intake", "Invoices arrive in the AP mailbox"],
+  ["Extract", "Read supplier, PO, lines, totals"],
+  ["3-way match", "Invoice vs PO vs goods received"],
+  ["Classify", "Tag variances, no PO, duplicates"],
+  ["Policy", "Hold bank changes, duplicates"],
+  ["Approve", "A controller signs off exceptions"],
+  ["Post", "Approved invoices go to the ledger"],
+  ["Audit", "Every decision is kept"],
 ];
+
+/** awaiting_approval → "Awaiting approval"; no workflow yet → "New". */
+function statusLabel(status?: string): string {
+  if (!status) return "New";
+  const s = status.replace(/_/g, " ");
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
 
 const btn =
   "rounded-md px-3 py-1.5 text-sm font-medium disabled:opacity-50 border border-border bg-background hover:bg-muted";
@@ -51,6 +60,9 @@ export function CreditControllerAgentClient() {
   const [filter, setFilter] = useState<"all" | "untriaged" | "awaiting">("all");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
+  // Why each invoice is held for approval, from the queue (keyed by invoice id).
+  const [reasons, setReasons] = useState<Record<string, string>>({});
+  const approver = useAuthStore((s) => s.user?.email);
 
   const refresh = useCallback(async () => {
     setError("");
@@ -71,6 +83,19 @@ export function CreditControllerAgentClient() {
       setInvoices([]);
       setSummary(null);
       setError(apiErrorMessage(err, "Could not load invoices."));
+    }
+    // Best effort: reasons only add context to the side panel.
+    try {
+      const queue = await creditControllerQueue();
+      setReasons(
+        Object.fromEntries(
+          (queue.awaiting_approval ?? [])
+            .filter((q) => q.reason)
+            .map((q) => [q.invoice_id, q.reason as string])
+        )
+      );
+    } catch {
+      setReasons({});
     }
   }, []);
 
@@ -118,6 +143,23 @@ export function CreditControllerAgentClient() {
     } finally {
       setBusy(null);
     }
+  };
+
+  const decide = (inv: InvoiceSummary, approved: boolean) => {
+    const runId = inv.workflow?.run_id;
+    if (!runId) return;
+    if (!approved && !confirm(`Reject ${inv.invoice_id}? It will not be posted to the ledger.`)) {
+      return;
+    }
+    void run(`${approved ? "approve" : "reject"}-${runId}`, async () => {
+      await approveCreditRun({
+        runId,
+        approved,
+        approver,
+        note: `${approved ? "approved" : "rejected"} from Credit Controller tab`,
+      });
+      toast.success(`${approved ? "Approved" : "Rejected"} ${inv.invoice_id}`);
+    });
   };
 
   return (
@@ -170,12 +212,13 @@ export function CreditControllerAgentClient() {
       </header>
 
       <section className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
-        {PROCESS.map((step, i) => (
+        {PROCESS.map(([step, help], i) => (
           <div key={step} className="rounded-lg border bg-muted/30 px-2 py-2 text-xs">
             <div className="mb-1 font-mono text-[10px] text-muted-foreground">
               {String(i + 1).padStart(2, "0")}
             </div>
             <div className="font-medium">{step}</div>
+            <div className="mt-0.5 text-[10px] leading-snug text-muted-foreground">{help}</div>
           </div>
         ))}
       </section>
@@ -201,7 +244,7 @@ export function CreditControllerAgentClient() {
             type="button"
             className={btn}
             disabled={!!busy || writesDisabled}
-            title={writesTitle}
+            title={writesTitle ?? "AI writes 10 sample supplier invoices for a week into the mailbox"}
             onClick={() =>
               void run("weekly", async () => {
                 const res = await generateCreditInvoices("weekly", 10);
@@ -215,7 +258,7 @@ export function CreditControllerAgentClient() {
             type="button"
             className={btn}
             disabled={!!busy || writesDisabled}
-            title={writesTitle}
+            title={writesTitle ?? "AI writes 10 sample supplier invoices for a month into the mailbox"}
             onClick={() =>
               void run("monthly", async () => {
                 const res = await generateCreditInvoices("monthly", 10);
@@ -229,7 +272,7 @@ export function CreditControllerAgentClient() {
             type="button"
             className={btnPrimary}
             disabled={!!busy || writesDisabled}
-            title={writesTitle}
+            title={writesTitle ?? "Match and classify up to 15 untriaged invoices; exceptions go to Awaiting"}
             onClick={() =>
               void run("batch", async () => {
                 const ids = invoices.filter((i) => !i.workflow).map((i) => i.invoice_id).slice(0, 15);
@@ -250,7 +293,7 @@ export function CreditControllerAgentClient() {
             type="button"
             className={btnPrimary}
             disabled={!!busy || writesDisabled}
-            title={writesTitle}
+            title={writesTitle ?? "Generate 10 sample monthly invoices, then triage up to 15 untriaged"}
             onClick={() =>
               void run("month_end", async () => {
                 await generateCreditInvoices("monthly", 10);
@@ -267,6 +310,10 @@ export function CreditControllerAgentClient() {
             {busy === "month_end" ? "Running…" : "Full month-end"}
           </button>
         </div>
+        <p className="w-full text-xs text-muted-foreground">
+          The AI buttons add made-up sample invoices to the mailbox; Full month-end adds 10 and
+          triages them. Triage holds exceptions in Awaiting for you to approve or reject.
+        </p>
       </div>
 
       <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[1.4fr_1fr]">
@@ -284,6 +331,17 @@ export function CreditControllerAgentClient() {
               </tr>
             </thead>
             <tbody>
+              {filtered.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-3 py-6 text-center text-sm text-muted-foreground">
+                    {invoices.length === 0
+                      ? "The mailbox is empty. Use “AI: 10 weekly” or “Full month-end” to add sample invoices."
+                      : filter === "untriaged"
+                        ? "Every invoice has been triaged. Open Awaiting to approve or reject exceptions."
+                        : "Nothing is awaiting approval. Triage invoices to find exceptions."}
+                  </td>
+                </tr>
+              )}
               {filtered.map((inv) => (
                 <tr
                   key={inv.invoice_id}
@@ -312,8 +370,8 @@ export function CreditControllerAgentClient() {
                       {SCENARIO_LABELS[inv.scenario_hint] ?? inv.scenario_hint}
                     </span>
                   </td>
-                  <td className="px-3 py-2 font-mono text-xs">
-                    {inv.workflow?.status ?? "new"}
+                  <td className="px-3 py-2 text-xs" title={reasons[inv.invoice_id]}>
+                    {statusLabel(inv.workflow?.status)}
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex gap-1">
@@ -326,32 +384,50 @@ export function CreditControllerAgentClient() {
                           e.stopPropagation();
                           void run(`triage-${inv.invoice_id}`, async () => {
                             const res = await triageCreditInvoice(inv.invoice_id);
-                            toast.success(`${inv.invoice_id} → ${String(res.status ?? "done")}`);
+                            // Select it so the side panel shows why it is held, if it is.
+                            setSelected(inv.invoice_id);
+                            const why =
+                              typeof res.reason === "string"
+                                ? res.reason
+                                : typeof res.message === "string"
+                                  ? res.message
+                                  : undefined;
+                            toast.success(
+                              `${inv.invoice_id}: ${statusLabel(typeof res.status === "string" ? res.status : "triaged")}`,
+                              why ? { description: why } : undefined
+                            );
                           });
                         }}
                       >
-                        Triage
+                        {busy === `triage-${inv.invoice_id}` ? "Triaging…" : "Triage"}
                       </button>
                       {inv.workflow?.status === "awaiting_approval" && inv.workflow.run_id && (
-                        <button
-                          type="button"
-                          className="text-xs text-primary hover:underline disabled:opacity-50"
-                          disabled={!!busy || writesDisabled}
-                          title={writesTitle}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void run(`approve-${inv.workflow!.run_id}`, async () => {
-                              await approveCreditRun({
-                                runId: inv.workflow!.run_id,
-                                approved: true,
-                                note: "approved from Credit Controller tab",
-                              });
-                              toast.success(`Approved ${inv.invoice_id}`);
-                            });
-                          }}
-                        >
-                          Approve
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            className="text-xs text-primary hover:underline disabled:opacity-50"
+                            disabled={!!busy || writesDisabled}
+                            title={writesTitle}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              decide(inv, true);
+                            }}
+                          >
+                            {busy === `approve-${inv.workflow.run_id}` ? "Approving…" : "Approve"}
+                          </button>
+                          <button
+                            type="button"
+                            className="text-xs text-destructive hover:underline disabled:opacity-50"
+                            disabled={!!busy || writesDisabled}
+                            title={writesTitle}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              decide(inv, false);
+                            }}
+                          >
+                            {busy === `reject-${inv.workflow.run_id}` ? "Rejecting…" : "Reject"}
+                          </button>
+                        </>
                       )}
                     </div>
                   </td>
@@ -364,6 +440,11 @@ export function CreditControllerAgentClient() {
         <aside className="space-y-4 rounded-xl border p-4">
           <div>
             <h3 className="text-sm font-semibold">{selected || "Select an invoice"}</h3>
+            {selected && reasons[selected] && (
+              <p className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:text-amber-100">
+                <span className="font-medium">Held for approval:</span> {reasons[selected]}
+              </p>
+            )}
             {doc ? (
               <pre className="mt-2 max-h-72 overflow-auto rounded-md bg-muted/50 p-3 font-mono text-[11px] leading-relaxed">
                 {doc}

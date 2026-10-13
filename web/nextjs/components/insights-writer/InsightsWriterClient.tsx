@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -20,6 +21,7 @@ import {
   usePublishBlogRunLive,
 } from "@/lib/hooks/useBlog";
 import { cn } from "@/lib/utils/cn";
+import { newTaskHref } from "@/lib/agents/links";
 import { blogRunTitle, type BlogRun } from "@/lib/types/blog";
 
 /** The builtin this tab belongs to; its runs are listed with ?writer=. */
@@ -159,6 +161,7 @@ function RunRow({
  * task / chat, which use the one server-side launch schema.
  */
 export function InsightsWriterClient() {
+  const agentId = useParams<{ id?: string }>()?.id;
   const { data, isLoading } = useBlogRuns({ per_page: 50, writer: WRITER });
   const { data: config } = useBlogConfig();
   const generate = useGenerateBlog();
@@ -202,7 +205,10 @@ export function InsightsWriterClient() {
         <div className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
           <Newspaper className="mx-auto mb-2 h-6 w-6" />
           No articles yet. Write a trending one now, give it a topic from{" "}
-          <span className="font-medium">New task</span>, or wait for the daily schedule.
+          <Link href={newTaskHref(agentId)} className="font-medium text-primary hover:underline">
+            New task
+          </Link>
+          , or wait for the daily schedule.
         </div>
       ) : (
         <ul className="space-y-3" aria-label="Insights articles">

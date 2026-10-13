@@ -115,6 +115,10 @@ export function AbTestAgentClient() {
           . Writes go through wslproxy MCP when its tools are on, otherwise the wslproxy admin
           API.
         </p>
+        <p className="text-xs text-muted-foreground">
+          wslproxy is the proxy in front of the site: it decides what share of visitors each
+          backend (version) gets, so a new version can be tried on some traffic first.
+        </p>
         {status && (
           <p className={`rounded-md border px-3 py-2 text-xs ${modeTone(status)}`}>
             <span className="font-semibold">{modeLabel(status)}</span> · {status.message}
@@ -122,6 +126,17 @@ export function AbTestAgentClient() {
         )}
         {error && <p className="text-sm text-destructive">{error}</p>}
       </header>
+
+      {!selected && status && (
+        <section className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
+          No experiment found on wslproxy for {status.demo_host}. Check the host&apos;s split
+          rule on wslproxy, then{" "}
+          <button type="button" className="underline underline-offset-2" onClick={() => void refresh()}>
+            Refresh
+          </button>
+          .
+        </section>
+      )}
 
       {selected && (
         <section className="space-y-3 rounded-xl border p-4">
@@ -196,7 +211,9 @@ export function AbTestAgentClient() {
               )}
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground">No backends read from wslproxy.</p>
+            <p className="text-sm text-muted-foreground">
+              No backends read from wslproxy. Check the rule above on wslproxy, then Refresh.
+            </p>
           )}
 
           <div className="flex flex-wrap items-end gap-3">
@@ -268,6 +285,7 @@ export function AbTestAgentClient() {
               type="button"
               className={btn}
               disabled={!!busy}
+              title={`Send 40 requests to ${selected.public_url}${selected.observe_path} and count which backend answered each`}
               onClick={() =>
                 void run("observe", async () => {
                   const body = await observeAB(id, 40);
