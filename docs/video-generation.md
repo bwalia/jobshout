@@ -99,6 +99,10 @@ every offered voice pre-fetched) and an LTX venv (ltx-2-mlx pinned to a tested
 commit). It downloads only the weights the distilled pipeline loads (~30 GB for
 LTX-2.3).
 
+**If launches fail with a gateway 403/401** (or int logs `resume check
+skipped — workstation unreachable`), follow
+[image-gateway-secret-runbook.md](image-gateway-secret-runbook.md).
+
 **Check what the workstation can do:** `GET /api/videos/capabilities`. When you
 launch, the agent runs the same check and refuses up front if ffmpeg or
 narration is missing, instead of failing an hour later.

@@ -115,6 +115,9 @@ The chart default in `values.yaml` is also `z-image-turbo`.
 
 ### The gateway secret
 
+When images or videos fail with a gateway 403/401, follow
+[image-gateway-secret-runbook.md](image-gateway-secret-runbook.md).
+
 `IMAGE_JWT_SECRET` follows `OLLAMA_JWT_SECRET` exactly: an HS256 JWT in the
 `x-api-key` header carrying an `app: jobshout` claim, minted per request and
 never cached. `server/internal/gatewayauth` is the one implementation, shared by
