@@ -2,8 +2,11 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { agentHref } from "@/lib/agents/links";
+import { agentKeys } from "@/lib/hooks/useAgents";
 import { MarketplaceCard } from "@/components/marketplace/MarketplaceCard";
 import { CategoryFilter } from "@/components/marketplace/CategoryFilter";
 import { ImportAgentDialog } from "@/components/marketplace/ImportAgentDialog";
@@ -43,6 +46,8 @@ export default function MarketplacePage() {
   const [searchQuery, setSearchQuery] = useState("");
   // The agent pending import confirmation; null when the dialog is closed
   const [pendingImport, setPendingImport] = useState<MarketplaceAgent | null>(null);
+  const router = useRouter();
+  const queryClient = useQueryClient();
 
   const {
     data: agents = [],
@@ -57,8 +62,13 @@ export default function MarketplacePage() {
 
   const importMutation = useMutation({
     mutationFn: (agentId: string) => importMarketplaceAgent(agentId),
-    onSuccess: (_data, _agentId) => {
-      toast.success(`"${pendingImport?.name}" has been added to your team.`);
+    onSuccess: (data) => {
+      // The new agent must show up in every agent list without a reload, and
+      // be one click away rather than something to go and find.
+      queryClient.invalidateQueries({ queryKey: agentKeys.lists() });
+      toast.success(`"${pendingImport?.name}" has been added to your team.`, {
+        action: { label: "Open agent", onClick: () => router.push(agentHref(data.id)) },
+      });
       setPendingImport(null);
     },
     onError: (err: unknown) => {

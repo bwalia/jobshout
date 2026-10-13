@@ -39,6 +39,10 @@ const STATUS_LABEL: Record<PentestRunStatus, string> = {
   cancelled: "Cancelled",
 };
 
+// The Security Tester agent's Workspace tab (resolved by LegacyTaskRedirect),
+// which is where scans are run and read; ?run= rides along to open one.
+const WORKSPACE = "/panel/task-manager?agent=pentest";
+
 async function fetchRecentRuns(): Promise<PentestRun[]> {
   const { data } = await apiClient.get<PaginatedPentestRuns>("/pentest-runs", {
     params: { per_page: 8 },
@@ -97,7 +101,7 @@ export function SecurityTesterCard() {
           Security Tester
         </h2>
         <Link
-          href="/panel/security-tester"
+          href={WORKSPACE}
           className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
         >
           Open <ArrowRight className="h-3 w-3" />
@@ -110,7 +114,7 @@ export function SecurityTesterCard() {
           <div className="flex h-24 flex-col items-center justify-center gap-2 text-center">
             <p className="text-sm text-muted-foreground">No scans yet.</p>
             <Link
-              href="/panel/security-tester"
+              href={WORKSPACE}
               className="text-sm font-medium text-primary hover:underline"
             >
               Run your first security scan
@@ -118,7 +122,10 @@ export function SecurityTesterCard() {
           </div>
         ) : (
           <div className="space-y-4">
-            <div className="flex items-center justify-between gap-3">
+            <Link
+              href={`${WORKSPACE}&run=${latest.id}`}
+              className="-mx-2 flex items-center justify-between gap-3 rounded-lg px-2 py-1 transition-colors hover:bg-secondary/50"
+            >
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium">{hostOf(latest.target)}</p>
                 <p className="truncate font-mono text-xs text-muted-foreground">
@@ -131,7 +138,7 @@ export function SecurityTesterCard() {
                   {scanning ? "Scanning…" : STATUS_LABEL[latest.status] ?? latest.status}
                 </span>
               </div>
-            </div>
+            </Link>
 
             <div className="grid grid-cols-3 gap-2">
               <SeverityTile

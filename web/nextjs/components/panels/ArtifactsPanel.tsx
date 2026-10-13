@@ -154,6 +154,15 @@ function ArtifactCard({ item }: { item: ArtifactItem }) {
     );
   }
 
+  // An image's href is the stored file on the API host, not an app route.
+  if (item.href && item.kind === "image") {
+    return (
+      <a href={item.href} target="_blank" rel="noreferrer" className={className}>
+        {inner}
+      </a>
+    );
+  }
+
   return <div className={className}>{inner}</div>;
 }
 
