@@ -920,7 +920,7 @@ function MetricsTab({ agentId }: { agentId: string }) {
       label: "Failed runs",
       value: String(failedRuns),
       hint: "In the last two weeks",
-      href: failedRuns > 0 ? `/panel/tasks?agent=${agentId}&failed=1` : undefined,
+      href: failedRuns > 0 ? `/panel/runs?agent=${agentId}&failed=1` : undefined,
     },
   ];
   return (
@@ -949,6 +949,12 @@ function MetricsTab({ agentId }: { agentId: string }) {
           );
         })}
       </div>
+      <p className="text-sm">
+        <Link href={`/panel/runs?agent=${agentId}`} className="font-medium text-primary hover:underline">
+          Recent runs →
+        </Link>
+        <span className="text-muted-foreground"> Results, costs, and debug traces for this agent.</span>
+      </p>
     </div>
   );
 }
@@ -1231,10 +1237,10 @@ export default function AgentProfilePage() {
           </p>
           <div className="flex shrink-0 gap-2">
             <Link
-              href={`/panel/tasks?agent=${agent.id}&failed=1`}
+              href={`/panel/runs?agent=${agent.id}&failed=1`}
               className="inline-flex h-8 items-center rounded-md border border-border bg-background px-3 text-xs font-medium hover:bg-muted"
             >
-              See failed tasks
+              See failed runs
             </Link>
             <Link
               href={agentHref(agent.id, "models")}

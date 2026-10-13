@@ -1,6 +1,6 @@
 import { apiClient } from "@/lib/api/client";
 import type { PaginatedResponse, PaginationParams } from "@/lib/types/common";
-import type { CreateTaskRunRequest, TaskRun } from "@/lib/types/task-run";
+import type { CreateTaskRunRequest, TaskRun, TaskRunStatus } from "@/lib/types/task-run";
 
 /** Launch an on-demand agent run of a task. Returns the queued run (202). */
 export async function createTaskRun(
@@ -23,6 +23,21 @@ export async function getTaskRuns(
     `/tasks/${taskId}/runs`,
     { params }
   );
+  return data;
+}
+
+export interface OrgTaskRunParams extends PaginationParams {
+  status?: TaskRunStatus | string;
+  agent_id?: string;
+}
+
+/** List every task run in the org, newest first. */
+export async function getOrgTaskRuns(
+  params: OrgTaskRunParams = {}
+): Promise<PaginatedResponse<TaskRun>> {
+  const { data } = await apiClient.get<PaginatedResponse<TaskRun>>("/task-runs", {
+    params,
+  });
   return data;
 }
 

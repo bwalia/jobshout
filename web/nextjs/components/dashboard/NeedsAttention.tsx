@@ -7,6 +7,7 @@ import { useAgents } from "@/lib/hooks/useAgents";
 import { useRetryBlogRun } from "@/lib/hooks/useBlog";
 import { useRunFailures, type RunFailure } from "@/lib/hooks/useRunFailures";
 import { useCreateTaskRun } from "@/lib/hooks/useTaskRuns";
+import { runsHubHref, taskResultHref } from "@/lib/run-links";
 
 /** How many failures the card lists before "View all". */
 const SHOWN = 5;
@@ -29,14 +30,17 @@ function FailureRow({ f, agentName }: { f: RunFailure; agentName?: string }) {
       : f.kind === "task" && f.taskId
         ? () => createRun.mutate({ taskId: f.taskId as string, payload: {} })
         : undefined;
-  // An article run has its own page; prefer it to the agent's workspace.
-  const openHref = f.taskId
-    ? `/panel/tasks?task=${f.taskId}`
-    : f.kind === "article"
-      ? `/articles/${f.runId}`
-      : f.agentId
-        ? agentHref(f.agentId, "workspace")
-        : undefined;
+  // Prefer the focused run so Retry/Open lands on the failure, not just the task.
+  const openHref =
+    f.taskId && f.runId
+      ? taskResultHref(f.taskId, f.runId)
+      : f.taskId
+        ? taskResultHref(f.taskId)
+        : f.kind === "article"
+          ? `/articles/${f.runId}`
+          : f.agentId
+            ? agentHref(f.agentId, "workspace")
+            : undefined;
 
   return (
     <li className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -80,7 +84,7 @@ function FailureRow({ f, agentName }: { f: RunFailure; agentName?: string }) {
             href={openHref}
             className="inline-flex h-8 items-center gap-1 rounded-md border border-border px-2.5 text-xs font-medium hover:bg-muted"
           >
-            <ExternalLink className="h-3.5 w-3.5" /> {f.taskId ? "Open task" : "Open run"}
+            <ExternalLink className="h-3.5 w-3.5" /> {f.taskId ? "View result" : "Open run"}
           </Link>
         )}
       </div>
@@ -112,8 +116,8 @@ export function NeedsAttention() {
             {failures.length}
           </span>
         </h2>
-        <Link href="/panel/tasks?failed=1" className="text-xs font-medium text-primary hover:underline">
-          View all failed tasks →
+        <Link href={runsHubHref({ failed: true })} className="text-xs font-medium text-primary hover:underline">
+          View all failed runs →
         </Link>
       </div>
       <ul className="mt-1 divide-y divide-destructive/20">

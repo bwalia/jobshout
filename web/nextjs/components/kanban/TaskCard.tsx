@@ -17,6 +17,7 @@ import { TaskProgressChip } from "@/components/task-manager/TaskProgressChip";
 import { cn } from "@/lib/utils/cn";
 import Link from "next/link";
 import { agentHref } from "@/lib/agents/links";
+import { taskResultHref } from "@/lib/run-links";
 import type { Priority } from "@/lib/types/common";
 import type { Task } from "@/lib/types/project";
 
@@ -128,8 +129,19 @@ export function TaskCardFace({
         {task.title}
       </h4>
 
-      <div className="mt-2">
+      <div className="mt-2 flex flex-wrap items-center gap-2">
         <TaskProgressChip task={task} />
+        {task.last_run_id &&
+          (task.last_run_status === "completed" || task.last_run_status === "failed") && (
+            <Link
+              href={taskResultHref(task.id, task.last_run_id)}
+              onClick={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="text-[11px] font-semibold text-primary hover:underline"
+            >
+              View result
+            </Link>
+          )}
       </div>
 
       <div className="mt-2 flex items-center justify-between">

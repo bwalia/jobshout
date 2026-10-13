@@ -18,6 +18,8 @@ import {
   ShieldAlert,
   Gauge,
   Bot,
+  Activity,
+  BarChart3,
 } from "lucide-react";
 
 export type PanelId =
@@ -26,6 +28,8 @@ export type PanelId =
   | "projects"
   | "agents"
   | "tasks"
+  | "runs"
+  | "usage"
   | "task-board"
   | "task-manager"
   | "security-tester"
@@ -59,6 +63,8 @@ export const PANELS: PanelDef[] = [
   { id: "dashboard", label: "Dashboard", href: "/panel/dashboard", icon: LayoutDashboard },
   { id: "projects", label: "Projects", href: "/panel/projects", icon: FolderKanban },
   { id: "tasks", label: "Tasks", href: "/panel/tasks", icon: Kanban },
+  { id: "runs", label: "Runs", href: "/panel/runs", icon: Activity },
+  { id: "usage", label: "Usage", href: "/panel/usage", icon: BarChart3, hidden: true },
   // Folded into Tasks and the agent profile; kept as redirects for old links.
   { id: "task-board", label: "Task Board", href: "/panel/task-board", icon: Kanban, hidden: true },
   // A static route (app/(app)/panel/agents); listed so panel transitions and

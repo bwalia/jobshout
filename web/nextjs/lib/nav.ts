@@ -1,6 +1,8 @@
 import type { LucideIcon } from "lucide-react";
 import {
+  Activity,
   Archive,
+  BarChart3,
   Bot,
   Clock,
   Cpu,
@@ -73,6 +75,15 @@ export const NAV_SECTIONS: NavSection[] = [
         icon: Kanban,
         match: ["/panel/tasks", "/panel/task-board", "/tasks"],
         keywords: ["board", "kanban", "task board"],
+        badge: "failed-tasks",
+      },
+      {
+        id: "runs",
+        label: "Runs",
+        href: "/panel/runs",
+        icon: Activity,
+        match: ["/panel/runs"],
+        keywords: ["results", "history", "test runs", "executions", "failed"],
         badge: "failed-tasks",
       },
       {
@@ -164,6 +175,14 @@ export const NAV_SESSIONS: NavItem = {
 
 /** Pinned to the bottom of the sidebar, so they never scroll away. */
 export const NAV_BOTTOM: NavItem[] = [
+  {
+    id: "usage",
+    label: "Usage",
+    href: "/panel/usage",
+    icon: BarChart3,
+    match: ["/panel/usage"],
+    keywords: ["cost", "costs", "tokens", "observability", "spend", "analytics"],
+  },
   {
     id: "llm-providers",
     label: "Models & providers",

@@ -8,6 +8,7 @@ import { hasAgentClient, specialistKind } from "@/lib/agents/specialist";
 import { useBlogConfig, useRetryBlogRun } from "@/lib/hooks/useBlog";
 import { useRunFailures } from "@/lib/hooks/useRunFailures";
 import { useCreateTaskRun, useTaskRun } from "@/lib/hooks/useTaskRuns";
+import { runsHubHref, taskResultHref } from "@/lib/run-links";
 import type { Agent } from "@/lib/types/agent";
 import type { Task, TaskModelOverride } from "@/lib/types/project";
 
@@ -158,20 +159,30 @@ export function TaskLatestRun({ task, agent }: { task: Task; agent?: Agent }) {
         at={task.last_run_at}
         busy={createRun.isPending}
         onRetry={task.assigned_agent_id ? () => createRun.mutate({ taskId: task.id, payload: {} }) : undefined}
+        openHref={task.last_run_id ? taskResultHref(task.id, task.last_run_id) : undefined}
+        runsHref={task.assigned_agent_id ? runsHubHref({ agentId: task.assigned_agent_id, failed: true }) : runsHubHref({ failed: true })}
       />
     );
   }
   if (!task.last_run_status) return null;
+  const resultHref = task.last_run_id ? taskResultHref(task.id, task.last_run_id) : undefined;
   return (
-    <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
-      {task.last_run_status === "completed" ? (
-        <CheckCircle2 className="h-4 w-4 text-status-done" />
-      ) : (
-        <Loader2 className="h-4 w-4 animate-spin" />
+    <div className="flex flex-wrap items-center gap-2 text-sm">
+      <p className="flex items-center gap-1.5 text-muted-foreground">
+        {task.last_run_status === "completed" ? (
+          <CheckCircle2 className="h-4 w-4 text-status-done" />
+        ) : (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        )}
+        Last run {task.last_run_status === "completed" ? "succeeded" : task.last_run_status}{" "}
+        {relative(task.last_run_at)}
+      </p>
+      {resultHref && (
+        <Link href={resultHref} className="text-xs font-semibold text-primary hover:underline">
+          View result →
+        </Link>
       )}
-      Last run {task.last_run_status === "completed" ? "succeeded" : task.last_run_status} {relative(task.last_run_at)}
-      {" "}· its output is under Runs &amp; history
-    </p>
+    </div>
   );
 }
 
@@ -181,12 +192,14 @@ function FailedRun({
   busy,
   onRetry,
   openHref,
+  runsHref,
 }: {
   error: string;
   at?: string | null;
   busy: boolean;
   onRetry?: () => void;
   openHref?: string;
+  runsHref?: string;
 }) {
   return (
     <div role="alert" className="space-y-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3">
@@ -210,7 +223,12 @@ function FailedRun({
         )}
         {openHref && (
           <Link href={openHref} className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-medium hover:bg-muted">
-            Open the run
+            View result
+          </Link>
+        )}
+        {runsHref && (
+          <Link href={runsHref} className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-medium hover:bg-muted">
+            All failed runs
           </Link>
         )}
       </div>

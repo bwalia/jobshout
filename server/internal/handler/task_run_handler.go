@@ -107,6 +107,38 @@ func (h *TaskRunHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 	RespondJSON(w, http.StatusOK, result)
 }
 
+// ListOrgRuns GET /api/v1/task-runs
+// Query: page, per_page, status, agent_id
+func (h *TaskRunHandler) ListOrgRuns(w http.ResponseWriter, r *http.Request) {
+	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid org_id in token")
+		return
+	}
+
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
+	params := model.PaginationParams{Page: page, PerPage: perPage}
+	status := r.URL.Query().Get("status")
+
+	var agentID *uuid.UUID
+	if raw := r.URL.Query().Get("agent_id"); raw != "" {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			RespondError(w, http.StatusBadRequest, "invalid agent_id")
+			return
+		}
+		agentID = &id
+	}
+
+	result, err := h.svc.ListOrgRuns(r.Context(), orgID, params, status, agentID)
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, "failed to list task runs: "+err.Error())
+		return
+	}
+	RespondJSON(w, http.StatusOK, result)
+}
+
 // GetRun GET /api/v1/task-runs/{runID}
 func (h *TaskRunHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 	runID, err := uuid.Parse(chi.URLParam(r, "runID"))

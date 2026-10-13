@@ -32,6 +32,9 @@ type TaskRunService interface {
 	GetRun(ctx context.Context, runID, orgID uuid.UUID) (*model.TaskRun, error)
 	// ListRuns lists the runs of a task, scoped to orgID.
 	ListRuns(ctx context.Context, taskID, orgID uuid.UUID, pagination model.PaginationParams) (*model.PaginatedResponse[model.TaskRun], error)
+	// ListOrgRuns lists every task run in the org, newest first. Optional
+	// status and agentID narrow the page (empty / nil = no filter).
+	ListOrgRuns(ctx context.Context, orgID uuid.UUID, pagination model.PaginationParams, status string, agentID *uuid.UUID) (*model.PaginatedResponse[model.TaskRun], error)
 	// SyncFromExecution mirrors an execution's state onto the task run that
 	// launched it, if any: used when a run paused for approval resumes
 	// (running) and when the resume ends (completed, failed, or paused again).
@@ -303,6 +306,14 @@ func (s *taskRunService) ListRuns(ctx context.Context, taskID, orgID uuid.UUID, 
 	}
 	pagination.Normalize()
 	return s.runRepo.ListByTask(ctx, taskID, pagination)
+}
+
+func (s *taskRunService) ListOrgRuns(ctx context.Context, orgID uuid.UUID, pagination model.PaginationParams, status string, agentID *uuid.UUID) (*model.PaginatedResponse[model.TaskRun], error) {
+	pagination.Normalize()
+	return s.runRepo.ListByOrg(ctx, orgID, pagination, repository.TaskRunListFilter{
+		Status:  strings.TrimSpace(status),
+		AgentID: agentID,
+	})
 }
 
 // resolveRunAgent picks the agent for a run: the explicit override if present,
