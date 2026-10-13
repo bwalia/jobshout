@@ -115,6 +115,11 @@ narration is missing, instead of failing an hour later.
 4. Add `VIDEO_LTX_MODEL=dgrauet/ltx-2.5-mlx-q8` to the image-service launchd
    plist's EnvironmentVariables and restart the service.
 
+**Relaunching a task cancels its previous render.** Only the task's latest
+run is ever collected, so an earlier one would otherwise hold the shared GPU for
+hours and queue ahead of the video you are waiting for. A queued render is
+dropped at once; a running one stops at its next step (its tool is killed).
+
 **Restarts are safe on both sides.**
 - **Workstation restart:** the service re-queues interrupted jobs (at most twice)
   and keeps finished ones for 7 days.

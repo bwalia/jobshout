@@ -29,6 +29,8 @@ const (
 	JobRunning = "running"
 	JobDone    = "done"
 	JobFailed  = "failed"
+	// JobCancelled: the render was superseded (its task was launched again).
+	JobCancelled = "cancelled"
 )
 
 // Shot is one beat of the film: what is said, and what is seen while it is.
@@ -180,6 +182,12 @@ func (c *Client) Jobs(ctx context.Context) ([]Job, error) {
 func (c *Client) Claim(ctx context.Context, id, holder string) error {
 	_, err := c.do(ctx, 2*time.Minute, http.MethodPost, "/api/videos/"+id+"/claim",
 		map[string]any{"holder": holder, "lease_seconds": 900})
+	return err
+}
+
+// Cancel stops a render: at once if queued, at its next step if running.
+func (c *Client) Cancel(ctx context.Context, id string) error {
+	_, err := c.do(ctx, time.Minute, http.MethodDelete, "/api/videos/"+id, nil)
 	return err
 }
 

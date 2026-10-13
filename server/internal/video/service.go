@@ -24,6 +24,7 @@ type Media interface {
 	Jobs(ctx context.Context) ([]Job, error)
 	Download(ctx context.Context, id string) ([]byte, error)
 	Claim(ctx context.Context, id, holder string) error
+	Cancel(ctx context.Context, id string) error
 }
 
 // ScriptWriter turns a brief into a script.
@@ -128,10 +129,38 @@ func (s *Service) Start(ctx context.Context, req StartRequest) (uuid.UUID, error
 		return uuid.Nil, errors.New("the video workstation is missing ffmpeg or narration — run image-service/install-video-tools.sh on it")
 	}
 
+	s.cancelSuperseded(ctx, req.TaskID)
+
 	runID := uuid.New()
 	s.claim(runID.String())
 	go s.run(runID, req, caps.Motion)
 	return runID, nil
+}
+
+// cancelSuperseded cancels the render of a task's previous launch. A relaunch
+// replaces it — the resumer only collects the task's current run — so left
+// alone it would hold the shared GPU for hours for a video nobody collects,
+// and queue ahead of the one the user is waiting for. The task still carries
+// the previous run's id here: the new one is written after Start returns.
+func (s *Service) cancelSuperseded(ctx context.Context, taskID *uuid.UUID) {
+	if taskID == nil || s.tasks == nil {
+		return
+	}
+	task, err := s.tasks.GetByID(ctx, *taskID)
+	if err != nil || task == nil {
+		return
+	}
+	prev, _ := task.Metadata[model.TaskMetaRunID].(string)
+	if prev == "" {
+		return
+	}
+	cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	// Not found is normal: the previous run may have been another agent's,
+	// or already pruned.
+	if err := s.media.Cancel(cctx, prev); err != nil && !errors.Is(err, ErrNotFound) {
+		s.logger.Warn("video: could not cancel the superseded render", zap.String("video_run", prev), zap.Error(err))
+	}
 }
 
 func (s *Service) run(runID uuid.UUID, req StartRequest, motionInstalled bool) {
@@ -238,6 +267,9 @@ func (s *Service) follow(ctx context.Context, jobID string, orgID uuid.UUID, tas
 		case job.Status == JobFailed:
 			s.note(taskID, "Video failed while rendering: "+job.Error, "")
 			return
+		case job.Status == JobCancelled:
+			// Superseded by a relaunch of the task, which reports for itself.
+			return
 		case job.Status == JobRunning && rendering.IsZero():
 			rendering = time.Now()
 		}
@@ -302,7 +334,7 @@ func (s *Service) StartResumer(ctx context.Context) {
 	for _, job := range jobs {
 		taskID, terr := uuid.Parse(job.Ref["task_id"])
 		orgID, oerr := uuid.Parse(job.Ref["org_id"])
-		if terr != nil || oerr != nil || job.Status == JobFailed {
+		if terr != nil || oerr != nil || job.Status == JobFailed || job.Status == JobCancelled {
 			continue
 		}
 		task, err := s.tasks.GetByID(ctx, taskID)

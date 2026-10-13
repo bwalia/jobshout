@@ -61,7 +61,7 @@ FORMATS = {
 # picks the pronunciation.
 VOICES = ["af_heart", "af_bella", "am_michael", "am_fenrir", "bf_emma", "bm_george", "hf_alpha", "hm_omega"]
 
-QUEUED, RUNNING, DONE, FAILED = "queued", "running", "done", "failed"
+QUEUED, RUNNING, DONE, FAILED, CANCELLED = "queued", "running", "done", "failed", "cancelled"
 
 # Padding after each line of narration, so one sentence does not run straight
 # into the next shot's first word.
@@ -76,6 +76,11 @@ _VOICE = re.compile(r"^[a-z]{2}_[a-z]+$")
 
 class RenderError(Exception):
     """A stage failed in a way worth showing the caller as-is."""
+
+
+class Cancelled(Exception):
+    """The job was cancelled while it rendered. Not a RenderError: a cancelled
+    clip must stop the video, not fall back to a still and carry on."""
 
 
 class QueueFull(Exception):
@@ -205,13 +210,25 @@ def _tool_env() -> dict:
     return env
 
 
+# The tool the (single) render worker is running, so cancel() can stop a
+# ten-minute LTX clip instead of waiting it out.
+_current: dict = {"proc": None}
+
+
 def _run(cmd: list[str], *, timeout: float, cwd: Path | None = None) -> str:
     """Run a tool; return its combined output, or raise with the end of it."""
+    proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, env=_tool_env())
+    _current["proc"] = proc
     try:
-        proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=_tool_env())
+        stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired as exc:
+        proc.kill()
+        proc.communicate()
         raise RenderError(f"{Path(cmd[0]).name} did not finish within {timeout:.0f}s") from exc
-    output = f"{proc.stdout}\n{proc.stderr}".strip()
+    finally:
+        _current["proc"] = None
+    output = f"{stdout}\n{stderr}".strip()
     if proc.returncode != 0:
         raise RenderError(f"{Path(cmd[0]).name} exited {proc.returncode}: {output[-600:]}")
     return output
@@ -248,6 +265,10 @@ class _Render:
         self.notes: list[str] = []
 
     def _progress(self, start: float, end: float, i: int, stage: str, message: str) -> None:
+        # Every step of every stage reports progress first, so this is also
+        # where a cancel is noticed.
+        if self.job.get("cancel_requested"):
+            raise Cancelled("cancelled")
         n = len(self.shots)
         self.report(stage=stage, message=message, progress=round(start + (end - start) * i / n, 3))
 
@@ -348,6 +369,8 @@ class _Render:
                     raise RenderError("no clip was written")
                 clips.append(clip)
             except RenderError as exc:
+                if self.job.get("cancel_requested"):
+                    raise Cancelled("cancelled") from exc
                 logger.warning("video %s: shot %d motion failed, using a still: %s", self.job["id"], i + 1, exc)
                 self.notes.append(f"shot {i + 1}: animation failed, used a still ({str(exc)[:160]})")
                 clips.append(None)
@@ -429,7 +452,9 @@ class VideoRenderer:
             except (OSError, ValueError):
                 continue
             if job.get("status") in (QUEUED, RUNNING):
-                if job.get("attempts", 0) >= config.VIDEO_MAX_ATTEMPTS:
+                if job.get("cancel_requested"):
+                    job.update(status=CANCELLED, stage="cancelled", error="cancelled", finished_at=time.time())
+                elif job.get("attempts", 0) >= config.VIDEO_MAX_ATTEMPTS:
                     job.update(status=FAILED, stage="failed", finished_at=time.time(),
                                error="interrupted by a service restart too many times")
                 else:
@@ -499,6 +524,29 @@ class VideoRenderer:
             self._save(job)
             return True
 
+    def cancel(self, job_id: str) -> dict | None:
+        """Stop a render nobody will collect (its task was launched again).
+
+        A queued job is cancelled on the spot. A running one is flagged and its
+        current tool is killed; the worker stops at the next step. A finished
+        job is left as it is. None means there is no such job.
+        """
+        proc = None
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return None
+            if job["status"] == QUEUED:
+                job.update(status=CANCELLED, stage="cancelled", error="cancelled", finished_at=time.time())
+                self._save(job)
+            elif job["status"] == RUNNING:
+                job["cancel_requested"] = True
+                self._save(job)
+                proc = _current["proc"]
+        if proc is not None:
+            proc.kill()
+        return job
+
     def list(self) -> list[dict]:
         return sorted(self._jobs.values(), key=lambda j: j["created_at"], reverse=True)
 
@@ -513,7 +561,7 @@ class VideoRenderer:
         cutoff = time.time() - config.VIDEO_KEEP_DAYS * 86400
         with self._lock:
             stale = [j for j in self._jobs.values()
-                     if j["status"] in (DONE, FAILED) and (j.get("finished_at") or 0) < cutoff]
+                     if j["status"] in (DONE, FAILED, CANCELLED) and (j.get("finished_at") or 0) < cutoff]
             for job in stale:
                 del self._jobs[job["id"]]
         for job in stale:
@@ -537,6 +585,11 @@ class VideoRenderer:
                              motion_model=config.VIDEO_LTX_MODEL if render.motion else "")
                 logger.info("video %s done in %.0fs", job_id, time.time() - job["started_at"])
             except Exception as exc:  # noqa: BLE001 — every failure ends the job, never the worker
+                if job.get("cancel_requested"):
+                    logger.info("video %s cancelled", job_id)
+                    self._update(job, status=CANCELLED, stage="cancelled", finished_at=time.time(),
+                                 error="cancelled", notes=render.notes if render else [])
+                    continue
                 logger.exception("video %s failed", job_id)
                 self._update(job, status=FAILED, stage="failed", finished_at=time.time(),
                              error=str(exc)[:1000], notes=render.notes if render else [])
