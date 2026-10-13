@@ -12,8 +12,10 @@ import { apiErrorMessage } from "@/lib/api/client";
 import { getExecution, type AgentExecution } from "@/lib/api/executions";
 import {
   createTaskRun,
+  getOrgTaskRuns,
   getTaskRun,
   getTaskRuns,
+  type OrgTaskRunParams,
 } from "@/lib/api/task-runs";
 import { taskKeys } from "@/lib/hooks/useTasks";
 import type { PaginatedResponse } from "@/lib/types/common";
@@ -26,6 +28,8 @@ import { isTaskRunActive } from "@/lib/types/task-run";
 export const taskRunKeys = {
   all: ["task-runs"] as const,
   byTask: (taskId: string) => [...taskRunKeys.all, "task", taskId] as const,
+  org: (params: OrgTaskRunParams) =>
+    [...taskRunKeys.all, "org", params] as const,
   detail: (runId: string) => [...taskRunKeys.all, "detail", runId] as const,
   execution: (execId: string) =>
     [...taskRunKeys.all, "execution", execId] as const,
@@ -46,6 +50,23 @@ export function useTaskRuns(
       const runs = query.state.data?.data;
       const active = runs?.some((r) => isTaskRunActive(r.status));
       return active ? 2000 : false;
+    },
+  });
+}
+
+/** Org-wide runs feed for the Runs hub and command palette. */
+export function useOrgTaskRuns(
+  params: OrgTaskRunParams = {},
+  enabled = true
+): UseQueryResult<PaginatedResponse<TaskRun>> {
+  return useQuery({
+    queryKey: taskRunKeys.org(params),
+    queryFn: () => getOrgTaskRuns(params),
+    enabled,
+    refetchInterval: (query) => {
+      const runs = query.state.data?.data;
+      const active = runs?.some((r) => isTaskRunActive(r.status));
+      return active ? 4000 : false;
     },
   });
 }
@@ -109,6 +130,7 @@ export function useCreateTaskRun(): UseMutationResult<
       queryClient.invalidateQueries({
         queryKey: taskRunKeys.byTask(run.task_id),
       });
+      queryClient.invalidateQueries({ queryKey: taskRunKeys.all });
       queryClient.invalidateQueries({ queryKey: taskKeys.all });
       toast.success("Run started.");
     },

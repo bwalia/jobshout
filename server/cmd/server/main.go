@@ -1407,7 +1407,8 @@ func main() {
 				})
 			})
 
-			// A single task run, looked up by its own ID (the poll target).
+			// Org-wide task runs (newest first), plus a single run by ID.
+			r.Get("/task-runs", taskRunHandler.ListOrgRuns)
 			r.Get("/task-runs/{runID}", taskRunHandler.GetRun)
 
 			// Organizations

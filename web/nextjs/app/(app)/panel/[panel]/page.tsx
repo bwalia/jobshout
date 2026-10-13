@@ -5,6 +5,8 @@ import { notFound, useParams } from "next/navigation";
 import { DashboardPanel } from "@/components/panels/DashboardPanel";
 import { ProjectsPanel } from "@/components/panels/ProjectsPanel";
 import { TasksView } from "@/components/tasks/TasksView";
+import { RunsView } from "@/components/runs/RunsView";
+import { UsagePanel } from "@/components/panels/UsagePanel";
 import { LegacyTaskRedirect } from "@/components/tasks/LegacyTaskRedirect";
 import { ArtifactsPanel } from "@/components/panels/ArtifactsPanel";
 import { PluginsSkillsPanel } from "@/components/panels/PluginsSkillsPanel";
@@ -74,6 +76,23 @@ function PanelBody({ panel }: { panel: Exclude<PanelId, "chat"> }) {
           </div>
         </div>
       );
+    case "runs":
+      return (
+        <div className="flex h-full min-h-0 flex-col">
+          <div className="px-6 pt-5">
+            <h1 className="text-2xl">Runs</h1>
+            <p className="text-sm text-muted-foreground">
+              Results and test runs across every task. Open a run to see output, cost, and the debug
+              trace — or retry a failure from here.
+            </p>
+          </div>
+          <div className="min-h-0 flex-1">
+            <RunsView />
+          </div>
+        </div>
+      );
+    case "usage":
+      return <UsagePanel />;
     case "task-board":
       return <LegacyTaskRedirect from="task-board" />;
     case "task-manager":

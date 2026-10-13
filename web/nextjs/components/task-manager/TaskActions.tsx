@@ -22,12 +22,16 @@ export function TaskActions({
   className?: string;
 }) {
   const compact = size === "sm";
+  const hasResult = Boolean(task.last_run_id);
   const secondary = compact
     ? "inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-secondary"
     : "inline-flex h-9 items-center gap-1.5 rounded-md border border-border px-3 text-sm hover:bg-secondary";
   const primary = compact
     ? "inline-flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground"
     : "inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:opacity-90";
+  // When a result exists, viewing it is the primary CTA; Run stays available.
+  const resultCls = hasResult ? primary : secondary;
+  const runCls = hasResult ? secondary : primary;
 
   return (
     <div className={cn("flex shrink-0 items-center gap-2", className)}>
@@ -37,10 +41,10 @@ export function TaskActions({
           e.stopPropagation();
           onShowHistory();
         }}
-        className={secondary}
+        className={resultCls}
       >
         <History className={compact ? "h-3 w-3" : "h-4 w-4"} />
-        Runs & history
+        {hasResult ? "View result" : "Runs & history"}
       </button>
       {canRunTask(task) && onRun ? (
         <button
@@ -49,7 +53,7 @@ export function TaskActions({
             e.stopPropagation();
             onRun();
           }}
-          className={primary}
+          className={runCls}
         >
           <Rocket className={compact ? "h-3 w-3" : "h-4 w-4"} />
           Run

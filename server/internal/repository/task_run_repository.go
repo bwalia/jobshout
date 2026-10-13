@@ -13,13 +13,19 @@ import (
 	"github.com/jobshout/server/internal/model"
 )
 
+// TaskRunListFilter narrows ListByOrg. Empty fields mean no filter.
+type TaskRunListFilter struct {
+	Status  string     // exact status match when non-empty
+	AgentID *uuid.UUID // nil = any agent
+}
+
 // TaskRunRepository persists on-demand task runs.
 type TaskRunRepository interface {
 	Create(ctx context.Context, run *model.TaskRun) error
 	GetByID(ctx context.Context, id uuid.UUID) (*model.TaskRun, error)
 	Update(ctx context.Context, run *model.TaskRun) error
 	ListByTask(ctx context.Context, taskID uuid.UUID, pagination model.PaginationParams) (*model.PaginatedResponse[model.TaskRun], error)
-	ListByOrg(ctx context.Context, orgID uuid.UUID, pagination model.PaginationParams) (*model.PaginatedResponse[model.TaskRun], error)
+	ListByOrg(ctx context.Context, orgID uuid.UUID, pagination model.PaginationParams, filter TaskRunListFilter) (*model.PaginatedResponse[model.TaskRun], error)
 	// CountActiveByTask is queued+running+awaiting_approval runs for a board card. Used so a
 	// finished run does not mark the card Done while another run is still live.
 	CountActiveByTask(ctx context.Context, taskID uuid.UUID) (int, error)
@@ -164,22 +170,48 @@ func (r *taskRunRepository) ListByTask(ctx context.Context, taskID uuid.UUID, pa
 	return r.listPaged(ctx, query, taskID, pagination, total)
 }
 
-func (r *taskRunRepository) ListByOrg(ctx context.Context, orgID uuid.UUID, pagination model.PaginationParams) (*model.PaginatedResponse[model.TaskRun], error) {
+func (r *taskRunRepository) ListByOrg(ctx context.Context, orgID uuid.UUID, pagination model.PaginationParams, filter TaskRunListFilter) (*model.PaginatedResponse[model.TaskRun], error) {
 	pagination.Normalize()
 
+	where, args := buildOrgRunWhere(orgID, filter)
 	var total int
-	if err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM task_runs WHERE org_id = $1`, orgID).Scan(&total); err != nil {
+	if err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM task_runs WHERE `+where, args...).Scan(&total); err != nil {
 		return nil, fmt.Errorf("counting task runs: %w", err)
 	}
 
-	query := `SELECT ` + taskRunColumns + `
-		FROM task_runs WHERE org_id = $1
-		ORDER BY created_at DESC LIMIT $2 OFFSET $3`
-	return r.listPaged(ctx, query, orgID, pagination, total)
+	limitIdx := len(args) + 1
+	offsetIdx := len(args) + 2
+	query := fmt.Sprintf(
+		`SELECT %s FROM task_runs WHERE %s ORDER BY created_at DESC LIMIT $%d OFFSET $%d`,
+		taskRunColumns, where, limitIdx, offsetIdx,
+	)
+	args = append(args, pagination.PerPage, pagination.Offset())
+	return r.listPagedArgs(ctx, query, args, pagination, total)
+}
+
+// buildOrgRunWhere returns the WHERE clause (without the WHERE keyword) and
+// its bind args for an org-scoped run list. Exported for unit tests via the
+// package-level test of the same name.
+func buildOrgRunWhere(orgID uuid.UUID, filter TaskRunListFilter) (string, []any) {
+	where := "org_id = $1"
+	args := []any{orgID}
+	if filter.Status != "" {
+		args = append(args, filter.Status)
+		where += fmt.Sprintf(" AND status = $%d", len(args))
+	}
+	if filter.AgentID != nil {
+		args = append(args, *filter.AgentID)
+		where += fmt.Sprintf(" AND agent_id = $%d", len(args))
+	}
+	return where, args
 }
 
 func (r *taskRunRepository) listPaged(ctx context.Context, query string, scope uuid.UUID, pagination model.PaginationParams, total int) (*model.PaginatedResponse[model.TaskRun], error) {
-	rows, err := r.pool.Query(ctx, query, scope, pagination.PerPage, pagination.Offset())
+	return r.listPagedArgs(ctx, query, []any{scope, pagination.PerPage, pagination.Offset()}, pagination, total)
+}
+
+func (r *taskRunRepository) listPagedArgs(ctx context.Context, query string, args []any, pagination model.PaginationParams, total int) (*model.PaginatedResponse[model.TaskRun], error) {
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing task runs: %w", err)
 	}

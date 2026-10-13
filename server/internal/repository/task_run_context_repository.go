@@ -60,8 +60,8 @@ func (t *TaskRunContexts) ListByTask(ctx context.Context, taskID uuid.UUID, p mo
 	return out, err
 }
 
-func (t *TaskRunContexts) ListByOrg(ctx context.Context, orgID uuid.UUID, p model.PaginationParams) (*model.PaginatedResponse[model.TaskRun], error) {
-	out, err := t.TaskRunRepository.ListByOrg(ctx, orgID, p)
+func (t *TaskRunContexts) ListByOrg(ctx context.Context, orgID uuid.UUID, p model.PaginationParams, filter TaskRunListFilter) (*model.PaginatedResponse[model.TaskRun], error) {
+	out, err := t.TaskRunRepository.ListByOrg(ctx, orgID, p, filter)
 	t.fillPage(ctx, out, err)
 	return out, err
 }

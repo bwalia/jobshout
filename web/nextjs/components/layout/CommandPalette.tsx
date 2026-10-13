@@ -6,14 +6,31 @@ import { Search } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { ALL_NAV_ITEMS } from "@/lib/nav";
 import { agentHref } from "@/lib/agents/links";
+import {
+  artifactsFromBlogRuns,
+  artifactsFromImages,
+  sortArtifacts,
+} from "@/lib/artifacts";
 import { useAgents } from "@/lib/hooks/useAgents";
+import { useBlogRuns } from "@/lib/hooks/useBlog";
+import { useChatSessions } from "@/lib/hooks/useChat";
+import { useGeneratedImages } from "@/lib/hooks/useImages";
 import { useProjects } from "@/lib/hooks/useProjects";
 import { useAllTasks } from "@/lib/hooks/useTasks";
-import { useChatSessions } from "@/lib/hooks/useChat";
+import { useOrgTaskRuns } from "@/lib/hooks/useTaskRuns";
+import { runsHubHref, taskResultHref } from "@/lib/run-links";
 import { sessionTitle } from "@/lib/types/chat";
 import { useUiStore } from "@/lib/store/ui-store";
 
-type Group = "Actions" | "Pages" | "Agents" | "Projects" | "Tasks" | "Chats";
+type Group =
+  | "Actions"
+  | "Pages"
+  | "Agents"
+  | "Projects"
+  | "Tasks"
+  | "Runs"
+  | "Outputs"
+  | "Chats";
 
 type Item =
   | { kind: "link"; group: Group; id: string; label: string; hint?: string; keywords?: string; href: string }
@@ -36,14 +53,22 @@ export function CommandPalette() {
   const { data: agentsResp } = useAgents({ per_page: 100 });
   const { data: projectsResp } = useProjects({ per_page: 100 });
   const { data: tasksResp } = useAllTasks();
+  const { data: runsResp } = useOrgTaskRuns({ per_page: 50 }, open);
+  const { data: blogRuns } = useBlogRuns({ per_page: 40 });
+  const { data: images } = useGeneratedImages(40);
 
   const items = useMemo<Item[]>(() => {
     const q = query.trim().toLowerCase();
+    const taskTitle = new Map((tasksResp?.data ?? []).map((t) => [t.id, t.title]));
+    const agentName = new Map((agentsResp?.data ?? []).map((a) => [a.id, a.name]));
+
     const all: Item[] = [
       { kind: "action", group: "Actions", id: "new-task", label: "New task", keywords: "create add", run: () => router.push("/panel/tasks?new=1") },
       { kind: "action", group: "Actions", id: "new-agent", label: "New agent", keywords: "create add", run: () => router.push("/panel/agents?new=1") },
       { kind: "action", group: "Actions", id: "new-chat", label: "New chat", keywords: "create ask", run: () => router.push("/chat") },
       { kind: "action", group: "Actions", id: "run-workflow", label: "Run a workflow", keywords: "automation start", run: () => router.push("/panel/workflows") },
+      { kind: "action", group: "Actions", id: "open-usage", label: "Open Usage", keywords: "cost spend tokens observability", run: () => router.push("/panel/usage") },
+      { kind: "action", group: "Actions", id: "failed-runs", label: "Runs with failures", keywords: "failed error retry debug", run: () => router.push(runsHubHref({ failed: true })) },
       ...ALL_NAV_ITEMS.map((n): Item => ({
         kind: "link",
         group: "Pages",
@@ -76,25 +101,74 @@ export function CommandPalette() {
         href: `/chat?session=${s.id}`,
       })),
     ];
-    // Tasks are many; only search them once something is typed.
+
+    // Tasks, runs and outputs are many; only search them once something is typed.
     if (q) {
       for (const t of tasksResp?.data ?? []) {
-        all.push({ kind: "link", group: "Tasks", id: t.id, label: t.title, href: `/panel/tasks?task=${t.id}` });
+        all.push({
+          kind: "link",
+          group: "Tasks",
+          id: t.id,
+          label: t.title,
+          hint: t.last_run_status ?? undefined,
+          href: t.last_run_id ? taskResultHref(t.id, t.last_run_id) : `/panel/tasks?task=${t.id}`,
+        });
+      }
+      for (const r of runsResp?.data ?? []) {
+        const title = taskTitle.get(r.task_id) ?? "Run";
+        const agent = agentName.get(r.agent_id) ?? "";
+        all.push({
+          kind: "link",
+          group: "Runs",
+          id: r.id,
+          label: title,
+          hint: `${r.status}${r.error_message ? ` · ${r.error_message.slice(0, 60)}` : ""}`,
+          keywords: `${agent} ${r.status} ${r.error_message ?? ""} ${r.model_name ?? ""}`,
+          href: taskResultHref(r.task_id, r.id),
+        });
+      }
+      const outputs = sortArtifacts([
+        ...artifactsFromBlogRuns(blogRuns?.data ?? []),
+        ...artifactsFromImages(images ?? []),
+      ]);
+      for (const o of outputs) {
+        const href = o.href;
+        if (!href) continue;
+        all.push({
+          kind: "link",
+          group: "Outputs",
+          id: o.id,
+          label: o.title,
+          hint: o.kind,
+          keywords: `${o.subtitle ?? ""} ${o.meta ?? ""} ${o.status}`,
+          href,
+        });
       }
     }
 
-    const matches = (i: Item) => !q || `${i.label} ${i.hint ?? ""} ${i.keywords ?? ""}`.toLowerCase().includes(q);
+    const matches = (i: Item) =>
+      !q || `${i.label} ${i.hint ?? ""} ${i.keywords ?? ""}`.toLowerCase().includes(q);
     const order: Group[] = q
-      ? ["Pages", "Agents", "Projects", "Tasks", "Actions", "Chats"]
+      ? ["Pages", "Agents", "Projects", "Tasks", "Runs", "Outputs", "Actions", "Chats"]
       : ["Actions", "Pages", "Agents", "Projects", "Chats"];
     const out: Item[] = [];
     for (const g of order) {
       const hits = all.filter((i) => i.group === g && matches(i));
-      // With no query every page is listed, so the palette doubles as a map.
       out.push(...(!q && g === "Pages" ? hits : hits.slice(0, PER_GROUP)));
     }
     return out;
-  }, [query, sessionsQuery.data, overrides, router, agentsResp, projectsResp, tasksResp]);
+  }, [
+    query,
+    sessionsQuery.data,
+    overrides,
+    router,
+    agentsResp,
+    projectsResp,
+    tasksResp,
+    runsResp,
+    blogRuns,
+    images,
+  ]);
 
   const close = useCallback(() => {
     setOpen(false);
@@ -197,7 +271,7 @@ export function CommandPalette() {
               setQuery(e.target.value);
               setFocusIdx(0);
             }}
-            placeholder="Search pages, agents, projects, tasks…"
+            placeholder="Search pages, agents, tasks, runs, outputs…"
             role="combobox"
             aria-expanded="true"
             aria-controls="command-palette-list"

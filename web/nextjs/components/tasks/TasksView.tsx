@@ -16,6 +16,7 @@ import { useRunFailures } from "@/lib/hooks/useRunFailures";
 import { useAllTasks, useTask } from "@/lib/hooks/useTasks";
 import { STATUS_DOT } from "@/lib/status-colors";
 import { PRIORITY_OPTIONS, STATUS_OPTIONS, priorityLabel, statusLabel } from "@/lib/task-labels";
+import { taskResultHref } from "@/lib/run-links";
 import type { Task } from "@/lib/types/project";
 import { cn } from "@/lib/utils/cn";
 import { toast } from "sonner";
@@ -327,13 +328,16 @@ export function TasksView({ lockedProjectId }: { lockedProjectId?: string }) {
                   <th scope="col" className="px-4 py-2.5 font-semibold">Status</th>
                   <th scope="col" className="px-4 py-2.5 font-semibold">Priority</th>
                   <th scope="col" className="px-4 py-2.5 font-semibold">Last run</th>
+                  <th scope="col" className="px-4 py-2.5 font-semibold">
+                    <span className="sr-only">Result</span>
+                  </th>
                 </tr>
               </thead>
               {columns.map((col) =>
                 col.tasks.length === 0 ? null : (
                   <tbody key={col.key} className="divide-y divide-border">
                     <tr className="bg-muted/20">
-                      <th scope="rowgroup" colSpan={6} className="px-4 py-1.5 text-xs font-semibold text-muted-foreground">
+                      <th scope="rowgroup" colSpan={7} className="px-4 py-1.5 text-xs font-semibold text-muted-foreground">
                         {col.label} · {col.tasks.length}
                       </th>
                     </tr>
@@ -393,6 +397,19 @@ export function TasksView({ lockedProjectId }: { lockedProjectId?: string }) {
                             </span>
                           ) : (
                             <TaskProgressChip task={t} />
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          {t.last_run_id ? (
+                            <Link
+                              href={taskResultHref(t.id, t.last_run_id)}
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-xs font-semibold text-primary hover:underline"
+                            >
+                              View result
+                            </Link>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
                           )}
                         </td>
                       </tr>
