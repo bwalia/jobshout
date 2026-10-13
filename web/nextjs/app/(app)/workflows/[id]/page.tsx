@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, Play, ChevronDown, ChevronRight, Clock, Bot } from "lucide-react";
 import { useState, useMemo } from "react";
 import { WorkflowBuilder } from "@/components/workflow/WorkflowBuilder";
@@ -160,8 +160,10 @@ export default function WorkflowDetailPage() {
   const updateWorkflow = useUpdateWorkflow();
   const executeWorkflow = useExecuteWorkflow();
   const { data: runsData } = useWorkflowRuns(params.id);
-  const [showRuns, setShowRuns] = useState(false);
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  // ?run=<id> (set by Run on the list page) opens straight onto that run.
+  const runParam = useSearchParams().get("run");
+  const [showRuns, setShowRuns] = useState(Boolean(runParam));
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(runParam);
 
   const runs = runsData?.data ?? [];
   const steps = workflow?.steps ?? [];
@@ -285,7 +287,16 @@ export default function WorkflowDetailPage() {
           </button>
           <button
             onClick={() =>
-              executeWorkflow.mutate({ id: params.id, payload: {} })
+              executeWorkflow.mutate(
+                { id: params.id, payload: {} },
+                {
+                  // Show the run that just started, live on the canvas.
+                  onSuccess: (run) => {
+                    setShowRuns(true);
+                    setSelectedRunId(run.id);
+                  },
+                }
+              )
             }
             disabled={executeWorkflow.isPending}
             className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"

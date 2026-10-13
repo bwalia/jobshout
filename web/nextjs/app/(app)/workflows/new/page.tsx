@@ -22,7 +22,8 @@ export default function NewWorkflowPage() {
         steps: graphToSteps(graph),
       },
       {
-        onSuccess: () => router.push("/workflows"),
+        // Open what was just built, not the list it has to be found in.
+        onSuccess: (wf) => router.push(`/workflows/${wf.id}`),
       }
     );
   };

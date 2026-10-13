@@ -9,6 +9,8 @@ import {
   useScheduledTaskRuns,
 } from "@/lib/hooks/useScheduler";
 import { useAgents } from "@/lib/hooks/useAgents";
+import { useWorkflows } from "@/lib/hooks/useWorkflows";
+import { agentHref } from "@/lib/agents/links";
 import { useAgentSchemas } from "@/lib/hooks/useAgentSchemas";
 import { fieldDefault, fieldOptions } from "@/lib/agents/input-schemas";
 import { useLLMProviders } from "@/lib/hooks/useLLMProviders";
@@ -82,6 +84,24 @@ const PRIORITY_COLORS: Record<string, string> = {
   critical: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
 };
 
+// Readable names for the chips on a schedule card; the raw enum values
+// ("agent", "active") read as debug output.
+const TYPE_LABELS: Record<string, string> = {
+  agent: "Agent run",
+  workflow: "Workflow run",
+  blog: "Articles",
+  multi_agent: "Multi-agent job",
+  career_scan: "Job scan",
+  career_apply: "Job applications",
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  active: "Active",
+  paused: "Paused",
+  completed: "Finished",
+  failed: "Failed",
+};
+
 const STATUS_COLORS: Record<string, string> = {
   active: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
   paused: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
@@ -92,6 +112,7 @@ const STATUS_COLORS: Record<string, string> = {
 export default function SchedulerPage() {
   const { data: tasksResponse, isLoading } = useScheduledTasks();
   const { data: agentsResponse } = useAgents();
+  const { data: workflowsResponse } = useWorkflows({ per_page: 100 });
   const { data: providers } = useLLMProviders();
   const { data: agentCatalog } = useAgentSchemas();
   const createMutation = useCreateScheduledTask();
@@ -129,6 +150,7 @@ export default function SchedulerPage() {
   });
 
   const agents = agentsResponse?.data ?? [];
+  const workflows = workflowsResponse?.data ?? [];
   // The Article Writer and its clones — one per website or project, each with
   // its own model, style, keywords and destination.
   const writers = agents.filter((a) => a.metadata?.builtin === "article_writer");
@@ -308,7 +330,7 @@ export default function SchedulerPage() {
     <div className="mx-auto max-w-5xl space-y-8">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Task Scheduler</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Schedules</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Schedule agent and workflow executions with cron, interval, or one-time triggers.
           </p>
@@ -343,12 +365,16 @@ export default function SchedulerPage() {
 
               <div className="space-y-2">
                 <label className="text-sm font-medium">Task Type</label>
+                {/* The target belongs to the type: an agent picked for an agent
+                    run must not ride along into a workflow or article schedule. */}
                 <select
                   value={form.task_type}
                   onChange={(e) =>
                     setForm({
                       ...form,
                       task_type: e.target.value as ScheduledTaskType,
+                      agent_id: undefined,
+                      workflow_id: undefined,
                     })
                   }
                   className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -374,6 +400,37 @@ export default function SchedulerPage() {
                       </option>
                     ))}
                   </select>
+                </div>
+              )}
+
+              {form.task_type === "workflow" && (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Workflow</label>
+                  {/* Required: a workflow schedule without one fires nothing.
+                      Not editable afterwards — the update API cannot repoint it. */}
+                  <select
+                    value={form.workflow_id ?? ""}
+                    onChange={(e) => setForm({ ...form, workflow_id: e.target.value || undefined })}
+                    required
+                    disabled={Boolean(editingId)}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+                  >
+                    <option value="">Select a workflow...</option>
+                    {workflows.map((w) => (
+                      <option key={w.id} value={w.id}>
+                        {w.name}
+                      </option>
+                    ))}
+                  </select>
+                  {workflows.length === 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      No workflows yet.{" "}
+                      <Link href="/workflows/new" className="text-primary hover:underline">
+                        Create one
+                      </Link>{" "}
+                      first.
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -773,18 +830,34 @@ export default function SchedulerPage() {
                         STATUS_COLORS[task.status] ?? ""
                       }`}
                     >
-                      {task.status}
+                      {STATUS_LABELS[task.status] ?? task.status}
                     </span>
                     <span
                       className={`rounded-full px-2 py-0.5 text-xs font-medium ${
                         PRIORITY_COLORS[task.priority] ?? ""
                       }`}
                     >
-                      {task.priority}
+                      {task.priority} priority
                     </span>
                     <span className="rounded-full bg-accent px-2 py-0.5 text-xs">
-                      {task.task_type === "blog" ? "articles" : task.task_type}
+                      {TYPE_LABELS[task.task_type] ?? task.task_type}
                     </span>
+                    {/* What the schedule actually runs, one click away. */}
+                    {task.workflow_id ? (
+                      <Link
+                        href={`/workflows/${task.workflow_id}`}
+                        className="text-xs text-primary hover:underline"
+                      >
+                        {workflows.find((w) => w.id === task.workflow_id)?.name ?? "Open workflow"}
+                      </Link>
+                    ) : task.agent_id ? (
+                      <Link
+                        href={agentHref(task.agent_id)}
+                        className="text-xs text-primary hover:underline"
+                      >
+                        {agents.find((a) => a.id === task.agent_id)?.name ?? "Open agent"}
+                      </Link>
+                    ) : null}
                   </div>
                   {task.description && (
                     <p className="text-xs text-muted-foreground">{task.description}</p>
