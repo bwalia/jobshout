@@ -25,6 +25,9 @@ already reach one Ollama.
 | `GET`  | `/health`      | no   | Liveness. Never loads a model.                 |
 | `GET`  | `/api/models`  | yes  | Which image models exist, and which are local. |
 | `POST` | `/api/generate`| yes  | Generate an image from a prompt.               |
+| `POST` | `/api/videos`  | yes  | Queue a narrated video render. See [Video](#video). |
+| `GET`  | `/api/videos[/{id}[/file]]` | yes | List renders, read one, download its MP4. |
+| `GET`  | `/api/videos/capabilities` | yes | Which video stages are installed. |
 
 `/health` is deliberately unauthenticated and deliberately does not touch the
 model: a health check that can fail for two different reasons cannot be used to
@@ -189,3 +192,64 @@ is a good way to run the machine out of memory.
 | `IMAGE_MAX_LOADED_MODELS` | `1`             | How many models stay resident.               |
 | `IMAGE_QUANTIZE`          | *(unset)*       | 3/4/5/6/8 — quantise on load to cut memory.  |
 | `IMAGE_LOG_LEVEL`         | `info`          | Log level.                                   |
+
+## Video
+
+The same process renders narrated videos for the Video Producer agent: a list of
+shots (narration + picture description) in, one MP4 out. It lives here rather
+than in a second service because it needs the same GPU, the same lock and the
+same gateway host — a separate service would need its own edge vhost, router
+port-forward and secret, and would race this one for memory.
+
+```
+narration (Kokoro, mlx-audio) → keyframe per shot (this service's image model)
+  → motion per shot (LTX-2, ltx-2-mlx; optional) → ffmpeg: captions, fades, concat
+```
+
+The narration's length sets each shot's length. A shot whose animation fails —
+or a job that asks for none — gets a slow Ken Burns move over its still, so
+motion can only improve a video, never fail it. Details are in `app/video.py`
+and [docs/video-generation.md](../docs/video-generation.md).
+
+**Install the tools once** (ffmpeg-full, a TTS virtualenv, an LTX virtualenv and
+their weights, ~40 GB):
+
+```bash
+./install-video-tools.sh
+```
+
+Tools are found at `~/.jobshout/media-tools/…` by default and checked per
+request, so installing them needs no restart. Renders run with
+`HF_HUB_OFFLINE=1`: a missing weight fails in a second rather than starting a
+30 GB download mid-render.
+
+**API.** `POST /api/videos` returns 202 with the job; poll `GET /api/videos/{id}`
+until `status` is `done` or `failed`, then fetch `GET /api/videos/{id}/file`.
+The caller chooses `id`, so a retried submission finds the job it already
+started. `ref` is opaque metadata handed back on every read — the platform puts
+the board task there so a restarted server can find its renders.
+
+```json
+{ "id": "…uuid…", "title": "The Last Keeper", "format": "landscape",
+  "voice": "bm_george", "style": "cinematic, golden-hour light",
+  "motion": true, "captions": true,
+  "shots": [{ "narration": "For two hundred years…", "visual": "A white stone lighthouse…" }],
+  "ref": { "task_id": "…", "org_id": "…" } }
+```
+
+**Jobs** run one at a time behind the image GPU lock, which is taken per clip,
+so a cover image waits minutes, not an hour. Job state is written next to the
+files under `VIDEO_DIR`; a restart re-queues interrupted jobs (twice at most)
+and keeps finished ones for `VIDEO_KEEP_DAYS`.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `VIDEO_LTX_MODEL` | `dgrauet/ltx-2.3-mlx-q8` | Motion model. `dgrauet/ltx-2.5-mlx-q8` is better but gated: accept its licence on Hugging Face, `hf auth login` on this host, re-run the installer with the same variable, then set it in the plist. |
+| `VIDEO_LTX_ARGS` | `--distilled` | Extra ltx-2-mlx flags (pipeline choice). |
+| `VIDEO_MAX_CLIP_FRAMES` | `121` | Longest animated clip (8n+1 frames at 24 fps ≈ 5 s); narration beyond it holds the last frame. |
+| `VIDEO_KEYFRAME_MODEL` | `IMAGE_DEFAULT_MODEL` | Image model for each shot's still. |
+| `VIDEO_TTS_MODEL` / `VIDEO_DEFAULT_VOICE` | Kokoro-82M / `af_heart` | Narration. |
+| `VIDEO_DIR` | `~/.jobshout/videos` | Job state and files. |
+| `VIDEO_TOOLS_DIR` | `~/.jobshout/media-tools` | Where the installer puts the tools. |
+| `VIDEO_MAX_SHOTS` / `VIDEO_MAX_QUEUE` | `30` / `4` | Per-video and queue ceilings. |
+| `VIDEO_KEEP_DAYS` | `7` | How long finished renders stay on disk. |

@@ -29,6 +29,7 @@ import (
 	"github.com/jobshout/server/internal/seo"
 	"github.com/jobshout/server/internal/service"
 	"github.com/jobshout/server/internal/simpro"
+	"github.com/jobshout/server/internal/video"
 	"github.com/jobshout/server/internal/waflab"
 )
 
@@ -53,6 +54,7 @@ type Deps struct {
 	Course           course.Runner
 	LinkedIn         linkedin.Runner
 	CompanyWeb       companyweb.Runner
+	Video            video.Runner
 }
 
 func init() {
@@ -87,6 +89,7 @@ func Register(d Deps) {
 	agentmodule.Register(course.Module(d.Course))
 	agentmodule.Register(linkedin.Module(d.LinkedIn))
 	agentmodule.Register(companyweb.Module(d.CompanyWeb))
+	agentmodule.Register(video.Module(d.Video))
 }
 
 type imageAdapter struct{ svc *service.ImageService }

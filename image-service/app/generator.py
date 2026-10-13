@@ -19,6 +19,8 @@ Three things make this more than a thin wrapper around mflux:
 
 import base64
 import concurrent.futures
+import contextlib
+import gc
 import inspect
 import io
 import logging
@@ -281,6 +283,36 @@ class Generator:
             ).result()
         finally:
             self._gpu.release()
+
+    @contextlib.contextmanager
+    def exclusive_gpu(self):
+        """Hold the GPU for work outside this process, with no image model resident.
+
+        A video model runs as a subprocess with its own MLX heap. Holding the
+        lock keeps an image request from loading beside it; dropping the cached
+        model hands its tens of gigabytes back before the subprocess asks for
+        its own. The next image request pays one cold load — seconds, against
+        an out-of-memory kill of both.
+        """
+        self._gpu.acquire()
+        try:
+            self._mlx_executor.submit(self._evict_all).result()
+            yield
+        finally:
+            self._gpu.release()
+
+    def _evict_all(self) -> None:
+        with self._registry_lock:
+            self._loaded.clear()
+        gc.collect()
+        try:
+            import mlx.core as mx
+
+            # Freed arrays sit in MLX's buffer cache until it is cleared, which
+            # from the OS's side is the same as not freeing them at all.
+            (getattr(mx, "clear_cache", None) or mx.metal.clear_cache)()
+        except Exception:  # noqa: BLE001 — best effort; the lock is what matters
+            logger.debug("mlx cache clear failed", exc_info=True)
 
     def catalogue(self):
         """List models on the MLX thread so mflux import shares that affinity."""

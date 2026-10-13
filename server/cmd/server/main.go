@@ -39,6 +39,7 @@ import (
 	"github.com/jobshout/server/internal/scheduler"
 	"github.com/jobshout/server/internal/secretsrot"
 	"github.com/jobshout/server/internal/simpro"
+	"github.com/jobshout/server/internal/video"
 	"github.com/jobshout/server/internal/waflab"
 	"github.com/jobshout/server/internal/webhook"
 	"github.com/jobshout/server/internal/wslproxymcp"
@@ -907,6 +908,28 @@ func main() {
 		zap.String("api_version", linkedInCfg.APIVersion),
 	)
 
+	// ─── Video Producer ─────────────────────────────────────────────────────
+	// Renders on the workstation image service (same host, gateway and secret
+	// as images); the script is written here with the platform LLM.
+	videoCfg := video.LoadConfig()
+	videoProvider, videoModel := agentLLM(cfg, model.BuiltinVideoProducer)
+	videoCfg.Provider = videoProvider
+	videoCfg.Model = firstNonEmptyStr(videoModel, videoCfg.Model)
+	videoCfg.BaseURL = cfg.ImageBaseURL
+	videoCfg.JWTSecret = cfg.ImageJWTSecret
+	videoCfg.PublicBaseURL = cfg.FrontendBaseURL
+	var videoWriter *video.Writer
+	if _, err := llmRouter.For(videoProvider); err == nil {
+		videoWriter = &video.Writer{LLM: llmRouter.Routed(videoProvider), Model: videoCfg.Model}
+	}
+	videoSvc := video.NewService(videoWriter, video.NewClient(videoCfg.BaseURL, videoCfg.JWTSecret), imgStore, videoCfg, logger)
+	videoSvc.BindTasks(taskSvc)
+	logger.Info("video producer initialised",
+		zap.Bool("configured", videoSvc.Configured()),
+		zap.String("workstation", videoCfg.BaseURL),
+		zap.Duration("max_runtime", videoCfg.MaxRuntime),
+	)
+
 	secretsRotCfg := secretsrot.LoadConfig()
 	secretsRotSvc := service.NewSecretsRotationService(secretsRotRunRepo, agentRepo, secretsRotCfg, logger)
 	logger.Info("secrets rotation agent initialised",
@@ -965,6 +988,7 @@ func main() {
 		Course:           courseSvc,
 		LinkedIn:         linkedInSvc,
 		CompanyWeb:       companyweb.ClientRunner{Client: researchClient},
+		Video:            videoSvc,
 	})
 
 	// ─── Autonomous agent engine ────────────────────────────────────────────
@@ -1974,6 +1998,7 @@ func main() {
 	go courseSvc.StartResumer(ctx)
 	// LinkedIn drafts for newly published articles, for orgs that connected it.
 	go linkedInSvc.StartAutoDraft(ctx)
+	go videoSvc.StartResumer(ctx)
 
 	srv := &http.Server{
 		Addr:    cfg.ServerPort,

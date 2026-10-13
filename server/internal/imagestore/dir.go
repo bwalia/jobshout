@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 )
@@ -26,17 +25,23 @@ func NewDirStore(root string) *DirStore {
 }
 
 // Put implements Store.
-func (s *DirStore) Put(_ context.Context, orgID uuid.UUID, png []byte) (string, error) {
-	if len(png) == 0 {
-		return "", fmt.Errorf("imagestore: refusing to store an empty image")
+func (s *DirStore) Put(ctx context.Context, orgID uuid.UUID, png []byte) (string, error) {
+	return s.PutFile(ctx, orgID, png, "png", "image/png")
+}
+
+// PutFile implements Store. The content type is not kept: the file route
+// derives it from the extension.
+func (s *DirStore) PutFile(_ context.Context, orgID uuid.UUID, data []byte, ext, _ string) (string, error) {
+	if len(data) == 0 {
+		return "", fmt.Errorf("imagestore: refusing to store an empty file")
 	}
-	key := fmt.Sprintf("%s/%s/%s.png", orgID, time.Now().UTC().Format("2006/01"), uuid.New())
+	key := newKey(orgID, ext)
 	path := filepath.Join(s.root, filepath.FromSlash(key))
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", fmt.Errorf("imagestore: create dir: %w", err)
 	}
-	if err := os.WriteFile(path, png, 0o644); err != nil {
-		return "", fmt.Errorf("imagestore: write image: %w", err)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return "", fmt.Errorf("imagestore: write %s: %w", ext, err)
 	}
 	return URLPrefix + key, nil
 }
