@@ -17,10 +17,12 @@ import {
   AlertTriangle,
   Pencil,
   ChevronRight,
+  Play,
 } from "lucide-react";
 import { useRunFailures } from "@/lib/hooks/useRunFailures";
 import { BuiltinAgentTab } from "@/components/task-manager/BuiltinAgentTab";
 import { AGENT_CLIENTS } from "@/lib/agents/tab-clients";
+import { useUiStore } from "@/lib/store/ui-store";
 import { useAgentSchemas } from "@/lib/hooks/useAgentSchemas";
 import { useProjects } from "@/lib/hooks/useProjects";
 import { taskKeys } from "@/lib/hooks/useTasks";
@@ -1200,9 +1202,10 @@ export default function AgentProfilePage() {
               computed it, so it read 0% for every agent — see the Metrics tab.) */}
           <div className="flex flex-col items-start gap-2 sm:items-end">
             <div className="flex flex-wrap justify-end gap-2">
+              <RunAgentButton agentId={agent.id} />
               <Link
                 href={`/panel/tasks?new=1&agent=${agent.id}`}
-                className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:opacity-90"
+                className="inline-flex h-9 items-center gap-1.5 rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent"
               >
                 New task
               </Link>
@@ -1294,5 +1297,20 @@ export default function AgentProfilePage() {
         {activeTab === "skills" && <SkillsTab agentId={agent.id} />}
       </div>
     </div>
+  );
+}
+
+/** Runs this agent now, in the same dialog as the header's "Run a task". */
+function RunAgentButton({ agentId }: { agentId: string }) {
+  const openRunDialog = useUiStore((s) => s.openRunDialog);
+  return (
+    <button
+      type="button"
+      onClick={() => openRunDialog(agentId)}
+      className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:opacity-90"
+    >
+      <Play className="h-4 w-4" />
+      Run
+    </button>
   );
 }

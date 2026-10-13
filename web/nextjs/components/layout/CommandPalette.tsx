@@ -43,6 +43,7 @@ export function CommandPalette() {
   const router = useRouter();
   const open = useUiStore((s) => s.commandPaletteOpen);
   const setOpen = useUiStore((s) => s.setCommandPaletteOpen);
+  const openRunDialog = useUiStore((s) => s.openRunDialog);
   const toggle = useUiStore((s) => s.toggleCommandPalette);
   const [query, setQuery] = useState("");
   const [focusIdx, setFocusIdx] = useState(0);
@@ -63,6 +64,7 @@ export function CommandPalette() {
     const agentName = new Map((agentsResp?.data ?? []).map((a) => [a.id, a.name]));
 
     const all: Item[] = [
+      { kind: "action", group: "Actions", id: "run-agent", label: "Run an agent…", keywords: "run task start launch execute test", run: () => openRunDialog() },
       { kind: "action", group: "Actions", id: "new-task", label: "New task", keywords: "create add", run: () => router.push("/panel/tasks?new=1") },
       { kind: "action", group: "Actions", id: "new-agent", label: "New agent", keywords: "create add", run: () => router.push("/panel/agents?new=1") },
       { kind: "action", group: "Actions", id: "new-chat", label: "New chat", keywords: "create ask", run: () => router.push("/chat") },
@@ -168,6 +170,7 @@ export function CommandPalette() {
     runsResp,
     blogRuns,
     images,
+    openRunDialog,
   ]);
 
   const close = useCallback(() => {

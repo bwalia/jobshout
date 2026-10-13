@@ -14,6 +14,11 @@ interface UiState {
   openTaskId: string | null;
   /** Local chat title overrides (no rename API yet). */
   chatTitleOverrides: Record<string, string>;
+  /**
+   * The global "Run a task" dialog: open, and the agent it was opened for
+   * (null = pick one). One dialog for every screen.
+   */
+  runDialog: { open: boolean; agentId: string | null };
 
   setSidebarCollapsed: (v: boolean) => void;
   toggleSidebar: () => void;
@@ -24,6 +29,8 @@ interface UiState {
   setOpenTaskId: (id: string | null) => void;
   setChatTitle: (sessionId: string, title: string) => void;
   clearChatTitle: (sessionId: string) => void;
+  openRunDialog: (agentId?: string | null) => void;
+  closeRunDialog: () => void;
 }
 
 export const useUiStore = create<UiState>()(
@@ -35,6 +42,7 @@ export const useUiStore = create<UiState>()(
       workspaceNavCollapsed: false,
       openTaskId: null,
       chatTitleOverrides: {},
+      runDialog: { open: false, agentId: null },
 
       setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
       toggleSidebar: () =>
@@ -46,6 +54,8 @@ export const useUiStore = create<UiState>()(
       setWorkspaceNavCollapsed: (workspaceNavCollapsed) =>
         set({ workspaceNavCollapsed }),
       setOpenTaskId: (openTaskId) => set({ openTaskId }),
+      openRunDialog: (agentId) => set({ runDialog: { open: true, agentId: agentId ?? null }, commandPaletteOpen: false }),
+      closeRunDialog: () => set({ runDialog: { open: false, agentId: null } }),
       setChatTitle: (sessionId, title) =>
         set((s) => ({
           chatTitleOverrides: { ...s.chatTitleOverrides, [sessionId]: title },
