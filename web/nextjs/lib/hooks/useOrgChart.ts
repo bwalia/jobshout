@@ -107,7 +107,8 @@ export function useOrgChart() {
   });
 
   const saveChart = useCallback(
-    (edges: Edge[]) => saveMutation.mutate(edges),
+    (edges: Edge[], onSaved?: () => void) =>
+      saveMutation.mutate(edges, { onSuccess: onSaved }),
     [saveMutation]
   );
 

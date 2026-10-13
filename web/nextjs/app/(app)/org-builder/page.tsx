@@ -19,9 +19,7 @@ export default function OrgBuilderPage() {
       {/* Page header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">
-            Organisation Builder
-          </h1>
+          <h1 className="text-2xl font-bold tracking-tight">Org chart</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Drag to connect agents and define your reporting hierarchy.
           </p>
