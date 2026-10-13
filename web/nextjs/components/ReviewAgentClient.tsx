@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { apiClient } from '@/lib/api/client';
 import { ReviewRun } from '@/types/review';
 import { ReviewRunForm } from './ReviewRunForm';
@@ -18,6 +18,9 @@ interface AgentSummary {
 export function ReviewAgentClient() {
   const searchParams = useSearchParams();
   const runParam = searchParams.get('run');
+  // On the agent profile's Workspace tab, run as that agent (it may be a clone).
+  // Elsewhere (/agents/review) there is no id, so look it up.
+  const pageAgentId = useParams<{ id?: string }>()?.id;
 
   const [agentId, setAgentId] = useState('');
   const [loadError, setLoadError] = useState('');
@@ -26,6 +29,10 @@ export function ReviewAgentClient() {
   const [tab, setTab] = useState<Tab>('run');
 
   useEffect(() => {
+    if (pageAgentId) {
+      setAgentId(pageAgentId);
+      return;
+    }
     void (async () => {
       try {
         const { data } = await apiClient.get<{ data: AgentSummary[] }>('/agents', {
@@ -42,7 +49,7 @@ export function ReviewAgentClient() {
         setLoadError('Failed to load the PR Reviewer agent.');
       }
     })();
-  }, []);
+  }, [pageAgentId]);
 
   // Deep-link from Task Manager Create & run: ?agent=review&run=<id>
   useEffect(() => {

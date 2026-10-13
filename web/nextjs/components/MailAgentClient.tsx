@@ -157,16 +157,19 @@ export function MailAgentClient() {
     }
   }, []);
 
-  useEffect(() => {
-    void (async () => {
-      try {
-        await loadConnection();
-        await loadThreads();
-      } catch {
-        setError("Failed to load Mail Agent.");
-      }
-    })();
+  const load = useCallback(async () => {
+    setError("");
+    try {
+      await loadConnection();
+      await loadThreads();
+    } catch (e: unknown) {
+      setError(apiErrorMessage(e, "Failed to load Mail Agent."));
+    }
   }, [loadConnection, loadThreads]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   useEffect(() => {
     const err = search.get("error");
@@ -391,7 +394,19 @@ export function MailAgentClient() {
   }
 
   if (!connection) {
-    return (
+    // A failed first load would otherwise read as "Loading…" forever.
+    return error ? (
+      <div className="space-y-3 rounded-lg border border-destructive/40 bg-destructive/10 p-6 text-center text-sm text-destructive">
+        <p>{error}</p>
+        <button
+          type="button"
+          onClick={() => void load()}
+          className="rounded-md border border-border bg-card px-3 py-1.5 text-sm text-foreground hover:bg-muted"
+        >
+          Retry
+        </button>
+      </div>
+    ) : (
       <div className="rounded-lg border border-border bg-card p-6 text-center text-muted-foreground">
         Loading Mail Agent…
       </div>

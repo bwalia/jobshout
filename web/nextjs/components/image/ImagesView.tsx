@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ImageModelPicker, type ImageModelSelection } from "@/components/image/ImageModelPicker";
 import { StoredImage } from "@/components/image/StoredImage";
+import { resolveStoredImageSrc } from "@/lib/api/images";
 import {
   useGeneratedImages,
   useGenerateImage,
@@ -31,6 +32,37 @@ const SOURCE_LABELS: Record<string, string> = {
   agent_tool: "Agent",
   manual: "Manual",
 };
+
+/**
+ * Opens the image full size in a new tab. Inline (data:) images can't be
+ * opened as a top-level tab, so those rely on Download alone.
+ */
+function FullSizeLink({ src, children }: { src: string; children: React.ReactNode }) {
+  if (src.startsWith("data:")) return <>{children}</>;
+  return (
+    <a
+      href={resolveStoredImageSrc(src)}
+      target="_blank"
+      rel="noreferrer"
+      title="Open full size"
+      className="block"
+    >
+      {children}
+    </a>
+  );
+}
+
+function DownloadLink({ src, seed }: { src: string; seed: number }) {
+  return (
+    <a
+      href={resolveStoredImageSrc(src)}
+      download={src.startsWith("data:") ? `image-${seed}.png` : ""}
+      className="text-xs font-medium text-primary hover:underline"
+    >
+      Download
+    </a>
+  );
+}
 
 export function ImagesView({
   hideHeader = false,
@@ -159,12 +191,17 @@ export function ImagesView({
 
       {result && resultSrc && (
         <section className="rounded-xl border border-border bg-card p-6">
-          <h2 className="text-base font-semibold">Result</h2>
-          <StoredImage
-            src={resultSrc}
-            alt={prompt}
-            className="mt-4 w-full rounded-lg border border-border"
-          />
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-base font-semibold">Result</h2>
+            <DownloadLink src={resultSrc} seed={result.seed} />
+          </div>
+          <FullSizeLink src={resultSrc}>
+            <StoredImage
+              src={resultSrc}
+              alt={prompt}
+              className="mt-4 w-full rounded-lg border border-border"
+            />
+          </FullSizeLink>
           <dl className="mt-4 grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
             <div>
               <dt className="text-muted-foreground">Provider</dt>
@@ -188,7 +225,7 @@ export function ImagesView({
           {!result.url && (
             <p className="mt-3 text-xs text-orange-600 dark:text-orange-400">
               Object storage is not configured, so this image has no permanent URL and will be
-              gone when you leave the page.
+              gone when you leave the page. Download it to keep it.
             </p>
           )}
         </section>
@@ -207,12 +244,15 @@ export function ImagesView({
             {history.map((img) => (
               <figure key={img.id} className="rounded-lg border border-border p-3">
                 {img.url ? (
-                  <StoredImage
-                    src={img.url}
-                    alt={img.prompt}
-                    loading="lazy"
-                    className="aspect-video w-full rounded object-cover"
-                  />
+                  <FullSizeLink src={img.url}>
+                    {/* object-contain: a square or 3:2 image must not be cropped to 16:9. */}
+                    <StoredImage
+                      src={img.url}
+                      alt={img.prompt}
+                      loading="lazy"
+                      className="aspect-video w-full rounded bg-muted object-contain"
+                    />
+                  </FullSizeLink>
                 ) : (
                   <div className="flex aspect-video w-full items-center justify-center rounded bg-muted text-xs text-muted-foreground">
                     not stored
@@ -225,6 +265,7 @@ export function ImagesView({
                   <p className="text-[11px] text-muted-foreground">
                     {SOURCE_LABELS[img.source] ?? img.source} · {img.model} · seed {img.seed}
                   </p>
+                  {img.url && <DownloadLink src={img.url} seed={img.seed} />}
                 </figcaption>
               </figure>
             ))}

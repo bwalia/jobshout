@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Check, Loader2, Minus, X } from "lucide-react";
+import { useParams, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { apiClient, apiErrorMessage } from "@/lib/api/client";
 import {
@@ -15,6 +16,13 @@ import {
 
 const inputClass =
   "mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+const hintClass = "mt-1 block text-xs font-normal text-muted-foreground";
+
+const MODE_HINTS: Record<string, string> = {
+  plan: "Inventories the hosts and builds a rolling plan. Changes nothing.",
+  patch: "Upgrades packages one host at a time, rebooting if needed, then checks services.",
+  verify: "Checks the services below are running and starts any that are stopped.",
+};
 
 function PhaseIcon({ status }: { status?: string }) {
   if (status === "completed") return <Check className="h-4 w-4 text-emerald-600" strokeWidth={2.5} />;
@@ -25,6 +33,9 @@ function PhaseIcon({ status }: { status?: string }) {
 }
 
 export function LinuxPatchAgentClient() {
+  // On the agent profile's Workspace tab, run as that agent (it may be a clone).
+  const pageAgentId = useParams<{ id?: string }>()?.id;
+  const runParam = useSearchParams().get("run");
   const [agentId, setAgentId] = useState("");
   const [statusLine, setStatusLine] = useState("");
   const [selected, setSelected] = useState<LinuxPatchRun | null>(null);
@@ -46,20 +57,42 @@ export function LinuxPatchAgentClient() {
   useEffect(() => {
     void (async () => {
       try {
-        const [{ data }, st] = await Promise.all([
-          apiClient.get<{ data: Array<{ id: string; metadata?: { builtin?: string } }> }>("/agents", {
-            params: { per_page: 100 },
-          }),
+        const [agents, st] = await Promise.all([
+          pageAgentId
+            ? null
+            : apiClient
+                .get<{ data: Array<{ id: string; metadata?: { builtin?: string } }> }>("/agents", {
+                  params: { per_page: 100 },
+                })
+                .then((r) => r.data.data ?? []),
           linuxPatchStatus().catch(() => null),
         ]);
-        const agent = (data.data ?? []).find((a) => a.metadata?.builtin === "linux_patch");
-        if (agent) setAgentId(agent.id);
+        const id = pageAgentId ?? agents?.find((a) => a.metadata?.builtin === "linux_patch")?.id;
+        if (id) setAgentId(id);
+        // Without an agent, Start stays disabled; say why instead of a dead button.
+        else setError("No Linux Patch agent found for this organization.");
         if (st) setStatusLine(String(st.message || ""));
       } catch {
         setError("Failed to load Linux Patch agent");
       }
     })();
-  }, []);
+  }, [pageAgentId]);
+
+  // Deep link from a task: ?run=<id> opens that run.
+  useEffect(() => {
+    if (!runParam) return;
+    let cancelled = false;
+    void getLinuxPatchRun(runParam)
+      .then((run) => {
+        if (cancelled) return;
+        setSelected(run);
+        setTab("run");
+      })
+      .catch(() => undefined); // History may still list it.
+    return () => {
+      cancelled = true;
+    };
+  }, [runParam]);
 
   useEffect(() => {
     if (!selected || ["completed", "failed", "cancelled"].includes(selected.status)) return;
@@ -79,6 +112,15 @@ export function LinuxPatchAgentClient() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!agentId) return;
+    if (
+      mode === "patch" &&
+      dryRun === "false" &&
+      !window.confirm(
+        `Patch these hosts for real?\n\n${hosts.trim()}\n\nPackages are upgraded over SSH one host at a time, and a host is rebooted if the update needs it.`
+      )
+    ) {
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -148,6 +190,7 @@ export function LinuxPatchAgentClient() {
                   <option value="patch">Patch</option>
                   <option value="verify">Verify</option>
                 </select>
+                <span className={hintClass}>{MODE_HINTS[mode]}</span>
               </label>
               <label className="text-sm font-medium">
                 Workload
@@ -190,6 +233,7 @@ export function LinuxPatchAgentClient() {
                   value={vaultMount}
                   onChange={(e) => setVaultMount(e.target.value)}
                 />
+                <span className={hintClass}>The Vault secrets engine the path is under, usually “secret”.</span>
               </label>
             </div>
             <label className="text-sm font-medium">
@@ -200,6 +244,10 @@ export function LinuxPatchAgentClient() {
                 onChange={(e) => setServices(e.target.value)}
                 placeholder="wslvault, nginx"
               />
+              <span className={hintClass}>
+                systemd services checked on each host; stopped ones are started. Empty uses the
+                workload&apos;s defaults.
+              </span>
             </label>
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="text-sm font-medium">
@@ -301,19 +349,30 @@ export function LinuxPatchAgentClient() {
 
       {tab === "history" && (
         <ul className="divide-y rounded-md border">
+          {history.length === 0 && (
+            <li className="px-3 py-4 text-sm text-muted-foreground">
+              No runs yet. Start one from the Run tab — Plan with dry run changes nothing.
+            </li>
+          )}
           {history.map((r) => (
             <li key={r.id}>
               <button
                 type="button"
-                className="flex w-full justify-between px-3 py-2 text-left text-sm hover:bg-muted/50"
+                className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-muted/50"
                 onClick={() => {
                   setSelected(r);
                   setTab("run");
                 }}
               >
-                <span className="truncate">{r.workload}</span>
-                <span className="text-xs text-muted-foreground">
+                <span className="min-w-0">
+                  <span className="block truncate">{r.hosts.split(/[\s,]+/).filter(Boolean).join(", ")}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {r.workload} · {new Date(r.created_at).toLocaleString()}
+                  </span>
+                </span>
+                <span className="shrink-0 text-xs text-muted-foreground">
                   {r.mode} · {r.status}
+                  {r.dry_run ? " · dry run" : ""}
                 </span>
               </button>
             </li>

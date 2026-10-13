@@ -87,9 +87,12 @@ export function useGenerateBlog() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (payload: GenerateBlogRequest) => generateBlog(payload),
-    onSuccess: () => {
+    onSuccess: (_run, payload) => {
       qc.invalidateQueries({ queryKey: blogKeys.lists() });
-      toast.success("Article Writer is working on it");
+      // Name the writer that was launched; omitted `writer` is the Article Writer.
+      const name =
+        payload.writer === "jobshout_com_writer" ? "JobShout.com Content Writer" : "Article Writer";
+      toast.success(`${name} is working on it`);
     },
     onError: (e) =>
       toast.error(apiErrorMessage(e, "Failed to start generation")),

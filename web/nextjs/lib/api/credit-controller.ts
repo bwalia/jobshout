@@ -96,10 +96,13 @@ export async function triageCreditBatch(invoiceIds: string[]) {
 }
 
 export async function creditControllerQueue() {
-  const { data } = await apiClient.get<{ awaiting_approval?: unknown[] }>("/credit-controller/queue");
+  const { data } = await apiClient.get<{
+    awaiting_approval?: { run_id: string; invoice_id: string; reason?: string }[];
+  }>("/credit-controller/queue");
   return data;
 }
 
+/** Records who decided. Without an approver the server falls back to its default controller. */
 export async function approveCreditRun(opts: {
   runId: string;
   approved: boolean;
@@ -109,7 +112,7 @@ export async function approveCreditRun(opts: {
   const { data } = await apiClient.post<Record<string, unknown>>("/credit-controller/approve", {
     run_id: opts.runId,
     approved: opts.approved,
-    approver: opts.approver ?? "s.oyelaran",
+    approver: opts.approver ?? "",
     note: opts.note ?? "",
   });
   return data;

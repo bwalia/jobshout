@@ -117,7 +117,7 @@ export function WriterSettings({ agentId }: { agentId: string }) {
           Writer settings
         </span>
         <span className="truncate text-xs text-muted-foreground">
-          {destination ? `Files to ${destination}` : "Files to this ring's CMS"}
+          {destination ? `Files to ${destination}` : "Files to the default website"}
           {focus ? ` · ${focus}` : ""}
         </span>
       </button>
@@ -194,7 +194,7 @@ export function WriterSettings({ agentId }: { agentId: string }) {
                 onChange={(e) => setDestination(e.target.value)}
                 className={inputClass}
               >
-                <option value="">This ring&apos;s CMS</option>
+                <option value="">Default website (set on the server)</option>
                 {destinations?.map((d) => (
                   <option key={d.name} value={d.name}>
                     {d.name}
@@ -209,8 +209,9 @@ export function WriterSettings({ agentId }: { agentId: string }) {
                 {selected
                   ? `${selected.base_url} · ${selected.namespace}`
                   : destination
-                    ? "No opsapi integration of this name in this organisation yet."
-                    : "Add an opsapi integration to file to another website."}
+                    ? "No website of this name is set up in this organisation yet."
+                    : // No integrations screen exists yet, so don't point at one.
+                      "Other websites appear here once an admin adds them as opsapi integrations."}
               </p>
             </div>
           </div>

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { useSearchParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { apiClient, apiErrorMessage } from "@/lib/api/client";
 import {
@@ -51,6 +51,8 @@ function ScoreRing({ score }: { score: number }) {
 export function SeoAgentClient() {
   const searchParams = useSearchParams();
   const runParam = searchParams.get("run");
+  // On the agent profile's Workspace tab, run as that agent (it may be a clone).
+  const pageAgentId = useParams<{ id?: string }>()?.id;
 
   const [agentId, setAgentId] = useState("");
   const [loadError, setLoadError] = useState("");
@@ -71,6 +73,10 @@ export function SeoAgentClient() {
   const [formError, setFormError] = useState("");
 
   useEffect(() => {
+    if (pageAgentId) {
+      setAgentId(pageAgentId);
+      return;
+    }
     void (async () => {
       try {
         const { data } = await apiClient.get<{ data: AgentSummary[] }>("/agents", {
@@ -87,7 +93,7 @@ export function SeoAgentClient() {
         setLoadError("Failed to load the SEO Analyst agent.");
       }
     })();
-  }, []);
+  }, [pageAgentId]);
 
   useEffect(() => {
     if (!runParam) return;
@@ -146,6 +152,14 @@ export function SeoAgentClient() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!agentId) return;
+    if (
+      mode === "publish" &&
+      !window.confirm(
+        `Improve and publish ${url.trim()}?\n\nThe proposed title, meta, slug and sitemap fixes are applied to the live site (WordPress or OpsAPI), or opened as a pull request when a GitHub repo is set.`
+      )
+    ) {
+      return;
+    }
     setFormError("");
     setSubmitting(true);
     try {

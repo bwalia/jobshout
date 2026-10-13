@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -20,6 +20,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import { newTaskHref } from "@/lib/agents/links";
 import { useCancelVideoRun, useVideoRuns } from "@/lib/hooks/useVideoRuns";
 import { isVideoRunActive, type VideoRun, type VideoRunStatus } from "@/lib/types/video";
 import { cn } from "@/lib/utils/cn";
@@ -364,6 +365,7 @@ function RunDetail({ run }: { run: VideoRun }) {
 export function VideoProducerClient() {
   const search = useSearchParams();
   const runParam = search.get("run");
+  const agentId = useParams<{ id?: string }>()?.id;
   const { data: runs = [], isLoading, isError } = useVideoRuns();
   const [selected, setSelected] = useState<string>(runParam ?? "");
 
@@ -385,8 +387,11 @@ export function VideoProducerClient() {
     return (
       <div className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
         <Clapperboard className="mx-auto mb-2 h-6 w-6" />
-        No videos yet. Start one from <span className="font-medium">New task</span> with the Video
-        Producer, or ask in chat: &ldquo;make a 30-second video about …&rdquo;. Its progress shows
+        No videos yet. Start one from{" "}
+        <Link href={newTaskHref(agentId)} className="font-medium text-primary hover:underline">
+          New task
+        </Link>{" "}
+        with the Video Producer, or ask in chat: &ldquo;make a 30-second video about …&rdquo;. Its progress shows
         here, step by step.
       </div>
     );

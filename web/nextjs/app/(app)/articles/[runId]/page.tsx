@@ -28,6 +28,8 @@ import { RunSteps } from "@/components/blog/RunSteps";
 import { ArticleViewer } from "@/components/blog/ArticleViewer";
 import { cn } from "@/lib/utils/cn";
 import { blogRunTitle } from "@/lib/types/blog";
+import { useAgent } from "@/lib/hooks/useAgents";
+import { agentHref } from "@/lib/agents/links";
 
 export default function ArticleRunPage() {
   const params = useParams();
@@ -44,6 +46,10 @@ export default function ArticleRunPage() {
   const retry = useRetryBlogRun();
   const cancel = useCancelBlogRun();
   const remove = useDeleteBlogRun();
+  // The writer that owns the run (Article Writer, Content Writer or a clone):
+  // the header names it and Back returns to its Workspace.
+  const { data: writer } = useAgent(run?.agent_id ?? "");
+  const backHref = run?.agent_id ? agentHref(run.agent_id, "workspace") : "/panel/artifacts";
 
   const writing = run?.status === "running" || run?.status === "pending";
   const articleCount = run?.articles?.length ?? 0;
@@ -128,11 +134,11 @@ export default function ArticleRunPage() {
       {/* Header */}
       <div>
         <Link
-          href="/panel/artifacts"
+          href={backHref}
           className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" />
-          Artifacts
+          {run.agent_id ? `Back to ${writer?.name ?? "the writer"}` : "Artifacts"}
         </Link>
 
         {/* Stacks on small screens: the action group is wider than what a
@@ -143,7 +149,7 @@ export default function ArticleRunPage() {
               {blogRunTitle(run)}
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Written by the Article Writer ·{" "}
+              {writer ? `Written by ${writer.name}` : "Article"} ·{" "}
               {new Date(run.created_at).toLocaleString()}
             </p>
           </div>
@@ -250,7 +256,7 @@ export default function ArticleRunPage() {
                 onClick={() => {
                   if (confirm("Delete this run and its articles?")) {
                     remove.mutate(runId, {
-                      onSuccess: () => router.push("/panel/artifacts"),
+                      onSuccess: () => router.push(backHref),
                     });
                   }
                 }}
@@ -377,7 +383,7 @@ export default function ArticleRunPage() {
               <Newspaper className="h-10 w-10 text-muted-foreground/40" />
               <p className="mt-3 text-sm text-muted-foreground">
                 {run.status === "running" || run.status === "pending"
-                  ? "The Article Writer is still working. This updates automatically."
+                  ? `${writer?.name ?? "The writer"} is still working. This updates automatically.`
                   : run.status === "cancelled"
                     ? articleCount === 0
                       ? "This run was stopped before producing an article."

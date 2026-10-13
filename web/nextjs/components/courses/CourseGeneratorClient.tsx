@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { useParams, useSearchParams } from "next/navigation";
 import { GraduationCap, Loader2 } from "lucide-react";
 
 import { CourseViewer } from "@/components/courses/CourseViewer";
+import { newTaskHref } from "@/lib/agents/links";
 import { useCourseRuns } from "@/lib/hooks/useCourses";
 import { cn } from "@/lib/utils/cn";
 
@@ -16,7 +18,8 @@ import { cn } from "@/lib/utils/cn";
 export function CourseGeneratorClient() {
   const searchParams = useSearchParams();
   const runParam = searchParams.get("run");
-  const { data, isLoading } = useCourseRuns({ per_page: 50 });
+  const agentId = useParams<{ id?: string }>()?.id;
+  const { data, isLoading, isError } = useCourseRuns({ per_page: 50 });
   const runs = data?.data ?? [];
   const firstRunId = data?.data?.[0]?.id ?? "";
   const [selected, setSelected] = useState<string>(runParam ?? "");
@@ -31,12 +34,23 @@ export function CourseGeneratorClient() {
   if (isLoading) {
     return <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />;
   }
+  // A failed load is not an empty list.
+  if (isError) {
+    return (
+      <p className="rounded-md border border-signal-error/30 bg-signal-error/5 px-3 py-2 text-sm text-signal-error">
+        Could not load courses. Refresh to try again.
+      </p>
+    );
+  }
   if (runs.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
         <GraduationCap className="mx-auto mb-2 h-6 w-6" />
-        No courses yet. Start one from <span className="font-medium">New task</span> with the
-        Course Generator, or ask in chat: &ldquo;create a course on …&rdquo;.
+        No courses yet. Start one from{" "}
+        <Link href={newTaskHref(agentId)} className="font-medium text-primary hover:underline">
+          New task
+        </Link>{" "}
+        with the Course Generator, or ask in chat: &ldquo;create a course on …&rdquo;.
       </div>
     );
   }

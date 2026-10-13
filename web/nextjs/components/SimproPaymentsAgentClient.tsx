@@ -13,6 +13,7 @@ import {
   type RefrigerantUsage,
   type SimproInvoice,
   type SimproPayment,
+  type SimproReconcileSuggestion,
   type SimproSummary,
 } from "@/lib/api/simpro-payments";
 
@@ -33,6 +34,7 @@ export function SimproPaymentsAgentClient() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [reconcileNote, setReconcileNote] = useState("");
+  const [suggestions, setSuggestions] = useState<SimproReconcileSuggestion[] | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -134,11 +136,8 @@ export function SimproPaymentsAgentClient() {
           onClick={() =>
             void run("reconcile", async () => {
               const body = await simproReconcilePreview();
-              setReconcileNote(
-                typeof body.message === "string"
-                  ? body.message
-                  : "Reconciliation preview loaded (read-only)."
-              );
+              setReconcileNote(body.message || "Reconciliation preview loaded (read-only).");
+              setSuggestions(body.suggestions ?? []);
               toast.success("Reconcile preview ready");
             })
           }
@@ -152,6 +151,50 @@ export function SimproPaymentsAgentClient() {
 
       {reconcileNote && (
         <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm">{reconcileNote}</p>
+      )}
+
+      {suggestions && (
+        <section className="overflow-hidden rounded-xl border">
+          <table className="w-full text-left text-sm">
+            <thead className="border-b bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
+              <tr>
+                <th className="px-3 py-2">Payment</th>
+                <th className="px-3 py-2">Invoice</th>
+                <th className="px-3 py-2">Amount</th>
+                <th className="px-3 py-2">Action</th>
+                <th className="px-3 py-2">Note</th>
+              </tr>
+            </thead>
+            <tbody>
+              {suggestions.length === 0 && (
+                <EmptyRow colSpan={5}>No payments to reconcile — nothing to allocate.</EmptyRow>
+              )}
+              {suggestions.map((s) => {
+                const pay = payments.find((p) => p.id === s.payment_id);
+                const inv = invoices.find((i) => i.id === s.invoice_id);
+                return (
+                  <tr key={s.payment_id} className="border-b last:border-0">
+                    <td className="px-3 py-2">
+                      {pay ? `${pay.customer} · ${pay.reference || pay.received_on}` : s.payment_id}
+                    </td>
+                    <td className="px-3 py-2">{inv?.number ?? s.invoice_id ?? "—"}</td>
+                    <td className="px-3 py-2 tabular-nums">
+                      £{s.amount_gbp.toLocaleString("en-GB")}
+                    </td>
+                    <td className="px-3 py-2">
+                      {s.action === "allocate"
+                        ? "Allocate"
+                        : s.action === "review_unallocated"
+                          ? "Review (unallocated)"
+                          : s.action}
+                    </td>
+                    <td className="px-3 py-2 text-muted-foreground">{s.note}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </section>
       )}
 
       {tab === "invoices" && (
@@ -168,6 +211,9 @@ export function SimproPaymentsAgentClient() {
               </tr>
             </thead>
             <tbody>
+              {invoices.length === 0 && (
+                <EmptyRow colSpan={6}>No invoices loaded. Press Refresh to load them again.</EmptyRow>
+              )}
               {invoices.map((inv) => (
                 <tr key={inv.id} className="border-b last:border-0">
                   <td className="px-3 py-2 font-medium">{inv.number}</td>
@@ -211,6 +257,9 @@ export function SimproPaymentsAgentClient() {
               </tr>
             </thead>
             <tbody>
+              {payments.length === 0 && (
+                <EmptyRow colSpan={6}>No payments loaded. Press Refresh to load them again.</EmptyRow>
+              )}
               {payments.map((p) => (
                 <tr key={p.id} className="border-b last:border-0">
                   <td className="px-3 py-2 tabular-nums">{p.received_on}</td>
@@ -254,6 +303,11 @@ export function SimproPaymentsAgentClient() {
                 </tr>
               </thead>
               <tbody>
+                {fgas.length === 0 && (
+                  <EmptyRow colSpan={8}>
+                    No refrigerant events loaded. Press Refresh to load them again.
+                  </EmptyRow>
+                )}
                 {fgas.map((e) => (
                   <tr
                     key={e.id}
@@ -297,6 +351,16 @@ export function SimproPaymentsAgentClient() {
         </section>
       )}
     </div>
+  );
+}
+
+function EmptyRow({ colSpan, children }: { colSpan: number; children: React.ReactNode }) {
+  return (
+    <tr>
+      <td colSpan={colSpan} className="px-3 py-6 text-center text-sm text-muted-foreground">
+        {children}
+      </td>
+    </tr>
   );
 }
 

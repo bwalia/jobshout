@@ -108,8 +108,21 @@ export async function simproAging() {
   return data;
 }
 
+/** One recommended allocation from the read-only reconcile preview. */
+export type SimproReconcileSuggestion = {
+  payment_id: string;
+  invoice_id?: string;
+  amount_gbp: number;
+  action: string;
+  note: string;
+};
+
 export async function simproReconcilePreview() {
-  const { data } = await apiClient.get<Record<string, unknown>>("/simpro-payments/reconcile-preview");
+  const { data } = await apiClient.get<{
+    message?: string;
+    // null when there are no payments (a nil Go slice).
+    suggestions?: SimproReconcileSuggestion[] | null;
+  }>("/simpro-payments/reconcile-preview");
   return data;
 }
 
