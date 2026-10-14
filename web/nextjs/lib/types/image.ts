@@ -62,6 +62,8 @@ export interface GeneratedImage {
   url?: string;
   /** What asked for it: blog_cover, blog_inline, agent_tool or manual. */
   source: string;
+  /** The article run a cover or inline figure was drawn for: /articles/<id>. */
+  blog_run_id?: string;
   duration_ms: number;
   created_at: string;
 }

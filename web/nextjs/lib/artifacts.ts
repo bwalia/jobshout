@@ -57,22 +57,40 @@ export function artifactsFromBlogRuns(runs: BlogRun[]): ArtifactItem[] {
   return items;
 }
 
+/** "Cover of <title>" when the run wrote one article, else a generic label. */
+function articleImageTitle(image: GeneratedImage, run?: BlogRun): string {
+  const article = run?.articles.length === 1 ? run.articles[0] : undefined;
+  const name = article ? article.title || article.topic : "";
+  if (!name) return "Article image";
+  return image.source === "blog_cover" ? `Cover of ${name}` : `Image in ${name}`;
+}
+
 /**
- * An image card opens the image itself. The image record carries no link to
- * the article it was made for, so a cover cannot open its article yet.
+ * An image drawn for an article opens that article; any other image opens the
+ * image itself. Pass the loaded runs to name the article on the card.
  */
-export function artifactsFromImages(images: GeneratedImage[]): ArtifactItem[] {
-  return images.map((image) => ({
-    id: `image:${image.id}`,
-    kind: "image",
-    title: image.prompt,
-    href: image.url ? resolveStoredImageSrc(image.url) : undefined,
-    createdAt: image.created_at,
-    imageUrl: image.url,
-    meta: [IMAGE_SOURCE_LABELS[image.source] ?? image.source, image.model]
-      .filter(Boolean)
-      .join(" · "),
-  }));
+export function artifactsFromImages(
+  images: GeneratedImage[],
+  runs: BlogRun[] = []
+): ArtifactItem[] {
+  const runsById = new Map(runs.map((run) => [run.id, run]));
+  return images.map((image) => {
+    const runId = image.blog_run_id;
+    let href = image.url ? resolveStoredImageSrc(image.url) : undefined;
+    if (runId) href = `/articles/${runId}`;
+    return {
+      id: `image:${image.id}`,
+      kind: "image",
+      title: runId ? articleImageTitle(image, runsById.get(runId)) : image.prompt,
+      subtitle: runId ? image.prompt : undefined,
+      href,
+      createdAt: image.created_at,
+      imageUrl: image.url,
+      meta: [IMAGE_SOURCE_LABELS[image.source] ?? image.source, image.model]
+        .filter(Boolean)
+        .join(" · "),
+    };
+  });
 }
 
 export function sortArtifacts(items: ArtifactItem[]): ArtifactItem[] {

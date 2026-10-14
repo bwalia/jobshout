@@ -1000,6 +1000,7 @@ func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, age
 
 	_, err := s.runner.Generate(ctx, blog.GenerateRequest{
 		OrgID:                run.OrgID,
+		RunID:                &run.ID,
 		Briefs:               req.Briefs,
 		Model:                req.Model,
 		MaxArticles:          req.MaxArticles,
@@ -1235,6 +1236,8 @@ func (s *blogService) Publish(ctx context.Context, orgID uuid.UUID, runID uuid.U
 			// Cover must travel with the article or Publish cannot fill
 			// opsapi's featured_image_url and the CMS draft has no cover.
 			CoverImageURL: a.CoverImageURL,
+			// A cover backfilled at publish time is linked to this run.
+			RunID: &run.ID,
 		})
 	}
 

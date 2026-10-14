@@ -16,6 +16,7 @@ import {
 import { GenerateArticleDialog } from "@/components/blog/GenerateArticleDialog";
 import { StoredImage } from "@/components/image/StoredImage";
 import { SignalDot } from "@/components/ui/signal-dot";
+import { resolveStoredImageSrc } from "@/lib/api/images";
 import {
   artifactsFromBlogRuns,
   artifactsFromImages,
@@ -146,15 +147,34 @@ function ArtifactCard({ item }: { item: ArtifactItem }) {
   const className =
     "group flex h-full flex-col rounded-xl border border-border bg-card p-5 shadow-card transition-shadow hover:shadow-card-hover";
 
-  if (item.href && item.kind === "article") {
+  // An app route: an article, or an image drawn for one. The picture stays
+  // reachable through its own link, beside the card link (no nested <a>).
+  if (item.href?.startsWith("/")) {
+    if (item.kind !== "image" || !item.imageUrl) {
+      return (
+        <Link href={item.href} className={className}>
+          {inner}
+        </Link>
+      );
+    }
     return (
-      <Link href={item.href} className={className}>
-        {inner}
-      </Link>
+      <div className={className}>
+        <Link href={item.href} className="flex flex-1 flex-col">
+          {inner}
+        </Link>
+        <a
+          href={resolveStoredImageSrc(item.imageUrl)}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-2 self-start text-2xs text-muted-foreground hover:text-foreground hover:underline"
+        >
+          Open image
+        </a>
+      </div>
     );
   }
 
-  // An image's href is the stored file on the API host, not an app route.
+  // Any other image's href is the stored file on the API host.
   if (item.href && item.kind === "image") {
     return (
       <a href={item.href} target="_blank" rel="noreferrer" className={className}>
@@ -181,7 +201,7 @@ export function ArtifactsPanel() {
     const articleItems = artifactsFromBlogRuns(blogs.data?.data ?? []);
     const imageItems = images.isError
       ? []
-      : artifactsFromImages(images.data ?? []);
+      : artifactsFromImages(images.data ?? [], blogs.data?.data ?? []);
     const merged = sortArtifacts([...articleItems, ...imageItems]);
     const byKind =
       filter === "all" ? merged : merged.filter((item) => item.kind === filter);

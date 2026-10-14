@@ -33,7 +33,7 @@ func NewImageRepository(pool *pgxpool.Pool) ImageRepository {
 
 const generatedImageColumns = `
 	id, org_id, created_by, prompt, provider, model, seed, width, height,
-	url, source, duration_ms, created_at`
+	url, source, blog_run_id, duration_ms, created_at`
 
 func scanGeneratedImage(row pgx.Row) (*model.GeneratedImage, error) {
 	var img model.GeneratedImage
@@ -42,7 +42,7 @@ func scanGeneratedImage(row pgx.Row) (*model.GeneratedImage, error) {
 	var url *string
 	err := row.Scan(
 		&img.ID, &img.OrgID, &img.CreatedBy, &img.Prompt, &img.Provider, &img.Model,
-		&img.Seed, &img.Width, &img.Height, &url, &img.Source, &img.DurationMS, &img.CreatedAt,
+		&img.Seed, &img.Width, &img.Height, &url, &img.Source, &img.BlogRunID, &img.DurationMS, &img.CreatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -70,13 +70,13 @@ func (r *imageRepository) Create(ctx context.Context, img *model.GeneratedImage)
 
 	const sql = `
 		INSERT INTO generated_images
-		    (id, org_id, created_by, prompt, provider, model, seed, width, height, url, source, duration_ms, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, NOW())
+		    (id, org_id, created_by, prompt, provider, model, seed, width, height, url, source, blog_run_id, duration_ms, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, NOW())
 		RETURNING created_at`
 
 	err := r.pool.QueryRow(ctx, sql,
 		img.ID, img.OrgID, img.CreatedBy, img.Prompt, img.Provider, img.Model,
-		img.Seed, img.Width, img.Height, url, img.Source, img.DurationMS,
+		img.Seed, img.Width, img.Height, url, img.Source, img.BlogRunID, img.DurationMS,
 	).Scan(&img.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("image_repo: insert image: %w", err)

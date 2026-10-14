@@ -31,6 +31,9 @@ type IllustrationRequest struct {
 	// Steps is the number of denoising steps. Zero means the provider default.
 	Steps  int
 	Source string
+	// RunID is the article run the picture is for, recorded on the image so
+	// it can open its article. Nil outside a run.
+	RunID *uuid.UUID
 	// NoFallback skips the workstation (mflux) path. Labeled figures become
 	// unreadable lettering on z-image-turbo; an article without a picture is
 	// better than one with that picture.
@@ -470,6 +473,7 @@ func (r *Runner) generateCover(ctx context.Context, orgID uuid.UUID, a *Generate
 			Height: coverHeight,
 			Steps:  coverSteps,
 			Source: "blog_cover",
+			RunID:  a.RunID,
 		})
 		if err == nil && img != nil && img.URL != "" {
 			a.CoverImageURL = img.URL
@@ -567,7 +571,7 @@ func transientImageErr(err error) bool {
 // the same reason an unrenderable Mermaid diagram is removed: the reader would
 // otherwise be shown a fenced block of prose describing a picture that is not
 // there, which reads as a bug in the article.
-func (r *Runner) illustrateBody(ctx context.Context, orgID uuid.UUID, markdown string) (string, []string) {
+func (r *Runner) illustrateBody(ctx context.Context, orgID uuid.UUID, runID *uuid.UUID, markdown string) (string, []string) {
 	matches := illustrationFence.FindAllStringSubmatchIndex(markdown, -1)
 	if len(matches) == 0 {
 		return markdown, nil
@@ -604,6 +608,7 @@ func (r *Runner) illustrateBody(ctx context.Context, orgID uuid.UUID, markdown s
 			Width:      width,
 			Height:     height,
 			Source:     "blog_inline",
+			RunID:      runID,
 			NoFallback: true,
 		})
 		if err != nil || img == nil || img.URL == "" {
