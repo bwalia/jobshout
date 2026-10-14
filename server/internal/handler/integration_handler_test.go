@@ -153,15 +153,16 @@ func TestIntegrationHandler_MasksSecrets(t *testing.T) {
 func TestIntegrationHandler_UpdateMergesCredentials(t *testing.T) {
 	h, repo, orgB, id := newIntegrationFixture()
 
-	// Blank keeps, omitted keeps, a value replaces, a new key is added.
+	// Blank keeps, masked keeps, omitted keeps, a value replaces, a new key
+	// is added.
 	rec := httptest.NewRecorder()
 	h.Update(rec, integrationReq(http.MethodPut,
-		`{"credentials":{"api_key":"","owner":"globex","token":"t-123"}}`, orgB, id))
+		`{"credentials":{"api_key":"","secret":"••••abcd","owner":"globex","token":"t-123"}}`, orgB, id))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("update = %d %s", rec.Code, rec.Body.String())
 	}
 	c := repo.byID[id].Credentials
-	if c["api_key"] != testSecret || c["owner"] != "globex" || c["token"] != "t-123" {
+	if _, masked := c["secret"]; masked || c["api_key"] != testSecret || c["owner"] != "globex" || c["token"] != "t-123" {
 		t.Fatalf("merged credentials = %v", c)
 	}
 

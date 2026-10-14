@@ -109,7 +109,8 @@ func (s *integrationService) Update(ctx context.Context, id uuid.UUID, req model
 		i.Credentials = map[string]any{}
 	}
 	for k, v := range req.Credentials {
-		if str, ok := v.(string); v == nil || (ok && strings.TrimSpace(str) == "") {
+		// A masked value ("••••abcd") is what the API showed, echoed back.
+		if str, ok := v.(string); v == nil || (ok && (strings.TrimSpace(str) == "" || strings.HasPrefix(str, "••••"))) {
 			continue
 		}
 		i.Credentials[k] = v
