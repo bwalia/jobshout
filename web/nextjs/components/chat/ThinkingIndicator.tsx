@@ -43,12 +43,12 @@ export function ThinkingIndicator({
           </span>
           <ChatDots />
           {model ? (
-            <span className="truncate font-mono text-xs text-muted-foreground/70">
+            <span className="truncate font-mono text-xs text-muted-foreground">
               {model}
             </span>
           ) : null}
           {elapsed >= 2 ? (
-            <span className="tabular text-xs text-muted-foreground/70">{elapsed}s</span>
+            <span className="tabular text-xs text-muted-foreground">{elapsed}s</span>
           ) : null}
         </div>
         {/* Shimmer bars read as "text is coming", which a spinner does not. */}

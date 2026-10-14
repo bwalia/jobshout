@@ -149,7 +149,7 @@ function RunCard({ run }: { run: BlogRun }) {
       )}
 
       {run.status === "running" && step && (
-        <p className="mt-3 flex items-center gap-2 rounded bg-muted/60 px-2 py-1.5 text-2xs text-foreground/80">
+        <p className="mt-3 flex items-center gap-2 rounded bg-muted/60 px-2 py-1.5 text-xs text-foreground">
           <SignalDot status="live" size="sm" />
           <span className="truncate">{step}</span>
         </p>

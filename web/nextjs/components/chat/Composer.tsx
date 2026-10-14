@@ -127,7 +127,7 @@ export function Composer({
               : "Reply, or ask for something else…")
           }
           className={cn(
-            "w-full resize-none bg-transparent text-[15px] leading-7 outline-none placeholder:text-muted-foreground",
+            "w-full resize-none bg-transparent text-[0.9375rem] leading-7 outline-none placeholder:text-muted-foreground",
             hero ? "min-h-[72px]" : "min-h-[24px]"
           )}
           onChange={(e) => onChange(e.target.value)}

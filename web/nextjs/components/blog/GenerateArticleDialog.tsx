@@ -163,14 +163,14 @@ export function GenerateArticleDialog({
             <div>
               <label htmlFor="industry" className="text-xs text-muted-foreground">
                 Industry{" "}
-                <span className="text-muted-foreground/60">(optional)</span>
+                <span className="text-muted-foreground">(optional)</span>
               </label>
               <input
                 id="industry"
                 value={industry}
                 onChange={(e) => setIndustry(e.target.value)}
                 placeholder="NHS trusts, 3PL logistics"
-                className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/60"
+                className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground"
               />
             </div>
             <p className="text-2xs text-muted-foreground sm:col-span-2">
@@ -213,7 +213,7 @@ export function GenerateArticleDialog({
                 value={row.topic}
                 onChange={(e) => updateRow(row.id, { topic: e.target.value })}
                 placeholder="Kubernetes Gateway API replacing Ingress"
-                className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/60"
+                className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground"
               />
 
               <label
@@ -221,7 +221,7 @@ export function GenerateArticleDialog({
                 className="mt-3 block text-xs text-muted-foreground"
               >
                 Context{" "}
-                <span className="text-muted-foreground/60">(optional)</span>
+                <span className="text-muted-foreground">(optional)</span>
               </label>
               <textarea
                 id={`context-${row.id}`}
@@ -229,7 +229,7 @@ export function GenerateArticleDialog({
                 value={row.context ?? ""}
                 onChange={(e) => updateRow(row.id, { context: e.target.value })}
                 placeholder="Angle, points to cover, things to avoid"
-                className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/60"
+                className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground"
               />
             </div>
           ))}
@@ -245,14 +245,14 @@ export function GenerateArticleDialog({
 
           <div>
             <label htmlFor="model" className="text-xs text-muted-foreground">
-              Model <span className="text-muted-foreground/60">(optional)</span>
+              Model <span className="text-muted-foreground">(optional)</span>
             </label>
             <input
               id="model"
               value={model}
               onChange={(e) => setModel(e.target.value)}
               placeholder="Leave blank to use the configured default"
-              className="mt-1 w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground/60"
+              className="mt-1 w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground"
             />
           </div>
         </div>

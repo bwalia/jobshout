@@ -22,6 +22,22 @@ func NewSessionHandler(repo repository.SessionRepository) *SessionHandler {
 	return &SessionHandler{repo: repo, validate: validator.New()}
 }
 
+// owned loads a session and checks it belongs to the caller's org. Another
+// org's session reads as not found, so IDs can't be probed across orgs.
+func (h *SessionHandler) owned(w http.ResponseWriter, r *http.Request, id uuid.UUID) (*model.Session, bool) {
+	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid org_id")
+		return nil, false
+	}
+	s, err := h.repo.GetByID(r.Context(), id)
+	if err != nil || s.OrgID != orgID {
+		RespondError(w, http.StatusNotFound, "session not found")
+		return nil, false
+	}
+	return s, true
+}
+
 func (h *SessionHandler) List(w http.ResponseWriter, r *http.Request) {
 	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
 	if err != nil {
@@ -93,9 +109,8 @@ func (h *SessionHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s, err := h.repo.GetByID(r.Context(), id)
-	if err != nil {
-		RespondError(w, http.StatusNotFound, "session not found")
+	s, ok := h.owned(w, r, id)
+	if !ok {
 		return
 	}
 	RespondJSON(w, http.StatusOK, s)
@@ -105,6 +120,10 @@ func (h *SessionHandler) Update(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "sessionID"))
 	if err != nil {
 		RespondError(w, http.StatusBadRequest, "invalid session ID")
+		return
+	}
+
+	if _, ok := h.owned(w, r, id); !ok {
 		return
 	}
 
@@ -128,6 +147,9 @@ func (h *SessionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if _, ok := h.owned(w, r, id); !ok {
+		return
+	}
 	if err := h.repo.Delete(r.Context(), id); err != nil {
 		RespondError(w, http.StatusInternalServerError, "failed to delete session")
 		return
@@ -143,6 +165,10 @@ func (h *SessionHandler) CopyContext(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if _, ok := h.owned(w, r, targetID); !ok {
+		return
+	}
+
 	var req model.CopyContextRequest
 	if !DecodeJSON(w, r, &req) {
 		return
@@ -153,9 +179,8 @@ func (h *SessionHandler) CopyContext(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sourceID, _ := uuid.Parse(req.SourceSessionID)
-	source, err := h.repo.GetByID(r.Context(), sourceID)
-	if err != nil {
-		RespondError(w, http.StatusNotFound, "source session not found")
+	source, ok := h.owned(w, r, sourceID)
+	if !ok {
 		return
 	}
 
@@ -208,9 +233,8 @@ func (h *SessionHandler) CreateSnapshot(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	session, err := h.repo.GetByID(r.Context(), sessionID)
-	if err != nil {
-		RespondError(w, http.StatusNotFound, "session not found")
+	session, ok := h.owned(w, r, sessionID)
+	if !ok {
 		return
 	}
 
@@ -240,6 +264,10 @@ func (h *SessionHandler) ListSnapshots(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if _, ok := h.owned(w, r, sessionID); !ok {
+		return
+	}
+
 	snaps, err := h.repo.ListSnapshots(r.Context(), sessionID)
 	if err != nil {
 		RespondError(w, http.StatusInternalServerError, "failed to list snapshots")
@@ -262,6 +290,10 @@ func (h *SessionHandler) RestoreSnapshot(w http.ResponseWriter, r *http.Request)
 	snapID, err := uuid.Parse(chi.URLParam(r, "snapshotID"))
 	if err != nil {
 		RespondError(w, http.StatusBadRequest, "invalid snapshot ID")
+		return
+	}
+
+	if _, ok := h.owned(w, r, sessionID); !ok {
 		return
 	}
 

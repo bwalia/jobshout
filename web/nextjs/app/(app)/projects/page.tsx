@@ -7,20 +7,13 @@ import { toast } from "sonner";
 import { getProjects, createProject } from "@/lib/api/projects";
 import type { Project, CreateProjectRequest } from "@/lib/types/project";
 import type { Priority, ProjectStatus } from "@/lib/types/common";
-import { THEME_BADGE } from "@/lib/status-colors";
+import { THEME_BADGE, PRIORITY_BADGE } from "@/lib/status-colors";
 
 const STATUS_COLOURS: Record<ProjectStatus, string> = {
   active: THEME_BADGE.success,
   paused: THEME_BADGE.warning,
   completed: THEME_BADGE.info,
   archived: THEME_BADGE.muted,
-};
-
-const PRIORITY_COLOURS: Record<Priority, string> = {
-  low: THEME_BADGE.muted,
-  medium: THEME_BADGE.info,
-  high: THEME_BADGE.orange,
-  critical: THEME_BADGE.danger,
 };
 
 function formatDate(dateString: string | null): string {
@@ -188,7 +181,7 @@ interface ProjectCardProps {
 
 function ProjectCard({ project }: ProjectCardProps) {
   const statusColour = STATUS_COLOURS[project.status] ?? THEME_BADGE.muted;
-  const priorityColour = PRIORITY_COLOURS[project.priority] ?? THEME_BADGE.muted;
+  const priorityColour = PRIORITY_BADGE[project.priority] ?? THEME_BADGE.muted;
 
   return (
     <Link

@@ -25,17 +25,17 @@ export const Markdown = memo(function Markdown({
         "prose w-full min-w-0 max-w-none dark:prose-invert",
         // 15px/1.7 rather than the app's 13px UI size. A reply is read, not
         // scanned, and the old size was the main complaint about this page.
-        "text-[15px] leading-7 text-foreground",
-        "prose-p:text-[15px] prose-p:leading-7 prose-li:text-[15px] prose-li:leading-7",
+        "text-[0.9375rem] leading-7 text-foreground",
+        "prose-p:text-[0.9375rem] prose-p:leading-7 prose-li:text-[0.9375rem] prose-li:leading-7",
         "prose-strong:text-foreground prose-strong:font-semibold",
         // Chat bubbles are narrow; long code and tables scroll inside their
         // own box instead of widening the whole column.
         "prose-pre:overflow-x-auto [&_table]:block [&_table]:overflow-x-auto",
-        "[&_td]:text-[14px] [&_th]:text-[14px] [&_td]:py-2 [&_th]:py-2",
+        "[&_td]:text-sm [&_th]:text-sm [&_td]:py-2 [&_th]:py-2",
         // Tighter rhythm than an article — a reply is a paragraph, not a page.
         "prose-p:my-3 prose-ul:my-3 prose-ol:my-3 prose-li:my-1",
         "prose-headings:font-display prose-headings:tracking-tight",
-        "prose-h1:text-lg prose-h2:text-base prose-h3:text-[15px] prose-headings:mb-2 prose-headings:mt-4",
+        "prose-h1:text-lg prose-h2:text-base prose-h3:text-[0.9375rem] prose-headings:mb-2 prose-headings:mt-4",
         "prose-a:text-primary prose-a:underline-offset-2 hover:prose-a:underline",
         "[&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-muted [&_:not(pre)>code]:px-1.5 [&_:not(pre)>code]:py-0.5 [&_:not(pre)>code]:text-[0.9em] [&_:not(pre)>code]:font-medium",
         "prose-code:before:content-none prose-code:after:content-none",
@@ -123,7 +123,7 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
       </div>
       {/* Typography's own `pre` box (margin, radius, fill) would sit inside
           this frame and read as a second card. */}
-      <pre className="!my-0 overflow-x-auto !rounded-none !bg-transparent px-3.5 py-3 text-[13px] leading-6 !text-foreground">
+      <pre className="!my-0 overflow-x-auto !rounded-none !bg-transparent px-3.5 py-3 text-xs leading-6 !text-foreground">
         <code>{code}</code>
       </pre>
     </div>

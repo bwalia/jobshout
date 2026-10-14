@@ -255,7 +255,7 @@ export function ChatEmptyState({ onPick }: { onPick: (prompt: string) => void })
                   className="group flex w-full items-center gap-3 px-3.5 py-3 text-left transition-colors duration-200 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                 >
                   <s.icon className="h-4 w-4 shrink-0 text-muted-foreground transition-colors group-hover:text-primary" />
-                  <span className="min-w-0 flex-1 truncate text-[15px] text-foreground">
+                  <span className="min-w-0 flex-1 truncate text-[0.9375rem] text-foreground">
                     {s.label}
                   </span>
                   <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity duration-200 group-hover:opacity-100" />

@@ -297,7 +297,7 @@ export function TasksView({ lockedProjectId }: { lockedProjectId?: string }) {
                   ) : (
                     <span className="truncate text-sm font-medium">{col.label}</span>
                   )}
-                  <span className="ml-auto font-mono text-[11px] text-muted-foreground">{col.tasks.length}</span>
+                  <span className="ml-auto font-mono text-2xs text-muted-foreground">{col.tasks.length}</span>
                 </header>
                 <ul className="flex-1 space-y-2 overflow-y-auto p-2 scrollbar-thin">
                   {col.tasks.length === 0 ? (

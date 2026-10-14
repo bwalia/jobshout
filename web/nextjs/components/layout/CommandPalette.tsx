@@ -282,7 +282,7 @@ export function CommandPalette() {
             aria-label="Search"
             className="h-11 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
-          <kbd className="hidden rounded border border-border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground sm:inline">
+          <kbd className="hidden rounded border border-border px-1.5 py-0.5 font-mono text-2xs text-muted-foreground sm:inline">
             esc
           </kbd>
         </div>
@@ -295,7 +295,7 @@ export function CommandPalette() {
             items.map((item, idx) => (
               <li key={`${item.group}-${item.id}`} role="presentation">
                 {(idx === 0 || items[idx - 1].group !== item.group) && (
-                  <p className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <p className="px-3 pb-1 pt-2 text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
                     {item.group}
                   </p>
                 )}
@@ -315,7 +315,7 @@ export function CommandPalette() {
                   )}
                 >
                   <span className="truncate">{item.label}</span>
-                  {item.hint && <span className="truncate text-[11px] text-muted-foreground">{item.hint}</span>}
+                  {item.hint && <span className="truncate text-2xs text-muted-foreground">{item.hint}</span>}
                 </button>
               </li>
             ))

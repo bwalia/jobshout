@@ -108,7 +108,7 @@ export function TaskCardFace({
           {labels.map((label) => (
             <span
               key={label.label}
-              className="inline-block rounded-full px-2 py-0.5 text-[11px] font-medium"
+              className="inline-block rounded-full px-2 py-0.5 text-2xs font-medium"
               style={{
                 backgroundColor: `${label.color}20`,
                 color: label.color,
@@ -118,7 +118,7 @@ export function TaskCardFace({
             </span>
           ))}
           {extraLabels > 0 && (
-            <span className="inline-block rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+            <span className="inline-block rounded-full bg-muted px-2 py-0.5 text-2xs font-medium text-muted-foreground">
               +{extraLabels}
             </span>
           )}
@@ -137,7 +137,7 @@ export function TaskCardFace({
               href={taskResultHref(task.id, task.last_run_id)}
               onClick={(e) => e.stopPropagation()}
               onPointerDown={(e) => e.stopPropagation()}
-              className="text-[11px] font-semibold text-primary hover:underline"
+              className="text-2xs font-semibold text-primary hover:underline"
             >
               View result
             </Link>
@@ -145,7 +145,7 @@ export function TaskCardFace({
       </div>
 
       <div className="mt-2 flex items-center justify-between">
-        <span className="font-mono text-[11px] text-muted-foreground">
+        <span className="font-mono text-2xs text-muted-foreground">
           #{task.id.slice(0, 8)}
         </span>
         <PriorityIcon priority={task.priority} />
@@ -170,9 +170,9 @@ export function TaskCardFace({
             onPointerDown={(e) => e.stopPropagation()}
             onKeyDown={(e) => e.stopPropagation()}
             title={`Open ${assigneeName}`}
-            className="flex min-w-0 items-center gap-1.5 rounded-full pr-1 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex min-w-0 items-center gap-1.5 rounded-full pr-1 text-2xs font-medium text-muted-foreground hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 border-card bg-primary/15 text-[10px] font-semibold text-primary">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 border-card bg-primary/15 text-2xs font-semibold text-primary">
               {initials(assigneeName)}
             </span>
             <span className="truncate">{assigneeName}</span>
@@ -181,7 +181,7 @@ export function TaskCardFace({
           <User className="h-3.5 w-3.5 text-muted-foreground/60" />
         )}
         {task.story_points != null && task.story_points > 0 && (
-          <span className="rounded bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+          <span className="rounded bg-muted px-2 py-0.5 text-2xs font-medium text-muted-foreground">
             {task.story_points} pts
           </span>
         )}

@@ -92,10 +92,10 @@
     --status-review: 275 42% 42%;
     --status-done: var(--brand-success-h) calc(var(--brand-success-s) + 6%) calc(var(--brand-success-l) - 21%);
     --status-blocked: var(--brand-danger-h) var(--brand-danger-s) var(--brand-danger-l);
-    --status-idle: var(--brand-ink-h) 12% 52%;
+    --status-idle: var(--brand-ink-h) 12% 42%;
 
     --signal: var(--brand-success-h) calc(var(--brand-success-s) + 6%) calc(var(--brand-success-l) - 21%);
-    --signal-live: var(--brand-success-h) calc(var(--brand-success-s) + 4%) calc(var(--brand-success-l) - 13%);
+    --signal-live: var(--brand-success-h) calc(var(--brand-success-s) + 4%) calc(var(--brand-success-l) - 20%);
     --signal-warn: 25 72% 34%;
     --signal-error: var(--brand-danger-h) var(--brand-danger-s) var(--brand-danger-l);
     --signal-info: 210 55% 36%;
@@ -117,7 +117,8 @@
     --popover: var(--brand-ink-h) 11% var(--brand-card-l);
     --popover-foreground: var(--brand-card-h) 45% 93%;
 
-    --primary: var(--brand-accent-h) 62% 57%;
+    /* 62%, not 57%: dark text on it and it as text both clear 4.5:1. */
+    --primary: var(--brand-accent-h) 62% 62%;
     --primary-foreground: var(--brand-ink-h) 30% 10%;
 
     --secondary: var(--brand-ink-h) 10% 18%;
@@ -134,11 +135,11 @@
 
     --border: var(--brand-ink-h) 10% 26%;
     --input: var(--brand-ink-h) 10% 28%;
-    --ring: var(--brand-accent-h) 62% 57%;
+    --ring: var(--brand-accent-h) 62% 62%;
 
     --sidebar: var(--brand-ink-h) 12% 11%;
     --sidebar-foreground: var(--brand-card-h) 12% 68%;
-    --sidebar-accent: var(--brand-accent-h) 62% 57%;
+    --sidebar-accent: var(--brand-accent-h) 62% 62%;
     --sidebar-muted: var(--brand-ink-h) 11% 16%;
     --sidebar-border: var(--brand-ink-h) 10% 24%;
 
@@ -147,7 +148,7 @@
     --status-review: 275 50% 72%;
     --status-done: var(--brand-success-h) 34% 64%;
     --status-blocked: var(--brand-danger-h) 60% 55%;
-    --status-idle: var(--brand-ink-h) 8% 44%;
+    --status-idle: var(--brand-ink-h) 8% 54%;
 
     --signal: var(--brand-success-h) 34% 64%;
     --signal-live: var(--brand-success-h) 36% 66%;
@@ -163,6 +164,16 @@
   }
   body {
     @apply bg-background text-foreground antialiased;
+  }
+  /* Text size setting (sidebar footer). Everything is in rem, so this one
+     number scales every label, button and gap together. */
+  html[data-text-size="large"] { font-size: 112.5%; }
+  html[data-text-size="largest"] { font-size: 125%; }
+  /* A clear ring on whatever the keyboard is on, everywhere — not only on
+     the components that remembered to ask for one. */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
   }
   /* Headings follow workstation.co.uk: Unbounded for h1/h2, Poppins for
      h3/h4, on the same fluid scale. Utilities still win (Tailwind sits above

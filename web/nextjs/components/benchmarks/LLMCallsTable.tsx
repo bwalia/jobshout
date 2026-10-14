@@ -70,10 +70,10 @@ export function LLMCallsTable({ calls }: { calls: LLMCall[] }) {
               >
                 {c.model || "—"}
                 {!c.model_reported && c.model && (
-                  <span className="ml-1 font-sans text-[11px] text-muted-foreground">(not reported)</span>
+                  <span className="ml-1 font-sans text-2xs text-muted-foreground">(not reported)</span>
                 )}
                 {c.requested_model && c.requested_model !== c.model && (
-                  <div className="font-sans text-[11px] text-muted-foreground">requested {c.requested_model}</div>
+                  <div className="font-sans text-2xs text-muted-foreground">requested {c.requested_model}</div>
                 )}
               </td>
               <td className="px-2 py-1.5 text-right">{fmtMs(c.duration_ms)}</td>
@@ -93,7 +93,7 @@ export function LLMCallsTable({ calls }: { calls: LLMCall[] }) {
               <td className={"px-2 py-1.5 " + (STATUS_CLS[c.status] ?? "")}>
                 {c.status}
                 {c.error && (
-                  <div className="max-w-xs whitespace-pre-wrap break-words font-sans text-[11px] text-muted-foreground">
+                  <div className="max-w-xs whitespace-pre-wrap break-words font-sans text-2xs text-muted-foreground">
                     {c.error}
                   </div>
                 )}

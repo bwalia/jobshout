@@ -8,6 +8,7 @@ import {
   Cpu,
   FolderKanban,
   Goal,
+  CircleHelp,
   History,
   Home,
   Kanban,
@@ -163,7 +164,8 @@ export const NAV_SECTIONS: NavSection[] = [
   },
 ];
 
-/** Shown at the foot of the Chats section: LLM context sessions, not chats. */
+/** LLM context sessions, not chats. Search-only (⌘K): too technical for the
+ *  sidebar, where it was mistaken for chat history. */
 export const NAV_SESSIONS: NavItem = {
   id: "sessions",
   label: "Model sessions",
@@ -197,6 +199,13 @@ export const NAV_BOTTOM: NavItem[] = [
     href: "/panel/settings",
     icon: Settings,
     match: ["/panel/settings", "/settings"],
+  },
+  {
+    id: "help",
+    label: "Help",
+    href: "/help",
+    icon: CircleHelp,
+    keywords: ["how to", "guide", "text size", "bigger text", "accessibility"],
   },
 ];
 

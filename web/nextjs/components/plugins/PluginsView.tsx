@@ -168,10 +168,10 @@ function PluginCard({ plugin }: { plugin: Plugin }) {
           <PluginStatusBadge status={plugin.status} />
         </div>
         <div className="mt-1 flex items-center gap-2">
-          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
+          <span className="rounded bg-muted px-1.5 py-0.5 text-2xs font-mono text-muted-foreground">
             v{plugin.version}
           </span>
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-2xs text-muted-foreground">
             {plugin.plugin_type}
           </span>
         </div>
@@ -185,7 +185,7 @@ function PluginCard({ plugin }: { plugin: Plugin }) {
             {plugin.permissions.map((perm) => (
               <span
                 key={perm}
-                className="rounded bg-orange-500/10 px-1.5 py-0.5 text-[10px] text-orange-400"
+                className="rounded bg-orange-500/10 px-1.5 py-0.5 text-2xs text-orange-400"
               >
                 {perm}
               </span>

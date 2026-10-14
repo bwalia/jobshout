@@ -125,7 +125,7 @@ export function TaskHistoryPanel({
                     <p className="text-sm">
                       {eventSummary(e, agents.find((a) => a.id === task.assigned_agent_id)?.name)}
                     </p>
-                    <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
+                    <p className="mt-0.5 font-mono text-2xs text-muted-foreground">
                       {formatWhen(e.changed_at ?? e.completed_at ?? e.created_at)}
                     </p>
                   </li>

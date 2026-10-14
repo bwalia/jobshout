@@ -185,7 +185,7 @@ function SeverityTile({
         : "text-blue-600 dark:text-blue-400";
   return (
     <div className="rounded-lg border border-border bg-background px-3 py-2">
-      <p className="text-[11px] text-muted-foreground">{label}</p>
+      <p className="text-2xs text-muted-foreground">{label}</p>
       <p className={cn("text-xl font-semibold", color)}>{value}</p>
     </div>
   );

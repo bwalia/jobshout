@@ -69,7 +69,7 @@ export function ReviewRunsList({ onRunSelected }: { onRunSelected?: (run: Review
                 <td className="px-4 py-2 font-mono text-foreground">
                   {run.repo}#{run.pr_number}
                   {run.dry_run ? (
-                    <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">
+                    <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-2xs uppercase text-muted-foreground">
                       preview
                     </span>
                   ) : null}

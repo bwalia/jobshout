@@ -59,7 +59,7 @@ export function MessageBubble({
     return (
       <div className="group/msg flex animate-chat-message-in justify-end">
         <div className="flex min-w-0 max-w-[85%] flex-col items-end gap-1">
-          <div className="min-w-0 rounded-2xl rounded-br-md bg-secondary px-4 py-3 text-[15px] text-foreground">
+          <div className="min-w-0 rounded-2xl rounded-br-md bg-secondary px-4 py-3 text-[0.9375rem] text-foreground">
             <p className="whitespace-pre-wrap break-words leading-7">{message.content}</p>
           </div>
           <div className="flex items-center gap-1.5 pr-1 opacity-0 transition-opacity duration-200 group-hover/msg:opacity-100 focus-within:opacity-100">
@@ -98,7 +98,7 @@ export function MessageBubble({
         {message.content ? (
           <Markdown>{message.content}</Markdown>
         ) : (
-          <p className="text-[15px] italic text-muted-foreground">No reply text.</p>
+          <p className="text-[0.9375rem] italic text-muted-foreground">No reply text.</p>
         )}
 
         {envelope?.actions?.length ? (
@@ -157,7 +157,7 @@ export function MessageBubble({
             </button>
           ) : null}
           {usage ? (
-            <span className="tabular ml-1 text-xs text-muted-foreground/80">
+            <span className="tabular ml-1 text-xs text-muted-foreground">
               {usage.model ? `${usage.model} · ` : ""}
               {usage.input_tokens + usage.output_tokens} tok
               {typeof usage.cost_usd === "number"

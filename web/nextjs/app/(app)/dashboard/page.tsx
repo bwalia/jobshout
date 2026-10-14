@@ -8,21 +8,15 @@ import { useTasks } from "@/lib/hooks/useTasks";
 import { useProjects } from "@/lib/hooks/useProjects";
 import type { Agent } from "@/lib/types/agent";
 import type { Task } from "@/lib/types/project";
+import { PRIORITY_BADGE } from "@/lib/status-colors";
 
 function formatStatus(status: string): string {
   return status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-const PRIORITY_CLASSES: Record<string, string> = {
-  critical: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
-  high: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
-  medium: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
-  low: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
-};
-
 function TaskRow({ task }: { task: Task }) {
   const priorityClass =
-    PRIORITY_CLASSES[task.priority] ?? "bg-secondary text-muted-foreground";
+    PRIORITY_BADGE[task.priority] ?? "bg-secondary text-muted-foreground";
 
   return (
     <li className="flex items-center justify-between gap-4 px-5 py-3.5 transition-colors hover:bg-secondary/50">

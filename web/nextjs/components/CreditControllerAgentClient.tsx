@@ -218,11 +218,11 @@ export function CreditControllerAgentClient() {
       <section className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
         {PROCESS.map(([step, help], i) => (
           <div key={step} className="rounded-lg border bg-muted/30 px-2 py-2 text-xs">
-            <div className="mb-1 font-mono text-[10px] text-muted-foreground">
+            <div className="mb-1 font-mono text-2xs text-muted-foreground">
               {String(i + 1).padStart(2, "0")}
             </div>
             <div className="font-medium">{step}</div>
-            <div className="mt-0.5 text-[10px] leading-snug text-muted-foreground">{help}</div>
+            <div className="mt-0.5 text-2xs leading-snug text-muted-foreground">{help}</div>
           </div>
         ))}
       </section>
@@ -357,7 +357,7 @@ export function CreditControllerAgentClient() {
                   <td className="px-3 py-2 font-mono text-xs">
                     {inv.invoice_id}
                     {inv.source === "generated" && (
-                      <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase">
+                      <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-2xs uppercase">
                         AI
                       </span>
                     )}
@@ -370,7 +370,7 @@ export function CreditControllerAgentClient() {
                       : "—"}
                   </td>
                   <td className="px-3 py-2">
-                    <span className="rounded border px-1.5 py-0.5 text-[11px]">
+                    <span className="rounded border px-1.5 py-0.5 text-2xs">
                       {SCENARIO_LABELS[inv.scenario_hint] ?? inv.scenario_hint}
                     </span>
                   </td>
@@ -450,7 +450,7 @@ export function CreditControllerAgentClient() {
               </p>
             )}
             {doc ? (
-              <pre className="mt-2 max-h-72 overflow-auto rounded-md bg-muted/50 p-3 font-mono text-[11px] leading-relaxed">
+              <pre className="mt-2 max-h-72 overflow-auto rounded-md bg-muted/50 p-3 font-mono text-2xs leading-relaxed">
                 {doc}
               </pre>
             ) : (
@@ -481,7 +481,7 @@ export function CreditControllerAgentClient() {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-[4.5rem] rounded-lg border px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="text-2xs uppercase tracking-wide text-muted-foreground">{label}</div>
       <div className="text-base font-semibold tabular-nums">{value}</div>
     </div>
   );

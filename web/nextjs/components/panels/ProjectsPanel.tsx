@@ -31,7 +31,7 @@ import {
   projectKeys,
 } from "@/lib/hooks/useProjects";
 import { taskKeys, useAllTasks } from "@/lib/hooks/useTasks";
-import { THEME_BADGE } from "@/lib/status-colors";
+import { THEME_BADGE, PRIORITY_BADGE } from "@/lib/status-colors";
 import type { Priority, ProjectStatus } from "@/lib/types/common";
 import type { Project } from "@/lib/types/project";
 import { cn } from "@/lib/utils/cn";
@@ -73,13 +73,6 @@ const STATUS_META: Record<
     icon: Archive,
     badge: THEME_BADGE.muted,
   },
-};
-
-const PRIORITY_BADGE: Record<Priority, string> = {
-  low: THEME_BADGE.muted,
-  medium: THEME_BADGE.info,
-  high: THEME_BADGE.orange,
-  critical: THEME_BADGE.danger,
 };
 
 const FILTER_TABS: {

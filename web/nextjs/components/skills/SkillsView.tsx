@@ -175,9 +175,9 @@ function CreateSkillDialog({
             rows={5}
             className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm font-mono"
           />
-          <p className="mt-1 text-[11px] text-muted-foreground">{configHint}</p>
+          <p className="mt-1 text-2xs text-muted-foreground">{configHint}</p>
           {jsonError && (
-            <p className="mt-1 text-[11px] text-destructive">{jsonError}</p>
+            <p className="mt-1 text-2xs text-destructive">{jsonError}</p>
           )}
         </div>
 
@@ -227,15 +227,15 @@ function SkillCard({ skill }: { skill: Skill }) {
           <StatusBadge status={skill.status} />
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-2">
-          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
+          <span className="rounded bg-muted px-1.5 py-0.5 text-2xs font-mono text-muted-foreground">
             {skill.slug}
           </span>
-          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
+          <span className="rounded bg-muted px-1.5 py-0.5 text-2xs font-mono text-muted-foreground">
             v{skill.version}
           </span>
-          <span className="text-[10px] text-muted-foreground">{meta.label}</span>
+          <span className="text-2xs text-muted-foreground">{meta.label}</span>
           {isBuiltIn && (
-            <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
+            <span className="rounded bg-primary/10 px-1.5 py-0.5 text-2xs text-primary">
               built-in
             </span>
           )}

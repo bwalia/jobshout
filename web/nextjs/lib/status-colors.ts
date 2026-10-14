@@ -31,3 +31,12 @@ export const THEME_BADGE = {
   orange:
     "bg-orange-100 text-orange-800 dark:bg-orange-500/20 dark:text-orange-400",
 } as const;
+
+/** One priority palette, readable (AA) in both themes. Medium is blue so it
+ *  never reads as High. */
+export const PRIORITY_BADGE: Record<string, string> = {
+  low: THEME_BADGE.muted,
+  medium: THEME_BADGE.info,
+  high: THEME_BADGE.orange,
+  critical: THEME_BADGE.danger,
+};

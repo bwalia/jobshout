@@ -57,6 +57,7 @@ import {
 } from "@/lib/hooks/useSkills";
 import type { Skill, SkillKind } from "@/lib/api/skills";
 import type { Task } from "@/lib/types/project";
+import { PRIORITY_BADGE, THEME_BADGE } from "@/lib/status-colors";
 
 // ---------------------------------------------------------------------------
 // Tab types
@@ -72,7 +73,6 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "knowledge", label: "Knowledge" },
   { id: "skills", label: "Skills" },
 ];
-
 
 // ---------------------------------------------------------------------------
 // Avatar helpers (mirrored from AgentCard to keep consistency)
@@ -564,17 +564,10 @@ function OverviewTab({ agent }: { agent: NonNullable<ReturnType<typeof useAgent>
   );
 }
 
-const PRIORITY_CLASSES: Record<string, string> = {
-  critical: "bg-red-500/20 text-red-400",
-  high: "bg-orange-500/20 text-orange-400",
-  medium: "bg-orange-500/20 text-orange-400",
-  low: "bg-blue-500/20 text-blue-400",
-};
-
 const STATUS_CLASSES: Record<string, string> = {
-  done: "bg-emerald-500/20 text-emerald-400",
-  in_progress: "bg-blue-500/20 text-blue-400",
-  review: "bg-violet-500/20 text-violet-400",
+  done: THEME_BADGE.success,
+  in_progress: THEME_BADGE.info,
+  review: THEME_BADGE.purple,
   todo: "bg-muted text-muted-foreground",
   backlog: "bg-muted text-muted-foreground",
 };
@@ -647,7 +640,7 @@ function TasksTab({ agentId }: { agentId: string }) {
                 </span>
                 <span
                   className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                    PRIORITY_CLASSES[task.priority] ?? ""
+                    PRIORITY_BADGE[task.priority] ?? ""
                   }`}
                 >
                   {task.priority}
@@ -1050,7 +1043,7 @@ function SkillsTab({ agentId }: { agentId: string }) {
                     {skill.description}
                   </p>
                 )}
-                <span className="mt-2 inline-block rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
+                <span className="mt-2 inline-block rounded bg-muted px-1.5 py-0.5 text-2xs font-mono text-muted-foreground">
                   {skill.kind}
                 </span>
               </div>
