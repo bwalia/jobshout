@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy, Loader2, Save, Settings2 } from "lucide-react";
@@ -206,12 +207,18 @@ export function WriterSettings({ agentId }: { agentId: string }) {
                 )}
               </select>
               <p className="mt-1 text-xs text-muted-foreground">
-                {selected
-                  ? `${selected.base_url} · ${selected.namespace}`
-                  : destination
-                    ? "No website of this name is set up in this organisation yet."
-                    : // No integrations screen exists yet, so don't point at one.
-                      "Other websites appear here once an admin adds them as opsapi integrations."}
+                {selected ? (
+                  `${selected.base_url} · ${selected.namespace}`
+                ) : (
+                  <>
+                    {destination
+                      ? "No website of this name is set up in this organisation yet. "
+                      : "Other websites appear here once an admin adds them as OpsAPI integrations. "}
+                    <Link href="/settings#integrations" className="underline hover:text-foreground">
+                      Manage integrations
+                    </Link>
+                  </>
+                )}
               </p>
             </div>
           </div>
