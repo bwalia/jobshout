@@ -129,29 +129,28 @@ func (h *SchedulerHandler) Create(w http.ResponseWriter, r *http.Request) {
 		t.InputJSON = map[string]any{}
 	}
 
-	if req.AgentID != nil {
-		id, _ := uuid.Parse(*req.AgentID)
-		t.AgentID = &id
-	}
-	if req.WorkflowID != nil {
-		id, _ := uuid.Parse(*req.WorkflowID)
-		t.WorkflowID = &id
-	}
-	if req.ProviderConfigID != nil {
-		id, _ := uuid.Parse(*req.ProviderConfigID)
-		t.ProviderConfigID = &id
-	}
-	if req.PlannerID != nil {
-		id, _ := uuid.Parse(*req.PlannerID)
-		t.PlannerID = &id
-	}
-	if req.ExecutorID != nil {
-		id, _ := uuid.Parse(*req.ExecutorID)
-		t.ExecutorID = &id
-	}
-	if req.ReviewerID != nil {
-		id, _ := uuid.Parse(*req.ReviewerID)
-		t.ReviewerID = &id
+	// A malformed id is the caller's mistake, not a zero UUID to insert.
+	for _, ref := range []struct {
+		name string
+		in   *string
+		out  **uuid.UUID
+	}{
+		{"agent_id", req.AgentID, &t.AgentID},
+		{"workflow_id", req.WorkflowID, &t.WorkflowID},
+		{"provider_config_id", req.ProviderConfigID, &t.ProviderConfigID},
+		{"planner_id", req.PlannerID, &t.PlannerID},
+		{"executor_id", req.ExecutorID, &t.ExecutorID},
+		{"reviewer_id", req.ReviewerID, &t.ReviewerID},
+	} {
+		if ref.in == nil || *ref.in == "" {
+			continue
+		}
+		id, perr := uuid.Parse(*ref.in)
+		if perr != nil {
+			RespondError(w, http.StatusBadRequest, "invalid "+ref.name)
+			return
+		}
+		*ref.out = &id
 	}
 
 	// Without this a one-time task ignored the time it was given and fired on
@@ -179,6 +178,10 @@ func (h *SchedulerHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.CreateTask(r.Context(), t); err != nil {
+		if errors.Is(err, repository.ErrScheduleTargetNotFound) {
+			RespondError(w, http.StatusBadRequest, "that agent or workflow is not in this organization")
+			return
+		}
 		RespondError(w, http.StatusInternalServerError, "failed to create: "+err.Error())
 		return
 	}

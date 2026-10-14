@@ -93,6 +93,16 @@ func (s *multiAgentService) RunJobSync(ctx context.Context, orgID uuid.UUID, req
 }
 
 func (s *multiAgentService) createJob(ctx context.Context, orgID uuid.UUID, req model.RunMultiAgentRequest) (*model.MultiAgentJob, error) {
+	// All three roles must be the org's own agents: the loop runs them with
+	// their prompts and model keys. Checked here so the API, the chat tool
+	// and the scheduler all get it.
+	for _, id := range []uuid.UUID{req.PlannerID, req.ExecutorID, req.ReviewerID} {
+		a, err := s.agentRepo.FindByID(ctx, id)
+		if err != nil || a == nil || a.OrgID != orgID {
+			return nil, ErrAgentNotFound
+		}
+	}
+
 	maxReview := req.MaxReview
 	if maxReview <= 0 {
 		maxReview = 2

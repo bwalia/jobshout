@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -38,6 +39,10 @@ func (h *MultiAgentHandler) RunJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	job, err := h.svc.RunJob(r.Context(), orgID, req)
+	if errors.Is(err, service.ErrAgentNotFound) {
+		RespondError(w, http.StatusBadRequest, "planner, executor and reviewer must be agents in this organization")
+		return
+	}
 	if err != nil {
 		RespondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -55,7 +60,8 @@ func (h *MultiAgentHandler) GetJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	job, err := h.svc.GetJob(r.Context(), jobID)
-	if err != nil {
+	// Another org's job is a 404, the same as one that does not exist.
+	if err != nil || job == nil || job.OrgID.String() != middleware.GetOrgID(r.Context()) {
 		RespondError(w, http.StatusNotFound, "job not found")
 		return
 	}

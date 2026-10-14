@@ -155,6 +155,11 @@ func (s *workflowService) Execute(ctx context.Context, wfID uuid.UUID, orgID uui
 	if err != nil {
 		return nil, fmt.Errorf("workflow_svc: load workflow: %w", err)
 	}
+	// Every caller (API, chat, scheduler) runs a workflow as an org; it must
+	// be that org's.
+	if wf.OrgID != orgID {
+		return nil, fmt.Errorf("workflow_svc: workflow %s is not in this org", wfID)
+	}
 
 	input := req.Input
 	if input == nil {

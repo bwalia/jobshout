@@ -72,4 +72,24 @@ func TestSchedulerRepoPG_UpdateSavesFields(t *testing.T) {
 	if err != nil || got.WorkflowID != nil || got.AgentID == nil || got.AgentID.String() != agentAStr {
 		t.Fatalf("clear workflow = %+v, %v", got, err)
 	}
+
+	// Create holds to the same rule, for every agent role and the workflow.
+	wfBID := uuid.MustParse(wfB)
+	for name, mut := range map[string]func(*model.ScheduledTask){
+		"agent":    func(x *model.ScheduledTask) { x.AgentID = &agentB },
+		"reviewer": func(x *model.ScheduledTask) { x.AgentID = &agentA; x.ReviewerID = &agentB },
+		"workflow": func(x *model.ScheduledTask) { x.WorkflowID = &wfBID },
+	} {
+		x := &model.ScheduledTask{ID: uuid.New(), OrgID: orgA, Name: name, TaskType: "agent",
+			ScheduleType: "once", Status: "active", Priority: "medium", Tags: []string{}}
+		mut(x)
+		if err := repo.CreateTask(ctx, x); !errors.Is(err, ErrScheduleTargetNotFound) {
+			t.Errorf("create with foreign %s = %v, want ErrScheduleTargetNotFound", name, err)
+		}
+	}
+	own := &model.ScheduledTask{ID: uuid.New(), OrgID: orgA, Name: "own", TaskType: "agent", AgentID: &agentA,
+		ScheduleType: "once", Status: "active", Priority: "medium", Tags: []string{}}
+	if err := repo.CreateTask(ctx, own); err != nil {
+		t.Fatalf("create with own agent: %v", err)
+	}
 }

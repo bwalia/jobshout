@@ -13,8 +13,8 @@ import (
 	"github.com/jobshout/server/internal/model"
 )
 
-// ErrScheduleTargetNotFound is returned by UpdateTask when the agent or
-// workflow it is pointed at is not in the task's org.
+// ErrScheduleTargetNotFound is returned by CreateTask and UpdateTask when an
+// agent, workflow or provider the task points at is not in the task's org.
 var ErrScheduleTargetNotFound = errors.New("agent or workflow not found")
 
 type SchedulerRepository interface {
@@ -74,6 +74,30 @@ func scanScheduledTask(s rowScanner, t *model.ScheduledTask) error {
 }
 
 func (r *schedulerRepository) CreateTask(ctx context.Context, t *model.ScheduledTask) error {
+	// Every agent (single, planner, executor, reviewer), the workflow and the
+	// provider must be the task's own org's: the runner acts on them as that
+	// org without checking again.
+	var agentIDs []uuid.UUID
+	for _, id := range []*uuid.UUID{t.AgentID, t.PlannerID, t.ExecutorID, t.ReviewerID} {
+		if id != nil {
+			agentIDs = append(agentIDs, *id)
+		}
+	}
+	var inOrg bool
+	if err := r.pool.QueryRow(ctx, `
+		SELECT NOT EXISTS (
+		           SELECT 1 FROM unnest($2::uuid[]) AS want(id)
+		           WHERE NOT EXISTS (SELECT 1 FROM agents a WHERE a.id = want.id AND a.org_id = $1))
+		   AND ($3::uuid IS NULL OR EXISTS (SELECT 1 FROM workflows w WHERE w.id = $3 AND w.org_id = $1))
+		   AND ($4::uuid IS NULL OR EXISTS (SELECT 1 FROM llm_provider_configs p WHERE p.id = $4 AND p.org_id = $1))`,
+		t.OrgID, agentIDs, t.WorkflowID, t.ProviderConfigID,
+	).Scan(&inOrg); err != nil {
+		return fmt.Errorf("scheduler_repo: create: check targets: %w", err)
+	}
+	if !inOrg {
+		return ErrScheduleTargetNotFound
+	}
+
 	inputJSON, _ := json.Marshal(t.InputJSON)
 	if inputJSON == nil {
 		inputJSON = []byte("{}")
