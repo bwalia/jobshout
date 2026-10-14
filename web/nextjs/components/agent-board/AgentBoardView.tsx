@@ -299,7 +299,7 @@ function AgentBoardCard({
       </div>
 
       {entry.current_job_prompt ? (
-        <p className="mt-2.5 line-clamp-2 rounded bg-muted/60 px-2 py-1.5 text-2xs text-foreground/80">
+        <p className="mt-2.5 line-clamp-2 rounded bg-muted/60 px-2 py-1.5 text-xs text-foreground">
           {entry.current_job_prompt}
         </p>
       ) : null}

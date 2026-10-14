@@ -170,7 +170,7 @@ export function AbTestAgentClient() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                  <tr className="text-left text-2xs uppercase tracking-wide text-muted-foreground">
                     <th className="py-1 pr-3 font-medium">Backend</th>
                     <th className="py-1 pr-3 font-medium">Address</th>
                     <th className="py-1 pr-3 font-medium">Weight on wslproxy</th>
@@ -312,13 +312,13 @@ export function AbTestAgentClient() {
           <div className="flex flex-wrap gap-3 text-sm">
             {observeVariants.map((k, i) => (
               <div key={k} className="rounded-lg border bg-muted/30 px-3 py-2 text-center">
-                <div className="flex items-center justify-center gap-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                <div className="flex items-center justify-center gap-1.5 text-2xs uppercase tracking-wide text-muted-foreground">
                   <span className={`h-2 w-2 rounded-full ${VARIANT_DOTS[i % VARIANT_DOTS.length]}`} />
                   {k}
                 </div>
                 <div className="font-semibold tabular-nums">{observe.counts[k] ?? 0}</div>
                 {observe.expected[k] != null && (
-                  <div className="text-[10px] text-muted-foreground">
+                  <div className="text-2xs text-muted-foreground">
                     wslproxy weight {observe.expected[k]}%
                   </div>
                 )}

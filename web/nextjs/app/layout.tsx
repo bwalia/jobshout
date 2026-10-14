@@ -45,6 +45,15 @@ export default function RootLayout({
       suppressHydrationWarning
       className={`${poppins.variable} ${unbounded.variable} ${jetbrainsMono.variable}`}
     >
+      <head>
+        {/* Apply the saved text size before first paint, so pages don't
+            jump from small to large. Mirrors lib/text-size.ts. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{var s=localStorage.getItem("jobshout-text-size");if(s==="large"||s==="largest")document.documentElement.dataset.textSize=s}catch(e){}`,
+          }}
+        />
+      </head>
       <body className="font-sans antialiased">
         <Providers>{children}</Providers>
       </body>

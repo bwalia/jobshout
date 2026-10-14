@@ -53,7 +53,7 @@ export function ConfirmationCard({
         <div className="min-w-0">
           <p
             id={titleId}
-            className="min-w-0 break-words text-[15px] font-semibold leading-6 text-foreground"
+            className="min-w-0 break-words text-[0.9375rem] font-semibold leading-6 text-foreground"
           >
             {confirmation.summary || "Please confirm"}
           </p>

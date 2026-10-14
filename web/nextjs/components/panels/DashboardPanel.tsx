@@ -20,7 +20,7 @@ import { getDashboardSummary, getTaskCompletion } from "@/lib/api/metrics";
 import { getProject } from "@/lib/api/projects";
 import { useAgents } from "@/lib/hooks/useAgents";
 import { useUiStore } from "@/lib/store/ui-store";
-import { useTasks } from "@/lib/hooks/useTasks";
+import { useAllTasks, useTasks } from "@/lib/hooks/useTasks";
 import { useAuthStore } from "@/lib/store/auth-store";
 import { ThroughputChart } from "@/components/dashboard/ThroughputChart";
 import { StatusDonut } from "@/components/dashboard/StatusDonut";
@@ -29,7 +29,7 @@ import type { StatusSlice } from "@/components/dashboard/StatusDonut";
 import type { Agent } from "@/lib/types/agent";
 import type { Task } from "@/lib/types/project";
 import { formatDateOnly } from "@/lib/dates";
-import { STATUS_DOT, STATUS_DOT_HSL } from "@/lib/status-colors";
+import { STATUS_DOT, STATUS_DOT_HSL, PRIORITY_BADGE } from "@/lib/status-colors";
 import { cn } from "@/lib/utils/cn";
 
 type DateRange = "7d" | "30d" | "90d";
@@ -38,13 +38,6 @@ const RANGES: { label: string; value: DateRange; days: number }[] = [
   { label: "30d", value: "30d", days: 30 },
   { label: "90d", value: "90d", days: 90 },
 ];
-
-const PRIORITY_PILL: Record<string, string> = {
-  critical: "bg-red-500/10 text-red-600 dark:text-red-400",
-  high: "bg-orange-500/10 text-orange-600 dark:text-orange-400",
-  medium: "bg-orange-500/10 text-orange-600 dark:text-orange-400",
-  low: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
-};
 
 const AVATAR_COLOURS = [
   "bg-violet-600",
@@ -243,12 +236,31 @@ export function DashboardPanel() {
     ];
   }, [summary?.tasks_by_status]);
 
+  // Per-agent task counts. The stored performance_score is never computed,
+  // so it showed 0% for agents that had finished plenty of work.
+  const { data: allTasksResp } = useAllTasks();
+  const agentTasks = useMemo(() => {
+    const m = new Map<string, { done: number; open: number }>();
+    for (const t of allTasksResp?.data ?? []) {
+      if (!t.assigned_agent_id) continue;
+      const c = m.get(t.assigned_agent_id) ?? { done: 0, open: 0 };
+      if (t.status === "done") c.done += 1;
+      else c.open += 1;
+      m.set(t.assigned_agent_id, c);
+    }
+    return m;
+  }, [allTasksResp]);
+  const countsFor = (id: string) => agentTasks.get(id) ?? { done: 0, open: 0 };
+
   const topAgents: Agent[] = useMemo(
     () =>
       [...agents]
-        .sort((a, b) => b.performance_score - a.performance_score)
+        .sort((a, b) => {
+          const ca = agentTasks.get(a.id), cb = agentTasks.get(b.id);
+          return (cb ? cb.done + cb.open : 0) - (ca ? ca.done + ca.open : 0);
+        })
         .slice(0, 6),
-    [agents]
+    [agents, agentTasks]
   );
 
   const { byAgent } = useRunFailures();
@@ -315,7 +327,7 @@ export function DashboardPanel() {
           <KpiCard
             label="Total tasks"
             value={(summary?.total_tasks ?? 0).toLocaleString()}
-            hint={`across ${summary?.total_projects ?? 0} projects`}
+            hint={`across ${summary?.total_projects ?? 0} project${summary?.total_projects === 1 ? "" : "s"}`}
             href="/panel/tasks"
             icon={ListChecks}
             tint="bg-blue-500/10 text-blue-600 dark:text-blue-400"
@@ -453,14 +465,14 @@ export function DashboardPanel() {
                     </div>
                     <span
                       className={cn(
-                        "shrink-0 rounded-md px-2 py-0.5 text-[11px] font-medium capitalize",
-                        PRIORITY_PILL[task.priority] ??
+                        "shrink-0 rounded-md px-2 py-0.5 text-2xs font-medium capitalize",
+                        PRIORITY_BADGE[task.priority] ??
                           "bg-secondary text-muted-foreground"
                       )}
                     >
                       {task.priority}
                     </span>
-                    <span className="w-16 shrink-0 text-right font-mono text-[11px] text-muted-foreground">
+                    <span className="w-16 shrink-0 text-right font-mono text-2xs text-muted-foreground">
                       {relativeTime(task.updated_at)}
                     </span>
                   </Link>
@@ -471,7 +483,7 @@ export function DashboardPanel() {
         </Card>
 
         <Card
-          title="Agent performance"
+          title="Your agents"
           action={
             <Link
               href="/panel/agents"
@@ -507,39 +519,25 @@ export function DashboardPanel() {
                   >
                     <span
                       className={cn(
-                        "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white",
+                        "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-2xs font-semibold text-white",
                         AVATAR_COLOURS[i % AVATAR_COLOURS.length]
                       )}
                     >
                       {initials(agent.name)}
                     </span>
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-baseline justify-between gap-2">
-                        <p className="truncate text-sm font-medium group-hover:text-primary">
-                          {agent.name}
-                        </p>
-                        {failedRuns(agent.id) > 0 && Math.round(agent.performance_score) === 0 ? (
-                          // A bare 0% reads as "bad agent"; say why instead.
-                          <span className="shrink-0 text-xs font-medium text-destructive">
-                            {failedRuns(agent.id)} failed run{failedRuns(agent.id) === 1 ? "" : "s"}
-                          </span>
-                        ) : (
-                          <span className="shrink-0 font-mono text-xs text-muted-foreground">
-                            {Math.round(agent.performance_score)}%
-                            {failedRuns(agent.id) > 0 && (
-                              <span className="ml-1 font-sans text-destructive">· {failedRuns(agent.id)} failed</span>
-                            )}
+                      <p className="truncate text-sm font-medium group-hover:text-primary">
+                        {agent.name}
+                      </p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {countsFor(agent.id).done} done
+                        {countsFor(agent.id).open > 0 && ` · ${countsFor(agent.id).open} to do`}
+                        {failedRuns(agent.id) > 0 && (
+                          <span className="font-medium text-destructive">
+                            {" "}· {failedRuns(agent.id)} failed run{failedRuns(agent.id) === 1 ? "" : "s"}
                           </span>
                         )}
-                      </div>
-                      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-secondary">
-                        <div
-                          className="h-full rounded-full bg-primary transition-all duration-500"
-                          style={{
-                            width: `${Math.min(100, Math.max(2, agent.performance_score))}%`,
-                          }}
-                        />
-                      </div>
+                      </p>
                     </div>
                   </Link>
                 </li>

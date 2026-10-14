@@ -37,16 +37,18 @@ module.exports = {
       // browsers and iOS treat as normal body text. That single number was
       // why the dashboard and chat read small no matter what the components
       // asked for; fixing it here fixes every page at once.
+      // rem, not px, so the "Text size" setting (html font-size) scales
+      // every label. 2xs was 11px; 12px is the smallest we let text go.
       fontSize: {
-        "2xs": ["11px", { lineHeight: "15px", letterSpacing: "0.02em" }],
-        xs: ["13px", { lineHeight: "18px" }],
-        sm: ["14px", { lineHeight: "21px" }],
-        base: ["16px", { lineHeight: "24px" }],
-        lg: ["18px", { lineHeight: "27px" }],
-        xl: ["20px", { lineHeight: "29px", letterSpacing: "-0.01em" }],
-        "2xl": ["25px", { lineHeight: "33px", letterSpacing: "-0.015em" }],
-        "3xl": ["32px", { lineHeight: "40px", letterSpacing: "-0.02em" }],
-        "4xl": ["40px", { lineHeight: "47px", letterSpacing: "-0.022em" }],
+        "2xs": ["0.75rem", { lineHeight: "1rem", letterSpacing: "0.02em" }],
+        xs: ["0.8125rem", { lineHeight: "1.125rem" }],
+        sm: ["0.875rem", { lineHeight: "1.3125rem" }],
+        base: ["1rem", { lineHeight: "1.5rem" }],
+        lg: ["1.125rem", { lineHeight: "1.6875rem" }],
+        xl: ["1.25rem", { lineHeight: "1.8125rem", letterSpacing: "-0.01em" }],
+        "2xl": ["1.5625rem", { lineHeight: "2.0625rem", letterSpacing: "-0.015em" }],
+        "3xl": ["2rem", { lineHeight: "2.5rem", letterSpacing: "-0.02em" }],
+        "4xl": ["2.5rem", { lineHeight: "2.9375rem", letterSpacing: "-0.022em" }],
       },
       colors: {
         border: "hsl(var(--border))",

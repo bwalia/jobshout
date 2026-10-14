@@ -29,7 +29,7 @@ export function ClarifyPrompt({
     <div className="mt-2 overflow-hidden rounded-lg border border-border bg-card">
       <div className="flex min-w-0 items-start gap-2 px-3 py-2.5">
         <HelpCircle className="mt-0.5 h-4 w-4 shrink-0 text-signal-info" />
-        <p className="min-w-0 break-words text-[15px] leading-6 text-foreground">
+        <p className="min-w-0 break-words text-[0.9375rem] leading-6 text-foreground">
           {clarify.question}
         </p>
       </div>

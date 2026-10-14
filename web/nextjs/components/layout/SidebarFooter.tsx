@@ -8,6 +8,12 @@ import { useAuthStore } from "@/lib/store/auth-store";
 import { clearTokens } from "@/lib/auth/auth";
 import { cn } from "@/lib/utils/cn";
 import { useHealth } from "@/lib/hooks/useHealth";
+import {
+  TEXT_SIZES,
+  applyTextSize,
+  readTextSize,
+  type TextSize,
+} from "@/lib/text-size";
 
 function initials(name: string): string {
   return name
@@ -55,13 +61,15 @@ export function SidebarFooter({ collapsed }: { collapsed: boolean }) {
   if (collapsed) {
     return (
       <div className="flex flex-col items-center gap-2 border-t border-sidebar-border px-2 py-3">
+        <TextSizeButton />
         <button
           type="button"
           onClick={() => setTheme(isDark ? "light" : "dark")}
           className="flex h-10 w-10 items-center justify-center rounded-lg text-sidebar-foreground hover:bg-sidebar-muted hover:text-foreground"
-          aria-label={isDark ? "Switch to light" : "Switch to dark"}
+          aria-label={isDark ? "Switch to light colours" : "Switch to dark colours"}
+          title={isDark ? "Switch to light colours" : "Switch to dark colours"}
         >
-          {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          {isDark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
         </button>
         <div ref={menuRef} className="relative">
           <button
@@ -133,17 +141,45 @@ export function SidebarFooter({ collapsed }: { collapsed: boolean }) {
             />
           )}
         </div>
+        <TextSizeButton />
         <button
           type="button"
           onClick={() => setTheme(isDark ? "light" : "dark")}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sidebar-foreground hover:bg-sidebar-muted hover:text-foreground"
-          aria-label={isDark ? "Switch to light" : "Switch to dark"}
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-sidebar-foreground hover:bg-sidebar-muted hover:text-foreground"
+          aria-label={isDark ? "Switch to light colours" : "Switch to dark colours"}
+          title={isDark ? "Switch to light colours" : "Switch to dark colours"}
         >
-          {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          {isDark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
         </button>
       </div>
       <BuildStamp info={health.data} />
     </div>
+  );
+}
+
+/** Steps Standard → Large → Largest → Standard. The Help page has the same
+ *  choice spelled out. */
+function TextSizeButton() {
+  const [size, setSize] = useState<TextSize>("standard");
+  useEffect(() => setSize(readTextSize()), []);
+  const i = TEXT_SIZES.findIndex((t) => t.value === size);
+  const next = TEXT_SIZES[(i + 1) % TEXT_SIZES.length];
+  const label = `Text size: ${TEXT_SIZES[i].label}. Change to ${next.label}`;
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        applyTextSize(next.value);
+        setSize(next.value);
+      }}
+      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg font-semibold text-sidebar-foreground hover:bg-sidebar-muted hover:text-foreground"
+      aria-label={label}
+      title={label}
+    >
+      <span aria-hidden className={size === "standard" ? "text-sm" : "text-base"}>
+        A{size === "largest" ? "++" : size === "large" ? "+" : ""}
+      </span>
+    </button>
   );
 }
 

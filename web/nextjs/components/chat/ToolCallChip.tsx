@@ -22,13 +22,13 @@ export function ToolCallChip({
           {label || humanise(action?.tool)}
         </span>
         {typeof action?.duration_ms === "number" ? (
-          <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">
+          <span className="ml-auto shrink-0 font-mono text-2xs opacity-60">
             {action.duration_ms}ms
           </span>
         ) : null}
       </summary>
       {action?.args && Object.keys(action.args).length > 0 ? (
-        <pre className="max-h-40 overflow-auto border-t border-border/60 px-2.5 py-2 font-mono text-[10px] text-muted-foreground">
+        <pre className="max-h-40 overflow-auto border-t border-border/60 px-2.5 py-2 font-mono text-2xs text-muted-foreground">
           {JSON.stringify(stripIds(action.args), null, 2)}
         </pre>
       ) : null}

@@ -626,7 +626,16 @@ func registerConfig(reg *Registry, d Deps) {
 					if err != nil {
 						return &Result{Question: "I couldn't read that session."}, nil
 					}
-					if err := d.Sessions.CreateSnapshot(ctx, &model.SessionSnapshot{SessionID: sid, Name: name}); err != nil {
+					sess, err := d.Sessions.GetByID(ctx, sid)
+					if err != nil || sess.OrgID != ident.OrgID {
+						return &Result{Question: "I couldn't find that session."}, nil
+					}
+					snap := &model.SessionSnapshot{
+						ID: uuid.New(), SessionID: sid, Name: name,
+						ContextMessages: sess.ContextMessages, ModelName: sess.ModelName,
+						TotalTokens: sess.TotalTokens, MessageCount: sess.MessageCount,
+					}
+					if err := d.Sessions.CreateSnapshot(ctx, snap); err != nil {
 						return nil, err
 					}
 					return &Result{Data: map[string]any{"name": name, "saved": true}}, nil

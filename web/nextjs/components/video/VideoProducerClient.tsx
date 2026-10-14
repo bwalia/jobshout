@@ -162,7 +162,7 @@ function Pipeline({ run }: { run: VideoRun }) {
                   (run.status === "failed"
                     ? "border-signal-error/40 bg-signal-error/10 text-signal-error"
                     : "border-border bg-muted text-muted-foreground"),
-                state === "pending" && "border-border text-muted-foreground/60"
+                state === "pending" && "border-border text-muted-foreground"
               )}
             >
               {state === "done" ? (

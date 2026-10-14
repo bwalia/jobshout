@@ -46,7 +46,7 @@ function statusBadge(status: string): {
   className: string;
   dim: boolean;
 } {
-  const base = "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium";
+  const base = "shrink-0 rounded-full px-2 py-0.5 text-2xs font-medium";
   switch (status) {
     case "new":
       return {
@@ -564,7 +564,7 @@ export function MailAgentClient() {
                   }
                   className="mt-1 w-full min-h-[8rem] resize-y rounded-md border border-input bg-background p-3 font-mono text-sm"
                 />
-                <span className="mt-1 block text-[11px]">
+                <span className="mt-1 block text-2xs">
                   Prices, products, policies — plain text or markdown. Replies
                   quote only what is written here; anything missing gets an
                   honest &quot;we&apos;ll follow up&quot;.

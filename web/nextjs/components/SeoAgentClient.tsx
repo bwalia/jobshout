@@ -43,7 +43,7 @@ function ScoreRing({ score }: { score: number }) {
   return (
     <div className={`flex h-16 w-16 flex-col items-center justify-center rounded-full border-2 border-current ${tone}`}>
       <span className="text-xl font-semibold leading-none">{score}</span>
-      <span className="text-[10px] uppercase tracking-wide opacity-70">SEO</span>
+      <span className="text-2xs uppercase tracking-wide opacity-70">SEO</span>
     </div>
   );
 }

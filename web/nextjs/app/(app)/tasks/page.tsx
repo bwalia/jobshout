@@ -6,7 +6,7 @@ import { getTasks } from "@/lib/api/tasks";
 import { getDashboardSummary } from "@/lib/api/metrics";
 import { taskKeys } from "@/lib/hooks/useTasks";
 import { formatDateOnly, isDueOverdue } from "@/lib/dates";
-import { THEME_BADGE } from "@/lib/status-colors";
+import { THEME_BADGE, PRIORITY_BADGE } from "@/lib/status-colors";
 import type { Task } from "@/lib/types/project";
 import type { TaskStatus, Priority } from "@/lib/types/common";
 
@@ -34,13 +34,6 @@ const STATUS_BADGE_STYLES: Record<TaskStatus, string> = {
   in_progress: THEME_BADGE.warning,
   review: THEME_BADGE.purple,
   done: THEME_BADGE.success,
-};
-
-const PRIORITY_BADGE_STYLES: Record<Priority, string> = {
-  low: "bg-secondary text-secondary-foreground",
-  medium: THEME_BADGE.info,
-  high: THEME_BADGE.orange,
-  critical: THEME_BADGE.danger,
 };
 
 function TableRowSkeleton() {
@@ -176,7 +169,7 @@ export default function TasksPage() {
                   </td>
                   <td className="px-4 py-3">
                     <span
-                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${PRIORITY_BADGE_STYLES[task.priority]}`}
+                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${PRIORITY_BADGE[task.priority]}`}
                     >
                       {task.priority}
                     </span>

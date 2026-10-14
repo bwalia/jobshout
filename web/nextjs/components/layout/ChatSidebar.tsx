@@ -26,7 +26,6 @@ import {
   NAV_BOTTOM,
   NAV_HOME,
   NAV_SECTIONS,
-  NAV_SESSIONS,
   NEW_TASK_HREF,
   activeNavItem,
   type NavItem,
@@ -107,7 +106,7 @@ function SectionHeader({
       onClick={onToggle}
       aria-expanded={open}
       aria-controls={controls}
-      className="mt-1.5 flex w-full items-center gap-1 rounded-md px-3 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="mt-1.5 flex w-full items-center gap-1 rounded-md px-3 py-0.5 text-2xs font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <span className="flex-1 text-left">{label}</span>
       <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", !open && "-rotate-90")} />
@@ -391,7 +390,6 @@ function SidebarBody({
                     {allChats ? "Show fewer" : `View all ${sessions.length} chats`}
                   </button>
                 )}
-                {link(NAV_SESSIONS)}
               </div>
             )}
           </div>

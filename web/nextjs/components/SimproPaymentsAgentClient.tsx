@@ -336,7 +336,7 @@ export function SimproPaymentsAgentClient() {
         <section className="grid gap-3 md:grid-cols-2">
           {(summary?.playbook ?? []).map((step) => (
             <div key={step.step} className="rounded-xl border bg-card p-4">
-              <div className="mb-1 font-mono text-[10px] text-muted-foreground">
+              <div className="mb-1 font-mono text-2xs text-muted-foreground">
                 {String(step.step).padStart(2, "0")}
               </div>
               <h3 className="font-semibold">{step.task}</h3>
@@ -367,7 +367,7 @@ function EmptyRow({ colSpan, children }: { colSpan: number; children: React.Reac
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-[4.5rem] rounded-lg border bg-muted/30 px-3 py-2 text-center">
-      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="text-2xs uppercase tracking-wide text-muted-foreground">{label}</div>
       <div className="font-semibold tabular-nums">{value}</div>
     </div>
   );

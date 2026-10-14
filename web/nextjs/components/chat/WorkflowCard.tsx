@@ -82,7 +82,7 @@ export function WorkflowCard({ runId }: { runId: string }) {
           {run.status}
         </span>
         {steps.length > 0 && (
-          <span className="ml-auto font-mono text-[11px] text-muted-foreground">
+          <span className="ml-auto font-mono text-2xs text-muted-foreground">
             {completedCount} / {steps.length}
           </span>
         )}

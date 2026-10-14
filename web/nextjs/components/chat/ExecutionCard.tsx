@@ -100,7 +100,7 @@ export function ExecutionCard({
           {agentName ?? "Agent run"}
         </span>
         <StatusPill status={exec.status} />
-        <span className="ml-auto flex shrink-0 items-center gap-3 font-mono text-[11px] text-muted-foreground">
+        <span className="ml-auto flex shrink-0 items-center gap-3 font-mono text-2xs text-muted-foreground">
           <span>{exec.total_tokens} tok</span>
           <span>${exec.cost_usd.toFixed(4)}</span>
           <span>{duration}</span>
