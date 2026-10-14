@@ -68,6 +68,8 @@ export interface UpdateScheduledTaskRequest {
   name?: string;
   /** Which agent runs the task — for article schedules, the writer. "" clears. */
   agent_id?: string;
+  /** Which workflow a workflow task runs. "" clears. */
+  workflow_id?: string;
   description?: string;
   input_prompt?: string;
   /**
@@ -77,9 +79,15 @@ export interface UpdateScheduledTaskRequest {
   input_json?: Record<string, unknown>;
   cron_expression?: string;
   interval_seconds?: number;
+  /** RFC 3339. For a one-time task this also moves when it runs. */
+  run_at?: string;
   status?: "active" | "paused" | "completed";
   max_runs?: number;
+  retry_on_failure?: boolean;
+  max_retries?: number;
   priority?: "low" | "medium" | "high" | "critical";
+  /** Replaces the stored tags. Omit to leave them. */
+  tags?: string[];
   model_override?: string;
 }
 

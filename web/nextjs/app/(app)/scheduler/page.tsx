@@ -13,7 +13,6 @@ import { useWorkflows } from "@/lib/hooks/useWorkflows";
 import { agentHref } from "@/lib/agents/links";
 import { useAgentSchemas } from "@/lib/hooks/useAgentSchemas";
 import { fieldDefault, fieldOptions } from "@/lib/agents/input-schemas";
-import { useLLMProviders } from "@/lib/hooks/useLLMProviders";
 import Link from "next/link";
 import type {
   CreateScheduledTaskRequest,
@@ -77,6 +76,12 @@ function parseFocusAreas(raw: string): string[] {
     .filter(Boolean);
 }
 
+/** A stored time as the value of a datetime-local input, in local time. */
+function toLocalInput(iso: string): string {
+  const d = new Date(iso);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+}
+
 const PRIORITY_COLORS: Record<string, string> = {
   low: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
   medium: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
@@ -113,7 +118,6 @@ export default function SchedulerPage() {
   const { data: tasksResponse, isLoading } = useScheduledTasks();
   const { data: agentsResponse } = useAgents();
   const { data: workflowsResponse } = useWorkflows({ per_page: 100 });
-  const { data: providers } = useLLMProviders();
   const { data: agentCatalog } = useAgentSchemas();
   const createMutation = useCreateScheduledTask();
   const updateMutation = useUpdateScheduledTask();
@@ -243,6 +247,7 @@ export default function SchedulerPage() {
       schedule_type: task.schedule_type,
       cron_expression: task.cron_expression ?? undefined,
       interval_seconds: task.interval_seconds ?? undefined,
+      run_at: task.run_at ? toLocalInput(task.run_at) : undefined,
       priority: task.priority,
       retry_on_failure: task.retry_on_failure,
       max_retries: task.max_retries,
@@ -279,11 +284,17 @@ export default function SchedulerPage() {
 
     const inputJSON =
       form.task_type === "blog" ? buildBlogInput() : form.input_json;
+    // datetime-local has no zone; the server takes RFC 3339 so the time the
+    // user picked is the time it runs, wherever the server is.
+    const runAt =
+      form.schedule_type === "once" && form.run_at
+        ? new Date(form.run_at).toISOString()
+        : undefined;
 
     if (editingId) {
-      // Only the fields an edit may change. task_type and schedule_type are
-      // not among them: changing what a task is would leave its stored input
-      // meaningless, and deleting it is the honest way to do that.
+      // Every field the form shows except task_type and schedule_type, which
+      // are locked while editing: changing what a task is would leave its
+      // stored input meaningless, and deleting it is the honest way to do that.
       await updateMutation.mutateAsync({
         id: editingId,
         payload: {
@@ -297,12 +308,19 @@ export default function SchedulerPage() {
           ...(form.interval_seconds
             ? { interval_seconds: form.interval_seconds }
             : {}),
+          ...(runAt ? { run_at: runAt } : {}),
           priority: form.priority,
-          ...(form.task_type === "blog" ? { agent_id: form.agent_id ?? "" } : {}),
+          retry_on_failure: form.retry_on_failure,
+          ...(form.max_retries !== undefined ? { max_retries: form.max_retries } : {}),
+          ...(form.task_type === "workflow"
+            ? { workflow_id: form.workflow_id ?? "" }
+            : form.task_type === "agent" || form.task_type === "blog"
+              ? { agent_id: form.agent_id ?? "" }
+              : {}),
         },
       });
     } else {
-      const payload: CreateScheduledTaskRequest = { ...form };
+      const payload: CreateScheduledTaskRequest = { ...form, run_at: runAt };
       if (inputJSON) payload.input_json = inputJSON;
       await createMutation.mutateAsync(payload);
     }
@@ -364,10 +382,12 @@ export default function SchedulerPage() {
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium">Task Type</label>
+                <label htmlFor="task-type" className="text-sm font-medium">Task Type</label>
                 {/* The target belongs to the type: an agent picked for an agent
                     run must not ride along into a workflow or article schedule. */}
                 <select
+                  id="task-type"
+                  disabled={Boolean(editingId)}
                   value={form.task_type}
                   onChange={(e) =>
                     setForm({
@@ -377,20 +397,28 @@ export default function SchedulerPage() {
                       workflow_id: undefined,
                     })
                   }
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
                 >
                   <option value="agent">Agent Execution</option>
                   <option value="workflow">Workflow Execution</option>
                   <option value="blog">Write articles</option>
                 </select>
+                {editingId && (
+                  <p className="text-xs text-muted-foreground">
+                    Can&apos;t be changed on an existing schedule. Create a new one instead.
+                  </p>
+                )}
               </div>
 
               {form.task_type === "agent" && (
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">Agent</label>
+                  <label htmlFor="task-agent" className="text-sm font-medium">Agent</label>
+                  {/* Required: an agent schedule without one fires nothing. */}
                   <select
+                    id="task-agent"
                     value={form.agent_id ?? ""}
                     onChange={(e) => setForm({ ...form, agent_id: e.target.value || undefined })}
+                    required
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <option value="">Select an agent...</option>
@@ -405,15 +433,14 @@ export default function SchedulerPage() {
 
               {form.task_type === "workflow" && (
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">Workflow</label>
-                  {/* Required: a workflow schedule without one fires nothing.
-                      Not editable afterwards — the update API cannot repoint it. */}
+                  <label htmlFor="task-workflow" className="text-sm font-medium">Workflow</label>
+                  {/* Required: a workflow schedule without one fires nothing. */}
                   <select
+                    id="task-workflow"
                     value={form.workflow_id ?? ""}
                     onChange={(e) => setForm({ ...form, workflow_id: e.target.value || undefined })}
                     required
-                    disabled={Boolean(editingId)}
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <option value="">Select a workflow...</option>
                     {workflows.map((w) => (
@@ -613,8 +640,10 @@ export default function SchedulerPage() {
               )}
 
               <div className="space-y-2">
-                <label className="text-sm font-medium">Schedule Type</label>
+                <label htmlFor="schedule-type" className="text-sm font-medium">Schedule Type</label>
                 <select
+                  id="schedule-type"
+                  disabled={Boolean(editingId)}
                   value={form.schedule_type}
                   onChange={(e) =>
                     setForm({
@@ -622,12 +651,17 @@ export default function SchedulerPage() {
                       schedule_type: e.target.value as "cron" | "interval" | "once",
                     })
                   }
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
                 >
                   <option value="cron">Cron Expression</option>
                   <option value="interval">Fixed Interval</option>
                   <option value="once">One-Time</option>
                 </select>
+                {editingId && (
+                  <p className="text-xs text-muted-foreground">
+                    Can&apos;t be changed on an existing schedule; its timing below can.
+                  </p>
+                )}
               </div>
 
               {form.schedule_type === "cron" && (
@@ -694,24 +728,6 @@ export default function SchedulerPage() {
                   />
                 </div>
               )}
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium">LLM Provider Override</label>
-                <select
-                  value={form.provider_config_id ?? ""}
-                  onChange={(e) =>
-                    setForm({ ...form, provider_config_id: e.target.value || undefined })
-                  }
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  <option value="">Use agent default</option>
-                  {providers?.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} ({p.provider_type} / {p.default_model})
-                    </option>
-                  ))}
-                </select>
-              </div>
 
               <div className="space-y-2">
                 <label className="text-sm font-medium">Priority</label>
