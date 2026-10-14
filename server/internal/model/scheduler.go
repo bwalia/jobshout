@@ -122,21 +122,25 @@ type UpdateScheduledTaskRequest struct {
 	Name *string `json:"name"`
 	// AgentID repoints the task at another agent — for an article schedule,
 	// which writer runs it. Nil leaves it; "" clears it.
-	AgentID          *string        `json:"agent_id"`
-	Description      *string        `json:"description"`
-	InputPrompt      *string        `json:"input_prompt"`
-	InputJSON        map[string]any `json:"input_json"`
-	ProviderConfigID *string        `json:"provider_config_id"`
-	ModelOverride    *string        `json:"model_override"`
-	CronExpression   *string        `json:"cron_expression"`
-	IntervalSeconds  *int           `json:"interval_seconds"`
-	RunAt            *string        `json:"run_at"`
-	Status           *string        `json:"status" validate:"omitempty,oneof=active paused completed"`
-	MaxRuns          *int           `json:"max_runs"`
-	RetryOnFailure   *bool          `json:"retry_on_failure"`
-	MaxRetries       *int           `json:"max_retries"`
-	Priority         *string        `json:"priority" validate:"omitempty,oneof=low medium high critical"`
-	Tags             []string       `json:"tags"`
+	AgentID *string `json:"agent_id"`
+	// WorkflowID repoints a workflow task at another workflow, the same way.
+	// Both must be in the task's org.
+	WorkflowID     *string        `json:"workflow_id"`
+	Description    *string        `json:"description"`
+	InputPrompt    *string        `json:"input_prompt"`
+	InputJSON      map[string]any `json:"input_json"`
+	ModelOverride  *string        `json:"model_override"`
+	CronExpression *string        `json:"cron_expression"`
+	// IntervalSeconds and RunAt (RFC 3339) also move next_run_at, for an
+	// interval or a one-time task respectively.
+	IntervalSeconds *int     `json:"interval_seconds"`
+	RunAt           *string  `json:"run_at"`
+	Status          *string  `json:"status" validate:"omitempty,oneof=active paused completed"`
+	MaxRuns         *int     `json:"max_runs"`
+	RetryOnFailure  *bool    `json:"retry_on_failure"`
+	MaxRetries      *int     `json:"max_retries"`
+	Priority        *string  `json:"priority" validate:"omitempty,oneof=low medium high critical"`
+	Tags            []string `json:"tags"`
 }
 
 // ScheduledTaskRun is a single execution of a scheduled task.

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -153,6 +154,13 @@ func (h *SchedulerHandler) Create(w http.ResponseWriter, r *http.Request) {
 		t.ReviewerID = &id
 	}
 
+	// Without this a one-time task ignored the time it was given and fired on
+	// the next tick.
+	if t.RunAt, err = parseRunAt(req.RunAt); err != nil {
+		RespondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	if t.TaskType == "multi_agent" {
 		if t.PlannerID == nil || t.ExecutorID == nil || t.ReviewerID == nil {
 			RespondError(w, http.StatusBadRequest, "multi_agent tasks require planner_id, executor_id, reviewer_id")
@@ -213,37 +221,71 @@ type validationErr struct{ msg string }
 
 func (e *validationErr) Error() string { return e.msg }
 
-func (h *SchedulerHandler) GetByID(w http.ResponseWriter, r *http.Request) {
+// ownedTask resolves {taskID} to a scheduled task of the caller's org. Another
+// org's task is a 404, the same as one that does not exist.
+func (h *SchedulerHandler) ownedTask(w http.ResponseWriter, r *http.Request) (*model.ScheduledTask, bool) {
 	id, err := uuid.Parse(chi.URLParam(r, "taskID"))
 	if err != nil {
 		RespondError(w, http.StatusBadRequest, "invalid task ID")
-		return
+		return nil, false
 	}
-
-	t, err := h.repo.GetTask(r.Context(), id)
+	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
 	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid org_id")
+		return nil, false
+	}
+	t, err := h.repo.GetTask(r.Context(), id)
+	if err != nil || t == nil || t.OrgID != orgID {
 		RespondError(w, http.StatusNotFound, "scheduled task not found")
+		return nil, false
+	}
+	return t, true
+}
+
+// parseRunAt reads a one-time task's run_at, which must be RFC 3339 so the
+// time zone is never guessed.
+func parseRunAt(s *string) (*time.Time, error) {
+	if s == nil || *s == "" {
+		return nil, nil
+	}
+	at, err := time.Parse(time.RFC3339, *s)
+	if err != nil {
+		return nil, &validationErr{"run_at must be an RFC 3339 time, e.g. 2026-01-02T09:00:00Z"}
+	}
+	return &at, nil
+}
+
+func (h *SchedulerHandler) GetByID(w http.ResponseWriter, r *http.Request) {
+	t, ok := h.ownedTask(w, r)
+	if !ok {
 		return
 	}
 	RespondJSON(w, http.StatusOK, t)
 }
 
 func (h *SchedulerHandler) Update(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "taskID"))
-	if err != nil {
-		RespondError(w, http.StatusBadRequest, "invalid task ID")
+	cur, ok := h.ownedTask(w, r)
+	if !ok {
 		return
 	}
+	id := cur.ID
 
 	var req model.UpdateScheduledTaskRequest
 	if !DecodeJSON(w, r, &req) {
 		return
 	}
-	if req.AgentID != nil && *req.AgentID != "" {
-		if _, perr := uuid.Parse(*req.AgentID); perr != nil {
-			RespondError(w, http.StatusBadRequest, "invalid agent_id")
-			return
+	for name, v := range map[string]*string{"agent_id": req.AgentID, "workflow_id": req.WorkflowID} {
+		if v != nil && *v != "" {
+			if _, perr := uuid.Parse(*v); perr != nil {
+				RespondError(w, http.StatusBadRequest, "invalid "+name)
+				return
+			}
 		}
+	}
+	runAt, err := parseRunAt(req.RunAt)
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	// Checked before the write, so a typo is refused rather than stored and
@@ -264,9 +306,15 @@ func (h *SchedulerHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		next := time.Now().Add(time.Duration(*req.IntervalSeconds) * time.Second)
 		rescheduled = &next
+	} else if runAt != nil && cur.ScheduleType == "once" {
+		rescheduled = runAt
 	}
 
 	t, err := h.repo.UpdateTask(r.Context(), id, req)
+	if errors.Is(err, repository.ErrScheduleTargetNotFound) {
+		RespondError(w, http.StatusBadRequest, "that agent or workflow is not in this organization")
+		return
+	}
 	if err != nil {
 		RespondError(w, http.StatusInternalServerError, "failed to update: "+err.Error())
 		return
@@ -289,13 +337,12 @@ func (h *SchedulerHandler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *SchedulerHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "taskID"))
-	if err != nil {
-		RespondError(w, http.StatusBadRequest, "invalid task ID")
+	t, ok := h.ownedTask(w, r)
+	if !ok {
 		return
 	}
 
-	if err := h.repo.DeleteTask(r.Context(), id); err != nil {
+	if err := h.repo.DeleteTask(r.Context(), t.ID); err != nil {
 		RespondError(w, http.StatusInternalServerError, "failed to delete")
 		return
 	}
@@ -303,11 +350,11 @@ func (h *SchedulerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *SchedulerHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "taskID"))
-	if err != nil {
-		RespondError(w, http.StatusBadRequest, "invalid task ID")
+	t, ok := h.ownedTask(w, r)
+	if !ok {
 		return
 	}
+	id := t.ID
 
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
