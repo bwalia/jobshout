@@ -3,21 +3,47 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Plus, Target, CalendarDays, Users, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+import { Plus, Target, CalendarDays, Users, CheckCircle2, AlertCircle, Loader2, X } from "lucide-react";
 import { agentHref } from "@/lib/agents/links";
+import { useAgents } from "@/lib/hooks/useAgents";
 import {
   useSprints,
   useSprint,
   useCreateSprint,
   useUpdateSprintStatus,
+  useAddSprintAgent,
+  useRemoveSprintAgent,
+  useAddSprintJob,
 } from "@/lib/hooks/useSprints";
 import type {
   Sprint,
   SprintDetail,
   SprintJob,
+  SprintRole,
   SprintStatus,
 } from "@/lib/api/sprints";
 import { cn } from "@/lib/utils/cn";
+
+const FIELD =
+  "flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm font-normal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+const PRIMARY_BUTTON =
+  "inline-flex h-10 items-center justify-center gap-1.5 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60";
+const SECONDARY_BUTTON =
+  "inline-flex h-10 items-center justify-center rounded-md border border-border px-4 text-sm font-medium hover:bg-muted";
+
+const ROLE_LABELS: Record<SprintRole, string> = {
+  planner: "Planner (plans the work)",
+  executor: "Executor (does the work)",
+  reviewer: "Reviewer (checks the work)",
+  any: "Any role",
+};
+
+/** The three seats on a job, in the order the job runs them. */
+const JOB_SEATS = [
+  { key: "planner_id", role: "planner", label: "Planner" },
+  { key: "executor_id", role: "executor", label: "Executor" },
+  { key: "reviewer_id", role: "reviewer", label: "Reviewer" },
+] as const;
 
 // JIRA-style sprint board: list of sprints on the left rail, selected sprint
 // detail on the right with jobs grouped by lifecycle phase.
@@ -167,11 +193,12 @@ function SprintDetailPane({
     );
   }
 
+  // Keyed by sprint so half-filled forms don't carry over to another sprint.
   return (
-    <div className="flex flex-col gap-5">
+    <div key={detail.id} className="flex flex-col gap-5">
       <SprintHeader detail={detail} />
-      <SprintAgents agents={detail.agents} />
-      <SprintBoard jobs={detail.jobs} />
+      <SprintAgents detail={detail} />
+      <SprintBoard detail={detail} />
     </div>
   );
 }
@@ -295,42 +322,205 @@ function SprintStatusActions({
   return null;
 }
 
-function SprintAgents({ agents }: { agents: SprintDetail["agents"] }) {
-  if (agents.length === 0) {
-    return (
-      // Honest about the gap: nothing in the app assigns a squad yet, only
-      // POST /sprints/{id}/agents.
-      <div className="rounded-lg border border-dashed border-border bg-card px-4 py-3 text-xs text-muted-foreground">
-        <Users className="mr-1.5 inline h-3.5 w-3.5" /> No agents assigned to
-        this sprint. Assigning a squad from this page isn&apos;t available yet —
-        today agents are added to a sprint through the API.
-      </div>
-    );
-  }
+function SprintAgents({ detail }: { detail: SprintDetail }) {
+  const agents = detail.agents;
+  const [adding, setAdding] = useState(false);
+  const remove = useRemoveSprintAgent();
+
   return (
-    <section className="rounded-lg border border-border bg-card p-3">
-      <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        <Users className="h-3.5 w-3.5" /> Squad
-      </h3>
-      <ul className="flex flex-wrap gap-2">
-        {agents.map((a) => (
-          <li key={`${a.agent_id}-${a.role_label}`}>
-            <Link
-              href={agentHref(a.agent_id)}
-              className="flex items-center gap-2 rounded-full border border-border bg-background px-2 py-1 text-xs transition-colors hover:border-primary/40 hover:bg-muted"
+    <section className="rounded-lg border border-border bg-card p-4">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <Users className="h-3.5 w-3.5" /> Squad
+        </h3>
+        {agents.length > 0 && !adding ? (
+          <button type="button" onClick={() => setAdding(true)} className={SECONDARY_BUTTON}>
+            <Plus className="mr-1.5 h-4 w-4" /> Add an agent
+          </button>
+        ) : null}
+      </div>
+
+      {agents.length === 0 && !adding ? (
+        <div className="py-3 text-center">
+          <p className="text-sm text-muted-foreground">
+            No agents in this sprint yet. A job needs a planner, an executor
+            and a reviewer.
+          </p>
+          <button type="button" onClick={() => setAdding(true)} className={cn(PRIMARY_BUTTON, "mt-3")}>
+            <Plus className="h-4 w-4" /> Add an agent to the squad
+          </button>
+        </div>
+      ) : (
+        <ul className="mt-3 flex flex-wrap gap-2">
+          {agents.map((a) => (
+            <li
+              key={`${a.agent_id}-${a.role_label}`}
+              className="flex items-center rounded-full border border-border bg-background text-xs"
             >
-              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent text-2xs font-semibold text-accent-foreground">
-                {a.name.charAt(0).toUpperCase()}
-              </span>
-              <span className="font-medium text-foreground">{a.name}</span>
-              <span className="rounded bg-muted px-1.5 py-0.5 text-2xs font-medium uppercase tracking-wide text-muted-foreground">
-                {a.role_label}
-              </span>
-            </Link>
-          </li>
-        ))}
-      </ul>
+              <Link
+                href={agentHref(a.agent_id)}
+                className="flex items-center gap-2 rounded-l-full py-1 pl-2 pr-1 transition-colors hover:bg-muted"
+              >
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent text-2xs font-semibold text-accent-foreground">
+                  {a.name.charAt(0).toUpperCase()}
+                </span>
+                <span className="font-medium text-foreground">{a.name}</span>
+                <span className="rounded bg-muted px-1.5 py-0.5 text-2xs font-medium uppercase tracking-wide text-muted-foreground">
+                  {a.role_label}
+                </span>
+              </Link>
+              <button
+                type="button"
+                aria-label={`Remove ${a.name} (${a.role_label}) from the squad`}
+                title="Remove from the squad"
+                disabled={remove.isPending}
+                onClick={() => {
+                  if (confirm(`Remove ${a.name} (${a.role_label}) from this sprint's squad?`)) {
+                    remove.mutate({ id: detail.id, agentId: a.agent_id, role: a.role_label });
+                  }
+                }}
+                className="flex h-8 w-8 items-center justify-center rounded-r-full text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {adding ? <AddSquadMember sprintId={detail.id} onDone={() => setAdding(false)} /> : null}
     </section>
+  );
+}
+
+function AddSquadMember({ sprintId, onDone }: { sprintId: string; onDone: () => void }) {
+  const { data } = useAgents({ per_page: 100 });
+  const agents = data?.data ?? [];
+  const add = useAddSprintAgent();
+  const [agentId, setAgentId] = useState("");
+  const [role, setRole] = useState<SprintRole>("planner");
+
+  // Stays open after each add so a whole squad can be put together in one go.
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!agentId) return;
+        add.mutate({ id: sprintId, agentId, role }, { onSuccess: () => setAgentId("") });
+      }}
+      className="mt-4 grid gap-3 rounded-md border border-border bg-background p-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
+    >
+      <label className="space-y-1 text-sm font-medium">
+        <span>Agent</span>
+        <select required value={agentId} onChange={(e) => setAgentId(e.target.value)} className={FIELD}>
+          <option value="">Choose an agent…</option>
+          {agents.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name} ({a.role})
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="space-y-1 text-sm font-medium">
+        <span>Role in this sprint</span>
+        <select value={role} onChange={(e) => setRole(e.target.value as SprintRole)} className={FIELD}>
+          {(Object.keys(ROLE_LABELS) as SprintRole[]).map((r) => (
+            <option key={r} value={r}>
+              {ROLE_LABELS[r]}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="flex gap-2">
+        <button type="submit" disabled={add.isPending || !agentId} className={PRIMARY_BUTTON}>
+          {add.isPending ? "Adding…" : "Add"}
+        </button>
+        <button type="button" onClick={onDone} className={SECONDARY_BUTTON}>
+          Done
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function AddSprintJob({ detail, onDone }: { detail: SprintDetail; onDone: () => void }) {
+  const { data } = useAgents({ per_page: 100 });
+  const agents = data?.data ?? [];
+  const add = useAddSprintJob();
+  // Each seat starts as the squad member with that role, else an "any" member.
+  const fromSquad = (role: SprintRole) =>
+    (
+      detail.agents.find((a) => a.role_label === role) ??
+      detail.agents.find((a) => a.role_label === "any")
+    )?.agent_id ?? "";
+  const [prompt, setPrompt] = useState("");
+  const [seats, setSeats] = useState({
+    planner_id: fromSquad("planner"),
+    executor_id: fromSquad("executor"),
+    reviewer_id: fromSquad("reviewer"),
+  });
+  const ready =
+    prompt.trim().length >= 3 && seats.planner_id && seats.executor_id && seats.reviewer_id;
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!ready) return;
+        add.mutate(
+          { id: detail.id, job: { task_prompt: prompt.trim(), ...seats }, position: detail.jobs.length },
+          { onSuccess: onDone }
+        );
+      }}
+      className="space-y-4 rounded-lg border border-border bg-card p-4"
+    >
+      <h3 className="text-base font-semibold text-foreground">Add a job to this sprint</h3>
+      <label className="block space-y-1 text-sm font-medium">
+        <span>What should the agents do?</span>
+        <textarea
+          required
+          minLength={3}
+          rows={3}
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="Write the release notes for version 2.3 from the merged pull requests"
+          className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-normal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        />
+      </label>
+      <div className="grid gap-3 sm:grid-cols-3">
+        {JOB_SEATS.map((s) => (
+          <label key={s.key} className="space-y-1 text-sm font-medium">
+            <span>{s.label}</span>
+            <select
+              required
+              value={seats[s.key]}
+              onChange={(e) => setSeats({ ...seats, [s.key]: e.target.value })}
+              className={FIELD}
+            >
+              <option value="">Choose an agent…</option>
+              {agents.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name} ({a.role})
+                </option>
+              ))}
+            </select>
+          </label>
+        ))}
+      </div>
+      <p className="rounded-md border border-status-progress/30 bg-status-progress/10 px-3 py-2 text-sm text-foreground">
+        The job starts running as soon as you add it: the planner plans it, the
+        executor does it and the reviewer checks it. Once started, it
+        can&apos;t be stopped.
+      </p>
+      <div className="flex gap-2">
+        <button type="submit" disabled={!ready || add.isPending} className={PRIMARY_BUTTON}>
+          {add.isPending ? "Starting…" : "Start the job"}
+        </button>
+        <button type="button" onClick={onDone} className={SECONDARY_BUTTON}>
+          Cancel
+        </button>
+      </div>
+    </form>
   );
 }
 
@@ -371,57 +561,70 @@ const JOB_COLUMNS: { key: string; label: string; matcher: (j: SprintJob) => bool
   },
 ];
 
-function SprintBoard({ jobs }: { jobs: SprintJob[] }) {
+function SprintBoard({ detail }: { detail: SprintDetail }) {
+  const jobs = detail.jobs;
+  const [adding, setAdding] = useState(false);
   const grouped = useMemo(() => {
     return JOB_COLUMNS.map((c) => ({ ...c, jobs: jobs.filter(c.matcher) }));
   }, [jobs]);
 
-  // Five "Empty" columns explain nothing. Nothing on this page adds a job
-  // yet; they arrive through the chat assistant's sprint tool or the API.
+  if (adding) {
+    return <AddSprintJob detail={detail} onDone={() => setAdding(false)} />;
+  }
+
+  // Five "Empty" columns explain nothing.
   if (jobs.length === 0) {
     return (
       <section className="rounded-lg border border-dashed border-border bg-card px-4 py-6 text-center text-sm text-muted-foreground">
         <p className="font-medium text-foreground">No jobs in this sprint yet.</p>
-        <p className="mx-auto mt-1 max-w-lg text-xs">
-          A sprint tracks multi-agent jobs (plan → execute → review). This board
-          shows jobs added to the sprint elsewhere — by asking the chat assistant
-          to add a job to it, or through the API. Adding jobs from this page is
-          still in progress.
+        <p className="mx-auto mt-1 max-w-lg text-sm">
+          A job is one piece of work: the planner plans it, the executor does it
+          and the reviewer checks it.
         </p>
+        <button type="button" onClick={() => setAdding(true)} className={cn(PRIMARY_BUTTON, "mt-4")}>
+          <Plus className="h-4 w-4" /> Add a job to this sprint
+        </button>
       </section>
     );
   }
 
   return (
-    <section className="flex flex-1 gap-3 overflow-x-auto pb-4 scrollbar-thin">
-      {grouped.map((col) => (
-        <div
-          key={col.key}
-          className="flex w-72 shrink-0 flex-col rounded-lg border border-border bg-secondary/40"
-        >
-          <header className="flex items-center justify-between border-b border-border px-3 py-2.5">
-            <div className="flex items-center gap-2">
-              <span className={cn("h-1.5 w-1.5 rounded-full", col.tone)} />
-              <span className="text-xs font-semibold uppercase tracking-wide text-foreground">
-                {col.label}
-              </span>
-            </div>
-            <span className="rounded bg-background px-2 py-0.5 text-2xs font-semibold text-muted-foreground">
-              {col.jobs.length}
-            </span>
-          </header>
-          <div className="flex flex-1 flex-col gap-2 p-2">
-            {col.jobs.length === 0 ? (
-              <div className="px-3 py-4 text-center text-2xs text-muted-foreground">
-                Empty
+    <>
+      <div className="flex justify-end">
+        <button type="button" onClick={() => setAdding(true)} className={PRIMARY_BUTTON}>
+          <Plus className="h-4 w-4" /> Add a job
+        </button>
+      </div>
+      <section className="flex flex-1 gap-3 overflow-x-auto pb-4 scrollbar-thin">
+        {grouped.map((col) => (
+          <div
+            key={col.key}
+            className="flex w-72 shrink-0 flex-col rounded-lg border border-border bg-secondary/40"
+          >
+            <header className="flex items-center justify-between border-b border-border px-3 py-2.5">
+              <div className="flex items-center gap-2">
+                <span className={cn("h-1.5 w-1.5 rounded-full", col.tone)} />
+                <span className="text-xs font-semibold uppercase tracking-wide text-foreground">
+                  {col.label}
+                </span>
               </div>
-            ) : (
-              col.jobs.map((j) => <JobCard key={j.id} job={j} />)
-            )}
+              <span className="rounded bg-background px-2 py-0.5 text-2xs font-semibold text-muted-foreground">
+                {col.jobs.length}
+              </span>
+            </header>
+            <div className="flex flex-1 flex-col gap-2 p-2">
+              {col.jobs.length === 0 ? (
+                <div className="px-3 py-4 text-center text-2xs text-muted-foreground">
+                  Empty
+                </div>
+              ) : (
+                col.jobs.map((j) => <JobCard key={j.id} job={j} />)
+              )}
+            </div>
           </div>
-        </div>
-      ))}
-    </section>
+        ))}
+      </section>
+    </>
   );
 }
 

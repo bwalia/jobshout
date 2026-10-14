@@ -88,3 +88,43 @@ export async function updateSprintStatus(
   const { data } = await apiClient.put<Sprint>(`/sprints/${id}`, { status });
   return data;
 }
+
+export type SprintRole = SprintAgentInfo["role_label"];
+
+export async function addSprintAgent(
+  id: string,
+  agentId: string,
+  role: SprintRole
+): Promise<void> {
+  await apiClient.post(`/sprints/${id}/agents`, { agent_id: agentId, role_label: role });
+}
+
+export async function removeSprintAgent(
+  id: string,
+  agentId: string,
+  role: SprintRole
+): Promise<void> {
+  await apiClient.delete(`/sprints/${id}/agents/${agentId}`, {
+    params: { role_label: role },
+  });
+}
+
+export interface NewSprintJob {
+  task_prompt: string;
+  planner_id: string;
+  executor_id: string;
+  reviewer_id: string;
+}
+
+/**
+ * Starts a multi-agent job and puts it on the sprint. A sprint only links
+ * existing jobs, so the job is created first — and it starts running at once.
+ */
+export async function addNewSprintJob(
+  id: string,
+  job: NewSprintJob,
+  position: number
+): Promise<void> {
+  const { data } = await apiClient.post<{ id: string }>("/multi-agent/jobs", job);
+  await apiClient.post(`/sprints/${id}/jobs`, { job_id: data.id, position });
+}
