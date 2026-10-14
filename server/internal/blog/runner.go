@@ -102,7 +102,10 @@ type CMSPublisher interface {
 type GenerateRequest struct {
 	// OrgID scopes the research the pipeline commissions, so a run is
 	// attributed to the right organization's Research Agent.
-	OrgID       uuid.UUID
+	OrgID uuid.UUID
+	// RunID is the run being written. Images drawn for its articles are
+	// linked to it. Nil when the caller has no run.
+	RunID       *uuid.UUID
 	Briefs      []model.BlogBrief `json:"briefs"`
 	Model       string            `json:"model,omitempty"`        // optional override for the LLM
 	MaxArticles int               `json:"max_articles,omitempty"` // safety cap; 0 = no cap below hard limit

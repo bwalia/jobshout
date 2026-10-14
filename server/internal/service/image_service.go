@@ -61,6 +61,9 @@ type GenerateImageRequest struct {
 	Seed     int64
 	// Source records what asked for the image. Defaults to manual.
 	Source string
+	// BlogRunID links the image to the article run it was drawn for. Nil when
+	// no article asked for it.
+	BlogRunID *uuid.UUID
 	// NoFallback skips the workstation path after a hosted failure.
 	NoFallback bool
 }
@@ -154,6 +157,7 @@ func (s *ImageService) Generate(ctx context.Context, req GenerateImageRequest) (
 			Height:     resp.Height,
 			URL:        result.URL,
 			Source:     source,
+			BlogRunID:  req.BlogRunID,
 			DurationMS: resp.DurationMS,
 		}
 		if err := s.repo.Create(ctx, record); err != nil {

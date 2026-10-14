@@ -41,6 +41,7 @@ func (b *blogIllustrator) Generate(ctx context.Context, req blog.IllustrationReq
 		// picture, which is what a fixed seed would produce.
 		Seed:       -1,
 		Source:     req.Source,
+		BlogRunID:  req.RunID,
 		NoFallback: req.NoFallback,
 	})
 	if err != nil {

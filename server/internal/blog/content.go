@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/jobshout/server/internal/audience"
@@ -62,6 +63,10 @@ type GeneratedArticle struct {
 	// draft can be tagged without anyone re-deriving them from the run.
 	Audience string
 	Industry string
+
+	// RunID is the run the article belongs to, when the caller knows it.
+	// Images drawn for the article are linked to it.
+	RunID *uuid.UUID
 }
 
 // render fills HTML and Excerpt from Markdown. Separate from generation so the
@@ -156,7 +161,8 @@ func (r *Runner) finalizeArticle(
 		report(progress, model.BlogStepIllustrating,
 			fmt.Sprintf("Illustrating %s", article.Title), model.AgentNameArticleWriter)
 
-		body, notes := r.illustrateBody(ctx, req.OrgID, article.Markdown)
+		article.RunID = req.RunID
+		body, notes := r.illustrateBody(ctx, req.OrgID, req.RunID, article.Markdown)
 		article.Markdown = body
 		for _, note := range notes {
 			r.logger.Info("blog: "+note, zap.String("title", article.Title))

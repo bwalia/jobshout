@@ -43,6 +43,10 @@ type GeneratedImage struct {
 	Source     string    `json:"source"`
 	DurationMS int       `json:"duration_ms"`
 	CreatedAt  time.Time `json:"created_at"`
+
+	// BlogRunID is the article run a blog cover or inline figure was drawn
+	// for, so the image can open its article. Nil for every other source.
+	BlogRunID *uuid.UUID `json:"blog_run_id,omitempty"`
 }
 
 // CoverImage is an article's cover: where it is, what asked for it, and enough

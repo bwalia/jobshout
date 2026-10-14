@@ -97,7 +97,7 @@ func TestEval_DraftWithoutFencesGetsBodyImages(t *testing.T) {
 
 	fake := &fakeIllustrator{enabled: true}
 	r := testRunner(fake)
-	rendered, _ := r.illustrateBody(context.Background(), uuid.New(), out)
+	rendered, _ := r.illustrateBody(context.Background(), uuid.New(), nil, out)
 	if strings.Contains(rendered, "```illustration") {
 		t.Fatal("fences should be replaced")
 	}
@@ -110,7 +110,7 @@ func TestEval_DraftWithFencesStillReplaced(t *testing.T) {
 	fake := &fakeIllustrator{enabled: true}
 	r := testRunner(fake)
 	md := "Intro.\n\n```illustration\nA control plane reconciling desired state\n```\n"
-	out, _ := r.illustrateBody(context.Background(), uuid.New(), md)
+	out, _ := r.illustrateBody(context.Background(), uuid.New(), nil, md)
 	if strings.Contains(out, "```illustration") {
 		t.Fatal("fence survived")
 	}

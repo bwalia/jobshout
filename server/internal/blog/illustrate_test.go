@@ -63,7 +63,7 @@ func TestIllustrateBody_ReplacesBlocksWithImages(t *testing.T) {
 		"```illustration\nA control plane reconciling desired state\n```\n\n" +
 		"Closing paragraph.\n"
 
-	out, notes := r.illustrateBody(context.Background(), uuid.New(), markdown)
+	out, notes := r.illustrateBody(context.Background(), uuid.New(), nil, markdown)
 
 	if strings.Contains(out, "```illustration") {
 		t.Errorf("the fenced block survived into the output:\n%s", out)
@@ -100,7 +100,7 @@ func TestIllustrateBody_TypedFenceSetsKindAndSize(t *testing.T) {
 	r := testRunner(fake)
 
 	markdown := "```illustration comparison\nPolling vs webhooks: latency, cost, failure modes\n```\n"
-	out, notes := r.illustrateBody(context.Background(), uuid.New(), markdown)
+	out, notes := r.illustrateBody(context.Background(), uuid.New(), nil, markdown)
 
 	if strings.Contains(out, "```illustration") {
 		t.Errorf("typed fence survived:\n%s", out)
@@ -128,7 +128,7 @@ func TestIllustrateBody_TypedFenceSetsKindAndSize(t *testing.T) {
 func TestIllustrateBody_DropsWorkstationLettering(t *testing.T) {
 	fake := &fakeIllustrator{enabled: true, provider: "mflux"}
 	r := testRunner(fake)
-	out, notes := r.illustrateBody(context.Background(), uuid.New(),
+	out, notes := r.illustrateBody(context.Background(), uuid.New(), nil,
 		"```illustration comparison\nPolling vs webhooks: latency\n```\n")
 	if strings.Contains(out, "![") {
 		t.Errorf("mflux output must not land in the article:\n%s", out)
@@ -149,7 +149,7 @@ func TestIllustrateBody_EnforcesTheLimit(t *testing.T) {
 		fmt.Fprintf(&b, "```illustration\npicture %d\n```\n\n", i)
 	}
 
-	out, notes := r.illustrateBody(context.Background(), uuid.New(), b.String())
+	out, notes := r.illustrateBody(context.Background(), uuid.New(), nil, b.String())
 
 	if len(fake.calls) != maxInlineIllustrations {
 		t.Errorf("drew %d images, want the cap of %d", len(fake.calls), maxInlineIllustrations)
@@ -170,7 +170,7 @@ func TestIllustrateBody_DropsWhatItCannotDraw(t *testing.T) {
 
 	markdown := "```illustration\nfirst\n```\n\n```illustration\nsecond\n```\n"
 
-	out, notes := r.illustrateBody(context.Background(), uuid.New(), markdown)
+	out, notes := r.illustrateBody(context.Background(), uuid.New(), nil, markdown)
 
 	if strings.Contains(out, "```illustration") || strings.Contains(out, "second") {
 		t.Errorf("the failed block leaked into the output:\n%s", out)
@@ -190,7 +190,7 @@ func TestIllustrateBody_LeavesPlainMarkdownAlone(t *testing.T) {
 	r := testRunner(fake)
 
 	markdown := "# Title\n\nSome prose.\n\n```mermaid\nflowchart TD\n A --> B\n```\n"
-	out, notes := r.illustrateBody(context.Background(), uuid.New(), markdown)
+	out, notes := r.illustrateBody(context.Background(), uuid.New(), nil, markdown)
 
 	if out != markdown {
 		t.Errorf("markdown was modified:\n%s", out)
@@ -294,6 +294,30 @@ func TestGenerateCover_RecordsTheSeedForReproduction(t *testing.T) {
 	}
 	if call.Steps != coverSteps {
 		t.Errorf("cover steps = %d, want %d", call.Steps, coverSteps)
+	}
+}
+
+// Covers and inline figures carry their run so the Outputs page can open the
+// article from the picture.
+func TestIllustrations_CarryTheirRun(t *testing.T) {
+	fake := &fakeIllustrator{enabled: true}
+	r := testRunner(fake)
+	runID := uuid.New()
+
+	article := &GeneratedArticle{Title: "A Title", Topic: "a topic", RunID: &runID}
+	if err := r.generateCover(context.Background(), uuid.New(), article); err != nil {
+		t.Fatalf("generateCover: %v", err)
+	}
+	r.illustrateBody(context.Background(), uuid.New(), &runID,
+		"Intro.\n\n```illustration flow\nRequest -> Gateway -> Service\n```\n")
+
+	if len(fake.calls) != 2 {
+		t.Fatalf("want a cover and an inline call, got %d", len(fake.calls))
+	}
+	for _, c := range fake.calls {
+		if c.RunID == nil || *c.RunID != runID {
+			t.Errorf("%s image RunID = %v, want %s", c.Source, c.RunID, runID)
+		}
 	}
 }
 
