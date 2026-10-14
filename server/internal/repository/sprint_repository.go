@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -9,6 +10,11 @@ import (
 
 	"github.com/jobshout/server/internal/model"
 )
+
+// ErrSprintMemberNotFound is returned by AddJob and AddAgent when the job or
+// agent does not exist in the sprint's org — another org's ID is refused the
+// same as an unknown one.
+var ErrSprintMemberNotFound = errors.New("not found in this organization")
 
 // SprintRepository persists sprints and their job/agent associations.
 type SprintRepository interface {
@@ -125,10 +131,18 @@ func (r *sprintRepository) Delete(ctx context.Context, id uuid.UUID) error {
 func (r *sprintRepository) AddJob(ctx context.Context, sprintID, jobID uuid.UUID, position int) error {
 	const sql = `
 		INSERT INTO sprint_jobs (sprint_id, job_id, position)
-		VALUES ($1, $2, $3)
+		SELECT s.id, j.id, $3
+		FROM sprints s JOIN multi_agent_jobs j ON j.org_id = s.org_id
+		WHERE s.id = $1 AND j.id = $2
 		ON CONFLICT (sprint_id, job_id) DO UPDATE SET position = EXCLUDED.position`
-	_, err := r.pool.Exec(ctx, sql, sprintID, jobID, position)
-	return err
+	tag, err := r.pool.Exec(ctx, sql, sprintID, jobID, position)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrSprintMemberNotFound
+	}
+	return nil
 }
 
 func (r *sprintRepository) RemoveJob(ctx context.Context, sprintID, jobID uuid.UUID) error {
@@ -171,12 +185,22 @@ func (r *sprintRepository) AddAgent(ctx context.Context, sprintID, agentID uuid.
 	if roleLabel == "" {
 		roleLabel = "any"
 	}
+	// DO UPDATE rather than DO NOTHING so re-adding a member still reports a
+	// row: no row then means only that the agent is not in the sprint's org.
 	const sql = `
 		INSERT INTO sprint_agents (sprint_id, agent_id, role_label)
-		VALUES ($1, $2, $3)
-		ON CONFLICT DO NOTHING`
-	_, err := r.pool.Exec(ctx, sql, sprintID, agentID, roleLabel)
-	return err
+		SELECT s.id, a.id, $3
+		FROM sprints s JOIN agents a ON a.org_id = s.org_id
+		WHERE s.id = $1 AND a.id = $2
+		ON CONFLICT (sprint_id, agent_id, role_label) DO UPDATE SET role_label = EXCLUDED.role_label`
+	tag, err := r.pool.Exec(ctx, sql, sprintID, agentID, roleLabel)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrSprintMemberNotFound
+	}
+	return nil
 }
 
 func (r *sprintRepository) RemoveAgent(ctx context.Context, sprintID, agentID uuid.UUID, roleLabel string) error {

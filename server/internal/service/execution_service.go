@@ -128,7 +128,9 @@ func (s *executionService) begin(ctx context.Context, orgID uuid.UUID, agentID u
 	if err != nil {
 		return nil, fmt.Errorf("execution_svc: find agent: %w", err)
 	}
-	if agent == nil {
+	// Another org's agent is not found: running it would use that org's
+	// prompt, tools and model keys.
+	if agent == nil || agent.OrgID != orgID {
 		return nil, ErrAgentNotFound
 	}
 

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/jobshout/server/internal/middleware"
 	"github.com/jobshout/server/internal/model"
+	"github.com/jobshout/server/internal/repository"
 	"github.com/jobshout/server/internal/service"
 )
 
@@ -64,12 +66,43 @@ func (h *SprintHandler) List(w http.ResponseWriter, r *http.Request) {
 	RespondJSON(w, http.StatusOK, out)
 }
 
-func (h *SprintHandler) Get(w http.ResponseWriter, r *http.Request) {
+// ownedSprint resolves {sprintID} to a sprint of the caller's org. Another
+// org's sprint is a 404, the same as one that does not exist.
+func (h *SprintHandler) ownedSprint(w http.ResponseWriter, r *http.Request) (*model.Sprint, bool) {
 	id, err := uuid.Parse(chi.URLParam(r, "sprintID"))
 	if err != nil {
 		RespondError(w, http.StatusBadRequest, "invalid sprint id")
+		return nil, false
+	}
+	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid org_id")
+		return nil, false
+	}
+	sp, err := h.svc.Get(r.Context(), id)
+	if err != nil || sp == nil || sp.OrgID != orgID {
+		RespondError(w, http.StatusNotFound, "sprint not found")
+		return nil, false
+	}
+	return sp, true
+}
+
+// respondMemberErr maps a refused job/agent attach to 404 and anything else
+// to 500.
+func respondMemberErr(w http.ResponseWriter, err error, what string) {
+	if errors.Is(err, repository.ErrSprintMemberNotFound) {
+		RespondError(w, http.StatusNotFound, what+" not found")
 		return
 	}
+	RespondError(w, http.StatusInternalServerError, err.Error())
+}
+
+func (h *SprintHandler) Get(w http.ResponseWriter, r *http.Request) {
+	sp, ok := h.ownedSprint(w, r)
+	if !ok {
+		return
+	}
+	id := sp.ID
 	// Detail view: sprint + jobs + agents + stats. The list view returns the
 	// thin Sprint rows so the index page stays fast.
 	detail, err := h.svc.GetDetail(r.Context(), id)
@@ -81,11 +114,11 @@ func (h *SprintHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *SprintHandler) Update(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "sprintID"))
-	if err != nil {
-		RespondError(w, http.StatusBadRequest, "invalid sprint id")
+	sp, ok := h.ownedSprint(w, r)
+	if !ok {
 		return
 	}
+	id := sp.ID
 	var req model.UpdateSprintRequest
 	if !DecodeJSON(w, r, &req) {
 		return
@@ -103,11 +136,11 @@ func (h *SprintHandler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *SprintHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "sprintID"))
-	if err != nil {
-		RespondError(w, http.StatusBadRequest, "invalid sprint id")
+	sp, ok := h.ownedSprint(w, r)
+	if !ok {
 		return
 	}
+	id := sp.ID
 	if err := h.svc.Delete(r.Context(), id); err != nil {
 		RespondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -116,11 +149,11 @@ func (h *SprintHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *SprintHandler) AddJob(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "sprintID"))
-	if err != nil {
-		RespondError(w, http.StatusBadRequest, "invalid sprint id")
+	sp, ok := h.ownedSprint(w, r)
+	if !ok {
 		return
 	}
+	id := sp.ID
 	var req model.AddSprintJobRequest
 	if !DecodeJSON(w, r, &req) {
 		return
@@ -130,18 +163,18 @@ func (h *SprintHandler) AddJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.svc.AddJob(r.Context(), id, req); err != nil {
-		RespondError(w, http.StatusInternalServerError, err.Error())
+		respondMemberErr(w, err, "job")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *SprintHandler) RemoveJob(w http.ResponseWriter, r *http.Request) {
-	sprintID, err := uuid.Parse(chi.URLParam(r, "sprintID"))
-	if err != nil {
-		RespondError(w, http.StatusBadRequest, "invalid sprint id")
+	sp, ok := h.ownedSprint(w, r)
+	if !ok {
 		return
 	}
+	sprintID := sp.ID
 	jobID, err := uuid.Parse(chi.URLParam(r, "jobID"))
 	if err != nil {
 		RespondError(w, http.StatusBadRequest, "invalid job id")
@@ -155,11 +188,11 @@ func (h *SprintHandler) RemoveJob(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *SprintHandler) AddAgent(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "sprintID"))
-	if err != nil {
-		RespondError(w, http.StatusBadRequest, "invalid sprint id")
+	sp, ok := h.ownedSprint(w, r)
+	if !ok {
 		return
 	}
+	id := sp.ID
 	var req model.AddSprintAgentRequest
 	if !DecodeJSON(w, r, &req) {
 		return
@@ -169,18 +202,18 @@ func (h *SprintHandler) AddAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.svc.AddAgent(r.Context(), id, req); err != nil {
-		RespondError(w, http.StatusInternalServerError, err.Error())
+		respondMemberErr(w, err, "agent")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *SprintHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
-	sprintID, err := uuid.Parse(chi.URLParam(r, "sprintID"))
-	if err != nil {
-		RespondError(w, http.StatusBadRequest, "invalid sprint id")
+	sp, ok := h.ownedSprint(w, r)
+	if !ok {
 		return
 	}
+	sprintID := sp.ID
 	agentID, err := uuid.Parse(chi.URLParam(r, "agentID"))
 	if err != nil {
 		RespondError(w, http.StatusBadRequest, "invalid agent id")

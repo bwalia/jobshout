@@ -24,6 +24,22 @@ func NewWorkflowHandler(svc service.WorkflowService) *WorkflowHandler {
 	return &WorkflowHandler{svc: svc, validate: validator.New()}
 }
 
+// ownedWorkflow resolves {workflowID} to a workflow of the caller's org.
+// Another org's workflow is a 404, the same as one that does not exist.
+func (h *WorkflowHandler) ownedWorkflow(w http.ResponseWriter, r *http.Request) (*model.Workflow, bool) {
+	id, err := uuid.Parse(chi.URLParam(r, "workflowID"))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid workflow ID")
+		return nil, false
+	}
+	wf, err := h.svc.GetByID(r.Context(), id)
+	if err != nil || wf == nil || wf.OrgID.String() != middleware.GetOrgID(r.Context()) {
+		RespondError(w, http.StatusNotFound, "workflow not found")
+		return nil, false
+	}
+	return wf, true
+}
+
 // Create handles POST /workflows
 func (h *WorkflowHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req model.CreateWorkflowRequest
@@ -56,15 +72,8 @@ func (h *WorkflowHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 // GetByID handles GET /workflows/{workflowID}
 func (h *WorkflowHandler) GetByID(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "workflowID"))
-	if err != nil {
-		RespondError(w, http.StatusBadRequest, "invalid workflow ID")
-		return
-	}
-
-	wf, err := h.svc.GetByID(r.Context(), id)
-	if err != nil {
-		RespondError(w, http.StatusNotFound, "workflow not found")
+	wf, ok := h.ownedWorkflow(w, r)
+	if !ok {
 		return
 	}
 	RespondJSON(w, http.StatusOK, wf)
@@ -92,11 +101,11 @@ func (h *WorkflowHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // Update handles PUT /workflows/{workflowID}
 func (h *WorkflowHandler) Update(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "workflowID"))
-	if err != nil {
-		RespondError(w, http.StatusBadRequest, "invalid workflow ID")
+	cur, ok := h.ownedWorkflow(w, r)
+	if !ok {
 		return
 	}
+	id := cur.ID
 
 	var req model.UpdateWorkflowRequest
 	if !DecodeJSON(w, r, &req) {
@@ -117,11 +126,11 @@ func (h *WorkflowHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 // Delete handles DELETE /workflows/{workflowID}
 func (h *WorkflowHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "workflowID"))
-	if err != nil {
-		RespondError(w, http.StatusBadRequest, "invalid workflow ID")
+	cur, ok := h.ownedWorkflow(w, r)
+	if !ok {
 		return
 	}
+	id := cur.ID
 
 	if err := h.svc.Delete(r.Context(), id); err != nil {
 		RespondError(w, http.StatusInternalServerError, "failed to delete workflow")
@@ -133,11 +142,11 @@ func (h *WorkflowHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // ExecuteWorkflow handles POST /workflows/{workflowID}/execute
 // It starts a workflow run asynchronously and returns the run record immediately.
 func (h *WorkflowHandler) ExecuteWorkflow(w http.ResponseWriter, r *http.Request) {
-	wfID, err := uuid.Parse(chi.URLParam(r, "workflowID"))
-	if err != nil {
-		RespondError(w, http.StatusBadRequest, "invalid workflow ID")
+	wf, ok := h.ownedWorkflow(w, r)
+	if !ok {
 		return
 	}
+	wfID := wf.ID
 
 	var req model.ExecuteWorkflowRequest
 	// Body is optional — caller may send {} or omit entirely.
@@ -173,7 +182,7 @@ func (h *WorkflowHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	run, err := h.svc.GetRunByID(r.Context(), runID)
-	if err != nil {
+	if err != nil || run == nil || run.OrgID.String() != middleware.GetOrgID(r.Context()) {
 		RespondError(w, http.StatusNotFound, "workflow run not found")
 		return
 	}
@@ -182,11 +191,11 @@ func (h *WorkflowHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 
 // ListRuns handles GET /workflows/{workflowID}/runs
 func (h *WorkflowHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
-	wfID, err := uuid.Parse(chi.URLParam(r, "workflowID"))
-	if err != nil {
-		RespondError(w, http.StatusBadRequest, "invalid workflow ID")
+	wf, ok := h.ownedWorkflow(w, r)
+	if !ok {
 		return
 	}
+	wfID := wf.ID
 
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -11,6 +12,10 @@ import (
 
 	"github.com/jobshout/server/internal/model"
 )
+
+// ErrScheduleTargetNotFound is returned by CreateTask and UpdateTask when an
+// agent, workflow or provider the task points at is not in the task's org.
+var ErrScheduleTargetNotFound = errors.New("agent or workflow not found")
 
 type SchedulerRepository interface {
 	CreateTask(ctx context.Context, t *model.ScheduledTask) error
@@ -69,6 +74,30 @@ func scanScheduledTask(s rowScanner, t *model.ScheduledTask) error {
 }
 
 func (r *schedulerRepository) CreateTask(ctx context.Context, t *model.ScheduledTask) error {
+	// Every agent (single, planner, executor, reviewer), the workflow and the
+	// provider must be the task's own org's: the runner acts on them as that
+	// org without checking again.
+	var agentIDs []uuid.UUID
+	for _, id := range []*uuid.UUID{t.AgentID, t.PlannerID, t.ExecutorID, t.ReviewerID} {
+		if id != nil {
+			agentIDs = append(agentIDs, *id)
+		}
+	}
+	var inOrg bool
+	if err := r.pool.QueryRow(ctx, `
+		SELECT NOT EXISTS (
+		           SELECT 1 FROM unnest($2::uuid[]) AS want(id)
+		           WHERE NOT EXISTS (SELECT 1 FROM agents a WHERE a.id = want.id AND a.org_id = $1))
+		   AND ($3::uuid IS NULL OR EXISTS (SELECT 1 FROM workflows w WHERE w.id = $3 AND w.org_id = $1))
+		   AND ($4::uuid IS NULL OR EXISTS (SELECT 1 FROM llm_provider_configs p WHERE p.id = $4 AND p.org_id = $1))`,
+		t.OrgID, agentIDs, t.WorkflowID, t.ProviderConfigID,
+	).Scan(&inOrg); err != nil {
+		return fmt.Errorf("scheduler_repo: create: check targets: %w", err)
+	}
+	if !inOrg {
+		return ErrScheduleTargetNotFound
+	}
+
 	inputJSON, _ := json.Marshal(t.InputJSON)
 	if inputJSON == nil {
 		inputJSON = []byte("{}")
@@ -150,8 +179,20 @@ func (r *schedulerRepository) UpdateTask(ctx context.Context, id uuid.UUID, req 
 		    agent_id = CASE WHEN $12::text IS NULL THEN agent_id
 		                    WHEN $12::text = '' THEN NULL
 		                    ELSE $12::uuid END,
+		    workflow_id = CASE WHEN $13::text IS NULL THEN workflow_id
+		                       WHEN $13::text = '' THEN NULL
+		                       ELSE $13::uuid END,
+		    run_at = COALESCE($14::text::timestamptz, run_at),
+		    retry_on_failure = COALESCE($15, retry_on_failure),
+		    max_retries = COALESCE($16, max_retries),
+		    tags = COALESCE($17::text[], tags),
 		    updated_at = NOW()
-		WHERE id = $1`
+		WHERE id = $1
+		  -- A task may only point at its own org's agent or workflow.
+		  AND (NULLIF($12::text, '') IS NULL OR EXISTS (
+		        SELECT 1 FROM agents a WHERE a.id = NULLIF($12::text, '')::uuid AND a.org_id = scheduled_tasks.org_id))
+		  AND (NULLIF($13::text, '') IS NULL OR EXISTS (
+		        SELECT 1 FROM workflows w WHERE w.id = NULLIF($13::text, '')::uuid AND w.org_id = scheduled_tasks.org_id))`
 
 	// A nil map means "not changing this" and leaves the stored value alone;
 	// anything else replaces it wholesale, so a task can drop a setting it used
@@ -166,13 +207,19 @@ func (r *schedulerRepository) UpdateTask(ctx context.Context, id uuid.UUID, req 
 		inputJSON = encoded
 	}
 
-	_, err := r.pool.Exec(ctx, sql,
+	tag, err := r.pool.Exec(ctx, sql,
 		id, req.Name, req.Description, req.InputPrompt,
 		req.CronExpression, req.IntervalSeconds, req.Status,
 		req.MaxRuns, req.Priority, req.ModelOverride, inputJSON, req.AgentID,
+		req.WorkflowID, req.RunAt, req.RetryOnFailure, req.MaxRetries, req.Tags,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("scheduler_repo: update: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		// Callers resolve the task first, so no row means the guard above
+		// refused the agent or workflow.
+		return nil, ErrScheduleTargetNotFound
 	}
 	return r.GetTask(ctx, id)
 }
