@@ -238,20 +238,21 @@ func main() {
 	execRepo := repository.NewExecutionRepository(pool)
 	toolPermRepo := repository.NewAgentToolRepository(pool)
 	approvalRepo := repository.NewApprovalRepository(pool)
-	// Tenant secrets (org LLM provider keys, webhook signing secrets) are
-	// sealed at rest when SECRETS_ENCRYPTION_KEY is set.
+	// Tenant secrets (org LLM provider keys, webhook signing secrets,
+	// integration credentials) are sealed at rest when SECRETS_ENCRYPTION_KEY
+	// is set.
 	secretBox, err := secretbox.New(cfg.SecretsEncryptionKey)
 	if err != nil {
 		logger.Fatal("invalid SECRETS_ENCRYPTION_KEY", zap.Error(err))
 	}
 	if !secretBox.Enabled() {
-		logger.Warn("SECRETS_ENCRYPTION_KEY not set: org LLM provider keys and webhook secrets are stored in plaintext")
+		logger.Warn("SECRETS_ENCRYPTION_KEY not set: org LLM provider keys, webhook secrets and integration credentials are stored in plaintext")
 	}
 	llmProviderRepo := repository.NewLLMProviderRepositoryWithBox(pool, secretBox)
 	schedulerRepo := repository.NewSchedulerRepository(pool)
 	sessionRepo := repository.NewSessionRepository(pool)
 	pluginRepo := repository.NewPluginRepository(pool)
-	integRepo := repository.NewIntegrationRepository(pool)
+	integRepo := repository.NewIntegrationRepository(pool, secretBox)
 	linkRepo := repository.NewTaskLinkRepository(pool)
 
 	// ─── WebSocket hub ───────────────────────────────────────────────────────
@@ -1769,8 +1770,10 @@ func main() {
 				})
 			})
 
-			// Integrations (Jira, GitHub)
+			// Integrations (OpsAPI, Jira, GitHub) — org admins only: even a
+			// masked read shows where the org's agents file their work.
 			r.Route("/integrations", func(r chi.Router) {
+				r.Use(middleware.RequirePermission(rbacSvc, model.PermOrgManage))
 				r.Get("/", integHandler.List)
 				r.Post("/", integHandler.Create)
 				r.Route("/{integrationID}", func(r chi.Router) {

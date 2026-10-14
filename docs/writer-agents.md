@@ -5,7 +5,8 @@ One Article Writer pipeline serves every website. A new site or style is a
 
 ## Set one up (on int first)
 
-1. **Website.** Add an `opsapi` integration to the org, named for the site:
+1. **Website.** Add an `opsapi` integration to the org, named for the site —
+   in **Settings → Integrations** (org admins), or over the API:
 
    ```json
    POST /api/v1/integrations

@@ -1,12 +1,16 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
+	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/jobshout/server/internal/middleware"
 	"github.com/jobshout/server/internal/model"
@@ -20,6 +24,82 @@ type IntegrationHandler struct {
 
 func NewIntegrationHandler(svc service.IntegrationService) *IntegrationHandler {
 	return &IntegrationHandler{svc: svc, validate: validator.New()}
+}
+
+// publicCredentialKeys are identifiers some adapters keep under credentials
+// (Jira email and project, GitHub owner and repo). They are not secrets, and
+// the settings form needs them to show what an integration points at. Every
+// other credential value is masked.
+var publicCredentialKeys = map[string]bool{"email": true, "project_key": true, "owner": true, "repo": true}
+
+// integrationView is an integration as the API returns it: secrets masked,
+// plus the names of the credentials that are set.
+type integrationView struct {
+	model.Integration
+	CredentialKeys []string `json:"credential_keys"`
+}
+
+// maskSecret keeps only the last four characters, enough to tell two keys
+// apart without revealing either.
+func maskSecret(s string) string {
+	if len(s) > 8 {
+		return "••••" + s[len(s)-4:]
+	}
+	return "••••"
+}
+
+// maskIntegration builds the API view of i. Clients never get a secret back —
+// they set it, the server keeps it.
+func maskIntegration(i model.Integration) integrationView {
+	masked := make(map[string]any, len(i.Credentials))
+	keys := []string{}
+	for k, v := range i.Credentials {
+		s, isStr := v.(string)
+		if v == nil || (isStr && strings.TrimSpace(s) == "") {
+			continue
+		}
+		keys = append(keys, k)
+		if isStr && publicCredentialKeys[k] {
+			masked[k] = s
+		} else {
+			masked[k] = maskSecret(s)
+		}
+	}
+	sort.Strings(keys)
+	i.Credentials = masked
+	return integrationView{Integration: i, CredentialKeys: keys}
+}
+
+// respondWriteError maps a create/update failure to a status. A duplicate
+// name is the one users hit, so it gets a plain message.
+func respondWriteError(w http.ResponseWriter, err error) {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		RespondError(w, http.StatusConflict, "an integration with this name already exists")
+		return
+	}
+	RespondError(w, http.StatusInternalServerError, err.Error())
+}
+
+// ownedIntegration resolves {integrationID} to an integration of the caller's
+// org. Another org's integration is a 404 — it holds that org's credentials.
+func (h *IntegrationHandler) ownedIntegration(w http.ResponseWriter, r *http.Request) (*model.Integration, bool) {
+	id, err := uuid.Parse(chi.URLParam(r, "integrationID"))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid integration id")
+		return nil, false
+	}
+	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid org_id in token")
+		return nil, false
+	}
+	i, err := h.svc.Get(r.Context(), id)
+	if err != nil || i == nil || i.OrgID != orgID {
+		RespondError(w, http.StatusNotFound, "integration not found")
+		return nil, false
+	}
+	return i, true
 }
 
 // Create handles POST /integrations
@@ -46,10 +126,10 @@ func (h *IntegrationHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	i, err := h.svc.Create(r.Context(), orgID, userID, req)
 	if err != nil {
-		RespondError(w, http.StatusInternalServerError, err.Error())
+		respondWriteError(w, err)
 		return
 	}
-	RespondJSON(w, http.StatusCreated, i)
+	RespondJSON(w, http.StatusCreated, maskIntegration(*i))
 }
 
 // List handles GET /integrations
@@ -65,33 +145,27 @@ func (h *IntegrationHandler) List(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if items == nil {
-		items = []model.Integration{}
+	out := make([]integrationView, 0, len(items))
+	for _, i := range items {
+		out = append(out, maskIntegration(i))
 	}
-	RespondJSON(w, http.StatusOK, items)
+	RespondJSON(w, http.StatusOK, out)
 }
 
 // Get handles GET /integrations/{integrationID}
 func (h *IntegrationHandler) Get(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "integrationID"))
-	if err != nil {
-		RespondError(w, http.StatusBadRequest, "invalid integration id")
+	i, ok := h.ownedIntegration(w, r)
+	if !ok {
 		return
 	}
-
-	i, err := h.svc.Get(r.Context(), id)
-	if err != nil {
-		RespondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	RespondJSON(w, http.StatusOK, i)
+	RespondJSON(w, http.StatusOK, maskIntegration(*i))
 }
 
-// Update handles PUT /integrations/{integrationID}
+// Update handles PUT /integrations/{integrationID}. Credentials are merged:
+// a key sent blank or left out keeps its stored value.
 func (h *IntegrationHandler) Update(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "integrationID"))
-	if err != nil {
-		RespondError(w, http.StatusBadRequest, "invalid integration id")
+	existing, ok := h.ownedIntegration(w, r)
+	if !ok {
 		return
 	}
 
@@ -100,23 +174,22 @@ func (h *IntegrationHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	i, err := h.svc.Update(r.Context(), id, req)
+	i, err := h.svc.Update(r.Context(), existing.ID, req)
 	if err != nil {
-		RespondError(w, http.StatusInternalServerError, err.Error())
+		respondWriteError(w, err)
 		return
 	}
-	RespondJSON(w, http.StatusOK, i)
+	RespondJSON(w, http.StatusOK, maskIntegration(*i))
 }
 
 // Delete handles DELETE /integrations/{integrationID}
 func (h *IntegrationHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "integrationID"))
-	if err != nil {
-		RespondError(w, http.StatusBadRequest, "invalid integration id")
+	i, ok := h.ownedIntegration(w, r)
+	if !ok {
 		return
 	}
 
-	if err := h.svc.Delete(r.Context(), id); err != nil {
+	if err := h.svc.Delete(r.Context(), i.ID); err != nil {
 		RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -125,9 +198,8 @@ func (h *IntegrationHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 // LinkTask handles POST /integrations/{integrationID}/tasks/{taskID}/link
 func (h *IntegrationHandler) LinkTask(w http.ResponseWriter, r *http.Request) {
-	integrationID, err := uuid.Parse(chi.URLParam(r, "integrationID"))
-	if err != nil {
-		RespondError(w, http.StatusBadRequest, "invalid integration id")
+	integ, ok := h.ownedIntegration(w, r)
+	if !ok {
 		return
 	}
 	taskID, err := uuid.Parse(chi.URLParam(r, "taskID"))
@@ -143,7 +215,7 @@ func (h *IntegrationHandler) LinkTask(w http.ResponseWriter, r *http.Request) {
 		direction = "bidirectional"
 	}
 
-	link, err := h.svc.LinkTask(r.Context(), integrationID, taskID, direction)
+	link, err := h.svc.LinkTask(r.Context(), integ.ID, taskID, direction)
 	if err != nil {
 		RespondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -153,9 +225,8 @@ func (h *IntegrationHandler) LinkTask(w http.ResponseWriter, r *http.Request) {
 
 // UnlinkTask handles DELETE /integrations/{integrationID}/tasks/{taskID}/link
 func (h *IntegrationHandler) UnlinkTask(w http.ResponseWriter, r *http.Request) {
-	integrationID, err := uuid.Parse(chi.URLParam(r, "integrationID"))
-	if err != nil {
-		RespondError(w, http.StatusBadRequest, "invalid integration id")
+	integ, ok := h.ownedIntegration(w, r)
+	if !ok {
 		return
 	}
 	taskID, err := uuid.Parse(chi.URLParam(r, "taskID"))
@@ -164,7 +235,7 @@ func (h *IntegrationHandler) UnlinkTask(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if err := h.svc.UnlinkTask(r.Context(), integrationID, taskID); err != nil {
+	if err := h.svc.UnlinkTask(r.Context(), integ.ID, taskID); err != nil {
 		RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -173,13 +244,12 @@ func (h *IntegrationHandler) UnlinkTask(w http.ResponseWriter, r *http.Request) 
 
 // ListLinks handles GET /integrations/{integrationID}/links
 func (h *IntegrationHandler) ListLinks(w http.ResponseWriter, r *http.Request) {
-	integrationID, err := uuid.Parse(chi.URLParam(r, "integrationID"))
-	if err != nil {
-		RespondError(w, http.StatusBadRequest, "invalid integration id")
+	integ, ok := h.ownedIntegration(w, r)
+	if !ok {
 		return
 	}
 
-	links, err := h.svc.ListLinks(r.Context(), integrationID)
+	links, err := h.svc.ListLinks(r.Context(), integ.ID)
 	if err != nil {
 		RespondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -192,6 +262,9 @@ func (h *IntegrationHandler) ListLinks(w http.ResponseWriter, r *http.Request) {
 
 // SyncLink handles POST /integrations/{integrationID}/links/{linkID}/sync
 func (h *IntegrationHandler) SyncLink(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.ownedIntegration(w, r); !ok {
+		return
+	}
 	linkID, err := uuid.Parse(chi.URLParam(r, "linkID"))
 	if err != nil {
 		RespondError(w, http.StatusBadRequest, "invalid link id")
@@ -212,9 +285,8 @@ func (h *IntegrationHandler) SyncLink(w http.ResponseWriter, r *http.Request) {
 
 // ListSyncLogs handles GET /integrations/{integrationID}/sync-logs
 func (h *IntegrationHandler) ListSyncLogs(w http.ResponseWriter, r *http.Request) {
-	integrationID, err := uuid.Parse(chi.URLParam(r, "integrationID"))
-	if err != nil {
-		RespondError(w, http.StatusBadRequest, "invalid integration id")
+	integ, ok := h.ownedIntegration(w, r)
+	if !ok {
 		return
 	}
 
@@ -222,7 +294,7 @@ func (h *IntegrationHandler) ListSyncLogs(w http.ResponseWriter, r *http.Request
 	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
 	params := model.PaginationParams{Page: page, PerPage: perPage}
 
-	logs, err := h.svc.ListSyncLogs(r.Context(), integrationID, params)
+	logs, err := h.svc.ListSyncLogs(r.Context(), integ.ID, params)
 	if err != nil {
 		RespondError(w, http.StatusInternalServerError, err.Error())
 		return

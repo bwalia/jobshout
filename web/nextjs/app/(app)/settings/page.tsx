@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { apiClient } from "@/lib/api/client";
 import { useAuthStore } from "@/lib/store/auth-store";
 import type { AuthUser } from "@/lib/auth/auth";
+import { IntegrationsSettings } from "@/components/settings/IntegrationsSettings";
 
 export default function SettingsPage() {
   const user = useAuthStore((s) => s.user);
@@ -140,7 +141,7 @@ export default function SettingsPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Manage your profile and organisation preferences.
+          Manage your profile, organisation and integrations.
         </p>
       </div>
 
@@ -273,6 +274,8 @@ export default function SettingsPage() {
           </button>
         </form>
       </section>
+
+      <IntegrationsSettings />
     </div>
   );
 }
