@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -102,8 +103,16 @@ func (s *integrationService) Update(ctx context.Context, id uuid.UUID, req model
 	if req.BaseURL != nil {
 		i.BaseURL = *req.BaseURL
 	}
-	if req.Credentials != nil {
-		i.Credentials = req.Credentials
+	// Merge, never replace: the API only ever shows masked secrets, so a key
+	// sent blank (or left out) keeps its stored value.
+	if i.Credentials == nil {
+		i.Credentials = map[string]any{}
+	}
+	for k, v := range req.Credentials {
+		if str, ok := v.(string); v == nil || (ok && strings.TrimSpace(str) == "") {
+			continue
+		}
+		i.Credentials[k] = v
 	}
 	if req.Config != nil {
 		i.Config = req.Config
