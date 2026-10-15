@@ -1,14 +1,27 @@
-# Runbook: JobShout secrets in WSL Vault
+# Runbook: JobShout secrets in WSLVault
 
 On k3s1, Ring Promoter deploys with `externalSecret.enabled=false`, so
 Helm-owned `jobshout-secrets` is placeholders only and is reset every deploy.
-Real credentials live in **WSL Vault** (KV v2 mount `kv`) and are synced by
+Real credentials live in **WSLVault** (KV v2 mount `kv`) and are synced by
 ESO (`ClusterSecretStore` `wslvault-backend`) into per-purpose Secrets listed
 in `extraSecretRefs`. Chart values commit **paths only**, never values.
 
+This is **WSLVault**, not HashiCorp Vault. Use the WSLVault UI or the
+`wslvault` CLI — do not use the HashiCorp `vault` binary against this host.
+
+| | |
+| --- | --- |
+| UI login | https://vault-ui.workstation.co.uk/login |
+| API | https://vault.workstation.co.uk |
+| Docs | https://www.wslvault.org/ |
+| KV mount | `kv` (versioned / Vault-compatible KV v2 API) |
+
+Scoped API keys / tokens are created in the WSLVault UI. WSLVault does not
+implement HashiCorp `auth/token/create` or `sys/policies`.
+
 ## Path layout
 
-| K8s Secret | Vault path (KV v2 under `kv`) | Expected env keys |
+| K8s Secret | WSLVault path (under mount `kv`) | Expected env keys |
 | --- | --- | --- |
 | `jobshout-core` | `jobshout/<ring>/core` | `DATABASE_PASSWORD`, `JWT_SECRET`, `PYTHON_SIDECAR_SECRET` |
 | `jobshout-cms` | `jobshout/<ring>/cms` | `OPSAPI_API_KEY` (CMS-only — no gateway/Gemini/MinIO keys) |
@@ -28,31 +41,63 @@ in `extraSecretRefs`. Chart values commit **paths only**, never values.
 
 `jobshout-secretsrot-kube` (kubeconfig file mount) stays out-of-band for now.
 
-## Add or rotate a secret
+## Populate a path (before first ESO sync)
 
-1. Write or update the KV v2 path in the WSL Vault UI (or CLI). Seed from the
-   existing k8s Secret once if migrating; do not paste values into git, tickets,
-   or PR bodies.
-2. Ensure `values-<ring>.yaml` lists the name in both `extraSecretRefs` and
-   `vaultSecrets` (`store: wslvault-backend`, `key: jobshout/<ring>/<name>`).
-3. After deploy (or annotate to force-sync):
+Seed from the live k8s Secret when migrating. Keep values in your terminal or
+the UI only — never paste them into git, tickets, chat, or PR bodies.
+
+### UI
+
+1. Sign in at https://vault-ui.workstation.co.uk/login.
+2. Open the `kv` engine and create (or edit) the path, e.g. `jobshout/int/gemini`.
+3. Add each env key with its value (exact names from the table above).
+4. For `jobshout/int/cms`, write **`OPSAPI_API_KEY` only** — drop any
+   gateway/Gemini/MinIO keys that drifted into the old hand-applied Secret.
+
+Read a value locally to paste into the UI:
+
+```bash
+kubectl -n int get secret jobshout-gemini -o jsonpath='{.data.GEMINI_API_KEY}' | base64 -d
+# paste into WSLVault UI; do not echo into shared logs
+```
+
+### `wslvault` CLI
+
+```bash
+wslvault login --key wslv_…   # API key from the WSLVault UI
+
+GEMINI_API_KEY=$(kubectl -n int get secret jobshout-gemini -o jsonpath='{.data.GEMINI_API_KEY}' | base64 -d)
+wslvault kv put jobshout/int/gemini GEMINI_API_KEY="$GEMINI_API_KEY"
+unset GEMINI_API_KEY
+
+# confirm keys only (no values)
+wslvault kv get jobshout/int/gemini   # inspect keys; avoid sharing output
+```
+
+Optional / missing secrets (`research`, `linkedin`) can wait; refs are
+`optional: true`. Populate **gemini / gateways / strix / cms / core** before
+merge so ExternalSecrets can sync on deploy.
+
+## After chart deploy: sync and restart
+
+1. Wait for ESO (or force-sync):
    ```bash
    kubectl -n <ring> annotate externalsecret <name> force-sync="$(date +%s)" --overwrite
    kubectl -n <ring> get externalsecret <name>
    # STATUS=SecretSynced, READY=True
    ```
-4. Confirm ESO owns the Secret (`ownerReferences` → ExternalSecret). Only then
+2. Confirm ESO owns the Secret (`ownerReferences` → ExternalSecret). Only then
    remove stale `kubectl.kubernetes.io/last-applied-configuration` annotations
    from hand-applied secrets. Chart `deletionPolicy: Retain` — removing a
    `vaultSecrets` entry does not delete the Secret.
-5. Restart the API so it reloads env (prefer Ring Promoter with an explicit
+3. Restart the API so it reloads env (prefer Ring Promoter with an explicit
    deployments list — never restart by `app.kubernetes.io/instance=jobshout`
    alone):
    ```bash
-   # example: POST /api/apps/jobshout/rings/<ring>/restart
+   # POST /api/apps/jobshout/rings/<ring>/restart
    # body: {"deployments":["jobshout-api"]}
    ```
-6. Verify key presence only, not values:
+4. Verify key presence only, not values:
    ```bash
    kubectl -n <ring> exec deploy/jobshout-api -- sh -c \
      'for k in GEMINI_API_KEY OPSAPI_API_KEY IMAGE_JWT_SECRET; do
