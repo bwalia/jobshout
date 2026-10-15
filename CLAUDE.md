@@ -19,7 +19,7 @@
 
 ## Secrets on k3s1
 
-- ESO is installed (serves `external-secrets.io/v1` only) with ClusterSecretStore `wslvault-backend` → WSLVault `kv` mount. But the chart is installed with `externalSecret.enabled=false`, so `jobshout-secrets` is **Helm-owned** — patching it is undone by the next deploy. `extraSecretRefs` Secrets are not Helm-managed and are safe to patch.
+- ESO is installed (serves `external-secrets.io/v1` only) with ClusterSecretStore `wslvault-backend` → WSLVault `kv` mount. The chart is installed with `externalSecret.enabled=false`, so Helm-owned `jobshout-secrets` is placeholders only — patching it is undone by the next deploy. Real credentials go in WSL Vault at `jobshout/<ring>/<name>` and are materialised via `vaultSecrets` + `extraSecretRefs` (see `docs/wsl-vault-secrets.md`). After sync/rotation, restart `jobshout-api` with an explicit deployments list.
 - WSLVault speaks the KV v2 API but not `auth/token/create` or `sys/policies`; scoped tokens must be made in its UI.
 - Launch-form values are persisted to the task (`TaskMetaLaunchValues`). Never make a credential a schema field — reference server-side creds by name.
 

@@ -53,36 +53,44 @@ storage:
 # To enable here, all three parts are needed — baseURL alone leaves the client
 # disabled, and so does the secret alone:
 #   1. set enabled: true and a baseURL below
-#   2. kubectl -n prod create secret generic jobshout-wslproxy \
-#        --from-literal=WSLPROXY_API_TOKEN=<token>
-#   3. add an extraSecretRefs list to this file naming jobshout-wslproxy
-#      (this ring has none yet, so it inherits the empty default)
+#   2. populate WSL Vault at jobshout/prod/wslproxy (WSLPROXY_API_TOKEN, …)
+#   3. add jobshout-wslproxy to extraSecretRefs + vaultSecrets below
 wafLab:
   enabled: false
   baseURL: ""
 
-# Shared workstation gateway secrets: OLLAMA_JWT_SECRET and IMAGE_JWT_SECRET.
-# The chart renders jobshout-secrets with them empty when externalSecret is
-# off, so without this the gateways refuse every LLM and image call (403).
-# Created by hand on k3s1, never in git.
+# Secrets layered after jobshout-secrets. Values in WSL Vault; ESO syncs via
+# vaultSecrets. See docs/wsl-vault-secrets.md. Paths use jobshout/prod/<name>.
 #
 # jobshout-google: "Continue with Google" on /login and /signup
 # (GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET). The OAuth client must
 # list https://www.jobshout.co.uk/api/v1/auth/google/callback as a redirect URI
-# (googleAuth.callbackHost below; the apex URI was never accepted by Google).
-# Refs are optional, so until the secret exists the button just stays hidden.
-#   kubectl -n prod create secret generic jobshout-google \
-#     --from-literal=GOOGLE_OAUTH_CLIENT_ID=... \
-#     --from-literal=GOOGLE_OAUTH_CLIENT_SECRET=...
+# (googleAuth.callbackHost; the apex URI was never accepted by Google).
+# Refs are optional, so until the Vault path is populated the button stays hidden.
+#
+# jobshout-cms: OPSAPI_API_KEY for the Workstation CMS below (CMS-only keys).
+# Minted with scripts/opsapi-api-key.sh against https://opsapi.workstation.co.uk
+# (namespace workstation, scope cms create/update/read). Optional until Vault
+# is filled — Article Writer writes but files nothing.
 extraSecretRefs:
+  - jobshout-core
   - jobshout-gateways
   - jobshout-google
-  # jobshout-cms: OPSAPI_API_KEY for the Workstation CMS below. Minted with
-  # scripts/opsapi-api-key.sh against https://opsapi.workstation.co.uk
-  # (namespace workstation, scope cms create/update/read) and created by hand:
-  #   kubectl -n prod create secret generic jobshout-cms --from-literal=OPSAPI_API_KEY=...
-  # Optional: until it exists the Article Writer writes but files nothing.
   - jobshout-cms
+
+vaultSecrets:
+  - name: jobshout-core
+    store: wslvault-backend
+    key: jobshout/prod/core
+  - name: jobshout-gateways
+    store: wslvault-backend
+    key: jobshout/prod/gateways
+  - name: jobshout-google
+    store: wslvault-backend
+    key: jobshout/prod/google
+  - name: jobshout-cms
+    store: wslvault-backend
+    key: jobshout/prod/cms
 
 # Workstation CMS — articles reach www.workstation.co.uk through it, as int's
 # reach int.workstation.co.uk through int-opsapi. Drafts only: going live is

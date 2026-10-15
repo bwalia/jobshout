@@ -58,19 +58,13 @@ spec:
             - secretRef:
                 name: jobshout-secrets
             {{- /*
-              Secrets this chart does NOT manage, layered last so their keys win
-              over the placeholders in jobshout-secrets.
-
-              This exists because the deploy has nowhere else to put a real
-              credential: Ring Promoter helm-installs with externalSecret off
-              (k3s1's Vault stores are not usable), and the chart is git-cloned
-              from a PUBLIC repo, so a values file is not a place a token can
-              live. Instead the secret is created on the cluster out of band and
-              named here — the name is not sensitive, the value never enters git,
-              and helm leaves it alone across redeploys.
-
-              optional: true so a ring that has not created it still starts;
-              the affected feature just stays disabled.
+              Secrets layered last so their keys win over the placeholders in
+              jobshout-secrets. On k3s1 Ring Promoter installs with
+              externalSecret off, and this chart is public — credentials live
+              in WSL Vault and are materialised by vaultSecrets (ESO). List the
+              Secret name here (extraSecretRefs); helm does not own these
+              objects. optional: true so a ring whose Vault path is not yet
+              populated still starts; the affected feature stays disabled.
             */}}
             {{- range .Values.extraSecretRefs }}
             - secretRef:

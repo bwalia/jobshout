@@ -37,34 +37,31 @@ externalSecret:
   vaultKeyPrefix: secret/jobshout
   vaultKeySuffix: config
 
-# Secrets that exist on the cluster but are NOT managed by this chart, layered
-# onto the API's environment after jobshout-secrets so their keys win.
+# Secrets layered onto the API after jobshout-secrets so their keys win.
 #
-# Real credentials have nowhere else to go on the k3s path: Ring Promoter
-# deploys with externalSecret.enabled=false, and it git-clones this chart from a
-# public repo — so anything committed here is public. Create the secret on the
-# cluster once and name it here:
+# On k3s1, Ring Promoter deploys with externalSecret.enabled=false (Helm-owned
+# jobshout-secrets is placeholders only) and clones this chart from a public
+# repo — values here must never hold credentials. Put real values in WSL Vault
+# at jobshout/<ring>/<name>, list the Secret name here, and add a matching
+# vaultSecrets entry so ESO materialises it. See docs/wsl-vault-secrets.md.
 #
-#   kubectl -n <ring> create secret generic jobshout-cms \
-#     --from-literal=OPSAPI_API_KEY=<key> \
-#     --dry-run=client -o yaml | kubectl apply -f -
-#
-# Missing secrets are tolerated (optional: true), so naming one before it exists
-# does not break a deploy.
+# Missing secrets are tolerated (optional: true), so naming one before Vault is
+# populated does not break a deploy.
 extraSecretRefs: []
 
-# Secrets kept in Vault instead of created by hand. Each entry renders an
-# ExternalSecret that copies every key under `key` into a Secret called
-# `name`; list the same name in extraSecretRefs so the API loads it. Only the
-# Vault path is committed — the values never are.
+# Secrets kept in WSL Vault (KV v2 under kv/). Each entry renders an
+# ExternalSecret (store: wslvault-backend) that copies every key under `key`
+# into a Secret called `name`; list the same name in extraSecretRefs so the API
+# loads it. Only the Vault path is committed — the values never are.
 #
 #   vaultSecrets:
 #     - name: jobshout-linkedin
 #       store: wslvault-backend   # ClusterSecretStore
 #       key: jobshout/int/linkedin
 #
-# The API reads its environment at start, so restart it once after the first
-# sync (or a rotation) for new values to take effect.
+# The API reads its environment at start, so restart jobshout-api once after the
+# first sync (or a rotation) for new values to take effect. Prefer Ring Promoter
+# restart with an explicit deployments list.
 vaultSecrets: []
 
 # Arbitrary extra config keys injected into jobshout-config (become env via
@@ -74,20 +71,23 @@ extraConfig: {}
 
 # Fallback plaintext secrets, used ONLY when externalSecret.enabled=false.
 # On k3s1 that is every deploy, so these stay as placeholders: a real value
-# committed here would be public. Anything genuinely secret belongs in an
-# extraSecretRefs secret instead.
+# committed here would be public. Override DATABASE_PASSWORD / JWT_SECRET /
+# PYTHON_SIDECAR_SECRET via Vault path jobshout/<ring>/core → jobshout-core
+# (extraSecretRefs). Feature keys (Gemini, gateways, CMS, …) live in their own
+# vaultSecrets paths — never here.
 secrets:
   databaseUser: jobshout
   databasePassword: ""
   jwtSecret: ""
   openaiApiKey: ""
-  # Set via extraSecretRefs or --set-string; never committed here.
+  # Prefer jobshout/<ring>/gemini → jobshout-gemini; never committed here.
   geminiApiKey: ""
-  # Set via --set-string or Vault; never committed here.
+  # Prefer jobshout/<ring>/gateways → jobshout-gateways; never committed here.
   ollamaJwtSecret: ""
-  # Gateway secret for strix-service. Distinct from ollama/image on purpose.
+  # Prefer jobshout/<ring>/strix → jobshout-strix; never committed here.
   strixJwtSecret: ""
   imageJwtSecret: ""
+  # Prefer jobshout/<ring>/cms → jobshout-cms; never committed here.
   opsapiApiKey: ""
   pythonSidecarSecret: ""
   registryUsername: ""
@@ -266,12 +266,9 @@ pentest:
   targetAllowlist: ""
 
 # WAF Efficacy Lab — talks to wslproxy. Empty baseURL disables the feature.
-# Token / username / password belong in extraSecretRefs (never committed).
-#
-#   kubectl -n <ring> create secret generic jobshout-wslproxy \
-#     --from-literal=WSLPROXY_API_TOKEN=<token> \
-#     --dry-run=client -o yaml | kubectl apply -f -
-#
+# Token / username / password: populate WSL Vault at jobshout/<ring>/wslproxy
+# (WSLPROXY_API_TOKEN, or WSLPROXY_USERNAME + WSLPROXY_PASSWORD; optional
+# WSLPROXY_MCP_API_KEY). Name jobshout-wslproxy in extraSecretRefs + vaultSecrets.
 wafLab:
   enabled: true
   baseURL: ""
@@ -293,59 +290,35 @@ wafLab:
   abObservePath: "/version"
 
 # Mail Agent — one shared org Gmail. OAuth client id/secret and GMAIL_TOKEN_KEY
-# are secrets (extraSecretRefs), not chart values. Empty client id leaves Connect
-# disabled; the builtin agent still seeds.
-#
-#   kubectl -n <ring> create secret generic jobshout-mail \
-#     --from-literal=GMAIL_CLIENT_ID=<google-oauth-client-id> \
-#     --from-literal=GMAIL_CLIENT_SECRET=<google-oauth-client-secret> \
-#     --from-literal=GMAIL_TOKEN_KEY=$(openssl rand -hex 32) \
-#     --dry-run=client -o yaml | kubectl apply -f -
-#
+# live in WSL Vault at jobshout/<ring>/mail (Secret jobshout-mail). Empty client
+# id leaves Connect disabled; the builtin agent still seeds.
 mail:
   pollInterval: "5m"
   reconcileInterval: "15s"
 
 # Google sign-in / sign-up (platform login, not Gmail). Client id/secret live in
-# an extraSecretRefs secret. Empty client id hides the button; email/password
-# still works. Helm sets GOOGLE_OAUTH_REDIRECT_URL from googleAuth.callbackHost,
-# falling back to .Values.host. The callback host must be registered on the
-# OAuth client and serve /api (host or a hostAlias); login state is server-side,
-# so starting on one host and returning on another is fine.
-#
-#   kubectl -n <ring> create secret generic jobshout-google \
-#     --from-literal=GOOGLE_OAUTH_CLIENT_ID=<id> \
-#     --from-literal=GOOGLE_OAUTH_CLIENT_SECRET=<secret> \
-#     --dry-run=client -o yaml | kubectl apply -f -
-#
-# Name that secret in extraSecretRefs. You may instead add those two keys to
-# jobshout-mail if the ring already mounts it.
+# WSL Vault at jobshout/<ring>/google (Secret jobshout-google). Empty client id
+# hides the button; email/password still works. Helm sets
+# GOOGLE_OAUTH_REDIRECT_URL from googleAuth.callbackHost, falling back to
+# .Values.host. The callback host must be registered on the OAuth client and
+# serve /api (host or a hostAlias); login state is server-side, so starting on
+# one host and returning on another is fine.
 googleAuth:
   callbackHost: ""
 
 # General web search for the Research Agent (Brave Search API). Optional:
 # without it research searches Hacker News and arXiv only, and a brief outside
-# software finds little that is relevant. Create the secret once per ring:
-#
-#   kubectl -n <ring> create secret generic jobshout-research \
-#     --from-literal=BRAVE_SEARCH_API_KEY=<key> \
-#     --dry-run=client -o yaml | kubectl apply -f -
-#
-# and name it in extraSecretRefs. The entry plan allows one request a second;
-# the client spaces its requests to stay inside that.
+# software finds little that is relevant. Populate WSL Vault at
+# jobshout/<ring>/research (BRAVE_SEARCH_API_KEY, optional research GITHUB_TOKEN)
+# and name jobshout-research in extraSecretRefs + vaultSecrets. The entry plan
+# allows one request a second; the client spaces its requests to stay inside that.
 
 # In-cluster PR reviewer (OpenCode + git clones in the pod; Ollama on the Mac
 # via ollama.workstation.co.uk). Off by default — int opts in. No public URL:
-# the API reaches it at http://jobshout-review-bot:8765. Create the operator
-# secret once per ring that enables this:
-#
-#   kubectl -n <ring> create secret generic jobshout-review \
-#     --from-literal=GITHUB_TOKEN=<repo-scope-bot> \
-#     --from-literal=REVIEW_BOT_TOKEN=$(openssl rand -hex 32) \
-#     --dry-run=client -o yaml | kubectl apply -f -
-#
-# and name it in extraSecretRefs. The sidecar also needs OLLAMA_JWT_SECRET from
-# jobshout-secrets (same gateway as articles).
+# the API reaches it at http://jobshout-review-bot:8765. Populate WSL Vault at
+# jobshout/<ring>/review (GITHUB_TOKEN, REVIEW_BOT_TOKEN) and name
+# jobshout-review in extraSecretRefs + vaultSecrets. The sidecar also needs
+# OLLAMA_JWT_SECRET from jobshout-gateways (same gateway as articles).
 # Sign in with Apple for the iOS app (docs/plans/08-ios-app.md). Bundle ids
 # accepted as the identity-token audience; empty disables it.
 apple:
@@ -373,23 +346,17 @@ reviewBot:
 # restart). Everything here is non-secret. Credentials are NAMED server-side
 # and never entered in a launch form (launch values are stored on the task):
 #
-#   SECRETS_ROT_GITHUB_TOKEN  dedicated fine-grained token, "Secrets: write" on
-#                             the target repos only (NOT the research GITHUB_TOKEN)
-#   RP_API_TOKEN              Ring Promoter bearer token
-#   RP_PROD_PASSWORD          optional; only sent when restarting ring prod
+#   SECRETS_VAULT_ADDR / SECRETS_VAULT_TOKEN  Vault access for rotation
+#   RP_API_TOKEN                               Ring Promoter bearer token
+#   SECRETS_ROT_GITHUB_TOKEN                   optional; "Secrets: write" on
+#                                              target repos only (NOT research)
+#   RP_PROD_PASSWORD                           optional; only when restarting prod
 #
-# Put those keys in Vault at secret/jobshout/<env>/config so the existing
-# jobshout-secrets ExternalSecret materialises them, or — on k3s1, where
-# externalSecret.enabled=false — in an extraSecretRefs secret:
-#
-#   kubectl -n <ring> create secret generic jobshout-secretsrot \
-#     --from-literal=SECRETS_ROT_GITHUB_TOKEN=<token> \
-#     --from-literal=RP_API_TOKEN=<token> \
-#     --dry-run=client -o yaml | kubectl apply -f -
+# On k3s1 put those keys in WSL Vault at jobshout/<ring>/secretsrot (Secret
+# jobshout-secretsrot via vaultSecrets). Do not put them in Helm jobshout-secrets.
 #
 # Kubeconfigs are mounted as files, one key per cluster name (launch field
-# cluster=k3s1 reads <mountPath>/k3s1). Keep them in Vault and sync them into
-# the Secret below with ESO, or create it out of band:
+# cluster=k3s1 reads <mountPath>/k3s1). That Secret stays out-of-band for now:
 #
 #   kubectl -n <ring> create secret generic jobshout-secretsrot-kube \
 #     --from-file=k3s1=./k3s1-secretsrot.kubeconfig
@@ -400,7 +367,7 @@ reviewBot:
 #   externalsecrets.external-secrets.io  get, patch   (only if ESO is installed)
 #   deployments.apps                     get, list    (restart consumer lookup)
 # The agent refuses to patch Helm-managed Secrets (a helm upgrade would revert
-# them); target the extraSecretRefs Secrets (jobshout-cms, jobshout-mail, …).
+# them); target the Vault-backed Secrets (jobshout-cms, jobshout-mail, …).
 secretsRotation:
   rpURL: "https://rp.workstation.co.uk"
   kubeconfig:
