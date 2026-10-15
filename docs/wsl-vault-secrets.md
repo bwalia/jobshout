@@ -63,15 +63,35 @@ kubectl -n int get secret jobshout-gemini -o jsonpath='{.data.GEMINI_API_KEY}' |
 
 ### `wslvault` CLI
 
-```bash
-wslvault login --key wslv_…   # API key from the WSLVault UI
+Install (macOS / Linux, needs Rust):
 
+```bash
+cargo install --git https://github.com/bwalia/wslvault --locked wslvault-cli
+# binary: ~/.cargo/bin/wslvault
+```
+
+Configure once (token/API key from the WSLVault UI — not HashiCorp `vault login`):
+
+```bash
+wslvault init
+# endpoint: https://vault.workstation.co.uk
+# writes ~/.wslvault/config.toml
+#
+# or non-interactive:
+#   export WSLVAULT_ADDR=https://vault.workstation.co.uk
+#   export WSLVAULT_TOKEN=…   # from vault-ui
+#   export WSLVAULT_TENANT_ID=…
+```
+
+Seed a path (real subcommand is `secret`, not HashiCorp-style `kv`):
+
+```bash
 GEMINI_API_KEY=$(kubectl -n int get secret jobshout-gemini -o jsonpath='{.data.GEMINI_API_KEY}' | base64 -d)
-wslvault kv put jobshout/int/gemini GEMINI_API_KEY="$GEMINI_API_KEY"
+wslvault secret put jobshout/int/gemini --data GEMINI_API_KEY="$GEMINI_API_KEY"
 unset GEMINI_API_KEY
 
-# confirm keys only (no values)
-wslvault kv get jobshout/int/gemini   # inspect keys; avoid sharing output
+# confirm (avoid sharing full output)
+wslvault secret get jobshout/int/gemini --format json | jq 'keys'
 ```
 
 Optional / missing secrets (`research`, `linkedin`) can wait; refs are
