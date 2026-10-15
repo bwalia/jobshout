@@ -264,15 +264,12 @@ pub fn clean_skills(raw: &[AgentSkillInput]) -> Result<Vec<AgentSkill>, DomainEr
         if out.iter().any(|o| o.slug == slug) {
             continue;
         }
-        let level = if s.level < 1 {
-            1
-        } else if s.level > 10 {
-            10
-        } else {
-            s.level
-        };
         // Zero often means "forgot to set"; treat as a solid mid claim.
-        let level = if s.level == 0 { 7 } else { level };
+        let level = if s.level == 0 {
+            7
+        } else {
+            s.level.clamp(1, 10)
+        };
         out.push(AgentSkill { slug, name, level });
     }
     if out.len() > MAX_TAGS {
