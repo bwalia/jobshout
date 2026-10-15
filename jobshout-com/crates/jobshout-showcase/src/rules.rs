@@ -4,8 +4,8 @@
 
 use jobshout_content::media::is_web_url;
 use jobshout_content::render::word_count;
-use jobshout_content::Actor;
 use jobshout_content::rules::slugify;
+use jobshout_content::Actor;
 use jobshout_domain::{
     AgentSkill, AgentSkillInput, DomainError, InsightSource, ProductionEvidence, ShowcaseAgent,
     ShowcaseApp, ShowcaseAppInput, ShowcaseIndustry, ShowcaseKind, ShowcaseLinkInput,
@@ -276,9 +276,7 @@ pub fn clean_skills(raw: &[AgentSkillInput]) -> Result<Vec<AgentSkill>, DomainEr
         out.push(AgentSkill { slug, name, level });
     }
     if out.len() > MAX_TAGS {
-        return Err(DomainError::Validation(
-            "list at most 15 skills".into(),
-        ));
+        return Err(DomainError::Validation("list at most 15 skills".into()));
     }
     Ok(out)
 }
@@ -459,12 +457,12 @@ pub fn validate(kind: ShowcaseKind, input: &ShowcaseAppInput) -> Result<Cleaned,
 
     // Agents: when skills are submitted, mirror their names into technologies
     // so existing tech filters and search keep working.
-    let technologies = if kind == ShowcaseKind::Agent && input.skills.is_some() && !skills.is_empty()
-    {
-        skills.iter().map(|s| s.name.clone()).collect()
-    } else {
-        technologies
-    };
+    let technologies =
+        if kind == ShowcaseKind::Agent && input.skills.is_some() && !skills.is_empty() {
+            skills.iter().map(|s| s.name.clone()).collect()
+        } else {
+            technologies
+        };
 
     let cleaned = Cleaned {
         screenshots,
