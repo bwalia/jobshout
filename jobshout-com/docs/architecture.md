@@ -68,7 +68,10 @@ Implemented:
 - **Agent directory** (`/agents`): agents and agent teams are showcase entries too,
   with `kind` = `agent` | `team` in `showcase_apps`, so they share review, stars, search,
   visibility and "Your showcase". Agents add a model and provider, capabilities (a fixed
-  list in `AGENT_CAPABILITIES`), skills, tools and MCP servers.
+  list in `AGENT_CAPABILITIES`), tools and MCP servers, and **skills with proficiency**
+  (`showcase_skills` catalog + `showcase_agent_skills` levels 1–10). Browse at
+  `/agents/skills` and `/agents/skills/{slug}`; agent profiles show vision-style bars.
+  Creators can add new skill names on submit (upsert into the catalog).
   - `showcase_links` records who built what: app → agent, app → team, team → member agent
     (ordered, with a role). A link target must be public and published, or the creator's
     own; the public only ever sees published targets.

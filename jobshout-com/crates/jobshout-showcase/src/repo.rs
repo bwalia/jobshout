@@ -2,9 +2,10 @@ use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, Utc};
 use jobshout_domain::{
-    DomainError, InsightSource, Job, ShowcaseApp, ShowcaseAppId, ShowcaseAppType,
+    AgentSkill, DomainError, InsightSource, Job, ShowcaseApp, ShowcaseAppId, ShowcaseAppType,
     ShowcaseBuildMethod, ShowcaseIndustry, ShowcaseKind, ShowcaseLink, ShowcaseMaturity,
-    ShowcasePricing, ShowcaseStatus, ShowcaseTag, ShowcaseVerification, ShowcaseVisibility,
+    ShowcasePricing, ShowcaseSkill, ShowcaseStatus, ShowcaseTag, ShowcaseVerification,
+    ShowcaseVisibility,
 };
 use jobshout_jobs::job_from_row;
 use sqlx::types::Json;
@@ -48,6 +49,8 @@ pub struct AppRecord {
     pub links: Vec<(ShowcaseAppId, String)>,
     /// Linked jobs in display order.
     pub job_ids: Vec<Uuid>,
+    /// Agents only: replace skills when `Some` (including empty = clear).
+    pub skills: Option<Vec<AgentSkill>>,
 }
 
 /// A job a link points at, as resolved from a submitted id.
@@ -92,6 +95,8 @@ pub struct ListQuery {
     pub pricing: Option<ShowcasePricing>,
     pub technology: Option<String>,
     pub capability: Option<String>,
+    /// Agents that claim this skill slug.
+    pub skill: Option<String>,
     /// An industry or vertical slug; entries tagged with it.
     pub industry: Option<String>,
     /// With `industry`: also general-purpose (`cross-industry`) entries,
@@ -132,10 +137,16 @@ impl ShowcaseRepository {
             Sort::Updated => "a.updated_at DESC",
         };
         // A sector's own entries come before general-purpose ones, and a
-        // search ranks by relevance before the chosen sort.
+        // search ranks by relevance before the chosen sort. Skill browse
+        // puts the strongest self-declared level first.
         let mut order = Vec::new();
         if q.industry.is_some() && q.include_cross_industry {
             order.push("(CASE WHEN $20::text = ANY(a.industries) THEN 0 ELSE 1 END)");
+        }
+        if q.skill.is_some() {
+            order.push(
+                "(SELECT sk.level FROM showcase_agent_skills sk WHERE sk.agent_id = a.id AND sk.skill_slug = $23) DESC NULLS LAST",
+            );
         }
         if q.q.is_some() {
             order.push("ts_rank(a.search, websearch_to_tsquery('english', $4)) DESC");
@@ -174,6 +185,9 @@ impl ShowcaseRepository {
               AND ($20::text IS NULL OR $20 = ANY(a.industries)
                    OR ($21 AND 'cross-industry' = ANY(a.industries)))
               AND (NOT $22 OR cardinality(a.industries) = 0)
+              AND ($23::text IS NULL OR EXISTS (
+                    SELECT 1 FROM showcase_agent_skills sk
+                    WHERE sk.agent_id = a.id AND sk.skill_slug = $23))
             ORDER BY {order}
             LIMIT $13 OFFSET $14
             "#
@@ -206,6 +220,7 @@ impl ShowcaseRepository {
             .bind(q.industry.as_deref())
             .bind(q.include_cross_industry)
             .bind(q.unclassified)
+            .bind(q.skill.as_deref())
             .fetch_all(&self.pool)
             .await
             .map_err(db)?;
@@ -214,6 +229,7 @@ impl ShowcaseRepository {
         self.attach_links(&mut apps, q.viewer_email.as_deref())
             .await?;
         self.attach_jobs(&mut apps).await?;
+        self.attach_skills(&mut apps).await?;
         Ok((apps, total))
     }
 
@@ -261,7 +277,154 @@ impl ShowcaseRepository {
         let mut apps = vec![from_row(&row)?];
         self.attach_links(&mut apps, viewer_email).await?;
         self.attach_jobs(&mut apps).await?;
+        self.attach_skills(&mut apps).await?;
         Ok(apps.remove(0))
+    }
+
+    /// Fill `skills` for agents (ordered by position). Apps/teams stay empty.
+    async fn attach_skills(&self, apps: &mut [ShowcaseApp]) -> Result<(), DomainError> {
+        let ids: Vec<Uuid> = apps
+            .iter()
+            .filter(|a| a.kind == ShowcaseKind::Agent)
+            .map(|a| a.id)
+            .collect();
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let rows = sqlx::query(
+            r#"
+            SELECT s.agent_id, s.skill_slug, s.level, c.name
+            FROM showcase_agent_skills s
+            JOIN showcase_skills c ON c.slug = s.skill_slug
+            WHERE s.agent_id = ANY($1)
+            ORDER BY s.position, c.name
+            "#,
+        )
+        .bind(&ids)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db)?;
+        let mut by: HashMap<Uuid, Vec<AgentSkill>> = HashMap::new();
+        for r in rows {
+            by.entry(r.get("agent_id")).or_default().push(AgentSkill {
+                slug: r.get("skill_slug"),
+                name: r.get("name"),
+                level: r.get("level"),
+            });
+        }
+        for a in apps.iter_mut() {
+            if a.kind == ShowcaseKind::Agent {
+                a.skills = by.remove(&a.id).unwrap_or_default();
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn list_skills(&self) -> Result<Vec<ShowcaseSkill>, DomainError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT slug, name, category, description, position
+            FROM showcase_skills
+            ORDER BY position, name
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db)?;
+        Ok(rows
+            .iter()
+            .map(|r| ShowcaseSkill {
+                slug: r.get("slug"),
+                name: r.get("name"),
+                category: r.get("category"),
+                description: r.get("description"),
+                position: r.get("position"),
+            })
+            .collect())
+    }
+
+    pub async fn skill_by_slug(&self, slug: &str) -> Result<ShowcaseSkill, DomainError> {
+        let row = sqlx::query(
+            r#"
+            SELECT slug, name, category, description, position
+            FROM showcase_skills WHERE slug = $1
+            "#,
+        )
+        .bind(slug)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(db)?
+        .ok_or(DomainError::NotFound)?;
+        Ok(ShowcaseSkill {
+            slug: row.get("slug"),
+            name: row.get("name"),
+            category: row.get("category"),
+            description: row.get("description"),
+            position: row.get("position"),
+        })
+    }
+
+    /// How many public, published agents claim each skill.
+    pub async fn skill_counts(&self) -> Result<HashMap<String, i64>, DomainError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT s.skill_slug AS slug, COUNT(*)::bigint AS count
+            FROM showcase_agent_skills s
+            JOIN showcase_apps a ON a.id = s.agent_id
+            WHERE a.kind = 'agent' AND a.status = 'published' AND a.visibility = 'public'
+            GROUP BY s.skill_slug
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db)?;
+        Ok(rows
+            .into_iter()
+            .map(|r| (r.get::<String, _>("slug"), r.get::<i64, _>("count")))
+            .collect())
+    }
+
+    /// Upsert catalog rows then replace an agent's skill links (call inside a write).
+    async fn set_agent_skills(
+        tx: &mut Transaction<'_, Postgres>,
+        agent_id: ShowcaseAppId,
+        skills: &[AgentSkill],
+    ) -> Result<(), DomainError> {
+        for s in skills {
+            sqlx::query(
+                r#"
+                INSERT INTO showcase_skills (slug, name, category, description, position)
+                VALUES ($1, $2, 'general', '', 100)
+                ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name
+                "#,
+            )
+            .bind(&s.slug)
+            .bind(&s.name)
+            .execute(&mut **tx)
+            .await
+            .map_err(db)?;
+        }
+        sqlx::query("DELETE FROM showcase_agent_skills WHERE agent_id = $1")
+            .bind(agent_id)
+            .execute(&mut **tx)
+            .await
+            .map_err(db)?;
+        for (i, s) in skills.iter().enumerate() {
+            sqlx::query(
+                r#"
+                INSERT INTO showcase_agent_skills (agent_id, skill_slug, level, position)
+                VALUES ($1, $2, $3, $4)
+                "#,
+            )
+            .bind(agent_id)
+            .bind(&s.slug)
+            .bind(s.level)
+            .bind(i as i32)
+            .execute(&mut **tx)
+            .await
+            .map_err(db)?;
+        }
+        Ok(())
     }
 
     /// Fill `linked_agents` and `linked_team`. A target shows when it is
@@ -637,6 +800,9 @@ impl ShowcaseRepository {
         res.map_err(db)?;
         set_links(&mut tx, a.id, &rec.links).await?;
         set_job_links(&mut tx, a.id, &rec.job_ids).await?;
+        if let Some(skills) = &rec.skills {
+            Self::set_agent_skills(&mut tx, a.id, skills).await?;
+        }
         tx.commit().await.map_err(db)
     }
 
@@ -702,6 +868,9 @@ impl ShowcaseRepository {
         .map_err(db)?;
         set_links(&mut tx, a.id, &rec.links).await?;
         set_job_links(&mut tx, a.id, &rec.job_ids).await?;
+        if let Some(skills) = &rec.skills {
+            Self::set_agent_skills(&mut tx, a.id, skills).await?;
+        }
         tx.commit().await.map_err(db)
     }
 
@@ -927,6 +1096,7 @@ fn from_row(r: &sqlx::postgres::PgRow) -> Result<ShowcaseApp, DomainError> {
         tools: r.get("tools"),
         mcp_servers: r.get("mcp_servers"),
         capabilities: r.get("capabilities"),
+        skills: Vec::new(),
         industries: r.get("industries"),
         linked_agents: Vec::new(),
         linked_team: None,

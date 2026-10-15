@@ -13,11 +13,14 @@ import {
   isSortKey,
   listApps,
   listIndustries,
+  listSkills,
   listTags,
+  skillHref,
   type Capability,
   type IndustryNode,
   type ShowcaseApp,
   type ShowcaseTag,
+  type SkillNode,
   type SortKey,
 } from "@/lib/showcase";
 import { currentViewer } from "@/lib/session";
@@ -50,9 +53,11 @@ export default async function AgentsPage({ searchParams }: { searchParams: Searc
   const kind = one(searchParams.kind) === "team" ? "team" : "agent";
   const cap = one(searchParams.capability);
   const sort = one(searchParams.sort);
+  const skillSlug = one(searchParams.skill).toLowerCase() || null;
   const filters = {
     kind,
     capability: kind === "agent" && isCapability(cap) ? (cap as Capability) : null,
+    skill: kind === "agent" ? skillSlug : null,
     tech: one(searchParams.tech) || null,
     industry: one(searchParams.industry).toLowerCase() || null,
     cross: one(searchParams.cross) !== "0",
@@ -60,26 +65,30 @@ export default async function AgentsPage({ searchParams }: { searchParams: Searc
     sort: (isSortKey(sort) ? sort : "new") as SortKey,
   } as const;
   const page = Math.max(1, Number.parseInt(one(searchParams.page) || "1", 10) || 1);
-  const filtered = Boolean(filters.capability || filters.tech || filters.q || filters.industry);
+  const filtered = Boolean(filters.capability || filters.skill || filters.tech || filters.q || filters.industry);
 
   let entries: ShowcaseApp[] = [];
   let total = 0;
   let tags: ShowcaseTag[] = [];
   let tree: IndustryNode[] = [];
+  let skills: SkillNode[] = [];
   let error = "";
   try {
-    const [list, tagList, industryTree] = await Promise.all([
+    const [list, tagList, industryTree, skillList] = await Promise.all([
       listApps({ ...filters, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }, viewer),
       kind === "agent" ? listTags(14, "agent") : Promise.resolve([]),
       listIndustries(kind).catch(() => [] as IndustryNode[]),
+      kind === "agent" ? listSkills().catch(() => [] as SkillNode[]) : Promise.resolve([]),
     ]);
     tree = industryTree;
     entries = list.data;
     total = list.total;
     tags = tagList;
+    skills = skillList.filter((s) => s.count > 0).slice(0, 16);
   } catch (e) {
     error = e instanceof Error ? e.message : "Could not load the directory";
   }
+  const activeSkill = skills.find((s) => s.slug === filters.skill) ?? null;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const noun = kind === "team" ? "team" : "agent";
   const names = industryNames(tree);
@@ -88,6 +97,13 @@ export default async function AgentsPage({ searchParams }: { searchParams: Searc
     sector ? { key: "industry", label: sector.node.name, href: directoryHref({ ...filters, industry: null }) } : null,
     filters.capability
       ? { key: "capability", label: CAPABILITIES[filters.capability], href: directoryHref({ ...filters, capability: null }) }
+      : null,
+    filters.skill
+      ? {
+          key: "skill",
+          label: activeSkill?.name ?? filters.skill,
+          href: directoryHref({ ...filters, skill: null }),
+        }
       : null,
     filters.tech ? { key: "tech", label: filters.tech, href: directoryHref({ ...filters, tech: null }) } : null,
     filters.q ? { key: "q", label: `“${filters.q}”`, href: directoryHref({ ...filters, q: null }) } : null,
@@ -135,6 +151,7 @@ export default async function AgentsPage({ searchParams }: { searchParams: Searc
           <form action="/agents" role="search" className="relative mt-8 w-full sm:max-w-sm">
             {kind === "team" ? <input type="hidden" name="kind" value="team" /> : null}
             {filters.capability ? <input type="hidden" name="capability" value={filters.capability} /> : null}
+            {filters.skill ? <input type="hidden" name="skill" value={filters.skill} /> : null}
             {filters.tech ? <input type="hidden" name="tech" value={filters.tech} /> : null}
             {filters.industry ? <input type="hidden" name="industry" value={filters.industry} /> : null}
             {filters.industry && !filters.cross ? <input type="hidden" name="cross" value="0" /> : null}
@@ -205,8 +222,36 @@ export default async function AgentsPage({ searchParams }: { searchParams: Searc
               </ul>
             </nav>
           ) : null}
-          {tags.length ? (
-            <nav aria-label="Filter by skill">
+          {kind === "agent" && skills.length ? (
+            <nav aria-label="Filter by skill" className="flex flex-wrap items-center gap-2">
+              <ul className="flex flex-wrap gap-2">
+                {skills.map((s) => {
+                  const active = filters.skill === s.slug;
+                  return (
+                    <li key={s.slug}>
+                      <Link
+                        href={directoryHref({ ...filters, skill: active ? null : s.slug, tech: null })}
+                        aria-current={active ? "true" : undefined}
+                        title={`${s.count} ${s.count === 1 ? "agent" : "agents"}`}
+                        className={cx(
+                          "inline-flex min-h-[32px] items-center rounded-pill border px-3 text-xs transition-colors duration-200",
+                          active
+                            ? "border-shout/40 bg-shout/10 font-medium text-ink"
+                            : "border-dashed border-line text-mute hover:border-edge hover:text-ink",
+                        )}
+                      >
+                        {s.name}
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+              <Link href="/agents/skills" className="text-xs font-medium text-ink underline decoration-line underline-offset-4 hover:text-shout">
+                All skills
+              </Link>
+            </nav>
+          ) : tags.length ? (
+            <nav aria-label="Filter by technology">
               <ul className="flex flex-wrap gap-2">
                 {tags.map((t) => {
                   const active = filters.tech?.toLowerCase() === t.name.toLowerCase();
@@ -218,7 +263,9 @@ export default async function AgentsPage({ searchParams }: { searchParams: Searc
                         title={`${t.count} ${t.count === 1 ? "agent" : "agents"}`}
                         className={cx(
                           "inline-flex min-h-[32px] items-center rounded-pill border px-3 text-xs transition-colors duration-200",
-                          active ? "border-shout/40 bg-shout/10 font-medium text-ink" : "border-dashed border-line text-mute hover:border-edge hover:text-ink",
+                          active
+                            ? "border-shout/40 bg-shout/10 font-medium text-ink"
+                            : "border-dashed border-line text-mute hover:border-edge hover:text-ink",
                         )}
                       >
                         {t.name}
@@ -237,6 +284,15 @@ export default async function AgentsPage({ searchParams }: { searchParams: Searc
               {filters.q ? `Results for “${filters.q}”` : kind === "team" ? "Agent teams" : "Agents"}
               {sector && !filters.q ? <span className="text-mute"> · {sector.node.name}</span> : null}
               {filters.capability ? <span className="text-mute"> · {CAPABILITIES[filters.capability]}</span> : null}
+              {filters.skill ? (
+                <span className="text-mute">
+                  {" "}
+                  ·{" "}
+                  <Link href={skillHref(filters.skill)} className="underline-offset-4 hover:text-ink hover:underline">
+                    {activeSkill?.name ?? filters.skill}
+                  </Link>
+                </span>
+              ) : null}
               {filters.tech ? <span className="text-mute"> · {filters.tech}</span> : null}
             </h2>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-mute">

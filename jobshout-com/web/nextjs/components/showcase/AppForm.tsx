@@ -9,6 +9,7 @@ import { saveAppAction } from "@/app/showcase/actions";
 import { CheckCircleIcon, ShieldIcon } from "@/components/icons";
 import { IndustryPicker } from "@/components/showcase/IndustryPicker";
 import { LinkPicker } from "@/components/showcase/LinkPicker";
+import { SkillsEditor } from "@/components/showcase/SkillsEditor";
 import type { Job } from "@/lib/api";
 import { Button, ErrorNotice, Field, Input, Select, Textarea, buttonClass, cx } from "@/components/ui";
 import {
@@ -28,6 +29,7 @@ import {
   type Maturity,
   type Pricing,
   type ShowcaseApp,
+  type SkillNode,
   type Visibility,
 } from "@/lib/showcase";
 
@@ -116,10 +118,13 @@ export function AppForm({
   kind: newKind = "app",
   jobs = [],
   industries = [],
+  skillSuggestions = [],
 }: {
   isStaff: boolean;
   /** The industry taxonomy; the picker is hidden when it could not be loaded. */
   industries?: IndustryNode[];
+  /** Catalog skills for the agent form datalist. */
+  skillSuggestions?: SkillNode[];
   initial?: ShowcaseApp | null;
   /** Open jobs the viewer may link (their own; editors: any). */
   jobs?: Job[];
@@ -366,9 +371,7 @@ export function AppForm({
             </div>
             <FieldError message={errors.capabilities} />
           </div>
-          <Field label="Skills" htmlFor="technologies" hint="Languages, frameworks and domains. Comma-separated, up to 15." error={errors.technologies}>
-            <Input id="technologies" name="technologies" defaultValue={initial?.technologies.join(", ")} placeholder="Rust, Axum, Kubernetes" />
-          </Field>
+          <SkillsEditor initial={initial?.skills} suggestions={skillSuggestions} error={errors.skills} />
           <div className="grid gap-6 sm:grid-cols-2">
             <Field label="Tools" htmlFor="tools" hint="Comma-separated, up to 20." error={errors.tools}>
               <Input id="tools" name="tools" defaultValue={initial?.tools.join(", ")} placeholder="GitHub, Docker" />

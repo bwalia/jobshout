@@ -237,6 +237,8 @@ export interface ShowcaseApp {
   tools: string[];
   mcp_servers: string[];
   capabilities: string[];
+  /** Agents only: catalog skills with proficiency 1–10. */
+  skills: AgentSkill[];
   /** Industry and vertical slugs, parents first; ["cross-industry"] for general tools. */
   industries: string[];
   linked_agents: ShowcaseLink[];
@@ -287,7 +289,16 @@ export type ShowcaseAppInput = Omit<
   | "used_in"
   | "jobs"
   | "industries"
-> & { industries?: string[]; submit: boolean; agent_links: LinkInput[]; team_slug: string; job_ids: string[] };
+  | "skills"
+> & {
+  industries?: string[];
+  /** Agents: absent keeps existing; present (including []) replaces. */
+  skills?: Array<{ name: string; level: number; slug?: string }>;
+  submit: boolean;
+  agent_links: LinkInput[];
+  team_slug: string;
+  job_ids: string[];
+};
 
 export interface ShowcaseTag {
   name: string;
@@ -308,6 +319,22 @@ export const CROSS_INDUSTRY = "cross-industry";
 export const MAX_INDUSTRIES = 3;
 export const MAX_VERTICALS = 3;
 
+/** A catalog skill with how many public agents claim it. */
+export interface SkillNode {
+  slug: string;
+  name: string;
+  category: string;
+  description: string;
+  count: number;
+}
+
+/** An agent's self-declared proficiency in a skill. */
+export interface AgentSkill {
+  slug: string;
+  name: string;
+  level: number;
+}
+
 export type ShowcaseQuery = {
   kind?: Kind | null;
   /** An industry or vertical slug. */
@@ -315,6 +342,8 @@ export type ShowcaseQuery = {
   /** With `industry`: also list cross-industry tools after the sector's own. Defaults to on. */
   cross?: boolean;
   capability?: Capability | null;
+  /** Agents: catalog skill slug. */
+  skill?: string | null;
   q?: string | null;
   type?: AppType | null;
   collection?: Collection | null;
@@ -346,6 +375,7 @@ export async function listApps(
   const params = new URLSearchParams();
   if (query.kind) params.set("kind", query.kind);
   if (query.capability) params.set("capability", query.capability);
+  if (query.skill) params.set("skill", query.skill);
   if (query.q) params.set("q", query.q);
   if (query.type) params.set("type", query.type);
   if (query.collection) params.set("collection", query.collection);
@@ -380,6 +410,28 @@ export async function listIndustries(kind?: Kind): Promise<IndustryNode[]> {
   });
   if (!res.ok) throw await failure(res, "Failed to load industries");
   return ((await res.json()) as { data: IndustryNode[] }).data;
+}
+
+export async function listSkills(): Promise<SkillNode[]> {
+  const res = await fetch(`${API_BASE}/api/v1/showcase/skills`, {
+    next: { revalidate: 120, tags: ["showcase"] },
+  });
+  if (!res.ok) throw await failure(res, "Failed to load skills");
+  return ((await res.json()) as { data: SkillNode[] }).data;
+}
+
+export async function getSkill(slug: string): Promise<SkillNode | null> {
+  const res = await fetch(`${API_BASE}/api/v1/showcase/skills/${encodeURIComponent(slug)}`, {
+    next: { revalidate: 120, tags: ["showcase"] },
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw await failure(res, "Failed to load skill");
+  const skill = ((await res.json()) as { data: Omit<SkillNode, "count"> }).data;
+  return { ...skill, count: 0 };
+}
+
+export function skillHref(slug: string): string {
+  return `/agents/skills/${encodeURIComponent(slug)}`;
 }
 
 /** Finds an industry or vertical, with the industry it belongs to. */
@@ -587,6 +639,7 @@ export function entryHref(e: { kind: Kind; slug: string }): string {
 export function directoryHref(f: {
   kind?: Kind | null;
   capability?: Capability | null;
+  skill?: string | null;
   industry?: string | null;
   cross?: boolean;
   q?: string | null;
@@ -597,6 +650,7 @@ export function directoryHref(f: {
   const p = new URLSearchParams();
   if (f.kind === "team") p.set("kind", "team");
   if (f.capability) p.set("capability", f.capability);
+  if (f.skill) p.set("skill", f.skill);
   if (f.industry) p.set("industry", f.industry);
   if (f.industry && f.cross === false) p.set("cross", "0");
   if (f.tech) p.set("tech", f.tech);

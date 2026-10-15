@@ -232,6 +232,10 @@ pub struct ShowcaseApp {
     pub mcp_servers: Vec<String>,
     /// Agents only: values from [`AGENT_CAPABILITIES`].
     pub capabilities: Vec<String>,
+    /// Agents only: catalog skills with a self-declared proficiency (1–10).
+    /// Empty for apps and teams. Loaded from `showcase_agent_skills`.
+    #[serde(default)]
+    pub skills: Vec<AgentSkill>,
     /// Industry and vertical slugs from `showcase_industries`, parents first.
     /// A vertical is always stored with its industry.
     pub industries: Vec<String>,
@@ -319,6 +323,9 @@ pub struct ShowcaseAppInput {
     pub mcp_servers: Vec<String>,
     #[serde(default)]
     pub capabilities: Vec<String>,
+    /// Agents only: skills with levels. Absent keeps what the agent has.
+    #[serde(default)]
+    pub skills: Option<Vec<AgentSkillInput>>,
     /// Industry and vertical slugs. Absent keeps what the entry has, so a
     /// client that predates industries cannot clear them by editing.
     #[serde(default)]
@@ -343,6 +350,49 @@ pub struct ShowcaseAppInput {
 pub struct ShowcaseTag {
     pub name: String,
     pub count: i64,
+}
+
+/// One skill in the catalog (`showcase_skills`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShowcaseSkill {
+    pub slug: String,
+    pub name: String,
+    pub category: String,
+    pub description: String,
+    pub position: i32,
+}
+
+/// A skill as shown in browse UI, with how many public agents claim it.
+#[derive(Debug, Clone, Serialize)]
+pub struct ShowcaseSkillNode {
+    pub slug: String,
+    pub name: String,
+    pub category: String,
+    pub description: String,
+    /// Public, published agents linked to it.
+    pub count: i64,
+}
+
+/// An agent's self-declared proficiency in a catalog skill (vision bars).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentSkill {
+    pub slug: String,
+    pub name: String,
+    /// 1 (familiar) … 10 (deep specialisation). Creator-declared.
+    pub level: i32,
+}
+
+/// How a creator submits a skill: name (or known slug) plus level.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+pub struct AgentSkillInput {
+    /// Display name or existing slug; the service slugifies and upserts.
+    #[serde(default)]
+    pub name: String,
+    /// Optional; when set and catalogued, preferred over deriving from name.
+    #[serde(default)]
+    pub slug: String,
+    #[serde(default)]
+    pub level: i32,
 }
 
 /// One industry or vertical in the taxonomy, as stored.
