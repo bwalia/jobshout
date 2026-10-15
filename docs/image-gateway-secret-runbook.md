@@ -13,12 +13,13 @@ video: resume check skipped — workstation unreachable
 
 | Gate | Where the secret lives | Role |
 | --- | --- | --- |
-| **rings** (int/test/acc/prod) | k8s secret `jobshout-gateways`, key `IMAGE_JWT_SECRET` (shared value, hand-made per namespace) | signs the token (`x-api-key`) |
+| **rings** (int/test/acc/prod) | WSL Vault `jobshout/<ring>/gateways` → k8s secret `jobshout-gateways`, key `IMAGE_JWT_SECRET` | signs the token (`x-api-key`) |
 | **edge** (wslproxy, admin `https://lon1.pop0.uk`) | server `images.workstation.co.uk` → rule `6bd45a55-7130-4285-a823-63999a4ec386` → `match.rules.jwt_token_validation_key` | verifies the signature |
 | **workstation** | launchd plist `com.jobshout.image-service` → `EnvironmentVariables.IMAGE_JWT_SECRET` | verifies the signature again (blocks direct hits on the forwarded port) |
 
-The rings' value is the canonical one. Change the edge and the workstation to
-match it, never the other way round.
+The rings' Vault path is the canonical source (see
+[wsl-vault-secrets.md](wsl-vault-secrets.md)). Change the edge and the
+workstation to match it, never the other way round.
 
 ## Health check
 

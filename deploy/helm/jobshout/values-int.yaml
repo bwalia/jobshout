@@ -5,19 +5,16 @@ logLevel: debug
 # image.tag is injected by Ring Promoter (--set image.tag=<sha>). Do not pin a
 # stale SHA here; a forgotten --set would roll int back to that commit.
 
-# Cluster-side secrets this chart does not manage. Only the names live here.
-# Create them on k3s1; helm leaves the Secret objects alone across redeploys.
-#   kubectl -n int create secret generic jobshout-cms ...
-#   kubectl -n int create secret generic jobshout-mail \
-#     --from-literal=GMAIL_CLIENT_ID=... \
-#     --from-literal=GMAIL_CLIENT_SECRET=... \
-#     --from-literal=GMAIL_TOKEN_KEY=$(openssl rand -hex 32)
-#   kubectl -n int create secret generic jobshout-google \
-#     --from-literal=GOOGLE_OAUTH_CLIENT_ID=... \
-#     --from-literal=GOOGLE_OAUTH_CLIENT_SECRET=...
-#   kubectl -n int create secret generic jobshout-wslproxy \
-#     --from-literal=WSLPROXY_API_TOKEN=...
+# Cluster-side secrets layered onto the API after jobshout-secrets (last wins).
+# Values live in WSL Vault (KV v2 under kv/); ESO syncs them via vaultSecrets
+# below. Never commit credential values — only names and Vault paths.
+#
+# Populate each path in WSL Vault, then restart jobshout-api after the first
+# sync (env is read at process start). See docs/wsl-vault-secrets.md.
 extraSecretRefs:
+  # DATABASE_PASSWORD / JWT_SECRET / PYTHON_SIDECAR_SECRET override Helm
+  # placeholders in jobshout-secrets (which RP resets every deploy).
+  - jobshout-core
   - jobshout-cms
   # BRAVE_SEARCH_API_KEY: general web search for the Research Agent. Without
   # it research searches Hacker News and arXiv only.
@@ -31,33 +28,65 @@ extraSecretRefs:
   # wafLab.baseURL below is set, but the client stays disabled until it also has
   # a token (or username+password) — those arrive only through this secret.
   - jobshout-wslproxy
-  # Secrets Rotation credentials: SECRETS_VAULT_ADDR/SECRETS_VAULT_TOKEN and
-  # RP_API_TOKEN. Created by hand on k3s1, never in git.
+  # Secrets Rotation: SECRETS_VAULT_ADDR / SECRETS_VAULT_TOKEN / RP_API_TOKEN
+  # (and optional SECRETS_ROT_GITHUB_TOKEN).
   - jobshout-secretsrot
   # GEMINI_API_KEY: registers Gemini as an LLM provider (int's default, see
   # ai.provider) and as the first-choice image backend.
-  #   kubectl -n int create secret generic jobshout-gemini --from-literal=GEMINI_API_KEY=...
   - jobshout-gemini
   # Shared workstation gateway secrets: OLLAMA_JWT_SECRET and IMAGE_JWT_SECRET.
   # The chart renders jobshout-secrets with them empty, so without this the
   # image gateway (images.workstation.co.uk) refuses every cover request (403)
-  # and articles publish without a featured image. Same values the other rings
-  # use — copy test's: kubectl -n test get secret jobshout-gateways -o yaml,
-  # strip metadata, re-apply in int. Created by hand on k3s1, never in git.
+  # and articles publish without a featured image.
   - jobshout-gateways
-  # STRIX_JWT_SECRET for the pentest gateway (strix.workstation.co.uk). The chart
-  # only wires it through .Values.secrets.strixJwtSecret into the Helm-owned
-  # jobshout-secrets (empty, and wiped every deploy), so without this the gateway
-  # 403s every request ("the token did not verify") and the Security Tester shows
-  # the workstation as unreachable. Kept in its own secret, not jobshout-gateways,
-  # on purpose: this fronts a vulnerability scanner, and the code keeps its secret
-  # distinct from the Ollama/image ones so leaking one does not hand over all three
-  # (server/internal/strix/config.go). pentest is int-only, so there is no other
-  # ring to copy from; the value must match the secret the strix edge vhost verifies:
-  #   kubectl -n int create secret generic jobshout-strix \
-  #     --from-literal=STRIX_JWT_SECRET=<secret the strix.workstation.co.uk gateway checks>
-  # then restart jobshout-api so it picks the secret up. Created by hand, never in git.
+  # STRIX_JWT_SECRET for the pentest gateway (strix.workstation.co.uk). Kept in
+  # its own secret, not jobshout-gateways, on purpose: this fronts a vulnerability
+  # scanner, and the code keeps its secret distinct from the Ollama/image ones
+  # so leaking one does not hand over all three (server/internal/strix/config.go).
+  # Must match the secret the strix edge vhost verifies.
   - jobshout-strix
+
+# ExternalSecrets → WSL Vault (ClusterSecretStore wslvault-backend). Each entry
+# materialises every key under `key` into a Secret of the same `name`. Keys in
+# Vault must match env names exactly (GEMINI_API_KEY, not geminiApiKey).
+# cms must hold CMS-only keys (OPSAPI_API_KEY) — not gateway/Gemini overlays.
+vaultSecrets:
+  - name: jobshout-core
+    store: wslvault-backend
+    key: jobshout/int/core
+  - name: jobshout-cms
+    store: wslvault-backend
+    key: jobshout/int/cms
+  - name: jobshout-research
+    store: wslvault-backend
+    key: jobshout/int/research
+  - name: jobshout-review
+    store: wslvault-backend
+    key: jobshout/int/review
+  - name: jobshout-mail
+    store: wslvault-backend
+    key: jobshout/int/mail
+  - name: jobshout-google
+    store: wslvault-backend
+    key: jobshout/int/google
+  - name: jobshout-linkedin
+    store: wslvault-backend
+    key: jobshout/int/linkedin
+  - name: jobshout-wslproxy
+    store: wslvault-backend
+    key: jobshout/int/wslproxy
+  - name: jobshout-secretsrot
+    store: wslvault-backend
+    key: jobshout/int/secretsrot
+  - name: jobshout-gemini
+    store: wslvault-backend
+    key: jobshout/int/gemini
+  - name: jobshout-gateways
+    store: wslvault-backend
+    key: jobshout/int/gateways
+  - name: jobshout-strix
+    store: wslvault-backend
+    key: jobshout/int/strix
 
 # opsapi CMS — the Article Writer files generated articles there as drafts.
 # The host and namespace slug are not secret; the API key is, and comes from
@@ -130,8 +159,9 @@ pentest:
   # Example once Juice Shop is up: "juice.local,127.0.0.1"
   targetAllowlist: ""
 
-# WAF Efficacy Lab against lon1 wslproxy. Credentials via extraSecretRefs
-# (WSLPROXY_API_TOKEN); keep chart values empty of secrets.
+# WAF Efficacy Lab against lon1 wslproxy. Credentials via Vault path
+# jobshout/int/wslproxy (WSLPROXY_API_TOKEN or WSLPROXY_USERNAME/PASSWORD);
+# keep chart values empty of secrets.
 wafLab:
   enabled: true
   baseURL: "https://lon1.pop0.uk"
@@ -190,6 +220,7 @@ langfuse:
 # Secrets Rotation propagation on int. The kubeconfig in jobshout-secretsrot-kube
 # (key "k3s1") belongs to ServiceAccount int/jobshout-secretsrot, whose Role only
 # allows get/patch secrets + externalsecrets and get/list deployments in int.
+# That Secret is still out-of-band (file mount); env credentials are Vault-backed.
 secretsRotation:
   kubeconfig:
     enabled: true
