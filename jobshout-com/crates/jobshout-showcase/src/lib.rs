@@ -18,7 +18,8 @@ use jobshout_content::Actor;
 use jobshout_domain::{
     DomainError, Job, ShowcaseApp, ShowcaseAppId, ShowcaseAppInput, ShowcaseAppType,
     ShowcaseBuildMethod, ShowcaseIndustryNode, ShowcaseKind, ShowcaseMaturity, ShowcasePricing,
-    ShowcaseStatus, ShowcaseTag, ShowcaseVerification, ShowcaseVisibility,
+    ShowcaseSkill, ShowcaseSkillNode, ShowcaseStatus, ShowcaseTag, ShowcaseVerification,
+    ShowcaseVisibility,
 };
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -61,6 +62,29 @@ impl ShowcaseService {
         q.unclassified = false;
         let (apps, total) = self.repo.list(&q).await?;
         Ok((apps.into_iter().map(public).collect(), total))
+    }
+
+    /// Skills catalog with how many public agents claim each skill.
+    pub async fn skills(&self) -> Result<Vec<ShowcaseSkillNode>, DomainError> {
+        let entries = self.repo.list_skills().await?;
+        let counts = self.repo.skill_counts().await?;
+        Ok(entries
+            .into_iter()
+            .map(|e| {
+                let count = counts.get(&e.slug).copied().unwrap_or(0);
+                ShowcaseSkillNode {
+                    slug: e.slug,
+                    name: e.name,
+                    category: e.category,
+                    description: e.description,
+                    count,
+                }
+            })
+            .collect())
+    }
+
+    pub async fn skill(&self, slug: &str) -> Result<ShowcaseSkill, DomainError> {
+        self.repo.skill_by_slug(slug).await
     }
 
     /// The industry taxonomy as a tree, with how many public entries (of
@@ -567,6 +591,16 @@ impl ShowcaseService {
             None => existing.map(|e| e.industries.clone()).unwrap_or_default(),
         };
         cleaned.industry_names = taxonomy.search_names(&cleaned.industries);
+        // Skills: absent keeps what the agent has (older clients). Present
+        // (including empty) replaces. Non-agents never write the join table.
+        let skills = if kind == ShowcaseKind::Agent {
+            match &input.skills {
+                Some(_) => Some(cleaned.skills.clone()),
+                None => None,
+            }
+        } else {
+            None
+        };
         let mut slugs: Vec<String> = cleaned.agent_links.iter().map(|l| l.slug.clone()).collect();
         slugs.extend(cleaned.team_slug.clone());
         let targets = self.repo.resolve_links(&slugs).await?;
@@ -601,6 +635,7 @@ impl ShowcaseService {
         let mut rec = record(kind, input, cleaned, status);
         rec.links = links;
         rec.job_ids = job_ids;
+        rec.skills = skills;
         Ok(rec)
     }
 
@@ -707,6 +742,7 @@ fn record(
             tools: cleaned.tools,
             mcp_servers: cleaned.mcp_servers,
             capabilities: cleaned.capabilities,
+            skills: cleaned.skills.clone(),
             industries: cleaned.industries,
             linked_agents: Vec::new(),
             linked_team: None,
@@ -732,6 +768,7 @@ fn record(
         tags_text,
         links: Vec::new(),
         job_ids: Vec::new(),
+        skills: None,
     }
 }
 

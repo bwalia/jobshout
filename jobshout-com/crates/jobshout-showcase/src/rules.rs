@@ -5,10 +5,11 @@
 use jobshout_content::media::is_web_url;
 use jobshout_content::render::word_count;
 use jobshout_content::Actor;
+use jobshout_content::rules::slugify;
 use jobshout_domain::{
-    DomainError, InsightSource, ProductionEvidence, ShowcaseAgent, ShowcaseApp, ShowcaseAppInput,
-    ShowcaseIndustry, ShowcaseKind, ShowcaseLinkInput, ShowcaseMaturity, ShowcaseStatus,
-    ShowcaseVisibility, AGENT_CAPABILITIES,
+    AgentSkill, AgentSkillInput, DomainError, InsightSource, ProductionEvidence, ShowcaseAgent,
+    ShowcaseApp, ShowcaseAppInput, ShowcaseIndustry, ShowcaseKind, ShowcaseLinkInput,
+    ShowcaseMaturity, ShowcaseStatus, ShowcaseVisibility, AGENT_CAPABILITIES,
 };
 
 pub const MAX_NAME: usize = 80;
@@ -204,6 +205,8 @@ pub struct Cleaned {
     pub tools: Vec<String>,
     pub mcp_servers: Vec<String>,
     pub capabilities: Vec<String>,
+    /// Agents only: cleaned skills ready to upsert into the catalog and link.
+    pub skills: Vec<jobshout_domain::AgentSkill>,
     /// Industry and vertical slugs, parents first. Set by the service from
     /// [`clean_industries`], which needs the taxonomy.
     pub industries: Vec<String>,
@@ -234,6 +237,50 @@ pub fn clean_tags(tags: &[String]) -> Vec<String> {
         }
     }
     out
+}
+
+/// Normalise creator-submitted skills: slugify name, clamp level 1–10, at most
+/// [`MAX_TAGS`], first spelling wins. Empty names are dropped.
+pub fn clean_skills(raw: &[AgentSkillInput]) -> Result<Vec<AgentSkill>, DomainError> {
+    let mut out: Vec<AgentSkill> = Vec::new();
+    for s in raw {
+        let name = s.name.split_whitespace().collect::<Vec<_>>().join(" ");
+        let slug = {
+            let from_slug = s.slug.trim().to_ascii_lowercase();
+            if !from_slug.is_empty() {
+                slugify(&from_slug)
+            } else {
+                slugify(&name)
+            }
+        };
+        if name.is_empty() || slug.is_empty() || slug == "insight" {
+            continue;
+        }
+        if name.chars().count() > MAX_TAG_LEN {
+            return Err(DomainError::Validation(
+                "skill names must be 32 characters or fewer".into(),
+            ));
+        }
+        if out.iter().any(|o| o.slug == slug) {
+            continue;
+        }
+        let level = if s.level < 1 {
+            1
+        } else if s.level > 10 {
+            10
+        } else {
+            s.level
+        };
+        // Zero often means "forgot to set"; treat as a solid mid claim.
+        let level = if s.level == 0 { 7 } else { level };
+        out.push(AgentSkill { slug, name, level });
+    }
+    if out.len() > MAX_TAGS {
+        return Err(DomainError::Validation(
+            "list at most 15 skills".into(),
+        ));
+    }
+    Ok(out)
 }
 
 /// Trimmed, lower-cased slug links with each slug kept once.
@@ -348,6 +395,13 @@ pub fn validate(kind: ShowcaseKind, input: &ShowcaseAppInput) -> Result<Cleaned,
         .collect();
     let agent_links = clean_links(&input.agent_links);
     let team_slug = Some(input.team_slug.trim().to_ascii_lowercase()).filter(|s| !s.is_empty());
+    let skills = match &input.skills {
+        Some(list) => clean_skills(list)?,
+        None => Vec::new(),
+    };
+    if kind != ShowcaseKind::Agent && !skills.is_empty() {
+        return v("skills with proficiency levels are for agents");
+    }
     if kind != ShowcaseKind::Agent
         && (!tools.is_empty()
             || !mcp_servers.is_empty()
@@ -403,6 +457,15 @@ pub fn validate(kind: ShowcaseKind, input: &ShowcaseAppInput) -> Result<Cleaned,
         return v("link at most 10 open roles");
     }
 
+    // Agents: when skills are submitted, mirror their names into technologies
+    // so existing tech filters and search keep working.
+    let technologies = if kind == ShowcaseKind::Agent && input.skills.is_some() && !skills.is_empty()
+    {
+        skills.iter().map(|s| s.name.clone()).collect()
+    } else {
+        technologies
+    };
+
     let cleaned = Cleaned {
         screenshots,
         technologies,
@@ -411,6 +474,7 @@ pub fn validate(kind: ShowcaseKind, input: &ShowcaseAppInput) -> Result<Cleaned,
         tools,
         mcp_servers,
         capabilities,
+        skills,
         industries: Vec::new(),
         industry_names: Vec::new(),
         agent_links,
@@ -638,6 +702,7 @@ mod tests {
             tools: vec![],
             mcp_servers: vec![],
             capabilities: vec![],
+            skills: vec![],
             industries: vec![],
             linked_agents: vec![],
             linked_team: None,
@@ -904,6 +969,35 @@ mod tests {
         let mut i = input();
         i.screenshots = vec!["https://img.example/a.png".into(); 9];
         assert!(msg(validate(ShowcaseKind::App, &i)).contains("eight"));
+    }
+
+    #[test]
+    fn skills_are_slugified_and_clamped() {
+        use jobshout_domain::AgentSkillInput;
+        let cleaned = clean_skills(&[
+            AgentSkillInput {
+                name: "  Rust  ".into(),
+                slug: String::new(),
+                level: 12,
+            },
+            AgentSkillInput {
+                name: "rust".into(),
+                slug: String::new(),
+                level: 3,
+            },
+            AgentSkillInput {
+                name: "APIs".into(),
+                slug: String::new(),
+                level: 0,
+            },
+        ])
+        .unwrap();
+        assert_eq!(cleaned.len(), 2);
+        assert_eq!(cleaned[0].slug, "rust");
+        assert_eq!(cleaned[0].name, "Rust");
+        assert_eq!(cleaned[0].level, 10);
+        assert_eq!(cleaned[1].slug, "apis");
+        assert_eq!(cleaned[1].level, 7);
     }
 
     #[test]

@@ -8,7 +8,7 @@ use axum::{Json, Router};
 use jobshout_domain::{
     DomainError, FollowState, Job, ShowcaseApp, ShowcaseAppInput, ShowcaseAppType,
     ShowcaseBuildMethod, ShowcaseIndustryNode, ShowcaseKind, ShowcaseMaturity, ShowcasePricing,
-    ShowcaseTag, AGENT_CAPABILITIES,
+    ShowcaseSkill, ShowcaseSkillNode, ShowcaseTag, AGENT_CAPABILITIES,
 };
 use jobshout_showcase::{ListQuery, Moderation, Sort};
 use serde::{Deserialize, Serialize};
@@ -23,6 +23,8 @@ pub fn routes() -> Router<AppState> {
         .route("/api/v1/showcase/apps", get(list).post(create))
         .route("/api/v1/showcase/apps/mine", get(mine))
         .route("/api/v1/showcase/tags", get(tags))
+        .route("/api/v1/showcase/skills", get(skills))
+        .route("/api/v1/showcase/skills/{slug}", get(skill_one))
         .route("/api/v1/showcase/industries", get(industries))
         .route("/api/v1/showcase/unclassified", get(unclassified))
         .route("/api/v1/showcase/review-queue", get(review_queue))
@@ -84,6 +86,8 @@ struct ListParams {
     kind: Option<String>,
     /// agents only: one of AGENT_CAPABILITIES
     capability: Option<String>,
+    /// agents only: skill catalog slug
+    skill: Option<String>,
     q: Option<String>,
     #[serde(rename = "type")]
     app_type: Option<String>,
@@ -141,9 +145,14 @@ async fn list(
     {
         return Err(bad_request(format!("invalid capability: {c}")));
     }
+    let skill = p
+        .skill
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty());
     let mut q = ListQuery {
         kind: Some(parse_kind(p.kind.as_deref())?),
         capability,
+        skill,
         q: p.q,
         app_type: parse_opt("type", p.app_type.as_deref(), ShowcaseAppType::parse)?,
         maturities: parse_opt("maturity", p.maturity.as_deref(), ShowcaseMaturity::parse)?
@@ -222,6 +231,24 @@ async fn tags(
 struct KindParam {
     /// app | agent | team; absent counts every kind.
     kind: Option<String>,
+}
+
+/// Skills catalog with public agent counts (browse-by-skill).
+async fn skills(
+    State(state): State<AppState>,
+) -> Result<Json<DataResponse<Vec<ShowcaseSkillNode>>>, ApiError> {
+    Ok(Json(DataResponse {
+        data: state.showcase.skills().await.map_err(err)?,
+    }))
+}
+
+async fn skill_one(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+) -> Result<Json<DataResponse<ShowcaseSkill>>, ApiError> {
+    Ok(Json(DataResponse {
+        data: state.showcase.skill(&slug).await.map_err(err)?,
+    }))
 }
 
 /// The industry taxonomy, with how many public entries each industry and

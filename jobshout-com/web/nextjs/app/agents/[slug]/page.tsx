@@ -21,6 +21,7 @@ import { FollowButton } from "@/components/FollowButton";
 import { CreatorLink } from "@/components/members/MemberCard";
 import { Badge, buttonClass, cx } from "@/components/ui";
 import { IndustryLinks } from "@/components/showcase/IndustryLinks";
+import { SkillBars } from "@/components/showcase/SkillBars";
 import { formatDate, isEditor, siteUrl } from "@/lib/insights";
 import {
   CAPABILITIES,
@@ -289,7 +290,11 @@ export default async function AgentPage({ params }: Params) {
                   </ul>
                 </section>
               ) : null}
-              <Chips title="Skills" items={e.technologies} href={(t) => directoryHref({ tech: t })} />
+              {e.skills?.length ? (
+                <SkillBars skills={e.skills} />
+              ) : (
+                <Chips title="Skills" items={e.technologies} href={(t) => directoryHref({ tech: t })} />
+              )}
               <Chips title="Tools" items={e.tools} />
               <Chips title="MCP servers" items={e.mcp_servers} />
             </>

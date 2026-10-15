@@ -169,6 +169,18 @@ struct AgentSample<'a> {
 }
 
 fn agent(s: AgentSample) -> ShowcaseAppInput {
+    let n = s.skills.len().max(1);
+    let skills = s
+        .skills
+        .iter()
+        .enumerate()
+        .map(|(i, name)| jobshout_domain::AgentSkillInput {
+            name: (*name).into(),
+            slug: String::new(),
+            // First skill strongest (10…), tapering toward 7.
+            level: (10 - ((i * 3) / n) as i32).clamp(7, 10),
+        })
+        .collect();
     ShowcaseAppInput {
         kind: Some(ShowcaseKind::Agent),
         name: format!("Sample: {}", s.name),
@@ -187,6 +199,7 @@ fn agent(s: AgentSample) -> ShowcaseAppInput {
         tools: tags(s.tools),
         mcp_servers: tags(s.mcp),
         capabilities: tags(s.capabilities),
+        skills: Some(skills),
         industries: Some(tags(s.industries)),
         submit: true,
         ..Default::default()
