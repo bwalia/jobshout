@@ -66,6 +66,9 @@ services:
       JOBSHOUT_COM_API_URL: http://api:8088
       JOBSHOUT_INTERNAL_TOKEN: local-dev-internal-token
       SITE_URL: http://localhost:3010
+      OPSAPI_URL: ${OPSAPI_URL:-}
+      OPSAPI_NAMESPACE: ${OPSAPI_NAMESPACE:-}
+      OPSAPI_WEBHOOK_SECRET: ${OPSAPI_WEBHOOK_SECRET:-}
     ports:
       - "3010:3010"
     depends_on:

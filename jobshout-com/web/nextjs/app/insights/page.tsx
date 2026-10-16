@@ -19,6 +19,7 @@ import {
   type Insight,
   type InsightTopic,
 } from "@/lib/insights";
+import { listOpsapiPosts } from "@/lib/opsapi";
 
 export const dynamic = "force-dynamic";
 
@@ -64,6 +65,8 @@ export default async function InsightsPage({ searchParams }: { searchParams: Sea
   let hero: Insight | null = null;
   let topics: InsightTopic[] = [];
   let error = "";
+  // Separate from the marketplace API: either source can be down without hiding the other.
+  const blogPostsPromise = showHero ? listOpsapiPosts(6) : Promise.resolve([] as Insight[]);
   try {
     const [list, topicList, featured] = await Promise.all([
       listInsights({ ...filters, limit: PAGE_SIZE + (showHero ? 1 : 0), offset: (page - 1) * PAGE_SIZE }),
@@ -78,6 +81,7 @@ export default async function InsightsPage({ searchParams }: { searchParams: Sea
     error = e instanceof Error ? e.message : "Could not load insights";
   }
 
+  const blogPosts = await blogPostsPromise;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const topicName = topics.find((t) => t.slug === filters.topic)?.name;
 
@@ -141,7 +145,24 @@ export default async function InsightsPage({ searchParams }: { searchParams: Sea
           ) : null}
         </div>
 
-        <section aria-labelledby="latest-heading" className="mt-8">
+        {blogPosts.length > 0 ? (
+          <section aria-labelledby="blog-heading" className="mt-8">
+            <div className="flex flex-wrap items-baseline justify-between gap-3 border-b border-line pb-4">
+              <h2 id="blog-heading" className="font-display text-xl font-semibold text-ink">
+                From the JobShout blog
+              </h2>
+            </div>
+            <ul className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+              {blogPosts.map((item) => (
+                <li key={item.id}>
+                  <InsightCard item={item} />
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
+        <section aria-labelledby="latest-heading" className={blogPosts.length > 0 ? "mt-12" : "mt-8"}>
           <div className="flex flex-wrap items-baseline justify-between gap-3 border-b border-line pb-4">
             <h2 id="latest-heading" className="font-display text-xl font-semibold text-ink">
               {filters.q
@@ -172,7 +193,7 @@ export default async function InsightsPage({ searchParams }: { searchParams: Sea
                 </li>
               ))}
             </ul>
-          ) : !error && !hero ? (
+          ) : !error && !hero && blogPosts.length === 0 ? (
             <div className="mt-6">
               {filtered ? (
                 <EmptyState
