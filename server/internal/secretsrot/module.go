@@ -25,7 +25,7 @@ func Module(run Runner) agentmodule.Module {
 		Icon:      "key",
 		TabSlug:   "secrets",
 		Hint:      "Rotate secrets on HashiCorp Vault or WSLVault with a zero-downtime dual-version window.",
-		ChatHint:  "To rotate secrets safely, call agent_execute on Secrets Rotation. Pass mount + path; prefer mode=plan first, then rotate. Works with WSLVault (vault-ui.workstation.co.uk) and HashiCorp Vault. Optional propagation: cluster (kubeconfig NAME, e.g. k3s1), k8s_secrets / external_secrets (namespace/name), github_repo, rp_rings. Credentials are server-side and named — never ask for or pass a kubeconfig, token or password.",
+		ChatHint:  "To rotate secrets safely, call agent_execute on Secrets Rotation. Pass mount + path; prefer mode=plan first, then rotate. Works with WSLVault (vault.workstation.co.uk) and HashiCorp Vault. Optional propagation: cluster (kubeconfig NAME, e.g. k3s1), k8s_secrets / external_secrets (namespace/name), github_repo, rp_rings. Credentials are server-side and named — never ask for or pass a kubeconfig, token or password.",
 		Schema:    schema(),
 		Seed:      Seed,
 		Launch:    launch(run),
@@ -66,7 +66,7 @@ func schema() agentschema.Schema {
 					{Label: "WSLVault (workstation)", Value: "wslvault"},
 					{Label: "HashiCorp Vault", Value: "hashicorp"},
 				},
-				Help: "WSLVault UI: https://vault-ui.workstation.co.uk/login · docs: https://www.wslvault.org/"},
+				Help: "WSLVault UI: https://vault.workstation.co.uk/login · docs: https://www.wslvault.org/"},
 			{Key: "vault_addr", Label: "Vault API address", Type: "text", Required: false,
 				Placeholder: DefaultWSLVaultAddr,
 				Help:        "Defaults to SECRETS_VAULT_ADDR / VAULT_ADDR / WSLVault"},
@@ -146,8 +146,8 @@ func schema() agentschema.Schema {
 
 // Seed is the built-in Secrets Rotation agent.
 func Seed(orgID uuid.UUID) *model.Agent {
-	desc := "Rotates secrets on HashiCorp Vault and WSLVault without downtime: KV v2 dual-version windows, transit key rotation, and database lease cutover plans. Optionally propagates to Kubernetes Secrets, ExternalSecrets, GitHub Actions secrets and a Ring Promoter restart. Integrates with vault-ui.workstation.co.uk."
-	prompt := "You are the Secrets Rotation agent. Prefer mode=plan before rotate. Use Vault-compatible APIs against WSLVault (https://vault.workstation.co.uk, UI https://vault-ui.workstation.co.uk/login, docs https://www.wslvault.org/) or HashiCorp Vault. Never echo secret values in chat or logs—only paths, versions, and keys. For KV v2: write N+1, keep N readable through a grace window, then optionally soft-delete N. For transit: rotate key versions so old ciphertext still decrypts. For database: produce a cutover plan (new lease → consumers → revoke old). Propagation is opt-in: after the Vault write and verify, patch plain Kubernetes Secrets (never Helm-managed ones), force-sync ExternalSecrets, update GitHub Actions secrets, then restart Ring Promoter rings whose Deployments consume the rotated Secrets. source=github makes GitHub Actions the source of truth and skips Vault. Clusters, GitHub and Ring Promoter credentials are named server-side (cluster=k3s1 is a kubeconfig name) — never ask for or accept a kubeconfig, token or password in chat or launch fields."
+	desc := "Rotates secrets on HashiCorp Vault and WSLVault without downtime: KV v2 dual-version windows, transit key rotation, and database lease cutover plans. Optionally propagates to Kubernetes Secrets, ExternalSecrets, GitHub Actions secrets and a Ring Promoter restart. Integrates with vault.workstation.co.uk."
+	prompt := "You are the Secrets Rotation agent. Prefer mode=plan before rotate. Use Vault-compatible APIs against WSLVault (https://vault.workstation.co.uk, UI https://vault.workstation.co.uk/login, docs https://www.wslvault.org/) or HashiCorp Vault. Never echo secret values in chat or logs—only paths, versions, and keys. For KV v2: write N+1, keep N readable through a grace window, then optionally soft-delete N. For transit: rotate key versions so old ciphertext still decrypts. For database: produce a cutover plan (new lease → consumers → revoke old). Propagation is opt-in: after the Vault write and verify, patch plain Kubernetes Secrets (never Helm-managed ones), force-sync ExternalSecrets, update GitHub Actions secrets, then restart Ring Promoter rings whose Deployments consume the rotated Secrets. source=github makes GitHub Actions the source of truth and skips Vault. Clusters, GitHub and Ring Promoter credentials are named server-side (cluster=k3s1 is a kubeconfig name) — never ask for or accept a kubeconfig, token or password in chat or launch fields."
 	return &model.Agent{
 		ID:           uuid.New(),
 		OrgID:        orgID,

@@ -8,7 +8,7 @@ import (
 
 const (
 	DefaultWSLVaultAddr = "https://vault.workstation.co.uk"
-	DefaultUILoginURL   = "https://vault-ui.workstation.co.uk/login"
+	DefaultUILoginURL   = "https://vault.workstation.co.uk/login"
 	DefaultDocsURL      = "https://www.wslvault.org/"
 
 	// DefaultKubeconfigDir holds one kubeconfig per named cluster

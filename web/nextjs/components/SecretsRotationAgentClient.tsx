@@ -217,11 +217,11 @@ export function SecretsRotationAgentClient() {
           plans. Console:{" "}
           <a
             className="underline underline-offset-2"
-            href="https://vault-ui.workstation.co.uk/login"
+            href="https://vault.workstation.co.uk/login"
             target="_blank"
             rel="noreferrer"
           >
-            vault-ui.workstation.co.uk
+            vault.workstation.co.uk
           </a>
           .
         </p>
