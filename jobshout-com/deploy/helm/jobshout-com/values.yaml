@@ -78,6 +78,9 @@ secrets:
   # already in the jobshout-com-opsapi Secret; set it on first install with
   # --set-string secrets.opsapiWebhookSecret=... rather than committing it.
   opsapiWebhookSecret: ""
+  # OpsAPI workspace API key ("opsk_..."). Same rule as above: set once with
+  # --set-string secrets.opsapiApiKey=..., never commit it.
+  opsapiApiKey: ""
 
 # OpsAPI CMS: published posts from one OpsAPI workspace show on /insights, and
 # OpsAPI's webhook calls https://<host>/hooks/opsapi to refresh them. Off unless

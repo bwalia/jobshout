@@ -69,6 +69,7 @@ services:
       OPSAPI_URL: ${OPSAPI_URL:-}
       OPSAPI_NAMESPACE: ${OPSAPI_NAMESPACE:-}
       OPSAPI_WEBHOOK_SECRET: ${OPSAPI_WEBHOOK_SECRET:-}
+      OPSAPI_API_KEY: ${OPSAPI_API_KEY:-}
     ports:
       - "3010:3010"
     depends_on:
