@@ -88,3 +88,30 @@ func TestNormalizeCarriesStyleToBriefs(t *testing.T) {
 		t.Errorf("run options style = %q", req.RunOptions().Style)
 	}
 }
+
+// A website picked at launch wins over the agent's; one left blank falls back
+// to the agent's, and either way it is recorded on the run.
+func TestDestinationPrecedenceAndRecorded(t *testing.T) {
+	ws := WriterSettings{Destination: "Workstation Website"}
+
+	picked := GenerateBlogRequest{Briefs: []BlogBrief{{Topic: "x"}}, Destination: "  JobShout "}
+	picked.Normalize()
+	picked.ApplyWriterSettings(ws)
+	if picked.Destination != "JobShout" {
+		t.Errorf("launch choice = %q, want JobShout", picked.Destination)
+	}
+	if got := picked.RunOptions().Destination; got != "JobShout" {
+		t.Errorf("run options destination = %q", got)
+	}
+
+	blank := GenerateBlogRequest{Briefs: []BlogBrief{{Topic: "x"}}}
+	blank.ApplyWriterSettings(ws)
+	if blank.RunOptions().Destination != "Workstation Website" {
+		t.Errorf("blank launch = %q, want the agent's website", blank.Destination)
+	}
+
+	long := GenerateBlogRequest{Briefs: []BlogBrief{{Topic: "x"}}, Destination: string(make([]byte, 201))}
+	if long.Validate() == nil {
+		t.Error("an over-long destination name should be rejected")
+	}
+}

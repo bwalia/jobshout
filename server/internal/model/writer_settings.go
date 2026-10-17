@@ -66,6 +66,9 @@ func (r *GenerateBlogRequest) ApplyWriterSettings(ws WriterSettings) {
 	if r.Industry == "" {
 		r.Industry = ws.Industry
 	}
+	if r.Destination == "" {
+		r.Destination = ws.Destination
+	}
 	if r.Trending && len(r.Focus) == 0 && len(ws.Focus) > 0 {
 		r.Focus = append([]string(nil), ws.Focus...)
 	}

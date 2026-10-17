@@ -38,3 +38,30 @@ func TestOpsapiDestination(t *testing.T) {
 		}
 	}
 }
+
+// Runs pick a website by integration name, case-insensitively; the namespace
+// comes from that integration, so two websites never share a key.
+func TestFindDestination(t *testing.T) {
+	key := func(s string) map[string]any {
+		return map[string]any{"api_key": strings.Join([]string{"opsk", s}, "_")}
+	}
+	list := []model.Integration{
+		{Name: "Workstation Website", Provider: model.ProviderOpsAPI, BaseURL: "https://opsapi.workstation.co.uk",
+			Credentials: key("ws"), Config: map[string]any{"namespace_slug": "workstation"}},
+		{Name: "JobShout", Provider: model.ProviderOpsAPI, BaseURL: "https://opsapi.workstation.co.uk",
+			Credentials: key("js"), Config: map[string]any{"namespace_slug": "jobshout"}},
+		{Name: "Half done", Provider: model.ProviderOpsAPI, BaseURL: "https://opsapi.workstation.co.uk",
+			Config: map[string]any{"namespace_slug": "x"}},
+	}
+	for name, ns := range map[string]string{"jobshout": "jobshout", " Workstation Website ": "workstation"} {
+		d, err := findDestination(list, name)
+		if err != nil || d.Namespace() != ns {
+			t.Errorf("%q: namespace %v, err %v; want %s", name, d, err, ns)
+		}
+	}
+	for _, bad := range []string{"Nowhere", "Half done"} {
+		if _, err := findDestination(list, bad); err == nil {
+			t.Errorf("%q: want an error", bad)
+		}
+	}
+}

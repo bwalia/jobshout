@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -62,6 +63,10 @@ func (h *BlogHandler) Generate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	run, err := h.svc.Generate(r.Context(), orgID, triggeredBy, "api", req)
+	if errors.Is(err, service.ErrBlogDestination) {
+		RespondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err != nil {
 		RespondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -208,6 +213,9 @@ func (h *BlogHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 func (h *BlogHandler) Config(w http.ResponseWriter, r *http.Request) {
 	RespondJSON(w, http.StatusOK, map[string]any{
 		"can_publish": h.svc.CanPublish(),
+		// The ring's own CMS namespace — where a run with no website files —
+		// so the website picker can name its default.
+		"cms_namespace": h.svc.CMSNamespace(),
 		// Whether JobShout.com Insights is reachable, for "Send to Insights".
 		"can_publish_insights": h.svc.CanPublishInsights(),
 		// Whether the Content Writer's "Publish live" can work end to end.

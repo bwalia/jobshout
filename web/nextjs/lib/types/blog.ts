@@ -131,6 +131,8 @@ export interface BlogRunOptions {
   industry?: string;
   /** Which builtin agent the run belongs to; absent is the Article Writer. */
   writer?: string;
+  /** The saved OpsAPI website the run files to, by name; absent is the ring's CMS. */
+  destination?: string;
 }
 
 /**
@@ -216,6 +218,11 @@ export interface GenerateBlogRequest {
   trending_count?: number;
   /** Files the finished articles in the CMS without waiting for a click. */
   auto_publish?: boolean;
+  /**
+   * A saved OpsAPI website (integration name) to file in, overriding the
+   * writer's own. Omitted uses the writer's website, else the ring's CMS.
+   */
+  destination?: string;
 }
 
 /**
@@ -225,6 +232,8 @@ export interface GenerateBlogRequest {
  */
 export interface BlogConfig {
   can_publish: boolean;
+  /** The ring's own CMS namespace, where a run with no website files; "" if none. */
+  cms_namespace?: string;
   /** Whether JobShout.com Insights is reachable, for "Send to Insights". */
   can_publish_insights: boolean;
   /** Whether the Content Writer's "Publish live" works end to end. */
