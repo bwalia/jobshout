@@ -34,6 +34,10 @@ spec:
               value: {{ printf "https://%s" .Values.host | quote }}
             - name: PORT
               value: {{ .Values.web.port | quote }}
+            - name: OPSAPI_URL
+              value: {{ .Values.opsapi.url | default "" | quote }}
+            - name: OPSAPI_NAMESPACE
+              value: {{ .Values.opsapi.namespace | default "" | quote }}
           # NEXTAUTH_SECRET / AUTH_SECRET arrive via envFrom rather than two
           # `env` entries with valueFrom. `env` is strategic-merged against the
           # live Deployment, and a running pod whose env list predates those
@@ -46,6 +50,8 @@ spec:
                 name: jobshout-com-auth
             - secretRef:
                 name: jobshout-com-internal
+            - secretRef:
+                name: jobshout-com-opsapi
           readinessProbe:
             tcpSocket:
               port: http

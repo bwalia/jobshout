@@ -22,14 +22,20 @@ import {
   siteUrl,
   type Insight,
 } from "@/lib/insights";
+import { OPSAPI_ID_PREFIX, getOpsapiPost } from "@/lib/opsapi";
 import { currentViewer } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 type Params = { params: { slug: string } };
 
+/** A native insight wins; otherwise a published post from the OpsAPI workspace. */
+async function loadItem(slug: string, viewer: Awaited<ReturnType<typeof currentViewer>>) {
+  return (await getInsight(slug, viewer)) ?? (await getOpsapiPost(slug));
+}
+
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
-  const item = await getInsight(params.slug, await currentViewer()).catch(() => null);
+  const item = await loadItem(params.slug, await currentViewer()).catch(() => null);
   if (!item) return { title: "Not found" };
   const url = `/insights/${item.slug}`;
   const images = item.cover_image_url ? [{ url: item.cover_image_url, alt: item.cover_image_alt }] : [];
@@ -116,12 +122,14 @@ function pickJobs(jobs: Job[]): Job[] {
 
 export default async function InsightPage({ params }: Params) {
   const viewer = await currentViewer();
-  const item = await getInsight(params.slug, viewer);
+  const item = await loadItem(params.slug, viewer);
   if (!item) notFound();
+  // OpsAPI posts are edited in OpsAPI, so none of the review/edit UI applies.
+  const external = item.id.startsWith(OPSAPI_ID_PREFIX);
 
   const [editor, related, jobs] = await Promise.all([
-    isEditor(viewer),
-    item.status === "published" ? relatedInsights(item.slug) : Promise.resolve([]),
+    external ? Promise.resolve(false) : isEditor(viewer),
+    item.status === "published" && !external ? relatedInsights(item.slug) : Promise.resolve([]),
     listJobs(30).catch(() => [] as Job[]),
   ]);
   const owner = Boolean(viewer && item.author_email?.toLowerCase() === viewer.email.toLowerCase());
@@ -227,7 +235,7 @@ export default async function InsightPage({ params }: Params) {
             {item.body_html ? (
               <div
                 className="insight-prose mt-8"
-                // Sanitised by the API (ammonia) when the item was saved.
+                // Sanitised by the API (ammonia) when saved, or by lib/opsapi.ts for OpsAPI posts.
                 dangerouslySetInnerHTML={{ __html: item.body_html }}
               />
             ) : null}

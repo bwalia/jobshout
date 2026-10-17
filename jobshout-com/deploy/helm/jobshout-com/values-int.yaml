@@ -19,6 +19,10 @@ postgres:
 insights:
   seedSamples: true
 
+opsapi:
+  url: "https://int-opsapi.workstation.co.uk"
+  namespace: "jobshout"
+
 showcase:
   seedSamples: true
 
