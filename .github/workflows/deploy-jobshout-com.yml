@@ -15,9 +15,10 @@ name: Build & seed JobShout.com (Ring Promoter)
 # seeding one app with the other's version stops being a way to lose a quarter
 # of an hour to ImagePullBackOff.
 #
-# Int edge (beaconpulse-style, every int run, idempotent):
-#   Cloudflare CNAME int.jobshout.com → lon1.pop0.uk
-#   wslproxy vhost from jobshout-com/deploy/edge/wslproxy-server-int.json
+# Int/test edge (beaconpulse-style, every int or test run, idempotent):
+#   Cloudflare CNAME <env>.jobshout.com → lon1.pop0.uk
+#   wslproxy vhost from jobshout-com/deploy/edge/wslproxy-server-<env>.json,
+#   VPN/LAN-only via access_profile jobshout-preprod
 
 on:
   # Called by deploy-k3s.yml once the release tag exists on the remote — RP
@@ -295,11 +296,18 @@ jobs:
           echo "Pushed $NS/{api,web}:$VERSION"
 
   register-edge:
-    name: Ensure int.jobshout.com DNS + wslproxy
+    name: Ensure ${{ needs.plan.outputs.target_env }}.jobshout.com DNS + wslproxy
     needs: [plan]
     runs-on: ubuntu-latest
-    # Beaconpulse-style: every int deploy upserts CF CNAME + ensures wslproxy vhost.
-    if: needs.plan.outputs.deploy == 'true' && needs.plan.outputs.target_env == 'int'
+    # Beaconpulse-style: every int/test deploy upserts CF CNAME + ensures wslproxy vhost.
+    # Both vhosts carry access_profile jobshout-preprod (VPN + home LAN only) —
+    # see jobshout-com/deploy/edge/README.md.
+    if: >-
+      needs.plan.outputs.deploy == 'true'
+      && contains(fromJSON('["int","test"]'), needs.plan.outputs.target_env)
+    env:
+      HOST: ${{ needs.plan.outputs.target_env }}.jobshout.com
+      SPEC: jobshout-com/deploy/edge/wslproxy-server-${{ needs.plan.outputs.target_env }}.json
     steps:
       - uses: actions/checkout@v4
       - name: Ensure Cloudflare CNAME
@@ -309,7 +317,7 @@ jobs:
           set -euo pipefail
           chmod +x jobshout-com/deploy/scripts/cloudflare-dns.sh
           jobshout-com/deploy/scripts/cloudflare-dns.sh \
-            --name int.jobshout.com \
+            --name "$HOST" \
             --content lon1.pop0.uk \
             --zone jobshout.com \
             --proxied false
@@ -318,8 +326,6 @@ jobs:
           WSLPROXY_USER: ${{ secrets.WSLPROXY_USER }}
           WSLPROXY_PASSWORD: ${{ secrets.WSLPROXY_PASSWORD }}
           WSLPROXY_GATEWAY_URL: ${{ secrets.WSLPROXY_GATEWAY_URL }}
-          HOST: int.jobshout.com
-          SPEC: jobshout-com/deploy/edge/wslproxy-server-int.json
         run: |
           set -euo pipefail
           GW="${WSLPROXY_GATEWAY_URL:-}"
@@ -343,7 +349,25 @@ jobs:
           existing=$(curl -fsS -X GET "$GW/api/servers" -H "Authorization: Bearer $TOKEN" \
             | jq -r --arg h "$HOST" '.data[]? | select(.server_name==$h) | .id' | head -1)
           if [ -n "$existing" ]; then
-            echo "wslproxy vhost for ${HOST} already exists (id=$existing)"; exit 0
+            # Vhosts created before access profiles existed lack the field, and
+            # create-only would leave them public forever. Reconcile just that
+            # one field, and only onto a full record — PUT replaces the record.
+            want=$(jq -r '.access_profile // empty' "$SPEC")
+            cur=$(curl -fsS -X GET "$GW/api/servers/$existing" -H "Authorization: Bearer $TOKEN" \
+              | jq -c '.data // .') || cur='{}'
+            have=$(echo "$cur" | jq -r '.access_profile // empty')
+            if [ "$want" = "$have" ]; then
+              echo "wslproxy vhost for ${HOST} already exists (id=$existing, access_profile=${have:-none})"; exit 0
+            fi
+            if [ "$(echo "$cur" | jq -r '.server_name // empty')" != "$HOST" ] \
+               || [ -z "$(echo "$cur" | jq -r '.config // empty')" ]; then
+              echo "::warning::could not read the full ${HOST} vhost — set access_profile=${want} by hand."
+              exit 0
+            fi
+            curl -fsS -X PUT "$GW/api/servers/$existing" \
+              -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+              -d "$(echo "$cur" | jq -c --arg p "$want" '.access_profile = $p')" >/dev/null
+            echo "set access_profile=${want} on ${HOST} (was ${have:-none})."; exit 0
           fi
           resp=$(curl -fsS -X POST "$GW/api/servers" \
             -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
