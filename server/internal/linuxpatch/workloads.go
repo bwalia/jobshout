@@ -89,7 +89,7 @@ func ProfileFor(workload string) WorkloadProfile {
 				"Drain / patch one region or pod/node at a time; peers continue serving.",
 				"Before reboot: confirm replication lag is healthy; after: verify sync and leases.",
 				"Prefer moving pods (k8s) or stopping one region node, patch, start, wait for sync, then next.",
-				"UI: https://vault-ui.workstation.co.uk/login · docs: https://www.wslvault.org/",
+				"UI: https://vault.workstation.co.uk/login · docs: https://www.wslvault.org/",
 			},
 			PreCommands: func(host string, idx, total int) []string {
 				return []string{

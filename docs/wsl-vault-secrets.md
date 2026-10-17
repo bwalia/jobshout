@@ -11,7 +11,7 @@ This is **WSLVault**, not HashiCorp Vault. Use the WSLVault UI or the
 
 | | |
 | --- | --- |
-| UI login | https://vault-ui.workstation.co.uk/login |
+| UI login | https://vault.workstation.co.uk/login |
 | API | https://vault.workstation.co.uk |
 | Docs | https://www.wslvault.org/ |
 | KV mount | `kv` (versioned / Vault-compatible KV v2 API) |
@@ -48,7 +48,7 @@ the UI only — never paste them into git, tickets, chat, or PR bodies.
 
 ### UI
 
-1. Sign in at https://vault-ui.workstation.co.uk/login.
+1. Sign in at https://vault.workstation.co.uk/login.
 2. Open the `kv` engine and create (or edit) the path, e.g. `jobshout/int/gemini`.
 3. Add each env key with its value (exact names from the table above).
 4. For `jobshout/int/cms`, write **`OPSAPI_API_KEY` only** — drop any
