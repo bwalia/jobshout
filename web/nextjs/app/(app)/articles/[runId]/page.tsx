@@ -114,15 +114,20 @@ export default function ArticleRunPage() {
   }
 
   const isPublished = Boolean(run.published_at);
+  // A run with a website of its own files there, even on a ring with no CMS.
+  const ownSite = run.options?.destination;
   const canPublish =
-    Boolean(config?.can_publish) && run.status === "completed" && !isPublished;
+    (Boolean(config?.can_publish) || Boolean(ownSite)) &&
+    run.status === "completed" &&
+    !isPublished;
   const inInsights = Boolean(run.insights_published_at);
   const canPublishInsights =
     Boolean(config?.can_publish_insights) && run.status === "completed" && !inInsights;
   // Offer the CMS button when the CMS is set up, or when nothing is (so the
   // disabled button explains why). Where only Insights is configured, a dead
   // "Send to CMS" would just be noise.
-  const showCmsAction = config?.can_publish !== false || !config?.can_publish_insights;
+  const showCmsAction =
+    Boolean(ownSite) || config?.can_publish !== false || !config?.can_publish_insights;
   const finished = run.status !== "failed" && run.status !== "cancelled";
 
   return (
@@ -230,7 +235,7 @@ export default function ArticleRunPage() {
                 disabled={!canPublish || publish.isPending}
                 onClick={() => publish.mutate(runId)}
                 title={
-                  config?.can_publish === false
+                  config?.can_publish === false && !ownSite
                     ? "Publishing needs the CMS connection configured on the server"
                     : run.status !== "completed"
                       ? "Wait for the articles to finish"
@@ -243,7 +248,9 @@ export default function ArticleRunPage() {
                 )}
               >
                 <Send className="h-4 w-4" />
-                {publish.isPending ? "Sending..." : "Send to CMS"}
+                <span className="max-w-[16rem] truncate">
+                  {publish.isPending ? "Sending..." : ownSite ? `Send to ${ownSite}` : "Send to CMS"}
+                </span>
               </button>
             )}
 

@@ -46,6 +46,59 @@ One Article Writer pipeline serves every website. A new site or style is a
 A writer with a website files there only. It is never sent to the jobshout.com
 Insights queue, which only the original Article Writer's runs reach.
 
+## Pick the website per article
+
+One writer can file to several OpsAPI namespaces. **Write articles** has a
+**Website** picker: the writer's own website (or this ring's CMS) by default,
+then every saved `opsapi` integration as `Name — namespace`. **+ Add a
+website…** saves a new one inline (org admins only), the same record as
+Settings → Integrations, and selects it.
+
+- **Over the API:** `POST /api/v1/blogs/generate` takes `"destination":
+  "JobShout"` (an integration name). Task launch and chat take the same name
+  as the Article Writer's `destination` field.
+- **Precedence:** the launch's website, then the agent's `writer_destination`,
+  then the ring's CMS (`OPSAPI_*` env). The choice is recorded on the run
+  (`options.destination`), so Publish, auto-publish and Retry reach the same
+  site even if the agent is repointed later.
+- **Validation:** a named website that does not exist, is not active, or lacks
+  its key, namespace or URL fails the launch with `400` before any writing
+  starts. A website the agent names is still checked only at Publish, as before.
+- **Keys:** sealed with AES-256-GCM (`SECRETS_ENCRYPTION_KEY`) in
+  `integrations.credentials`. The integrations API (org admins only) returns
+  them masked to the last four characters; `/blogs/destinations` returns
+  only name, URL, namespace and `ready`. A run stores the name, never the key.
+
+### Set up Workstation and JobShout (int)
+
+1. **Mint one key per namespace**, as a namespace admin, scoped `cms`
+   create/update/read only:
+
+   ```
+   OPSAPI_BASE_URL=https://int-opsapi.workstation.co.uk OPSAPI_NAMESPACE=workstation \
+     OPSAPI_KEY_NAME=jobshout-blog-int ./scripts/opsapi-api-key.sh
+   OPSAPI_BASE_URL=https://int-opsapi.workstation.co.uk OPSAPI_NAMESPACE=jobshout \
+     OPSAPI_KEY_NAME=jobshout-blog-int ./scripts/opsapi-api-key.sh
+   ```
+
+   The key is printed once. Paste it straight into the next step; don't save
+   it in a file or chat.
+
+2. **Save each as a website**, from **Write articles → Website → + Add a
+   website…** or Settings → Integrations → OpsAPI: `Workstation Website` /
+   `workstation` and `JobShout` / `jobshout`, both at
+   `https://int-opsapi.workstation.co.uk`. Check that `SECRETS_ENCRYPTION_KEY`
+   is set on the ring first; without it the key is stored in plaintext.
+
+3. **Test.** Write one short article to each website, wait for it to finish,
+   then **Send to Workstation Website** / **Send to JobShout**. The run should
+   show *Drafted in workstation* / *Drafted in jobshout*, and the draft should
+   appear in that namespace in the OpsAPI CMS. Publish the JobShout draft in
+   the CMS and it appears on int jobshout.com `/insights`, which reads
+   namespace `jobshout`.
+
+Runs that pick no website behave exactly as before.
+
 ## Promote int → test → acc → prod
 
 Export the tested agent on int (agent page → Export) and import the

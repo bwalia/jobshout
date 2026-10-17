@@ -2,10 +2,14 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useGenerateBlog } from "@/lib/hooks/useBlog";
+import { useQuery } from "@tanstack/react-query";
+import { getBlogDestinations } from "@/lib/api/blog";
+import { useBlogConfig, useGenerateBlog } from "@/lib/hooks/useBlog";
+import { useAgent } from "@/lib/hooks/useAgents";
 import { useAgentSchemas } from "@/lib/hooks/useAgentSchemas";
 import { fieldDefault, fieldOptions } from "@/lib/agents/input-schemas";
-import type { BlogBrief } from "@/lib/types/blog";
+import { WRITER_SETTING_KEYS, type BlogBrief } from "@/lib/types/blog";
+import { AddWebsiteForm } from "@/components/blog/AddWebsiteForm";
 
 /**
  * The Article Writer's builtin marker. Its audience choices come from
@@ -13,6 +17,9 @@ import type { BlogBrief } from "@/lib/types/blog";
  * the web reads. See .claude/rules/agent-modules.md.
  */
 const ARTICLE_WRITER = "article_writer";
+
+/** The website picker's "add one" entry; never a real integration name. */
+const ADD_WEBSITE = "\u0000add";
 
 /** Matches blog.HardMaxArticles on the server, which truncates beyond this. */
 const HARD_MAX_ARTICLES = 10;
@@ -55,6 +62,28 @@ export function GenerateArticleDialog({
   // times. A brief can still override it over the API.
   const [runAudience, setRunAudience] = useState("");
   const [industry, setIndustry] = useState("");
+  // The OpsAPI website (integration name) to file in; "" is the writer's own
+  // website, else this ring's CMS.
+  const [destination, setDestination] = useState("");
+  const [addingSite, setAddingSite] = useState(false);
+
+  const { data: config } = useBlogConfig();
+  const { data: agent } = useAgent(agentId ?? "");
+  const { data: destinations } = useQuery({
+    queryKey: ["blog-destinations"],
+    queryFn: getBlogDestinations,
+    enabled: open,
+  });
+  const sites = destinations ?? [];
+  const agentSite =
+    typeof agent?.engine_config?.[WRITER_SETTING_KEYS.destination] === "string"
+      ? (agent.engine_config[WRITER_SETTING_KEYS.destination] as string)
+      : "";
+  const defaultLabel = agentSite
+    ? `Writer's website (${agentSite})`
+    : config?.cms_namespace
+      ? `Default (${config.cms_namespace})`
+      : "Default (no CMS set up on this ring)";
 
   const { data: agentCatalog } = useAgentSchemas();
   const catalog = agentCatalog ?? [];
@@ -63,7 +92,7 @@ export function GenerateArticleDialog({
 
   const filled = rows.filter((r) => r.topic.trim() !== "");
   const atCap = rows.length >= HARD_MAX_ARTICLES;
-  const canSubmit = filled.length > 0 && !generate.isPending;
+  const canSubmit = filled.length > 0 && !generate.isPending && !addingSite;
 
   if (!open) return null;
 
@@ -99,6 +128,7 @@ export function GenerateArticleDialog({
         audience: runAudience || undefined,
         industry: industry.trim() || undefined,
         agent_id: agentId,
+        destination: destination || undefined,
       },
       {
         onSuccess: (run) => {
@@ -106,6 +136,8 @@ export function GenerateArticleDialog({
           setModel("");
           setRunAudience("");
           setIndustry("");
+          setDestination("");
+          setAddingSite(false);
           onClose();
           // Go straight to the run so the user watches it work rather than
           // wondering whether anything happened.
@@ -173,6 +205,52 @@ export function GenerateArticleDialog({
                 className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground"
               />
             </div>
+            <div className="sm:col-span-2">
+              <label htmlFor="destination" className="text-xs text-muted-foreground">
+                Website
+              </label>
+              <select
+                id="destination"
+                value={addingSite ? ADD_WEBSITE : destination}
+                onChange={(e) => {
+                  if (e.target.value === ADD_WEBSITE) {
+                    setAddingSite(true);
+                    return;
+                  }
+                  setAddingSite(false);
+                  setDestination(e.target.value);
+                }}
+                className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+              >
+                <option value="">{defaultLabel}</option>
+                {sites.map((d) => (
+                  <option key={d.name} value={d.name} disabled={!d.ready}>
+                    {d.name} — {d.namespace || "no namespace"}
+                    {d.ready ? "" : " (needs its key or namespace)"}
+                  </option>
+                ))}
+                <option value={ADD_WEBSITE}>+ Add a website…</option>
+              </select>
+              {sites.length === 0 && !addingSite && (
+                <p className="mt-1 text-2xs text-muted-foreground">
+                  Publishing to another OpsAPI namespace, such as jobshout? Add
+                  it once and every later article can pick it.
+                </p>
+              )}
+            </div>
+            {addingSite && (
+              <div className="sm:col-span-2">
+                <AddWebsiteForm
+                  defaultBaseURL={sites[0]?.base_url ?? ""}
+                  takenNames={sites.map((d) => d.name.toLowerCase())}
+                  onSaved={(name) => {
+                    setDestination(name);
+                    setAddingSite(false);
+                  }}
+                  onCancel={() => setAddingSite(false)}
+                />
+              </div>
+            )}
             <p className="text-2xs text-muted-foreground sm:col-span-2">
               This applies to every article below. It changes how each one is
               researched, structured, written and reviewed — a business briefing

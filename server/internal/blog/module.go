@@ -56,6 +56,7 @@ func schema() agentschema.Schema {
 			},
 			{Key: "industry", Label: "Industry (optional)", Type: "text", Placeholder: "e.g. NHS trusts, 3PL logistics, commercial property", Help: "Frames the examples and consequences for one sector."},
 			{Key: "context", Label: "Context (optional)", Type: "textarea", Placeholder: "Angle, points to cover or avoid"},
+			{Key: "destination", Label: "Website (optional)", Type: "text", Placeholder: "e.g. JobShout", Help: "The name of a saved OpsAPI website (Settings → Integrations). Blank uses the writer's own website, else this ring's CMS."},
 			{Key: "model", Label: "Model override (optional)", Type: "text", Placeholder: "agent default"},
 		},
 		TitleRules: []agentschema.TitleRule{
@@ -128,7 +129,9 @@ func launch(w Writer) agentmodule.LaunchFunc {
 			Audience: strings.TrimSpace(in.Values["audience"]),
 			Industry: strings.TrimSpace(in.Values["industry"]),
 			Model:    strings.TrimSpace(in.Values["model"]),
-			TaskID:   &tid,
+			// A name only; the key stays sealed on the integration.
+			Destination: strings.TrimSpace(in.Values["destination"]),
+			TaskID:      &tid,
 		})
 		if err != nil {
 			return nil, err

@@ -203,6 +203,11 @@ type BlogRunOptions struct {
 	// Style is the writing style the run was asked for, so a trending run's
 	// discovered briefs — and a retry — are written the same way.
 	Style string `json:"style,omitempty"`
+	// Destination is the opsapi integration the run files to, by name — the
+	// one picked at launch, else its agent's. Recorded so Publish and a retry
+	// reach the site the articles were written for even if the agent is
+	// repointed later. Empty is the ring's CMS.
+	Destination string `json:"destination,omitempty"`
 }
 
 // RunOptions extracts what a run records about how it was asked to work.
@@ -217,6 +222,7 @@ func (r *GenerateBlogRequest) RunOptions() BlogRunOptions {
 		Industry:      r.Industry,
 		Writer:        r.Writer,
 		Style:         r.Style,
+		Destination:   r.Destination,
 	}
 }
 
@@ -412,6 +418,11 @@ type GenerateBlogRequest struct {
 	// Style is free-text writing-style instructions for every brief in the run.
 	// A run usually takes it from its agent's settings rather than naming it.
 	Style string `json:"style,omitempty"`
+	// Destination names the org's opsapi integration ("JobShout",
+	// "Workstation Website") to file this run in, overriding the agent's
+	// writer_destination. A name, never a key: the key stays sealed on the
+	// integration. Empty is the agent's website, else the ring's CMS.
+	Destination string `json:"destination,omitempty"`
 }
 
 // Normalize folds the legacy Topics field into Briefs and trims empties, so
@@ -420,6 +431,7 @@ func (r *GenerateBlogRequest) Normalize() {
 	// The run's reader and sector are settled first, so every brief below can
 	// inherit them and no consumer has to know the precedence.
 	r.Writer = strings.ToLower(strings.TrimSpace(r.Writer))
+	r.Destination = strings.TrimSpace(r.Destination)
 	if r.Writer == BuiltinArticleWriter {
 		r.Writer = ""
 	}
@@ -543,6 +555,9 @@ func (r *GenerateBlogRequest) resolveIndustry(brief string) string {
 // conditional: briefs are required unless the run is discovering its own
 // topics, and `validate:"required"` cannot express that.
 func (r *GenerateBlogRequest) Validate() error {
+	if len(r.Destination) > maxDestinationName {
+		return fmt.Errorf("destination name is longer than %d characters", maxDestinationName)
+	}
 	if r.Writer != "" {
 		if _, ok := BlogWriters[r.Writer]; !ok {
 			return fmt.Errorf("unknown writer %q", r.Writer)
@@ -578,6 +593,9 @@ func (r *GenerateBlogRequest) Validate() error {
 	}
 	return nil
 }
+
+// maxDestinationName bounds a destination name; integration names are short.
+const maxDestinationName = 200
 
 // audienceKeys lists the accepted audience values for an error message.
 func audienceKeys() string {

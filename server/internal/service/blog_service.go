@@ -88,6 +88,8 @@ type BlogService interface {
 	// CanPublish reports whether the CMS connection is configured, so the UI
 	// can disable the action instead of offering a button that always fails.
 	CanPublish() bool
+	// CMSNamespace is the ring's default CMS namespace, "" when unset.
+	CMSNamespace() string
 	// CanPublishInsights reports whether JobShout.com Insights is reachable.
 	CanPublishInsights() bool
 	// Provider is the LLM provider the writing pipeline is bound to, and
@@ -187,6 +189,15 @@ func (s *blogService) BindTasks(tasks TaskService) {
 
 func (s *blogService) CanPublish() bool {
 	return s.runner != nil && s.runner.CanPublish()
+}
+
+// CMSNamespace is the ring's own CMS namespace — where a run with no
+// destination files — or "" when the ring has no CMS.
+func (s *blogService) CMSNamespace() string {
+	if s.runner == nil {
+		return ""
+	}
+	return s.runner.CMSNamespace()
 }
 
 func (s *blogService) CanPublishInsights() bool {
@@ -451,47 +462,70 @@ func (s *blogService) runAgent(ctx context.Context, run *model.BlogRun) (*model.
 	return s.ensureWriter(ctx, run.OrgID, builtin)
 }
 
-// destination is the CMS a run's articles are filed in: its agent's named
-// opsapi integration when it has one, else nil for the ring's CMS.
+// ErrBlogDestination marks a launch that names a website this org cannot
+// file to: no such opsapi integration, or one missing its key, namespace or
+// URL. The handler answers it with 400, since the caller can fix it.
+var ErrBlogDestination = errors.New("blog_svc: destination")
+
+// destinationName is the website a run files to: the one recorded on the run
+// at launch, else — for runs from before that was recorded — its agent's.
+// Empty is the ring's CMS.
+func (s *blogService) destinationName(ctx context.Context, run *model.BlogRun) (string, error) {
+	if name := strings.TrimSpace(run.Options.Destination); name != "" {
+		return name, nil
+	}
+	if run.AgentID == nil {
+		return "", nil
+	}
+	agent, err := s.agentRepo.FindByID(ctx, *run.AgentID)
+	if err != nil || agent == nil {
+		return "", err
+	}
+	return model.WriterSettingsOf(agent).Destination, nil
+}
+
+// destination is the CMS a run's articles are filed in: its named opsapi
+// integration when it has one, else nil for the ring's CMS.
 //
 // A named destination that cannot be resolved is an error rather than a quiet
 // fall-back to the ring's CMS: filing a Workstation article on some other site
 // is worse than not filing it.
 func (s *blogService) destination(ctx context.Context, run *model.BlogRun) (CMSDestination, error) {
-	if run.AgentID == nil {
-		return nil, nil
-	}
-	agent, err := s.agentRepo.FindByID(ctx, *run.AgentID)
-	if err != nil || agent == nil {
+	name, err := s.destinationName(ctx, run)
+	if err != nil || name == "" {
 		return nil, err
 	}
-	name := model.WriterSettingsOf(agent).Destination
-	if name == "" {
-		return nil, nil
-	}
+	return s.resolveDestination(ctx, run.OrgID, name)
+}
+
+// resolveDestination builds the CMS client for the org's opsapi integration
+// called name. The key is read here, server-side, and never leaves.
+func (s *blogService) resolveDestination(ctx context.Context, orgID uuid.UUID, name string) (CMSDestination, error) {
 	if s.integrations == nil {
-		return nil, fmt.Errorf("blog_svc: %s files to %q, but integrations are not available", agent.Name, name)
+		return nil, fmt.Errorf("blog_svc: articles file to %q, but integrations are not available", name)
 	}
-	list, err := s.integrations.ListByOrg(ctx, run.OrgID)
+	list, err := s.integrations.ListByOrg(ctx, orgID)
 	if err != nil {
 		return nil, fmt.Errorf("blog_svc: list integrations: %w", err)
 	}
-	for _, in := range list {
-		if !strings.EqualFold(strings.TrimSpace(in.Name), name) {
-			continue
-		}
-		return opsapiDestination(in)
-	}
-	return nil, fmt.Errorf("blog_svc: %s files to %q, but this organization has no integration of that name — add an opsapi integration called %q", agent.Name, name, name)
+	return findDestination(list, name)
 }
 
-// hasDestination reports whether the run's agent names a website of its own.
-func (s *blogService) hasDestination(ctx context.Context, run *model.BlogRun) bool {
-	if run.AgentID == nil {
-		return false
+// findDestination picks the integration called name (case-insensitively).
+func findDestination(list []model.Integration, name string) (CMSDestination, error) {
+	name = strings.TrimSpace(name)
+	for _, in := range list {
+		if strings.EqualFold(strings.TrimSpace(in.Name), name) {
+			return opsapiDestination(in)
+		}
 	}
-	agent, err := s.agentRepo.FindByID(ctx, *run.AgentID)
-	return err == nil && model.WriterSettingsOf(agent).Destination != ""
+	return nil, fmt.Errorf("blog_svc: articles file to %q, but this organization has no integration of that name — add an opsapi integration called %q", name, name)
+}
+
+// hasDestination reports whether the run files to a website of its own.
+func (s *blogService) hasDestination(ctx context.Context, run *model.BlogRun) bool {
+	name, err := s.destinationName(ctx, run)
+	return err == nil && name != ""
 }
 
 // initialSteps is the trace a run starts with. Steps are pre-seeded as pending
@@ -700,6 +734,15 @@ func (s *blogService) Generate(
 	agent, err := s.writerAgent(ctx, orgID, model.BlogWriterBuiltin(req.Writer), req.AgentID)
 	if err != nil {
 		return nil, err
+	}
+	// A website picked at launch is checked now, before an hour of writing,
+	// so a typo or a half-configured integration is a 400 the caller can fix
+	// rather than a finished run that cannot be filed. The agent's own
+	// destination is left to Publish, as before.
+	if req.Destination != "" {
+		if _, err := s.resolveDestination(ctx, orgID, req.Destination); err != nil {
+			return nil, fmt.Errorf("%w: %s", ErrBlogDestination, strings.TrimPrefix(err.Error(), "blog_svc: "))
+		}
 	}
 	// The agent's own settings fill whatever the launch or schedule left
 	// unset, then the request is normalized again so its briefs inherit them.
@@ -1190,7 +1233,7 @@ func (s *blogService) Publish(ctx context.Context, orgID uuid.UUID, runID uuid.U
 		return nil, err
 	}
 	if dest == nil && !s.CanPublish() {
-		return nil, fmt.Errorf("blog_svc: publishing is not configured (OPSAPI_BASE_URL, OPSAPI_API_KEY and OPSAPI_NAMESPACE must all be set, or give the writer agent a destination)")
+		return nil, fmt.Errorf("blog_svc: publishing is not configured (OPSAPI_BASE_URL, OPSAPI_API_KEY and OPSAPI_NAMESPACE must all be set, or pick a website for the run)")
 	}
 	namespace := s.runner.CMSNamespace()
 	if dest != nil {
@@ -1541,7 +1584,9 @@ func (s *blogService) Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUI
 		Industry: run.Options.Industry,
 		Writer:   run.Options.Writer,
 		Style:    run.Options.Style,
-		AgentID:  run.AgentID,
+		// The same website, so the retried articles file where the rest did.
+		Destination: run.Options.Destination,
+		AgentID:     run.AgentID,
 	}
 	req.Normalize()
 	if run.Model != nil {
@@ -1615,6 +1660,7 @@ func discoveryRetryRequest(run *model.BlogRun) model.GenerateBlogRequest {
 		Industry:      run.Options.Industry,
 		Writer:        run.Options.Writer,
 		Style:         run.Options.Style,
+		Destination:   run.Options.Destination,
 		AgentID:       run.AgentID,
 	}
 	req.Normalize()
