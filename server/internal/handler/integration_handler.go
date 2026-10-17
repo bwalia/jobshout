@@ -82,6 +82,10 @@ func respondWriteError(w http.ResponseWriter, err error) {
 		RespondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if errors.Is(err, service.ErrDuplicateWebsite) {
+		RespondError(w, http.StatusConflict, err.Error())
+		return
+	}
 	if errors.Is(err, service.ErrSecretsNotSealed) {
 		RespondError(w, http.StatusServiceUnavailable, err.Error())
 		return

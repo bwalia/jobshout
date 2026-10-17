@@ -345,6 +345,31 @@ func (h *BlogHandler) GetArticle(w http.ResponseWriter, r *http.Request) {
 	RespondJSON(w, http.StatusOK, article)
 }
 
+// CheckWebsite handles GET /api/v1/blogs/destinations/check?namespace=&base_url=
+// — the add-website form's first step. base_url defaults to this ring's
+// OpsAPI. The answer never includes a key.
+func (h *BlogHandler) CheckWebsite(w http.ResponseWriter, r *http.Request) {
+	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid org_id in token")
+		return
+	}
+	base := r.URL.Query().Get("base_url")
+	if strings.TrimSpace(base) == "" {
+		base = h.opsapiBaseURL
+	}
+	res, err := h.svc.CheckWebsite(r.Context(), orgID, r.URL.Query().Get("namespace"), base)
+	if errors.Is(err, service.ErrInvalidIntegration) {
+		RespondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, "failed to check the website")
+		return
+	}
+	RespondJSON(w, http.StatusOK, res)
+}
+
 // Destinations handles GET /api/v1/blogs/destinations — the websites (opsapi
 // integrations) a writer agent can be pointed at. Credentials are never
 // returned.

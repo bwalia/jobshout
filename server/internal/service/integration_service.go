@@ -38,6 +38,10 @@ var ErrSecretsNotSealed = errors.New("this server has no SECRETS_ENCRYPTION_KEY,
 // ErrInvalidIntegration wraps a payload the provider cannot work with.
 var ErrInvalidIntegration = errors.New("invalid integration")
 
+// ErrDuplicateWebsite refuses a second opsapi integration for a namespace the
+// org already saved: the stored key is reused, never re-entered.
+var ErrDuplicateWebsite = errors.New("this namespace is already a saved website")
+
 // opsapiNamespace is an OpsAPI namespace slug.
 var opsapiNamespace = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
@@ -126,6 +130,18 @@ func (s *integrationService) Create(ctx context.Context, orgID, createdBy uuid.U
 	}
 	if err := s.checkSealing(req.Credentials); err != nil {
 		return nil, err
+	}
+	if req.Provider == model.ProviderOpsAPI {
+		ns, _ := req.Config["namespace_slug"].(string)
+		existing, err := s.integRepo.ListByOrg(ctx, orgID)
+		if err != nil {
+			return nil, fmt.Errorf("create integration: %w", err)
+		}
+		for _, in := range existing {
+			if sameWebsite(in, ns, req.BaseURL) {
+				return nil, fmt.Errorf("%w as %q", ErrDuplicateWebsite, in.Name)
+			}
+		}
 	}
 	i := &model.Integration{
 		OrgID:       orgID,

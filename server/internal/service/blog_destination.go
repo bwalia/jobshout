@@ -52,3 +52,27 @@ func opsapiDestination(in model.Integration) (CMSDestination, error) {
 		Namespace: strings.TrimSpace(ns),
 	}), nil
 }
+
+// normalBaseURL is an OpsAPI root as websites are compared: no trailing
+// slash, case-insensitive scheme and host.
+func normalBaseURL(raw string) string {
+	b := strings.TrimRight(strings.TrimSpace(raw), "/")
+	u, err := url.Parse(b)
+	if err != nil || u.Host == "" {
+		return strings.ToLower(b)
+	}
+	u.Scheme = strings.ToLower(u.Scheme)
+	u.Host = strings.ToLower(u.Host)
+	return u.String()
+}
+
+// sameWebsite reports whether in is the opsapi website for namespace on
+// baseURL. One namespace on one OpsAPI is one website, with one stored key.
+func sameWebsite(in model.Integration, namespace, baseURL string) bool {
+	if in.Provider != model.ProviderOpsAPI {
+		return false
+	}
+	ns, _ := in.Config["namespace_slug"].(string)
+	return strings.EqualFold(strings.TrimSpace(ns), strings.TrimSpace(namespace)) &&
+		normalBaseURL(in.BaseURL) == normalBaseURL(baseURL)
+}

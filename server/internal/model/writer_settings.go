@@ -1,6 +1,10 @@
 package model
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/google/uuid"
+)
 
 // Writer settings are EngineConfig keys on a writer agent (the Article Writer
 // or a clone of it). They are how one writer is configured for a website or
@@ -108,4 +112,17 @@ type BlogDestination struct {
 	// Ready is false when the integration is missing its key, namespace or a
 	// valid URL, or is not active — filing to it would fail.
 	Ready bool `json:"ready"`
+}
+
+// WebsiteCheck answers the add-website form's first question: is this
+// namespace (on this OpsAPI) already a saved website of the org? It never
+// carries a key — Ready only says whether the stored one is usable.
+type WebsiteCheck struct {
+	Namespace string `json:"namespace"`
+	BaseURL   string `json:"base_url"`
+	Exists    bool   `json:"exists"`
+	// Name, IntegrationID and Ready describe the saved website when Exists.
+	Name          string     `json:"name,omitempty"`
+	IntegrationID *uuid.UUID `json:"integration_id,omitempty"`
+	Ready         bool       `json:"ready"`
 }

@@ -290,6 +290,20 @@ export interface BlogDestination {
 }
 
 /**
+ * Whether a namespace is already a saved website of the org, from
+ * GET /blogs/destinations/check. It never carries the key: `ready` only says
+ * whether the stored one is usable.
+ */
+export interface WebsiteCheck {
+  namespace: string;
+  base_url: string;
+  exists: boolean;
+  name?: string;
+  integration_id?: string;
+  ready: boolean;
+}
+
+/**
  * A writer agent's settings, stored in its engine_config. They are how one
  * writer is set up for a website or project without code, and they travel with
  * the agent when it is exported from one ring and imported into another.

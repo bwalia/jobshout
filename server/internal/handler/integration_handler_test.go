@@ -233,3 +233,28 @@ func TestIntegrationHandler_UpdateMergesCredentials(t *testing.T) {
 		t.Fatalf("name-only update lost credentials: %d %v", rec.Code, repo.byID[id].Credentials)
 	}
 }
+
+// A namespace already saved on the same OpsAPI is reused, not added twice.
+func TestIntegrationHandler_RefusesDuplicateWebsite(t *testing.T) {
+	h, _, orgB, id := newIntegrationFixture()
+	body := func(baseURL, ns string) string {
+		return `{"name":"site-` + ns + `","provider":"opsapi","base_url":"` + baseURL +
+			`","config":{"namespace_slug":"` + ns + `"},"credentials":{"api_key":"` + testSecret + `"}}`
+	}
+	rec := httptest.NewRecorder()
+	h.Create(rec, integrationReq(http.MethodPost, body("https://opsapi.example.com", "jobshout"), orgB, id))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("first = %d %s", rec.Code, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	h.Create(rec, integrationReq(http.MethodPost, body("https://OPSAPI.example.com/", "jobshout"), orgB, id))
+	if rec.Code != http.StatusConflict || strings.Contains(rec.Body.String(), testSecret) {
+		t.Fatalf("duplicate = %d %s, want 409 without the key", rec.Code, rec.Body.String())
+	}
+	// Another org may save the same namespace with its own key.
+	rec = httptest.NewRecorder()
+	h.Create(rec, integrationReq(http.MethodPost, body("https://opsapi.example.com", "jobshout"), uuid.New(), id))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("other org = %d %s", rec.Code, rec.Body.String())
+	}
+}

@@ -72,11 +72,16 @@ Settings → Integrations, and selects it.
   characters; `/blogs/destinations` returns only name, URL, namespace and
   `ready`. A run stores the name, never the key. A key this server cannot
   decrypt makes the website not ready instead of sending ciphertext.
-- **Adding a website:** Namespace and OpsAPI API key, from the writer's
-  settings (Website → **+ Add a website…**, saved as the writer's website) or
-  from Write articles. The name defaults to the namespace and the URL to this
-  ring's `OPSAPI_BASE_URL` (both under More options). The server checks the
-  URL, the namespace slug and that a key is present (`400` otherwise).
+- **Adding a website:** from the writer's settings (Website → **+ Add a
+  website…**, saved as the writer's website) or from Write articles. The form
+  asks for the **namespace first**; `GET /blogs/destinations/check` validates
+  it (`400` for a bad slug or URL) and says whether the org already saved it
+  on that OpsAPI. A saved namespace with a usable key is reused and no key is
+  asked for; a saved one whose key is missing or unreadable asks for a new key
+  (admins only); a new one asks for its key and saves it sealed. The check
+  never returns a key. The server also refuses a second website for the same
+  namespace and OpsAPI (`409`). The name defaults to the namespace and the URL
+  to this ring's `OPSAPI_BASE_URL` (both under More options).
 
 ### Set up Workstation and JobShout (int)
 

@@ -1472,6 +1472,7 @@ func main() {
 			r.Route("/blogs", func(r chi.Router) {
 				r.Get("/config", blogHandler.Config)
 				r.Get("/destinations", blogHandler.Destinations)
+				r.Get("/destinations/check", blogHandler.CheckWebsite)
 				r.Post("/generate", blogHandler.Generate)
 				r.Get("/runs", blogHandler.ListRuns)
 				r.Route("/runs/{runID}", func(r chi.Router) {
