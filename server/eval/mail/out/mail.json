@@ -1,0 +1,640 @@
+{
+  "suite": "mail",
+  "tier": "1",
+  "reports": [
+    {
+      "suite": "mail",
+      "case": "auto_reply",
+      "outcomes": [
+        {
+          "name": "never_sends_without_approval",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "thread_reaches_expected_status",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_written_only_when_expected",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "research_called_only_when_expected",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_cites_only_researched_sources",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_never_claims_sent",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_prompt_forbids_claiming_sent",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "research_reference_names_the_real_run",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "no_secrets_in_thread_error",
+          "fatal": true,
+          "passed": true
+        }
+      ],
+      "notes": [
+        "An out-of-office bounce must not be answered."
+      ]
+    },
+    {
+      "suite": "mail",
+      "case": "availability_with_link",
+      "outcomes": [
+        {
+          "name": "never_sends_without_approval",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "thread_reaches_expected_status",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_written_only_when_expected",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "research_called_only_when_expected",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_cites_only_researched_sources",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_never_claims_sent",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_prompt_forbids_claiming_sent",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "research_reference_names_the_real_run",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "no_secrets_in_thread_error",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "sender_links_are_fetched_directly",
+          "fatal": true,
+          "passed": true
+        }
+      ],
+      "notes": [
+        "Stock availability question with a product link."
+      ]
+    },
+    {
+      "suite": "mail",
+      "case": "multi_link",
+      "outcomes": [
+        {
+          "name": "never_sends_without_approval",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "thread_reaches_expected_status",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_written_only_when_expected",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "research_called_only_when_expected",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_cites_only_researched_sources",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_never_claims_sent",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_prompt_forbids_claiming_sent",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "research_reference_names_the_real_run",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "no_secrets_in_thread_error",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "sender_links_are_fetched_directly",
+          "fatal": true,
+          "passed": true
+        }
+      ],
+      "notes": [
+        "Two links in one message; both must reach the research request."
+      ]
+    },
+    {
+      "suite": "mail",
+      "case": "newsletter",
+      "outcomes": [
+        {
+          "name": "never_sends_without_approval",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "thread_reaches_expected_status",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_written_only_when_expected",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "research_called_only_when_expected",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_cites_only_researched_sources",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_never_claims_sent",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_prompt_forbids_claiming_sent",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "research_reference_names_the_real_run",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "no_secrets_in_thread_error",
+          "fatal": true,
+          "passed": true
+        }
+      ],
+      "notes": [
+        "A marketing blast must be ignored, with no draft written."
+      ]
+    },
+    {
+      "suite": "mail",
+      "case": "pinned_knowledge",
+      "outcomes": [
+        {
+          "name": "never_sends_without_approval",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "thread_reaches_expected_status",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_written_only_when_expected",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "research_called_only_when_expected",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_cites_only_researched_sources",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_never_claims_sent",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_prompt_forbids_claiming_sent",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "research_reference_names_the_real_run",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "no_secrets_in_thread_error",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "pinned_knowledge_urls_are_used",
+          "fatal": true,
+          "passed": true
+        }
+      ],
+      "notes": [
+        "Operator pinned knowledge pages force research even when the classifier says none is needed."
+      ]
+    },
+    {
+      "suite": "mail",
+      "case": "price_with_link",
+      "outcomes": [
+        {
+          "name": "never_sends_without_approval",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "thread_reaches_expected_status",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_written_only_when_expected",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "research_called_only_when_expected",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_cites_only_researched_sources",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_never_claims_sent",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_prompt_forbids_claiming_sent",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "research_reference_names_the_real_run",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "no_secrets_in_thread_error",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "sender_links_are_fetched_directly",
+          "fatal": true,
+          "passed": true
+        }
+      ],
+      "notes": [
+        "The brief's headline use case: a buyer asks a price and pastes a product link."
+      ]
+    },
+    {
+      "suite": "mail",
+      "case": "question_no_link",
+      "outcomes": [
+        {
+          "name": "never_sends_without_approval",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "thread_reaches_expected_status",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_written_only_when_expected",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "research_called_only_when_expected",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_cites_only_researched_sources",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_never_claims_sent",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_prompt_forbids_claiming_sent",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "research_reference_names_the_real_run",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "no_secrets_in_thread_error",
+          "fatal": true,
+          "passed": true
+        }
+      ],
+      "notes": [
+        "An answerable question with no link and no need for the web."
+      ]
+    },
+    {
+      "suite": "mail",
+      "case": "reply_style",
+      "outcomes": [
+        {
+          "name": "never_sends_without_approval",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "thread_reaches_expected_status",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_written_only_when_expected",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "research_called_only_when_expected",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_cites_only_researched_sources",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_never_claims_sent",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_prompt_forbids_claiming_sent",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "research_reference_names_the_real_run",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "no_secrets_in_thread_error",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "reply_style_reaches_the_draft_prompt",
+          "fatal": true,
+          "passed": true
+        }
+      ],
+      "notes": [
+        "Operator reply instructions must reach the draft prompt."
+      ]
+    },
+    {
+      "suite": "mail",
+      "case": "reply_style_open_web",
+      "outcomes": [
+        {
+          "name": "never_sends_without_approval",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "thread_reaches_expected_status",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_written_only_when_expected",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "research_called_only_when_expected",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_cites_only_researched_sources",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_never_claims_sent",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_prompt_forbids_claiming_sent",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "research_reference_names_the_real_run",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "no_secrets_in_thread_error",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "sender_links_are_fetched_directly",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "reply_style_reaches_the_draft_prompt",
+          "fatal": true,
+          "passed": true
+        }
+      ],
+      "notes": [
+        "Operator reply instructions must reach the prompt even when the facts came from the sender's own link rather than pinned knowledge pages. They used to be gated on pinned knowledge, so the setting was silently ignored in the commonest case of all."
+      ]
+    },
+    {
+      "suite": "mail",
+      "case": "research_unavailable",
+      "outcomes": [
+        {
+          "name": "never_sends_without_approval",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "thread_reaches_expected_status",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_written_only_when_expected",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "research_called_only_when_expected",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_cites_only_researched_sources",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_never_claims_sent",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_prompt_forbids_claiming_sent",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "research_reference_names_the_real_run",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "no_secrets_in_thread_error",
+          "fatal": true,
+          "passed": true
+        }
+      ],
+      "notes": [
+        "Research fails; the agent must still draft, and must not invent a citation."
+      ]
+    },
+    {
+      "suite": "mail",
+      "case": "thread_reply",
+      "outcomes": [
+        {
+          "name": "never_sends_without_approval",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "thread_reaches_expected_status",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_written_only_when_expected",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "research_called_only_when_expected",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_cites_only_researched_sources",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_never_claims_sent",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "draft_prompt_forbids_claiming_sent",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "research_reference_names_the_real_run",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "no_secrets_in_thread_error",
+          "fatal": true,
+          "passed": true
+        },
+        {
+          "name": "subject_has_one_re_prefix",
+          "fatal": true,
+          "passed": true
+        }
+      ],
+      "notes": [
+        "A message already prefixed Re: must not gain a second prefix."
+      ]
+    }
+  ]
+}

@@ -8,6 +8,7 @@ import (
 	"github.com/jobshout/server/internal/blog"
 	"github.com/jobshout/server/internal/integration/adapters/opsapi"
 	"github.com/jobshout/server/internal/model"
+	"github.com/jobshout/server/internal/secretbox"
 )
 
 // CMSDestination is a website a writer agent files articles in.
@@ -35,6 +36,11 @@ func opsapiDestination(in model.Integration) (CMSDestination, error) {
 	key, _ := in.Credentials["api_key"].(string)
 	if strings.TrimSpace(key) == "" {
 		return nil, fmt.Errorf("blog_svc: integration %q has no credentials.api_key", in.Name)
+	}
+	// Still sealed after reading: this server has no or another
+	// SECRETS_ENCRYPTION_KEY, and sending the ciphertext would only fail auth.
+	if secretbox.IsSealed(key) {
+		return nil, fmt.Errorf("blog_svc: integration %q has a key this server cannot decrypt (check SECRETS_ENCRYPTION_KEY)", in.Name)
 	}
 	ns, _ := in.Config["namespace_slug"].(string)
 	if strings.TrimSpace(ns) == "" {

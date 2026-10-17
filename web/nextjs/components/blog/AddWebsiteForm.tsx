@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import axios from "axios";
 import { useCreateIntegration } from "@/lib/hooks/useIntegrations";
+import { useBlogConfig } from "@/lib/hooks/useBlog";
 import { apiErrorMessage } from "@/lib/api/client";
 
 const inputClass =
@@ -17,52 +18,68 @@ const SLUG = /^[a-z0-9][a-z0-9-]*$/;
  * the server once and is sealed there; it is never read back, so it lives in
  * this form only until it is sent.
  *
- * It is a <div>, not a <form>: it sits inside the article dialog's form.
+ * Namespace and key are all most sites need: the name defaults to the
+ * namespace and the OpsAPI URL to this ring's, both under "More options".
+ *
+ * It is a <div>, not a <form>: it sits inside other forms.
  */
 export function AddWebsiteForm({
-  defaultBaseURL,
   takenNames,
   onSaved,
   onCancel,
 }: {
-  defaultBaseURL: string;
   /** Existing website names, lower-cased: names are how runs pick a site. */
   takenNames: string[];
   onSaved: (name: string) => void;
   onCancel: () => void;
 }) {
   const create = useCreateIntegration();
-  const [name, setName] = useState("");
-  const [baseURL, setBaseURL] = useState(defaultBaseURL);
+  const { data: config } = useBlogConfig();
+  const ringURL = config?.opsapi_base_url ?? "";
+  // Only false is a refusal: an older server sends nothing and decides itself.
+  const cannotSeal = config?.keys_sealed === false;
+
   const [namespace, setNamespace] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [name, setName] = useState("");
+  const [baseURL, setBaseURL] = useState(ringURL);
+  const [more, setMore] = useState(false);
   const [error, setError] = useState("");
 
+  // The config can arrive after the form opens.
+  useEffect(() => {
+    setBaseURL((u) => u || ringURL);
+  }, [ringURL]);
+
+  const siteName = name.trim() || namespace.trim();
+
   function problem(): string {
-    const n = name.trim();
-    if (!n) return "Give the website a name, e.g. JobShout.";
-    if (takenNames.includes(n.toLowerCase())) return `A website called "${n}" already exists.`;
+    if (!SLUG.test(namespace.trim())) {
+      return "The namespace is the OpsAPI slug: lower-case letters, digits and hyphens, e.g. jobshout.";
+    }
+    if (!apiKey.trim()) return "Paste the namespace's OpsAPI API key.";
+    if (takenNames.includes(siteName.toLowerCase())) {
+      return `A website called "${siteName}" already exists. Pick it from the list, or give this one another name under More options.`;
+    }
     try {
       const u = new URL(baseURL.trim());
       if (u.protocol !== "https:" && u.protocol !== "http:") throw new Error();
     } catch {
-      return "The OpsAPI URL must be a full http(s) address.";
+      return "Set the OpsAPI URL under More options: this ring has no default.";
     }
-    if (!SLUG.test(namespace.trim())) {
-      return "The namespace is the OpsAPI slug: lower-case letters, digits and hyphens.";
-    }
-    if (!apiKey.trim()) return "Paste the namespace's OpsAPI API key.";
     return "";
   }
 
   function save() {
     const p = problem();
     setError(p);
-    if (p) return;
-    const n = name.trim();
+    if (p) {
+      if (!ringURL || p.includes("More options")) setMore(true);
+      return;
+    }
     create.mutate(
       {
-        name: n,
+        name: siteName,
         provider: "opsapi",
         base_url: baseURL.trim().replace(/\/+$/, ""),
         credentials: { api_key: apiKey.trim() },
@@ -71,7 +88,7 @@ export function AddWebsiteForm({
       {
         onSuccess: () => {
           setApiKey("");
-          onSaved(n);
+          onSaved(siteName);
         },
         onError: (e) => {
           setError(
@@ -90,19 +107,13 @@ export function AddWebsiteForm({
         Add an OpsAPI namespace to publish to. The key is encrypted on the
         server and never shown again; future articles reuse it.
       </p>
+      {cannotSeal && (
+        <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          This server can&apos;t store keys encrypted yet (SECRETS_ENCRYPTION_KEY is not
+          set), so it won&apos;t save one. Ask an operator to set it, then add the website.
+        </p>
+      )}
       <div className="grid gap-3 sm:grid-cols-2">
-        <div>
-          <label htmlFor="site-name" className="text-xs text-muted-foreground">
-            Name
-          </label>
-          <input
-            id="site-name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="JobShout"
-            className={inputClass}
-          />
-        </div>
         <div>
           <label htmlFor="site-namespace" className="text-xs text-muted-foreground">
             Namespace
@@ -116,22 +127,9 @@ export function AddWebsiteForm({
             className={inputClass}
           />
         </div>
-        <div className="sm:col-span-2">
-          <label htmlFor="site-url" className="text-xs text-muted-foreground">
-            OpsAPI URL
-          </label>
-          <input
-            id="site-url"
-            value={baseURL}
-            onChange={(e) => setBaseURL(e.target.value)}
-            placeholder="https://opsapi.workstation.co.uk"
-            spellCheck={false}
-            className={inputClass}
-          />
-        </div>
-        <div className="sm:col-span-2">
+        <div>
           <label htmlFor="site-key" className="text-xs text-muted-foreground">
-            API key
+            OpsAPI API key
           </label>
           <input
             id="site-key"
@@ -140,11 +138,56 @@ export function AddWebsiteForm({
             spellCheck={false}
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
-            placeholder="A namespace key with cms create, update and read"
+            placeholder="opsk_… with cms create, update and read"
             className={inputClass}
           />
         </div>
       </div>
+
+      <button
+        type="button"
+        onClick={() => setMore((v) => !v)}
+        className="text-xs text-muted-foreground underline hover:text-foreground"
+        aria-expanded={more}
+      >
+        {more ? "Fewer options" : "More options"}
+      </button>
+      {!more && (
+        <span className="ml-2 text-2xs text-muted-foreground">
+          Saved as &ldquo;{siteName || "namespace"}&rdquo;
+          {ringURL ? ` on ${ringURL}` : ""}
+        </span>
+      )}
+      {more && (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label htmlFor="site-name" className="text-xs text-muted-foreground">
+              Name (optional)
+            </label>
+            <input
+              id="site-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={namespace || "JobShout"}
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label htmlFor="site-url" className="text-xs text-muted-foreground">
+              OpsAPI URL
+            </label>
+            <input
+              id="site-url"
+              value={baseURL}
+              onChange={(e) => setBaseURL(e.target.value)}
+              placeholder="https://opsapi.workstation.co.uk"
+              spellCheck={false}
+              className={inputClass}
+            />
+          </div>
+        </div>
+      )}
+
       {error && <p className="text-xs text-destructive">{error}</p>}
       <div className="flex justify-end gap-2">
         <button
@@ -157,7 +200,7 @@ export function AddWebsiteForm({
         <button
           type="button"
           onClick={save}
-          disabled={create.isPending}
+          disabled={create.isPending || cannotSeal}
           className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
         >
           {create.isPending ? "Saving..." : "Save website"}

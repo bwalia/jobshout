@@ -78,6 +78,14 @@ func respondWriteError(w http.ResponseWriter, err error) {
 		RespondError(w, http.StatusConflict, "an integration with this name already exists")
 		return
 	}
+	if errors.Is(err, service.ErrInvalidIntegration) {
+		RespondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if errors.Is(err, service.ErrSecretsNotSealed) {
+		RespondError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
 	RespondError(w, http.StatusInternalServerError, err.Error())
 }
 

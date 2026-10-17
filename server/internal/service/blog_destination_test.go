@@ -29,6 +29,8 @@ func TestOpsapiDestination(t *testing.T) {
 		"base_url":  func(i *model.Integration) { i.BaseURL = "ftp://x" },
 		"api_key":   func(i *model.Integration) { i.Credentials = map[string]any{} },
 		"namespace": func(i *model.Integration) { i.Config = map[string]any{} },
+		// Left sealed by a server without its SECRETS_ENCRYPTION_KEY.
+		"sealed key": func(i *model.Integration) { i.Credentials = map[string]any{"api_key": "enc:v1:AAAA"} },
 	}
 	for name, mut := range broken {
 		in := ok

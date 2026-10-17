@@ -241,7 +241,6 @@ export function GenerateArticleDialog({
             {addingSite && (
               <div className="sm:col-span-2">
                 <AddWebsiteForm
-                  defaultBaseURL={sites[0]?.base_url ?? ""}
                   takenNames={sites.map((d) => d.name.toLowerCase())}
                   onSaved={(name) => {
                     setDestination(name);

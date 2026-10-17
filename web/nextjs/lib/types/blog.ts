@@ -234,6 +234,10 @@ export interface BlogConfig {
   can_publish: boolean;
   /** The ring's own CMS namespace, where a run with no website files; "" if none. */
   cms_namespace?: string;
+  /** This ring's OpsAPI URL, the default for a new website; "" if none. */
+  opsapi_base_url?: string;
+  /** Whether a website's key is stored encrypted here; false = saving one is refused. */
+  keys_sealed?: boolean;
   /** Whether JobShout.com Insights is reachable, for "Send to Insights". */
   can_publish_insights: boolean;
   /** Whether the Content Writer's "Publish live" works end to end. */
