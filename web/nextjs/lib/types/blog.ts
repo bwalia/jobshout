@@ -234,6 +234,10 @@ export interface BlogConfig {
   can_publish: boolean;
   /** The ring's own CMS namespace, where a run with no website files; "" if none. */
   cms_namespace?: string;
+  /** This ring's OpsAPI URL, the default for a new website; "" if none. */
+  opsapi_base_url?: string;
+  /** Whether a website's key is stored encrypted here; false = saving one is refused. */
+  keys_sealed?: boolean;
   /** Whether JobShout.com Insights is reachable, for "Send to Insights". */
   can_publish_insights: boolean;
   /** Whether the Content Writer's "Publish live" works end to end. */
@@ -282,6 +286,20 @@ export interface BlogDestination {
   base_url: string;
   namespace: string;
   /** False when the integration is missing its key, namespace or URL. */
+  ready: boolean;
+}
+
+/**
+ * Whether a namespace is already a saved website of the org, from
+ * GET /blogs/destinations/check. It never carries the key: `ready` only says
+ * whether the stored one is usable.
+ */
+export interface WebsiteCheck {
+  namespace: string;
+  base_url: string;
+  exists: boolean;
+  name?: string;
+  integration_id?: string;
   ready: boolean;
 }
 

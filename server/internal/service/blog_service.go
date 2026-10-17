@@ -85,6 +85,10 @@ type BlogService interface {
 	// ListDestinations lists the websites a writer can be pointed at — the
 	// org's opsapi integrations — without their credentials.
 	ListDestinations(ctx context.Context, orgID uuid.UUID) ([]model.BlogDestination, error)
+	// CheckWebsite validates namespace and reports whether the org already
+	// saved it as a website on baseURL, so a form asks for a key only when it
+	// is new. Errors wrap ErrInvalidIntegration for a bad namespace or URL.
+	CheckWebsite(ctx context.Context, orgID uuid.UUID, namespace, baseURL string) (*model.WebsiteCheck, error)
 	// CanPublish reports whether the CMS connection is configured, so the UI
 	// can disable the action instead of offering a button that always fails.
 	CanPublish() bool
@@ -1892,6 +1896,32 @@ func (s *blogService) ListDestinations(ctx context.Context, orgID uuid.UUID) ([]
 		out = append(out, model.BlogDestination{
 			Name: in.Name, BaseURL: in.BaseURL, Namespace: ns, Ready: derr == nil,
 		})
+	}
+	return out, nil
+}
+
+func (s *blogService) CheckWebsite(ctx context.Context, orgID uuid.UUID, namespace, baseURL string) (*model.WebsiteCheck, error) {
+	ns := strings.ToLower(strings.TrimSpace(namespace))
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if err := validateOpsAPI(&base, map[string]any{"namespace_slug": ns}, nil, false); err != nil {
+		return nil, err
+	}
+	out := &model.WebsiteCheck{Namespace: ns, BaseURL: base}
+	if s.integrations == nil {
+		return out, nil
+	}
+	list, err := s.integrations.ListByOrg(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	for _, in := range list {
+		if !sameWebsite(in, ns, base) {
+			continue
+		}
+		id := in.ID
+		_, derr := opsapiDestination(in)
+		out.Exists, out.Name, out.IntegrationID, out.Ready = true, in.Name, &id, derr == nil
+		break
 	}
 	return out, nil
 }

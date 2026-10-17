@@ -12,8 +12,12 @@ import { useAgent, useUpdateAgent } from "@/lib/hooks/useAgents";
 import { useAgentSchemas } from "@/lib/hooks/useAgentSchemas";
 import { fieldOptions } from "@/lib/agents/input-schemas";
 import { WRITER_SETTING_KEYS as K } from "@/lib/types/blog";
+import { AddWebsiteForm } from "@/components/blog/AddWebsiteForm";
 
 const ARTICLE_WRITER = "article_writer";
+
+/** The website picker's "add one" entry; never a real integration name. */
+const ADD_WEBSITE = "\u0000add";
 
 const inputClass =
   "mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground";
@@ -51,6 +55,7 @@ export function WriterSettings({ agentId }: { agentId: string }) {
   const [industry, setIndustry] = useState("");
   const [reader, setReader] = useState("");
   const [destination, setDestination] = useState("");
+  const [addingSite, setAddingSite] = useState(false);
   const [cloneName, setCloneName] = useState("");
   const [cloning, setCloning] = useState(false);
 
@@ -65,7 +70,8 @@ export function WriterSettings({ agentId }: { agentId: string }) {
 
   if (!agent) return null;
 
-  function save() {
+  // site overrides the picked website: a website just added is saved at once.
+  function save(site = destination) {
     if (!agent) return;
     const keywords = focus
       .split(",")
@@ -80,7 +86,7 @@ export function WriterSettings({ agentId }: { agentId: string }) {
           [K.focus]: keywords,
           [K.industry]: industry.trim(),
           [K.audience]: reader,
-          [K.destination]: destination,
+          [K.destination]: site,
         },
       },
     });
@@ -191,8 +197,15 @@ export function WriterSettings({ agentId }: { agentId: string }) {
               </label>
               <select
                 id="writer-destination"
-                value={destination}
-                onChange={(e) => setDestination(e.target.value)}
+                value={addingSite ? ADD_WEBSITE : destination}
+                onChange={(e) => {
+                  if (e.target.value === ADD_WEBSITE) {
+                    setAddingSite(true);
+                    return;
+                  }
+                  setAddingSite(false);
+                  setDestination(e.target.value);
+                }}
                 className={inputClass}
               >
                 <option value="">Default website (set on the server)</option>
@@ -205,6 +218,7 @@ export function WriterSettings({ agentId }: { agentId: string }) {
                 {destination && !selected && (
                   <option value={destination}>{destination} (missing here)</option>
                 )}
+                <option value={ADD_WEBSITE}>+ Add a website…</option>
               </select>
               <p className="mt-1 text-xs text-muted-foreground">
                 {selected ? (
@@ -213,7 +227,7 @@ export function WriterSettings({ agentId }: { agentId: string }) {
                   <>
                     {destination
                       ? "No website of this name is set up in this organisation yet. "
-                      : "Other websites appear here once an admin adds them as OpsAPI integrations. "}
+                      : "Add an OpsAPI namespace and its key with + Add a website…. "}
                     <Link href="/settings#integrations" className="underline hover:text-foreground">
                       Manage integrations
                     </Link>
@@ -222,6 +236,18 @@ export function WriterSettings({ agentId }: { agentId: string }) {
               </p>
             </div>
           </div>
+
+          {addingSite && (
+            <AddWebsiteForm
+              takenNames={(destinations ?? []).map((d) => d.name.toLowerCase())}
+              onSaved={(name) => {
+                setDestination(name);
+                setAddingSite(false);
+                save(name);
+              }}
+              onCancel={() => setAddingSite(false)}
+            />
+          )}
 
           <div className="flex flex-wrap items-end justify-between gap-3 border-t border-border pt-4">
             <div className="flex items-end gap-2">
@@ -249,7 +275,7 @@ export function WriterSettings({ agentId }: { agentId: string }) {
             </div>
             <button
               type="button"
-              onClick={save}
+              onClick={() => save()}
               disabled={update.isPending}
               className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
             >

@@ -22,6 +22,10 @@ type BlogHandler struct {
 	validate *validator.Validate
 	// insightsSiteURL is the public jobshout.com site; empty hides links.
 	insightsSiteURL string
+	// opsapiBaseURL is this ring's OpsAPI, the default for a new website.
+	opsapiBaseURL string
+	// keysSealed is whether a website's key can be stored encrypted here.
+	keysSealed bool
 }
 
 // NewBlogHandler creates a BlogHandler.
@@ -33,6 +37,14 @@ func NewBlogHandler(svc service.BlogService) *BlogHandler {
 // UI links published articles to.
 func (h *BlogHandler) WithInsightsSiteURL(u string) *BlogHandler {
 	h.insightsSiteURL = strings.TrimRight(strings.TrimSpace(u), "/")
+	return h
+}
+
+// WithWebsiteDefaults sets what the "Add a website" form needs: this ring's
+// OpsAPI URL (not a secret) and whether keys are stored encrypted.
+func (h *BlogHandler) WithWebsiteDefaults(opsapiBaseURL string, keysSealed bool) *BlogHandler {
+	h.opsapiBaseURL = strings.TrimRight(strings.TrimSpace(opsapiBaseURL), "/")
+	h.keysSealed = keysSealed
 	return h
 }
 
@@ -216,6 +228,10 @@ func (h *BlogHandler) Config(w http.ResponseWriter, r *http.Request) {
 		// The ring's own CMS namespace — where a run with no website files —
 		// so the website picker can name its default.
 		"cms_namespace": h.svc.CMSNamespace(),
+		// Defaults for adding a website: this ring's OpsAPI, and whether its
+		// key would be stored encrypted (saving one is refused otherwise).
+		"opsapi_base_url": h.opsapiBaseURL,
+		"keys_sealed":     h.keysSealed,
 		// Whether JobShout.com Insights is reachable, for "Send to Insights".
 		"can_publish_insights": h.svc.CanPublishInsights(),
 		// Whether the Content Writer's "Publish live" can work end to end.
@@ -327,6 +343,31 @@ func (h *BlogHandler) GetArticle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	RespondJSON(w, http.StatusOK, article)
+}
+
+// CheckWebsite handles GET /api/v1/blogs/destinations/check?namespace=&base_url=
+// — the add-website form's first step. base_url defaults to this ring's
+// OpsAPI. The answer never includes a key.
+func (h *BlogHandler) CheckWebsite(w http.ResponseWriter, r *http.Request) {
+	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid org_id in token")
+		return
+	}
+	base := r.URL.Query().Get("base_url")
+	if strings.TrimSpace(base) == "" {
+		base = h.opsapiBaseURL
+	}
+	res, err := h.svc.CheckWebsite(r.Context(), orgID, r.URL.Query().Get("namespace"), base)
+	if errors.Is(err, service.ErrInvalidIntegration) {
+		RespondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, "failed to check the website")
+		return
+	}
+	RespondJSON(w, http.StatusOK, res)
 }
 
 // Destinations handles GET /api/v1/blogs/destinations — the websites (opsapi

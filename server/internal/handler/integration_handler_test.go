@@ -84,7 +84,7 @@ func newIntegrationFixture() (*IntegrationHandler, *fakeIntegrationRepo, uuid.UU
 		id: {ID: id, OrgID: orgB, Name: "cms", Provider: model.ProviderOpsAPI,
 			Credentials: map[string]any{"api_key": testSecret, "owner": "acme"}},
 	}}
-	h := NewIntegrationHandler(service.NewIntegrationService(repo, nil, nil, nil, zap.NewNop()))
+	h := NewIntegrationHandler(service.NewIntegrationService(repo, nil, nil, nil, zap.NewNop(), true))
 	return h, repo, orgB, id
 }
 
@@ -146,8 +146,69 @@ func TestIntegrationHandler_MasksSecrets(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	h.Create(rec, integrationReq(http.MethodPost,
-		`{"name":"new","provider":"opsapi","credentials":{"api_key":"`+testSecret+`"}}`, orgB, id))
+		`{"name":"new","provider":"opsapi","base_url":"https://opsapi.example.com",`+
+			`"config":{"namespace_slug":"jobshout"},"credentials":{"api_key":"`+testSecret+`"}}`, orgB, id))
 	check("create", rec, http.StatusCreated)
+}
+
+func TestIntegrationHandler_ValidatesOpsAPIWebsite(t *testing.T) {
+	h, _, orgB, id := newIntegrationFixture()
+	body := func(baseURL, ns, key string) string {
+		return `{"name":"site","provider":"opsapi","base_url":"` + baseURL +
+			`","config":{"namespace_slug":"` + ns + `"},"credentials":{"api_key":"` + key + `"}}`
+	}
+	for name, b := range map[string]string{
+		"no url":        body("", "jobshout", testSecret),
+		"not http":      body("ftp://opsapi.example.com", "jobshout", testSecret),
+		"bad namespace": body("https://opsapi.example.com", "Job Shout", testSecret),
+		"no namespace":  body("https://opsapi.example.com", "", testSecret),
+		"no key":        body("https://opsapi.example.com", "jobshout", ""),
+	} {
+		rec := httptest.NewRecorder()
+		h.Create(rec, integrationReq(http.MethodPost, b, orgB, id))
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: create = %d %s, want 400", name, rec.Code, rec.Body.String())
+		}
+	}
+
+	// An update is checked only on what it sets: the fixture predates the
+	// check (no URL or namespace) and still renames.
+	rec := httptest.NewRecorder()
+	h.Update(rec, integrationReq(http.MethodPut, `{"config":{"namespace_slug":"Bad_NS"}}`, orgB, id))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad namespace update = %d, want 400", rec.Code)
+	}
+}
+
+func TestIntegrationHandler_RefusesPlaintextKeys(t *testing.T) {
+	orgB, id := uuid.New(), uuid.New()
+	repo := &fakeIntegrationRepo{byID: map[uuid.UUID]*model.Integration{
+		id: {ID: id, OrgID: orgB, Name: "cms", Provider: model.ProviderOpsAPI,
+			Credentials: map[string]any{"api_key": testSecret}},
+	}}
+	// No SECRETS_ENCRYPTION_KEY on this server.
+	h := NewIntegrationHandler(service.NewIntegrationService(repo, nil, nil, nil, zap.NewNop(), false))
+
+	rec := httptest.NewRecorder()
+	h.Create(rec, integrationReq(http.MethodPost,
+		`{"name":"site","provider":"opsapi","base_url":"https://opsapi.example.com",`+
+			`"config":{"namespace_slug":"jobshout"},"credentials":{"api_key":"`+testSecret+`"}}`, orgB, id))
+	if rec.Code != http.StatusServiceUnavailable || len(repo.byID) != 1 {
+		t.Fatalf("create without encryption = %d (%d rows), want 503 and nothing stored", rec.Code, len(repo.byID))
+	}
+
+	rec = httptest.NewRecorder()
+	h.Update(rec, integrationReq(http.MethodPut, `{"credentials":{"api_key":"other-key"}}`, orgB, id))
+	if rec.Code != http.StatusServiceUnavailable || repo.byID[id].Credentials["api_key"] != testSecret {
+		t.Fatalf("new key without encryption = %d, want 503 and the old key kept", rec.Code)
+	}
+
+	// Existing rows keep working: a rename, or the masked key echoed back.
+	rec = httptest.NewRecorder()
+	h.Update(rec, integrationReq(http.MethodPut, `{"name":"renamed","credentials":{"api_key":"••••cdef"}}`, orgB, id))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("rename without encryption = %d %s, want 200", rec.Code, rec.Body.String())
+	}
 }
 
 func TestIntegrationHandler_UpdateMergesCredentials(t *testing.T) {
@@ -170,5 +231,30 @@ func TestIntegrationHandler_UpdateMergesCredentials(t *testing.T) {
 	h.Update(rec, integrationReq(http.MethodPut, `{"name":"only-name"}`, orgB, id))
 	if rec.Code != http.StatusOK || repo.byID[id].Credentials["api_key"] != testSecret {
 		t.Fatalf("name-only update lost credentials: %d %v", rec.Code, repo.byID[id].Credentials)
+	}
+}
+
+// A namespace already saved on the same OpsAPI is reused, not added twice.
+func TestIntegrationHandler_RefusesDuplicateWebsite(t *testing.T) {
+	h, _, orgB, id := newIntegrationFixture()
+	body := func(baseURL, ns string) string {
+		return `{"name":"site-` + ns + `","provider":"opsapi","base_url":"` + baseURL +
+			`","config":{"namespace_slug":"` + ns + `"},"credentials":{"api_key":"` + testSecret + `"}}`
+	}
+	rec := httptest.NewRecorder()
+	h.Create(rec, integrationReq(http.MethodPost, body("https://opsapi.example.com", "jobshout"), orgB, id))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("first = %d %s", rec.Code, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	h.Create(rec, integrationReq(http.MethodPost, body("https://OPSAPI.example.com/", "jobshout"), orgB, id))
+	if rec.Code != http.StatusConflict || strings.Contains(rec.Body.String(), testSecret) {
+		t.Fatalf("duplicate = %d %s, want 409 without the key", rec.Code, rec.Body.String())
+	}
+	// Another org may save the same namespace with its own key.
+	rec = httptest.NewRecorder()
+	h.Create(rec, integrationReq(http.MethodPost, body("https://opsapi.example.com", "jobshout"), uuid.New(), id))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("other org = %d %s", rec.Code, rec.Body.String())
 	}
 }

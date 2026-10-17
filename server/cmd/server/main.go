@@ -246,7 +246,7 @@ func main() {
 		logger.Fatal("invalid SECRETS_ENCRYPTION_KEY", zap.Error(err))
 	}
 	if !secretBox.Enabled() {
-		logger.Warn("SECRETS_ENCRYPTION_KEY not set: org LLM provider keys, webhook secrets and integration credentials are stored in plaintext")
+		logger.Warn("SECRETS_ENCRYPTION_KEY not set: org LLM provider keys and webhook secrets are stored in plaintext, and new integration credentials are refused")
 	}
 	llmProviderRepo := repository.NewLLMProviderRepositoryWithBox(pool, secretBox)
 	schedulerRepo := repository.NewSchedulerRepository(pool)
@@ -1009,7 +1009,7 @@ func main() {
 	adapterRegistry.RegisterNotification("email", emailAdapter.NewAdapter)
 
 	eventBus := integ.NewBus()
-	integSvc := service.NewIntegrationService(integRepo, linkRepo, syncLogRepo, adapterRegistry, logger)
+	integSvc := service.NewIntegrationService(integRepo, linkRepo, syncLogRepo, adapterRegistry, logger, secretBox.Enabled())
 	notifSvc := service.NewNotificationService(notifConfigRepo, adapterRegistry, logger)
 
 	// Phase 1: make the org's configured integrations agent-callable. These
@@ -1208,7 +1208,8 @@ func main() {
 	auditHandler := handler.NewAuditHandler(auditRepo)
 	pricingHandler := handler.NewPricingHandler(pricingRepo)
 	leaderboardHandler := handler.NewLeaderboardHandler(leaderboardSvc)
-	blogHandler := handler.NewBlogHandler(blogSvc).WithInsightsSiteURL(cfg.JobshoutComSiteURL)
+	blogHandler := handler.NewBlogHandler(blogSvc).WithInsightsSiteURL(cfg.JobshoutComSiteURL).
+		WithWebsiteDefaults(cfg.OpsAPIBaseURL, secretBox.Enabled())
 	researchHandler := handler.NewResearchHandler(researchSvc)
 	pentestHandler := handler.NewPentestHandler(pentestSvc)
 	reviewHandler := handler.NewReviewHandler(reviewSvc)
@@ -1471,6 +1472,7 @@ func main() {
 			r.Route("/blogs", func(r chi.Router) {
 				r.Get("/config", blogHandler.Config)
 				r.Get("/destinations", blogHandler.Destinations)
+				r.Get("/destinations/check", blogHandler.CheckWebsite)
 				r.Post("/generate", blogHandler.Generate)
 				r.Get("/runs", blogHandler.ListRuns)
 				r.Route("/runs/{runID}", func(r chi.Router) {

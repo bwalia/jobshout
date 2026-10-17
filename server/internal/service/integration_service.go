@@ -2,7 +2,10 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -28,12 +31,29 @@ type IntegrationService interface {
 	ListSyncLogs(ctx context.Context, integrationID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.IntegrationSyncLog], error)
 }
 
+// ErrSecretsNotSealed refuses a new credential on a server that cannot
+// encrypt it (no SECRETS_ENCRYPTION_KEY): it would be stored in plaintext.
+var ErrSecretsNotSealed = errors.New("this server has no SECRETS_ENCRYPTION_KEY, so it cannot store keys encrypted; ask an operator to set it, then try again")
+
+// ErrInvalidIntegration wraps a payload the provider cannot work with.
+var ErrInvalidIntegration = errors.New("invalid integration")
+
+// ErrDuplicateWebsite refuses a second opsapi integration for a namespace the
+// org already saved: the stored key is reused, never re-entered.
+var ErrDuplicateWebsite = errors.New("this namespace is already a saved website")
+
+// opsapiNamespace is an OpsAPI namespace slug.
+var opsapiNamespace = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
 type integrationService struct {
 	integRepo   repository.IntegrationRepository
 	linkRepo    repository.TaskLinkRepository
 	syncLogRepo repository.SyncLogRepository
 	registry    *integration.Registry
 	logger      *zap.Logger
+	// sealsSecrets is whether the repository encrypts credentials at rest.
+	// Without it, new credentials are refused rather than stored in plaintext.
+	sealsSecrets bool
 }
 
 func NewIntegrationService(
@@ -42,17 +62,87 @@ func NewIntegrationService(
 	syncLogRepo repository.SyncLogRepository,
 	registry *integration.Registry,
 	logger *zap.Logger,
+	sealsSecrets bool,
 ) IntegrationService {
 	return &integrationService{
-		integRepo:   integRepo,
-		linkRepo:    linkRepo,
-		syncLogRepo: syncLogRepo,
-		registry:    registry,
-		logger:      logger,
+		integRepo:    integRepo,
+		linkRepo:     linkRepo,
+		syncLogRepo:  syncLogRepo,
+		registry:     registry,
+		logger:       logger,
+		sealsSecrets: sealsSecrets,
 	}
 }
 
+// newCredential reports whether v is a credential value the caller is setting,
+// as opposed to blank or the masked value the API showed ("••••abcd").
+func newCredential(v any) bool {
+	str, ok := v.(string)
+	return v != nil && (!ok || (strings.TrimSpace(str) != "" && !strings.HasPrefix(str, "••••")))
+}
+
+// checkSealing refuses creds that set a value this server would store in
+// plaintext.
+func (s *integrationService) checkSealing(creds map[string]any) error {
+	if s.sealsSecrets {
+		return nil
+	}
+	for _, v := range creds {
+		if newCredential(v) {
+			return ErrSecretsNotSealed
+		}
+	}
+	return nil
+}
+
+// validateOpsAPI checks the parts of an opsapi integration an article is
+// filed with. Only what a request sets is checked, so rows written before
+// this check still save a rename or a status change.
+func validateOpsAPI(baseURL *string, config map[string]any, creds map[string]any, creating bool) error {
+	if baseURL != nil || creating {
+		b := ""
+		if baseURL != nil {
+			b = strings.TrimSpace(*baseURL)
+		}
+		if u, err := url.Parse(b); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+			return fmt.Errorf("%w: base_url must be a full http(s) OpsAPI address", ErrInvalidIntegration)
+		}
+	}
+	if config != nil || creating {
+		ns, _ := config["namespace_slug"].(string)
+		if !opsapiNamespace.MatchString(strings.TrimSpace(ns)) {
+			return fmt.Errorf("%w: config.namespace_slug must be an OpsAPI namespace slug (lower-case letters, digits and hyphens)", ErrInvalidIntegration)
+		}
+	}
+	if creating {
+		if key, _ := creds["api_key"].(string); strings.TrimSpace(key) == "" {
+			return fmt.Errorf("%w: credentials.api_key is required", ErrInvalidIntegration)
+		}
+	}
+	return nil
+}
+
 func (s *integrationService) Create(ctx context.Context, orgID, createdBy uuid.UUID, req model.CreateIntegrationRequest) (*model.Integration, error) {
+	if req.Provider == model.ProviderOpsAPI {
+		if err := validateOpsAPI(&req.BaseURL, req.Config, req.Credentials, true); err != nil {
+			return nil, err
+		}
+	}
+	if err := s.checkSealing(req.Credentials); err != nil {
+		return nil, err
+	}
+	if req.Provider == model.ProviderOpsAPI {
+		ns, _ := req.Config["namespace_slug"].(string)
+		existing, err := s.integRepo.ListByOrg(ctx, orgID)
+		if err != nil {
+			return nil, fmt.Errorf("create integration: %w", err)
+		}
+		for _, in := range existing {
+			if sameWebsite(in, ns, req.BaseURL) {
+				return nil, fmt.Errorf("%w as %q", ErrDuplicateWebsite, in.Name)
+			}
+		}
+	}
 	i := &model.Integration{
 		OrgID:       orgID,
 		Name:        req.Name,
@@ -96,6 +186,14 @@ func (s *integrationService) Update(ctx context.Context, id uuid.UUID, req model
 	if err != nil || i == nil {
 		return nil, fmt.Errorf("integration not found")
 	}
+	if i.Provider == model.ProviderOpsAPI {
+		if err := validateOpsAPI(req.BaseURL, req.Config, nil, false); err != nil {
+			return nil, err
+		}
+	}
+	if err := s.checkSealing(req.Credentials); err != nil {
+		return nil, err
+	}
 
 	if req.Name != nil {
 		i.Name = *req.Name
@@ -110,7 +208,7 @@ func (s *integrationService) Update(ctx context.Context, id uuid.UUID, req model
 	}
 	for k, v := range req.Credentials {
 		// A masked value ("••••abcd") is what the API showed, echoed back.
-		if str, ok := v.(string); v == nil || (ok && (strings.TrimSpace(str) == "" || strings.HasPrefix(str, "••••"))) {
+		if !newCredential(v) {
 			continue
 		}
 		i.Credentials[k] = v

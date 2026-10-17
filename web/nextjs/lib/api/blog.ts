@@ -4,6 +4,7 @@ import type {
   BlogArticle,
   BlogConfig,
   BlogDestination,
+  WebsiteCheck,
   BlogRun,
   GenerateBlogRequest,
 } from "@/lib/types/blog";
@@ -22,6 +23,14 @@ export type BlogRunListParams = PaginationParams & { writer?: string; agent_id?:
 /** The websites a writer agent can be pointed at. */
 export async function getBlogDestinations(): Promise<BlogDestination[]> {
   const { data } = await apiClient.get<BlogDestination[]>("/blogs/destinations");
+  return data;
+}
+
+/** Validates a namespace and says whether it is already saved; base URL defaults to this ring's OpsAPI. */
+export async function checkWebsite(namespace: string, baseURL?: string): Promise<WebsiteCheck> {
+  const { data } = await apiClient.get<WebsiteCheck>("/blogs/destinations/check", {
+    params: { namespace, base_url: baseURL || undefined },
+  });
   return data;
 }
 
