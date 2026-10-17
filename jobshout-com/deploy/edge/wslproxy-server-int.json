@@ -9,5 +9,6 @@
   "ssl_staging": false,
   "ssl_email": "balinder.walia@gmail.com",
   "listens": [ { "listen": "80" } ],
-  "match_cases": {}
+  "match_cases": {},
+  "access_profile": "jobshout-preprod"
 }
