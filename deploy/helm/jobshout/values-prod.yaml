@@ -18,7 +18,10 @@ ai:
   chatModelFallback: "llama3.1:8b"
   imageBaseURL: "https://images.workstation.co.uk"
   imageModel: "z-image-turbo"
-  blogCoverImages: false
+  # Unique listing covers per article. Without this, OpsAPI posts ship with no
+  # featured_image_url and workstation.co.uk falls back to the same hero image
+  # for every card.
+  blogCoverImages: true
   # Article writer on qwen3.8, as proved on int (see values-int.yaml): 120m per
   # article, 45m per call, 16384-token window for prose. Research and the JSON
   # stages stay on ollamaModel.
