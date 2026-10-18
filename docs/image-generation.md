@@ -88,7 +88,7 @@ exists if that one did not register.
 | `IMAGE_TIMEOUT`       | `30m`           | Bounds one generation.                         |
 | `IMAGE_OPENAI_MODEL`  | `gpt-image-1`   | Hosted image model.                            |
 | `MINIO_BUCKET_IMAGES` | `images`        | Where generated PNGs are stored.               |
-| `BLOG_COVER_IMAGES`   | `false`         | Whether every article run draws a cover.       |
+| `BLOG_COVER_IMAGES`   | `false` (chart); **true** on int/test/acc/prod | Whether every article run draws a cover. |
 
 `IMAGE_BASE_URL` has no default on purpose. Defaulting it to localhost would
 make every deployed ring try to reach an image service inside its own pod and
@@ -105,11 +105,15 @@ All four rings point at `https://images.workstation.co.uk` and set
 JWT gateway, and an image has been drawn through that whole path — edge,
 gateway, workstation GPU.
 
-`BLOG_COVER_IMAGES` is **on in int only**. The rollout is one ring at a time:
-generate an image by hand from the Images page to confirm the endpoint answers,
-then set `ai.blogCoverImages: true` in that ring's values and watch a run. A
-z-image-turbo cover is usually under two minutes of a single shared GPU per
-article.
+`BLOG_COVER_IMAGES` is **on in every ring** (`ai.blogCoverImages: true`). Gemini
+is tried first when keyed; mflux on the workstation is the fallback. A cover is
+usually under two minutes of a shared GPU (or seconds on Gemini). Without this
+flag, OpsAPI posts ship with an empty `featured_image_url` and public sites
+fall back to a single shared hero for every listing card.
+
+To redraw a cover from finished article content (and optionally push it to
+OpsAPI), see [blog-covers.md](./blog-covers.md)
+(`POST /api/v1/blogs/articles/{id}/regenerate-cover`).
 
 The chart default in `values.yaml` is also `z-image-turbo`.
 

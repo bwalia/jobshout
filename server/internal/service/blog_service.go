@@ -15,6 +15,7 @@ import (
 	"github.com/jobshout/server/internal/agentmodule"
 	"github.com/jobshout/server/internal/audience"
 	"github.com/jobshout/server/internal/blog"
+	"github.com/jobshout/server/internal/integration/adapters/opsapi"
 	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/llmtrace"
 	"github.com/jobshout/server/internal/model"
@@ -74,6 +75,11 @@ type BlogService interface {
 	CanPublishLive() bool
 	ListArticles(ctx context.Context, runID uuid.UUID) ([]model.BlogArticle, error)
 	GetArticle(ctx context.Context, id uuid.UUID) (*model.BlogArticle, error)
+	// RegenerateCover redraws one article's cover from its finished content.
+	// When syncCMS is true and the article already has a CMS post UUID, the
+	// new cover is also written to opsapi's featured_image_url so listing
+	// cards update without re-publishing the body.
+	RegenerateCover(ctx context.Context, orgID, articleID uuid.UUID, syncCMS bool) (*model.BlogArticle, error)
 	// BindTasks updates the Task Manager card when a launched run finishes.
 	BindTasks(tasks TaskService)
 	// BindIntegrations lets a writer agent file to its own website: the named
@@ -1932,4 +1938,131 @@ func (s *blogService) ListArticles(ctx context.Context, runID uuid.UUID) ([]mode
 
 func (s *blogService) GetArticle(ctx context.Context, id uuid.UUID) (*model.BlogArticle, error) {
 	return s.repo.GetArticle(ctx, id)
+}
+
+// featuredImageUpdater is implemented by the opsapi client. Declared here so
+// a regenerated cover can update an existing CMS post without widening
+// CMSPublisher (which only creates drafts).
+type featuredImageUpdater interface {
+	UpdateFeaturedImage(ctx context.Context, postUUID, imageURL string) (*opsapi.Post, error)
+}
+
+func (s *blogService) RegenerateCover(ctx context.Context, orgID, articleID uuid.UUID, syncCMS bool) (*model.BlogArticle, error) {
+	if s.runner == nil {
+		return nil, fmt.Errorf("blog_svc: generator not configured")
+	}
+	a, err := s.repo.GetArticle(ctx, articleID)
+	if err != nil {
+		return nil, err
+	}
+	if a == nil {
+		return nil, fmt.Errorf("blog_svc: article not found")
+	}
+	if a.OrgID != orgID {
+		return nil, fmt.Errorf("blog_svc: article does not belong to this organization")
+	}
+
+	runID := a.RunID
+	gen := &blog.GeneratedArticle{
+		Topic:         a.Topic,
+		Title:         a.Title,
+		Slug:          a.Slug,
+		Markdown:      a.Markdown,
+		HTML:          a.HTML,
+		Excerpt:       articleExcerpt(a),
+		CoverImageURL: a.CoverImageURL,
+		Audience:      a.Audience,
+		Industry:      a.Industry,
+		RunID:         &runID,
+	}
+	if err := s.runner.RegenerateCover(ctx, orgID, gen); err != nil {
+		return nil, err
+	}
+
+	meta := model.CoverImageMeta{
+		Provider: gen.CoverImageProvider,
+		Model:    gen.CoverImageModel,
+		Seed:     gen.CoverImageSeed,
+		Width:    gen.CoverImageWidth,
+		Height:   gen.CoverImageHeight,
+	}
+	if err := s.repo.UpdateArticleCover(ctx, a.ID, gen.CoverImageURL, gen.CoverImagePrompt, meta); err != nil {
+		return nil, err
+	}
+	a.CoverImageURL = gen.CoverImageURL
+	a.CoverImagePrompt = gen.CoverImagePrompt
+	a.CoverImageMeta = meta
+
+	if syncCMS && a.PostUUID != nil && *a.PostUUID != "" {
+		abs := blog.PublicImageURL(s.runner.PublicBaseURL(), gen.CoverImageURL)
+		if abs == "" {
+			s.logger.Warn("blog_svc: regenerated cover has no public URL; CMS not updated",
+				zap.String("article_id", a.ID.String()))
+			return a, nil
+		}
+		run, rerr := s.repo.GetByID(ctx, a.RunID)
+		if rerr != nil {
+			return a, fmt.Errorf("blog_svc: cover saved but CMS sync failed looking up run: %w", rerr)
+		}
+		dest, derr := s.destination(ctx, run)
+		if derr != nil {
+			return a, fmt.Errorf("blog_svc: cover saved but CMS sync failed: %w", derr)
+		}
+		var cms blog.CMSPublisher = dest
+		if cms == nil {
+			cms = s.runner.RingCMS()
+		}
+		updater, ok := cms.(featuredImageUpdater)
+		if !ok || updater == nil {
+			return a, fmt.Errorf("blog_svc: cover saved but the CMS client cannot update featured images")
+		}
+		if _, err := updater.UpdateFeaturedImage(ctx, *a.PostUUID, abs); err != nil {
+			return a, fmt.Errorf("blog_svc: cover saved but CMS featured image update failed: %w", err)
+		}
+	}
+	return a, nil
+}
+
+// articleExcerpt prefers the stored HTML excerpt path used at publish time.
+func articleExcerpt(a *model.BlogArticle) string {
+	if a == nil {
+		return ""
+	}
+	// HTML excerpt derivation lives in the blog package; a short plain-text
+	// fallback from markdown is enough to steer cover regeneration.
+	if strings.TrimSpace(a.HTML) != "" {
+		plain := stripHTMLTags(a.HTML)
+		if plain != "" {
+			return plain
+		}
+	}
+	return firstProseLine(a.Markdown)
+}
+
+func firstProseLine(md string) string {
+	for _, line := range strings.Split(md, "\n") {
+		t := strings.TrimSpace(line)
+		if t == "" || strings.HasPrefix(t, "#") {
+			continue
+		}
+		return t
+	}
+	return ""
+}
+
+func stripHTMLTags(html string) string {
+	// Local, dependency-free strip for cover-brief steering only.
+	var b strings.Builder
+	inTag := false
+	for _, r := range html {
+		switch {
+		case r == '<':
+			inTag = true
+		case r == '>':
+			inTag = false
+		case !inTag:
+			b.WriteRune(r)
+		}
+	}
+	return strings.Join(strings.Fields(b.String()), " ")
 }

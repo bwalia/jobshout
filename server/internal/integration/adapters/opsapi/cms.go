@@ -183,18 +183,34 @@ func (c *Client) CreatePost(ctx context.Context, req CreatePostRequest) (*Post, 
 // The key needs the cms:update (or cms:manage) scope as well as cms:create; a
 // key minted for drafting alone is refused with a 403 that says so.
 func (c *Client) SetPostStatus(ctx context.Context, postUUID, status string) (*Post, error) {
+	return c.patchPost(ctx, postUUID, map[string]string{"status": status})
+}
+
+// UpdateFeaturedImage sets a post's featured_image_url — the listing / hero
+// picture on public sites. Used when regenerating a cover for an article that
+// is already filed in the CMS (create alone cannot rewrite an existing post).
+func (c *Client) UpdateFeaturedImage(ctx context.Context, postUUID, imageURL string) (*Post, error) {
+	imageURL = strings.TrimSpace(imageURL)
+	if imageURL == "" {
+		return nil, fmt.Errorf("opsapi: update featured image: empty url")
+	}
+	return c.patchPost(ctx, postUUID, map[string]string{"featured_image_url": imageURL})
+}
+
+// patchPost PUTs a partial field map to /api/v2/cms/posts/{uuid}.
+func (c *Client) patchPost(ctx context.Context, postUUID string, fields map[string]string) (*Post, error) {
 	postUUID = strings.TrimSpace(postUUID)
 	if postUUID == "" {
-		return nil, fmt.Errorf("opsapi: set post status: no post uuid")
+		return nil, fmt.Errorf("opsapi: update post: no post uuid")
 	}
-	body, err := json.Marshal(map[string]string{"status": status})
+	body, err := json.Marshal(fields)
 	if err != nil {
-		return nil, fmt.Errorf("opsapi: encode status: %w", err)
+		return nil, fmt.Errorf("opsapi: encode post update: %w", err)
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPut,
 		c.cfg.BaseURL+"/api/v2/cms/posts/"+url.PathEscape(postUUID), bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("opsapi: build status request: %w", err)
+		return nil, fmt.Errorf("opsapi: build post update request: %w", err)
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
 	httpReq.Header.Set("Content-Type", "application/json")
@@ -203,32 +219,36 @@ func (c *Client) SetPostStatus(ctx context.Context, postUUID, status string) (*P
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("opsapi: set post %s to %s: %w", postUUID, status, err)
+		return nil, fmt.Errorf("opsapi: update post %s: %w", postUUID, err)
 	}
 	defer resp.Body.Close()
 
+	action := "update"
+	if _, ok := fields["status"]; ok && len(fields) == 1 {
+		action = "set status to " + fields["status"]
+	}
 	if resp.StatusCode != http.StatusOK {
 		b := readBodySnippet(resp)
 		switch resp.StatusCode {
 		case http.StatusForbidden:
 			return nil, fmt.Errorf(
-				"%w: set post %s to %s — the API key needs the cms:update scope "+
-					"in namespace %q (or CreatePost with status=published). Response: %s",
-				ErrUpdateForbidden, postUUID, status, c.cfg.Namespace, b)
+				"%w: %s on post %s — the API key needs the cms:update scope "+
+					"in namespace %q. Response: %s",
+				ErrUpdateForbidden, action, postUUID, c.cfg.Namespace, b)
 		case http.StatusNotFound:
 			return nil, fmt.Errorf("opsapi: post %s not found in namespace %q — was the draft deleted? Response: %s",
 				postUUID, c.cfg.Namespace, b)
 		default:
-			return nil, fmt.Errorf("opsapi: set post %s to %s failed (status %d): %s",
-				postUUID, status, resp.StatusCode, b)
+			return nil, fmt.Errorf("opsapi: %s on post %s failed (status %d): %s",
+				action, postUUID, resp.StatusCode, b)
 		}
 	}
 	var env postEnvelope
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
-		return nil, fmt.Errorf("opsapi: decode status response: %w", err)
+		return nil, fmt.Errorf("opsapi: decode post update response: %w", err)
 	}
 	if !env.Success {
-		return nil, fmt.Errorf("opsapi: set post %s to %s: %s", postUUID, status, env.Error)
+		return nil, fmt.Errorf("opsapi: %s on post %s: %s", action, postUUID, env.Error)
 	}
 	return &env.Data, nil
 }

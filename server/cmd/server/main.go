@@ -1486,6 +1486,7 @@ func main() {
 					r.Delete("/", blogHandler.Delete)
 				})
 				r.Get("/articles/{articleID}", blogHandler.GetArticle)
+				r.Post("/articles/{articleID}/regenerate-cover", blogHandler.RegenerateCover)
 			})
 
 			// Research is exposed on its own, not only via the article

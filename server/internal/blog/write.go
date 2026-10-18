@@ -123,9 +123,12 @@ Decide:
    %s
 2. One sentence on the angle: what a reader gets from this piece.
 3. %s section headings that deliver that angle.
-4. A cover brief: one concrete visual metaphor unique to this topic, one or two
-   focal objects (not generic "tools, documents, agents"), and a one-word
-   accent note (e.g. "amber", "ice", "copper") that still sits with teal/coral.
+4. A cover brief grounded in THIS article's angle and findings — one concrete
+   visual metaphor unique to this title, one or two focal objects that could
+   not illustrate a different article on a neighbouring topic (not generic
+   "tools, documents, agents"), and a one-word accent note (e.g. "amber",
+   "ice", "copper") that still sits with teal/coral. Listing cards share a
+   house style; only the metaphor and objects make each cover distinct.
 %s
 The title must be about the TOPIC given above; research that wandered off it is not a reason to change subject.
 

@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -340,6 +342,48 @@ func (h *BlogHandler) GetArticle(w http.ResponseWriter, r *http.Request) {
 	}
 	if article == nil {
 		RespondError(w, http.StatusNotFound, "article not found")
+		return
+	}
+	RespondJSON(w, http.StatusOK, article)
+}
+
+// RegenerateCover handles POST /api/v1/blogs/articles/{articleID}/regenerate-cover.
+// Redraws the cover from the article's finished content. Pass {"sync_cms":true}
+// to also update opsapi featured_image_url when the article is already filed.
+func (h *BlogHandler) RegenerateCover(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "articleID"))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid article ID")
+		return
+	}
+	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid org_id in token")
+		return
+	}
+	var body struct {
+		SyncCMS bool `json:"sync_cms"`
+	}
+	// Empty body is fine — defaults to JobShout-only regeneration.
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil && err != io.EOF {
+			RespondError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+			return
+		}
+	}
+	article, err := h.svc.RegenerateCover(r.Context(), orgID, id, body.SyncCMS)
+	if err != nil {
+		msg := err.Error()
+		switch {
+		case strings.Contains(msg, "not found"):
+			RespondError(w, http.StatusNotFound, msg)
+		case strings.Contains(msg, "not enabled"), strings.Contains(msg, "not configured"):
+			RespondError(w, http.StatusServiceUnavailable, msg)
+		case strings.Contains(msg, "does not belong"):
+			RespondError(w, http.StatusForbidden, msg)
+		default:
+			RespondError(w, http.StatusInternalServerError, msg)
+		}
 		return
 	}
 	RespondJSON(w, http.StatusOK, article)
