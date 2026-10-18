@@ -152,11 +152,22 @@ func (s *linkedInService) resolveArticle(ctx context.Context, orgID uuid.UUID, r
 }
 
 // linkFor is the article's public URL, when it has one.
+//
+// Insights wins when the piece is live on jobshout.com; otherwise a CMS /
+// Workstation blog URL is built from BlogSiteURL + slug so listing posts
+// still get a link card.
 func (s *linkedInService) linkFor(a *model.LinkedInArticle) string {
-	if a.InsightsSlug == "" || s.cfg.InsightsSiteURL == "" {
+	if a == nil {
 		return ""
 	}
-	return strings.TrimRight(s.cfg.InsightsSiteURL, "/") + "/insights/" + a.InsightsSlug
+	if a.InsightsSlug != "" && s.cfg.InsightsSiteURL != "" {
+		return strings.TrimRight(s.cfg.InsightsSiteURL, "/") + "/insights/" + a.InsightsSlug
+	}
+	slug := strings.Trim(strings.TrimSpace(a.Slug), "/")
+	if slug != "" && s.cfg.BlogSiteURL != "" {
+		return strings.TrimRight(s.cfg.BlogSiteURL, "/") + "/" + slug
+	}
+	return ""
 }
 
 // draftAll writes each claimed row. It runs detached from the request: the
