@@ -18,4 +18,4 @@ postgres:
 # OpsAPI CMS Insights (/insights) + /hooks/opsapi webhook
 opsapi:
   url: "https://opsapi.workstation.co.uk"
-  namespace: "jobshout"
+  namespace: "workstation"
