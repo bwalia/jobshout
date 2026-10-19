@@ -125,4 +125,7 @@ type WebsiteCheck struct {
 	Name          string     `json:"name,omitempty"`
 	IntegrationID *uuid.UUID `json:"integration_id,omitempty"`
 	Ready         bool       `json:"ready"`
+	// Ring is the ring's own CMS namespace: it exists, with the ring's
+	// configured key, without being saved as a website.
+	Ring bool `json:"ring,omitempty"`
 }

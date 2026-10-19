@@ -90,4 +90,64 @@ test.describe("New task launch fields", () => {
       "kubernetes cost optimisation",
     );
   });
+
+  test("Article Writer namespace asks for a key only when the namespace is new", async ({
+    page,
+  }) => {
+    // The server's answers are stubbed: which namespaces are connected is
+    // per ring, and the key must never be needed for a connected one.
+    const connected = new Set(["jobshout"]);
+    await page.route("**/blogs/destinations/check**", async (route) => {
+      const ns = new URL(route.request().url()).searchParams.get("namespace") ?? "";
+      await route.fulfill({
+        json: {
+          namespace: ns,
+          base_url: "https://opsapi.example.com",
+          exists: connected.has(ns),
+          ready: connected.has(ns),
+          ...(connected.has(ns) ? { name: ns, integration_id: crypto.randomUUID() } : {}),
+        },
+      });
+    });
+    let created: Record<string, unknown> | null = null;
+    await page.route("**/api/v1/integrations", async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      created = route.request().postDataJSON();
+      connected.add(String((created?.config as Record<string, string>)?.namespace_slug));
+      await route.fulfill({ status: 201, json: { id: crypto.randomUUID(), name: created?.name } });
+    });
+
+    await navigateTo(page, "/panel/tasks");
+    await page.getByRole("main").getByRole("button", { name: "New task" }).click();
+    const agentSelect = page.locator("#create-task-agent");
+    const value = await agentSelect
+      .locator("option", { hasText: "Article Writer" })
+      .first()
+      .getAttribute("value");
+    await agentSelect.selectOption(value!);
+
+    const ns = page.locator("#agent-field-destination");
+    const key = page.locator("#agent-field-destination-api-key");
+
+    // Existing namespace (the default): reused, no key field.
+    await expect(ns).toHaveValue("jobshout");
+    await expect(page.getByTestId("website-connected")).toBeVisible();
+    await expect(key).toHaveCount(0);
+
+    // New namespace: the key field appears, and connecting saves the key to
+    // the integration — not to the task's launch values.
+    await ns.fill("brand-new");
+    await expect(key).toBeVisible();
+    // Built at runtime so secret scanners don't read a fixture as a real key.
+    await key.fill(["opsk", "e2e", "placeholder"].join("_"));
+    await page.getByRole("button", { name: "Connect" }).click();
+    await expect(page.getByTestId("website-connected")).toBeVisible();
+    await expect(key).toHaveCount(0);
+    expect(created).toMatchObject({
+      name: "brand-new",
+      provider: "opsapi",
+      config: { namespace_slug: "brand-new" },
+    });
+    await expect(ns).toHaveValue("brand-new");
+  });
 });

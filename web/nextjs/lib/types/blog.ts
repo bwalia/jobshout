@@ -301,6 +301,8 @@ export interface WebsiteCheck {
   name?: string;
   integration_id?: string;
   ready: boolean;
+  /** The ring's own CMS namespace: connected with the ring's key, not saved by the org. */
+  ring?: boolean;
 }
 
 /**

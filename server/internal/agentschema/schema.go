@@ -19,11 +19,12 @@ type Field struct {
 	Key         string
 	Label       string
 	Question    string
-	Type        string // text, textarea, tags, number, select, checkbox, repo
+	Type        string // text, textarea, tags, number, select, checkbox, repo, website
 	Required    bool
 	MinLength   int
 	Min         int
 	Default     string
+	FormDefault string // prefills launch forms only; ApplyDefaults never applies it
 	Placeholder string
 	Help        string
 	Group       string

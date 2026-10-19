@@ -146,6 +146,20 @@ func TestArticleLaunch(t *testing.T) {
 	if w.last.Briefs[0].Topic != "edge AI" {
 		t.Fatalf("topic = %q", w.last.Briefs[0].Topic)
 	}
+	// No website named: the writer's own, else the ring's CMS, as before.
+	if w.last.Destination != "" {
+		t.Fatalf("destination = %q, want empty", w.last.Destination)
+	}
+
+	// A namespace picked on the New Task form is carried to the run by name
+	// only; the key never travels in launch values.
+	in = launchIn(map[string]string{"topic": "edge AI", "destination": " jobshout "}, "task_manager")
+	if _, err := blog.Module(w).Launch(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	if w.last.Destination != "jobshout" {
+		t.Fatalf("destination = %q, want jobshout", w.last.Destination)
+	}
 }
 
 type stubResearch struct {

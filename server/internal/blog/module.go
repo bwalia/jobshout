@@ -56,7 +56,15 @@ func schema() agentschema.Schema {
 			},
 			{Key: "industry", Label: "Industry (optional)", Type: "text", Placeholder: "e.g. NHS trusts, 3PL logistics, commercial property", Help: "Frames the examples and consequences for one sector."},
 			{Key: "context", Label: "Context (optional)", Type: "textarea", Placeholder: "Angle, points to cover or avoid"},
-			{Key: "destination", Label: "Website (optional)", Type: "text", Placeholder: "e.g. JobShout", Help: "The name of a saved OpsAPI website (Settings → Integrations). Blank uses the writer's own website, else this ring's CMS."},
+			{
+				// FormDefault, not Default: launches apply Default server-side,
+				// and chat or API launches that name no website must keep
+				// filing where they did.
+				Key: "destination", Label: "Namespace", Type: "website", FormDefault: "jobshout",
+				Placeholder: "e.g. jobshout",
+				Question:    "Which OpsAPI namespace should the article be published to?",
+				Help:        "The OpsAPI namespace the article is filed in. A connected namespace reuses its saved key; a new one asks for its key once. Blank uses the writer's own website, else this ring's CMS.",
+			},
 			{Key: "model", Label: "Model override (optional)", Type: "text", Placeholder: "agent default"},
 		},
 		TitleRules: []agentschema.TitleRule{

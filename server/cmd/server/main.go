@@ -768,7 +768,7 @@ func main() {
 		researchSvc, mailCfg, logger,
 	)
 	blogSvc.BindTasks(taskSvc)
-	blogSvc.BindIntegrations(integRepo)
+	blogSvc.BindIntegrations(integRepo, cfg.OpsAPIBaseURL)
 	mailSvc.BindTasks(taskSvc)
 	pentestReconciler.BindTasks(taskSvc)
 	reviewReconciler.BindTasks(taskSvc)

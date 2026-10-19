@@ -12,6 +12,7 @@ type WireField struct {
 	MinLength   int    `json:"min_length,omitempty"`
 	Min         int    `json:"min,omitempty"`
 	Default     string `json:"default,omitempty"`
+	FormDefault string `json:"form_default,omitempty"`
 	Placeholder string `json:"placeholder,omitempty"`
 	Help        string `json:"help,omitempty"`
 	Group       string `json:"group,omitempty"`
@@ -72,7 +73,7 @@ func Wire(s Schema) WireSchema {
 		wf := WireField{
 			Key: f.Key, Label: f.Label, Question: f.Question, Type: f.Type,
 			Required: f.Required, MinLength: f.MinLength, Min: f.Min,
-			Default: f.Default, Placeholder: f.Placeholder, Help: f.Help, Group: f.Group,
+			Default: f.Default, FormDefault: f.FormDefault, Placeholder: f.Placeholder, Help: f.Help, Group: f.Group,
 		}
 		for _, o := range f.Options {
 			wf.Options = append(wf.Options, struct {
