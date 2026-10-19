@@ -89,6 +89,14 @@ opsapi:
   url: ""
   namespace: ""
 
+# Job Support chat → cluster NebulaDB (Ollama LLM + vector match).
+# Identity still goes to OpsAPI CRM via OPSAPI_API_KEY. Leave url empty to
+# hide the assistant (GET /api/job-support/chat returns enabled:false).
+nebuladb:
+  url: ""
+  # Optional bearer if the ring's NebulaDB has NEBULA_API_KEYS set.
+  apiKey: ""
+
 # Insights hub (/insights).
 insights:
   # Comma-separated emails that publish without review and moderate the queue.
