@@ -19,3 +19,6 @@ postgres:
 opsapi:
   url: "https://opsapi.workstation.co.uk"
   namespace: "workstation"
+
+nebuladb:
+  url: "http://nebuladb.prod.svc.cluster.local:8080"

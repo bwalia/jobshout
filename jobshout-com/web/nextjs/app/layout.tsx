@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from "next";
 import { JetBrains_Mono, Poppins, Unbounded } from "next/font/google";
 import { AuthProvider } from "@/components/AuthProvider";
 import { BetaBanner } from "@/components/BetaBanner";
+import { JobSupportDock } from "@/components/job-support/JobSupportDock";
+import { JobSupportProvider } from "@/components/job-support/JobSupportProvider";
 import { SiteFooter } from "@/components/SiteFooter";
 import { SiteHeader } from "@/components/SiteHeader";
 import "./globals.css";
@@ -74,14 +76,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           Skip to content
         </a>
         <AuthProvider>
-          <div className="flex min-h-screen flex-col">
-            <BetaBanner />
-            <SiteHeader />
-            <main id="main" className="flex-1">
-              {children}
-            </main>
-            <SiteFooter />
-          </div>
+          <JobSupportProvider>
+            <div className="flex min-h-screen flex-col">
+              <BetaBanner />
+              <SiteHeader />
+              <main id="main" className="flex-1">
+                {children}
+              </main>
+              <SiteFooter />
+            </div>
+            <JobSupportDock />
+          </JobSupportProvider>
         </AuthProvider>
       </body>
     </html>

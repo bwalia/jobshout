@@ -11,3 +11,6 @@ web:
 postgres:
   enabled: true
   storage: 10Gi
+
+nebuladb:
+  url: "http://nebuladb.test.svc.cluster.local:8080"

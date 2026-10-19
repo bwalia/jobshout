@@ -38,6 +38,12 @@ spec:
               value: {{ .Values.opsapi.url | default "" | quote }}
             - name: OPSAPI_NAMESPACE
               value: {{ .Values.opsapi.namespace | default "" | quote }}
+            - name: NEBULA_URL
+              value: {{ .Values.nebuladb.url | default "" | quote }}
+            {{- if .Values.nebuladb.apiKey }}
+            - name: NEBULA_API_KEY
+              value: {{ .Values.nebuladb.apiKey | quote }}
+            {{- end }}
           # NEXTAUTH_SECRET / AUTH_SECRET arrive via envFrom rather than two
           # `env` entries with valueFrom. `env` is strategic-merged against the
           # live Deployment, and a running pod whose env list predates those

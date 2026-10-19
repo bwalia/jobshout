@@ -23,6 +23,9 @@ opsapi:
   url: "https://int-opsapi.workstation.co.uk"
   namespace: "jobshout"
 
+nebuladb:
+  url: "http://nebuladb.int.svc.cluster.local:8080"
+
 showcase:
   seedSamples: true
 
