@@ -96,15 +96,15 @@ func TestLinkedInPG_ArticlesAndClaims(t *testing.T) {
 	now := time.Now()
 
 	insertArticle(t, pool, org, "Unpublished draft", "")
-	cms := insertArticle(t, pool, org, "CMS article", ", post_status, posted_at", "published", now.Add(-2*time.Hour))
-	ins := insertArticle(t, pool, org, "Insights article on routing", ", insights_status, insights_slug, insights_posted_at", "Published", "routing", now.Add(-time.Hour))
+	cms := insertArticle(t, pool, org, "CMS article", ", slug, post_status, posted_at", "cms-article", "published", now.Add(-2*time.Hour))
+	ins := insertArticle(t, pool, org, "Insights article on routing", ", slug, insights_status, insights_slug, insights_posted_at", "routing", "Published", "routing", now.Add(-time.Hour))
 	insertArticle(t, pool, org, "In review", ", insights_status, insights_slug, insights_posted_at", "InReview", "review", now)
 
 	a, err := r.LatestUndrafted(ctx, org)
-	if err != nil || a.ID != ins || a.InsightsSlug != "routing" || a.PublishedAt == nil {
+	if err != nil || a.ID != ins || a.InsightsSlug != "routing" || a.Slug != "routing" || a.PublishedAt == nil {
 		t.Fatalf("LatestUndrafted = %+v, %v", a, err)
 	}
-	if a, err := r.FindArticleByTitle(ctx, org, "cms"); err != nil || a.ID != cms || a.InsightsSlug != "" {
+	if a, err := r.FindArticleByTitle(ctx, org, "cms"); err != nil || a.ID != cms || a.InsightsSlug != "" || a.Slug != "cms-article" {
 		t.Errorf("FindArticleByTitle = %+v, %v", a, err)
 	}
 	if _, err := r.FindArticleByTitle(ctx, org, "unpublished"); !errors.Is(err, ErrLinkedInNotFound) {

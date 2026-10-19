@@ -83,12 +83,13 @@ const linkedInPublishedAt = `COALESCE(
 	CASE WHEN COALESCE(a.post_status, '') = 'published' THEN a.posted_at END)`
 
 const linkedInArticleCols = `a.id, a.org_id, COALESCE(NULLIF(a.title, ''), a.topic), COALESCE(a.markdown, ''),
-	COALESCE(a.audience, ''), CASE WHEN LOWER(COALESCE(a.insights_status, '')) = 'published' THEN COALESCE(a.insights_slug, '') ELSE '' END,
+	COALESCE(a.audience, ''), COALESCE(a.slug, ''),
+	CASE WHEN LOWER(COALESCE(a.insights_status, '')) = 'published' THEN COALESCE(a.insights_slug, '') ELSE '' END,
 	` + linkedInPublishedAt
 
 func scanLinkedInArticle(row pgx.Row) (*model.LinkedInArticle, error) {
 	var a model.LinkedInArticle
-	if err := row.Scan(&a.ID, &a.OrgID, &a.Title, &a.Markdown, &a.Audience, &a.InsightsSlug, &a.PublishedAt); err != nil {
+	if err := row.Scan(&a.ID, &a.OrgID, &a.Title, &a.Markdown, &a.Audience, &a.Slug, &a.InsightsSlug, &a.PublishedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrLinkedInNotFound
 		}

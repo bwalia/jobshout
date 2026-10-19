@@ -67,6 +67,8 @@ data:
   # this URL alone enables nothing.
   JOBSHOUT_COM_API_URL: {{ .Values.insights.apiURL | default "" | quote }}
   JOBSHOUT_COM_SITE_URL: {{ .Values.insights.siteURL | default "" | quote }}
+  # Public blog base for LinkedIn link cards on CMS-published articles.
+  LINKEDIN_BLOG_SITE_URL: {{ .Values.linkedin.blogSiteURL | default "https://www.workstation.co.uk/en/docs/blogs" | quote }}
   # Penetration testing. Empty baseURL disables the feature (same pattern as
   # IMAGE_BASE_URL). The scanner itself lives on the workstation.
   STRIX_ENABLED: {{ .Values.pentest.enabled | default false | quote }}

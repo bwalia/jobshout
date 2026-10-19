@@ -39,6 +39,10 @@ type Config struct {
 	// InsightsSiteURL is jobshout.com for this ring; with an article's
 	// Insights slug it is the link a post carries. Set by main.
 	InsightsSiteURL string
+	// BlogSiteURL is the public blog listing base for CMS-published articles
+	// (e.g. https://www.workstation.co.uk/en/docs/blogs). With the article
+	// slug it becomes the link card URL when Insights is not set.
+	BlogSiteURL string
 }
 
 // LoadConfig reads LINKEDIN_* variables with safe defaults.
@@ -55,6 +59,7 @@ func LoadConfig() Config {
 		PollInterval:    durationEnv("LINKEDIN_POLL_INTERVAL", 5*time.Minute),
 		Lookback:        durationEnv("LINKEDIN_LOOKBACK", 72*time.Hour),
 		DraftTimeout:    durationEnv("LINKEDIN_DRAFT_TIMEOUT", 10*time.Minute),
+		BlogSiteURL:     strings.TrimSpace(os.Getenv("LINKEDIN_BLOG_SITE_URL")),
 	}
 	if c.FrontendBaseURL == "" {
 		c.FrontendBaseURL = "http://localhost:3001"
@@ -65,6 +70,9 @@ func LoadConfig() Config {
 	}
 	if c.APIVersion == "" {
 		c.APIVersion = DefaultAPIVersion
+	}
+	if c.BlogSiteURL == "" {
+		c.BlogSiteURL = "https://www.workstation.co.uk/en/docs/blogs"
 	}
 	return c
 }

@@ -14,3 +14,8 @@ web:
 postgres:
   enabled: true
   storage: 50Gi
+
+# OpsAPI CMS Insights (/insights) + /hooks/opsapi webhook
+opsapi:
+  url: "https://opsapi.workstation.co.uk"
+  namespace: "jobshout"

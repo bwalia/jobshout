@@ -311,9 +311,29 @@ func newTestLinkedIn(t *testing.T, drafter linkedInDrafter) (*linkedInService, *
 		ClientID: "cid", ClientSecret: "sec", TokenKey: "a passphrase", RedirectURL: "https://cb",
 		AutoDraft: true, Lookback: 72 * time.Hour, DraftTimeout: time.Minute,
 		InsightsSiteURL: "https://jobshout.com/",
+		BlogSiteURL:     "https://www.workstation.co.uk/en/docs/blogs",
 	}
 	svc := NewLinkedInService(repo, fakeBuiltinAgents{id: uuid.New()}, api, drafter, cfg, nil).(*linkedInService)
 	return svc, repo, api
+}
+
+func TestLinkedInLinkFor_PrefersInsightsThenBlogSlug(t *testing.T) {
+	svc, _, _ := newTestLinkedIn(t, &fakeLinkedInDrafter{})
+
+	insights := &model.LinkedInArticle{InsightsSlug: "routing", Slug: "routing-cms"}
+	if got := svc.linkFor(insights); got != "https://jobshout.com/insights/routing" {
+		t.Errorf("insights link = %q", got)
+	}
+
+	cms := &model.LinkedInArticle{Slug: "gateway-api-shifts-cluster-networking"}
+	want := "https://www.workstation.co.uk/en/docs/blogs/gateway-api-shifts-cluster-networking"
+	if got := svc.linkFor(cms); got != want {
+		t.Errorf("cms link = %q, want %q", got, want)
+	}
+
+	if got := svc.linkFor(&model.LinkedInArticle{}); got != "" {
+		t.Errorf("empty article link = %q", got)
+	}
 }
 
 func addArticle(repo *fakeLinkedInRepo, orgID uuid.UUID, title, slug string, age time.Duration) model.LinkedInArticle {

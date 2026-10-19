@@ -72,11 +72,17 @@ wafLab:
 # Minted with scripts/opsapi-api-key.sh against https://opsapi.workstation.co.uk
 # (namespace workstation, scope cms create/update/read). Optional until Vault
 # is filled — Article Writer writes but files nothing.
+#
+# jobshout-linkedin: LinkedIn Poster (LINKEDIN_CLIENT_ID / CLIENT_SECRET /
+# TOKEN_KEY). Without it drafts still work; Connect and Approve & post stay
+# disabled. Register OAuth redirects on the LinkedIn app for
+# https://jobshout.co.uk/api/v1/linkedin/oauth/callback (and www if used).
 extraSecretRefs:
   - jobshout-core
   - jobshout-gateways
   - jobshout-google
   - jobshout-cms
+  - jobshout-linkedin
 
 vaultSecrets:
   - name: jobshout-core
@@ -91,6 +97,9 @@ vaultSecrets:
   - name: jobshout-cms
     store: wslvault-backend
     key: jobshout/prod/cms
+  - name: jobshout-linkedin
+    store: wslvault-backend
+    key: jobshout/prod/linkedin
 
 # Workstation CMS — articles reach www.workstation.co.uk through it, as int's
 # reach int.workstation.co.uk through int-opsapi. Drafts only: going live is

@@ -56,6 +56,10 @@ extraSecretRefs: []
 #
 #   vaultSecrets:
 #     - name: jobshout-linkedin
+
+# LinkedIn Poster — public blog base for CMS link cards (Insights wins when set).
+linkedin:
+  blogSiteURL: "https://www.workstation.co.uk/en/docs/blogs"
 #       store: wslvault-backend   # ClusterSecretStore
 #       key: jobshout/int/linkedin
 #

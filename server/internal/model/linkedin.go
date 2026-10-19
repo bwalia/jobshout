@@ -102,6 +102,9 @@ type LinkedInArticle struct {
 	Title    string
 	Markdown string
 	Audience string
+	// Slug is the article's own slug (CMS / blog path). Used for a public
+	// Workstation blog URL when Insights is not the publish destination.
+	Slug string
 	// InsightsSlug is set when the article is on jobshout.com Insights; with
 	// the site URL it is the article's public URL.
 	InsightsSlug string
