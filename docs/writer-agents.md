@@ -46,6 +46,21 @@ One Article Writer pipeline serves every website. A new site or style is a
 A writer with a website files there only. It is never sent to the jobshout.com
 Insights queue, which only the original Article Writer's runs reach.
 
+### Covers (listing images)
+
+Each article should get a unique cover from its angle and content when
+`BLOG_COVER_IMAGES` is on (all rings). Publish maps it to OpsAPI
+`featured_image_url`. If a live listing still shows the shared Workstation
+hero, regenerate from content:
+
+```http
+POST /api/v1/blogs/articles/{articleID}/regenerate-cover
+{"sync_cms": true}
+```
+
+Full procedure, backfill script, and skill: [blog-covers.md](./blog-covers.md),
+`.claude/skills/blog-covers/`.
+
 ## Pick the website per article
 
 One writer can file to several OpsAPI namespaces. **Write articles** has a

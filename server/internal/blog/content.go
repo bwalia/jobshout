@@ -54,6 +54,9 @@ type GeneratedArticle struct {
 	CoverImageHeight   int
 
 	// Cover brief from the plan step — unique metaphor, shared house style.
+	// CoverAngle is the article's one-sentence angle; it steers the cover so
+	// two pieces on a similar topic still get different focal objects.
+	CoverAngle    string
 	CoverMetaphor string
 	CoverObjects  string
 	CoverAccent   string
@@ -357,6 +360,7 @@ func (r *Runner) writeOne(
 		Markdown:      markdown,
 		References:    refs,
 		WordCount:     len(strings.Fields(markdown)),
+		CoverAngle:    plan.Angle,
 		CoverMetaphor: plan.CoverMetaphor,
 		CoverObjects:  plan.CoverObjects.String(),
 		CoverAccent:   plan.CoverAccent,

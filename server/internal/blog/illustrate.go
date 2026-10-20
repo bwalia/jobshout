@@ -132,11 +132,14 @@ func coverSubtitleText(title, topic string) string {
 // coverPrompt fills the dark-mode editorial cover template for z-image-turbo.
 //
 // Turbo ignores separate negative prompts, so exclusions and exact title
-// strings live in the positive prompt. The topic drives the metaphor; the
-// title (trimmed) is lettered on the left.
-func coverPrompt(title, topic string, metaphor, objects, accent string) string {
+// strings live in the positive prompt. The article's angle and cover brief
+// drive a unique metaphor; the title (trimmed) is lettered on the left.
+// Two articles must not share the same focal objects — angle + metaphor are
+// what keep listing cards visually distinct.
+func coverPrompt(title, topic, angle, metaphor, objects, accent string) string {
 	topic = strings.TrimSpace(topic)
 	title = strings.TrimSpace(title)
+	angle = strings.TrimSpace(angle)
 	metaphor = strings.TrimSpace(metaphor)
 	objects = strings.TrimSpace(objects)
 	accent = strings.TrimSpace(accent)
@@ -148,18 +151,21 @@ func coverPrompt(title, topic string, metaphor, objects, accent string) string {
 	if subject == "" {
 		subject = "software engineering"
 	}
+	if angle != "" {
+		subject = subject + " — " + angle
+	}
 
 	headline := coverTitleText(title, topic)
 	subtitle := coverSubtitleText(title, topic)
 
-	focal := "a concrete visual metaphor for the topic"
+	focal := "a concrete visual metaphor unique to this article's angle"
 	if metaphor != "" {
 		focal = metaphor
 	}
 	if objects != "" {
 		focal += " — " + objects
 	} else if metaphor == "" {
-		focal += " using tools, documents, agents, networks or machines as simple shapes"
+		focal += " drawn from the article's concrete claims, not a generic tech collage"
 	}
 	accentClause := "small coral accent dots and thin geometric lines floating nearby"
 	if accent != "" {
@@ -184,6 +190,93 @@ func coverPrompt(title, topic string, metaphor, objects, accent string) string {
 			"No logos, no watermarks, no UI chrome, no extra text beyond the title and subtitle.",
 		subject, headline, subtitle, focal, accentClause,
 	)
+}
+
+// ensureCoverBrief fills metaphor / objects / accent from the finished article
+// when the plan step left them empty — regenerating a cover for an already
+// written piece, or a plan that skipped the brief. It prefers concrete nouns
+// from the title and excerpt over a generic "tools and agents" scene so
+// listing cards stay distinct.
+func ensureCoverBrief(a *GeneratedArticle) {
+	if a == nil {
+		return
+	}
+	if strings.TrimSpace(a.CoverMetaphor) != "" && strings.TrimSpace(a.CoverObjects) != "" {
+		if strings.TrimSpace(a.CoverAccent) == "" {
+			a.CoverAccent = accentForTopic(a.Title, a.Topic, a.CoverAngle)
+		}
+		return
+	}
+	metaphor, objects, accent := deriveCoverBrief(a.Title, a.Topic, a.CoverAngle, a.Excerpt, a.Markdown)
+	if strings.TrimSpace(a.CoverMetaphor) == "" {
+		a.CoverMetaphor = metaphor
+	}
+	if strings.TrimSpace(a.CoverObjects) == "" {
+		a.CoverObjects = objects
+	}
+	if strings.TrimSpace(a.CoverAccent) == "" {
+		a.CoverAccent = accent
+	}
+}
+
+// deriveCoverBrief invents a unique cover brief from article text when none
+// was planned. Heuristic, not an LLM call: regenerating six covers must not
+// depend on a second model round-trip.
+func deriveCoverBrief(title, topic, angle, excerpt, markdown string) (metaphor, objects, accent string) {
+	blob := strings.ToLower(strings.Join([]string{title, topic, angle, excerpt, firstParagraph(markdown)}, " "))
+	accent = accentForTopic(title, topic, angle)
+
+	type hint struct {
+		needles []string
+		meta    string
+		objs    string
+	}
+	hints := []hint{
+		{[]string{"gateway api", "gateway", "kube-proxy", "ingress"}, "a luminous API gateway arch routing traffic past a fading proxy node", "gateway arch, route lines, fading kube-proxy glyph"},
+		{[]string{"resilience hub", "resilience", "aws"}, "a fortified hub with radiating health spokes across workload islands", "resilience hub core, workload islands, green health spokes"},
+		{[]string{"unit test", "reliability", "regulated", "chaos"}, "a layered shield over a live system with fault injectors at the edge", "reliability shield, live service glyph, fault-injection bolts"},
+		{[]string{"agentic", "autonomous", "guardrail"}, "autonomous agents orbiting a goal with a guardrail ring", "agent orbs, goal beacon, guardrail ring"},
+		{[]string{"mcp", "model context", "tool"}, "a model-context protocol bus linking tools as glowing sockets", "MCP bus, tool sockets, audited connection lines"},
+		{[]string{"devops", "double-edged", "ai's", "cicd", "ci/cd"}, "a double-edged AI blade cutting a delivery pipeline — one edge speeds, one edge risks", "AI blade, pipeline stages, warning and boost accents"},
+		{[]string{"observability", "prometheus", "otel", "opentelemetry"}, "a single pane of glass gathering metrics, logs and traces as light streams", "observability pane, metric streams, trace lattice"},
+		{[]string{"vault", "secret", "tenant"}, "sealed vault chambers with cryptographically isolated tenant keys", "vault chambers, tenant keys, isolation barriers"},
+		{[]string{"kubernetes", "cluster", "networking"}, "a cluster fabric of pods linked by glowing network paths", "pods, network paths, control-plane core"},
+	}
+	for _, h := range hints {
+		for _, n := range h.needles {
+			if strings.Contains(blob, n) {
+				return h.meta, h.objs, accent
+			}
+		}
+	}
+	// Last resort: use the headline nouns so two unrelated topics still differ.
+	words := strings.Fields(coverTitleText(title, topic))
+	if len(words) > 3 {
+		words = words[:3]
+	}
+	label := strings.ToLower(strings.Join(words, " "))
+	if label == "" {
+		label = "the topic"
+	}
+	return "a glowing emblem for " + label + " as a unique focal sculpture",
+		"emblem of " + label + ", soft teal light ribbons",
+		accent
+}
+
+func accentForTopic(title, topic, angle string) string {
+	blob := strings.ToLower(title + " " + topic + " " + angle)
+	switch {
+	case strings.Contains(blob, "security"), strings.Contains(blob, "vault"), strings.Contains(blob, "secret"):
+		return "amber"
+	case strings.Contains(blob, "resilience"), strings.Contains(blob, "reliability"), strings.Contains(blob, "observ"):
+		return "emerald"
+	case strings.Contains(blob, "network"), strings.Contains(blob, "gateway"), strings.Contains(blob, "cluster"):
+		return "ice"
+	case strings.Contains(blob, "agent"), strings.Contains(blob, "mcp"), strings.Contains(blob, "ai"):
+		return "violet"
+	default:
+		return "copper"
+	}
 }
 
 // citationMark strips [1]-style citation markers so they do not leak into
@@ -462,7 +555,8 @@ func firstSentence(s string) string {
 // with backoff. A failure after every attempt is returned, not swallowed — the
 // caller decides whether an article without a picture is still an article.
 func (r *Runner) generateCover(ctx context.Context, orgID uuid.UUID, a *GeneratedArticle) error {
-	prompt := coverPrompt(a.Title, a.Topic, a.CoverMetaphor, a.CoverObjects, a.CoverAccent)
+	ensureCoverBrief(a)
+	prompt := coverPrompt(a.Title, a.Topic, a.CoverAngle, a.CoverMetaphor, a.CoverObjects, a.CoverAccent)
 
 	var lastErr error
 	for attempt := 1; attempt <= coverMaxAttempts; attempt++ {
@@ -522,6 +616,30 @@ func (r *Runner) generateCover(ctx context.Context, orgID uuid.UUID, a *Generate
 		}
 	}
 	return fmt.Errorf("blog: cover failed after %d attempts: %w", coverMaxAttempts, lastErr)
+}
+
+// RegenerateCover redraws an article's cover from its finished content.
+//
+// Used when a published piece has no featured image (or a stale one) and the
+// operator wants a new picture grounded in title, angle, excerpt and body —
+// not a re-run of the whole writing pipeline. Best-effort callers treat a
+// failure the same way generateCover does: the article stays publishable.
+func (r *Runner) RegenerateCover(ctx context.Context, orgID uuid.UUID, a *GeneratedArticle) error {
+	if a == nil {
+		return fmt.Errorf("blog: regenerate cover: no article")
+	}
+	if !r.canIllustrate() {
+		return fmt.Errorf("blog: regenerate cover: image generation is not enabled")
+	}
+	// Force a fresh brief from the written piece so a missing or generic plan
+	// brief cannot keep producing the same fallback scene.
+	a.CoverMetaphor = ""
+	a.CoverObjects = ""
+	a.CoverAccent = ""
+	if strings.TrimSpace(a.CoverAngle) == "" {
+		a.CoverAngle = strings.TrimSpace(a.Excerpt)
+	}
+	return r.generateCover(ctx, orgID, a)
 }
 
 // coverRetryWaitFn is the pause before the next cover attempt. Tests replace it

@@ -51,6 +51,8 @@ type BlogRepository interface {
 	CreateArticles(ctx context.Context, articles []model.BlogArticle) error
 	ListArticlesByRun(ctx context.Context, runID uuid.UUID) ([]model.BlogArticle, error)
 	GetArticle(ctx context.Context, id uuid.UUID) (*model.BlogArticle, error)
+	// UpdateArticleCover writes a regenerated cover onto one article.
+	UpdateArticleCover(ctx context.Context, articleID uuid.UUID, coverURL, prompt string, meta model.CoverImageMeta) error
 	// UpdateArticles writes the run's lightweight per-article summaries, so a
 	// brief can be persisted without a full terminal Update racing the step
 	// trace.
@@ -459,6 +461,24 @@ func (r *blogRepository) GetArticle(ctx context.Context, id uuid.UUID) (*model.B
 		return nil, fmt.Errorf("blog_repo: get article: %w", err)
 	}
 	return a, nil
+}
+
+func (r *blogRepository) UpdateArticleCover(ctx context.Context, articleID uuid.UUID, coverURL, prompt string, meta model.CoverImageMeta) error {
+	metaJSON, err := json.Marshal(meta)
+	if err != nil {
+		return fmt.Errorf("blog_repo: encode cover meta: %w", err)
+	}
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE blog_articles
+		SET cover_image_url = $2, cover_image_prompt = $3, cover_image_meta = $4
+		WHERE id = $1`, articleID, coverURL, prompt, metaJSON)
+	if err != nil {
+		return fmt.Errorf("blog_repo: update article cover: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("blog_repo: update article cover: article %s not found", articleID)
+	}
+	return nil
 }
 
 func (r *blogRepository) RecentTopics(ctx context.Context, orgID uuid.UUID, since time.Time, audience string) ([]string, error) {
