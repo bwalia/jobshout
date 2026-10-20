@@ -8,7 +8,8 @@ export type AgentFieldType =
   | "number"
   | "select"
   | "checkbox"
-  | "repo";
+  | "repo"
+  | "image";
 
 export interface AgentFieldOption {
   value: string;

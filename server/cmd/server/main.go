@@ -1971,6 +1971,7 @@ func main() {
 			r.Route("/images", func(r chi.Router) {
 				r.Get("/models", imageHandler.ListModels)
 				r.Post("/generate", imageHandler.Generate)
+				r.Post("/upload", imageHandler.Upload)
 				r.Get("/", imageHandler.List)
 			})
 

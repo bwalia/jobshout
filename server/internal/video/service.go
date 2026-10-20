@@ -2,6 +2,7 @@ package video
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"math"
@@ -12,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/jobshout/server/internal/imagestore"
 	"github.com/jobshout/server/internal/llmtrace"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/repository"
@@ -33,9 +35,11 @@ type ScriptWriter interface {
 	Write(ctx context.Context, b Brief) (*Script, error)
 }
 
-// Store keeps the finished file and returns the URL it is served from.
+// Store keeps the finished file and returns the URL it is served from, and
+// reads a stored image back — the uploaded product photo for a product video.
 type Store interface {
 	PutFile(ctx context.Context, orgID uuid.UUID, data []byte, ext, contentType string) (string, error)
+	Get(ctx context.Context, key string) ([]byte, error)
 }
 
 // Tasks is the slice of the task service that board updates need.
@@ -294,15 +298,25 @@ func (s *Service) run(run *model.VideoRun, req StartRequest, motionInstalled boo
 		ref["task_id"] = req.TaskID.String()
 	}
 	sub := SubmitRequest{
-		ID:       run.ID.String(),
-		Title:    script.Title,
-		Shots:    script.Shots,
-		Format:   req.Brief.Format,
-		Voice:    req.Brief.Voice,
-		Style:    req.Brief.Style,
-		Motion:   animated,
-		Captions: req.Brief.Captions,
-		Ref:      ref,
+		ID:          run.ID.String(),
+		Title:       script.Title,
+		Kind:        req.Brief.Kind,
+		Shots:       script.Shots,
+		Format:      req.Brief.Format,
+		Voice:       req.Brief.Voice,
+		Style:       req.Brief.Style,
+		Motion:      animated,
+		Captions:    req.Brief.Captions,
+		ProductName: req.Brief.ProductName,
+		Ref:         ref,
+	}
+	if req.Brief.ProductImage != "" {
+		if data, perr := s.productImage(ctx, req.OrgID, req.Brief.ProductImage); perr != nil {
+			log.Warn("video: product photo unavailable; the product will be drawn", zap.Error(perr))
+			s.note(req.TaskID, "Could not use the product photo ("+perr.Error()+"); the product is drawn instead.", "")
+		} else {
+			sub.ProductImage = data
+		}
 	}
 	// The id is ours, so a resubmission finds the job a lost response already
 	// created: retrying is safe. A full queue is not worth retrying for.
@@ -634,6 +648,31 @@ func (s *Service) note(taskID *uuid.UUID, note, status string) {
 	if status != "" {
 		_ = s.tasks.Transition(ctx, *taskID, status, nil)
 	}
+}
+
+// productImage reads an uploaded product photo back from the store and returns
+// it base64-encoded for the workstation. The URL is a launch value a user can
+// set to anything, so the key must sit under the caller's own org prefix — the
+// same scoping imagestore writes with — before a single byte is read.
+func (s *Service) productImage(ctx context.Context, orgID uuid.UUID, rawURL string) (string, error) {
+	trimmed := strings.TrimSpace(rawURL)
+	key := strings.TrimPrefix(trimmed, imagestore.URLPrefix)
+	if key == trimmed || key == "" {
+		return "", errors.New("not a stored image URL")
+	}
+	if !strings.HasPrefix(key, orgID.String()+"/") {
+		return "", errors.New("image is not this organisation's")
+	}
+	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	data, err := s.store.Get(cctx, key)
+	if err != nil {
+		return "", err
+	}
+	if len(data) == 0 {
+		return "", errors.New("the image was empty")
+	}
+	return base64.StdEncoding.EncodeToString(data), nil
 }
 
 // budget is how long a render may run: twice the expected time plus slack,

@@ -263,6 +263,12 @@ class _Render:
         seed = req.get("seed", -1)
         self.seed = seed if seed >= 0 else int(uuid.uuid4().int % (2**31 - 1))
         self.notes: list[str] = []
+        self.kind = req.get("kind", "")
+        self.product_name = (req.get("product_name") or "").strip()
+        self.product_image_b64 = req.get("product_image") or ""
+        self._product_still_path: Path | None = None
+        # Shots that used the real product photo, so motion leaves them alone.
+        self.product_shots: set[int] = set()
 
     def _progress(self, start: float, end: float, i: int, stage: str, message: str) -> None:
         # Every step of every stage reports progress first, so this is also
@@ -324,11 +330,43 @@ class _Render:
         visual = shot["visual"].strip().rstrip(".")
         return f"{visual}. {self.style}" if self.style else visual
 
+    def _product_still(self) -> Path | None:
+        """The uploaded product photo, fitted to the keyframe size, or None.
+
+        Built once and reused: a product video shows the same real photo in
+        every hero shot so the product looks identical throughout. ffmpeg does
+        the fit (contain + white pad) so there is no Pillow dependency.
+        """
+        if not self.product_image_b64:
+            return None
+        if self._product_still_path is not None:
+            return self._product_still_path
+        try:
+            raw = base64.b64decode(self.product_image_b64)
+            (self.dir / "product_src").write_bytes(raw)
+            vf = (f"scale={self.mw}:{self.mh}:force_original_aspect_ratio=decrease,"
+                  f"pad={self.mw}:{self.mh}:(ow-iw)/2:(oh-ih)/2:color=white")
+            _run([config.VIDEO_FFMPEG, "-y", "-i", "product_src", "-vf", vf, "-frames:v", "1", "product.png"],
+                 timeout=120, cwd=self.dir)
+        except Exception as exc:  # noqa: BLE001 — a bad photo degrades to a drawn product, never fails the video
+            logger.warning("video %s: product photo unusable, drawing instead: %s", self.job["id"], exc)
+            self.notes.append(f"product photo could not be used ({str(exc)[:160]}); the product was drawn instead")
+            self.product_image_b64 = ""
+            return None
+        self._product_still_path = self.dir / "product.png"
+        return self._product_still_path
+
     def keyframes(self) -> None:
         name = config.VIDEO_KEYFRAME_MODEL
         end = 0.35 if self.motion else 0.80
+        product = self._product_still()
         for i, shot in enumerate(self.shots):
             self._progress(0.05, end, i, "keyframes", f"Drawing shot {i + 1} of {len(self.shots)}")
+            dest = self.dir / f"still_{i:02d}.png"
+            if product is not None and shot.get("shows_product"):
+                shutil.copyfile(product, dest)
+                self.product_shots.add(i)
+                continue
             for attempt in range(3):
                 try:
                     result = generator.generate(
@@ -342,12 +380,17 @@ class _Render:
                     # short, so waiting again is right, not failing a video.
                     if attempt == 2:
                         raise
-            (self.dir / f"still_{i:02d}.png").write_bytes(base64.b64decode(result.image_base64))
+            dest.write_bytes(base64.b64decode(result.image_base64))
 
     def animate(self, seconds: list[float]) -> list[Path | None]:
         clips: list[Path | None] = []
         for i, shot in enumerate(self.shots):
             self._progress(0.35, 0.90, i, "motion", f"Animating shot {i + 1} of {len(self.shots)}")
+            if i in self.product_shots:
+                # Keep the real product undistorted: the assembly step gives it
+                # a ken-burns move over the photo, not an LTX pass that warps it.
+                clips.append(None)
+                continue
             clip = self.dir / f"clip_{i:02d}.mp4"
             prompt = f"{self._visual(shot)}. Natural, subtle motion; steady cinematic camera."
             cmd = [

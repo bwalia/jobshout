@@ -23,20 +23,35 @@ const (
 )
 
 // VideoShot is one line of narration and the picture shown while it is spoken.
+// ShowsProduct marks a product-video shot that features the product itself (as
+// opposed to a supporting or lifestyle scene), so the renderer can use the
+// uploaded product photo for it instead of drawing one.
 type VideoShot struct {
-	Narration string `json:"narration"`
-	Visual    string `json:"visual"`
+	Narration    string `json:"narration"`
+	Visual       string `json:"visual"`
+	ShowsProduct bool   `json:"shows_product,omitempty"`
 }
+
+// Video kinds. Explainer is the original narrated-documentary behaviour; anime
+// is an animated story; product is a promotional video for one product.
+const (
+	VideoKindExplainer = "explainer"
+	VideoKindAnime     = "anime"
+	VideoKindProduct   = "product"
+)
 
 // VideoBrief is what a launch asked for.
 type VideoBrief struct {
-	Seconds  int    `json:"seconds"`
-	Format   string `json:"format"`
-	Voice    string `json:"voice"`
-	Style    string `json:"style,omitempty"`
-	Motion   bool   `json:"motion"`
-	Captions bool   `json:"captions"`
-	Notes    string `json:"notes,omitempty"`
+	Kind         string `json:"kind,omitempty"`
+	Seconds      int    `json:"seconds"`
+	Format       string `json:"format"`
+	Voice        string `json:"voice"`
+	Style        string `json:"style,omitempty"`
+	Motion       bool   `json:"motion"`
+	Captions     bool   `json:"captions"`
+	Notes        string `json:"notes,omitempty"`
+	ProductName  string `json:"product_name,omitempty"`
+	ProductImage string `json:"product_image,omitempty"` // URL of the uploaded product photo
 }
 
 // VideoRun is one Video Producer launch and where it has got to. Stage and

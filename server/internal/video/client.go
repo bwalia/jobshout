@@ -41,13 +41,19 @@ type Shot = model.VideoShot
 type SubmitRequest struct {
 	ID       string            `json:"id"`
 	Title    string            `json:"title,omitempty"`
+	Kind     string            `json:"kind,omitempty"`
 	Shots    []Shot            `json:"shots"`
 	Format   string            `json:"format"`
 	Voice    string            `json:"voice,omitempty"`
 	Style    string            `json:"style,omitempty"`
 	Motion   bool              `json:"motion"`
 	Captions bool              `json:"captions"`
-	Ref      map[string]string `json:"ref,omitempty"`
+	// ProductName and ProductImage drive a product video. ProductImage is the
+	// photo's raw bytes, base64-encoded: the workstation gateway is not on the
+	// platform's network, so a stored-image URL would not resolve there.
+	ProductName  string            `json:"product_name,omitempty"`
+	ProductImage string            `json:"product_image,omitempty"`
+	Ref          map[string]string `json:"ref,omitempty"`
 }
 
 // Job is a render as the workstation reports it.

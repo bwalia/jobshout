@@ -14,14 +14,17 @@ import (
 
 // Brief is a launch's values, resolved.
 type Brief struct {
-	Topic    string
-	Seconds  int
-	Format   string // landscape | portrait
-	Voice    string
-	Style    string
-	Motion   bool
-	Captions bool
-	Notes    string
+	Topic        string
+	Kind         string // explainer | anime | product
+	Seconds      int
+	Format       string // landscape | portrait
+	Voice        string
+	Style        string
+	Motion       bool
+	Captions     bool
+	Notes        string
+	ProductName  string
+	ProductImage string // URL of an uploaded product photo (product videos)
 }
 
 // Script is the film on paper: a title and the shots that make it up.
@@ -76,10 +79,25 @@ func scriptPrompt(b Brief) string {
 	}
 	style := b.Style
 	if style == "" {
+		style = DefaultStyle(b.Kind)
+	}
+	if style == "" {
 		style = "choose one that suits the subject, and keep it identical in every shot"
 	}
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "Write a narrated video about: %s\n\n", b.Topic)
+	switch b.Kind {
+	case model.VideoKindProduct:
+		if b.ProductName != "" {
+			fmt.Fprintf(&sb, "Write a short promotional video for a product called %q.\n", b.ProductName)
+		} else {
+			fmt.Fprintf(&sb, "Write a short promotional video for this product: %s\n", b.Topic)
+		}
+		fmt.Fprintf(&sb, "What it is / what to cover: %s\n\n", b.Topic)
+	case model.VideoKindAnime:
+		fmt.Fprintf(&sb, "Write a short anime-style animated video about: %s\n\n", b.Topic)
+	default:
+		fmt.Fprintf(&sb, "Write a narrated video about: %s\n\n", b.Topic)
+	}
 	fmt.Fprintf(&sb, "Length: about %d seconds of narration — about %d words in total, across %d shots.\n",
 		b.Seconds, int(float64(b.Seconds)*wordsPerSecond), shots)
 	fmt.Fprintf(&sb, "Format: %s.\n", format)
@@ -88,7 +106,51 @@ func scriptPrompt(b Brief) string {
 	if b.Notes != "" {
 		fmt.Fprintf(&sb, "Notes from the requester: %s\n", b.Notes)
 	}
-	sb.WriteString(`
+	sb.WriteString(kindGuidance(b.Kind))
+	return sb.String()
+}
+
+// kindGuidance is the JSON shape and the rules, tuned to the video's kind. The
+// shared rules differ only where the kind needs them to: product videos sell
+// and tag their product shots; anime describes animated scenes; the default is
+// the original narrated documentary.
+func kindGuidance(kind string) string {
+	switch kind {
+	case model.VideoKindProduct:
+		return `
+Return JSON in exactly this shape:
+{"title": "a short title", "shots": [{"narration": "...", "visual": "...", "product": true}]}
+
+Rules for "narration":
+- Spoken ad copy for that shot: one or two short sentences, 8 to 20 words, benefit-led and energetic.
+- The first shot hooks with the single biggest reason to care. The last shot ends on a clear call to action.
+- Plain spoken language. No stage directions, shot numbers, emojis or hashtags.
+- State only claims you are confident are true. Never invent statistics, prices, awards or quotes.
+
+Rules for "visual":
+- A self-contained description an image model can draw on its own, 25 to 60 words, always in English: subject, setting, composition, camera angle, lighting and colour palette.
+- Set "product": true for every shot whose main subject IS the product (a hero shot). Set "product": false for supporting or lifestyle shots that set a mood or show it in use without being a clean shot of the product itself.
+- Describe the product the same distinctive way in every "product": true shot so it looks consistent.
+- No written words, letters, numbers, captions, logos or signs in the picture, and no real, identifiable people.
+- Vary the framing between wide, medium and close-up shots.`
+	case model.VideoKindAnime:
+		return `
+Return JSON in exactly this shape:
+{"title": "a short title", "shots": [{"narration": "...", "visual": "..."}]}
+
+Rules for "narration":
+- What the narrator says during that shot: one or two short spoken sentences, 8 to 20 words.
+- The first shot hooks the viewer in its first sentence. The last shot lands a clear ending.
+- Plain spoken language. No stage directions, shot numbers, emojis or hashtags.
+- State only facts you are confident are true. Never invent statistics, quotes or names.
+
+Rules for "visual":
+- A self-contained description of an anime-style animated scene an image model can draw, 25 to 60 words, always in English: character or subject, action, setting, composition, camera angle, lighting and colour palette.
+- Recurring characters are described with the same distinctive hair, outfit, colours and features every time, so they look the same in every shot.
+- No written words, letters, numbers, captions, logos or signs in the picture, and no real, identifiable people.
+- Vary the framing between wide establishing shots, medium shots and close-ups.`
+	default:
+		return `
 Return JSON in exactly this shape:
 {"title": "a short title", "shots": [{"narration": "...", "visual": "..."}]}
 
@@ -103,8 +165,22 @@ Rules for "visual":
 - Show concretely what the narration is about. Prefer a scene over an abstract concept.
 - A recurring person, animal or place is described with the same distinctive details every time it appears, so it looks the same in every shot.
 - No written words, letters, numbers, captions, logos or signs in the picture, and no real, identifiable people.
-- Vary the framing between wide, medium and close-up shots.`)
-	return sb.String()
+- Vary the framing between wide, medium and close-up shots.`
+	}
+}
+
+// DefaultStyle is the visual style a kind falls back to when the requester
+// leaves the style field blank. Explainer keeps the old "let the writer choose"
+// behaviour (empty string).
+func DefaultStyle(kind string) string {
+	switch kind {
+	case model.VideoKindAnime:
+		return "anime style, cel-shaded, vibrant saturated colours, clean linework, detailed backgrounds, dramatic cinematic lighting"
+	case model.VideoKindProduct:
+		return "clean studio product photography, soft even lighting, shallow depth of field, seamless neutral background, crisp focus on the product"
+	default:
+		return ""
+	}
 }
 
 // writeRetryWait is the base pause between script attempts. A variable for tests.
@@ -193,13 +269,26 @@ func (t *text) UnmarshalJSON(data []byte) error {
 }
 
 type rawShot struct {
-	Narration    text `json:"narration"`
-	Voiceover    text `json:"voiceover"`
-	Text         text `json:"text"`
-	Visual       text `json:"visual"`
-	VisualPrompt text `json:"visual_prompt"`
-	ImagePrompt  text `json:"image_prompt"`
-	Description  text `json:"description"`
+	Narration    text  `json:"narration"`
+	Voiceover    text  `json:"voiceover"`
+	Text         text  `json:"text"`
+	Visual       text  `json:"visual"`
+	VisualPrompt text  `json:"visual_prompt"`
+	ImagePrompt  text  `json:"image_prompt"`
+	Description  text  `json:"description"`
+	Product      *bool `json:"product"`
+	ShowsProduct *bool `json:"shows_product"`
+	IsProduct    *bool `json:"is_product"`
+}
+
+// showsProduct reads whichever of the product flags the model used.
+func (s rawShot) showsProduct() bool {
+	for _, v := range []*bool{s.Product, s.ShowsProduct, s.IsProduct} {
+		if v != nil {
+			return *v
+		}
+	}
+	return false
 }
 
 // ParseScript reads the writer's JSON, accepting the field names models drift
@@ -228,7 +317,7 @@ func ParseScript(content string) (*Script, error) {
 		if narration == "" || visual == "" {
 			continue
 		}
-		script.Shots = append(script.Shots, Shot{Narration: truncate(narration, 800), Visual: truncate(visual, 2000)})
+		script.Shots = append(script.Shots, Shot{Narration: truncate(narration, 800), Visual: truncate(visual, 2000), ShowsProduct: s.showsProduct()})
 	}
 	if len(script.Shots) == 0 {
 		return nil, errors.New("the script had no shot with both narration and a visual")
@@ -258,6 +347,6 @@ func truncate(s string, n int) string {
 
 // model is the brief as a run records it.
 func (b Brief) model() model.VideoBrief {
-	return model.VideoBrief{Seconds: b.Seconds, Format: b.Format, Voice: b.Voice, Style: b.Style,
-		Motion: b.Motion, Captions: b.Captions, Notes: b.Notes}
+	return model.VideoBrief{Kind: b.Kind, Seconds: b.Seconds, Format: b.Format, Voice: b.Voice, Style: b.Style,
+		Motion: b.Motion, Captions: b.Captions, Notes: b.Notes, ProductName: b.ProductName, ProductImage: b.ProductImage}
 }
