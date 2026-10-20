@@ -78,7 +78,8 @@ type BlogService interface {
 	BindTasks(tasks TaskService)
 	// BindIntegrations lets a writer agent file to its own website: the named
 	// opsapi integration in its settings, instead of the ring's CMS.
-	BindIntegrations(store IntegrationLister)
+	// opsapiBaseURL is this ring's OpsAPI, where a bare namespace is looked up.
+	BindIntegrations(store IntegrationLister, opsapiBaseURL string)
 	// ListByAgentID lists the runs of one writer agent — the original or a
 	// clone of it.
 	ListByAgentID(ctx context.Context, orgID, agentID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.BlogRun], error)
@@ -142,6 +143,9 @@ type blogService struct {
 	// integrations resolves a writer's named destination; nil means every
 	// writer files to the ring's CMS.
 	integrations IntegrationLister
+	// opsapiBaseURL is this ring's OpsAPI (OPSAPI_BASE_URL): a destination
+	// given as a bare namespace means that namespace here.
+	opsapiBaseURL string
 }
 
 // IntegrationLister reads an org's integrations.
@@ -179,9 +183,10 @@ func NewBlogService(
 	}
 }
 
-func (s *blogService) BindIntegrations(store IntegrationLister) {
+func (s *blogService) BindIntegrations(store IntegrationLister, opsapiBaseURL string) {
 	if s != nil {
 		s.integrations = store
+		s.opsapiBaseURL = opsapiBaseURL
 	}
 }
 
@@ -502,28 +507,69 @@ func (s *blogService) destination(ctx context.Context, run *model.BlogRun) (CMSD
 	return s.resolveDestination(ctx, run.OrgID, name)
 }
 
-// resolveDestination builds the CMS client for the org's opsapi integration
-// called name. The key is read here, server-side, and never leaves.
+// resolveDestination builds the CMS client for the org's opsapi website
+// called name, or saved for namespace name (see findDestination). The key is
+// read here, server-side, and never leaves.
+//
+// The ring's own CMS namespace needs no saved website: it resolves to nil,
+// the ring's CMS and its configured key, as a run with no destination does.
 func (s *blogService) resolveDestination(ctx context.Context, orgID uuid.UUID, name string) (CMSDestination, error) {
-	if s.integrations == nil {
-		return nil, fmt.Errorf("blog_svc: articles file to %q, but integrations are not available", name)
+	var list []model.Integration
+	if s.integrations != nil {
+		var err error
+		if list, err = s.integrations.ListByOrg(ctx, orgID); err != nil {
+			return nil, fmt.Errorf("blog_svc: list integrations: %w", err)
+		}
 	}
-	list, err := s.integrations.ListByOrg(ctx, orgID)
-	if err != nil {
-		return nil, fmt.Errorf("blog_svc: list integrations: %w", err)
+	dest, err := findDestination(list, name, s.opsapiBaseURL)
+	if errors.Is(err, errNoDestination) && s.isRingNamespace(name) {
+		return nil, nil
 	}
-	return findDestination(list, name)
+	return dest, err
 }
 
-// findDestination picks the integration called name (case-insensitively).
-func findDestination(list []model.Integration, name string) (CMSDestination, error) {
+// isRingNamespace reports whether name is the namespace the ring's own CMS
+// files to — a website that exists without being saved by the org.
+func (s *blogService) isRingNamespace(name string) bool {
+	ns := s.CMSNamespace()
+	return ns != "" && strings.EqualFold(strings.TrimSpace(name), ns)
+}
+
+// errNoDestination is findDestination finding nothing by that name or
+// namespace, as opposed to finding a website it cannot use.
+var errNoDestination = errors.New("blog_svc: no such website")
+
+// findDestination picks the opsapi website a run names: the integration
+// called name (case-insensitively), else the one saved for namespace name —
+// on ringBaseURL when the namespace is saved on several OpsAPIs.
+func findDestination(list []model.Integration, name, ringBaseURL string) (CMSDestination, error) {
 	name = strings.TrimSpace(name)
 	for _, in := range list {
 		if strings.EqualFold(strings.TrimSpace(in.Name), name) {
 			return opsapiDestination(in)
 		}
 	}
-	return nil, fmt.Errorf("blog_svc: articles file to %q, but this organization has no integration of that name — add an opsapi integration called %q", name, name)
+	var matches []model.Integration
+	for _, in := range list {
+		if in.Provider != model.ProviderOpsAPI {
+			continue
+		}
+		ns, _ := in.Config["namespace_slug"].(string)
+		if !strings.EqualFold(strings.TrimSpace(ns), name) {
+			continue
+		}
+		if ringBaseURL != "" && sameWebsite(in, name, ringBaseURL) {
+			return opsapiDestination(in)
+		}
+		matches = append(matches, in)
+	}
+	switch len(matches) {
+	case 0:
+		return nil, fmt.Errorf("%w: articles file to %q, but this organization has no website of that name or namespace — connect the namespace with its OpsAPI API key", errNoDestination, name)
+	case 1:
+		return opsapiDestination(matches[0])
+	}
+	return nil, fmt.Errorf("blog_svc: namespace %q is saved on %d OpsAPIs — pick the website by name", name, len(matches))
 }
 
 // hasDestination reports whether the run files to a website of its own.
@@ -1907,21 +1953,24 @@ func (s *blogService) CheckWebsite(ctx context.Context, orgID uuid.UUID, namespa
 		return nil, err
 	}
 	out := &model.WebsiteCheck{Namespace: ns, BaseURL: base}
-	if s.integrations == nil {
-		return out, nil
-	}
-	list, err := s.integrations.ListByOrg(ctx, orgID)
-	if err != nil {
-		return nil, err
-	}
-	for _, in := range list {
-		if !sameWebsite(in, ns, base) {
-			continue
+	if s.integrations != nil {
+		list, err := s.integrations.ListByOrg(ctx, orgID)
+		if err != nil {
+			return nil, err
 		}
-		id := in.ID
-		_, derr := opsapiDestination(in)
-		out.Exists, out.Name, out.IntegrationID, out.Ready = true, in.Name, &id, derr == nil
-		break
+		for _, in := range list {
+			if !sameWebsite(in, ns, base) {
+				continue
+			}
+			id := in.ID
+			_, derr := opsapiDestination(in)
+			out.Exists, out.Name, out.IntegrationID, out.Ready = true, in.Name, &id, derr == nil
+			return out, nil
+		}
+	}
+	// The ring's own CMS namespace is already connected, with the ring's key.
+	if s.isRingNamespace(ns) && normalBaseURL(base) == normalBaseURL(s.opsapiBaseURL) {
+		out.Exists, out.Ready, out.Ring = true, true, true
 	}
 	return out, nil
 }

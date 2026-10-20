@@ -84,3 +84,20 @@ func TestIsThinPrompt(t *testing.T) {
 		}
 	}
 }
+
+// FormDefault is for forms: it travels on the wire but a launch that leaves
+// the field empty keeps it empty, so chat and API launches are unchanged.
+func TestFormDefaultIsNotAppliedToLaunches(t *testing.T) {
+	s := agentschema.Schema{Fields: []agentschema.Field{
+		{Key: "audience", Default: "developers"},
+		{Key: "destination", Type: "website", FormDefault: "jobshout"},
+	}}
+	vals := s.ApplyDefaults(map[string]string{})
+	if vals["audience"] != "developers" || vals["destination"] != "" {
+		t.Fatalf("ApplyDefaults = %v; want audience defaulted, destination left empty", vals)
+	}
+	w := agentschema.Wire(s)
+	if w.Fields[1].FormDefault != "jobshout" || w.Fields[1].Default != "" {
+		t.Fatalf("wire field = %+v; want form_default only", w.Fields[1])
+	}
+}

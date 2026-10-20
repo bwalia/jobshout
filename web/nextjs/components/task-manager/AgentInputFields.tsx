@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { apiClient } from "@/lib/api/client";
 import type { AgentField } from "@/lib/agents/input-schemas";
 import { parseTags, TagInput } from "@/components/ui/TagInput";
+import { WebsiteNamespaceField } from "@/components/blog/WebsiteNamespaceField";
 import type { ReviewRepos } from "@/types/review";
 import { cn } from "@/lib/utils/cn";
 
@@ -163,6 +164,16 @@ function Field({
           placeholder={field.placeholder}
           required={field.required}
           minLength={minLen}
+          error={Boolean(error)}
+        />
+      ) : field.type === "website" ? (
+        <WebsiteNamespaceField
+          id={`agent-field-${field.key}`}
+          value={value}
+          onChange={onChange}
+          disabled={disabled}
+          autoFocus={autoFocus}
+          placeholder={field.placeholder}
           error={Boolean(error)}
         />
       ) : field.type === "tags" ? (

@@ -15,9 +15,9 @@ const buttonClass =
   "rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50";
 
 /** OpsAPI namespace slugs: lower-case letters, digits and hyphens. */
-const SLUG = /^[a-z0-9][a-z0-9-]*$/;
+export const SLUG = /^[a-z0-9][a-z0-9-]*$/;
 
-const ADMIN_ONLY =
+export const ADMIN_ONLY =
   "Only organization admins can add websites or keys. Ask one to add it in Settings → Integrations.";
 
 /**
