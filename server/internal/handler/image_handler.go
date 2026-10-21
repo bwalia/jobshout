@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"encoding/base64"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -187,12 +188,7 @@ func (h *ImageHandler) Serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	contentType := "image/png"
-	if strings.HasSuffix(key, ".mp4") {
-		// Rendered videos (the Video Producer) share this store and route.
-		contentType = "video/mp4"
-	}
-	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Type", contentTypeForKey(key))
 	// Generated images never change: the key contains a UUID, so a new image is
 	// a new key. Caching hard is safe and keeps an article's cover off the
 	// storage backend on every page view.
@@ -203,6 +199,76 @@ func (h *ImageHandler) Serve(w http.ResponseWriter, r *http.Request) {
 	// included. Fine at today's sizes (a 1-minute 720p video is ~6 MB); stream
 	// the MinIO object (an io.ReadSeeker) here if videos grow past tens of MB.
 	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(data))
+}
+
+// Upload handles POST /api/v1/images/upload — a user-supplied image (a product
+// photo for the Video Producer) stored in the image bucket so it can be fetched
+// back by key and served by the file route. Multipart form, "file" field.
+func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := h.orgFromRequest(w, r)
+	if !ok {
+		return
+	}
+	// 5 MB, matching the avatar cap; a product photo needs no more.
+	r.Body = http.MaxBytesReader(w, r.Body, 5<<20)
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "expected a multipart file field named 'file'")
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(file)
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "could not read the uploaded file: "+err.Error())
+		return
+	}
+	// Sniff the bytes rather than trust the client's header: the extension
+	// decides the content type the file route serves it back with.
+	ext, contentType, ok := imageUpload(http.DetectContentType(data))
+	if !ok {
+		RespondError(w, http.StatusBadRequest, "only PNG, JPEG, WebP or GIF images are allowed")
+		return
+	}
+	url, err := h.images.StoreUpload(r.Context(), orgID, data, ext, contentType)
+	if err != nil {
+		RespondError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	RespondJSON(w, http.StatusOK, map[string]any{"url": url})
+}
+
+// imageUpload maps a sniffed content type to the key extension and content type
+// to store an upload under. ok is false for anything that is not a web image.
+func imageUpload(detected string) (ext, contentType string, ok bool) {
+	switch {
+	case strings.HasPrefix(detected, "image/png"):
+		return "png", "image/png", true
+	case strings.HasPrefix(detected, "image/jpeg"):
+		return "jpg", "image/jpeg", true
+	case strings.HasPrefix(detected, "image/webp"):
+		return "webp", "image/webp", true
+	case strings.HasPrefix(detected, "image/gif"):
+		return "gif", "image/gif", true
+	}
+	return "", "", false
+}
+
+// contentTypeForKey serves a stored object as what its extension says it is.
+// Generated images are PNG; the Video Producer stores MP4s and uploaded product
+// photos (JPEG/WebP/GIF) in the same bucket and route.
+func contentTypeForKey(key string) string {
+	switch {
+	case strings.HasSuffix(key, ".mp4"):
+		return "video/mp4"
+	case strings.HasSuffix(key, ".jpg"), strings.HasSuffix(key, ".jpeg"):
+		return "image/jpeg"
+	case strings.HasSuffix(key, ".webp"):
+		return "image/webp"
+	case strings.HasSuffix(key, ".gif"):
+		return "image/gif"
+	default:
+		return "image/png"
+	}
 }
 
 // orgFromRequest resolves the calling organization, answering the request with

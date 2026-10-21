@@ -9,6 +9,7 @@ export type AgentFieldType =
   | "select"
   | "checkbox"
   | "repo"
+  | "image"
   /** An OpsAPI namespace to publish to; see WebsiteNamespaceField. */
   | "website";
 

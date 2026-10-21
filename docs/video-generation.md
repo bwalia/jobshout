@@ -56,13 +56,24 @@ about …").
 
 | Field | Notes |
 | --- | --- |
-| Topic | Required. One sentence is enough. |
+| Kind | **Explainer / documentary** (realistic scenes, the original behaviour), **Anime** (an animated story, anime-style script and look), or **Product promo** (benefit-led ad script; its hero shots use the uploaded product photo). |
+| Topic | Required. One sentence is enough. For a product video, what the product is / what to cover. |
 | Length | 30 s – 3 min. About 2.5 words of narration per second, one shot per ~6 s. |
 | Format | Landscape 16:9, or portrait 9:16 for Shorts, Reels and TikTok. |
 | Pictures | **Animated** (LTX, ~12 min of GPU per shot) or **stills** with camera moves (~1.5 min per shot). |
 | Voice | Kokoro voices in US English, UK English and Hindi. The voice also picks the script's language. |
-| Style | Appended to every shot, so the whole video looks the same. |
+| Style | Appended to every shot, so the whole video looks the same. Left blank, each kind picks a fitting look (anime → cel-shaded; product → clean studio photography). |
+| Product name | Product videos only. Named in the ad copy. |
+| Product photo | Product videos only. Uploaded (PNG/JPEG/WebP/GIF, ≤5 MB). The script marks which shots are the product; those shots use the real photo (fitted onto the frame, never LTX-animated so it is not warped), the rest are drawn as supporting/lifestyle shots. Left empty, the product is drawn from the description. |
 | Captions | Burned in, timed to the narration. |
+
+**How the kinds differ.** Only the *script prompt* and the *default style*
+change per kind — the render pipeline is the same. A product video additionally
+carries the photo: the web uploads it to `POST /api/v1/images/upload` (stored in
+the image bucket, org-scoped), and the server reads it back and sends the bytes
+to the workstation inline (its stored-image URLs do not resolve from the
+workstation gateway). A shot marked `shows_product` uses that photo as its
+keyframe; everything else is unchanged.
 
 **Watch it work:** Agents → **Video Producer** → **Workspace**. Every video is
 listed, and the selected one shows what the agent is doing right now — writing

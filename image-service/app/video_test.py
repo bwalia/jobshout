@@ -55,6 +55,20 @@ class PureHelperTests(unittest.TestCase):
         self.assertTrue(video.valid_voice("bf_emma"))
         self.assertFalse(video.valid_voice("--voice"))
 
+    def test_product_fields_and_a_missing_photo_draw_instead(self) -> None:
+        job = {"id": "prodtest1", "request": {
+            "id": "prodtest1", "kind": "product", "product_name": "Acme",
+            "product_image": "",
+            "shots": [{"narration": "a", "visual": "b", "shows_product": True}],
+        }}
+        with tempfile.TemporaryDirectory() as d:
+            render = video._Render(job, Path(d), lambda **kw: None)
+            self.assertEqual(render.kind, "product")
+            self.assertEqual(render.product_name, "Acme")
+            # No photo supplied: fall back to a drawn product, no hero shots.
+            self.assertIsNone(render._product_still())
+            self.assertEqual(render.product_shots, set())
+
 
 class QueueTests(unittest.TestCase):
     def setUp(self) -> None:

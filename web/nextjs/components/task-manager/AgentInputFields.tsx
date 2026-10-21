@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import { apiClient } from "@/lib/api/client";
+import { apiClient, API_BASE_URL } from "@/lib/api/client";
 import type { AgentField } from "@/lib/agents/input-schemas";
 import { parseTags, TagInput } from "@/components/ui/TagInput";
 import { WebsiteNamespaceField } from "@/components/blog/WebsiteNamespaceField";
@@ -166,6 +166,13 @@ function Field({
           minLength={minLen}
           error={Boolean(error)}
         />
+      ) : field.type === "image" ? (
+        <ImageField
+          value={value}
+          onChange={onChange}
+          disabled={disabled}
+          error={Boolean(error)}
+        />
       ) : field.type === "website" ? (
         <WebsiteNamespaceField
           id={`agent-field-${field.key}`}
@@ -208,6 +215,97 @@ function Field({
         </p>
       ) : field.help ? (
         <p className="text-xs text-muted-foreground">{field.help}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function ImageField({
+  value,
+  onChange,
+  disabled,
+  error,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+  error?: boolean;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  async function upload(file: File) {
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const { data } = await apiClient.post<{ url: string }>(
+        "/images/upload",
+        form
+      );
+      onChange(data.url);
+    } catch {
+      setUploadError("Upload failed. Use a PNG, JPEG, WebP or GIF under 5MB.");
+    } finally {
+      setUploading(false);
+      if (inputRef.current) inputRef.current.value = "";
+    }
+  }
+
+  // Stored URLs are relative to the API; the file route is public so a plain
+  // <img> loads without a token.
+  const src = value ? `${API_BASE_URL}${value}` : "";
+
+  return (
+    <div className="space-y-2">
+      {src ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={src}
+          alt="Uploaded product"
+          className="h-32 w-32 rounded-md border border-input object-contain bg-background"
+        />
+      ) : null}
+      <div className="flex items-center gap-2">
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          className="hidden"
+          disabled={disabled || uploading}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) void upload(file);
+          }}
+        />
+        <button
+          type="button"
+          disabled={disabled || uploading}
+          onClick={() => inputRef.current?.click()}
+          className={cn(
+            "inline-flex h-10 items-center rounded-md border px-4 text-sm font-medium hover:bg-secondary disabled:opacity-50",
+            error ? "border-destructive" : "border-input"
+          )}
+        >
+          {uploading ? "Uploading…" : value ? "Replace photo" : "Upload photo"}
+        </button>
+        {value ? (
+          <button
+            type="button"
+            disabled={disabled || uploading}
+            onClick={() => onChange("")}
+            className="inline-flex h-10 items-center rounded-md px-3 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50"
+          >
+            Remove
+          </button>
+        ) : null}
+      </div>
+      {uploadError ? (
+        <p className="text-xs text-destructive" role="alert">
+          {uploadError}
+        </p>
       ) : null}
     </div>
   );

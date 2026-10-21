@@ -67,6 +67,13 @@ func schema() agentschema.Schema {
 		Builtin: model.BuiltinVideoProducer,
 		Hint:    "A topic in, a narrated video out. Stills: ~15 min per minute of video; animated: ~2 h per minute.",
 		Fields: []agentschema.Field{
+			{Key: "kind", Label: "Kind of video", Type: "select", Default: model.VideoKindExplainer,
+				Help: "Explainer draws realistic scenes; Anime is an animated story; Product promotes one product (add its photo below).",
+				Options: []model.ClarifyOption{
+					{Label: "Explainer / documentary", Value: model.VideoKindExplainer},
+					{Label: "Anime (animated story)", Value: model.VideoKindAnime},
+					{Label: "Product promo", Value: model.VideoKindProduct},
+				}},
 			{Key: "topic", Label: "What is the video about?", Type: "textarea", Required: true, MinLength: 3,
 				Placeholder: "Why lighthouses still matter in the age of GPS",
 				Question:    "What should the video be about?"},
@@ -91,7 +98,12 @@ func schema() agentschema.Schema {
 			{Key: "voice", Label: "Narrator voice", Type: "select", Default: defaultVoice, Options: voices},
 			{Key: "style", Label: "Visual style (optional)", Type: "text",
 				Placeholder: "cinematic documentary, warm golden-hour light",
-				Help:        "Applied to every shot so the video looks consistent"},
+				Help:        "Applied to every shot so the video looks consistent. Left blank, each kind picks a fitting look."},
+			{Key: "product_name", Label: "Product name (product videos)", Type: "text",
+				Placeholder: "Acme Noise-Cancelling Headphones",
+				Help:        "Only used for a Product promo video."},
+			{Key: "product_image", Label: "Product photo (product videos)", Type: "image",
+				Help: "Upload a photo of your product. Its hero shots use the real photo instead of a drawn one. Only used for a Product promo video."},
 			{Key: "captions", Label: "Captions", Type: "select", Default: "yes",
 				Options: []model.ClarifyOption{
 					{Label: "Burn in captions", Value: "yes"},
@@ -104,11 +116,13 @@ func schema() agentschema.Schema {
 			{Prefix: "Video: ", FromKey: "topic", Truncate: 80, Fallback: "new video"},
 		},
 		DescRules: []agentschema.DescRule{
+			{Key: "kind", Prefix: "Kind: "},
 			{Key: "length", Prefix: "Length (s): "},
 			{Key: "format", Prefix: "Format: "},
 			{Key: "motion", Prefix: "Pictures: "},
 			{Key: "voice", Prefix: "Voice: "},
 			{Key: "style", Prefix: "Style: "},
+			{Key: "product_name", Prefix: "Product: "},
 			{Key: "notes"},
 		},
 	}
@@ -134,15 +148,28 @@ func BriefFromValues(v map[string]string) Brief {
 	if !known {
 		voice = defaultVoice
 	}
+	kind := strings.TrimSpace(v["kind"])
+	switch kind {
+	case model.VideoKindAnime, model.VideoKindProduct:
+	default:
+		kind = model.VideoKindExplainer
+	}
+	style := truncate(v["style"], maxStyle)
+	if style == "" {
+		style = DefaultStyle(kind)
+	}
 	return Brief{
-		Topic:    strings.TrimSpace(v["topic"]),
-		Seconds:  seconds,
-		Format:   format,
-		Voice:    voice,
-		Style:    truncate(v["style"], maxStyle),
-		Motion:   strings.TrimSpace(v["motion"]) != "stills",
-		Captions: strings.TrimSpace(v["captions"]) != "no",
-		Notes:    strings.TrimSpace(v["notes"]),
+		Topic:        strings.TrimSpace(v["topic"]),
+		Kind:         kind,
+		Seconds:      seconds,
+		Format:       format,
+		Voice:        voice,
+		Style:        style,
+		Motion:       strings.TrimSpace(v["motion"]) != "stills",
+		Captions:     strings.TrimSpace(v["captions"]) != "no",
+		Notes:        strings.TrimSpace(v["notes"]),
+		ProductName:  truncate(v["product_name"], 200),
+		ProductImage: strings.TrimSpace(v["product_image"]),
 	}
 }
 

@@ -190,6 +190,8 @@ async def generate(req: GenerateRequest, caller: str = Depends(require_auth)):
 class VideoShot(BaseModel):
     narration: str = Field(min_length=1, max_length=800)
     visual: str = Field(min_length=1, max_length=2000)
+    # A product video's hero shot: use the uploaded product photo for it.
+    shows_product: bool = False
 
 
 class VideoRequest(BaseModel):
@@ -197,12 +199,18 @@ class VideoRequest(BaseModel):
     # job it already started instead of rendering the video twice.
     id: str = ""
     title: str = Field(default="", max_length=200)
+    kind: str = Field(default="", max_length=20)
     shots: list[VideoShot] = Field(min_length=1)
     format: Literal["landscape", "portrait"] = "landscape"
     voice: str = ""
     style: str = Field(default="", max_length=500)
     motion: bool = True
     captions: bool = True
+    product_name: str = Field(default="", max_length=200)
+    # The product photo's bytes, base64-encoded (the platform's stored-image
+    # URLs do not resolve from the workstation gateway). ~7M chars holds a 5 MB
+    # image.
+    product_image: str = Field(default="", max_length=10_000_000)
     seed: int = -1
     # Opaque to this service and handed back on every read: lets a caller that
     # restarted find which of its tasks a job belongs to.

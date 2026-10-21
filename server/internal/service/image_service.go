@@ -217,3 +217,13 @@ func (s *ImageService) Fetch(ctx context.Context, key string) ([]byte, error) {
 	}
 	return s.store.Get(ctx, key)
 }
+
+// StoreUpload keeps a user-supplied image (e.g. a product photo) in the same
+// bucket and URL scheme as generated images, so it can be fetched back by key
+// and served by the existing file route. Returns the serving URL.
+func (s *ImageService) StoreUpload(ctx context.Context, orgID uuid.UUID, data []byte, ext, contentType string) (string, error) {
+	if s.store == nil {
+		return "", fmt.Errorf("image storage is not configured on this server")
+	}
+	return s.store.PutFile(ctx, orgID, data, ext, contentType)
+}

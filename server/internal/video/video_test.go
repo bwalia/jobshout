@@ -175,11 +175,21 @@ func (m *fakeMedia) Jobs(context.Context) ([]Job, error) { return m.jobs, nil }
 
 func (m *fakeMedia) Download(context.Context, string) ([]byte, error) { return []byte("mp4"), nil }
 
-type fakeStore struct{ ext, contentType string }
+type fakeStore struct {
+	ext, contentType string
+	objects          map[string][]byte // key -> bytes, for Get
+}
 
 func (s *fakeStore) PutFile(_ context.Context, _ uuid.UUID, _ []byte, ext, contentType string) (string, error) {
 	s.ext, s.contentType = ext, contentType
 	return "/api/v1/images/file/org/2026/10/x.mp4", nil
+}
+
+func (s *fakeStore) Get(_ context.Context, key string) ([]byte, error) {
+	if data, ok := s.objects[key]; ok {
+		return data, nil
+	}
+	return nil, errors.New("not found")
 }
 
 type fakeTasks struct {
