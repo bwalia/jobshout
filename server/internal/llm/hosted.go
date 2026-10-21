@@ -69,6 +69,15 @@ func (e *ProviderError) Error() string {
 
 func (e *ProviderError) Unwrap() error { return e.Kind }
 
+// IsContentBlocked reports whether err is a provider refusing a request because
+// its safety filter blocked the prompt or the response (e.g. Gemini's
+// PROHIBITED_CONTENT). It is a 400 that retrying the same provider cannot fix —
+// but a different model, with a different filter or none, may well accept.
+func IsContentBlocked(err error) bool {
+	var pe *ProviderError
+	return errors.As(err, &pe) && pe.Kind == ErrProviderBadRequest && strings.Contains(pe.Message, "blocked")
+}
+
 // Retryable reports whether sending the same request again could succeed.
 // Timeouts are deliberately excluded: a generation that ran out the clock once
 // will usually do so again, and a retry doubles the wait.

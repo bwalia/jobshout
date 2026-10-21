@@ -187,29 +187,52 @@ func DefaultStyle(kind string) string {
 var writeRetryWait = time.Minute
 
 // Writer turns a brief into a script with an LLM.
+//
+// Fallback is an optional second client used only when the primary refuses the
+// prompt outright (a hosted safety filter blocking it — Gemini's
+// PROHIBITED_CONTENT, which no setting can turn off). A local model has no such
+// filter, so a benign topic that Gemini rejects still makes a video. The
+// fallback is not used for ordinary failures, so it does not loosen anything
+// the primary allows.
 type Writer struct {
-	LLM   llm.Client
-	Model string
+	LLM           llm.Client
+	Model         string
+	Fallback      llm.Client
+	FallbackModel string
 }
 
-// Write asks for the script, once more if the first answer is unusable.
+// Write asks for the script, once more if the first answer is unusable, and on
+// the fallback model if the primary blocks the prompt.
 func (w *Writer) Write(ctx context.Context, b Brief) (*Script, error) {
 	if w == nil || w.LLM == nil {
 		return nil, errors.New("video: no LLM configured to write the script")
 	}
+	script, err := w.writeWith(ctx, w.LLM, w.Model, b)
+	if err != nil && w.Fallback != nil && llm.IsContentBlocked(err) {
+		if s, ferr := w.writeWith(ctx, w.Fallback, w.FallbackModel, b); ferr == nil {
+			return s, nil
+		}
+		// The fallback failed too: return the original block, which names the
+		// real reason the user needs to see.
+	}
+	return script, err
+}
+
+// writeWith generates and parses a script with one client, retrying a transient
+// failure (a shared Ollama answering "server busy" for minutes) but not a
+// content block, which retrying the same provider only repeats.
+func (w *Writer) writeWith(ctx context.Context, client llm.Client, model string, b Brief) (*Script, error) {
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
-			// A shared Ollama at capacity answers "server busy" for minutes at
-			// a time; the client's own single quick retry does not outlast it.
 			select {
 			case <-ctx.Done():
 				return nil, fmt.Errorf("video: script writing failed: %w", lastErr)
 			case <-time.After(time.Duration(attempt) * writeRetryWait):
 			}
 		}
-		resp, err := w.LLM.Generate(llm.WithStage(ctx, "video_script"), llm.GenerateRequest{
-			Model:       w.Model,
+		resp, err := client.Generate(llm.WithStage(ctx, "video_script"), llm.GenerateRequest{
+			Model:       model,
 			MaxTokens:   8000,
 			Temperature: 0.7,
 			JSON:        true,
@@ -220,6 +243,11 @@ func (w *Writer) Write(ctx context.Context, b Brief) (*Script, error) {
 		})
 		if err != nil {
 			if ctx.Err() != nil {
+				return nil, err
+			}
+			// A blocked prompt is not transient; return it now so Write can try
+			// the fallback instead of blocking twice more.
+			if llm.IsContentBlocked(err) {
 				return nil, err
 			}
 			lastErr = err
