@@ -9,7 +9,9 @@ export type AgentFieldType =
   | "select"
   | "checkbox"
   | "repo"
-  | "image";
+  | "image"
+  /** An OpsAPI namespace to publish to; see WebsiteNamespaceField. */
+  | "website";
 
 export interface AgentFieldOption {
   value: string;
@@ -92,6 +94,8 @@ export interface WireSchema {
     min_length?: number;
     min?: number;
     default?: string;
+    /** Prefilled by forms only; the server never applies it to a launch. */
+    form_default?: string;
     placeholder?: string;
     help?: string;
     group?: string;
@@ -227,7 +231,9 @@ export function schemaFromWire(w: WireSchema): AgentInputSchema {
       group: f.group,
       options: f.options?.map((o) => ({ label: o.label, value: o.value })),
       defaultValue:
-        f.type === "checkbox" ? f.default === "true" : f.default || undefined,
+        f.type === "checkbox"
+          ? f.default === "true"
+          : f.default || f.form_default || undefined,
     })),
     titleFrom: (v) => applyTitleRules(w.title_rules, v),
     descriptionFrom: (v) => applyDescRules(w.desc_rules, v) || undefined,

@@ -334,6 +334,24 @@ func (r *Runner) CanPublish() bool {
 	return true
 }
 
+// PublicBaseURL is this ring's public origin, used to absolutise cover paths
+// for opsapi. Empty when covers cannot be shared outside JobShout.
+func (r *Runner) PublicBaseURL() string {
+	if r == nil {
+		return ""
+	}
+	return strings.TrimRight(strings.TrimSpace(r.cfg.PublicBaseURL), "/")
+}
+
+// RingCMS is the ring's default CMS publisher (OPSAPI_*), or nil when unset.
+// Named destinations from integrations are passed separately to PublishTo.
+func (r *Runner) RingCMS() CMSPublisher {
+	if r == nil {
+		return nil
+	}
+	return r.cms
+}
+
 // CMSNamespace is the namespace publishing targets, or "" when the CMS is not
 // configured. Callers use it to record where a run's drafts went.
 func (r *Runner) CMSNamespace() string {

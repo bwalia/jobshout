@@ -15,6 +15,7 @@ import (
 	"github.com/jobshout/server/internal/agentmodule"
 	"github.com/jobshout/server/internal/audience"
 	"github.com/jobshout/server/internal/blog"
+	"github.com/jobshout/server/internal/integration/adapters/opsapi"
 	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/llmtrace"
 	"github.com/jobshout/server/internal/model"
@@ -74,11 +75,17 @@ type BlogService interface {
 	CanPublishLive() bool
 	ListArticles(ctx context.Context, runID uuid.UUID) ([]model.BlogArticle, error)
 	GetArticle(ctx context.Context, id uuid.UUID) (*model.BlogArticle, error)
+	// RegenerateCover redraws one article's cover from its finished content.
+	// When syncCMS is true and the article already has a CMS post UUID, the
+	// new cover is also written to opsapi's featured_image_url so listing
+	// cards update without re-publishing the body.
+	RegenerateCover(ctx context.Context, orgID, articleID uuid.UUID, syncCMS bool) (*model.BlogArticle, error)
 	// BindTasks updates the Task Manager card when a launched run finishes.
 	BindTasks(tasks TaskService)
 	// BindIntegrations lets a writer agent file to its own website: the named
 	// opsapi integration in its settings, instead of the ring's CMS.
-	BindIntegrations(store IntegrationLister)
+	// opsapiBaseURL is this ring's OpsAPI, where a bare namespace is looked up.
+	BindIntegrations(store IntegrationLister, opsapiBaseURL string)
 	// ListByAgentID lists the runs of one writer agent — the original or a
 	// clone of it.
 	ListByAgentID(ctx context.Context, orgID, agentID uuid.UUID, params model.PaginationParams) (*model.PaginatedResponse[model.BlogRun], error)
@@ -142,6 +149,9 @@ type blogService struct {
 	// integrations resolves a writer's named destination; nil means every
 	// writer files to the ring's CMS.
 	integrations IntegrationLister
+	// opsapiBaseURL is this ring's OpsAPI (OPSAPI_BASE_URL): a destination
+	// given as a bare namespace means that namespace here.
+	opsapiBaseURL string
 }
 
 // IntegrationLister reads an org's integrations.
@@ -179,9 +189,10 @@ func NewBlogService(
 	}
 }
 
-func (s *blogService) BindIntegrations(store IntegrationLister) {
+func (s *blogService) BindIntegrations(store IntegrationLister, opsapiBaseURL string) {
 	if s != nil {
 		s.integrations = store
+		s.opsapiBaseURL = opsapiBaseURL
 	}
 }
 
@@ -502,28 +513,69 @@ func (s *blogService) destination(ctx context.Context, run *model.BlogRun) (CMSD
 	return s.resolveDestination(ctx, run.OrgID, name)
 }
 
-// resolveDestination builds the CMS client for the org's opsapi integration
-// called name. The key is read here, server-side, and never leaves.
+// resolveDestination builds the CMS client for the org's opsapi website
+// called name, or saved for namespace name (see findDestination). The key is
+// read here, server-side, and never leaves.
+//
+// The ring's own CMS namespace needs no saved website: it resolves to nil,
+// the ring's CMS and its configured key, as a run with no destination does.
 func (s *blogService) resolveDestination(ctx context.Context, orgID uuid.UUID, name string) (CMSDestination, error) {
-	if s.integrations == nil {
-		return nil, fmt.Errorf("blog_svc: articles file to %q, but integrations are not available", name)
+	var list []model.Integration
+	if s.integrations != nil {
+		var err error
+		if list, err = s.integrations.ListByOrg(ctx, orgID); err != nil {
+			return nil, fmt.Errorf("blog_svc: list integrations: %w", err)
+		}
 	}
-	list, err := s.integrations.ListByOrg(ctx, orgID)
-	if err != nil {
-		return nil, fmt.Errorf("blog_svc: list integrations: %w", err)
+	dest, err := findDestination(list, name, s.opsapiBaseURL)
+	if errors.Is(err, errNoDestination) && s.isRingNamespace(name) {
+		return nil, nil
 	}
-	return findDestination(list, name)
+	return dest, err
 }
 
-// findDestination picks the integration called name (case-insensitively).
-func findDestination(list []model.Integration, name string) (CMSDestination, error) {
+// isRingNamespace reports whether name is the namespace the ring's own CMS
+// files to — a website that exists without being saved by the org.
+func (s *blogService) isRingNamespace(name string) bool {
+	ns := s.CMSNamespace()
+	return ns != "" && strings.EqualFold(strings.TrimSpace(name), ns)
+}
+
+// errNoDestination is findDestination finding nothing by that name or
+// namespace, as opposed to finding a website it cannot use.
+var errNoDestination = errors.New("blog_svc: no such website")
+
+// findDestination picks the opsapi website a run names: the integration
+// called name (case-insensitively), else the one saved for namespace name —
+// on ringBaseURL when the namespace is saved on several OpsAPIs.
+func findDestination(list []model.Integration, name, ringBaseURL string) (CMSDestination, error) {
 	name = strings.TrimSpace(name)
 	for _, in := range list {
 		if strings.EqualFold(strings.TrimSpace(in.Name), name) {
 			return opsapiDestination(in)
 		}
 	}
-	return nil, fmt.Errorf("blog_svc: articles file to %q, but this organization has no integration of that name — add an opsapi integration called %q", name, name)
+	var matches []model.Integration
+	for _, in := range list {
+		if in.Provider != model.ProviderOpsAPI {
+			continue
+		}
+		ns, _ := in.Config["namespace_slug"].(string)
+		if !strings.EqualFold(strings.TrimSpace(ns), name) {
+			continue
+		}
+		if ringBaseURL != "" && sameWebsite(in, name, ringBaseURL) {
+			return opsapiDestination(in)
+		}
+		matches = append(matches, in)
+	}
+	switch len(matches) {
+	case 0:
+		return nil, fmt.Errorf("%w: articles file to %q, but this organization has no website of that name or namespace — connect the namespace with its OpsAPI API key", errNoDestination, name)
+	case 1:
+		return opsapiDestination(matches[0])
+	}
+	return nil, fmt.Errorf("blog_svc: namespace %q is saved on %d OpsAPIs — pick the website by name", name, len(matches))
 }
 
 // hasDestination reports whether the run files to a website of its own.
@@ -1907,21 +1959,24 @@ func (s *blogService) CheckWebsite(ctx context.Context, orgID uuid.UUID, namespa
 		return nil, err
 	}
 	out := &model.WebsiteCheck{Namespace: ns, BaseURL: base}
-	if s.integrations == nil {
-		return out, nil
-	}
-	list, err := s.integrations.ListByOrg(ctx, orgID)
-	if err != nil {
-		return nil, err
-	}
-	for _, in := range list {
-		if !sameWebsite(in, ns, base) {
-			continue
+	if s.integrations != nil {
+		list, err := s.integrations.ListByOrg(ctx, orgID)
+		if err != nil {
+			return nil, err
 		}
-		id := in.ID
-		_, derr := opsapiDestination(in)
-		out.Exists, out.Name, out.IntegrationID, out.Ready = true, in.Name, &id, derr == nil
-		break
+		for _, in := range list {
+			if !sameWebsite(in, ns, base) {
+				continue
+			}
+			id := in.ID
+			_, derr := opsapiDestination(in)
+			out.Exists, out.Name, out.IntegrationID, out.Ready = true, in.Name, &id, derr == nil
+			return out, nil
+		}
+	}
+	// The ring's own CMS namespace is already connected, with the ring's key.
+	if s.isRingNamespace(ns) && normalBaseURL(base) == normalBaseURL(s.opsapiBaseURL) {
+		out.Exists, out.Ready, out.Ring = true, true, true
 	}
 	return out, nil
 }
@@ -1932,4 +1987,131 @@ func (s *blogService) ListArticles(ctx context.Context, runID uuid.UUID) ([]mode
 
 func (s *blogService) GetArticle(ctx context.Context, id uuid.UUID) (*model.BlogArticle, error) {
 	return s.repo.GetArticle(ctx, id)
+}
+
+// featuredImageUpdater is implemented by the opsapi client. Declared here so
+// a regenerated cover can update an existing CMS post without widening
+// CMSPublisher (which only creates drafts).
+type featuredImageUpdater interface {
+	UpdateFeaturedImage(ctx context.Context, postUUID, imageURL string) (*opsapi.Post, error)
+}
+
+func (s *blogService) RegenerateCover(ctx context.Context, orgID, articleID uuid.UUID, syncCMS bool) (*model.BlogArticle, error) {
+	if s.runner == nil {
+		return nil, fmt.Errorf("blog_svc: generator not configured")
+	}
+	a, err := s.repo.GetArticle(ctx, articleID)
+	if err != nil {
+		return nil, err
+	}
+	if a == nil {
+		return nil, fmt.Errorf("blog_svc: article not found")
+	}
+	if a.OrgID != orgID {
+		return nil, fmt.Errorf("blog_svc: article does not belong to this organization")
+	}
+
+	runID := a.RunID
+	gen := &blog.GeneratedArticle{
+		Topic:         a.Topic,
+		Title:         a.Title,
+		Slug:          a.Slug,
+		Markdown:      a.Markdown,
+		HTML:          a.HTML,
+		Excerpt:       articleExcerpt(a),
+		CoverImageURL: a.CoverImageURL,
+		Audience:      a.Audience,
+		Industry:      a.Industry,
+		RunID:         &runID,
+	}
+	if err := s.runner.RegenerateCover(ctx, orgID, gen); err != nil {
+		return nil, err
+	}
+
+	meta := model.CoverImageMeta{
+		Provider: gen.CoverImageProvider,
+		Model:    gen.CoverImageModel,
+		Seed:     gen.CoverImageSeed,
+		Width:    gen.CoverImageWidth,
+		Height:   gen.CoverImageHeight,
+	}
+	if err := s.repo.UpdateArticleCover(ctx, a.ID, gen.CoverImageURL, gen.CoverImagePrompt, meta); err != nil {
+		return nil, err
+	}
+	a.CoverImageURL = gen.CoverImageURL
+	a.CoverImagePrompt = gen.CoverImagePrompt
+	a.CoverImageMeta = meta
+
+	if syncCMS && a.PostUUID != nil && *a.PostUUID != "" {
+		abs := blog.PublicImageURL(s.runner.PublicBaseURL(), gen.CoverImageURL)
+		if abs == "" {
+			s.logger.Warn("blog_svc: regenerated cover has no public URL; CMS not updated",
+				zap.String("article_id", a.ID.String()))
+			return a, nil
+		}
+		run, rerr := s.repo.GetByID(ctx, a.RunID)
+		if rerr != nil {
+			return a, fmt.Errorf("blog_svc: cover saved but CMS sync failed looking up run: %w", rerr)
+		}
+		dest, derr := s.destination(ctx, run)
+		if derr != nil {
+			return a, fmt.Errorf("blog_svc: cover saved but CMS sync failed: %w", derr)
+		}
+		var cms blog.CMSPublisher = dest
+		if cms == nil {
+			cms = s.runner.RingCMS()
+		}
+		updater, ok := cms.(featuredImageUpdater)
+		if !ok || updater == nil {
+			return a, fmt.Errorf("blog_svc: cover saved but the CMS client cannot update featured images")
+		}
+		if _, err := updater.UpdateFeaturedImage(ctx, *a.PostUUID, abs); err != nil {
+			return a, fmt.Errorf("blog_svc: cover saved but CMS featured image update failed: %w", err)
+		}
+	}
+	return a, nil
+}
+
+// articleExcerpt prefers the stored HTML excerpt path used at publish time.
+func articleExcerpt(a *model.BlogArticle) string {
+	if a == nil {
+		return ""
+	}
+	// HTML excerpt derivation lives in the blog package; a short plain-text
+	// fallback from markdown is enough to steer cover regeneration.
+	if strings.TrimSpace(a.HTML) != "" {
+		plain := stripHTMLTags(a.HTML)
+		if plain != "" {
+			return plain
+		}
+	}
+	return firstProseLine(a.Markdown)
+}
+
+func firstProseLine(md string) string {
+	for _, line := range strings.Split(md, "\n") {
+		t := strings.TrimSpace(line)
+		if t == "" || strings.HasPrefix(t, "#") {
+			continue
+		}
+		return t
+	}
+	return ""
+}
+
+func stripHTMLTags(html string) string {
+	// Local, dependency-free strip for cover-brief steering only.
+	var b strings.Builder
+	inTag := false
+	for _, r := range html {
+		switch {
+		case r == '<':
+			inTag = true
+		case r == '>':
+			inTag = false
+		case !inTag:
+			b.WriteRune(r)
+		}
+	}
+	return strings.Join(strings.Fields(b.String()), " ")
 }

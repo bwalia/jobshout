@@ -212,9 +212,13 @@ func TestEscapeAlt_NeutralisesBracketsAndNewlines(t *testing.T) {
 }
 
 func TestCoverPrompt_NamesASubjectAndPinsTheStyle(t *testing.T) {
-	got := coverPrompt("What the Gateway API Actually Changes", "kubernetes networking", "", "", "")
+	got := coverPrompt("What the Gateway API Actually Changes", "kubernetes networking",
+		"operators move off kube-proxy", "", "", "")
 	if !strings.Contains(got, "kubernetes networking") {
 		t.Errorf("prompt lost the topic subject: %q", got)
+	}
+	if !strings.Contains(got, "operators move off kube-proxy") {
+		t.Errorf("prompt should include the article angle: %q", got)
 	}
 	// Short title lettering is intentional for z-image-turbo dark covers.
 	if !strings.Contains(got, `"WHAT THE GATEWAY API ACTUALLY"`) {
@@ -233,12 +237,23 @@ func TestCoverPrompt_NamesASubjectAndPinsTheStyle(t *testing.T) {
 		t.Errorf("prompt should place title text on the left: %q", got)
 	}
 
-	fallback := coverPrompt("", "kubernetes networking", "", "", "")
+	fallback := coverPrompt("", "kubernetes networking", "", "", "", "")
 	if !strings.Contains(fallback, "kubernetes networking") {
 		t.Errorf("empty title should fall back to the topic: %q", fallback)
 	}
 	if !strings.Contains(fallback, `"KUBERNETES NETWORKING"`) {
 		t.Errorf("empty title should letter the topic as the title: %q", fallback)
+	}
+}
+
+func TestDeriveCoverBrief_DiffersByTopic(t *testing.T) {
+	m1, o1, _ := deriveCoverBrief("Gateway API Shifts Cluster Networking", "gateway api", "", "", "")
+	m2, o2, _ := deriveCoverBrief("Agentic AI in Production", "agentic ai", "", "", "")
+	if m1 == m2 || o1 == o2 {
+		t.Fatalf("different topics produced the same brief: %q/%q vs %q/%q", m1, o1, m2, o2)
+	}
+	if !strings.Contains(strings.ToLower(m1), "gateway") {
+		t.Errorf("gateway article metaphor = %q", m1)
 	}
 }
 

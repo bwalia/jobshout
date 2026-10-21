@@ -768,7 +768,7 @@ func main() {
 		researchSvc, mailCfg, logger,
 	)
 	blogSvc.BindTasks(taskSvc)
-	blogSvc.BindIntegrations(integRepo)
+	blogSvc.BindIntegrations(integRepo, cfg.OpsAPIBaseURL)
 	mailSvc.BindTasks(taskSvc)
 	pentestReconciler.BindTasks(taskSvc)
 	reviewReconciler.BindTasks(taskSvc)
@@ -1486,6 +1486,7 @@ func main() {
 					r.Delete("/", blogHandler.Delete)
 				})
 				r.Get("/articles/{articleID}", blogHandler.GetArticle)
+				r.Post("/articles/{articleID}/regenerate-cover", blogHandler.RegenerateCover)
 			})
 
 			// Research is exposed on its own, not only via the article

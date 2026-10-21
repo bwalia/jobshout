@@ -121,8 +121,10 @@ func TestEval_DraftWithFencesStillReplaced(t *testing.T) {
 
 func TestEval_CoverPromptsShareHouseStyleAndDifferByMetaphor(t *testing.T) {
 	a := coverPrompt("Gateway Changes", "kubernetes networking",
+		"operators move off kube-proxy",
 		"a harbour lighthouse guiding container ships", "lighthouse and hull silhouettes", "ice")
 	b := coverPrompt("Postgres Vacuum", "database maintenance",
+		"keepers reclaim dead tuples without downtime",
 		"a clockwork broom sweeping parchment scrolls", "gears and a broom", "amber")
 
 	for _, p := range []string{a, b} {
