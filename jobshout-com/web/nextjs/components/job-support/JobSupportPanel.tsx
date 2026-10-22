@@ -30,7 +30,7 @@ export function JobSupportPanel({ autoFocus }: { autoFocus?: boolean }) {
       <div className="js-panel-scroll flex-1 space-y-3 overflow-y-auto px-4 py-3">
         {enabled === false && (
           <p className="rounded-xl border border-line bg-raised px-3 py-2 text-sm text-muted">
-            Job Support is offline on this ring — browse{" "}
+            Recruiting is offline on this ring — browse{" "}
             <Link href="/jobs" className="font-semibold text-shout underline">
               open roles
             </Link>{" "}
@@ -97,7 +97,7 @@ export function JobSupportPanel({ autoFocus }: { autoFocus?: boolean }) {
           placeholder={
             enabled === false
               ? "Assistant offline"
-              : "Job brief or CV notes…"
+              : "Answer, CV notes, or name + email…"
           }
           disabled={busy || enabled === false}
           className="w-full resize-none rounded-xl border border-line bg-bg px-3 py-2 text-sm text-ink outline-none ring-shout/40 placeholder:text-muted focus:ring-2"

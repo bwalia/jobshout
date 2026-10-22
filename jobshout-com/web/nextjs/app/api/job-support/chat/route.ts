@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
       {
         error: {
           code: "JOB_SUPPORT_OFFLINE",
-          message: "Job Support is offline right now — browse jobs or post a role and our team will help.",
+          message: "Recruiting is offline right now — browse jobs or post a role and our team will help.",
         },
       },
       { status: 503 },
@@ -54,10 +54,18 @@ export async function POST(req: NextRequest) {
   }
 
   const base = newSession();
+  const incoming = body.session ?? {};
   const session: SessionState = {
     ...base,
-    ...(body.session ?? {}),
-    id: body.session?.id || base.id,
+    ...incoming,
+    id: incoming.id || base.id,
+    jobId: incoming.jobId ?? base.jobId,
+    jobTitle: incoming.jobTitle ?? base.jobTitle,
+    jobSummary: incoming.jobSummary ?? base.jobSummary,
+    jobRequirements: Array.isArray(incoming.jobRequirements)
+      ? incoming.jobRequirements
+      : base.jobRequirements,
+    applied: Boolean(incoming.applied),
   };
   const history = Array.isArray(body.history) ? body.history.slice(-12) : [];
 
@@ -88,6 +96,11 @@ export async function POST(req: NextRequest) {
             email: next.email,
             phone: next.phone,
             company: next.company,
+            jobId: next.jobId,
+            jobTitle: next.jobTitle,
+            jobSummary: next.jobSummary,
+            jobRequirements: next.jobRequirements,
+            applied: next.applied,
           },
         });
       } catch (err) {
