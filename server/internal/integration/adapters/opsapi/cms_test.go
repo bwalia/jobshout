@@ -197,3 +197,28 @@ func TestNewClient_TrimsTrailingSlash(t *testing.T) {
 		t.Errorf("BaseURL() = %q, want the trailing slash removed", c.BaseURL())
 	}
 }
+
+// Going live and setting the featured image happen in one PUT, so a post can
+// never be public without its picture.
+func TestPublishPost_SendsStatusAndFeaturedImageTogether(t *testing.T) {
+	var got map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/api/v2/cms/posts/p-1" {
+			t.Errorf("got %s %s", r.Method, r.URL.Path)
+		}
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		_, _ = w.Write([]byte(`{"success":true,"data":{"uuid":"p-1","status":"published"}}`))
+	}))
+	defer srv.Close()
+	c := NewClient(Config{BaseURL: srv.URL, APIKey: "k", Namespace: "ns"})
+
+	if _, err := c.PublishPost(context.Background(), "p-1", "https://jobshout.test/api/v1/images/file/a.png"); err != nil {
+		t.Fatal(err)
+	}
+	if got["status"] != StatusPublished || got["featured_image_url"] != "https://jobshout.test/api/v1/images/file/a.png" {
+		t.Fatalf("body = %v", got)
+	}
+	if _, err := c.PublishPost(context.Background(), "p-1", "  "); err == nil {
+		t.Fatal("publishing without a featured image must be refused")
+	}
+}

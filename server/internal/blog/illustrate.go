@@ -48,6 +48,9 @@ type Illustration struct {
 	Seed     int64
 	Width    int
 	Height   int
+	// PNG is the image itself, when the generator returned it. Publishing uses
+	// it to give the CMS the picture rather than a link back into JobShout.
+	PNG []byte
 }
 
 // coverWidth and coverHeight are 16:9, which is the shape a cover is displayed
@@ -628,9 +631,6 @@ func (r *Runner) RegenerateCover(ctx context.Context, orgID uuid.UUID, a *Genera
 	if a == nil {
 		return fmt.Errorf("blog: regenerate cover: no article")
 	}
-	if !r.canIllustrate() {
-		return fmt.Errorf("blog: regenerate cover: image generation is not enabled")
-	}
 	// Force a fresh brief from the written piece so a missing or generic plan
 	// brief cannot keep producing the same fallback scene.
 	a.CoverMetaphor = ""
@@ -639,7 +639,22 @@ func (r *Runner) RegenerateCover(ctx context.Context, orgID uuid.UUID, a *Genera
 	if strings.TrimSpace(a.CoverAngle) == "" {
 		a.CoverAngle = strings.TrimSpace(a.Excerpt)
 	}
-	return r.generateCover(ctx, orgID, a)
+	err := fmt.Errorf("image generation is not enabled")
+	if r.canIllustrate() {
+		if err = r.generateCover(ctx, orgID, a); err == nil {
+			return nil
+		}
+	}
+	// Could not draw. A real cover already in storage is kept — never swapped
+	// for the fallback; an article with none gets the branded fallback, so its
+	// post is not left without a featured image.
+	if r.coverStored(ctx, a.CoverImageURL) {
+		return fmt.Errorf("blog: regenerate cover: %w", err)
+	}
+	if ferr := r.storeFallbackCover(ctx, orgID, a); ferr != nil {
+		return fmt.Errorf("blog: regenerate cover: %w; no fallback could be stored either: %v", err, ferr)
+	}
+	return nil
 }
 
 // coverRetryWaitFn is the pause before the next cover attempt. Tests replace it

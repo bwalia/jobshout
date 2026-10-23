@@ -2010,6 +2010,11 @@ func (s *blogService) RegenerateCover(ctx context.Context, orgID, articleID uuid
 	if a.OrgID != orgID {
 		return nil, fmt.Errorf("blog_svc: article does not belong to this organization")
 	}
+	// Drawing takes a minute or more on the workstation GPU. A client or edge
+	// that gives up first must not cancel the redraw and leave the CMS post
+	// pointing at the old (often missing) image.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Minute)
+	defer cancel()
 
 	runID := a.RunID
 	gen := &blog.GeneratedArticle{

@@ -255,6 +255,9 @@ type Runner struct {
 	// but disabled, means a run produces text only — which is the default, and
 	// a complete article either way.
 	images Illustrator
+	// covers is the image store covers are verified against before publishing
+	// and fallback covers are written to (WithCoverStore).
+	covers CoverStore
 	// insights files articles in JobShout.com's Insights hub, a destination
 	// beside the CMS. Nil means that destination is not configured.
 	insights InsightsPublisher
@@ -485,20 +488,14 @@ func (r *Runner) PublishTo(ctx context.Context, orgID uuid.UUID, cms CMSPublishe
 			}
 		}
 
-		// Backfill a cover when the stored article has none. Covers are drawn at
-		// generation time, but if that attempt failed (a busy GPU, a provider
-		// over quota) the article is stored coverless and every publish would
-		// otherwise send opsapi a post with no featured image. Drawing it here
-		// means "push to opsapi" reliably carries an image. Best-effort: a cover
-		// that still cannot be drawn never fails the publish.
-		if a.CoverImageURL == "" && r.canIllustrate() {
-			report(progress, model.BlogStepIllustrating,
-				fmt.Sprintf("Drawing a cover for %q before publishing", a.Title),
-				model.AgentNameArticleWriter)
-			if err := r.generateCover(ctx, orgID, &a); err != nil {
-				r.logger.Warn("blog: could not backfill a cover at publish time",
-					zap.String("title", a.Title), zap.Error(err))
-			}
+		// Every post carries a featured image that is really in storage: the
+		// article's cover, one drawn now, or the branded fallback. A post that
+		// cannot have one is not filed — as a draft it is one click from a live
+		// page with a broken picture.
+		featured, err := r.ensureCover(ctx, orgID, &a, progress)
+		if err != nil {
+			return &PublishResult{Namespace: namespace, Posts: posts, PublishedAt: r.clock()},
+				fmt.Errorf("blog: publish %d/%d: %w", i+1, len(articles), err)
 		}
 
 		post, err := cms.CreatePost(ctx, opsapi.CreatePostRequest{
@@ -508,9 +505,8 @@ func (r *Runner) PublishTo(ctx context.Context, orgID uuid.UUID, cms CMSPublishe
 			ContentHTML: a.HTML,
 			Status:      opsapi.StatusDraft,
 			AuthorName:  r.cfg.AuthorName,
-			// Cover → opsapi Featured image. Absolute so the console <img>
-			// preview (and public sites) can load bytes without a JobShout JWT.
-			FeaturedImageURL: publicImageURL(r.cfg.PublicBaseURL, a.CoverImageURL),
+			// Cover → opsapi Featured image: absolute, and verified to exist.
+			FeaturedImageURL: featured,
 			// Tags say who the piece was written for, so an editor opening the
 			// CMS can tell a developer deep dive from a plain-English briefing
 			// without reading either — which is the whole point of running two

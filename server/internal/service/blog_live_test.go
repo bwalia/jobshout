@@ -4,21 +4,23 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
-	"github.com/jobshout/server/internal/blog"
 	"github.com/jobshout/server/internal/integration/adapters/jobshoutcom"
 	"github.com/jobshout/server/internal/integration/adapters/opsapi"
 	"github.com/jobshout/server/internal/model"
 )
 
-// liveCMS drafts and changes status, recording each status change.
+// liveCMS drafts and takes posts live, recording each go-live and the
+// featured image it was given.
 type liveCMS struct {
 	statusCalls []string
+	liveImages  []string
 	statusErr   error
 	created     []opsapi.CreatePostRequest
 }
@@ -28,12 +30,13 @@ func (c *liveCMS) CreatePost(_ context.Context, req opsapi.CreatePostRequest) (*
 	c.created = append(c.created, req)
 	return &opsapi.Post{UUID: "new-" + req.Slug, Status: req.Status, Slug: req.Slug}, nil
 }
-func (c *liveCMS) SetPostStatus(_ context.Context, id, status string) (*opsapi.Post, error) {
+func (c *liveCMS) PublishPost(_ context.Context, id, featuredImageURL string) (*opsapi.Post, error) {
 	if c.statusErr != nil {
 		return nil, c.statusErr
 	}
-	c.statusCalls = append(c.statusCalls, id+"="+status)
-	return &opsapi.Post{UUID: id, Status: status}, nil
+	c.statusCalls = append(c.statusCalls, id+"="+opsapi.StatusPublished)
+	c.liveImages = append(c.liveImages, featuredImageURL)
+	return &opsapi.Post{UUID: id, Status: opsapi.StatusPublished}, nil
 }
 
 type liveJobshout struct {
@@ -88,11 +91,11 @@ func liveFixture(writer string) (*blogService, *liveStore, *liveCMS, *liveJobsho
 	store := &liveStore{runStore{run: run, storedArticles: []model.BlogArticle{{
 		ID: uuid.New(), RunID: run.ID, Topic: "Decision models", Slug: "decision-models",
 		Title: "Decision models", Markdown: "# Decision models\n\nBody.",
-		HTML: "<h1>Decision models</h1><p>Body.</p>",
+		HTML:     "<h1>Decision models</h1><p>Body.</p>",
 		PostUUID: &postID, PostStatus: &draft,
 	}}}}
 	cms, js := &liveCMS{}, &liveJobshout{}
-	runner := blog.NewRunner(blog.Config{}, nil, cms, nil, zap.NewNop()).WithLiveInsights(js)
+	runner := publishingRunner(cms).WithLiveInsights(js)
 	return &blogService{runner: runner, repo: store, logger: zap.NewNop()}, store, cms, js, org
 }
 
@@ -183,7 +186,7 @@ func TestPublishLive_CreateAsPublishedWhenUpdateForbidden(t *testing.T) {
 }
 
 func TestCanPublishLive_NeedsBothHalves(t *testing.T) {
-	onlyCMS := &blogService{runner: blog.NewRunner(blog.Config{}, nil, &liveCMS{}, nil, zap.NewNop())}
+	onlyCMS := &blogService{runner: publishingRunner(&liveCMS{})}
 	if onlyCMS.CanPublishLive() {
 		t.Fatal("without a jobshout.com client, publishing live is not configured")
 	}
@@ -210,5 +213,18 @@ func TestRunWriterName_AttributesSteps(t *testing.T) {
 	}
 	if runWriterName(&model.BlogRun{}) != model.AgentNameArticleWriter {
 		t.Fatal("a run with no writer is the Article Writer's")
+	}
+}
+
+// The fixture's draft was filed with no cover, as every draft before covers
+// were guaranteed. Taking it live must send a featured image with the status
+// in the same update — flipping status alone would publish it picture-less.
+func TestPublishLive_SendsFeaturedImageWithStatus(t *testing.T) {
+	svc, store, cms, _, org := liveFixture(model.BuiltinJobShoutComWriter)
+	if _, err := svc.PublishLive(context.Background(), org, store.run.ID); err != nil {
+		t.Fatalf("publish live: %v", err)
+	}
+	if len(cms.liveImages) != 1 || !strings.HasPrefix(cms.liveImages[0], "https://jobshout.test/api/v1/images/file/") {
+		t.Fatalf("post went live without a usable featured image: %v", cms.liveImages)
 	}
 }

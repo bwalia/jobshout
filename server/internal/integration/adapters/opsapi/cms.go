@@ -186,6 +186,20 @@ func (c *Client) SetPostStatus(ctx context.Context, postUUID, status string) (*P
 	return c.patchPost(ctx, postUUID, map[string]string{"status": status})
 }
 
+// PublishPost takes a post live and sets its featured image in the same update,
+// so a post can never become public without the picture its listing card and
+// social previews show. Needs the cms:update scope, like SetPostStatus.
+func (c *Client) PublishPost(ctx context.Context, postUUID, featuredImageURL string) (*Post, error) {
+	featuredImageURL = strings.TrimSpace(featuredImageURL)
+	if featuredImageURL == "" {
+		return nil, fmt.Errorf("opsapi: publish post %s: no featured image", postUUID)
+	}
+	return c.patchPost(ctx, postUUID, map[string]string{
+		"status":             StatusPublished,
+		"featured_image_url": featuredImageURL,
+	})
+}
+
 // UpdateFeaturedImage sets a post's featured_image_url — the listing / hero
 // picture on public sites. Used when regenerating a cover for an article that
 // is already filed in the CMS (create alone cannot rewrite an existing post).

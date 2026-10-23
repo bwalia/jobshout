@@ -34,6 +34,7 @@ fi
 echo "Listing published posts in namespace ${NS}..."
 LIST=$(curl -fsS "${BASE}/api/v2/public/cms/${NS}/posts?page=1&perPage=50")
 
+fail=0
 for slug in "${TARGETS[@]}"; do
   uuid=$(python3 -c '
 import json,sys
@@ -51,7 +52,12 @@ for p in data.get("data") or []:
   url="${SITE}/img/blog/${slug}/cover.svg"
   code=$(curl -sI -o /dev/null -w "%{http_code}" "$url" || true)
   if [[ "$code" != "200" ]]; then
-    echo "warn ${slug} - ${url} returned HTTP ${code} (deploy the SVG first)"
+    # Never point a live post at a dead image: opsapi stores the URL verbatim
+    # and the site shows a broken card (this is how three posts 404'd on
+    # 2026-10-23). Deploy the SVG first, or regenerate the cover in JobShout.
+    echo "SKIP ${slug} - ${url} returned HTTP ${code}; not updating the post"
+    fail=1
+    continue
   fi
   echo "PUT ${slug} -> ${url}"
   curl -fsS -X PUT "${BASE}/api/v2/cms/posts/${uuid}" \
@@ -65,3 +71,4 @@ for p in data.get("data") or []:
 done
 
 echo "Done. Revalidate the website CMS cache if listings still show the hero."
+exit "$fail"

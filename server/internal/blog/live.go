@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/jobshout/server/internal/integration/adapters/jobshoutcom"
@@ -18,17 +19,20 @@ import (
 // jobshout.com does not queue it for a second review — it trusts the agent the
 // client is configured as (INSIGHTS_TRUSTED_AGENTS there).
 
-// CMSStatusSetter is the CMS capability publishing live needs beyond drafting.
+// CMSStatusSetter is the CMS capability publishing live needs beyond drafting:
+// taking a draft public together with its featured image, in one update, so a
+// post can never become public without the picture its listing card shows.
 // Declared separately from CMSPublisher so existing fakes that only draft are
 // untouched.
 type CMSStatusSetter interface {
-	SetPostStatus(ctx context.Context, postUUID, status string) (*opsapi.Post, error)
+	PublishPost(ctx context.Context, postUUID, featuredImageURL string) (*opsapi.Post, error)
 }
 
 // LiveCMSPost is a draft to take public, with enough of the article to re-file
 // as published when the API key cannot update existing posts (cms:create only).
 type LiveCMSPost struct {
 	UUID    string
+	OrgID   uuid.UUID
 	Article GeneratedArticle
 }
 
@@ -86,7 +90,15 @@ func (r *Runner) SetPostsLive(ctx context.Context, posts []LiveCMSPost, agentNam
 }
 
 func (r *Runner) takePostLive(ctx context.Context, setter CMSStatusSetter, p LiveCMSPost) (LiveCMSResult, error) {
-	if _, err := setter.SetPostStatus(ctx, p.UUID, opsapi.StatusPublished); err == nil {
+	// A draft filed before covers were guaranteed may have none; flipping only
+	// its status would publish it without a picture. Resolve the cover first and
+	// send it with the status.
+	a := p.Article
+	featured, err := r.ensureCover(ctx, p.OrgID, &a, nil)
+	if err != nil {
+		return LiveCMSResult{}, err
+	}
+	if _, err := setter.PublishPost(ctx, p.UUID, featured); err == nil {
 		return LiveCMSResult{OriginalUUID: p.UUID, LiveUUID: p.UUID}, nil
 	} else if !opsapi.IsUpdateForbidden(err) {
 		return LiveCMSResult{}, err
@@ -95,7 +107,6 @@ func (r *Runner) takePostLive(ctx context.Context, setter CMSStatusSetter, p Liv
 	// Key can create but not update: file a published copy. The draft stays;
 	// editors can delete it in the CMS. Prefer this over blocking Publish live
 	// on a key minted with the original create-only script.
-	a := p.Article
 	if a.HTML == "" {
 		if err := a.render(); err != nil {
 			return LiveCMSResult{}, fmt.Errorf("render for create-as-published: %w", err)
@@ -115,7 +126,7 @@ func (r *Runner) takePostLive(ctx context.Context, setter CMSStatusSetter, p Liv
 		ContentHTML:      a.HTML,
 		Status:           opsapi.StatusPublished,
 		AuthorName:       r.cfg.AuthorName,
-		FeaturedImageURL: publicImageURL(r.cfg.PublicBaseURL, a.CoverImageURL),
+		FeaturedImageURL: featured,
 		Tags:             articleTags(a),
 		SEOTitle:         a.Title,
 		SEODescription:   a.Excerpt,

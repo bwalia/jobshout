@@ -161,7 +161,7 @@ func TestCheckWebsite(t *testing.T) {
 // ring's OpsAPI.
 func TestCheckWebsite_RingNamespace(t *testing.T) {
 	svc := &blogService{
-		runner:        blog.NewRunner(blog.Config{}, nil, &liveCMS{}, nil, zap.NewNop()),
+		runner:        publishingRunner(&liveCMS{}),
 		integrations:  listIntegrations{},
 		opsapiBaseURL: "https://opsapi.workstation.co.uk",
 	}
@@ -216,7 +216,7 @@ func TestPublish_ToSelectedNamespace(t *testing.T) {
 		}}}
 		ring := &liveCMS{}
 		svc := &blogService{
-			runner: blog.NewRunner(blog.Config{}, nil, ring, nil, zap.NewNop()),
+			runner: publishingRunner(ring),
 			repo:   store, logger: zap.NewNop(),
 			integrations: integrations, opsapiBaseURL: srv.URL,
 		}

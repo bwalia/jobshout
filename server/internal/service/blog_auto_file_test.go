@@ -22,7 +22,7 @@ func autoFileFixture(autoFileCMS bool, cms blog.CMSPublisher) (*blogService, *li
 		HTML: "<h1>Edge inference</h1><p>Body.</p>",
 	}}}}
 	js := &liveJobshout{}
-	runner := blog.NewRunner(blog.Config{}, nil, cms, nil, zap.NewNop()).WithInsights(js)
+	runner := publishingRunner(cms).WithInsights(js)
 	svc := &blogService{runner: runner, repo: store, logger: zap.NewNop(), autoFileCMS: autoFileCMS}
 	return svc, store, js, run
 }
