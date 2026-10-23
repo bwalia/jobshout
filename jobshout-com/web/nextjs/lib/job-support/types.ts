@@ -11,4 +11,11 @@ export type SessionState = {
   email: string;
   phone: string;
   company: string;
+  /** When set, chat is scoped to applying for this board job. */
+  jobId: string | null;
+  jobTitle: string;
+  jobSummary: string;
+  jobRequirements: string[];
+  /** True after a successful applications API submit for jobId. */
+  applied: boolean;
 };

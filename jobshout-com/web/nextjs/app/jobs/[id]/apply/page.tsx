@@ -58,6 +58,17 @@ export default async function ApplyPage({ params }: { params: { id: string } }) 
             sends anything on your behalf.
           </p>
 
+          <p className="mt-5 rounded-xl border border-line bg-subtle px-4 py-3 text-sm text-body">
+            Prefer a guided chat for this role?{" "}
+            <Link
+              href={`/jobs/${job.id}?chat=1`}
+              className="font-semibold text-shout underline decoration-shout/40 underline-offset-4"
+            >
+              Apply with Recruiting
+            </Link>
+            .
+          </p>
+
           <div className="mt-9">
             <ApplyForm
               job={job}

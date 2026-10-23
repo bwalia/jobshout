@@ -173,9 +173,12 @@ export default async function JobDetailPage({ params }: { params: { id: string }
           ) : null}
 
           <section className="mt-12 flex flex-wrap items-center gap-4 border-t border-line pt-10">
-            <Link href={`/jobs/${job.id}/apply`} className={buttonClass("primary", "lg")}>
+            <Link href={`/jobs/${job.id}?chat=1`} className={buttonClass("primary", "lg")}>
               <SendIcon className="h-4 w-4" />
               Apply for this role
+            </Link>
+            <Link href={`/jobs/${job.id}/apply`} className={buttonClass("secondary", "lg")}>
+              Prefer the short form
             </Link>
             <Link href="/profile" className={buttonClass("secondary", "lg")}>
               <TargetIcon className="h-4 w-4" />
@@ -204,13 +207,19 @@ export default async function JobDetailPage({ params }: { params: { id: string }
             </dl>
 
             <Link
-              href={`/jobs/${job.id}/apply`}
+              href={`/jobs/${job.id}?chat=1`}
               className={buttonClass("primary", "md", "mt-6 w-full")}
             >
               Apply now
             </Link>
+            <Link
+              href={`/jobs/${job.id}/apply`}
+              className="mt-3 block text-center text-xs font-medium text-mute underline decoration-line underline-offset-4 hover:text-shout"
+            >
+              Prefer the short form
+            </Link>
             <p className="mt-3 text-center text-xs leading-relaxed text-mute">
-              Takes about two minutes. Nothing is sent until you press send.
+              Opens Recruiting for this role. Nothing is sent until you confirm.
             </p>
           </div>
         </aside>
