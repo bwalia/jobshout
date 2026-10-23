@@ -23,16 +23,22 @@ type fakeIllustrator struct {
 	// provider overrides the reported provider. Empty means gemini, which is
 	// the path that can letter labels.
 	provider string
+	// store, when set, receives each image the way the real image service
+	// stores before returning a URL.
+	store *memCovers
 }
 
 func (f *fakeIllustrator) Enabled() bool { return f.enabled }
 
 func (f *fakeIllustrator) Generate(ctx context.Context, req IllustrationRequest) (*Illustration, error) {
 	f.calls = append(f.calls, req)
-	if f.failAfter > 0 && len(f.calls) > f.failAfter {
+	if f.failAfter < 0 || (f.failAfter > 0 && len(f.calls) > f.failAfter) {
 		return nil, fmt.Errorf("the GPU is busy")
 	}
 	url := fmt.Sprintf("/api/v1/images/file/img-%d.png", len(f.calls))
+	if f.store != nil {
+		url, _ = f.store.PutFile(ctx, req.OrgID, []byte("png"), "png", "image/png")
+	}
 	if f.noURL {
 		url = ""
 	}

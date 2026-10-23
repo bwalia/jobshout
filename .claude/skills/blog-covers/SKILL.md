@@ -14,9 +14,12 @@ description: Generate or regenerate unique Article Writer / Workstation blog lis
 ## Rules
 
 1. Covers are **content-derived**: metaphor from title + angle + excerpt + body, not a generic tech collage.
-2. Prefer JobShout pipeline (`BLOG_COVER_IMAGES=true`) over hand-edited assets.
+2. Prefer JobShout pipeline (`BLOG_COVER_IMAGES=true`) over hand-edited assets. JobShout never files a post
+   without a verified featured image (stored cover → drawn cover → branded fallback) — see `docs/blog-covers.md`.
 3. Never put image credentials in launch schema fields.
-4. After regenerating, sync CMS (`sync_cms: true` or `scripts/backfill-blog-featured-images.sh`).
+4. After regenerating, sync CMS (`sync_cms: true`).
+5. **Never set `featured_image_url` to a URL that does not return 200 with an image.** OpsAPI stores it verbatim
+   and the live site shows a broken card. Check with `curl -sI <url>` first.
 
 ## JobShout API
 
@@ -27,10 +30,13 @@ POST /api/v1/blogs/articles/{articleID}/regenerate-cover
 
 Docs: `docs/blog-covers.md`, `docs/image-generation.md`.
 
-## Live Workstation backfill (no JobShout row)
+## Live Workstation backfill (no JobShout row) — last resort
+
+Only for a post JobShout did not write. For anything JobShout filed, use `regenerate-cover` above.
 
 1. Ensure `workstation-website/public/img/blog/<slug>/cover.svg` exists (unique per slug).
-2. Deploy the website (or confirm `/img/blog/<slug>/cover.svg` returns 200).
+2. Deploy the website and confirm `/img/blog/<slug>/cover.svg` returns 200 — the script refuses to point a
+   post at a URL that does not (it exits non-zero and leaves the post untouched).
 3. Run with a `cms:update` key:
 
 ```bash

@@ -4,6 +4,36 @@ Workstation listing cards (`/en/docs/blogs`) use each post's OpsAPI
 `featured_image_url`. When that field is empty, the site used to fall back to
 the same `/img/ai-agents-business-hero.jpg` for every JobShout-filed article.
 
+## The guarantee: no post without a working featured image
+
+OpsAPI stores `featured_image_url` verbatim (no validation, `varchar(255)`) and
+the website links it as-is, so whatever JobShout sends is what readers see.
+Every path that files or publishes a post therefore resolves the image first
+(`blog.Runner.ensureCover`):
+
+1. the article's recorded cover — **only if its bytes are really in image
+   storage** (a recorded URL whose object is gone, or any URL not in our store,
+   is not trusted);
+2. otherwise a cover drawn now from the article (needs `BLOG_COVER_IMAGES`);
+3. otherwise a **branded fallback** rendered in-process (a dark gradient in the
+   topic's accent colour, unique per slug) — no GPU, provider or network.
+
+If none of that yields an absolute URL (e.g. `FRONTEND_BASE_URL` unset) the
+post is **not filed** and the run errors: a draft is one click from going live.
+Going live (`PublishPost`) sends the status and the featured image in one PUT,
+so a draft filed before this existed cannot go public picture-less.
+
+A fallback cover is recorded with provider `fallback`; redraw it with
+`regenerate-cover` once image generation is healthy.
+
+### Where covers live
+
+Images must outlive deploys and be readable from every API replica. MinIO when
+`MINIO_ENDPOINT` is set; otherwise **Postgres** (`image_blobs`, migration
+000070). The pod-local directory is used only when `IMAGE_STORE_DIR` is set
+explicitly (single-process laptops). Until 2026-10, prod had no MinIO and wrote
+covers to each pod's disk — another reason its posts had no working image.
+
 ## How JobShout draws a cover
 
 With `BLOG_COVER_IMAGES=true` (all rings), each article run:
@@ -11,7 +41,8 @@ With `BLOG_COVER_IMAGES=true` (all rings), each article run:
 1. Plans a **cover brief** (`cover_metaphor`, `cover_objects`, `cover_accent`)
    grounded in the article's angle — not a generic tech collage.
 2. Draws a 1536×864 cover (Gemini → mflux → OpenAI).
-3. Publishes it as OpsAPI `featured_image_url` (absolute URL).
+3. Publishes it as OpsAPI `featured_image_url` (absolute URL), via the
+   guarantee above.
 
 See [image-generation.md](./image-generation.md) for providers and rings.
 
@@ -35,7 +66,12 @@ Content-Type: application/json
 The regenerator derives a fresh metaphor from title, excerpt and body so two
 neighbouring topics never share the same focal objects.
 
-## Fix coverless live posts without a JobShout article row
+## Fix coverless live posts without a JobShout article row (last resort)
+
+Never point a post at an asset that is not deployed yet: on 2026-10-23 three
+posts were pointed at `/img/blog/<slug>/cover.svg` files that did not exist and
+showed broken images. The script below now refuses any URL that is not 200.
+
 
 1. Add a unique SVG (or PNG) at
    `workstation-website/public/img/blog/<slug>/cover.svg`.

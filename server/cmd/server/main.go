@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -411,19 +410,20 @@ func main() {
 	// the same arrangement Ollama already uses.
 	imageRouter := imagegen.NewRouter(cfg).WithLogger(logger)
 	var imgStore imagestore.Store
-	if minioClient != nil {
+	switch dir := strings.TrimSpace(os.Getenv("IMAGE_STORE_DIR")); {
+	case minioClient != nil:
 		imgStore = imagestore.NewMinIOStore(minioClient, cfg.MinIOBucketImages)
-	} else {
-		// MinIO is optional locally. Without somewhere to write, the GPU still
-		// draws covers and inline pictures, then the article pipeline drops them
-		// because a cover with no URL is not a cover. A directory next to the
-		// process is enough for the same /api/v1/images/file/… URLs.
-		dir := os.Getenv("IMAGE_STORE_DIR")
-		if dir == "" {
-			dir = filepath.Join(".", ".dev-data", "images")
-		}
+	case dir != "":
+		// Only when asked for, on a single-process laptop: with two replicas
+		// each pod would serve only the images it wrote itself.
 		imgStore = imagestore.NewDirStore(dir)
-		logger.Info("image storage using local directory (MinIO unset)", zap.String("dir", dir))
+		logger.Info("image storage using local directory (IMAGE_STORE_DIR)", zap.String("dir", dir))
+	default:
+		// No MinIO: Postgres, which every replica shares and which outlives
+		// deploys. Blog covers are the public website's featured images, so
+		// they must never live on one pod's disk (prod did until 2026-10).
+		imgStore = imagestore.NewPGStore(pool)
+		logger.Info("image storage using Postgres (MinIO unset)")
 	}
 	imageSvc := service.NewImageService(imageRouter, imgStore, repository.NewImageRepository(pool), logger)
 	if imageSvc.Enabled() {
@@ -663,6 +663,10 @@ func main() {
 		if cfg.BlogCoverImages && imageSvc.Enabled() {
 			blogRunner = blogRunner.WithIllustrator(&blogIllustrator{images: imageSvc})
 		}
+		// Always, whether or not covers are drawn: publishing checks the cover
+		// exists in this store and, when none could be drawn, stores a branded
+		// fallback here — so no post reaches the CMS without a featured image.
+		blogRunner = blogRunner.WithCoverStore(imgStore)
 		// JobShout.com Insights, beside the CMS. NewClient returns nil when the
 		// URL or token is missing, which the runner reads as "not configured".
 		blogRunner = blogRunner.WithInsights(jobshoutcom.NewClient(jobshoutcom.Config{

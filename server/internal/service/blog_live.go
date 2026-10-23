@@ -73,7 +73,8 @@ func (s *blogService) PublishLive(ctx context.Context, orgID uuid.UUID, runID uu
 		if a.PostUUID != nil && *a.PostUUID != "" && (a.PostStatus == nil || *a.PostStatus != opsapi.StatusPublished) {
 			postArticle[*a.PostUUID] = a.ID
 			pending = append(pending, blog.LiveCMSPost{
-				UUID: *a.PostUUID,
+				UUID:  *a.PostUUID,
+				OrgID: orgID,
 				Article: blog.GeneratedArticle{
 					Topic: a.Topic, Slug: a.Slug, Path: a.Path, Title: a.Title,
 					Markdown: a.Markdown, HTML: a.HTML, WordCount: a.WordCount,

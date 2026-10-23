@@ -54,6 +54,7 @@ func (b *blogIllustrator) Generate(ctx context.Context, req blog.IllustrationReq
 		Seed:     result.Seed,
 		Width:    result.Width,
 		Height:   result.Height,
+		PNG:      result.PNG,
 	}, nil
 }
 

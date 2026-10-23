@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -49,7 +50,7 @@ func newTestRunnerWith(cms CMSPublisher, researcher Researcher, responses ...scr
 		ContentDir:    "content/blogs",
 		AuthorName:    "Test Writer",
 		PublicBaseURL: "https://jobshout.test",
-	}, &stubLLM{responses: responses}, cms, researcher, zap.NewNop())
+	}, &stubLLM{responses: responses}, cms, researcher, zap.NewNop()).WithCoverStore(newMemCovers())
 }
 
 // newRunnerWithStub is newTestRunner for tests that then read back what the
@@ -199,11 +200,12 @@ func TestPublish_AlwaysCreatesDrafts(t *testing.T) {
 	}
 }
 
-// A cover on the article must land in opsapi's featured_image_url as an
-// absolute URL, so the console Featured image preview can load it.
+// A cover that really is in storage lands in opsapi's featured_image_url as an
+// absolute URL, unchanged.
 func TestPublish_SendsFeaturedImageURL(t *testing.T) {
 	cms := &fakeCMS{}
 	r := newTestRunner(cms)
+	r.covers.(*memCovers).objects["org/2026/08/cover.png"] = []byte("png")
 
 	_, err := r.Publish(context.Background(), uuid.Nil, []GeneratedArticle{{
 		Topic: "covered", Slug: "covered",
@@ -228,8 +230,9 @@ func TestPublish_SendsFeaturedImageURL(t *testing.T) {
 // so the caller can persist it.
 func TestPublish_BackfillsMissingCover(t *testing.T) {
 	cms := &fakeCMS{}
-	ill := &fakeIllustrator{enabled: true}
-	r := newTestRunner(cms).WithIllustrator(ill)
+	r := newTestRunner(cms)
+	ill := &fakeIllustrator{enabled: true, store: r.covers.(*memCovers)}
+	r.WithIllustrator(ill)
 
 	result, err := r.Publish(context.Background(), uuid.Nil, []GeneratedArticle{{
 		Topic: "coverless", Slug: "coverless",
@@ -243,23 +246,26 @@ func TestPublish_BackfillsMissingCover(t *testing.T) {
 	if len(ill.calls) == 0 {
 		t.Fatal("no cover was drawn for a coverless article")
 	}
-	if cms.posts[0].FeaturedImageURL == "" {
-		t.Fatal("opsapi draft got no featured image after backfill")
+	if !strings.HasPrefix(cms.posts[0].FeaturedImageURL, "https://jobshout.test/api/v1/images/file/") {
+		t.Fatalf("opsapi draft got no usable featured image: %q", cms.posts[0].FeaturedImageURL)
 	}
 	if result.Posts[0].CoverImageURL == "" {
 		t.Fatal("backfilled cover was not reported back for persistence")
 	}
 }
 
-// A publish must never fail just because a cover could not be drawn.
-func TestPublish_CoverFailureDoesNotFailPublish(t *testing.T) {
+// The bug this guards: a post filed with no featured image (or a dead one)
+// shows a broken card on the public site. When no cover can be drawn, the
+// publish still succeeds — with the branded fallback, never with nothing.
+func TestPublish_CoverFailureFilesFallbackCover(t *testing.T) {
+	defer func(f func(int) time.Duration) { coverRetryWaitFn = f }(coverRetryWaitFn)
+	coverRetryWaitFn = func(int) time.Duration { return 0 }
 	cms := &fakeCMS{}
-	// noURL: the generator "works" but has nowhere to store the image, so the
-	// cover cannot be used — the failure path backfill must tolerate.
-	ill := &fakeIllustrator{enabled: true, noURL: true}
-	r := newTestRunner(cms).WithIllustrator(ill)
+	r := newTestRunner(cms)
+	ill := &fakeIllustrator{enabled: true, failAfter: -1} // every draw fails
+	r.WithIllustrator(ill)
 
-	_, err := r.Publish(context.Background(), uuid.Nil, []GeneratedArticle{{
+	result, err := r.Publish(context.Background(), uuid.Nil, []GeneratedArticle{{
 		Topic: "x", Slug: "x", Title: "X", Excerpt: "e", HTML: "<p>b</p>",
 	}}, nil)
 	if err != nil {
@@ -268,8 +274,83 @@ func TestPublish_CoverFailureDoesNotFailPublish(t *testing.T) {
 	if len(cms.posts) != 1 {
 		t.Fatalf("article was not published: %d posts", len(cms.posts))
 	}
-	if cms.posts[0].FeaturedImageURL != "" {
-		t.Errorf("expected no featured image when cover failed, got %q", cms.posts[0].FeaturedImageURL)
+	got := cms.posts[0].FeaturedImageURL
+	if !strings.HasPrefix(got, "https://jobshout.test/api/v1/images/file/") {
+		t.Fatalf("expected the fallback cover as the featured image, got %q", got)
+	}
+	key := strings.TrimPrefix(got, "https://jobshout.test/api/v1/images/file/")
+	if len(r.covers.(*memCovers).objects[key]) == 0 {
+		t.Fatal("the featured image URL points at nothing in storage")
+	}
+	if result.Posts[0].CoverImageURL == "" {
+		t.Fatal("the fallback cover was not reported back for persistence")
+	}
+}
+
+// With image generation switched off for the ring, posts still get a cover.
+func TestPublish_NoIllustratorStillFilesACover(t *testing.T) {
+	cms := &fakeCMS{}
+	r := newTestRunner(cms)
+
+	if _, err := r.Publish(context.Background(), uuid.Nil, []GeneratedArticle{{
+		Topic: "plain", Slug: "plain", Title: "Plain", Excerpt: "e", HTML: "<p>b</p>",
+	}}, nil); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if cms.posts[0].FeaturedImageURL == "" {
+		t.Fatal("a post was filed without a featured image")
+	}
+}
+
+// A recorded cover whose bytes are gone (pod-local disk, deleted object) is a
+// dead link on the live site; it must be replaced, not sent.
+func TestPublish_ReplacesCoverMissingFromStorage(t *testing.T) {
+	cms := &fakeCMS{}
+	r := newTestRunner(cms)
+
+	if _, err := r.Publish(context.Background(), uuid.Nil, []GeneratedArticle{{
+		Topic: "stale", Slug: "stale", Title: "Stale", Excerpt: "e", HTML: "<p>b</p>",
+		CoverImageURL: "/api/v1/images/file/org/2026/08/gone.png",
+	}}, nil); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if strings.HasSuffix(cms.posts[0].FeaturedImageURL, "gone.png") {
+		t.Fatal("sent the CMS a cover that is not in storage")
+	}
+}
+
+// A cover pointing anywhere but our own storage (e.g. a website asset someone
+// hand-pointed and never deployed) is not trusted.
+func TestPublish_DoesNotTrustForeignCoverURL(t *testing.T) {
+	cms := &fakeCMS{}
+	r := newTestRunner(cms)
+
+	if _, err := r.Publish(context.Background(), uuid.Nil, []GeneratedArticle{{
+		Topic: "f", Slug: "f", Title: "F", Excerpt: "e", HTML: "<p>b</p>",
+		CoverImageURL: "https://www.example.com/img/blog/f/cover.svg",
+	}}, nil); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if strings.Contains(cms.posts[0].FeaturedImageURL, "example.com") {
+		t.Fatal("sent the CMS an unverified foreign image URL")
+	}
+}
+
+// Without a public origin the CMS would get a relative path no browser can
+// load. That must stop the post, not file it image-less.
+func TestPublish_RefusesWithoutPublicBaseURL(t *testing.T) {
+	cms := &fakeCMS{}
+	r := newTestRunner(cms)
+	r.cfg.PublicBaseURL = ""
+
+	_, err := r.Publish(context.Background(), uuid.Nil, []GeneratedArticle{{
+		Topic: "n", Slug: "n", Title: "N", Excerpt: "e", HTML: "<p>b</p>",
+	}}, nil)
+	if err == nil || !strings.Contains(err.Error(), "FRONTEND_BASE_URL") {
+		t.Fatalf("want a refusal naming FRONTEND_BASE_URL, got %v", err)
+	}
+	if len(cms.posts) != 0 {
+		t.Fatal("a post was filed without a loadable featured image")
 	}
 }
 

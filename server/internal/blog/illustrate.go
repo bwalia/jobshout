@@ -48,6 +48,9 @@ type Illustration struct {
 	Seed     int64
 	Width    int
 	Height   int
+	// PNG is the image itself, when the generator returned it. Publishing uses
+	// it to give the CMS the picture rather than a link back into JobShout.
+	PNG []byte
 }
 
 // coverWidth and coverHeight are 16:9, which is the shape a cover is displayed
