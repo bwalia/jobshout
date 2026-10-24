@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
+
+	"github.com/jobshout/server/internal/integration/adapters/opsapi"
 
 	"github.com/jobshout/server/internal/llmtrace"
 	"github.com/jobshout/server/internal/model"
@@ -87,7 +90,11 @@ type Service struct {
 	tasks        Tasks
 	runs         Runs
 	chrome       Chrome
-	logger       *zap.Logger
+	logos        *LogoChecker
+	// saveTemplates saves each email as an OpsAPI Marketing mail-merge
+	// template as well (MARKETING_EMAIL_SAVE_TEMPLATE, default on).
+	saveTemplates bool
+	logger        *zap.Logger
 	// sync runs the pipeline inline (tests).
 	sync bool
 }
@@ -98,7 +105,39 @@ func NewService(writer *Writer, destinations DestinationResolver, logger *zap.Lo
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &Service{writer: writer, destinations: destinations, chrome: ChromeFromEnv(), logger: logger}
+	return &Service{
+		writer: writer, destinations: destinations, chrome: ChromeFromEnv(), logos: NewLogoChecker(),
+		saveTemplates: SaveTemplatesFromEnv(), logger: logger,
+	}
+}
+
+// EnvSaveTemplate turns saving the OpsAPI Marketing mail-merge template on or
+// off. Default on; "false", "0", "off" or "no" turn it off.
+const EnvSaveTemplate = "MARKETING_EMAIL_SAVE_TEMPLATE"
+
+// SaveTemplatesFromEnv reads EnvSaveTemplate.
+func SaveTemplatesFromEnv() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(EnvSaveTemplate))) {
+	case "false", "0", "off", "no":
+		return false
+	}
+	return true
+}
+
+// WithTemplateSave turns saving the mail-merge template on or off.
+func (s *Service) WithTemplateSave(on bool) *Service { s.saveTemplates = on; return s }
+
+// WithLogoChecker replaces the logo check; nil always uses the text wordmark.
+func (s *Service) WithLogoChecker(c *LogoChecker) *Service { s.logos = c; return s }
+
+// chromeFor is the chrome for one render: the logo only when it answers 200
+// (cached), else the text wordmark — never a broken image.
+func (s *Service) chromeFor(ctx context.Context) Chrome {
+	c := s.chrome
+	if c.LogoURL != "" && !s.logos.Available(ctx, c.LogoURL) {
+		c.LogoURL = ""
+	}
+	return c
 }
 
 // BindRuns lets runs be recorded for the agent's tab.
@@ -322,7 +361,8 @@ func (s *Service) run(parent context.Context, run *model.MarketingEmailRun, upse
 	run.HeroImageURL = s.hero(ctx, run, draft, log)
 
 	// 3. Render.
-	html, err := Render(draft, run.HeroImageURL, s.chrome)
+	chrome := s.chromeFor(ctx)
+	html, err := Render(draft, run.HeroImageURL, chrome)
 	if err != nil {
 		s.fail(run, err)
 		return
@@ -371,8 +411,136 @@ func (s *Service) run(parent context.Context, run *model.MarketingEmailRun, upse
 	if run.BrowserURL != "" {
 		run.Message += ": " + run.BrowserURL
 	}
+
+	// 5. Save the same email as an OpsAPI Marketing mail-merge template. A
+	// failure here is reported on the run; it never fails the CMS publish.
+	run.Stage = "template"
+	s.save(run)
+	s.saveTemplate(ctx, run, dest, draft, chrome, log)
+
 	s.finish(run, "")
 	s.note(run.TaskID, doneNote(run), "done")
+}
+
+// templateTimeout bounds the Marketing template calls.
+const templateTimeout = time.Minute
+
+// TemplateName is the stable name a run's template is upserted by: the slug
+// does not change when an email is re-generated.
+func TemplateName(slug string) string { return "Email: " + slug }
+
+// saveTemplate upserts the run's mail-merge template by name (or by the uuid
+// a previous run stored) as a draft email template, and records the outcome.
+func (s *Service) saveTemplate(ctx context.Context, run *model.MarketingEmailRun, dest *Destination,
+	d *model.MarketingEmailDraft, chrome Chrome, log *zap.Logger) {
+	notSaved := func(msg string) {
+		run.TemplateOutcome, run.TemplateMessage = model.MarketingTemplateNotSaved, "Template not saved: "+msg
+	}
+	if !s.saveTemplates {
+		run.TemplateOutcome = model.MarketingTemplateDisabled
+		run.TemplateMessage = "Template not saved: saving mail-merge templates is turned off (" + EnvSaveTemplate + ")"
+		return
+	}
+	if dest == nil || dest.Templates == nil {
+		notSaved("this website has no OpsAPI Marketing connection")
+		return
+	}
+	html, err := RenderMailMerge(d, run.HeroImageURL, chrome)
+	if err != nil {
+		notSaved(err.Error())
+		return
+	}
+	run.TemplateHTML = html
+	run.TemplateName = TemplateName(run.Slug)
+	req := opsapi.MarketingTemplateRequest{
+		Name: run.TemplateName, Channel: "email", Subject: run.Subject, PreviewText: run.Preheader,
+		BodyHTML: html, BodyText: RenderMailMergeText(d, chrome),
+	}
+
+	tctx, cancel := context.WithTimeout(ctx, templateTimeout)
+	defer cancel()
+	tpl, analysis, err := upsertTemplate(tctx, dest.Templates, run.TemplateUUID, req)
+	if err != nil {
+		log.Warn("marketingemail: mail-merge template not saved", zap.Error(err))
+		switch {
+		case errors.Is(err, opsapi.ErrMarketingScope):
+			notSaved("missing " + opsapi.MarketingTemplatesScope + " scope")
+		case errors.Is(err, opsapi.ErrMarketingDisabled):
+			notSaved("the OpsAPI Marketing plugin is not enabled for namespace " + dest.Namespace)
+		default:
+			notSaved(err.Error())
+		}
+		return
+	}
+	run.TemplateUUID, run.TemplateOutcome = tpl.UUID, model.MarketingTemplateSaved
+	status := firstNonEmpty(tpl.Status, opsapi.StatusDraft)
+	run.TemplateMessage = fmt.Sprintf("Saved as mail-merge template %q (%s)", run.TemplateName, status)
+	if analysis != nil {
+		var notes []string
+		for _, k := range analysis.UnknownMerge {
+			notes = append(notes, "unknown merge field "+k)
+		}
+		notes = append(notes, analysis.Warnings...)
+		if len(notes) > 0 {
+			run.TemplateMessage += "; OpsAPI warnings: " + strings.Join(notes, ", ")
+		}
+	}
+}
+
+// upsertTemplate saves req to the template at knownUUID, else to the one
+// named req.Name, else to a new draft template. Content always goes through
+// the studio save so OpsAPI sanitises and analyses it.
+func upsertTemplate(ctx context.Context, t MarketingTemplates, knownUUID string, req opsapi.MarketingTemplateRequest) (
+	*opsapi.MarketingTemplate, *opsapi.TemplateAnalysis, error) {
+	id := strings.TrimSpace(knownUUID)
+	if id == "" {
+		found, err := t.FindMarketingTemplateByName(ctx, req.Name)
+		if err != nil {
+			return nil, nil, err
+		}
+		if found != nil {
+			id = found.UUID
+		}
+	}
+	if id == "" {
+		create := req
+		create.Status = opsapi.StatusDraft
+		created, err := t.CreateMarketingTemplate(ctx, create)
+		if err != nil {
+			return nil, nil, err
+		}
+		id = created.UUID
+	}
+	req.Status = "" // keep whatever status the template has now
+	tpl, analysis, err := t.SaveMarketingTemplate(ctx, id, req)
+	if err != nil && knownUUID != "" && !errors.Is(err, opsapi.ErrMarketingScope) && !errors.Is(err, opsapi.ErrMarketingDisabled) {
+		// The stored template may have been deleted: find or create by name.
+		return upsertTemplate(ctx, t, "", req)
+	}
+	return tpl, analysis, err
+}
+
+// SaveTemplate saves (or re-saves) a finished run's mail-merge template from
+// its stored draft — e.g. after the key gains the Marketing scope.
+func (s *Service) SaveTemplate(ctx context.Context, orgID, id uuid.UUID) (*model.MarketingEmailRun, error) {
+	run, err := s.Get(ctx, orgID, id)
+	if err != nil {
+		return nil, err
+	}
+	if run.Unfinished() {
+		return run, ErrBusy
+	}
+	if run.Slug == "" || len(run.Draft.Sections) == 0 {
+		return run, ErrNotPublished
+	}
+	dest, err := s.destinations.Resolve(ctx, orgID, run.Brief.Destination)
+	if err != nil {
+		return nil, err
+	}
+	draft := run.Draft
+	s.saveTemplate(ctx, run, dest, &draft, s.chromeFor(ctx), s.logger.With(zap.String("marketing_email_run", run.ID.String())))
+	s.save(run)
+	return run, nil
 }
 
 // hero draws the hero image when an illustrator is on and the prompt exists.
@@ -427,6 +595,12 @@ func doneNote(run *model.MarketingEmailRun) string {
 	fmt.Fprintf(&sb, "Marketing email %s: %s\nPreheader: %s", run.Status, run.Subject, run.Preheader)
 	if run.BrowserURL != "" {
 		fmt.Fprintf(&sb, "\nBrowser version: %s", run.BrowserURL)
+	}
+	if run.TemplateMessage != "" {
+		sb.WriteString("\n" + run.TemplateMessage)
+		if run.TemplateUUID != "" {
+			fmt.Fprintf(&sb, " — template %s", run.TemplateUUID)
+		}
 	}
 	return sb.String()
 }

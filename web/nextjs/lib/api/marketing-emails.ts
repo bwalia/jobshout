@@ -26,3 +26,10 @@ export async function unpublishMarketingEmailRun(id: string): Promise<MarketingE
   );
   return data;
 }
+
+export async function saveMarketingEmailTemplate(id: string): Promise<MarketingEmailRun> {
+  const { data } = await apiClient.post<MarketingEmailRun>(
+    `/marketing-emails/runs/${encodeURIComponent(id)}/template`
+  );
+  return data;
+}

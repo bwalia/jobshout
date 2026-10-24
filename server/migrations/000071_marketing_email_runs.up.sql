@@ -43,3 +43,10 @@ CREATE INDEX IF NOT EXISTS idx_marketing_email_runs_org_created
     ON marketing_email_runs (org_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_marketing_email_runs_org_slug
     ON marketing_email_runs (org_id, slug) WHERE slug <> '';
+
+-- The OpsAPI Marketing mail-merge template saved from the same email.
+ALTER TABLE marketing_email_runs ADD COLUMN IF NOT EXISTS template_uuid TEXT NOT NULL DEFAULT '';
+ALTER TABLE marketing_email_runs ADD COLUMN IF NOT EXISTS template_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE marketing_email_runs ADD COLUMN IF NOT EXISTS template_outcome VARCHAR(16) NOT NULL DEFAULT '';
+ALTER TABLE marketing_email_runs ADD COLUMN IF NOT EXISTS template_message TEXT NOT NULL DEFAULT '';
+ALTER TABLE marketing_email_runs ADD COLUMN IF NOT EXISTS template_html TEXT NOT NULL DEFAULT '';

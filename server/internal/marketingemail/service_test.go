@@ -139,6 +139,7 @@ func newTestService(t *testing.T, pages *fakePages, replies ...string) (*Service
 	dest := &Destination{Pages: pages, BaseURL: "https://int-opsapi.workstation.co.uk", Namespace: "workstation"}
 	s := NewService(&Writer{LLM: &fakeCompleter{replies: replies}}, fakeResolver{dest: dest}, nil)
 	s.BindRuns(runs)
+	s.WithLogoChecker(nil) // no network: the header is the text wordmark
 	s.sync = true
 	return s, runs
 }
@@ -308,7 +309,7 @@ func TestHero_OnlyAbsoluteHTTPS(t *testing.T) {
 			if got != tt.wantImg {
 				t.Errorf("hero = %q, want image %v", runs.runs[id].HeroImageURL, tt.wantImg)
 			}
-			if !tt.wantImg && strings.Count(pages.lastReq.ContentHTML, "<img ") != 1 {
+			if !tt.wantImg && strings.Count(pages.lastReq.ContentHTML, "<img ") != 0 {
 				t.Error("html has a hero image it should not")
 			}
 		})

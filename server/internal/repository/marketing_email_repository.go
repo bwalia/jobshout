@@ -41,7 +41,8 @@ func NewMarketingEmailRunRepository(pool *pgxpool.Pool) MarketingEmailRunReposit
 
 const marketingEmailRunCols = `id, org_id, task_id, agent_id, requested_by, brief, subject, preheader, title,
 	slug, status, stage, message, error_message, content_html, draft_json, hero_image_url, page_uuid,
-	page_status, browser_url, destination, model, publish_mode, created_at, started_at, finished_at, updated_at`
+	page_status, browser_url, destination, model, publish_mode, created_at, started_at, finished_at, updated_at,
+	template_uuid, template_name, template_outcome, template_message, template_html`
 
 func scanMarketingEmailRun(row pgx.Row) (*model.MarketingEmailRun, error) {
 	var (
@@ -51,7 +52,8 @@ func scanMarketingEmailRun(row pgx.Row) (*model.MarketingEmailRun, error) {
 	if err := row.Scan(&r.ID, &r.OrgID, &r.TaskID, &r.AgentID, &r.RequestedBy, &brief, &r.Subject,
 		&r.Preheader, &r.Title, &r.Slug, &r.Status, &r.Stage, &r.Message, &r.Error, &r.ContentHTML, &draft,
 		&r.HeroImageURL, &r.PageUUID, &r.PageStatus, &r.BrowserURL, &r.Destination, &r.Model, &r.PublishMode,
-		&r.CreatedAt, &r.StartedAt, &r.FinishedAt, &r.UpdatedAt); err != nil {
+		&r.CreatedAt, &r.StartedAt, &r.FinishedAt, &r.UpdatedAt,
+		&r.TemplateUUID, &r.TemplateName, &r.TemplateOutcome, &r.TemplateMessage, &r.TemplateHTML); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrMarketingEmailRunNotFound
 		}
@@ -89,11 +91,14 @@ func (r *marketingEmailRunRepository) Save(ctx context.Context, run *model.Marke
 		UPDATE marketing_email_runs SET subject = $2, preheader = $3, title = $4, slug = $5, status = $6,
 			stage = $7, message = $8, error_message = $9, content_html = $10, draft_json = $11,
 			hero_image_url = $12, page_uuid = $13, page_status = $14, browser_url = $15, destination = $16,
-			model = $17, publish_mode = $18, started_at = $19, finished_at = $20, updated_at = NOW()
+			model = $17, publish_mode = $18, started_at = $19, finished_at = $20, template_uuid = $21,
+			template_name = $22, template_outcome = $23, template_message = $24, template_html = $25,
+			updated_at = NOW()
 		WHERE id = $1`,
 		run.ID, run.Subject, run.Preheader, run.Title, run.Slug, run.Status, run.Stage, run.Message, run.Error,
 		run.ContentHTML, draft, run.HeroImageURL, run.PageUUID, run.PageStatus, run.BrowserURL,
-		run.Destination, run.Model, run.PublishMode, run.StartedAt, run.FinishedAt)
+		run.Destination, run.Model, run.PublishMode, run.StartedAt, run.FinishedAt, run.TemplateUUID,
+		run.TemplateName, run.TemplateOutcome, run.TemplateMessage, run.TemplateHTML)
 	if err != nil {
 		return fmt.Errorf("marketing_email_repo: save: %w", err)
 	}

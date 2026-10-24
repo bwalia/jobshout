@@ -44,7 +44,12 @@ func nonHTTPSLinks(s string) []string {
 func stripMarkers(s string) string {
 	s = strings.ReplaceAll(s, "{{", "{")
 	s = strings.ReplaceAll(s, "}}", "}")
-	return strings.ReplaceAll(s, "{%", "{")
+	s = strings.ReplaceAll(s, "{%", "{")
+	// Model text can never carry a merge sentinel (see render.go).
+	for strings.Contains(s, sentinelPrefix) {
+		s = strings.ReplaceAll(s, sentinelPrefix, "")
+	}
+	return s
 }
 
 // inlineHTML renders one line of inline markdown to safe HTML.

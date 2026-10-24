@@ -22,6 +22,14 @@ type Pages interface {
 	FindPageBySlug(ctx context.Context, slug string) (*opsapi.Page, error)
 }
 
+// MarketingTemplates is the slice of the opsapi client that saves OpsAPI
+// Marketing mail-merge templates. *opsapi.Client satisfies it.
+type MarketingTemplates interface {
+	CreateMarketingTemplate(ctx context.Context, req opsapi.MarketingTemplateRequest) (*opsapi.MarketingTemplate, error)
+	SaveMarketingTemplate(ctx context.Context, templateUUID string, req opsapi.MarketingTemplateRequest) (*opsapi.MarketingTemplate, *opsapi.TemplateAnalysis, error)
+	FindMarketingTemplateByName(ctx context.Context, name string) (*opsapi.MarketingTemplate, error)
+}
+
 // IntegrationLister reads an org's integrations.
 type IntegrationLister interface {
 	ListByOrg(ctx context.Context, orgID uuid.UUID) ([]model.Integration, error)
@@ -30,7 +38,9 @@ type IntegrationLister interface {
 // Destination is a resolved website: the CMS client plus what is needed to
 // work out the email's public browser URL. It never exposes the key.
 type Destination struct {
-	Pages     Pages
+	Pages Pages
+	// Templates saves the mail-merge template; nil means it cannot be saved.
+	Templates MarketingTemplates
 	BaseURL   string // OpsAPI root, for BrowserURL's host map
 	Namespace string
 	// SiteURL is the integration's config.site_url override, if any.
@@ -95,7 +105,7 @@ func (d *Destinations) Resolve(ctx context.Context, orgID uuid.UUID, name string
 	if d == nil || d.Ring == nil {
 		return nil, fmt.Errorf("%w: no CMS is configured on this server (set OPSAPI_BASE_URL, OPSAPI_API_KEY and OPSAPI_NAMESPACE) and no website was named", ErrDestination)
 	}
-	return &Destination{Pages: d.Ring, BaseURL: d.Ring.BaseURL(), Namespace: d.Ring.Namespace()}, nil
+	return &Destination{Pages: d.Ring, Templates: d.Ring, BaseURL: d.Ring.BaseURL(), Namespace: d.Ring.Namespace()}, nil
 }
 
 func (d *Destinations) isRingNamespace(name string) bool {
@@ -168,7 +178,7 @@ func integrationDestination(in model.Integration) (*Destination, error) {
 		return nil, fmt.Errorf("integration %q is incomplete", in.Name)
 	}
 	site, _ := in.Config["site_url"].(string)
-	return &Destination{Pages: client, BaseURL: base, Namespace: ns, SiteURL: site}, nil
+	return &Destination{Pages: client, Templates: client, BaseURL: base, Namespace: ns, SiteURL: site}, nil
 }
 
 func normalBase(raw string) string {

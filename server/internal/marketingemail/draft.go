@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -85,9 +86,34 @@ const systemPrompt = `You are a senior B2B email copywriter. You write one marke
 You never invent prices, specifications, discounts, dates or customer quotes: use only facts in the brief.
 You reply with a single JSON object and nothing else.`
 
+// tradeFacts are the confirmed Workstation Trade membership facts. They are
+// offered to the model only when the brief is about Trade, so it never has to
+// invent a price or a benefit.
+const tradeFacts = `Confirmed Workstation Trade membership facts (use only these for Trade; do not add others):
+- Founding price from £75/month or £750/year ex VAT; 100 founding places.
+- Unlimited AI engineer time by phone, chat and email.
+- Money off qualifying orders.
+- A 60-day quote price lock.
+- 24-hour early access to new stock.
+- Cancel in two clicks.
+- Engineer phone: +44 7515 356 146.
+- Landing page: https://shop.workstation.co.uk/trade
+- Chat: https://shop.workstation.co.uk/chat
+`
+
+var tradeRe = regexp.MustCompile(`(?i)\btrade\b`)
+
+// aboutTrade reports whether the brief is about Trade membership.
+func aboutTrade(b model.MarketingEmailBrief) bool {
+	return tradeRe.MatchString(b.Brief + " " + b.Products + " " + b.PrimaryCTAURL + " " + b.PrimaryCTALabel)
+}
+
 func draftPrompt(b model.MarketingEmailBrief) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Write a marketing email about:\n%s\n\n", strings.TrimSpace(b.Brief))
+	if aboutTrade(b) {
+		sb.WriteString(tradeFacts + "\n")
+	}
 	if b.Audience != "" {
 		fmt.Fprintf(&sb, "Audience: %s\n", b.Audience)
 	}
@@ -122,6 +148,7 @@ Rules:
 - body_markdown allows only paragraphs, **bold**, *italic*, [links](https://...) and "- " lists. No HTML.
 - Every URL must start with https://. Never use merge tags such as {{name}}.
 - A "feature" lists its points in items; a "product" names one product and may link to it; a "quote" is only a quote the brief supplies.
+- Do not open with a greeting such as "Hi" or "Dear": the email adds "Hi <first name>," itself.
 - Plain, concrete sentences. One idea per section.
 `, maxSubject, minPreheader, maxPreheader, minSections, maxSections)
 	return sb.String()

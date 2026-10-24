@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   Copy,
   ExternalLink,
+  FileStack,
   Loader2,
   Mail,
   RefreshCw,
@@ -21,6 +22,7 @@ import {
   useMarketingEmailRun,
   useMarketingEmailRuns,
   useRegenerateMarketingEmail,
+  useSaveMarketingEmailTemplate,
   useUnpublishMarketingEmail,
 } from "@/lib/hooks/useMarketingEmails";
 import {
@@ -83,6 +85,96 @@ function PreviewFrame({ html, width }: { html: string; width: number }) {
           style={{ width, minHeight: 400, height: 480 }}
         />
       </div>
+    </div>
+  );
+}
+
+/**
+ * The "Save as mail-merge template" outcome: the same email saved to OpsAPI
+ * Marketing (Studio) with real merge fields, as a draft template.
+ */
+function TemplateOutcome({
+  run,
+  busy,
+  onCopied,
+}: {
+  run: MarketingEmailRun;
+  busy: boolean;
+  onCopied: (msg: string) => void;
+}) {
+  const save = useSaveMarketingEmailTemplate();
+  if (!run.slug) return null;
+  const saved = run.template_outcome === "saved";
+  return (
+    <div className="space-y-2 rounded-lg border border-border p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+          <FileStack className="h-4 w-4" />
+          Save as mail-merge template
+          {saved ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-status-done/10 px-2 py-0.5 text-2xs font-medium text-status-done">
+              <CheckCircle2 className="h-3 w-3" /> Saved
+            </span>
+          ) : run.template_outcome ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-signal-error/10 px-2 py-0.5 text-2xs font-medium text-signal-error">
+              <AlertTriangle className="h-3 w-3" /> Not saved
+            </span>
+          ) : null}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {run.template_html ? (
+            <button
+              type="button"
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-xs font-medium hover:bg-muted"
+              onClick={() =>
+                void copyText("mail-merge HTML", run.template_html!).then(() =>
+                  onCopied("Mail-merge HTML copied")
+                )
+              }
+            >
+              <Copy className="h-3.5 w-3.5" />
+              Copy mail-merge HTML
+            </button>
+          ) : null}
+          <button
+            type="button"
+            disabled={busy || save.isPending}
+            onClick={() => save.mutate(run.id)}
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-xs font-medium hover:bg-muted disabled:opacity-50"
+          >
+            {save.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileStack className="h-3.5 w-3.5" />}
+            {saved ? "Save again" : "Save template"}
+          </button>
+        </div>
+      </div>
+      {run.template_message ? (
+        <p className={cn("text-xs", saved ? "text-muted-foreground" : "text-signal-error")}>
+          {run.template_message}
+        </p>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          Saves this email to OpsAPI Marketing as a draft template with {"{{contact.first_name}}"},
+          unsubscribe, preferences and view-in-browser merge fields.
+        </p>
+      )}
+      {run.template_uuid ? (
+        <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span>
+            {run.template_name ? `${run.template_name} · ` : ""}template{" "}
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-2xs">{run.template_uuid}</code>
+          </span>
+          <button
+            type="button"
+            className="text-signal-live hover:underline"
+            onClick={() =>
+              void copyText("template id", run.template_uuid!).then(() => onCopied("Template id copied"))
+            }
+          >
+            Copy id
+          </button>
+          <span>— open it in the OpsAPI dashboard under Marketing → Studio.</span>
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -205,6 +297,8 @@ function RunDetail({
         ) : null}
         {copyMsg ? <span className="self-center text-2xs text-status-done">{copyMsg}</span> : null}
       </div>
+
+      <TemplateOutcome run={run} busy={busy} onCopied={setCopyMsg} />
 
       {html ? (
         <div className="space-y-3">

@@ -41,6 +41,10 @@ func (f *fakeEmailRuns) ReGenerate(ctx context.Context, orgID, id uuid.UUID) (*m
 	return run, err
 }
 
+func (f *fakeEmailRuns) SaveTemplate(ctx context.Context, orgID, id uuid.UUID) (*model.MarketingEmailRun, error) {
+	return f.Get(ctx, orgID, id)
+}
+
 func (f *fakeEmailRuns) Unpublish(ctx context.Context, orgID, id uuid.UUID) (*model.MarketingEmailRun, error) {
 	run, err := f.Get(ctx, orgID, id)
 	if err == nil {
@@ -61,12 +65,13 @@ func emailRouter(h *MarketingEmailHandler, orgID uuid.UUID) http.Handler {
 	r.Get("/runs/{runID}", h.GetRun)
 	r.Post("/runs/{runID}/regenerate", h.Regenerate)
 	r.Post("/runs/{runID}/unpublish", h.Unpublish)
+	r.Post("/runs/{runID}/template", h.SaveTemplate)
 	return r
 }
 
 func TestMarketingEmailRuns_ScopedAndListOmitsHTML(t *testing.T) {
 	org := uuid.New()
-	runs := &fakeEmailRuns{run: model.MarketingEmailRun{ID: uuid.New(), OrgID: org, Status: model.MarketingEmailStatusPublished, ContentHTML: "<html>big</html>"}}
+	runs := &fakeEmailRuns{run: model.MarketingEmailRun{ID: uuid.New(), OrgID: org, Status: model.MarketingEmailStatusPublished, ContentHTML: "<html>big</html>", TemplateHTML: "<html>merge</html>"}}
 	h := NewMarketingEmailHandler(runs)
 
 	rec := httptest.NewRecorder()
@@ -74,7 +79,7 @@ func TestMarketingEmailRuns_ScopedAndListOmitsHTML(t *testing.T) {
 	var list struct {
 		Data []model.MarketingEmailRun `json:"data"`
 	}
-	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &list) != nil || len(list.Data) != 1 || list.Data[0].ContentHTML != "" {
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &list) != nil || len(list.Data) != 1 || list.Data[0].ContentHTML != "" || list.Data[0].TemplateHTML != "" {
 		t.Fatalf("list: %d %s", rec.Code, rec.Body)
 	}
 
@@ -101,6 +106,12 @@ func TestMarketingEmailRuns_UnpublishAndBusy(t *testing.T) {
 	emailRouter(h, org).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/runs/"+runs.run.ID.String()+"/unpublish", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("unpublish: %d %s", rec.Code, rec.Body)
+	}
+
+	rec = httptest.NewRecorder()
+	emailRouter(h, org).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/runs/"+runs.run.ID.String()+"/template", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save template: %d %s", rec.Code, rec.Body)
 	}
 
 	runs.run.Status = model.MarketingEmailStatusWriting

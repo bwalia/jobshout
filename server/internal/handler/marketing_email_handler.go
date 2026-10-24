@@ -22,6 +22,7 @@ type MarketingEmailRuns interface {
 	Get(ctx context.Context, orgID, id uuid.UUID) (*model.MarketingEmailRun, error)
 	ReGenerate(ctx context.Context, orgID, id uuid.UUID) (*model.MarketingEmailRun, error)
 	Unpublish(ctx context.Context, orgID, id uuid.UUID) (*model.MarketingEmailRun, error)
+	SaveTemplate(ctx context.Context, orgID, id uuid.UUID) (*model.MarketingEmailRun, error)
 }
 
 // MarketingEmailHandler serves the Marketing Email Writer's tab: every run, its
@@ -51,9 +52,10 @@ func (h *MarketingEmailHandler) ListRuns(w http.ResponseWriter, r *http.Request)
 		marketingEmailError(w, err)
 		return
 	}
-	// The list omits each email's full HTML; Get returns it.
+	// The list omits each email's full HTML (browser and mail-merge); Get
+	// returns it.
 	for i := range runs {
-		runs[i].ContentHTML = ""
+		runs[i].ContentHTML, runs[i].TemplateHTML = "", ""
 	}
 	RespondJSON(w, http.StatusOK, map[string]any{"data": runs})
 }
@@ -95,6 +97,22 @@ func (h *MarketingEmailHandler) Unpublish(w http.ResponseWriter, r *http.Request
 		return
 	}
 	run, err := h.runs.Unpublish(r.Context(), orgID, id)
+	if err != nil {
+		marketingEmailError(w, err)
+		return
+	}
+	RespondJSON(w, http.StatusOK, run)
+}
+
+// SaveTemplate POST /api/v1/marketing-emails/runs/{runID}/template — saves (or
+// re-saves) the email as an OpsAPI Marketing mail-merge template. The outcome
+// is on the returned run (template_outcome / template_message).
+func (h *MarketingEmailHandler) SaveTemplate(w http.ResponseWriter, r *http.Request) {
+	orgID, id, ok := marketingEmailRun(w, r)
+	if !ok {
+		return
+	}
+	run, err := h.runs.SaveTemplate(r.Context(), orgID, id)
 	if err != nil {
 		marketingEmailError(w, err)
 		return

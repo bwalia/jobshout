@@ -6,6 +6,8 @@ export type MarketingEmailRunStatus =
   | "failed"
   | "archived";
 
+export type MarketingTemplateOutcome = "saved" | "not_saved" | "disabled";
+
 export interface MarketingEmailBrief {
   brief: string;
   audience?: string;
@@ -38,6 +40,13 @@ export interface MarketingEmailRun {
   page_uuid?: string;
   page_status?: string;
   browser_url?: string;
+  /** OpsAPI Marketing mail-merge template saved from the same email. */
+  template_uuid?: string;
+  template_name?: string;
+  template_outcome?: MarketingTemplateOutcome;
+  template_message?: string;
+  /** Mail-merge HTML (real {{merge}} fields); only on a single-run read. */
+  template_html?: string;
   destination?: string;
   model?: string;
   publish_mode?: string;

@@ -19,7 +19,7 @@ func TestRender_Golden(t *testing.T) {
 		{Type: "quote", Heading: "A customer", BodyMarkdown: "Great {{ .Secret }} kit"},
 	}, d.Sections...)
 
-	out, err := Render(d, "https://img.example/hero.png", Chrome{})
+	out, err := Render(d, "https://img.example/hero.png", logoChrome)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestRender_Golden(t *testing.T) {
 		`width="600"`, `role="presentation"`, "#0d0b21", "#e5165f",
 		"<strong>bold</strong>", "<em>soft</em>",
 		`href="https://www.workstation.co.uk/shop"`,
-		"Manage preferences / unsubscribe", DefaultUnsubscribeURL, DefaultLogoURL,
+		"Manage preferences", "Unsubscribe", DefaultUnsubscribeURL, logoChrome.LogoURL, "Hi there,",
 		"&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;",
 		"&lt;img src=x onerror=alert(1)&gt;",
 	} {
@@ -48,8 +48,11 @@ func TestRender_Golden(t *testing.T) {
 	}
 }
 
+// logoChrome has a logo that (the service checked) answers 200.
+var logoChrome = Chrome{LogoURL: "https://cdn.example/logo.png"}
+
 func TestRender_EveryImgHasAltSizeAndBlock(t *testing.T) {
-	out, err := Render(goodDraft(), "https://img.example/hero.png", Chrome{})
+	out, err := Render(goodDraft(), "https://img.example/hero.png", logoChrome)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +74,7 @@ func TestRender_EveryImgHasAltSizeAndBlock(t *testing.T) {
 
 func TestRender_NoHeroWithoutHTTPSImage(t *testing.T) {
 	for _, u := range []string{"", "http://x.example/a.png", "/api/images/a.png", "javascript:alert(1)"} {
-		out, err := Render(goodDraft(), u, Chrome{})
+		out, err := Render(goodDraft(), u, logoChrome)
 		if err != nil {
 			t.Fatal(err)
 		}

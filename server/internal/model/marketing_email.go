@@ -23,6 +23,13 @@ const (
 	MarketingEmailStatusArchived   = "archived"
 )
 
+// Mail-merge template outcomes.
+const (
+	MarketingTemplateSaved    = "saved"
+	MarketingTemplateNotSaved = "not_saved"
+	MarketingTemplateDisabled = "disabled"
+)
+
 // Publish modes: live files the CMS page as published at once; draft files it
 // as a draft.
 const (
@@ -114,13 +121,21 @@ type MarketingEmailRun struct {
 	PageUUID     string              `json:"page_uuid,omitempty"`
 	PageStatus   string              `json:"page_status,omitempty"`
 	BrowserURL   string              `json:"browser_url,omitempty"`
-	Destination  string              `json:"destination,omitempty"`
-	Model        string              `json:"model,omitempty"`
-	PublishMode  string              `json:"publish_mode"`
-	CreatedAt    time.Time           `json:"created_at"`
-	StartedAt    *time.Time          `json:"started_at,omitempty"`
-	FinishedAt   *time.Time          `json:"finished_at,omitempty"`
-	UpdatedAt    time.Time           `json:"updated_at"`
+	// The OpsAPI Marketing mail-merge template saved from the same email
+	// (real merge fields kept). TemplateOutcome is saved, not_saved or
+	// disabled; TemplateMessage says why when it is not saved.
+	TemplateUUID    string     `json:"template_uuid,omitempty"`
+	TemplateName    string     `json:"template_name,omitempty"`
+	TemplateOutcome string     `json:"template_outcome,omitempty"`
+	TemplateMessage string     `json:"template_message,omitempty"`
+	TemplateHTML    string     `json:"template_html,omitempty"`
+	Destination     string     `json:"destination,omitempty"`
+	Model           string     `json:"model,omitempty"`
+	PublishMode     string     `json:"publish_mode"`
+	CreatedAt       time.Time  `json:"created_at"`
+	StartedAt       *time.Time `json:"started_at,omitempty"`
+	FinishedAt      *time.Time `json:"finished_at,omitempty"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 // Unfinished reports whether the run can still change by itself.

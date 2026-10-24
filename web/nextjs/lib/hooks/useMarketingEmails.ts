@@ -8,6 +8,7 @@ import {
   getMarketingEmailRun,
   listMarketingEmailRuns,
   regenerateMarketingEmailRun,
+  saveMarketingEmailTemplate,
   unpublishMarketingEmailRun,
 } from "@/lib/api/marketing-emails";
 import {
@@ -65,5 +66,19 @@ export function useUnpublishMarketingEmail() {
       void qc.invalidateQueries({ queryKey: marketingEmailKeys.run(run.id) });
     },
     onError: (e) => toast.error(apiErrorMessage(e, "Could not unpublish")),
+  });
+}
+
+export function useSaveMarketingEmailTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: saveMarketingEmailTemplate,
+    onSuccess: (run) => {
+      if (run.template_outcome === "saved") toast.success("Saved as a mail-merge template");
+      else toast.error(run.template_message || "Template not saved");
+      void qc.invalidateQueries({ queryKey: marketingEmailKeys.runs() });
+      void qc.invalidateQueries({ queryKey: marketingEmailKeys.run(run.id) });
+    },
+    onError: (e) => toast.error(apiErrorMessage(e, "Could not save the template")),
   });
 }

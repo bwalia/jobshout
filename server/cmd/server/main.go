@@ -965,6 +965,7 @@ func main() {
 		zap.Bool("configured", emailSvc.Configured()),
 		zap.String("provider", emailProvider),
 		zap.Bool("illustrator", cfg.BlogCoverImages && imageSvc.Enabled()),
+		zap.Bool("save_mail_merge_template", marketingemail.SaveTemplatesFromEnv()),
 	)
 
 	secretsRotCfg := secretsrot.LoadConfig()
@@ -1686,6 +1687,7 @@ func main() {
 				r.Get("/runs/{runID}", marketingEmailHandler.GetRun)
 				r.Post("/runs/{runID}/regenerate", marketingEmailHandler.Regenerate)
 				r.Post("/runs/{runID}/unpublish", marketingEmailHandler.Unpublish)
+				r.Post("/runs/{runID}/template", marketingEmailHandler.SaveTemplate)
 			})
 
 			r.Route("/linkedin", func(r chi.Router) {
