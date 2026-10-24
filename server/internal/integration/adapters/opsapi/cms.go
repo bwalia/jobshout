@@ -9,8 +9,8 @@ package opsapi
 import (
 	"bytes"
 	"context"
-	"errors"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -37,6 +37,9 @@ const DefaultTimeout = 30 * time.Second
 const (
 	StatusDraft     = "draft"
 	StatusPublished = "published"
+	// StatusArchived takes a page (or post) out of public view without
+	// deleting it. Used to unpublish.
+	StatusArchived = "archived"
 )
 
 // Config is what the client needs to reach an opsapi deployment.
@@ -302,3 +305,209 @@ func readBodySnippet(resp *http.Response) string {
 	}
 	return strings.TrimSpace(string(b))
 }
+
+// CreatePageRequest is the body of POST /api/v2/cms/pages. Pages, unlike
+// posts, never appear in the blog listing, which is why the Marketing Email
+// Writer files its emails here (Template "email").
+type CreatePageRequest struct {
+	Title            string `json:"title"`
+	Slug             string `json:"slug,omitempty"`
+	Excerpt          string `json:"excerpt,omitempty"`
+	ContentHTML      string `json:"content_html"`
+	FeaturedImageURL string `json:"featured_image_url,omitempty"`
+	Status           string `json:"status"`
+	Template         string `json:"template,omitempty"`
+	// ShowInNav is a pointer so an explicit false is sent (the default for an
+	// email is to stay out of the site navigation).
+	ShowInNav      *bool  `json:"show_in_nav,omitempty"`
+	SEOTitle       string `json:"seo_title,omitempty"`
+	SEODescription string `json:"seo_description,omitempty"`
+}
+
+// Page is the subset of opsapi's CMS page row JobShout stores.
+type Page struct {
+	UUID     string `json:"uuid"`
+	Title    string `json:"title"`
+	Slug     string `json:"slug"`
+	Status   string `json:"status"`
+	Template string `json:"template"`
+}
+
+// pageEnvelope is opsapi's house response shape for one page.
+type pageEnvelope struct {
+	Success bool   `json:"success"`
+	Data    Page   `json:"data"`
+	Error   string `json:"error"`
+}
+
+// CreatePage creates one CMS page and returns what opsapi stored. An empty
+// status is filed as a draft.
+func (c *Client) CreatePage(ctx context.Context, req CreatePageRequest) (*Page, error) {
+	if req.Status == "" {
+		req.Status = StatusDraft
+	}
+	resp, err := c.pageCall(ctx, http.MethodPost, "/api/v2/cms/pages", req)
+	if err != nil {
+		return nil, fmt.Errorf("opsapi: create page %q: %w", req.Title, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		return nil, c.pageError(resp, "create page "+strconvQuote(req.Title), "cms:create", "")
+	}
+	return decodePage(resp, "create page "+strconvQuote(req.Title))
+}
+
+// UpdatePage PUTs fields to /api/v2/cms/pages/{uuid}. fields is a full
+// CreatePageRequest or a partial map (e.g. {"status": "archived"}); opsapi
+// applies only what is sent.
+//
+// A key without cms:update is refused with a 403 that wraps ErrUpdateForbidden
+// and names the scope, so a caller never silently creates a duplicate page.
+func (c *Client) UpdatePage(ctx context.Context, pageUUID string, fields any) (*Page, error) {
+	pageUUID = strings.TrimSpace(pageUUID)
+	if pageUUID == "" {
+		return nil, fmt.Errorf("opsapi: update page: no page uuid")
+	}
+	resp, err := c.pageCall(ctx, http.MethodPut, "/api/v2/cms/pages/"+url.PathEscape(pageUUID), fields)
+	if err != nil {
+		return nil, fmt.Errorf("opsapi: update page %s: %w", pageUUID, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.pageError(resp, "update page "+pageUUID, "cms:update", pageUUID)
+	}
+	return decodePage(resp, "update page "+pageUUID)
+}
+
+// SetPageStatus changes only a page's status — archive to unpublish.
+func (c *Client) SetPageStatus(ctx context.Context, pageUUID, status string) (*Page, error) {
+	return c.UpdatePage(ctx, pageUUID, map[string]string{"status": status})
+}
+
+// FindPageBySlug looks a page up by exact slug, or returns nil when there is
+// none. opsapi's list endpoint only offers a fuzzy search, so the result is
+// filtered to an exact (case-insensitive) slug match.
+func (c *Client) FindPageBySlug(ctx context.Context, slug string) (*Page, error) {
+	slug = strings.TrimSpace(slug)
+	if slug == "" {
+		return nil, fmt.Errorf("opsapi: find page: empty slug")
+	}
+	resp, err := c.pageCall(ctx, http.MethodGet, "/api/v2/cms/pages?search="+url.QueryEscape(slug), nil)
+	if err != nil {
+		return nil, fmt.Errorf("opsapi: find page %q: %w", slug, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.pageError(resp, "find page "+strconvQuote(slug), "cms:read", "")
+	}
+	var env struct {
+		Success bool            `json:"success"`
+		Data    json.RawMessage `json:"data"`
+		Items   json.RawMessage `json:"items"`
+		Error   string          `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		return nil, fmt.Errorf("opsapi: decode page list: %w", err)
+	}
+	if env.Error != "" && !env.Success {
+		return nil, fmt.Errorf("opsapi: find page %q: %s", slug, env.Error)
+	}
+	pages := pagesFromList(env.Data)
+	if len(pages) == 0 {
+		pages = pagesFromList(env.Items)
+	}
+	for i := range pages {
+		if strings.EqualFold(strings.TrimSpace(pages[i].Slug), slug) {
+			return &pages[i], nil
+		}
+	}
+	return nil, nil
+}
+
+// pagesFromList reads pages from a list payload: a bare array, or an object
+// holding one under items, pages, rows or data.
+func pagesFromList(raw json.RawMessage) []Page {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var arr []Page
+	if raw[0] == '[' {
+		if json.Unmarshal(raw, &arr) == nil {
+			return arr
+		}
+		return nil
+	}
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(raw, &obj) != nil {
+		return nil
+	}
+	for _, k := range []string{"items", "pages", "rows", "data"} {
+		if v, ok := obj[k]; ok {
+			if p := pagesFromList(v); len(p) > 0 {
+				return p
+			}
+		}
+	}
+	return nil
+}
+
+func (c *Client) pageCall(ctx context.Context, method, path string, body any) (*http.Response, error) {
+	var rdr io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return nil, fmt.Errorf("encode: %w", err)
+		}
+		rdr = bytes.NewReader(b)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, method, c.cfg.BaseURL+path, rdr)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+	httpReq.Header.Set("Accept", "application/json")
+	httpReq.Header.Set("X-Namespace-Slug", c.cfg.Namespace)
+	if body != nil {
+		httpReq.Header.Set("Content-Type", "application/json")
+	}
+	return c.http.Do(httpReq)
+}
+
+func decodePage(resp *http.Response, what string) (*Page, error) {
+	var env pageEnvelope
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		return nil, fmt.Errorf("opsapi: decode %s response: %w", what, err)
+	}
+	if !env.Success {
+		return nil, fmt.Errorf("opsapi: %s: %s", what, env.Error)
+	}
+	return &env.Data, nil
+}
+
+// pageError turns a rejected page call into a message that names the cause.
+// scope is the CMS scope the call needs; a 403 on an update wraps
+// ErrUpdateForbidden so callers can tell it from other failures.
+func (c *Client) pageError(resp *http.Response, what, scope, pageUUID string) error {
+	body := readBodySnippet(resp)
+	switch resp.StatusCode {
+	case http.StatusUnauthorized:
+		return fmt.Errorf("opsapi: %s rejected (401) — the API key is invalid, revoked or expired. Response: %s", what, body)
+	case http.StatusForbidden:
+		err := fmt.Errorf("%s forbidden (403) — the API key needs the %s scope, must belong to namespace %q, "+
+			"and that namespace must have the cms feature enabled. Response: %s", what, scope, c.cfg.Namespace, body)
+		if scope == "cms:update" {
+			return fmt.Errorf("%w: %s", ErrUpdateForbidden, err)
+		}
+		return fmt.Errorf("opsapi: %w", err)
+	case http.StatusNotFound:
+		if pageUUID != "" {
+			return fmt.Errorf("opsapi: page %s not found in namespace %q — was it deleted? Response: %s", pageUUID, c.cfg.Namespace, body)
+		}
+		return fmt.Errorf("opsapi: %s: not found in namespace %q. Response: %s", what, c.cfg.Namespace, body)
+	default:
+		return fmt.Errorf("opsapi: %s failed (status %d): %s", what, resp.StatusCode, body)
+	}
+}
+
+func strconvQuote(s string) string { return fmt.Sprintf("%q", s) }

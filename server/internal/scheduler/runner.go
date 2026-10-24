@@ -14,12 +14,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
 
+	"github.com/jobshout/server/internal/marketingemail"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/repository"
 	"github.com/jobshout/server/internal/service"
@@ -31,14 +33,15 @@ const TickInterval = 30 * time.Second
 // Runner is the cron dispatcher. It is started from main.go and runs
 // until its context is cancelled.
 type Runner struct {
-	repo        repository.SchedulerRepository
-	blogSvc     service.BlogService
-	workflows   service.WorkflowService
-	execs       service.ExecutionService
-	multiAgents service.MultiAgentService
-	career      service.CareerService
-	parser      cron.Parser
-	logger      *zap.Logger
+	repo           repository.SchedulerRepository
+	blogSvc        service.BlogService
+	workflows      service.WorkflowService
+	execs          service.ExecutionService
+	multiAgents    service.MultiAgentService
+	career         service.CareerService
+	marketingEmail marketingemail.Runner
+	parser         cron.Parser
+	logger         *zap.Logger
 }
 
 // NewRunner wires the Runner. blogSvc / multiAgents may be nil — tasks of
@@ -67,6 +70,13 @@ func NewRunner(
 // WithCareer enables scheduled portal scans (task_type career_scan).
 func (r *Runner) WithCareer(svc service.CareerService) *Runner {
 	r.career = svc
+	return r
+}
+
+// WithMarketingEmail enables scheduled marketing email runs (task_type
+// marketing_email, or kind/tag markers).
+func (r *Runner) WithMarketingEmail(run marketingemail.Runner) *Runner {
+	r.marketingEmail = run
 	return r
 }
 
@@ -176,6 +186,8 @@ func (r *Runner) runOne(ctx context.Context, t model.ScheduledTask) {
 	switch {
 	case isBlogTask(t):
 		err = r.dispatchBlog(ctx, t, runRec)
+	case isMarketingEmailTask(t):
+		err = r.dispatchMarketingEmail(ctx, t, runRec)
 	case t.TaskType == "career_scan":
 		err = r.dispatchCareerScan(ctx, t)
 	case t.TaskType == "career_apply":
@@ -313,6 +325,40 @@ func (r *Runner) dispatchBlog(ctx context.Context, t model.ScheduledTask, runRec
 	// Only the ID: Generate returns as soon as the run is queued, so anything
 	// the pipeline produces later is not knowable here.
 	out := fmt.Sprintf(`{"blog_run_id":%q}`, run.ID.String())
+	runRec.Output = &out
+	return nil
+}
+
+func (r *Runner) dispatchMarketingEmail(ctx context.Context, t model.ScheduledTask, runRec *model.ScheduledTaskRun) error {
+	if r.marketingEmail == nil {
+		return fmt.Errorf("scheduler: marketing email writer is not configured")
+	}
+	values, err := stringMapFromInput(t.InputJSON)
+	if err != nil {
+		return fmt.Errorf("%w: %v", errTaskMisconfigured, err)
+	}
+	brief := marketingemail.BriefFromValues(values)
+	if strings.TrimSpace(brief.Brief) == "" {
+		return fmt.Errorf("%w: this email schedule has no brief — edit it and resume", errTaskMisconfigured)
+	}
+	userID := uuid.Nil
+	if t.CreatedBy != nil {
+		userID = *t.CreatedBy
+	}
+	agentID := uuid.Nil
+	if t.AgentID != nil {
+		agentID = *t.AgentID
+	}
+	runID, err := r.marketingEmail.Start(ctx, marketingemail.StartRequest{
+		OrgID:   t.OrgID,
+		UserID:  userID,
+		AgentID: agentID,
+		Brief:   brief,
+	})
+	if err != nil {
+		return err
+	}
+	out := fmt.Sprintf(`{"marketing_email_run_id":%q}`, runID.String())
 	runRec.Output = &out
 	return nil
 }
@@ -475,6 +521,49 @@ func isBlogTask(t model.ScheduledTask) bool {
 		return true
 	}
 	return false
+}
+
+func isMarketingEmailTask(t model.ScheduledTask) bool {
+	if t.TaskType == "marketing_email" {
+		return true
+	}
+	for _, tag := range t.Tags {
+		if tag == "marketing_email" {
+			return true
+		}
+	}
+	if kind, ok := t.InputJSON["kind"].(string); ok && kind == "marketing_email" {
+		return true
+	}
+	return false
+}
+
+// stringMapFromInput flattens schedule input_json into launch string values.
+func stringMapFromInput(in map[string]any) (map[string]string, error) {
+	out := map[string]string{}
+	if in == nil {
+		return out, nil
+	}
+	for k, v := range in {
+		if k == "kind" {
+			continue
+		}
+		switch x := v.(type) {
+		case string:
+			out[k] = x
+		case float64, bool:
+			out[k] = fmt.Sprint(x)
+		case nil:
+			// skip
+		default:
+			b, err := json.Marshal(x)
+			if err != nil {
+				return nil, fmt.Errorf("field %q: %w", k, err)
+			}
+			out[k] = string(b)
+		}
+	}
+	return out, nil
 }
 
 func blogRequestFromInput(in map[string]any) (model.GenerateBlogRequest, error) {

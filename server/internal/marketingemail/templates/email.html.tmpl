@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
+<meta name="x-apple-disable-message-reformatting">
+<title>{{.Subject}}</title>
+<style>
+@media only screen and (max-width: 620px) {
+  .container { width: 100% !important; max-width: 100% !important; }
+  .px { padding-left: 20px !important; padding-right: 20px !important; }
+  .hero-img { width: 100% !important; height: auto !important; }
+  .hero-h1 { font-size: 26px !important; line-height: 32px !important; }
+}
+@media (prefers-color-scheme: dark) {
+  .body-bg { background-color: #0a0918 !important; }
+  .card { background-color: #17162b !important; }
+  .em-t, .em-h { color: #e9e8f2 !important; }
+  .muted { color: #a9a8bd !important; }
+  .panel { background-color: #24203d !important; }
+  .box { border-color: #34324d !important; }
+}
+</style>
+</head>
+<body class="body-bg" style="margin:0;padding:0;background-color:#f3f3f7;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
+<span style="display:none;font-size:1px;line-height:1px;color:#f3f3f7;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">{{.Preheader}}&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="body-bg" style="background-color:#f3f3f7;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" class="container" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;">
+
+<tr><td class="px" bgcolor="#0d0b21" style="background-color:#0d0b21;padding:22px 40px;border-radius:8px 8px 0 0;">
+<a href="{{.HomeURL}}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;"><img src="{{.LogoURL}}" alt="{{.CompanyName}}" width="160" height="36" style="display:block;border:0;outline:none;text-decoration:none;height:auto;width:160px;"></a>
+</td></tr>
+
+<tr><td class="px" bgcolor="#0d0b21" style="background-color:#0d0b21;padding:8px 40px 32px 40px;">
+<h1 class="hero-h1" style="margin:0 0 12px 0;font-family:Arial,Helvetica,sans-serif;font-size:32px;line-height:38px;font-weight:bold;color:#ffffff;">{{.Headline}}</h1>
+{{if .Subline}}<p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:17px;line-height:26px;color:#c9c8dc;">{{.Subline}}</p>{{end}}
+</td></tr>
+{{if .HeroImageURL}}
+<tr><td bgcolor="#0d0b21" style="background-color:#0d0b21;padding:0;font-size:0;line-height:0;">
+<img class="hero-img" src="{{.HeroImageURL}}" alt="{{.Headline}}" width="600" height="338" style="display:block;border:0;outline:none;text-decoration:none;width:100%;max-width:600px;height:auto;">
+</td></tr>
+{{end}}
+{{range .Sections}}
+<tr><td class="px card" bgcolor="#ffffff" style="background-color:#ffffff;padding:32px 40px 8px 40px;">
+{{if .IsQuote}}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+<td width="4" bgcolor="#e5165f" style="background-color:#e5165f;width:4px;font-size:0;line-height:0;">&nbsp;</td>
+<td style="padding:4px 0 4px 20px;">
+{{if .Body}}<div style="font-style:italic;">{{.Body}}</div>{{end}}
+{{if .Heading}}<p class="muted" style="margin:0 0 16px 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:20px;color:#6b6a80;">{{.Heading}}</p>{{end}}
+</td></tr></table>
+{{else if .IsCTA}}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+<td class="panel" align="center" bgcolor="#fdeaf1" style="background-color:#fdeaf1;border-radius:8px;padding:28px 24px 12px 24px;">
+{{if .Heading}}<h2 class="em-h" style="margin:0 0 12px 0;font-family:Arial,Helvetica,sans-serif;font-size:22px;line-height:28px;font-weight:bold;color:#0d0b21;">{{.Heading}}</h2>{{end}}
+<div style="text-align:center;">{{.Body}}</div>
+{{if .CTAURL}}<table role="presentation" align="center" cellpadding="0" cellspacing="0" border="0" style="margin:8px auto 16px auto;"><tr>
+<td align="center" bgcolor="#e5165f" style="background-color:#e5165f;border-radius:6px;"><a href="{{.CTAURL}}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:14px 32px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:20px;font-weight:bold;color:#ffffff;text-decoration:none;border-radius:6px;">{{.CTALabel}}</a></td>
+</tr></table>{{end}}
+</td></tr></table>
+{{else if .IsProduct}}
+<table role="presentation" class="box" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #e3e3ec;border-radius:8px;"><tr>
+<td style="padding:24px 24px 8px 24px;">
+{{if .Heading}}<h2 class="em-h" style="margin:0 0 12px 0;font-family:Arial,Helvetica,sans-serif;font-size:20px;line-height:26px;font-weight:bold;color:#0d0b21;">{{.Heading}}</h2>{{end}}
+{{.Body}}
+{{if .Items}}<ul class="em-t" style="margin:0 0 16px 0;padding:0 0 0 22px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.6;color:#2b2a3a;">{{range .Items}}<li class="em-t" style="margin:0 0 6px 0;">{{.}}</li>{{end}}</ul>{{end}}
+{{if .CTAURL}}<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 16px 0;"><tr>
+<td align="center" bgcolor="#e5165f" style="background-color:#e5165f;border-radius:6px;"><a href="{{.CTAURL}}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:12px 26px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:20px;font-weight:bold;color:#ffffff;text-decoration:none;border-radius:6px;">{{.CTALabel}}</a></td>
+</tr></table>{{end}}
+</td></tr></table>
+{{else}}
+{{if .Heading}}<h2 class="em-h" style="margin:0 0 12px 0;font-family:Arial,Helvetica,sans-serif;font-size:22px;line-height:28px;font-weight:bold;color:#0d0b21;">{{.Heading}}</h2>{{end}}
+{{.Body}}
+{{if .Items}}<ul class="em-t" style="margin:0 0 16px 0;padding:0 0 0 22px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.6;color:#2b2a3a;">{{range .Items}}<li class="em-t" style="margin:0 0 6px 0;">{{.}}</li>{{end}}</ul>{{end}}
+{{if .CTAURL}}<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 16px 0;"><tr>
+<td align="center" bgcolor="#e5165f" style="background-color:#e5165f;border-radius:6px;"><a href="{{.CTAURL}}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:12px 26px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:20px;font-weight:bold;color:#ffffff;text-decoration:none;border-radius:6px;">{{.CTALabel}}</a></td>
+</tr></table>{{end}}
+{{end}}
+</td></tr>
+{{end}}
+
+<tr><td class="card" bgcolor="#ffffff" style="background-color:#ffffff;padding:8px 0 0 0;border-radius:0 0 8px 8px;font-size:0;line-height:0;">&nbsp;</td></tr>
+
+<tr><td class="px" align="center" style="padding:24px 40px 8px 40px;">
+{{if .FooterNote}}<p class="muted" style="margin:0 0 12px 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:20px;color:#6b6a80;">{{.FooterNote}}</p>{{end}}
+<p class="muted" style="margin:0 0 8px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:18px;color:#6b6a80;">{{.CompanyName}}{{if .CompanyAddress}} &middot; {{.CompanyAddress}}{{end}}</p>
+<p class="muted" style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:18px;color:#6b6a80;"><a href="{{.HomeURL}}" target="_blank" rel="noopener noreferrer" style="color:#6b6a80;text-decoration:underline;">{{.HomeURL}}</a> &middot; <a href="{{.UnsubscribeURL}}" target="_blank" rel="noopener noreferrer" style="color:#6b6a80;text-decoration:underline;">Manage preferences / unsubscribe</a></p>
+</td></tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>
