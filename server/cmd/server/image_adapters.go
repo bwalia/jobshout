@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/jobshout/server/internal/blog"
+	"github.com/jobshout/server/internal/marketingemail"
 	"github.com/jobshout/server/internal/service"
 	"github.com/jobshout/server/internal/tools"
 )
@@ -56,6 +57,28 @@ func (b *blogIllustrator) Generate(ctx context.Context, req blog.IllustrationReq
 		Height:   result.Height,
 		PNG:      result.PNG,
 	}, nil
+}
+
+// emailIllustrator adapts *service.ImageService to marketingemail.Illustrator.
+type emailIllustrator struct {
+	images *service.ImageService
+}
+
+func (e *emailIllustrator) Enabled() bool { return e.images != nil && e.images.Enabled() }
+
+func (e *emailIllustrator) Generate(ctx context.Context, req marketingemail.IllustrationRequest) (*marketingemail.Illustration, error) {
+	result, err := e.images.Generate(ctx, service.GenerateImageRequest{
+		OrgID:  req.OrgID,
+		Prompt: req.Prompt,
+		Width:  req.Width,
+		Height: req.Height,
+		Seed:   -1,
+		Source: req.Source,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &marketingemail.Illustration{URL: result.URL}, nil
 }
 
 // toolImageGenerator adapts *service.ImageService to tools.ImageGenerator.

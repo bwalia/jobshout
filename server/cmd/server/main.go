@@ -67,6 +67,7 @@ import (
 	"github.com/jobshout/server/internal/llmbench"
 	"github.com/jobshout/server/internal/llmtrace"
 	"github.com/jobshout/server/internal/mail"
+	"github.com/jobshout/server/internal/marketingemail"
 	"github.com/jobshout/server/internal/middleware"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/modelselect"
@@ -944,6 +945,28 @@ func main() {
 		zap.Duration("max_runtime", videoCfg.MaxRuntime),
 	)
 
+	// ─── Marketing Email Writer ─────────────────────────────────────────────
+	emailProvider, emailModel := agentLLM(cfg, model.BuiltinMarketingEmailWriter)
+	var emailWriter *marketingemail.Writer
+	if _, err := llmRouter.For(emailProvider); err == nil {
+		emailWriter = &marketingemail.Writer{
+			LLM:   marketingemail.NewClientCompleter(llmRouter.Routed(emailProvider), emailModel),
+			Model: emailModel,
+		}
+	}
+	emailDest := &marketingemail.Destinations{Integrations: integRepo, Ring: cmsClient}
+	emailSvc := marketingemail.NewService(emailWriter, emailDest, logger)
+	emailSvc.BindTasks(taskSvc)
+	emailSvc.BindRuns(repository.NewMarketingEmailRunRepository(pool))
+	if cfg.BlogCoverImages && imageSvc.Enabled() {
+		emailSvc = emailSvc.WithIllustrator(&emailIllustrator{images: imageSvc})
+	}
+	logger.Info("marketing email writer initialised",
+		zap.Bool("configured", emailSvc.Configured()),
+		zap.String("provider", emailProvider),
+		zap.Bool("illustrator", cfg.BlogCoverImages && imageSvc.Enabled()),
+	)
+
 	secretsRotCfg := secretsrot.LoadConfig()
 	secretsRotSvc := service.NewSecretsRotationService(secretsRotRunRepo, agentRepo, secretsRotCfg, logger)
 	logger.Info("secrets rotation agent initialised",
@@ -1003,6 +1026,7 @@ func main() {
 		LinkedIn:         linkedInSvc,
 		CompanyWeb:       companyweb.ClientRunner{Client: researchClient},
 		Video:            videoSvc,
+		MarketingEmail:   emailSvc,
 	})
 
 	// ─── Autonomous agent engine ────────────────────────────────────────────
@@ -1233,6 +1257,7 @@ func main() {
 	seoHandler := handler.NewSEOHandler(seoSvc)
 	courseHandler := handler.NewCourseHandler(courseSvc)
 	videoHandler := handler.NewVideoHandler(videoSvc)
+	marketingEmailHandler := handler.NewMarketingEmailHandler(emailSvc)
 	linkedInHandler := handler.NewLinkedInHandler(linkedInSvc, cfg.FrontendBaseURL)
 	secretsRotHandler := handler.NewSecretsRotationHandler(secretsRotSvc)
 	linuxPatchHandler := handler.NewLinuxPatchHandler(linuxPatchSvc)
@@ -1656,6 +1681,13 @@ func main() {
 				r.Post("/runs/{runID}/cancel", videoHandler.CancelRun)
 			})
 
+			r.Route("/marketing-emails", func(r chi.Router) {
+				r.Get("/runs", marketingEmailHandler.ListRuns)
+				r.Get("/runs/{runID}", marketingEmailHandler.GetRun)
+				r.Post("/runs/{runID}/regenerate", marketingEmailHandler.Regenerate)
+				r.Post("/runs/{runID}/unpublish", marketingEmailHandler.Unpublish)
+			})
+
 			r.Route("/linkedin", func(r chi.Router) {
 				r.Get("/connection", linkedInHandler.Status)
 				r.Delete("/connection", linkedInHandler.Disconnect)
@@ -1996,7 +2028,9 @@ func main() {
 	// ─── Scheduler dispatcher ───────────────────────────────────────────────
 	// Ticks every 30s, picks up due scheduled_tasks, and dispatches them to
 	// the appropriate path (blog pipeline / workflow / agent).
-	schedulerRunner := scheduler.NewRunner(schedulerRepo, blogSvc, workflowSvc, execSvc, multiAgentSvc, logger).WithCareer(careerSvc)
+	schedulerRunner := scheduler.NewRunner(schedulerRepo, blogSvc, workflowSvc, execSvc, multiAgentSvc, logger).
+		WithCareer(careerSvc).
+		WithMarketingEmail(emailSvc)
 	go schedulerRunner.Start(ctx)
 
 	// ─── Usage partition maintainer ─────────────────────────────────────────
@@ -2027,6 +2061,7 @@ func main() {
 	// LinkedIn drafts for newly published articles, for orgs that connected it.
 	go linkedInSvc.StartAutoDraft(ctx)
 	go videoSvc.StartResumer(ctx)
+	emailSvc.FailStale(ctx, 30*time.Minute)
 
 	srv := &http.Server{
 		Addr:    cfg.ServerPort,
