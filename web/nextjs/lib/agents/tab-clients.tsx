@@ -19,6 +19,7 @@ import { CourseGeneratorClient } from "@/components/courses/CourseGeneratorClien
 import { InsightsWriterClient } from "@/components/insights-writer/InsightsWriterClient";
 import { LinkedInClient } from "@/components/linkedin/LinkedInClient";
 import { VideoProducerClient } from "@/components/video/VideoProducerClient";
+import { MarketingEmailClient } from "@/components/marketing-email/MarketingEmailClient";
 import type { AgentClientBuiltin } from "@/lib/agents/specialist";
 
 /**
@@ -53,6 +54,7 @@ export const AGENT_CLIENTS: Record<string, ComponentType> = {
   jobshout_com_writer: InsightsWriterClient,
   linkedin_poster: LinkedInClient,
   video_producer: VideoProducerClient,
+  marketing_email_writer: MarketingEmailClient,
   // Keyed exactly by AGENT_CLIENT_BUILTINS (lib/agents/specialist.ts): a screen
   // added here without listing it there, or the reverse, does not compile.
 } satisfies Record<AgentClientBuiltin, ComponentType>;
