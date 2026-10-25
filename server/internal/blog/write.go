@@ -32,6 +32,9 @@ type writePlan struct {
 	CoverMetaphor string         `json:"cover_metaphor"`
 	CoverObjects  flexibleString `json:"cover_objects"`
 	CoverAccent   string         `json:"cover_accent"`
+	// CoverScene is the diagram a drawn cover shows. Decoded tolerantly: an
+	// odd shape leaves it empty and the cover derives one from the article.
+	CoverScene coverScene `json:"cover_scene"`
 	// Figures are in-body informational images (flow, comparison, …), planned
 	// only when this run can actually draw. Omitted or empty is fine.
 	Figures []figureBrief `json:"figures"`
@@ -94,7 +97,7 @@ func (r *Runner) plan(ctx context.Context, modelName string, brief model.BlogBri
 	figureAsk, extraJSON := "", ""
 	if r.canLetterFigures() {
 		figureAsk = `
-5. One or two in-article figures that would teach something. Each names a
+6. One or two in-article figures that would teach something. Each names a
    kind (flow, comparison, architecture, process, or concept), the section
    it belongs under, and the facts to put on the figure — labels, rows or
    steps, not a decorative scene.`
@@ -129,11 +132,16 @@ Decide:
    "tools, documents, agents"), and a one-word accent note (e.g. "amber",
    "ice", "copper") that still sits with teal/coral. Listing cards share a
    house style; only the metaphor and objects make each cover distinct.
+5. A cover diagram: the one layout below that best pictures this article's
+   argument, with 2-6 labels of 1-3 words each in this article's own terms
+   (section ideas, not sector names), a "stat" only when a finding states that
+   exact figure (otherwise ""), and an "eyebrow" of 1-3 words naming the field.
+%s
 %s
 The title must be about the TOPIC given above; research that wandered off it is not a reason to change subject.
 
 Respond with JSON only, in exactly this shape:
-{"title": "...", "angle": "...", "sections": ["...", "..."], "cover_metaphor": "...", "cover_objects": "...", "cover_accent": "..."%s}`,
+{"title": "...", "angle": "...", "sections": ["...", "..."], "cover_metaphor": "...", "cover_objects": "...", "cover_accent": "...", "cover_scene": {"layout": "...", "labels": ["...", "..."], "stat": "", "eyebrow": "..."}%s}`,
 		reader.PlanningLine(),
 		brief.Topic,
 		guidanceOrNone(brief.Context),
@@ -142,6 +150,7 @@ Respond with JSON only, in exactly this shape:
 		formatFindings(rb.Findings),
 		reader.TitleStyle,
 		reader.Sections,
+		coverLayoutGuide,
 		figureAsk,
 		extraJSON,
 	)

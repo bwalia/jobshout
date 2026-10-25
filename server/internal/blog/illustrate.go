@@ -636,12 +636,13 @@ func (r *Runner) RegenerateCover(ctx context.Context, orgID uuid.UUID, a *Genera
 	a.CoverMetaphor = ""
 	a.CoverObjects = ""
 	a.CoverAccent = ""
+	a.CoverScene = coverScene{}
 	if strings.TrimSpace(a.CoverAngle) == "" {
 		a.CoverAngle = strings.TrimSpace(a.Excerpt)
 	}
-	err := fmt.Errorf("image generation is not enabled")
-	if r.canIllustrate() {
-		if err = r.generateCover(ctx, orgID, a); err == nil {
+	err := fmt.Errorf("cover drawing is not available")
+	if r.canDrawCover() {
+		if err = r.drawCover(ctx, orgID, a); err == nil {
 			return nil
 		}
 	}

@@ -60,6 +60,9 @@ type GeneratedArticle struct {
 	CoverMetaphor string
 	CoverObjects  string
 	CoverAccent   string
+	// CoverScene is the diagram a drawn cover shows (layout + labels). Empty
+	// means derive one from the written piece.
+	CoverScene coverScene
 
 	// Audience and Industry are the reader this was written for, carried out of
 	// the pipeline so the caller can store them on the article and the CMS
@@ -171,7 +174,10 @@ func (r *Runner) finalizeArticle(
 			r.logger.Info("blog: "+note, zap.String("title", article.Title))
 		}
 
-		if err := r.generateCover(ctx, req.OrgID, article); err != nil {
+	}
+	if r.canDrawCover() {
+		article.RunID = req.RunID
+		if err := r.drawCover(ctx, req.OrgID, article); err != nil {
 			r.logger.Warn("blog: could not draw a cover image",
 				zap.String("title", article.Title), zap.Error(err))
 			report(progress, model.BlogStepIllustrating,
@@ -364,6 +370,7 @@ func (r *Runner) writeOne(
 		CoverMetaphor: plan.CoverMetaphor,
 		CoverObjects:  plan.CoverObjects.String(),
 		CoverAccent:   plan.CoverAccent,
+		CoverScene:    plan.CoverScene,
 		Audience:      brief.Audience,
 		Industry:      brief.Industry,
 	}, nil

@@ -3,6 +3,7 @@ package blog
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"hash/fnv"
@@ -47,7 +48,8 @@ const maxFeaturedImageURL = 255
 // In order:
 //  1. the article's recorded cover, if its bytes really are in the store;
 //  2. a cover drawn now from the article — the relevant picture;
-//  3. a branded fallback rendered here, needing no GPU, provider or network.
+//  3. a fallback rendered here, needing no GPU, provider or network: the
+//     article's diagram, or failing that a branded gradient.
 //
 // An error means there is no usable image at all, and the caller must not file
 // the post: a draft without a picture is one click from a live page without one.
@@ -60,11 +62,11 @@ func (r *Runner) ensureCover(ctx context.Context, orgID uuid.UUID, a *GeneratedA
 			zap.String("title", a.Title), zap.String("cover", a.CoverImageURL))
 		a.CoverImageURL = ""
 	}
-	if r.canIllustrate() {
+	if r.canDrawCover() {
 		report(progress, model.BlogStepIllustrating,
 			fmt.Sprintf("Drawing a cover for %q before publishing", a.Title),
 			model.AgentNameArticleWriter)
-		err := r.generateCover(ctx, orgID, a)
+		err := r.drawCover(ctx, orgID, a)
 		if err == nil && r.coverStored(ctx, a.CoverImageURL) {
 			return r.featuredImageURL(a.CoverImageURL)
 		}
@@ -113,13 +115,85 @@ func (r *Runner) featuredImageURL(cover string) (string, error) {
 	return abs, nil
 }
 
-// storeFallbackCover renders the branded cover and records it as a's cover.
-// The provider "fallback" marks it in the article, so it can be redrawn
-// (regenerate-cover) once image generation is healthy again.
+// Cover styles (Config.CoverStyle).
+const (
+	// CoverStyleDiagram draws the article's idea as a vector diagram in the
+	// house style. No GPU or provider: it only needs the cover store.
+	CoverStyleDiagram = "diagram"
+	// CoverStylePicture asks the image service for a generated picture.
+	CoverStylePicture = "picture"
+)
+
+func (r *Runner) coverPictures() bool {
+	return strings.EqualFold(strings.TrimSpace(r.cfg.CoverStyle), CoverStylePicture)
+}
+
+// canDrawCover reports whether this run can give an article a real cover in
+// the configured style.
+func (r *Runner) canDrawCover() bool {
+	if r.coverPictures() {
+		return r.canIllustrate()
+	}
+	return r.covers != nil
+}
+
+// drawCover gives a its cover in the configured style.
+func (r *Runner) drawCover(ctx context.Context, orgID uuid.UUID, a *GeneratedArticle) error {
+	if r.coverPictures() {
+		return r.generateCover(ctx, orgID, a)
+	}
+	return r.storeDiagramCover(ctx, orgID, a)
+}
+
+// storeDiagramCover draws a's cover diagram and records it as a's cover. The
+// scene is kept as the prompt, so the article shows what was drawn and why.
+func (r *Runner) storeDiagramCover(ctx context.Context, orgID uuid.UUID, a *GeneratedArticle) error {
+	if r.covers == nil {
+		return errors.New("no image store is configured")
+	}
+	scene := coverSceneFor(a)
+	accent := a.CoverAccent
+	if strings.TrimSpace(accent) == "" {
+		accent = accentForTopic(a.Title, a.Topic, a.CoverAngle)
+	}
+	seed := a.Slug
+	if seed == "" {
+		seed = a.Title
+	}
+	img, err := drawDiagramCover(scene, accent, seed)
+	if err != nil {
+		return err
+	}
+	url, err := r.covers.PutFile(ctx, orgID, img, "png", "image/png")
+	if err != nil {
+		return err
+	}
+	spec, _ := json.Marshal(scene)
+	a.CoverScene = scene
+	a.CoverImageURL = url
+	a.CoverImagePrompt = string(spec)
+	a.CoverImageProvider = "diagram"
+	a.CoverImageModel = "scene:" + string(scene.Layout)
+	a.CoverImageSeed = 0
+	a.CoverImageWidth, a.CoverImageHeight = int(designW), int(designH)
+	return nil
+}
+
+// storeFallbackCover records a cover for an article none could be drawn for.
+// The article's diagram comes first — it needs nothing that a failed picture
+// needed, and it is still about the article. The branded gradient is the
+// last resort; its provider "fallback" marks it for regenerate-cover once
+// drawing is healthy again.
 func (r *Runner) storeFallbackCover(ctx context.Context, orgID uuid.UUID, a *GeneratedArticle) error {
 	if r.covers == nil {
 		return errors.New("no image store is configured")
 	}
+	err := r.storeDiagramCover(ctx, orgID, a)
+	if err == nil {
+		return nil
+	}
+	r.logger.Warn("blog: could not draw a diagram cover; using the branded gradient",
+		zap.String("title", a.Title), zap.Error(err))
 	seed := a.Slug
 	if seed == "" {
 		seed = a.Title

@@ -652,6 +652,7 @@ func main() {
 			ContentDir:      cfg.BlogContentDir,
 			AuthorName:      cfg.BlogAuthorName,
 			PublicBaseURL:   cfg.FrontendBaseURL,
+			CoverStyle:      cfg.BlogCoverStyle,
 			Model:           firstNonEmptyStr(blogModel, cfg.BlogModel),
 			ProseModel:      cfg.BlogProseModel,
 			StructuredModel: cfg.BlogStructuredModel,

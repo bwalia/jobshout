@@ -50,6 +50,10 @@ type Config struct {
 	// prefixes relative covers with this base. Empty means covers are omitted
 	// from the CMS payload rather than sending a path another host cannot resolve.
 	PublicBaseURL string
+	// CoverStyle is what an article's cover is: CoverStyleDiagram (the
+	// default — the article's idea drawn as a diagram, no GPU) or
+	// CoverStylePicture (a generated picture from the image service).
+	CoverStyle string
 	// Model is the LLM used for writing — planning, drafting, reviewing,
 	// revising and expanding. Empty means the provider's default.
 	//
