@@ -38,6 +38,11 @@ struct MainTabView: View {
             Tab("Work", systemImage: "square.stack.3d.up") {
                 NavigationStack { WorkView().detailDestinations() }
             }
+            #if os(iOS)
+            Tab("Schedules", systemImage: "clock") {
+                NavigationStack { SchedulesView().detailDestinations() }
+            }
+            #endif
             Tab("Approvals", systemImage: "checkmark.shield") {
                 NavigationStack { ApprovalsView().detailDestinations() }
             }

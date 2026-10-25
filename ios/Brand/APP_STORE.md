@@ -46,3 +46,8 @@ Until App Store Connect + distribution certs exist, Archive → Distribute App �
 ## ExportOptions (App Store)
 
 See `ExportOptions-MacAppStore.plist` — fill `teamID` before export.
+
+## iPhone TestFlight
+
+See [`TESTFLIGHT.md`](TESTFLIGHT.md) and `../scripts/release-ios-testflight.sh`
+for the `com.jobshout.app` App Store Connect track.
