@@ -5,6 +5,8 @@ Plan and scope: [`docs/plans/08-ios-app.md`](../docs/plans/08-ios-app.md).
 
 Brand masters (icon, wordmark, App Store notes): [`Brand/`](Brand/).
 Mac shipping target builds as **JobShout.app** (scheme `JobShoutMac`).
+iPhone TestFlight: [`Brand/TESTFLIGHT.md`](Brand/TESTFLIGHT.md) and
+`./scripts/release-ios-testflight.sh`.
 
 The iPhone app covers the core loop: sign in (Sign in with Apple or email),
 browse agents, **call an agent** with its server-defined launch form, watch
