@@ -23,6 +23,7 @@ import (
 	"github.com/jobshout/server/internal/linuxpatch"
 	"github.com/jobshout/server/internal/mail"
 	"github.com/jobshout/server/internal/marketingemail"
+	"github.com/jobshout/server/internal/marketingmanager"
 	"github.com/jobshout/server/internal/pentester"
 	"github.com/jobshout/server/internal/prreview"
 	"github.com/jobshout/server/internal/research"
@@ -57,6 +58,7 @@ type Deps struct {
 	CompanyWeb       companyweb.Runner
 	Video            video.Runner
 	MarketingEmail   marketingemail.Runner
+	Marketing        *marketingmanager.Service
 }
 
 func init() {
@@ -93,6 +95,7 @@ func Register(d Deps) {
 	agentmodule.Register(companyweb.Module(d.CompanyWeb))
 	agentmodule.Register(video.Module(d.Video))
 	agentmodule.Register(marketingemail.Module(d.MarketingEmail))
+	agentmodule.Register(marketingmanager.Module(d.Marketing))
 }
 
 type imageAdapter struct{ svc *service.ImageService }

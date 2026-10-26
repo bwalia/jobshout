@@ -36,6 +36,7 @@ implement HashiCorp `auth/token/create` or `sys/policies`.
 | `jobshout-llm` | `jobshout/<ring>/llm` | Any of `OPENAI_API_KEY`, `CLAUDE_API_KEY` (or `ANTHROPIC_API_KEY`), `GEMINI_API_KEY`. Each key set adds that provider to the model picker; which models it offers is `ai.*Model` / `ai.*Models` in the chart values, not a secret |
 | `jobshout-gateways` | `jobshout/<ring>/gateways` | `OLLAMA_JWT_SECRET`, `IMAGE_JWT_SECRET` |
 | `jobshout-strix` | `jobshout/<ring>/strix` | `STRIX_JWT_SECRET` (separate from gateways on purpose) |
+| `jobshout-marketing` | `jobshout/<ring>/marketing` | `OPSAPI_MARKETING_API_KEY` (marketing-profile key, never the CMS key), `OPSAPI_MARKETING_NAMESPACE`, `MARKETING_TEST_RECIPIENTS`. Int only so far; see `docs/marketing-manager.md` |
 
 `<ring>` is `int`, `test`, `acc`, or `prod`. Keys must match env names exactly
 (`GEMINI_API_KEY`, not `geminiApiKey`).
