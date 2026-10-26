@@ -24,7 +24,7 @@ func NewClaudeClient(baseURL, apiKey, defaultModel string) *ClaudeClient {
 		baseURL = "https://api.anthropic.com"
 	}
 	if defaultModel == "" {
-		defaultModel = "claude-sonnet-4-20250514"
+		defaultModel = "claude-sonnet-5-5"
 	}
 	return &ClaudeClient{
 		BaseURL:      baseURL,
@@ -101,10 +101,9 @@ func (c *ClaudeClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 		model = c.DefaultModel
 	}
 
-	maxTokens := req.MaxTokens
-	if maxTokens == 0 {
-		maxTokens = 4096
-	}
+	// Current Claude models think by default (some cannot be told not to), and
+	// thinking spends from max_tokens.
+	maxTokens := max(req.MaxTokens, minThinkingTokens)
 
 	// Separate system message from conversation messages, translating any
 	// native tool-calling fields into Anthropic content blocks.
@@ -154,7 +153,7 @@ func (c *ClaudeClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 		System:    systemPrompt,
 		Messages:  msgs,
 	}
-	if t := resolvedTemperature(req); t > 0 {
+	if t := resolvedTemperature(req); t > 0 && !refused("claude", model, "temperature") {
 		body.Temperature = &t
 	}
 
@@ -171,42 +170,10 @@ func (c *ClaudeClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 		})
 	}
 
-	payload, err := json.Marshal(body)
+	rawBody, err := c.post(ctx, &body)
 	if err != nil {
-		return nil, fmt.Errorf("claude: marshal request: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/v1/messages", bytes.NewReader(payload))
-	if err != nil {
-		return nil, fmt.Errorf("claude: build request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("x-api-key", c.APIKey)
-	httpReq.Header.Set("anthropic-version", "2023-06-01")
-
-	attempt := beginAttempt(ctx)
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		err = fmt.Errorf("claude: HTTP error: %w", err)
-		attempt.end(err)
 		return nil, err
 	}
-	defer resp.Body.Close()
-	attempt.response(resp)
-
-	rawBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		err = fmt.Errorf("claude: read response body: %w", err)
-		attempt.end(err)
-		return nil, err
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		err := fmt.Errorf("claude: unexpected status %d: %s", resp.StatusCode, string(rawBody))
-		attempt.end(err)
-		return nil, err
-	}
-	attempt.end(nil)
 
 	var chatResp claudeResponse
 	if err := json.Unmarshal(rawBody, &chatResp); err != nil {
@@ -255,4 +222,59 @@ func (c *ClaudeClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 		RequestID:     chatResp.ID,
 		Usage:         usage,
 	}, nil
+}
+
+// post sends body, once more without temperature if the model refuses one
+// (see refusedParams).
+func (c *ClaudeClient) post(ctx context.Context, body *claudeRequest) ([]byte, error) {
+	for {
+		status, raw, err := c.send(ctx, body)
+		if err != nil && body.Temperature != nil && refuses("claude", body.Model, status, raw, "temperature") {
+			body.Temperature = nil
+			continue
+		}
+		return raw, err
+	}
+}
+
+// send makes one /v1/messages request. A non-200 is an error that still
+// returns the status and body, for post to inspect.
+func (c *ClaudeClient) send(ctx context.Context, body *claudeRequest) (int, []byte, error) {
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return 0, nil, fmt.Errorf("claude: marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/v1/messages", bytes.NewReader(payload))
+	if err != nil {
+		return 0, nil, fmt.Errorf("claude: build request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("x-api-key", c.APIKey)
+	httpReq.Header.Set("anthropic-version", "2023-06-01")
+
+	attempt := beginAttempt(ctx)
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		err = fmt.Errorf("claude: HTTP error: %w", err)
+		attempt.end(err)
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	attempt.response(resp)
+
+	rawBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		err = fmt.Errorf("claude: read response body: %w", err)
+		attempt.end(err)
+		return resp.StatusCode, nil, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		err := fmt.Errorf("claude: unexpected status %d: %s", resp.StatusCode, string(rawBody))
+		attempt.end(err)
+		return resp.StatusCode, rawBody, err
+	}
+	attempt.end(nil)
+	return resp.StatusCode, rawBody, nil
 }

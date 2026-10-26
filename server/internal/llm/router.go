@@ -38,6 +38,11 @@ type Router struct {
 	// pointer, so a Router built as a composite literal (NewTestRouter) is
 	// usable without further initialisation.
 	modelCache modelCache
+
+	// configuredModels is each hosted provider's model list as the environment
+	// set it (<PROVIDER>_MODELS plus its default model). Nil in test routers,
+	// which then get the built-in lists.
+	configuredModels map[string][]ModelInfo
 }
 
 // NewRouter builds a Router pre-populated with the configured LLM providers.
@@ -49,6 +54,7 @@ func NewRouter(cfg *config.Config) *Router {
 		defaultProvider:          cfg.LLMProvider,
 		embedders:                make(map[string]Embedder),
 		defaultEmbeddingProvider: cfg.EmbeddingProvider,
+		configuredModels:         make(map[string][]ModelInfo),
 	}
 
 	// Ollama is always registered — it requires no API key. When
@@ -59,12 +65,15 @@ func NewRouter(cfg *config.Config) *Router {
 	).WithNumCtx(cfg.OllamaNumCtx)
 
 	// OpenAI (and compatible endpoints) are registered when an API key is set.
-	openAIBase := cfg.OpenAIBaseURL
+	// The clients add /v1 themselves; a base copied from a provider's docs
+	// usually ends in it already.
+	openAIBase := apiRoot(cfg.OpenAIBaseURL)
 	if openAIBase == "" {
 		openAIBase = "https://api.openai.com"
 	}
 	if cfg.OpenAIAPIKey != "" {
 		r.clients["openai"] = NewOpenAIClient(openAIBase, cfg.OpenAIAPIKey, cfg.OpenAIDefaultModel)
+		r.configuredModels["openai"] = ConfiguredModels("openai", cfg.OpenAIDefaultModel, cfg.OpenAIModels)
 	}
 
 	// Gemini is registered when GEMINI_API_KEY is set — the same key image
@@ -72,11 +81,13 @@ func NewRouter(cfg *config.Config) *Router {
 	// to Gemini only when an agent or run names the provider.
 	if cfg.GeminiAPIKey != "" {
 		r.clients["gemini"] = NewGeminiClient(cfg.GeminiBaseURL, cfg.GeminiAPIKey, cfg.GeminiDefaultModel, cfg.GeminiTimeout)
+		r.configuredModels["gemini"] = ConfiguredModels("gemini", cfg.GeminiDefaultModel, cfg.GeminiModels)
 	}
 
 	// Claude / Anthropic is registered when an API key is set.
 	if cfg.ClaudeAPIKey != "" {
-		r.clients["claude"] = NewClaudeClient(cfg.ClaudeBaseURL, cfg.ClaudeAPIKey, cfg.ClaudeDefaultModel)
+		r.clients["claude"] = NewClaudeClient(apiRoot(cfg.ClaudeBaseURL), cfg.ClaudeAPIKey, cfg.ClaudeDefaultModel)
+		r.configuredModels["claude"] = ConfiguredModels("claude", cfg.ClaudeDefaultModel, cfg.ClaudeModels)
 	}
 
 	// ─── Embedders ───────────────────────────────────────────────────────────
@@ -108,6 +119,11 @@ func NewRouter(cfg *config.Config) *Router {
 	}
 
 	return r
+}
+
+// apiRoot strips a trailing slash and /v1 from a provider base URL.
+func apiRoot(base string) string {
+	return strings.TrimSuffix(strings.TrimRight(base, "/"), "/v1")
 }
 
 // RegisteredProviders returns a list of all registered provider names and

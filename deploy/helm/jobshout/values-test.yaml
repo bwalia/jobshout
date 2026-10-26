@@ -52,6 +52,10 @@ extraSecretRefs:
   - jobshout-core
   - jobshout-secretsrot
   - jobshout-gateways
+  # OPENAI_API_KEY / CLAUDE_API_KEY (or ANTHROPIC_API_KEY) / GEMINI_API_KEY:
+  # each key set registers that provider in the model picker. Models are
+  # chosen with ai.*Model / ai.*Models (values.yaml), not here.
+  - jobshout-llm
 
 vaultSecrets:
   - name: jobshout-core
@@ -63,6 +67,9 @@ vaultSecrets:
   - name: jobshout-gateways
     store: wslvault-backend
     key: jobshout/test/gateways
+  - name: jobshout-llm
+    store: wslvault-backend
+    key: jobshout/test/llm
 
 # Secrets Rotation propagation on test. jobshout-secretsrot holds
 # SECRETS_VAULT_ADDR/SECRETS_VAULT_TOKEN and RP_API_TOKEN (Vault path above).

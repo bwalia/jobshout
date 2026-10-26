@@ -23,6 +23,10 @@
 - WSLVault speaks the KV v2 API but not `auth/token/create` or `sys/policies`; scoped tokens must be made in its UI.
 - Launch-form values are persisted to the task (`TaskMetaLaunchValues`). Never make a credential a schema field — reference server-side creds by name.
 
+## LLM providers
+
+- Hosted models are configuration: `<PROVIDER>_DEFAULT_MODEL` / `<PROVIDER>_MODELS` (chart `ai.*Model` / `ai.*Models`), keys in Vault `jobshout/<ring>/llm`. Never add a model id to code to offer it; `StaticModels` is only the fallback list.
+
 ## Article Writer
 
 - `BLOG_MAX_RUNTIME` is a per-article budget (one article ≈ 25–30 min on int). A flat per-run cap kills finished runs.

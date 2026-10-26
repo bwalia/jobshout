@@ -33,6 +33,7 @@ implement HashiCorp `auth/token/create` or `sys/policies`.
 | `jobshout-wslproxy` | `jobshout/<ring>/wslproxy` | `WSLPROXY_API_TOKEN` and/or `WSLPROXY_USERNAME`+`WSLPROXY_PASSWORD`; optional `WSLPROXY_MCP_API_KEY` |
 | `jobshout-secretsrot` | `jobshout/<ring>/secretsrot` | `SECRETS_VAULT_ADDR`, `SECRETS_VAULT_TOKEN`, `RP_API_TOKEN`; optional `SECRETS_ROT_GITHUB_TOKEN` |
 | `jobshout-gemini` | `jobshout/<ring>/gemini` | `GEMINI_API_KEY` |
+| `jobshout-llm` | `jobshout/<ring>/llm` | Any of `OPENAI_API_KEY`, `CLAUDE_API_KEY` (or `ANTHROPIC_API_KEY`), `GEMINI_API_KEY`. Each key set adds that provider to the model picker; which models it offers is `ai.*Model` / `ai.*Models` in the chart values, not a secret |
 | `jobshout-gateways` | `jobshout/<ring>/gateways` | `OLLAMA_JWT_SECRET`, `IMAGE_JWT_SECRET` |
 | `jobshout-strix` | `jobshout/<ring>/strix` | `STRIX_JWT_SECRET` (separate from gateways on purpose) |
 

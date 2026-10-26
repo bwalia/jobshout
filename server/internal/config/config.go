@@ -87,10 +87,19 @@ type Config struct {
 	OpenAIDefaultModel string `mapstructure:"OPENAI_DEFAULT_MODEL"`
 
 	// Claude / Anthropic configuration.
-	// When LLM_PROVIDER=claude, CLAUDE_API_KEY must be set.
+	// When LLM_PROVIDER=claude, CLAUDE_API_KEY (or ANTHROPIC_API_KEY) must be set.
 	ClaudeAPIKey       string `mapstructure:"CLAUDE_API_KEY"`
 	ClaudeBaseURL      string `mapstructure:"CLAUDE_BASE_URL"`
 	ClaudeDefaultModel string `mapstructure:"CLAUDE_DEFAULT_MODEL"`
+
+	// OpenAIModels, ClaudeModels and GeminiModels are the models each hosted
+	// provider offers in the model picker (OPENAI_MODELS, CLAUDE_MODELS,
+	// GEMINI_MODELS, comma-separated). Empty keeps the built-in list. The
+	// provider's default model is always offered too, so moving to a new model
+	// is an environment change, never a code change.
+	OpenAIModels []string
+	ClaudeModels []string
+	GeminiModels []string
 
 	// Image generation configuration.
 	//
@@ -297,6 +306,17 @@ func (c *Config) RefreshTokenExpiry() time.Duration {
 	return time.Duration(c.JWTRefreshExpiryDays) * 24 * time.Hour
 }
 
+// csv splits a comma-separated value, dropping blanks.
+func csv(s string) []string {
+	var out []string
+	for _, v := range strings.Split(s, ",") {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
 // Load reads configuration from environment variables.
 func Load() (*Config, error) {
 	viper.AutomaticEnv()
@@ -326,7 +346,9 @@ func Load() (*Config, error) {
 	viper.SetDefault("OPENAI_BASE_URL", "https://api.openai.com")
 	viper.SetDefault("OPENAI_DEFAULT_MODEL", "gpt-4o-mini")
 	viper.SetDefault("CLAUDE_BASE_URL", "https://api.anthropic.com")
-	viper.SetDefault("CLAUDE_DEFAULT_MODEL", "claude-sonnet-4-20250514")
+	viper.SetDefault("CLAUDE_DEFAULT_MODEL", "claude-sonnet-5-5")
+	// ANTHROPIC_API_KEY is Anthropic's own name for the key; either works.
+	_ = viper.BindEnv("CLAUDE_API_KEY", "CLAUDE_API_KEY", "ANTHROPIC_API_KEY")
 
 	// Image generation defaults. The local image service is the out-of-the-box
 	// provider, on 11435 — one above Ollama's 11434, because the two workstation
@@ -409,6 +431,9 @@ func Load() (*Config, error) {
 		ClaudeAPIKey:         viper.GetString("CLAUDE_API_KEY"),
 		ClaudeBaseURL:        viper.GetString("CLAUDE_BASE_URL"),
 		ClaudeDefaultModel:   viper.GetString("CLAUDE_DEFAULT_MODEL"),
+		OpenAIModels:         csv(viper.GetString("OPENAI_MODELS")),
+		ClaudeModels:         csv(viper.GetString("CLAUDE_MODELS")),
+		GeminiModels:         csv(viper.GetString("GEMINI_MODELS")),
 		ImageProvider:        viper.GetString("IMAGE_PROVIDER"),
 		ImageBaseURL:         viper.GetString("IMAGE_BASE_URL"),
 		ImageDefaultModel:    viper.GetString("IMAGE_DEFAULT_MODEL"),

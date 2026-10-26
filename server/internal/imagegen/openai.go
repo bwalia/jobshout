@@ -46,7 +46,7 @@ func NewOpenAIClient(baseURL, apiKey, defaultModel string) *OpenAIClient {
 		defaultModel = openAIDefaultModel
 	}
 	return &OpenAIClient{
-		baseURL:      strings.TrimRight(baseURL, "/"),
+		baseURL:      strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/v1"),
 		apiKey:       apiKey,
 		defaultModel: defaultModel,
 		httpClient:   &http.Client{Timeout: openAITimeout},

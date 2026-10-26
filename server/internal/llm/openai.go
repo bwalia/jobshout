@@ -60,11 +60,14 @@ func (c *OpenAIClient) SupportsTools() bool { return true }
 
 // openAIChatRequest mirrors the OpenAI /v1/chat/completions request body.
 type openAIChatRequest struct {
-	Model       string          `json:"model"`
-	Messages    []openAIMessage `json:"messages"`
-	MaxTokens   int             `json:"max_tokens,omitempty"`
-	Temperature float64         `json:"temperature,omitempty"`
-	Tools       []openAITool    `json:"tools,omitempty"`
+	Model     string          `json:"model"`
+	Messages  []openAIMessage `json:"messages"`
+	MaxTokens int             `json:"max_tokens,omitempty"`
+	// MaxCompletionTokens replaces MaxTokens for models that refuse it
+	// (OpenAI's reasoning models); it also bounds their reasoning.
+	MaxCompletionTokens int          `json:"max_completion_tokens,omitempty"`
+	Temperature         float64      `json:"temperature,omitempty"`
+	Tools               []openAITool `json:"tools,omitempty"`
 }
 
 type openAIMessage struct {
@@ -144,11 +147,16 @@ func (c *OpenAIClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 		msgs[i] = om
 	}
 
-	body := openAIChatRequest{
-		Model:       model,
-		Messages:    msgs,
-		MaxTokens:   req.MaxTokens,
-		Temperature: resolvedTemperature(req),
+	name := c.ProviderName()
+	body := openAIChatRequest{Model: model, Messages: msgs}
+	if req.MaxTokens > 0 {
+		body.MaxTokens = req.MaxTokens
+		if refused(name, model, "max_completion_tokens") {
+			body.MaxTokens, body.MaxCompletionTokens = 0, max(req.MaxTokens, minThinkingTokens)
+		}
+	}
+	if !refused(name, model, "temperature") {
+		body.Temperature = resolvedTemperature(req)
 	}
 
 	// Native tool-calling: advertise function definitions when provided.
@@ -163,43 +171,10 @@ func (c *OpenAIClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 		})
 	}
 
-	payload, err := json.Marshal(body)
+	rawBody, err := c.post(ctx, &body)
 	if err != nil {
-		return nil, fmt.Errorf("openai: marshal request: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/v1/chat/completions", bytes.NewReader(payload))
-	if err != nil {
-		return nil, fmt.Errorf("openai: build request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	if c.APIKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+c.APIKey)
-	}
-
-	attempt := beginAttempt(ctx)
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		err = fmt.Errorf("openai: HTTP error: %w", err)
-		attempt.end(err)
 		return nil, err
 	}
-	defer resp.Body.Close()
-	attempt.response(resp)
-
-	rawBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		err = fmt.Errorf("openai: read response body: %w", err)
-		attempt.end(err)
-		return nil, err
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		err := fmt.Errorf("openai: unexpected status %d: %s", resp.StatusCode, string(rawBody))
-		attempt.end(err)
-		return nil, err
-	}
-	attempt.end(nil)
 
 	var chatResp openAIChatResponse
 	if err := json.Unmarshal(rawBody, &chatResp); err != nil {
@@ -261,4 +236,68 @@ func openAIUsage(r openAIChatResponse) Usage {
 		u.ReasoningTokens = d.ReasoningTokens
 	}
 	return u
+}
+
+// post sends body, adjusting it to what the model accepts when a 400 names a
+// parameter it refuses (see refusedParams). Each adjustment clears the field it
+// fixes, so this sends at most three requests.
+func (c *OpenAIClient) post(ctx context.Context, body *openAIChatRequest) ([]byte, error) {
+	name := c.ProviderName()
+	for {
+		status, raw, err := c.send(ctx, body)
+		switch {
+		case err == nil:
+			return raw, nil
+		// The refusal of max_tokens names its replacement.
+		case body.MaxTokens > 0 && refuses(name, body.Model, status, raw, "max_completion_tokens"):
+			body.MaxTokens, body.MaxCompletionTokens = 0, max(body.MaxTokens, minThinkingTokens)
+		case body.Temperature > 0 && refuses(name, body.Model, status, raw, "temperature"):
+			body.Temperature = 0
+		default:
+			return nil, err
+		}
+	}
+}
+
+// send makes one chat-completions request. A non-200 is an error that still
+// returns the status and body, for post to inspect.
+func (c *OpenAIClient) send(ctx context.Context, body *openAIChatRequest) (int, []byte, error) {
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return 0, nil, fmt.Errorf("openai: marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/v1/chat/completions", bytes.NewReader(payload))
+	if err != nil {
+		return 0, nil, fmt.Errorf("openai: build request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if c.APIKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+c.APIKey)
+	}
+
+	attempt := beginAttempt(ctx)
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		err = fmt.Errorf("openai: HTTP error: %w", err)
+		attempt.end(err)
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	attempt.response(resp)
+
+	rawBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		err = fmt.Errorf("openai: read response body: %w", err)
+		attempt.end(err)
+		return resp.StatusCode, nil, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		err := fmt.Errorf("openai: unexpected status %d: %s", resp.StatusCode, string(rawBody))
+		attempt.end(err)
+		return resp.StatusCode, rawBody, err
+	}
+	attempt.end(nil)
+	return resp.StatusCode, rawBody, nil
 }

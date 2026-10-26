@@ -29,6 +29,13 @@ data:
   CHAT_NUM_CTX: {{ .Values.ai.chatNumCtx | default 16384 | quote }}
   OPENAI_BASE_URL: {{ .Values.ai.openaiBaseURL | quote }}
   OPENAI_DEFAULT_MODEL: {{ .Values.ai.openaiModel | quote }}
+  # Hosted providers register when their key is set (jobshout-llm). The model
+  # lists are what the picker offers (comma-separated; empty = built-in list,
+  # and the default model is always offered), so a new model is a values change.
+  OPENAI_MODELS: {{ .Values.ai.openaiModels | default "" | quote }}
+  CLAUDE_BASE_URL: {{ .Values.ai.claudeBaseURL | default "https://api.anthropic.com" | quote }}
+  CLAUDE_DEFAULT_MODEL: {{ .Values.ai.claudeModel | default "claude-sonnet-5-5" | quote }}
+  CLAUDE_MODELS: {{ .Values.ai.claudeModels | default "" | quote }}
   # Image generation. Like Ollama, the local image model runs OUTSIDE the
   # cluster — mflux needs Apple MLX and the nodes are amd64 Linux — so every
   # ring points at the one workstation service. Gemini is tried first when
@@ -45,6 +52,7 @@ data:
   # LLM_PROVIDER is "gemini" or an agent's model_provider is. This is its
   # default model.
   GEMINI_DEFAULT_MODEL: {{ .Values.ai.geminiModel | default "gemini-flash-latest" | quote }}
+  GEMINI_MODELS: {{ .Values.ai.geminiModels | default "" | quote }}
   # Whether every article run pays for a cover image. Off leaves generation
   # available on demand through the API and the generate_image tool.
   BLOG_COVER_IMAGES: {{ .Values.ai.blogCoverImages | default false | quote }}
