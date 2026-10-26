@@ -231,6 +231,7 @@ func TestPublish_SendsFeaturedImageURL(t *testing.T) {
 func TestPublish_BackfillsMissingCover(t *testing.T) {
 	cms := &fakeCMS{}
 	r := newTestRunner(cms)
+	r.cfg.CoverStyle = CoverStylePicture
 	ill := &fakeIllustrator{enabled: true, store: r.covers.(*memCovers)}
 	r.WithIllustrator(ill)
 

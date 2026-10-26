@@ -3,9 +3,11 @@ module github.com/jobshout/server
 go 1.25.0
 
 require (
+	github.com/fogleman/gg v1.3.0
 	github.com/go-chi/chi/v5 v5.1.0
 	github.com/go-playground/validator/v10 v10.30.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
+	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/jackc/pgx/v5 v5.7.1
@@ -22,6 +24,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.45.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.54.0
+	golang.org/x/image v0.40.0
 	golang.org/x/net v0.57.0
 	gopkg.in/yaml.v3 v3.0.1
 )

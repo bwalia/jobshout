@@ -65,15 +65,17 @@ func TestFallbackCover_DeterministicAndUniquePerArticle(t *testing.T) {
 }
 
 // Repairing a coverless post must leave it with a featured image even when
-// drawing is unavailable — the state every prod post was in.
+// pictures are unavailable — the state every prod post was in. The fallback
+// is the article's diagram, which needs no image service.
 func TestRegenerateCover_CoverlessFallsBackWhenDrawingUnavailable(t *testing.T) {
-	r := newTestRunner(&fakeCMS{}) // no illustrator: drawing is off
+	r := newTestRunner(&fakeCMS{}) // no illustrator: pictures are off
+	r.cfg.CoverStyle = CoverStylePicture
 	a := &GeneratedArticle{Title: "T", Slug: "t", Topic: "t"}
 
 	if err := r.RegenerateCover(context.Background(), uuid.New(), a); err != nil {
 		t.Fatalf("a coverless article must get the fallback, got %v", err)
 	}
-	if a.CoverImageProvider != "fallback" || !r.coverStored(context.Background(), a.CoverImageURL) {
+	if a.CoverImageProvider != "diagram" || !r.coverStored(context.Background(), a.CoverImageURL) {
 		t.Fatalf("no stored fallback cover: provider=%q url=%q", a.CoverImageProvider, a.CoverImageURL)
 	}
 }
@@ -81,6 +83,7 @@ func TestRegenerateCover_CoverlessFallsBackWhenDrawingUnavailable(t *testing.T) 
 // A failed redraw must not replace a real, stored cover with the fallback.
 func TestRegenerateCover_KeepsRealCoverWhenRedrawFails(t *testing.T) {
 	r := newTestRunner(&fakeCMS{})
+	r.cfg.CoverStyle = CoverStylePicture
 	r.WithIllustrator(&fakeIllustrator{enabled: true, failAfter: -1})
 	defer func(f func(int) time.Duration) { coverRetryWaitFn = f }(coverRetryWaitFn)
 	coverRetryWaitFn = func(int) time.Duration { return 0 }

@@ -14,8 +14,10 @@ description: Generate or regenerate unique Article Writer / Workstation blog lis
 ## Rules
 
 1. Covers are **content-derived**: metaphor from title + angle + excerpt + body, not a generic tech collage.
-2. Prefer JobShout pipeline (`BLOG_COVER_IMAGES=true`) over hand-edited assets. JobShout never files a post
-   without a verified featured image (stored cover → drawn cover → branded fallback) — see `docs/blog-covers.md`.
+2. Prefer JobShout pipeline over hand-edited assets. Covers default to `BLOG_COVER_STYLE=diagram` — the
+   article's idea as a vector diagram (layout + labels from the plan's `cover_scene`), no GPU. JobShout never
+   files a post without a verified featured image (stored cover → drawn cover → diagram/gradient fallback) —
+   see `docs/blog-covers.md`.
 3. Never put image credentials in launch schema fields.
 4. After regenerating, sync CMS (`sync_cms: true`).
 5. **Never set `featured_image_url` to a URL that does not return 200 with an image.** OpsAPI stores it verbatim

@@ -230,6 +230,10 @@ ai:
   # article, and that is a cost an operator should choose to pay. Image
   # generation stays available on demand either way.
   blogCoverImages: false
+  # What a cover is. "diagram": the article's idea drawn as a vector diagram
+  # (no GPU, needs only the image store). "picture": a generated image, which
+  # also needs blogCoverImages. Body figures follow blogCoverImages either way.
+  blogCoverStyle: diagram
   # How long a running row may sit without a heartbeat before the reconciler
   # marks it failed. Must outlast a legitimate long LLM call. Max runtime is
   # the wall-clock budget PER ARTICLE (a run gets it times its article count);
