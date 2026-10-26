@@ -45,6 +45,10 @@ extraSecretRefs:
   # so leaking one does not hand over all three (server/internal/strix/config.go).
   # Must match the secret the strix edge vhost verifies.
   - jobshout-strix
+  # OPENAI_API_KEY / CLAUDE_API_KEY (or ANTHROPIC_API_KEY) / GEMINI_API_KEY:
+  # each key set registers that provider in the model picker. Models are
+  # chosen with ai.*Model / ai.*Models (values.yaml), not here.
+  - jobshout-llm
 
 # ExternalSecrets → WSL Vault (ClusterSecretStore wslvault-backend). Each entry
 # materialises every key under `key` into a Secret of the same `name`. Keys in
@@ -87,6 +91,9 @@ vaultSecrets:
   - name: jobshout-strix
     store: wslvault-backend
     key: jobshout/int/strix
+  - name: jobshout-llm
+    store: wslvault-backend
+    key: jobshout/int/llm
 
 # opsapi CMS — the Article Writer files generated articles there as drafts.
 # The host and namespace slug are not secret; the API key is, and comes from

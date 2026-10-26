@@ -86,6 +86,10 @@ extraSecretRefs:
   - jobshout-google
   - jobshout-cms
   - jobshout-linkedin
+  # OPENAI_API_KEY / CLAUDE_API_KEY (or ANTHROPIC_API_KEY) / GEMINI_API_KEY:
+  # each key set registers that provider in the model picker. Models are
+  # chosen with ai.*Model / ai.*Models (values.yaml), not here.
+  - jobshout-llm
 
 vaultSecrets:
   - name: jobshout-core
@@ -103,6 +107,9 @@ vaultSecrets:
   - name: jobshout-linkedin
     store: wslvault-backend
     key: jobshout/prod/linkedin
+  - name: jobshout-llm
+    store: wslvault-backend
+    key: jobshout/prod/llm
 
 # Workstation CMS — articles reach www.workstation.co.uk through it, as int's
 # reach int.workstation.co.uk through int-opsapi. Drafts only: going live is

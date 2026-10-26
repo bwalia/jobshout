@@ -54,6 +54,10 @@ wafLab:
 extraSecretRefs:
   - jobshout-core
   - jobshout-gateways
+  # OPENAI_API_KEY / CLAUDE_API_KEY (or ANTHROPIC_API_KEY) / GEMINI_API_KEY:
+  # each key set registers that provider in the model picker. Models are
+  # chosen with ai.*Model / ai.*Models (values.yaml), not here.
+  - jobshout-llm
 
 vaultSecrets:
   - name: jobshout-core
@@ -62,6 +66,9 @@ vaultSecrets:
   - name: jobshout-gateways
     store: wslvault-backend
     key: jobshout/acc/gateways
+  - name: jobshout-llm
+    store: wslvault-backend
+    key: jobshout/acc/llm
 
 insights:
   siteURL: "https://acc.jobshout.com"

@@ -197,8 +197,19 @@ ai:
   # ai.provider.
   mailProvider: ""
   chatNumCtx: 16384
+  # Hosted providers (OpenAI, Claude, Gemini) appear in the model picker once
+  # their key is in the ring's jobshout-llm Vault secret. *Model is the model an
+  # agent gets when it picks the provider but names none; *Models is the
+  # comma-separated list the picker offers (empty = the built-in list). The
+  # default model is always offered, so switching models never needs code:
+  #   claudeModel: "claude-opus-5-5"
+  #   claudeModels: "claude-opus-5-5,claude-sonnet-5-5,claude-haiku-5-5"
   openaiBaseURL: "https://api.openai.com"
   openaiModel: "gpt-4o-mini"
+  openaiModels: ""
+  claudeBaseURL: "https://api.anthropic.com"
+  claudeModel: "claude-sonnet-5-5"
+  claudeModels: ""
   # Per-task model selection. When true, an agent whose modelProvider is "auto"
   # gets a provider+model chosen per call — cheap local models for routine work,
   # stronger ones for planning and code. Agents pinned to a provider are
@@ -225,6 +236,7 @@ ai:
   geminiBaseURL: "https://generativelanguage.googleapis.com"
   # Text model for agents set to the gemini provider (same GEMINI_API_KEY).
   geminiModel: "gemini-flash-latest"
+  geminiModels: ""
   imageBucket: "images"
   # Off by default: a cover costs roughly 25 seconds of a single shared GPU per
   # article, and that is a cost an operator should choose to pay. Image

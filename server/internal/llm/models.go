@@ -150,6 +150,15 @@ func (c *modelCache) put(provider string, e modelCacheEntry) {
 	c.entries[provider] = e
 }
 
+// staticModels is the list a provider without discovery offers: the one its
+// environment configured (NewRouter), else the built-in one.
+func (r *Router) staticModels(provider string) []ModelInfo {
+	if m, ok := r.configuredModels[provider]; ok {
+		return m
+	}
+	return StaticModels(provider)
+}
+
 // AvailableModels returns every registered provider's models, refreshing any
 // entry older than the TTL.
 //
@@ -188,7 +197,7 @@ func (r *Router) CachedModels() []ProviderModels {
 				Provider:  name,
 				IsDefault: name == r.defaultProvider,
 				Source:    SourceStatic,
-				Models:    StaticModels(name),
+				Models:    r.staticModels(name),
 			})
 			continue
 		}
@@ -232,7 +241,7 @@ func (r *Router) modelsFor(ctx context.Context, provider string, force bool) Pro
 	client, err := r.For(provider)
 	if err != nil {
 		res.Source = SourceStatic
-		res.Models = StaticModels(provider)
+		res.Models = r.staticModels(provider)
 		return res
 	}
 
@@ -242,7 +251,7 @@ func (r *Router) modelsFor(ctx context.Context, provider string, force bool) Pro
 		// /v1/models, but neither reports context window or tool capability —
 		// so a live call would replace good data with worse).
 		entry := modelCacheEntry{
-			models:  StaticModels(provider),
+			models:  r.staticModels(provider),
 			source:  SourceStatic,
 			fetched: time.Now(),
 		}
@@ -262,7 +271,7 @@ func (r *Router) modelsFor(ctx context.Context, provider string, force bool) Pro
 		if hasCached && len(cached.models) > 0 {
 			entry.models, entry.source = cached.models, SourceStale
 		} else {
-			entry.models, entry.source = StaticModels(provider), SourceStatic
+			entry.models, entry.source = r.staticModels(provider), SourceStatic
 		}
 		r.modelCache.put(provider, entry)
 		res.Source, res.Models, res.Error = entry.source, entry.models, err.Error()
