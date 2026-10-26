@@ -51,7 +51,8 @@ extraSecretRefs:
   - jobshout-llm
   # Marketing Manager: OPSAPI_MARKETING_API_KEY (scripts/opsapi-api-key.sh
   # with OPSAPI_KEY_PROFILE=marketing — never the CMS key),
-  # OPSAPI_MARKETING_NAMESPACE, MARKETING_TEST_RECIPIENTS. No
+  # OPSAPI_MARKETING_NAMESPACE, OPSAPI_MARKETING_ORG_IDS (the only orgs that
+  # may use this workspace), MARKETING_TEST_RECIPIENTS. No
   # MARKETING_LIVE_SEND here: int sends only from a workspace in OpsAPI test
   # mode (docs/marketing-manager.md).
   - jobshout-marketing

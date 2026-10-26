@@ -1014,6 +1014,7 @@ func main() {
 		zap.Bool("ring_workspace", marketingSvc.RingConfigured()),
 		zap.Bool("live_send_allowed", marketingSvc.AllowLiveSend),
 		zap.Int("ring_test_recipients", len(marketingSvc.Ring.TestRecipients)),
+		zap.Int("ring_orgs", len(marketingSvc.Ring.Orgs)),
 	)
 	// Its chat tools live with the agent (marketingmanager/chattools).
 	agentmodule.SetToolInstaller(model.BuiltinMarketingManager, mmchattools.Installer(marketingSvc))

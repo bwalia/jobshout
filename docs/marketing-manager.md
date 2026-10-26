@@ -53,7 +53,7 @@ chat ("Prepare the launch campaign for opted-in customers")
 | Creates send an `Idempotency-Key`; a contact whose email exists is returned, not duplicated; only GETs and idempotent creates are retried, never a send | `service.go`, `client.go` |
 | Every write and send, refused ones included, goes to `audit_logs` (`marketing.<action>`, field names only, never bodies or personal data) | `chattools/tools.go` |
 | The API key never appears in results, errors or logs | `client.go` `scrub` |
-| Tenant isolation: each call resolves the org's own workspace afresh. A named website the org doesn't have is an error. OpsAPI binds a key to one namespace | `resolve.go` |
+| Tenant isolation: each call resolves the org's own workspace afresh from that org's integrations. A named website the org doesn't have is an error. The ring's workspace serves only the orgs in `OPSAPI_MARKETING_ORG_IDS`. OpsAPI binds a key to one namespace | `resolve.go` |
 
 ## Configuration
 
@@ -64,12 +64,14 @@ A workspace comes from (first match):
 2. the org's only OpsAPI integration with `credentials.marketing_api_key`;
 3. the ring's own workspace: `OPSAPI_MARKETING_API_KEY` +
    `OPSAPI_MARKETING_NAMESPACE` (default `OPSAPI_NAMESPACE`) on
-   `OPSAPI_BASE_URL`.
+   `OPSAPI_BASE_URL`, **only for orgs listed in `OPSAPI_MARKETING_ORG_IDS`**.
+   Any other org gets "no marketing workspace", never the ring's customers.
 
 | Setting | Meaning |
 | --- | --- |
 | `OPSAPI_MARKETING_API_KEY` | Ring workspace key, marketing profile. **Never the CMS key** |
 | `OPSAPI_MARKETING_NAMESPACE` | Its namespace |
+| `OPSAPI_MARKETING_ORG_IDS` | Comma list of JobShout org uuids allowed to use the ring workspace. Unset means none: fail closed |
 | `MARKETING_TEST_RECIPIENTS` | Comma list of confirmed test addresses (added to each website's own `config.marketing_test_recipients`) |
 | `MARKETING_LIVE_SEND` | `true` lets sends leave a workspace that is not in test mode. Leave unset on int/test/acc |
 | integration `credentials.marketing_api_key` | Per-org key (falls back to `api_key`). Needs `SECRETS_ENCRYPTION_KEY` on the ring, or the server refuses to store it |
@@ -100,6 +102,8 @@ Other rings don't have it yet.
 2. Mint a marketing-profile key (above).
 3. In WSL Vault, `kv` → `jobshout/int/marketing`: `OPSAPI_MARKETING_API_KEY`,
    `OPSAPI_MARKETING_NAMESPACE=workstation`,
+   `OPSAPI_MARKETING_ORG_IDS=<your int org uuid>` (from
+   `SELECT id, name FROM organizations`),
    `MARKETING_TEST_RECIPIENTS=<your address>`. Force-sync and restart the API
    with an explicit deployments list:
    ```bash

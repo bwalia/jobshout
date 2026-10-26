@@ -51,7 +51,7 @@ func Module(svc *Service) agentmodule.Module {
 		},
 		Requirements: []agentmodule.Requirement{{
 			Key: "opsapi_marketing", Kind: "integration", Blocking: true,
-			Message: "An OpsAPI website integration with credentials.marketing_api_key (scopes opsapi_marketing_* and crm), or OPSAPI_MARKETING_API_KEY on the server.",
+			Message: "An OpsAPI website integration with credentials.marketing_api_key (scopes opsapi_marketing_* and crm), or OPSAPI_MARKETING_API_KEY on the server with this org in OPSAPI_MARKETING_ORG_IDS.",
 		}},
 		Ready: func(ctx context.Context, orgID uuid.UUID) []agentmodule.Issue {
 			if svc == nil {

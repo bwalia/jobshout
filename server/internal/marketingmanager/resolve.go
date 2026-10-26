@@ -29,10 +29,27 @@ type RingConfig struct {
 	// TestRecipients (MARKETING_TEST_RECIPIENTS) are the confirmed addresses
 	// test sends may go to, for every workspace on this ring.
 	TestRecipients []string
+	// Orgs (OPSAPI_MARKETING_ORG_IDS) are the only organizations that may use
+	// this workspace. Empty means none: the ring's customers and campaigns are
+	// never offered to every org that signs up.
+	Orgs []uuid.UUID
 }
 
 func (r RingConfig) complete() bool {
 	return strings.TrimSpace(r.BaseURL) != "" && strings.TrimSpace(r.Key) != "" && strings.TrimSpace(r.Namespace) != ""
+}
+
+// allows reports whether org may use the ring's workspace.
+func (r RingConfig) allows(org uuid.UUID) bool {
+	if !r.complete() || org == uuid.Nil {
+		return false
+	}
+	for _, o := range r.Orgs {
+		if o == org {
+			return true
+		}
+	}
+	return false
 }
 
 // ErrNotConfigured means the org has no OpsAPI workspace the agent can use.
@@ -43,7 +60,8 @@ var ErrNotConfigured = errors.New("marketingmanager: not configured")
 //   - an opsapi integration named website (case-insensitive), else one saved
 //     for that namespace slug;
 //   - empty website: the org's only opsapi integration that carries a
-//     marketing key, else the ring's own workspace.
+//     marketing key, else the ring's own workspace if the org is one of
+//     ring.Orgs.
 //
 // A named website that cannot be found is an error: the agent never quietly
 // manages a different tenant's marketing.
@@ -81,7 +99,7 @@ func resolve(ctx context.Context, list IntegrationLister, ring RingConfig, orgID
 		default:
 			return Conn{}, fmt.Errorf("%w: namespace %q is saved on %d OpsAPIs — name the website instead", ErrNotConfigured, website, len(byNS))
 		}
-		if ring.complete() && strings.EqualFold(website, ring.Namespace) {
+		if ring.allows(orgID) && strings.EqualFold(website, ring.Namespace) {
 			return ringConn(ring), nil
 		}
 		return Conn{}, fmt.Errorf("%w: this organization has no OpsAPI website called %q", ErrNotConfigured, website)
@@ -103,10 +121,13 @@ func resolve(ctx context.Context, list IntegrationLister, ring RingConfig, orgID
 		}
 		return Conn{}, fmt.Errorf("%w: several websites have a marketing key (%s) — say which one", ErrNotConfigured, strings.Join(names, ", "))
 	}
-	if ring.complete() {
+	if ring.allows(orgID) {
 		return ringConn(ring), nil
 	}
-	return Conn{}, fmt.Errorf("%w: no OpsAPI marketing workspace is set up. Add credentials.marketing_api_key to the org's OpsAPI website integration (a key scoped for opsapi_marketing_* and crm), or set OPSAPI_MARKETING_API_KEY on this server", ErrNotConfigured)
+	if ring.complete() {
+		return Conn{}, fmt.Errorf("%w: this organization has no OpsAPI marketing workspace. Add credentials.marketing_api_key to its OpsAPI website integration (a key scoped for opsapi_marketing_* and crm); the server's own workspace is only for organizations listed in OPSAPI_MARKETING_ORG_IDS", ErrNotConfigured)
+	}
+	return Conn{}, fmt.Errorf("%w: no OpsAPI marketing workspace is set up. Add credentials.marketing_api_key to the org's OpsAPI website integration (a key scoped for opsapi_marketing_* and crm), or set OPSAPI_MARKETING_API_KEY and OPSAPI_MARKETING_ORG_IDS on this server", ErrNotConfigured)
 }
 
 func ringConn(r RingConfig) Conn {

@@ -69,10 +69,11 @@ func TestToolsByKind(t *testing.T) {
 
 func TestSendDescribedAndAudited(t *testing.T) {
 	srv := fakeServer(t, true)
-	svc := &Service{Ring: marketingmanager.RingConfig{BaseURL: srv.URL, Key: "k", Namespace: "workstation"}}
+	org := uuid.New()
+	svc := &Service{Ring: marketingmanager.RingConfig{BaseURL: srv.URL, Key: "k", Namespace: "workstation", Orgs: []uuid.UUID{org}}}
 	audit := &auditRec{}
 	tl := &tool{svc: svc, kind: Send, audit: audit}
-	ctx := platformtools.WithIdentity(context.Background(), platformtools.Identity{OrgID: uuid.New(), UserID: uuid.New()})
+	ctx := platformtools.WithIdentity(context.Background(), platformtools.Identity{OrgID: org, UserID: uuid.New()})
 	args := map[string]any{"action": "schedule_campaign", "id": "c1"}
 
 	eff := tl.DescribeEffect(ctx, args)
@@ -91,10 +92,11 @@ func TestSendDescribedAndAudited(t *testing.T) {
 
 func TestRefusedSendIsAudited(t *testing.T) {
 	srv := fakeServer(t, false) // live workspace, live send not allowed
-	svc := &Service{Ring: marketingmanager.RingConfig{BaseURL: srv.URL, Key: "k", Namespace: "workstation"}}
+	org := uuid.New()
+	svc := &Service{Ring: marketingmanager.RingConfig{BaseURL: srv.URL, Key: "k", Namespace: "workstation", Orgs: []uuid.UUID{org}}}
 	audit := &auditRec{}
 	tl := &tool{svc: svc, kind: Send, audit: audit}
-	ctx := platformtools.WithIdentity(context.Background(), platformtools.Identity{OrgID: uuid.New()})
+	ctx := platformtools.WithIdentity(context.Background(), platformtools.Identity{OrgID: org})
 	if _, err := tl.Run(ctx, map[string]any{"action": "schedule_campaign", "id": "c1", "live_send_approved": true}); err == nil {
 		t.Fatal("live send went ahead on a server that blocks it")
 	}

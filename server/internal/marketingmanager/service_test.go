@@ -72,7 +72,7 @@ var testKey = strings.Join([]string{"opsk", "test", "secret", "value"}, "_")
 
 func (f *fakeOpsAPI) service(testers ...string) *Service {
 	return &Service{
-		Ring: RingConfig{BaseURL: f.srv.URL, Key: testKey, Namespace: "workstation", TestRecipients: testers},
+		Ring: RingConfig{BaseURL: f.srv.URL, Key: testKey, Namespace: "workstation", TestRecipients: testers, Orgs: []uuid.UUID{org}},
 	}
 }
 
@@ -300,7 +300,7 @@ func TestResolveKeepsTenantsApart(t *testing.T) {
 		opsInt("TenthMatrix", "tenthmatrix", "k-tm", map[string]any{"marketing_test_recipients": "qa@tenthmatrix.co.uk", "marketing_brand": map[string]any{"primary": "#123"}}),
 		opsInt("Workstation Shop", "workstation", "k-ws", nil),
 	}
-	ring := RingConfig{BaseURL: "https://ring.example.com", Key: "k-ring", Namespace: "jobshout", TestRecipients: []string{"ops@jobshout.com"}}
+	ring := RingConfig{BaseURL: "https://ring.example.com", Key: "k-ring", Namespace: "jobshout", TestRecipients: []string{"ops@jobshout.com"}, Orgs: []uuid.UUID{org}}
 
 	c, err := resolve(context.Background(), ints, ring, org, "tenthmatrix")
 	if err != nil || c.APIKey != "k-tm" || c.Namespace != "tenthmatrix" || c.Brand["primary"] != "#123" {
@@ -347,5 +347,58 @@ func TestOpsTableIsWellFormed(t *testing.T) {
 		if strings.Contains(o.Path, "approve") || strings.Contains(o.Path, "reject") || o.Method == http.MethodDelete && o.Kind != Send && !strings.Contains(o.Path, "/members/") {
 			t.Errorf("%s: approvals and deletes stay with people", o.Name)
 		}
+	}
+}
+
+// orgInts answers ListByOrg per org, as the integrations repository does.
+type orgInts map[uuid.UUID][]model.Integration
+
+func (o orgInts) ListByOrg(_ context.Context, id uuid.UUID) ([]model.Integration, error) {
+	return o[id], nil
+}
+
+func TestOneOrgNeverReachesAnothersWorkspace(t *testing.T) {
+	orgA, orgB := uuid.New(), uuid.New()
+	ints := orgInts{orgA: {opsInt("TenthMatrix", "tenthmatrix", "k-tm", nil)}}
+	ring := RingConfig{BaseURL: "https://ring.example.com", Key: "k-ring", Namespace: "jobshout", Orgs: []uuid.UUID{orgA}}
+	ctx := context.Background()
+
+	for _, website := range []string{"TenthMatrix", "tenthmatrix", "jobshout", ""} {
+		c, err := resolve(ctx, ints, ring, orgB, website)
+		if !errors.Is(err, ErrNotConfigured) {
+			t.Fatalf("org B, website %q: got %+v, %v — want no workspace", website, c, err)
+		}
+		if strings.Contains(err.Error(), "k-tm") || strings.Contains(err.Error(), "k-ring") {
+			t.Fatalf("error leaks a key: %v", err)
+		}
+	}
+	if c, err := resolve(ctx, ints, ring, orgA, "tenthmatrix"); err != nil || c.APIKey != "k-tm" {
+		t.Fatalf("org A own website: %+v %v", c, err)
+	}
+	if c, err := resolve(ctx, ints, ring, orgA, "jobshout"); err != nil || c.Website != "ring" {
+		t.Fatalf("org A listed for the ring: %+v %v", c, err)
+	}
+	// A ring with no orgs listed serves nobody.
+	ring.Orgs = nil
+	if _, err := resolve(ctx, nil, ring, orgA, ""); !errors.Is(err, ErrNotConfigured) || !strings.Contains(err.Error(), "OPSAPI_MARKETING_ORG_IDS") {
+		t.Fatalf("unlisted ring: %v", err)
+	}
+
+	// End to end: org B's request never reaches OpsAPI.
+	f := newFake(t)
+	s := f.service()
+	if _, err := s.Run(ctx, orgB, Read, Call{Action: "list_contacts"}); !errors.Is(err, ErrNotConfigured) {
+		t.Fatalf("org B run: %v", err)
+	}
+	if len(f.calls) != 0 {
+		t.Fatalf("org B reached OpsAPI: %v", f.calls)
+	}
+}
+
+func TestOrgIDsFromEnv(t *testing.T) {
+	a, b := uuid.New(), uuid.New()
+	got := orgIDs(" " + a.String() + ",not-a-uuid,," + b.String() + "," + uuid.Nil.String())
+	if len(got) != 2 || got[0] != a || got[1] != b {
+		t.Fatalf("orgIDs = %v", got)
 	}
 }
