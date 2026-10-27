@@ -43,11 +43,31 @@ if [[ -z "${IMAGE_JWT_SECRET:-}" ]]; then
   echo "WARNING: IMAGE_JWT_SECRET is unset — every request will be accepted." >&2
 fi
 
-# One worker, always. The GPU lock is per-process, so a second worker would be a
-# second process holding its own lock and its own resident model — which is
-# precisely the concurrent generation the lock exists to prevent.
-exec "$PYTHON" -m uvicorn app.main:app \
-  --host "$IMAGE_HOST" \
-  --port "$IMAGE_PORT" \
-  --workers 1 \
-  --log-level "${IMAGE_LOG_LEVEL:-info}"
+# Restarted here, not left to launchd. The GPU is shared with Ollama, and a Metal
+# command-buffer timeout aborts the process from inside MLX, where Python cannot
+# catch it. launchd's KeepAlive should bring it back, but on 2026-10-27 it pended
+# the respawn ("pended nondemand spawn = inefficient") and every ring lost
+# covers, images and video until someone restarted it by hand.
+#
+# A clean exit (status 0) ends the loop; launchd's own stop sends TERM, which is
+# passed to the server.
+child=0
+trap 'kill -TERM "$child" 2>/dev/null; wait "$child"; exit 0' TERM INT
+while true; do
+  # One worker, always. The GPU lock is per-process, so a second worker would be
+  # a second process holding its own lock and its own resident model — which is
+  # precisely the concurrent generation the lock exists to prevent.
+  "$PYTHON" -m uvicorn app.main:app \
+    --host "$IMAGE_HOST" \
+    --port "$IMAGE_PORT" \
+    --workers 1 \
+    --log-level "${IMAGE_LOG_LEVEL:-info}" &
+  child=$!
+  status=0
+  wait "$child" || status=$?
+  if [[ $status -eq 0 ]]; then
+    exit 0
+  fi
+  echo "$(date '+%F %T') jobshout-image-service exited with status $status; restarting in 5s" >&2
+  sleep 5
+done
