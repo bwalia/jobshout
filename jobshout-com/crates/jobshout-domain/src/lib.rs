@@ -39,14 +39,14 @@ macro_rules! string_enum {
     };
 }
 
+mod freelance;
 mod insights;
 mod members;
 mod showcase;
-mod freelance;
+pub use freelance::*;
 pub use insights::*;
 pub use members::*;
 pub use showcase::*;
-pub use freelance::*;
 
 pub type OrganisationId = Uuid;
 pub type JobId = Uuid;

@@ -5,8 +5,8 @@
 mod repo;
 
 use jobshout_domain::{
-    Bid, BidStatus, CreateBidRequest, CreateProjectRequest, DomainError, Project, ProjectType,
-    UpsertFreelancerProfileRequest, FreelancerProfile, ProjectId, BidId, UserId,
+    Bid, BidId, BidStatus, CreateBidRequest, CreateProjectRequest, DomainError, FreelancerProfile,
+    Project, ProjectId, ProjectType, UpsertFreelancerProfileRequest, UserId,
 };
 use jobshout_observability::{error_ctx, info_ctx};
 use sqlx::PgPool;
@@ -142,7 +142,9 @@ impl FreelanceService {
     ) -> Result<Vec<Bid>, DomainError> {
         let limit = limit.clamp(1, 50);
         let offset = offset.max(0);
-        self.bid_repo.list_by_freelancer(freelancer_id, limit, offset, status).await
+        self.bid_repo
+            .list_by_freelancer(freelancer_id, limit, offset, status)
+            .await
     }
 
     /// Update bid status (shortlist, reject, etc.)
@@ -198,7 +200,9 @@ impl FreelanceService {
     }
 
     /// Get project categories
-    pub async fn list_categories(&self) -> Result<Vec<jobshout_domain::ProjectCategory>, DomainError> {
+    pub async fn list_categories(
+        &self,
+    ) -> Result<Vec<jobshout_domain::ProjectCategory>, DomainError> {
         self.project_repo.list_categories().await
     }
 }
@@ -210,7 +214,9 @@ fn validate_create_project(req: &CreateProjectRequest) -> Result<(), DomainError
     }
 
     if req.description.trim().is_empty() {
-        return Err(DomainError::Validation("Description is required".to_string()));
+        return Err(DomainError::Validation(
+            "Description is required".to_string(),
+        ));
     }
 
     // Validate budget range

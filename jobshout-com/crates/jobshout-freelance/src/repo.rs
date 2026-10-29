@@ -98,12 +98,15 @@ impl ProjectRepository {
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| {
-            error_ctx!("failed to get project", project_id = id.to_string(), error = e.to_string());
+            error_ctx!(
+                "failed to get project",
+                project_id = id.to_string(),
+                error = e.to_string()
+            );
             DomainError::Other(e.into())
         })?;
 
-        row.map(|r| r.into_project())
-            .ok_or(DomainError::NotFound)
+        row.map(|r| r.into_project()).ok_or(DomainError::NotFound)
     }
 
     /// Create a new project
@@ -137,7 +140,11 @@ impl ProjectRepository {
         .bind(req.duration_estimate.as_deref())
         .bind(&req.skills_required)
         .bind(&req.deliverables)
-        .bind(req.milestones.as_ref().map(|m| serde_json::to_value(m).unwrap()))
+        .bind(
+            req.milestones
+                .as_ref()
+                .map(|m| serde_json::to_value(m).unwrap()),
+        )
         .bind(req.bidding_end_at)
         .bind(req.max_bids)
         .bind(req.escrow_required)
@@ -222,7 +229,11 @@ impl BidRepository {
             .fetch_all(&self.pool)
             .await
             .map_err(|e| {
-                error_ctx!("failed to list bids", project_id = project_id.to_string(), error = e.to_string());
+                error_ctx!(
+                    "failed to list bids",
+                    project_id = project_id.to_string(),
+                    error = e.to_string()
+                );
                 DomainError::Other(e.into())
             })?;
 
@@ -246,16 +257,23 @@ impl BidRepository {
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| {
-            error_ctx!("failed to get bid", bid_id = id.to_string(), error = e.to_string());
+            error_ctx!(
+                "failed to get bid",
+                bid_id = id.to_string(),
+                error = e.to_string()
+            );
             DomainError::Other(e.into())
         })?;
 
-        row.map(|r| r.into_bid())
-            .ok_or(DomainError::NotFound)
+        row.map(|r| r.into_bid()).ok_or(DomainError::NotFound)
     }
 
     /// Check if freelancer has already bid on a project
-    pub async fn has_bid(&self, project_id: ProjectId, freelancer_id: Uuid) -> Result<bool, DomainError> {
+    pub async fn has_bid(
+        &self,
+        project_id: ProjectId,
+        freelancer_id: Uuid,
+    ) -> Result<bool, DomainError> {
         let count: i64 = sqlx::query_scalar(
             r#"
             SELECT COUNT(*) FROM bids
@@ -305,7 +323,11 @@ impl BidRepository {
         .bind(req.estimated_hours)
         .bind(&req.proposal)
         .bind(req.delivery_timeline.as_deref())
-        .bind(req.attachments.as_ref().map(|a| serde_json::to_value(a).unwrap()))
+        .bind(
+            req.attachments
+                .as_ref()
+                .map(|a| serde_json::to_value(a).unwrap()),
+        )
         .bind(BidStatus::Submitted.as_str())
         .bind(false)
         .bind(now)
@@ -357,7 +379,11 @@ impl BidRepository {
             .fetch_all(&self.pool)
             .await
             .map_err(|e| {
-                error_ctx!("failed to list freelancer bids", freelancer_id = freelancer_id.to_string(), error = e.to_string());
+                error_ctx!(
+                    "failed to list freelancer bids",
+                    freelancer_id = freelancer_id.to_string(),
+                    error = e.to_string()
+                );
                 DomainError::Other(e.into())
             })?;
 
@@ -387,7 +413,11 @@ impl BidRepository {
         .fetch_one(&self.pool)
         .await
         .map_err(|e| {
-            error_ctx!("failed to update bid status", bid_id = id.to_string(), error = e.to_string());
+            error_ctx!(
+                "failed to update bid status",
+                bid_id = id.to_string(),
+                error = e.to_string()
+            );
             DomainError::Other(e.into())
         })?;
 
@@ -401,7 +431,10 @@ impl FreelancerProfileRepository {
     }
 
     /// Get freelancer profile by user ID
-    pub async fn get_by_user_id(&self, user_id: Uuid) -> Result<Option<FreelancerProfile>, DomainError> {
+    pub async fn get_by_user_id(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Option<FreelancerProfile>, DomainError> {
         let row = sqlx::query_as::<_, FreelancerProfileRow>(
             r#"
             SELECT
@@ -418,7 +451,11 @@ impl FreelancerProfileRepository {
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| {
-            error_ctx!("failed to get freelancer profile", user_id = user_id.to_string(), error = e.to_string());
+            error_ctx!(
+                "failed to get freelancer profile",
+                user_id = user_id.to_string(),
+                error = e.to_string()
+            );
             DomainError::Other(e.into())
         })?;
 
@@ -501,9 +538,9 @@ struct ProjectRow {
 
 impl ProjectRow {
     fn into_project(self) -> Project {
-        let milestones = self.milestones.and_then(|m| {
-            serde_json::from_value::<Vec<Milestone>>(m).ok()
-        });
+        let milestones = self
+            .milestones
+            .and_then(|m| serde_json::from_value::<Vec<Milestone>>(m).ok());
 
         Project {
             id: self.id,
@@ -569,9 +606,9 @@ struct BidRow {
 
 impl BidRow {
     fn into_bid(self) -> Bid {
-        let attachments = self.attachments.and_then(|a| {
-            serde_json::from_value::<Vec<Attachment>>(a).ok()
-        });
+        let attachments = self
+            .attachments
+            .and_then(|a| serde_json::from_value::<Vec<Attachment>>(a).ok());
 
         Bid {
             id: self.id,
@@ -641,10 +678,10 @@ struct FreelancerProfileRow {
 
 impl FreelancerProfileRow {
     fn into_profile(self) -> FreelancerProfile {
-        let skills_certifications: Vec<Certification> = serde_json::from_value(self.skills_certifications)
-            .unwrap_or_default();
-        let payment_methods: Vec<PaymentMethod> = serde_json::from_value(self.payment_methods)
-            .unwrap_or_default();
+        let skills_certifications: Vec<Certification> =
+            serde_json::from_value(self.skills_certifications).unwrap_or_default();
+        let payment_methods: Vec<PaymentMethod> =
+            serde_json::from_value(self.payment_methods).unwrap_or_default();
 
         FreelancerProfile {
             id: self.id,
