@@ -1,0 +1,20 @@
+[package]
+name = "jobshout-freelance"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+chrono = "0.4.45"
+jobshout-domain = { path = "../jobshout-domain" }
+jobshout-observability = { path = "../jobshout-observability" }
+rust_decimal = "2.5.1"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sqlx = { version = "0.8.6", features = ["postgres", "runtime-tokio-native-tls", "uuid", "json", "decimal", "chrono"] }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
