@@ -113,7 +113,8 @@ pub struct Milestone {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project {
     pub id: Uuid,
-    pub job_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub job_id: Option<Uuid>,
     pub project_type: ProjectType,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub budget_min: Option<Decimal>,
@@ -232,9 +233,7 @@ pub struct Attachment {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FreelancerProfile {
     pub id: Uuid,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub candidate_profile_id: Option<Uuid>,
-    pub user_id: Uuid,
+    pub candidate_profile_id: Uuid,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hourly_rate_min: Option<Decimal>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -244,10 +243,10 @@ pub struct FreelancerProfile {
     pub portfolio_urls: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub years_experience: Option<i32>,
-    pub success_score: f32,
+    pub success_score: Decimal,
     pub completed_projects: i32,
-    pub client_satisfaction: f32,
-    pub on_time_delivery: f32,
+    pub client_satisfaction: Decimal,
+    pub on_time_delivery: Decimal,
     pub skills_certifications: Vec<Certification>,
     pub verified_identity: bool,
     pub payment_methods: Vec<PaymentMethod>,

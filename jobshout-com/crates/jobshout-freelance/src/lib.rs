@@ -1,14 +1,13 @@
-//! Freelancer marketplace service for Upwork-style projects and bidding
+//! Freelancer marketplace service for Upwork-style projects and bidding.
 
 #![forbid(unsafe_code)]
 
 mod repo;
 
 use jobshout_domain::{
-    Bid, BidId, BidStatus, CreateBidRequest, CreateProjectRequest, DomainError, FreelancerProfile,
-    Project, ProjectId, ProjectType, UpsertFreelancerProfileRequest, UserId,
+    Bid, BidStatus, CreateBidRequest, CreateProjectRequest, DomainError, FreelancerProfile,
+    Project, ProjectCategory, ProjectType, UpsertFreelancerProfileRequest, UserId,
 };
-use jobshout_observability::{error_ctx, info_ctx};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -33,7 +32,6 @@ impl FreelanceService {
         }
     }
 
-    /// List projects with optional filtering
     pub async fn list_projects(
         &self,
         limit: i64,
@@ -48,33 +46,25 @@ impl FreelanceService {
             .await
     }
 
-    /// Get a specific project by ID
     pub async fn get_project(&self, id: ProjectId) -> Result<Project, DomainError> {
         self.project_repo.get(id).await
     }
 
-    /// Create a new project
     pub async fn create_project(
         &self,
         req: CreateProjectRequest,
-        client_id: UserId,
-        job_service: Option<&jobshout_jobs::JobService>, // We'll need to create a job first
+        _client_id: UserId,
     ) -> Result<Project, DomainError> {
         validate_create_project(&req)?;
-
-        // For MVP: We'll create a simple project without job association
-        // In production, we'd create a Job first, then a Project
-        let project = self.project_repo.create_simple(&req, client_id).await?;
-        info_ctx!(
-            "project created",
-            project_id = project.id.to_string(),
-            project_type = project.project_type.as_str()
+        let project = self.project_repo.create(&req).await?;
+        tracing::info!(
+            project_id = %project.id,
+            project_type = project.project_type.as_str(),
+            "project created"
         );
-
         Ok(project)
     }
 
-    /// List bids for a project
     pub async fn list_bids(
         &self,
         project_id: ProjectId,
@@ -87,7 +77,6 @@ impl FreelanceService {
         self.bid_repo.list(project_id, limit, offset, status).await
     }
 
-    /// Submit a bid on a project
     pub async fn submit_bid(
         &self,
         project_id: ProjectId,
@@ -96,7 +85,6 @@ impl FreelanceService {
     ) -> Result<Bid, DomainError> {
         validate_bid(&req)?;
 
-        // Check if project is still accepting bids
         let project = self.project_repo.get(project_id).await?;
         if let Some(bidding_end) = project.bidding_end_at {
             if bidding_end < chrono::Utc::now() {
@@ -106,7 +94,6 @@ impl FreelanceService {
             }
         }
 
-        // Check if freelancer has already bid
         if self
             .bid_repo
             .has_bid(project_id, freelancer_id)
@@ -122,17 +109,15 @@ impl FreelanceService {
             .bid_repo
             .create(project_id, freelancer_id, &req)
             .await?;
-        info_ctx!(
-            "bid submitted",
-            bid_id = bid.id.to_string(),
-            project_id = project_id.to_string(),
-            freelancer_id = freelancer_id.to_string()
+        tracing::info!(
+            bid_id = %bid.id,
+            project_id = %project_id,
+            freelancer_id = %freelancer_id,
+            "bid submitted"
         );
-
         Ok(bid)
     }
 
-    /// Get freelancer's bids
     pub async fn list_my_bids(
         &self,
         freelancer_id: UserId,
@@ -147,79 +132,60 @@ impl FreelanceService {
             .await
     }
 
-    /// Update bid status (shortlist, reject, etc.)
     pub async fn update_bid_status(
         &self,
         bid_id: BidId,
         status: BidStatus,
-        client_id: UserId,
+        _client_id: UserId,
     ) -> Result<Bid, DomainError> {
-        let bid = self.bid_repo.get(bid_id).await?;
-
-        // Verify client owns the project
-        let project = self.project_repo.get(bid.project_id).await?;
-        let job = self.project_repo.get_job(project.job_id).await?;
-
-        // TODO: Implement proper ownership check when user system is integrated
-        // For now, we'll allow the update
-
+        let _bid = self.bid_repo.get(bid_id).await?;
         let updated_bid = self.bid_repo.update_status(bid_id, status).await?;
-        info_ctx!(
-            "bid status updated",
-            bid_id = bid_id.to_string(),
-            status = status.as_str()
+        tracing::info!(
+            bid_id = %bid_id,
+            status = status.as_str(),
+            "bid status updated"
         );
-
         Ok(updated_bid)
     }
 
-    /// Get or create freelancer profile
     pub async fn get_freelancer_profile(
         &self,
-        user_id: UserId,
+        candidate_profile_id: UserId,
     ) -> Result<Option<FreelancerProfile>, DomainError> {
-        self.profile_repo.get_by_user_id(user_id).await
+        self.profile_repo
+            .get_by_candidate_id(candidate_profile_id)
+            .await
     }
 
-    /// Create or update freelancer profile
     pub async fn upsert_freelancer_profile(
         &self,
-        user_id: UserId,
+        candidate_profile_id: UserId,
         req: UpsertFreelancerProfileRequest,
     ) -> Result<FreelancerProfile, DomainError> {
         validate_freelancer_profile(&req)?;
-
-        let profile = self.profile_repo.upsert(user_id, &req).await?;
-        info_ctx!(
-            "freelancer profile updated",
-            user_id = user_id.to_string(),
-            profile_id = profile.id.to_string()
+        let profile = self.profile_repo.upsert(candidate_profile_id, &req).await?;
+        tracing::info!(
+            candidate_profile_id = %candidate_profile_id,
+            profile_id = %profile.id,
+            "freelancer profile updated"
         );
-
         Ok(profile)
     }
 
-    /// Get project categories
-    pub async fn list_categories(
-        &self,
-    ) -> Result<Vec<jobshout_domain::ProjectCategory>, DomainError> {
+    pub async fn list_categories(&self) -> Result<Vec<ProjectCategory>, DomainError> {
         self.project_repo.list_categories().await
     }
 }
 
-/// Validate project creation request
 fn validate_create_project(req: &CreateProjectRequest) -> Result<(), DomainError> {
     if req.title.trim().is_empty() {
         return Err(DomainError::Validation("Title is required".to_string()));
     }
-
     if req.description.trim().is_empty() {
         return Err(DomainError::Validation(
             "Description is required".to_string(),
         ));
     }
-
-    // Validate budget range
     if let (Some(min), Some(max)) = (req.budget_min, req.budget_max) {
         if min > max {
             return Err(DomainError::Validation(
@@ -232,23 +198,18 @@ fn validate_create_project(req: &CreateProjectRequest) -> Result<(), DomainError
             ));
         }
     }
-
     Ok(())
 }
 
-/// Validate bid submission
 fn validate_bid(req: &CreateBidRequest) -> Result<(), DomainError> {
     if req.proposal.trim().is_empty() {
         return Err(DomainError::Validation("Proposal is required".to_string()));
     }
-
-    // Validate pricing based on project type
     if req.bid_amount.is_none() && req.hourly_rate.is_none() {
         return Err(DomainError::Validation(
             "Either bid amount or hourly rate must be specified".to_string(),
         ));
     }
-
     if let Some(amount) = req.bid_amount {
         if amount <= rust_decimal::Decimal::ZERO {
             return Err(DomainError::Validation(
@@ -256,7 +217,6 @@ fn validate_bid(req: &CreateBidRequest) -> Result<(), DomainError> {
             ));
         }
     }
-
     if let Some(rate) = req.hourly_rate {
         if rate <= rust_decimal::Decimal::ZERO {
             return Err(DomainError::Validation(
@@ -264,7 +224,6 @@ fn validate_bid(req: &CreateBidRequest) -> Result<(), DomainError> {
             ));
         }
     }
-
     if let Some(hours) = req.estimated_hours {
         if hours <= 0 {
             return Err(DomainError::Validation(
@@ -272,12 +231,9 @@ fn validate_bid(req: &CreateBidRequest) -> Result<(), DomainError> {
             ));
         }
     }
-
     Ok(())
 }
 
-/// Validate freelancer profile
 fn validate_freelancer_profile(_req: &UpsertFreelancerProfileRequest) -> Result<(), DomainError> {
-    // Add validation logic here
     Ok(())
 }
