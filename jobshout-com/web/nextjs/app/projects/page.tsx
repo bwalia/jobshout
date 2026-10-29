@@ -1,70 +1,10 @@
 import Link from "next/link";
 import { buttonClass } from "@/components/ui";
 import { SearchIcon, SlidersIcon, BriefcaseIcon, WalletIcon, ClockIcon } from "@/components/icons";
+import { MOCK_PROJECTS, formatProjectBudget, projectTypeLabel } from "@/lib/projects";
 
 export default function ProjectsPage() {
-  const projects = [
-    {
-      id: "1",
-      title: "React Developer for E-commerce Platform",
-      summary: "Build a modern e-commerce frontend with React and TypeScript",
-      budget: { min: 2000, max: 5000 },
-      type: "fixed_price",
-      posted: "2 hours ago",
-      bids: 12,
-      skills: ["React", "TypeScript", "Next.js", "Tailwind"],
-    },
-    {
-      id: "2",
-      title: "Mobile App UI/UX Design",
-      summary: "Design a fitness tracking app for iOS and Android",
-      budget: { min: 1500, max: 3000 },
-      type: "fixed_price",
-      posted: "5 hours ago",
-      bids: 8,
-      skills: ["UI/UX", "Figma", "Mobile Design", "Prototyping"],
-    },
-    {
-      id: "3",
-      title: "Backend API Development",
-      summary: "Build REST API for inventory management system",
-      budget: { hourly: 50 },
-      type: "hourly",
-      posted: "1 day ago",
-      bids: 15,
-      skills: ["Node.js", "PostgreSQL", "Docker", "AWS"],
-    },
-    {
-      id: "4",
-      title: "Content Writing - Tech Blog",
-      summary: "Write 10 articles about AI and machine learning",
-      budget: { min: 800, max: 1500 },
-      type: "fixed_price",
-      posted: "2 days ago",
-      bids: 5,
-      skills: ["Content Writing", "Tech Writing", "SEO", "AI"],
-    },
-    {
-      id: "5",
-      title: "DevOps Setup & CI/CD Pipeline",
-      summary: "Set up CI/CD pipeline for web application",
-      budget: { hourly: 75 },
-      type: "hourly",
-      posted: "3 days ago",
-      bids: 9,
-      skills: ["Kubernetes", "GitHub Actions", "AWS", "Terraform"],
-    },
-    {
-      id: "6",
-      title: "Social Media Marketing Strategy",
-      summary: "Develop 3-month social media marketing plan",
-      budget: { min: 1200, max: 2500 },
-      type: "fixed_price",
-      posted: "4 days ago",
-      bids: 7,
-      skills: ["Social Media", "Marketing", "Content Strategy", "Analytics"],
-    },
-  ];
+  const projects = MOCK_PROJECTS;
 
   const categories = [
     { name: "Web Development", count: 42 },
@@ -157,13 +97,11 @@ export default function ProjectsPage() {
                     <div className="mt-4 flex flex-wrap items-center gap-4 text-sm">
                       <span className="inline-flex items-center gap-1.5 rounded-pill bg-brand/10 px-2.5 py-1 font-medium text-brand">
                         <WalletIcon className="h-3 w-3" />
-                        {project.budget.hourly
-                          ? `$${project.budget.hourly}/hr`
-                          : `$${project.budget.min} - $${project.budget.max}`}
+                        {formatProjectBudget(project.budget)}
                       </span>
                       <span className="inline-flex items-center gap-1.5 rounded-pill bg-line/50 px-2.5 py-1 text-mute">
                         <ClockIcon className="h-3 w-3" />
-                        {project.type.replace('_', ' ')}
+                        {projectTypeLabel(project.type)}
                       </span>
                       <span className="text-mute">{project.posted}</span>
                       <span className="text-mute">{project.bids} bids</span>
