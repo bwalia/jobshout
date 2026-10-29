@@ -39,9 +39,11 @@ macro_rules! string_enum {
     };
 }
 
+mod freelance;
 mod insights;
 mod members;
 mod showcase;
+pub use freelance::*;
 pub use insights::*;
 pub use members::*;
 pub use showcase::*;

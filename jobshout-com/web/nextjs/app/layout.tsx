@@ -34,8 +34,8 @@ const mono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "JobShout.com — find work, post work",
-    template: "%s · JobShout.com",
+    default: "JobShout — find work, post work",
+    template: "%s · JobShout",
   },
   description:
     "The AI-native employment marketplace. Search open roles, apply in a couple of minutes, and post jobs that reach candidates who actually match.",
