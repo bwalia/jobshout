@@ -23,7 +23,7 @@ settings:
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
     MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "2"
+    CURRENT_PROJECT_VERSION: "3"
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     # Set your team locally or via xcodebuild DEVELOPMENT_TEAM=...; never commit it.
     DEVELOPMENT_TEAM: ""

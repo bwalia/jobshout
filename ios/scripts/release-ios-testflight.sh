@@ -6,6 +6,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 TEAM="${DEVELOPMENT_TEAM:-PAS2QUVJHC}"
+# App Store Connect numeric Apple ID for JobShout iOS.
+ASC_APPLE_ID="${ASC_APPLE_ID:-511622488}"
 ARCHIVE_PATH="${ARCHIVE_PATH:-/tmp/JobShout-iOS.xcarchive}"
 EXPORT_PATH="${EXPORT_PATH:-/tmp/JobShout-iOS-Export}"
 EXPORT_OPTIONS="${EXPORT_OPTIONS:-$ROOT/Brand/ExportOptions-iOSAppStore.plist}"
@@ -61,10 +63,11 @@ upload_with_api_key() {
     echo "error: ASC key file not found: $key_path" >&2
     return 1
   fi
-  echo "==> Upload via altool (API key)"
+  echo "==> Upload via altool (API key) apple-id=$ASC_APPLE_ID"
   xcrun altool --upload-app \
     --type ios \
     --file "$IPA" \
+    --apple-id "$ASC_APPLE_ID" \
     --apiKey "$key_id" \
     --apiIssuer "$issuer_id"
 }
@@ -90,15 +93,27 @@ upload_via_xcode() {
 </dict>
 </plist>
 EOF
-  echo "==> Upload via xcodebuild (destination=upload)"
+  echo "==> Upload via xcodebuild (destination=upload) apple-id=$ASC_APPLE_ID"
   local upload_path="${EXPORT_PATH}-upload"
   rm -rf "$upload_path"
-  xcodebuild -exportArchive \
+  local log
+  log="$(mktemp /tmp/JobShout-upload.XXXXXX.log)"
+  if ! xcodebuild -exportArchive \
     -archivePath "$ARCHIVE_PATH" \
     -exportPath "$upload_path" \
     -exportOptionsPlist "$upload_opts" \
-    -allowProvisioningUpdates
-  rm -f "$upload_opts"
+    -allowProvisioningUpdates >"$log" 2>&1; then
+    cat "$log" >&2
+    rm -f "$upload_opts" "$log"
+    return 1
+  fi
+  if grep -E -q "EXPORT FAILED|not found on App Store Connect|error:" "$log"; then
+    cat "$log" >&2
+    rm -f "$upload_opts" "$log"
+    return 1
+  fi
+  cat "$log"
+  rm -f "$upload_opts" "$log"
 }
 
 if [[ "$UPLOAD" == "1" ]]; then
@@ -106,8 +121,9 @@ if [[ "$UPLOAD" == "1" ]]; then
     echo "==> Uploaded to App Store Connect. Wait for processing, then enable in TestFlight."
     exit 0
   fi
-  echo "error: upload failed. Create the App Store Connect app for com.jobshout.app first" >&2
-  echo "       (see Brand/TESTFLIGHT.md), then re-run with JOBSHOUT_UPLOAD=1." >&2
+  echo "error: upload failed for ASC Apple ID $ASC_APPLE_ID (com.jobshout.app)." >&2
+  echo "       Confirm the ASC app bundle matches, then re-run with JOBSHOUT_UPLOAD=1." >&2
+  echo "       ASC: https://appstoreconnect.apple.com/apps/${ASC_APPLE_ID}" >&2
   exit 1
 fi
 
@@ -117,12 +133,13 @@ if upload_with_api_key; then
 fi
 
 echo ""
-echo "==> CLI upload skipped. Create the ASC app for com.jobshout.app if missing, then either:"
+echo "==> CLI upload skipped for ASC Apple ID $ASC_APPLE_ID. Either:"
 echo "      JOBSHOUT_UPLOAD=1 ./scripts/release-ios-testflight.sh"
 echo "    or set APP_STORE_CONNECT_KEY_ID / ISSUER_ID / KEY_PATH (.p8), or:"
 echo "      1. open $ARCHIVE_PATH"
-echo "      2. Distribute App → App Store Connect → Upload"
+echo "      2. Distribute App → App Store Connect → Upload (app $ASC_APPLE_ID)"
 echo "      3. TestFlight → enable build for internal testers"
+echo "    ASC: https://appstoreconnect.apple.com/apps/${ASC_APPLE_ID}"
 echo ""
 echo "==> Archive ready: $ARCHIVE_PATH"
 echo "==> IPA ready:     $IPA"

@@ -35,6 +35,11 @@ struct MainTabView: View {
             Tab("Agents", systemImage: "sparkles") {
                 NavigationStack { AgentsView().detailDestinations() }
             }
+            #if os(iOS)
+            Tab("Projects", systemImage: "briefcase") {
+                NavigationStack { FreelanceProjectsView().detailDestinations() }
+            }
+            #endif
             Tab("Work", systemImage: "square.stack.3d.up") {
                 NavigationStack { WorkView().detailDestinations() }
             }
