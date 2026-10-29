@@ -1060,13 +1060,13 @@ dependencies = [
  "anyhow",
  "chrono",
  "jobshout-domain",
- "jobshout-observability",
  "rust_decimal",
  "serde",
  "serde_json",
  "sqlx",
  "thiserror",
  "tokio",
+ "tracing",
  "uuid",
 ]
 
