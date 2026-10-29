@@ -8,6 +8,8 @@ Primary TestFlight track: **Release** → prod API → bundle `com.jobshout.app`
 | Scheme | `JobShout` |
 | Configuration | Release |
 | Bundle ID | `com.jobshout.app` |
+| App Store Connect Apple ID | `511622488` |
+| ASC URL | https://appstoreconnect.apple.com/apps/511622488 |
 | Marketing version | `0.1.0` (`MARKETING_VERSION` in `project.yml`) |
 | Build | `CURRENT_PROJECT_VERSION` (bump each upload) |
 | Min iOS | 18.0 |
@@ -43,11 +45,11 @@ Note: Homebrew `rsync` 3.x breaks export (`Copy failed`); the script puts
 
 ## App Store Connect / Developer Portal checklist
 
-Upload fails with *App record with bundle identifier "com.jobshout.app" not found*
-until the ASC app exists. Create it first (Apps → + → iOS → bundle `com.jobshout.app`).
+Use existing ASC app **Apple ID `511622488`** (bundle must be `com.jobshout.app`).
+Override with `ASC_APPLE_ID=…` if needed.
 
 - [ ] App ID `com.jobshout.app` with **Sign in with Apple**, **Push Notifications**, **Keychain Sharing** (`$(AppIdentifierPrefix)com.jobshout.shared`)
-- [ ] App Store Connect iOS app record for `com.jobshout.app`
+- [x] App Store Connect iOS app record Apple ID `511622488`
 - [ ] Xcode signed into team `PAS2QUVJHC` so Automatic signing can create **Apple Distribution** + App Store provisioning profile
 - [ ] Optional: App Store Connect API key (Issuer ID + Key ID + `.p8`) for non-interactive `altool` / Transporter upload
 - [ ] Prod Helm `apple.clientIds` includes `com.jobshout.app` (and Mac/Watch ids when those ship)
@@ -57,9 +59,11 @@ until the ASC app exists. Create it first (Apps → + → iOS → bundle `com.jo
 
 ## What this build covers
 
-Home → Agents → Call agent → Work → Approvals → Schedules → Me (devices / sign out).
+Home → Agents → **Projects** (Upwork-style freelance catalog + submit bid) → Call agent → Work → Approvals → Schedules → Me.
 
-Not in this track yet: jobshout.com Jobs / Showcase / Insights, chat, Career UI, APNs delivery from the server.
+Projects/bids mirror jobshout.com `/projects` (same seeded catalog until the Rust freelance API is auth-wired through Go).
+
+Not in this track yet: Showcase / Insights, chat, Career UI, APNs delivery from the server.
 
 ## Related
 
