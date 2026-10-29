@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { buttonClass } from "@/components/ui";
-import { SearchIcon, FilterIcon, StarIcon, CheckCircleIcon, GlobeIcon, CurrencyDollarIcon } from "@/components/icons";
+import { SearchIcon, SlidersIcon, StarIcon, CheckCircleIcon, GlobeIcon, WalletIcon } from "@/components/icons";
 
 export default function FreelancersPage() {
   const freelancers = [
@@ -111,7 +111,7 @@ export default function FreelancersPage() {
             </div>
           </div>
           <button className={buttonClass("secondary", "md")}>
-            <FilterIcon className="h-4 w-4" />
+            <SlidersIcon className="h-4 w-4" />
             Filters
           </button>
           <Link href="/freelancers/create" className={buttonClass("ghost", "md")}>
@@ -159,7 +159,7 @@ export default function FreelancersPage() {
 
                         <div className="mt-3 flex flex-wrap items-center gap-4 text-sm">
                           <span className="inline-flex items-center gap-1.5 font-medium text-ink">
-                            <CurrencyDollarIcon className="h-3 w-3" />
+                            <WalletIcon className="h-3 w-3" />
                             ${freelancer.rate.min}-${freelancer.rate.max}/hr
                           </span>
                           <span className="inline-flex items-center gap-1.5 text-mute">

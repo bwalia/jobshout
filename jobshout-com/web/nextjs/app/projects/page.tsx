@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { buttonClass } from "@/components/ui";
-import { SearchIcon, FilterIcon, BriefcaseIcon, CurrencyDollarIcon, ClockIcon } from "@/components/icons";
+import { SearchIcon, SlidersIcon, BriefcaseIcon, WalletIcon, ClockIcon } from "@/components/icons";
 
 export default function ProjectsPage() {
   const projects = [
@@ -129,7 +129,7 @@ export default function ProjectsPage() {
             </div>
           </div>
           <button className={buttonClass("secondary", "md")}>
-            <FilterIcon className="h-4 w-4" />
+            <SlidersIcon className="h-4 w-4" />
             Filters
           </button>
           <Link href="/projects/post" className={buttonClass("primary", "md")}>
@@ -156,7 +156,7 @@ export default function ProjectsPage() {
 
                     <div className="mt-4 flex flex-wrap items-center gap-4 text-sm">
                       <span className="inline-flex items-center gap-1.5 rounded-pill bg-brand/10 px-2.5 py-1 font-medium text-brand">
-                        <CurrencyDollarIcon className="h-3 w-3" />
+                        <WalletIcon className="h-3 w-3" />
                         {project.budget.hourly
                           ? `$${project.budget.hourly}/hr`
                           : `$${project.budget.min} - $${project.budget.max}`}

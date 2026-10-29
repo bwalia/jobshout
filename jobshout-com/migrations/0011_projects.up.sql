@@ -1,5 +1,6 @@
 -- Upwork-style freelancer marketplace: Projects table
-CREATE TABLE projects (
+-- Identity in this schema is candidate_profiles / members (no users table).
+CREATE TABLE IF NOT EXISTS projects (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     job_id UUID REFERENCES jobs(id) ON DELETE CASCADE,
     project_type VARCHAR(50) NOT NULL CHECK (project_type IN ('fixed_price', 'hourly', 'retainer', 'milestone')),
@@ -17,14 +18,14 @@ CREATE TABLE projects (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_projects_job_id ON projects(job_id);
-CREATE INDEX idx_projects_bidding_end ON projects(bidding_end_at) WHERE bidding_end_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_projects_job_id ON projects(job_id);
+CREATE INDEX IF NOT EXISTS idx_projects_bidding_end ON projects(bidding_end_at) WHERE bidding_end_at IS NOT NULL;
 
 -- Bids table
-CREATE TABLE bids (
+CREATE TABLE IF NOT EXISTS bids (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    freelancer_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    freelancer_id UUID NOT NULL REFERENCES candidate_profiles(id) ON DELETE CASCADE,
     bid_amount DECIMAL(10,2),
     hourly_rate DECIMAL(10,2),
     estimated_hours INTEGER,
@@ -43,16 +44,15 @@ CREATE TABLE bids (
     UNIQUE(project_id, freelancer_id)
 );
 
-CREATE INDEX idx_bids_project_id ON bids(project_id);
-CREATE INDEX idx_bids_freelancer_id ON bids(freelancer_id);
-CREATE INDEX idx_bids_status ON bids(status);
-CREATE INDEX idx_bids_shortlisted ON bids(project_id) WHERE is_shortlisted = true;
+CREATE INDEX IF NOT EXISTS idx_bids_project_id ON bids(project_id);
+CREATE INDEX IF NOT EXISTS idx_bids_freelancer_id ON bids(freelancer_id);
+CREATE INDEX IF NOT EXISTS idx_bids_status ON bids(status);
+CREATE INDEX IF NOT EXISTS idx_bids_shortlisted ON bids(project_id) WHERE is_shortlisted = true;
 
 -- Freelancer profiles (extends candidate_profiles)
-CREATE TABLE freelancer_profiles (
+CREATE TABLE IF NOT EXISTS freelancer_profiles (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    candidate_profile_id UUID REFERENCES candidate_profiles(id) ON DELETE CASCADE,
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    candidate_profile_id UUID NOT NULL UNIQUE REFERENCES candidate_profiles(id) ON DELETE CASCADE,
     hourly_rate_min DECIMAL(10,2),
     hourly_rate_max DECIMAL(10,2),
     availability VARCHAR(50) CHECK (availability IN ('full_time', 'part_time', 'not_available')),
@@ -69,11 +69,10 @@ CREATE TABLE freelancer_profiles (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_freelancer_profiles_user_id ON freelancer_profiles(user_id);
-CREATE INDEX idx_freelancer_profiles_candidate_id ON freelancer_profiles(candidate_profile_id);
+CREATE INDEX IF NOT EXISTS idx_freelancer_profiles_candidate_id ON freelancer_profiles(candidate_profile_id);
 
 -- Project categories for better filtering
-CREATE TABLE project_categories (
+CREATE TABLE IF NOT EXISTS project_categories (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(100) NOT NULL,
     slug VARCHAR(100) NOT NULL UNIQUE,
@@ -90,14 +89,15 @@ INSERT INTO project_categories (name, slug, description, icon) VALUES
     ('Marketing & Sales', 'marketing-sales', 'Digital marketing, SEO, social media, sales', 'trending-up'),
     ('Administrative Support', 'admin-support', 'Virtual assistance, data entry, customer service', 'file-text'),
     ('Consulting & Strategy', 'consulting-strategy', 'Business consulting, strategy planning', 'briefcase'),
-    ('AI & Machine Learning', 'ai-ml', 'AI development, ML models, data science', 'brain');
+    ('AI & Machine Learning', 'ai-ml', 'AI development, ML models, data science', 'brain')
+ON CONFLICT (slug) DO NOTHING;
 
 -- Project to categories mapping
-CREATE TABLE project_categories_mapping (
+CREATE TABLE IF NOT EXISTS project_categories_mapping (
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     category_id UUID NOT NULL REFERENCES project_categories(id) ON DELETE CASCADE,
     PRIMARY KEY (project_id, category_id)
 );
 
-CREATE INDEX idx_project_categories_project ON project_categories_mapping(project_id);
-CREATE INDEX idx_project_categories_category ON project_categories_mapping(category_id);
+CREATE INDEX IF NOT EXISTS idx_project_categories_project ON project_categories_mapping(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_categories_category ON project_categories_mapping(category_id);
