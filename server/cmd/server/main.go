@@ -35,6 +35,8 @@ import (
 	"github.com/jobshout/server/internal/linkedin"
 	"github.com/jobshout/server/internal/linuxpatch"
 	"github.com/jobshout/server/internal/liveevents"
+	"github.com/jobshout/server/internal/marketingmanager"
+	mmchattools "github.com/jobshout/server/internal/marketingmanager/chattools"
 	"github.com/jobshout/server/internal/scheduler"
 	"github.com/jobshout/server/internal/secretsrot"
 	"github.com/jobshout/server/internal/simpro"
@@ -1007,6 +1009,16 @@ func main() {
 		zap.Bool("live_configured", abTestClient.LiveConfigured()),
 	)
 
+	marketingSvc := marketingmanager.NewFromEnv(integRepo)
+	logger.Info("marketing manager initialised",
+		zap.Bool("ring_workspace", marketingSvc.RingConfigured()),
+		zap.Bool("live_send_allowed", marketingSvc.AllowLiveSend),
+		zap.Int("ring_test_recipients", len(marketingSvc.Ring.TestRecipients)),
+		zap.Int("ring_orgs", len(marketingSvc.Ring.Orgs)),
+	)
+	// Its chat tools live with the agent (marketingmanager/chattools).
+	agentmodule.SetToolInstaller(model.BuiltinMarketingManager, mmchattools.Installer(marketingSvc))
+
 	// All specialists are wired this way: own package, then one Register call.
 	// A new agent does not need significant platform changes — register it.
 	agentmodules.Register(agentmodules.Deps{
@@ -1029,6 +1041,7 @@ func main() {
 		CompanyWeb:       companyweb.ClientRunner{Client: researchClient},
 		Video:            videoSvc,
 		MarketingEmail:   emailSvc,
+		Marketing:        marketingSvc,
 	})
 
 	// ─── Autonomous agent engine ────────────────────────────────────────────

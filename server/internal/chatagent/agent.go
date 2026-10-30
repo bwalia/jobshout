@@ -539,7 +539,7 @@ func (a *Agent) executeTool(ctx context.Context, stream StreamFunc, name string,
 			switch {
 			case errors.Is(err, platformtools.ErrNeedsConfirm):
 				action.Status = model.ActionPendingConfirmation
-				action.Error = destructiveEffect(t, args)
+				action.Error = destructiveEffect(ctx, t, args)
 			case errors.Is(err, platformtools.ErrDenied), errors.Is(err, platformtools.ErrPolicy):
 				action.Status = model.ActionDenied
 				action.Error = HumaniseError(err)
@@ -815,7 +815,12 @@ func finaliseUsage(resp *model.ChatResponse, start time.Time, modelName string) 
 	resp.Usage.LatencyMs = time.Since(start).Milliseconds()
 }
 
-func destructiveEffect(t platformtools.PlatformTool, args map[string]any) string {
+func destructiveEffect(ctx context.Context, t platformtools.PlatformTool, args map[string]any) string {
+	if d, ok := t.(platformtools.EffectDescriber); ok {
+		if s := strings.TrimSpace(d.DescribeEffect(ctx, args)); s != "" {
+			return s
+		}
+	}
 	name := ""
 	for _, k := range []string{"name", "title", "agent", "workflow", "target"} {
 		if s := asString(args[k]); s != "" {

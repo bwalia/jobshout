@@ -49,6 +49,13 @@ extraSecretRefs:
   # each key set registers that provider in the model picker. Models are
   # chosen with ai.*Model / ai.*Models (values.yaml), not here.
   - jobshout-llm
+  # Marketing Manager: OPSAPI_MARKETING_API_KEY (scripts/opsapi-api-key.sh
+  # with OPSAPI_KEY_PROFILE=marketing — never the CMS key),
+  # OPSAPI_MARKETING_NAMESPACE, OPSAPI_MARKETING_ORG_IDS (the only orgs that
+  # may use this workspace), MARKETING_TEST_RECIPIENTS. No
+  # MARKETING_LIVE_SEND here: int sends only from a workspace in OpsAPI test
+  # mode (docs/marketing-manager.md).
+  - jobshout-marketing
 
 # ExternalSecrets → WSL Vault (ClusterSecretStore wslvault-backend). Each entry
 # materialises every key under `key` into a Secret of the same `name`. Keys in
@@ -94,6 +101,9 @@ vaultSecrets:
   - name: jobshout-llm
     store: wslvault-backend
     key: jobshout/int/llm
+  - name: jobshout-marketing
+    store: wslvault-backend
+    key: jobshout/int/marketing
 
 # opsapi CMS — the Article Writer files generated articles there as drafts.
 # The host and namespace slug are not secret; the API key is, and comes from

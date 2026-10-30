@@ -24,6 +24,13 @@ type PlatformTool interface {
 	Run(ctx context.Context, input map[string]any) (*Result, error)
 }
 
+// EffectDescriber is optional on a destructive tool: it states the concrete
+// effect of these args (who is affected, whether it is real) for the
+// confirmation the guard holds the call for. "" falls back to the generic text.
+type EffectDescriber interface {
+	DescribeEffect(ctx context.Context, args map[string]any) string
+}
+
 // Result is what a platform tool returns to the chat loop. Data is serialised
 // into an untrusted delimiter block for the model. Entity/Entities populate
 // the response envelope. Missing triggers slot-filling rather than prose.
