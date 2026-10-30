@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { JetBrains_Mono, Poppins, Unbounded } from "next/font/google";
+import localFont from "next/font/local";
 import { AuthProvider } from "@/components/AuthProvider";
 import { BetaBanner } from "@/components/BetaBanner";
 import { JobSupportDock } from "@/components/job-support/JobSupportDock";
@@ -8,25 +8,37 @@ import { SiteFooter } from "@/components/SiteFooter";
 import { SiteHeader } from "@/components/SiteHeader";
 import "./globals.css";
 
-// The Workstation type system, shared with workstation.co.uk: Poppins for body
-// and UI, Unbounded for h1/h2 and display text, JetBrains Mono for code.
-const display = Unbounded({
-  subsets: ["latin"],
-  weight: ["500", "600", "700", "800"],
+// Vendored latin cuts — Docker/CI builds must not fetch fonts.googleapis.com
+// (that fetch flakes and fails the image publish). Same Workstation stack as
+// workstation.co.uk: Poppins body/UI, Unbounded display, JetBrains Mono code.
+const display = localFont({
+  src: [
+    { path: "../fonts/unbounded-latin-500-normal.woff2", weight: "500", style: "normal" },
+    { path: "../fonts/unbounded-latin-600-normal.woff2", weight: "600", style: "normal" },
+    { path: "../fonts/unbounded-latin-700-normal.woff2", weight: "700", style: "normal" },
+    { path: "../fonts/unbounded-latin-800-normal.woff2", weight: "800", style: "normal" },
+  ],
   variable: "--font-display",
   display: "swap",
 });
 
-const sans = Poppins({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
+const sans = localFont({
+  src: [
+    { path: "../fonts/poppins-latin-400-normal.woff2", weight: "400", style: "normal" },
+    { path: "../fonts/poppins-latin-500-normal.woff2", weight: "500", style: "normal" },
+    { path: "../fonts/poppins-latin-600-normal.woff2", weight: "600", style: "normal" },
+    { path: "../fonts/poppins-latin-700-normal.woff2", weight: "700", style: "normal" },
+    { path: "../fonts/poppins-latin-800-normal.woff2", weight: "800", style: "normal" },
+  ],
   variable: "--font-sans",
   display: "swap",
 });
 
-const mono = JetBrains_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500"],
+const mono = localFont({
+  src: [
+    { path: "../fonts/jetbrains-mono-latin-400-normal.woff2", weight: "400", style: "normal" },
+    { path: "../fonts/jetbrains-mono-latin-500-normal.woff2", weight: "500", style: "normal" },
+  ],
   variable: "--font-mono",
   display: "swap",
   preload: false,
