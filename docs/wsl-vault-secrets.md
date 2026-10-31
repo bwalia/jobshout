@@ -30,6 +30,7 @@ implement HashiCorp `auth/token/create` or `sys/policies`.
 | `jobshout-mail` | `jobshout/<ring>/mail` | `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_TOKEN_KEY` |
 | `jobshout-google` | `jobshout/<ring>/google` | `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` |
 | `jobshout-linkedin` | `jobshout/<ring>/linkedin` | `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET`, `LINKEDIN_TOKEN_KEY` |
+| `jobshout-meta` | `jobshout/<ring>/meta` | `META_APP_ID`, `META_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN`, `META_TOKEN_KEY`; optional `META_GRAPH_VERSION` |
 | `jobshout-wslproxy` | `jobshout/<ring>/wslproxy` | `WSLPROXY_API_TOKEN` and/or `WSLPROXY_USERNAME`+`WSLPROXY_PASSWORD`; optional `WSLPROXY_MCP_API_KEY` |
 | `jobshout-secretsrot` | `jobshout/<ring>/secretsrot` | `SECRETS_VAULT_ADDR`, `SECRETS_VAULT_TOKEN`, `RP_API_TOKEN`; optional `SECRETS_ROT_GITHUB_TOKEN` |
 | `jobshout-gemini` | `jobshout/<ring>/gemini` | `GEMINI_API_KEY` |
@@ -96,7 +97,7 @@ unset GEMINI_API_KEY
 wslvault secret get jobshout/int/gemini --format json | jq 'keys'
 ```
 
-Optional / missing secrets (`research`, `linkedin`) can wait; refs are
+Optional / missing secrets (`research`, `linkedin`, `meta`) can wait; refs are
 `optional: true`. Populate **gemini / gateways / strix / cms / core** before
 merge so ExternalSecrets can sync on deploy.
 

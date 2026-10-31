@@ -25,6 +25,7 @@ export const AGENT_CLIENT_BUILTINS = [
   "linkedin_poster",
   "video_producer",
   "marketing_email_writer",
+  "meta_lead_analyst",
 ] as const;
 
 export type AgentClientBuiltin = (typeof AGENT_CLIENT_BUILTINS)[number];

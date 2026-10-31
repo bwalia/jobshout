@@ -70,6 +70,7 @@ import (
 	"github.com/jobshout/server/internal/llmtrace"
 	"github.com/jobshout/server/internal/mail"
 	"github.com/jobshout/server/internal/marketingemail"
+	"github.com/jobshout/server/internal/metalead"
 	"github.com/jobshout/server/internal/middleware"
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/modelselect"
@@ -971,6 +972,33 @@ func main() {
 		zap.Bool("save_mail_merge_template", marketingemail.SaveTemplatesFromEnv()),
 	)
 
+	// ─── Meta Lead Analyst ──────────────────────────────────────────────────
+	metaLeadCfg := metalead.LoadConfig()
+	metaLeadProvider, metaLeadModel := agentLLM(cfg, model.BuiltinMetaLead)
+	metaLeadCfg.Provider = metaLeadProvider
+	metaLeadCfg.Model = firstNonEmptyStr(metaLeadModel, metaLeadCfg.Model)
+	var metaLeadAnalyser *metalead.Analyser
+	if _, err := llmRouter.For(metaLeadProvider); err == nil {
+		metaLeadAnalyser = &metalead.Analyser{
+			LLM:   metalead.NewClientCompleter(llmRouter.Routed(metaLeadProvider), metaLeadCfg.Model),
+			Model: metaLeadCfg.Model,
+		}
+	}
+	metaLeadSvc := metalead.NewService(
+		metalead.NewRepo(pool),
+		metalead.NewClient(metaLeadCfg.GraphVersion),
+		metaLeadAnalyser,
+		metaLeadCfg,
+		logger,
+	)
+	metaLeadSvc.BindTasks(taskSvc)
+	logger.Info("meta lead analyst initialised",
+		zap.Bool("configured", metaLeadSvc.Configured()),
+		zap.Bool("can_seal_tokens", metaLeadCfg.CanSealTokens()),
+		zap.Bool("llm", metaLeadAnalyser != nil),
+		zap.String("graph_version", metaLeadCfg.GraphVersion),
+	)
+
 	secretsRotCfg := secretsrot.LoadConfig()
 	secretsRotSvc := service.NewSecretsRotationService(secretsRotRunRepo, agentRepo, secretsRotCfg, logger)
 	logger.Info("secrets rotation agent initialised",
@@ -1042,6 +1070,7 @@ func main() {
 		Video:            videoSvc,
 		MarketingEmail:   emailSvc,
 		Marketing:        marketingSvc,
+		MetaLead:         metaLeadSvc,
 	})
 
 	// ─── Autonomous agent engine ────────────────────────────────────────────
@@ -1333,6 +1362,8 @@ func main() {
 	// Prometheus metrics endpoint
 	r.Handle("/metrics", promhttp.Handler())
 
+	metaLeadHandler := handler.NewMetaLeadHandler(metaLeadSvc)
+
 	// Public webhook endpoints (no auth — verified by HMAC/secret token)
 	r.Route("/webhooks", func(r chi.Router) {
 		r.Post("/jira/{integrationID}", webhookHandler.Jira)
@@ -1340,6 +1371,8 @@ func main() {
 		if telegramHandler != nil {
 			r.Post("/telegram", telegramHandler.Webhook)
 		}
+		r.Get("/meta", metaLeadHandler.WebhookVerify)
+		r.Post("/meta", metaLeadHandler.WebhookReceive)
 	})
 
 	// API v1 routes
@@ -1712,6 +1745,16 @@ func main() {
 				r.Patch("/posts/{postID}", linkedInHandler.UpdatePost)
 				r.Post("/posts/{postID}/redraft", linkedInHandler.Redraft)
 				r.Post("/posts/{postID}/publish", linkedInHandler.Publish)
+			})
+
+			r.Route("/meta-leads", func(r chi.Router) {
+				r.Get("/status", metaLeadHandler.Status)
+				r.Get("/connections", metaLeadHandler.ListConnections)
+				r.Put("/connections", metaLeadHandler.UpsertConnection)
+				r.Get("/runs", metaLeadHandler.ListRuns)
+				r.Get("/runs/{runID}", metaLeadHandler.GetRun)
+				r.Get("/runs/{runID}/leads", metaLeadHandler.ListRunLeads)
+				r.Get("/leads", metaLeadHandler.ListLeads)
 			})
 
 			r.Route("/secrets-rotation", func(r chi.Router) {

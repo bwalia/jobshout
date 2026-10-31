@@ -63,6 +63,12 @@ linkedin:
 #       store: wslvault-backend   # ClusterSecretStore
 #       key: jobshout/int/linkedin
 #
+# Meta Lead Analyst — App ID/secret, webhook verify token, and META_TOKEN_KEY
+# live in Vault jobshout/<ring>/meta → jobshout-meta (extraSecretRefs). Optional
+# META_GRAPH_VERSION defaults to v21.0 in code. See docs/meta-lead-analyst.md.
+meta:
+  graphVersion: "v21.0"
+#
 # The API reads its environment at start, so restart jobshout-api once after the
 # first sync (or a rotation) for new values to take effect. Prefer Ring Promoter
 # restart with an explicit deployments list.
