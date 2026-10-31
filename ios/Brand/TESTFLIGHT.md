@@ -1,13 +1,13 @@
 # iPhone TestFlight (JobShout)
 
-Primary TestFlight track: **Release** → prod API → bundle `com.jobshout.app`.
+Primary TestFlight track: **Release** → prod API → bundle `com.tenthmatrix_jobshout`.
 
 | | |
 |---|---|
 | Display name | JobShout |
 | Scheme | `JobShout` |
 | Configuration | Release |
-| Bundle ID | `com.jobshout.app` |
+| Bundle ID | `com.tenthmatrix_jobshout` |
 | App Store Connect Apple ID | `511622488` |
 | ASC URL | https://appstoreconnect.apple.com/apps/511622488 |
 | Marketing version | `0.1.0` (`MARKETING_VERSION` in `project.yml`) |
@@ -45,14 +45,14 @@ Note: Homebrew `rsync` 3.x breaks export (`Copy failed`); the script puts
 
 ## App Store Connect / Developer Portal checklist
 
-Use existing ASC app **Apple ID `511622488`** (bundle must be `com.jobshout.app`).
+Use existing ASC app **Apple ID `511622488`** (bundle `com.tenthmatrix_jobshout`).
 Override with `ASC_APPLE_ID=…` if needed.
 
-- [ ] App ID `com.jobshout.app` with **Sign in with Apple**, **Push Notifications**, **Keychain Sharing** (`$(AppIdentifierPrefix)com.jobshout.shared`)
+- [ ] App ID `com.tenthmatrix_jobshout` with **Sign in with Apple**, **Push Notifications**, **Keychain Sharing** (`$(AppIdentifierPrefix)com.jobshout.shared`)
 - [x] App Store Connect iOS app record Apple ID `511622488`
 - [ ] Xcode signed into team `PAS2QUVJHC` so Automatic signing can create **Apple Distribution** + App Store provisioning profile
 - [ ] Optional: App Store Connect API key (Issuer ID + Key ID + `.p8`) for non-interactive `altool` / Transporter upload
-- [ ] Prod Helm `apple.clientIds` includes `com.jobshout.app` (and Mac/Watch ids when those ship)
+- [ ] Prod Helm `apple.clientIds` includes `com.tenthmatrix_jobshout` (and Mac/Watch ids when those ship)
 - [ ] Privacy: `ITSAppUsesNonExemptEncryption` is false in the app Info.plist
 - [ ] Internal testers added in TestFlight; build processed and enabled
 - [ ] Review notes (later public TF): Google OAuth uses `jobshout://`; SIWA on prod; agents core loop
