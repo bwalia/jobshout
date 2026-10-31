@@ -80,12 +80,19 @@ wafLab:
 # TOKEN_KEY). Without it drafts still work; Connect and Approve & post stay
 # disabled. Register OAuth redirects on the LinkedIn app for
 # https://jobshout.co.uk/api/v1/linkedin/oauth/callback (and www if used).
+#
+# jobshout-meta: Meta Lead Analyst (META_APP_ID / META_APP_SECRET /
+# META_WEBHOOK_VERIFY_TOKEN / META_TOKEN_KEY). Webhook callback:
+# https://jobshout.co.uk/webhooks/meta — see docs/meta-lead-analyst.md.
+# Uncomment jobshout-meta under extraSecretRefs + vaultSecrets after seeding
+# jobshout/prod/meta in Vault (ESO fails if the path is missing).
 extraSecretRefs:
   - jobshout-core
   - jobshout-gateways
   - jobshout-google
   - jobshout-cms
   - jobshout-linkedin
+  # - jobshout-meta
   # OPENAI_API_KEY / CLAUDE_API_KEY (or ANTHROPIC_API_KEY) / GEMINI_API_KEY:
   # each key set registers that provider in the model picker. Models are
   # chosen with ai.*Model / ai.*Models (values.yaml), not here.
@@ -107,6 +114,9 @@ vaultSecrets:
   - name: jobshout-linkedin
     store: wslvault-backend
     key: jobshout/prod/linkedin
+  # - name: jobshout-meta
+  #   store: wslvault-backend
+  #   key: jobshout/prod/meta
   - name: jobshout-llm
     store: wslvault-backend
     key: jobshout/prod/llm
