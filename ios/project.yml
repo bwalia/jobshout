@@ -63,7 +63,8 @@ targets:
         Staging:
           PRODUCT_BUNDLE_IDENTIFIER: com.jobshout.app.staging
         Release:
-          PRODUCT_BUNDLE_IDENTIFIER: com.jobshout.app
+          # App Store Connect Apple ID 511622488
+          PRODUCT_BUNDLE_IDENTIFIER: com.tenthmatrix_jobshout
     info:
       path: App/Info.plist
       properties:

@@ -53,7 +53,7 @@ Schemes: `JobShout` (iPhone/iPad), `JobShoutMac`, `JobShoutWatch`.
 |---|---|---|---|---|
 | Debug | int | `com.jobshout.app.dev` | `com.jobshout.mac.dev` | `com.jobshout.app.watchkitapp.dev` |
 | Staging | acc | `com.jobshout.app.staging` | `com.jobshout.mac.staging` | `com.jobshout.app.watchkitapp.staging` |
-| Release | prod | `com.jobshout.app` | `com.jobshout.mac` | `com.jobshout.app.watchkitapp` |
+| Release | prod | `com.tenthmatrix_jobshout` | `com.jobshout.mac` | `com.jobshout.app.watchkitapp` |
 
 Set your team in Xcode (never commit `DEVELOPMENT_TEAM`). On the simulator,
 ad-hoc signing is enough: `CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual`.

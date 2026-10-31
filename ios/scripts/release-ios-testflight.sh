@@ -121,7 +121,7 @@ if [[ "$UPLOAD" == "1" ]]; then
     echo "==> Uploaded to App Store Connect. Wait for processing, then enable in TestFlight."
     exit 0
   fi
-  echo "error: upload failed for ASC Apple ID $ASC_APPLE_ID (com.jobshout.app)." >&2
+  echo "error: upload failed for ASC Apple ID $ASC_APPLE_ID (com.tenthmatrix_jobshout)." >&2
   echo "       Confirm the ASC app bundle matches, then re-run with JOBSHOUT_UPLOAD=1." >&2
   echo "       ASC: https://appstoreconnect.apple.com/apps/${ASC_APPLE_ID}" >&2
   exit 1
@@ -133,7 +133,7 @@ if upload_with_api_key; then
 fi
 
 echo ""
-echo "==> CLI upload skipped for ASC Apple ID $ASC_APPLE_ID. Either:"
+echo "==> CLI upload skipped for ASC Apple ID $ASC_APPLE_ID (com.tenthmatrix_jobshout). Either:"
 echo "      JOBSHOUT_UPLOAD=1 ./scripts/release-ios-testflight.sh"
 echo "    or set APP_STORE_CONNECT_KEY_ID / ISSUER_ID / KEY_PATH (.p8), or:"
 echo "      1. open $ARCHIVE_PATH"
