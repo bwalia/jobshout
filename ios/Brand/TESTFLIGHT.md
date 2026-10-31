@@ -15,20 +15,34 @@ Primary TestFlight track: **Release** → prod API → bundle `com.tenthmatrix.j
 | Min iOS | 18.0 |
 | Team | `PAS2QUVJHC` (pass via script/env; never commit in `project.yml`) |
 
-## One-shot archive + upload
+## Fastlane (preferred)
+
+```sh
+cd ios
+# Optional but recommended for non-interactive upload:
+export APP_STORE_CONNECT_KEY_ID=6KVVV27G4Q   # or your Key ID
+export APP_STORE_CONNECT_ISSUER_ID=<Issuer-UUID-from-ASC-Keys>
+export APP_STORE_CONNECT_KEY_PATH=$HOME/.appstoreconnect/private_keys/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8
+
+fastlane ios beta
+```
+
+Issuer ID: App Store Connect → Users and Access → Integrations → App Store Connect API.
+
+Without an API key, Fastlane falls back to Apple ID / Xcode session upload.
+`SKIP_UPLOAD=1 fastlane ios beta` builds the IPA only.
+
+## Shell script (alternate)
 
 ```sh
 cd ios && JOBSHOUT_UPLOAD=1 ./scripts/release-ios-testflight.sh
 ```
 
-`ASC_APPLE_ID` defaults to `511622488`. Override only if Apple assigns a new app id.
-
-Or set `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID`, and
-`APP_STORE_CONNECT_KEY_PATH` (`.p8`). If CLI upload still fails, open the
+`ASC_APPLE_ID` defaults to `511622488`. If CLI upload still fails, open the
 archive in **Xcode → Organizer → Distribute App → App Store Connect → Upload**.
 
-Note: Homebrew `rsync` 3.x breaks export (`Copy failed`); the script puts
-`/usr/bin` first on `PATH` so macOS openrsync is used.
+Note: Homebrew `rsync` 3.x breaks export (`Copy failed`); Fastlane and the
+script put `/usr/bin` first on `PATH` so macOS openrsync is used.
 
 ## App Store Connect / Developer Portal checklist
 

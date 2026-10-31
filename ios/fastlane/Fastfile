@@ -1,0 +1,188 @@
+# frozen_string_literal: true
+
+require "shellwords"
+
+default_platform(:ios)
+
+# Release → TestFlight for ASC app 511622488 (com.tenthmatrix.jobshout).
+#
+# Auth (pick one):
+#   1) App Store Connect API key (preferred):
+#        APP_STORE_CONNECT_KEY_ID
+#        APP_STORE_CONNECT_ISSUER_ID
+#        APP_STORE_CONNECT_KEY_PATH   # AuthKey_XXXX.p8
+#      or APP_STORE_CONNECT_API_KEY_PATH → JSON {key_id,issuer_id,key_filepath}
+#   2) Apple ID: FASTLANE_USER + FASTLANE_APPLE_APPLICATION_SPECIFIC_PASSWORD
+#   3) Fallback: xcodebuild destination=upload (uses the Apple ID signed into Xcode)
+#
+# Usage:
+#   cd ios && fastlane ios beta
+#   SKIP_UPLOAD=1 fastlane ios beta
+
+platform :ios do
+  TEAM_ID = "PAS2QUVJHC"
+  ASC_APPLE_ID = ENV.fetch("FL_APPLE_APP_ID", "511622488")
+  BUNDLE_ID = "com.tenthmatrix.jobshout"
+  ARCHIVE_PATH = "/tmp/JobShout-iOS.xcarchive"
+  EXPORT_DIR = "/tmp/JobShout-Fastlane-Export"
+
+  desc "Archive Release and upload to TestFlight (ASC 511622488)"
+  lane :beta do
+    ensure_xcode_path
+    generate_project
+
+    api_key = connect_api_key
+
+    build_app(
+      project: "JobShout.xcodeproj",
+      scheme: "JobShout",
+      configuration: "Release",
+      clean: true,
+      export_method: "app-store",
+      export_options: File.expand_path("../Brand/ExportOptions-iOSAppStore.plist", __dir__),
+      output_directory: EXPORT_DIR,
+      output_name: "JobShout",
+      skip_profile_detection: true,
+      xcargs: "DEVELOPMENT_TEAM=#{TEAM_ID} CODE_SIGN_STYLE=Automatic -allowProvisioningUpdates -skipPackagePluginValidation",
+      destination: "generic/platform=iOS",
+      derived_data_path: "/tmp/JobShout-Fastlane-DerivedData"
+    )
+
+    # Keep a stable archive path for the xcodebuild upload fallback.
+    built_archive = lane_context[SharedValues::XCODEBUILD_ARCHIVE]
+    if built_archive && File.exist?(built_archive)
+      sh("rm -rf '#{ARCHIVE_PATH}' && cp -R '#{built_archive}' '#{ARCHIVE_PATH}'")
+    end
+
+    if ENV["SKIP_UPLOAD"].to_s == "1"
+      UI.success("SKIP_UPLOAD=1 — IPA at #{EXPORT_DIR}/JobShout.ipa")
+      next
+    end
+
+    begin
+      upload_kwargs = {
+        app_identifier: BUNDLE_ID,
+        apple_id: ASC_APPLE_ID,
+        skip_waiting_for_build_processing: true,
+        distribute_external: false
+      }
+      upload_kwargs[:api_key] = api_key if api_key
+      upload_kwargs[:changelog] = ENV["TESTFLIGHT_CHANGELOG"] if ENV["TESTFLIGHT_CHANGELOG"]
+      upload_to_testflight(upload_kwargs)
+    rescue => e
+      UI.important("upload_to_testflight failed (#{e.message}); trying xcodebuild destination=upload")
+      upload_via_xcodebuild
+    end
+  end
+
+  desc "Upload an existing IPA to TestFlight"
+  lane :upload do |options|
+    ipa = options[:ipa] || ENV["IPA"] || "#{EXPORT_DIR}/JobShout.ipa"
+    UI.user_error!("IPA not found: #{ipa}") unless File.exist?(ipa)
+
+    api_key = connect_api_key
+    upload_kwargs = {
+      ipa: ipa,
+      app_identifier: BUNDLE_ID,
+      apple_id: ASC_APPLE_ID,
+      skip_waiting_for_build_processing: true,
+      distribute_external: false
+    }
+    upload_kwargs[:api_key] = api_key if api_key
+    upload_to_testflight(upload_kwargs)
+  end
+
+  private_lane :ensure_xcode_path do
+    # Homebrew rsync 3.x breaks xcodebuild -exportArchive ("Copy failed").
+    ENV["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin:#{ENV['PATH']}"
+  end
+
+  private_lane :generate_project do
+    sh("command -v xcodegen >/dev/null || brew install xcodegen")
+    Dir.chdir("..") { sh("xcodegen generate") }
+  end
+
+  private_lane :connect_api_key do
+    json_path = ENV["APP_STORE_CONNECT_API_KEY_PATH"].to_s
+    unless json_path.empty? || !File.exist?(json_path)
+      require "json"
+      data = JSON.parse(File.read(json_path))
+      next app_store_connect_api_key(
+        key_id: data["key_id"] || data["keyId"],
+        issuer_id: data["issuer_id"] || data["issuerId"],
+        key_filepath: data["key_filepath"] || data["keyFilepath"] || data["key"],
+        duration: 1200,
+        in_house: false
+      )
+    end
+
+    key_id = ENV["APP_STORE_CONNECT_KEY_ID"] || ENV["ASC_KEY_ID"]
+    issuer_id = ENV["APP_STORE_CONNECT_ISSUER_ID"] || ENV["ASC_ISSUER_ID"]
+    key_path = ENV["APP_STORE_CONNECT_KEY_PATH"] || ENV["ASC_KEY_PATH"]
+    key_path ||= File.expand_path("~/.appstoreconnect/private_keys/AuthKey_#{key_id}.p8") if key_id
+
+    if key_id.to_s.empty? || issuer_id.to_s.empty? || key_path.to_s.empty? || !File.exist?(key_path.to_s)
+      UI.important(
+        "No ASC API key (need KEY_ID + ISSUER_ID + .p8). " \
+        "Will try Apple ID session, then xcodebuild upload fallback."
+      )
+      next nil
+    end
+
+    app_store_connect_api_key(
+      key_id: key_id,
+      issuer_id: issuer_id,
+      key_filepath: key_path,
+      duration: 1200,
+      in_house: false
+    )
+  end
+
+  private_lane :upload_via_xcodebuild do
+    UI.user_error!("Archive missing at #{ARCHIVE_PATH}") unless File.directory?(ARCHIVE_PATH)
+
+    upload_opts = "/tmp/JobShout-UploadOptions.plist"
+    File.write(upload_opts, <<~PLIST)
+      <?xml version="1.0" encoding="UTF-8"?>
+      <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+      <plist version="1.0">
+      <dict>
+        <key>method</key>
+        <string>app-store-connect</string>
+        <key>destination</key>
+        <string>upload</string>
+        <key>signingStyle</key>
+        <string>automatic</string>
+        <key>teamID</key>
+        <string>#{TEAM_ID}</string>
+        <key>uploadSymbols</key>
+        <true/>
+      </dict>
+      </plist>
+    PLIST
+
+    upload_path = "#{EXPORT_DIR}-upload"
+    sh("rm -rf #{upload_path.shellescape}")
+    log = "/tmp/JobShout-fastlane-upload.log"
+    cmd = [
+      "xcodebuild", "-exportArchive",
+      "-archivePath", ARCHIVE_PATH,
+      "-exportPath", upload_path,
+      "-exportOptionsPlist", upload_opts,
+      "-allowProvisioningUpdates"
+    ].shelljoin
+
+    system("#{cmd} >#{log.shellescape} 2>&1")
+    status = $?.exitstatus
+    out = File.exist?(log) ? File.read(log) : ""
+    puts out
+    if status != 0 || out =~ /EXPORT FAILED|not found on App Store Connect|error:/i
+      UI.user_error!(
+        "Upload failed for ASC #{ASC_APPLE_ID} (#{BUNDLE_ID}). " \
+        "Confirm App Information Bundle ID is #{BUNDLE_ID} (lowercase). " \
+        "ASC: https://appstoreconnect.apple.com/apps/#{ASC_APPLE_ID}"
+      )
+    end
+    UI.success("Uploaded via xcodebuild. Enable the build in TestFlight when processing finishes.")
+  end
+end
