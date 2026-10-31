@@ -122,7 +122,7 @@ if [[ "$UPLOAD" == "1" ]]; then
     exit 0
   fi
   echo "error: upload failed for ASC Apple ID $ASC_APPLE_ID (com.tenthmatrix.jobshout)." >&2
-  echo "       Confirm the ASC app bundle matches, then re-run with JOBSHOUT_UPLOAD=1." >&2
+  echo "       Confirm ASC App Information Bundle ID is com.tenthmatrix.jobshout (lowercase), then re-run with JOBSHOUT_UPLOAD=1." >&2
   echo "       ASC: https://appstoreconnect.apple.com/apps/${ASC_APPLE_ID}" >&2
   exit 1
 fi

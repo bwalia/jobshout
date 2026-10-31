@@ -7,7 +7,7 @@ Primary TestFlight track: **Release** → prod API → bundle `com.tenthmatrix.j
 | Display name | JobShout |
 | Scheme | `JobShout` |
 | Configuration | Release |
-| Bundle ID | `com.tenthmatrix.jobshout` |
+| Bundle ID | `com.tenthmatrix.jobshout` (all lowercase — ASC + Developer Portal) |
 | App Store Connect Apple ID | `511622488` (permanent) |
 | ASC URL | https://appstoreconnect.apple.com/apps/511622488/testflight/ios |
 | Marketing version | `0.1.0` (`MARKETING_VERSION` in `project.yml`) |
@@ -32,11 +32,13 @@ Note: Homebrew `rsync` 3.x breaks export (`Copy failed`); the script puts
 
 ## App Store Connect / Developer Portal checklist
 
-ASC app **`511622488`** must use bundle **`com.tenthmatrix.jobshout`** (Apple
-App IDs allow letters, digits, `.` and `-` only — not `_`).
+ASC Bundle ID must be selected from the **registered App ID** list as
+**`com.tenthmatrix.jobshout`** (all lowercase). Do not use
+`com.tenthmatrix.Jobshout` — Apple treats that as unavailable because the
+lowercase App ID already exists on team `PAS2QUVJHC`.
 
 - [x] Developer Portal App ID `com.tenthmatrix.jobshout` (Push + Sign in with Apple; Store profile on team `PAS2QUVJHC`)
-- [ ] ASC app `511622488` bundle set to `com.tenthmatrix.jobshout` (My Apps → app → App Information). If the bundle cannot be changed, create the app with that bundle and update `ASC_APPLE_ID` / this doc.
+- [ ] ASC app `511622488` → App Information → Bundle ID → pick **`com.tenthmatrix.jobshout`** (lowercase) from the dropdown, then Save
 - [ ] Xcode signed into team `PAS2QUVJHC`
 - [ ] Optional: App Store Connect API key (Issuer ID + Key ID + `.p8`) for non-interactive upload
 - [ ] Prod Helm `apple.clientIds` includes `com.tenthmatrix.jobshout`
