@@ -1,40 +1,27 @@
 # iPhone TestFlight (JobShout)
 
-Primary TestFlight track: **Release** → prod API → bundle `com.tenthmatrix.jobshout`.
+Primary TestFlight track: **Release** → prod API → bundle `com.tenthmatrix.jobshout` → ASC Apple ID **`511622488`**.
 
 | | |
 |---|---|
 | Display name | JobShout |
 | Scheme | `JobShout` |
 | Configuration | Release |
-| Bundle ID | `com.tenthmatrix.jobshout` |
-| App Store Connect Apple ID | `511622488` |
-| ASC URL | https://appstoreconnect.apple.com/apps/511622488 |
+| Bundle ID | `com.tenthmatrix.jobshout` (all lowercase — ASC + Developer Portal) |
+| App Store Connect Apple ID | `511622488` (permanent) |
+| ASC URL | https://appstoreconnect.apple.com/apps/511622488/testflight/ios |
 | Marketing version | `0.1.0` (`MARKETING_VERSION` in `project.yml`) |
 | Build | `CURRENT_PROJECT_VERSION` (bump each upload) |
 | Min iOS | 18.0 |
 | Team | `PAS2QUVJHC` (pass via script/env; never commit in `project.yml`) |
 
-## One-shot archive + export
+## One-shot archive + upload
 
 ```sh
-cd ios && ./scripts/release-ios-testflight.sh
+cd ios && JOBSHOUT_UPLOAD=1 ./scripts/release-ios-testflight.sh
 ```
 
-Override team or paths if needed:
-
-```sh
-DEVELOPMENT_TEAM=PAS2QUVJHC \
-  ARCHIVE_PATH=/tmp/JobShout-iOS.xcarchive \
-  EXPORT_PATH=/tmp/JobShout-iOS-Export \
-  ./scripts/release-ios-testflight.sh
-```
-
-After the ASC app record exists:
-
-```sh
-JOBSHOUT_UPLOAD=1 ./scripts/release-ios-testflight.sh
-```
+`ASC_APPLE_ID` defaults to `511622488`. Override only if Apple assigns a new app id.
 
 Or set `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID`, and
 `APP_STORE_CONNECT_KEY_PATH` (`.p8`). If CLI upload still fails, open the
@@ -45,14 +32,16 @@ Note: Homebrew `rsync` 3.x breaks export (`Copy failed`); the script puts
 
 ## App Store Connect / Developer Portal checklist
 
-Use existing ASC app **Apple ID `511622488`** (bundle `com.tenthmatrix.jobshout`).
-Apple App IDs allow only letters, digits, `.` and `-` — not `_`. Override with `ASC_APPLE_ID=…` if needed.
+ASC Bundle ID must be selected from the **registered App ID** list as
+**`com.tenthmatrix.jobshout`** (all lowercase). Do not use
+`com.tenthmatrix.Jobshout` — Apple treats that as unavailable because the
+lowercase App ID already exists on team `PAS2QUVJHC`.
 
-- [ ] App ID `com.tenthmatrix.jobshout` with **Sign in with Apple**, **Push Notifications**, **Keychain Sharing** (`$(AppIdentifierPrefix)com.jobshout.shared`)
-- [x] App Store Connect iOS app record Apple ID `511622488`
-- [ ] Xcode signed into team `PAS2QUVJHC` so Automatic signing can create **Apple Distribution** + App Store provisioning profile
-- [ ] Optional: App Store Connect API key (Issuer ID + Key ID + `.p8`) for non-interactive `altool` / Transporter upload
-- [ ] Prod Helm `apple.clientIds` includes `com.tenthmatrix.jobshout` (and Mac/Watch ids when those ship)
+- [x] Developer Portal App ID `com.tenthmatrix.jobshout` (Push + Sign in with Apple; Store profile on team `PAS2QUVJHC`)
+- [ ] ASC app `511622488` → App Information → Bundle ID → pick **`com.tenthmatrix.jobshout`** (lowercase) from the dropdown, then Save
+- [ ] Xcode signed into team `PAS2QUVJHC`
+- [ ] Optional: App Store Connect API key (Issuer ID + Key ID + `.p8`) for non-interactive upload
+- [ ] Prod Helm `apple.clientIds` includes `com.tenthmatrix.jobshout`
 - [ ] Privacy: `ITSAppUsesNonExemptEncryption` is false in the app Info.plist
 - [ ] Internal testers added in TestFlight; build processed and enabled
 - [ ] Review notes (later public TF): Google OAuth uses `jobshout://`; SIWA on prod; agents core loop
