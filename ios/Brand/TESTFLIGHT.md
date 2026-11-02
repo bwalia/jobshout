@@ -1,6 +1,6 @@
 # iPhone TestFlight (JobShout)
 
-Primary TestFlight track: **Release** → prod API → bundle `com.jobshout.app` → ASC Apple ID **`511622488`**.
+Primary TestFlight track: **Release** → prod API → bundle `com.jobshout.app` → ASC Apple ID **`6829933699`**.
 
 | | |
 |---|---|
@@ -8,8 +8,9 @@ Primary TestFlight track: **Release** → prod API → bundle `com.jobshout.app`
 | Scheme | `JobShout` |
 | Configuration | Release |
 | Bundle ID | `com.jobshout.app` |
-| App Store Connect Apple ID | `511622488` (permanent) |
-| ASC URL | https://appstoreconnect.apple.com/apps/511622488/testflight/ios |
+| SKU | `jobshout-ios` |
+| App Store Connect Apple ID | `6829933699` (permanent) |
+| ASC URL | https://appstoreconnect.apple.com/apps/6829933699/testflight/ios |
 | Marketing version | `0.1.0` (`MARKETING_VERSION` in `project.yml`) |
 | Build | `CURRENT_PROJECT_VERSION` (bump each upload) |
 | Min iOS | 18.0 |
@@ -38,7 +39,7 @@ Without an API key, Fastlane falls back to Apple ID / Xcode session upload.
 cd ios && JOBSHOUT_UPLOAD=1 ./scripts/release-ios-testflight.sh
 ```
 
-`ASC_APPLE_ID` defaults to `511622488`. If CLI upload still fails, open the
+`ASC_APPLE_ID` defaults to `6829933699`. If CLI upload still fails, open the
 archive in **Xcode → Organizer → Distribute App → App Store Connect → Upload**.
 
 Note: Homebrew `rsync` 3.x breaks export (`Copy failed`); Fastlane and the
@@ -46,11 +47,11 @@ script put `/usr/bin` first on `PATH` so macOS openrsync is used.
 
 ## App Store Connect / Developer Portal checklist
 
-ASC app **`511622488`** Bundle ID must be **`com.jobshout.app`** (same as the
+ASC app **`6829933699`** Bundle ID must be **`com.jobshout.app`** (same as the
 Developer Portal App ID + Store profile on team `PAS2QUVJHC`).
 
 - [x] Developer Portal App ID `com.jobshout.app` (Push + Sign in with Apple; Store profile on team `PAS2QUVJHC`)
-- [x] ASC app `511622488` uses bundle `com.jobshout.app`
+- [x] ASC app `6829933699` uses bundle `com.jobshout.app`
 - [ ] Xcode signed into team `PAS2QUVJHC`
 - [ ] Optional: App Store Connect API key (Issuer ID + Key ID + `.p8`) for non-interactive upload
 - [ ] Prod Helm `apple.clientIds` includes `com.jobshout.app`
