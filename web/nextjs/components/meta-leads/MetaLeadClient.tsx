@@ -116,9 +116,9 @@ export function MetaLeadClient() {
       <div>
         <h2 className="text-lg font-semibold text-foreground">Meta Lead Analyst</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Pull Instagram/Facebook Lead Ads Instant Form submissions, review LLM briefs, and sync
-          contacts into OpsAPI CRM. Launch from New task with a named connection. Tokens stay
-          server-side.
+          Instagram and Facebook DMs, comments and @mentions are qualified as they arrive; Lead Ads
+          form submissions are pulled from New task with a named connection. Real leads with an
+          email or phone sync into OpsAPI CRM. Tokens stay server-side.
         </p>
         {status ? (
           <p className="mt-2 text-xs text-muted-foreground">
@@ -194,7 +194,8 @@ export function MetaLeadClient() {
                   <li key={c.id} className="rounded-md border border-border px-3 py-2">
                     <div className="font-medium">{c.name}</div>
                     <div className="text-xs text-muted-foreground">
-                      {c.page_name || "Page"} · {c.page_id}
+                      {c.page_name || "Page"} · {c.page_id} · Instagram:{" "}
+                      {c.ig_account_id || "not linked"}
                     </div>
                   </li>
                 ))}
@@ -273,7 +274,9 @@ export function MetaLeadClient() {
       {tab === "leads" ? (
         <div className="space-y-2">
           {leads.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No analysed leads yet.</p>
+            <p className="text-sm text-muted-foreground">
+              No leads yet. They appear here as DMs, comments and mentions arrive.
+            </p>
           ) : (
             leads.map((lead) => (
               <LeadCard key={lead.id} lead={lead} onPushed={refresh} crmReady={!!status?.crm} />
@@ -310,15 +313,39 @@ function LeadCard({
     }
   }
 
+  const notLead = a?.is_lead === false;
+
   return (
-    <div className="rounded-md border border-border px-3 py-2 text-sm">
+    <div className={`rounded-md border border-border px-3 py-2 text-sm ${notLead ? "opacity-60" : ""}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="font-medium">{a?.summary || lead.leadgen_id}</span>
+        <span className="font-medium">{a?.summary || lead.author_name || lead.leadgen_id}</span>
         <span className="text-xs text-muted-foreground">
-          {a?.fit_score != null ? `fit ${a.fit_score}` : lead.status}
+          {lead.source.replace("_", " ")}
+          {a?.is_lead != null ? (a.is_lead ? " · lead" : " · not a lead") : ""}
+          {a?.category ? ` · ${a.category}` : ""}
+          {a?.fit_score != null ? ` · fit ${a.fit_score}` : ` · ${lead.status}`}
           {a?.spam_risk ? ` · spam ${a.spam_risk}` : ""}
         </span>
       </div>
+      {lead.author_name || lead.permalink ? (
+        <p className="text-xs text-muted-foreground">
+          {lead.author_name}
+          {lead.permalink ? (
+            <>
+              {lead.author_name ? " · " : ""}
+              <a href={lead.permalink} target="_blank" rel="noreferrer" className="underline">
+                open
+              </a>
+            </>
+          ) : null}
+        </p>
+      ) : null}
+      {lead.body ? (
+        <p className="mt-1 line-clamp-3 whitespace-pre-line text-foreground">{lead.body}</p>
+      ) : null}
+      {a?.evidence ? (
+        <p className="mt-1 border-l-2 border-primary pl-2 text-muted-foreground">“{a.evidence}”</p>
+      ) : null}
       {a?.intent ? <p className="mt-1 text-muted-foreground">Intent: {a.intent}</p> : null}
       {a?.next_action ? <p className="text-muted-foreground">Next: {a.next_action}</p> : null}
       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">

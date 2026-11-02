@@ -16,15 +16,21 @@ import (
 
 // Store persists connections, runs and leads.
 type Store interface {
-	UpsertConnection(ctx context.Context, orgID uuid.UUID, name, pageID, pageName string, tokenEnc []byte, connectedBy *uuid.UUID) (*model.MetaLeadConnection, error)
+	UpsertConnection(ctx context.Context, orgID uuid.UUID, name, pageID, pageName, igAccountID string, tokenEnc []byte, connectedBy *uuid.UUID) (*model.MetaLeadConnection, error)
 	GetConnectionByName(ctx context.Context, orgID uuid.UUID, name string) (*connRow, error)
-	GetConnectionByPageID(ctx context.Context, pageID string) (*connRow, error)
+	// GetConnectionByAccount finds the connection for a Page id or its linked
+	// Instagram account id: whichever a webhook entry names.
+	GetConnectionByAccount(ctx context.Context, accountID string) (*connRow, error)
 	ListConnections(ctx context.Context, orgID uuid.UUID) ([]model.MetaLeadConnection, error)
 	CreateRun(ctx context.Context, run *model.MetaLeadRun) error
 	UpdateRun(ctx context.Context, run *model.MetaLeadRun) error
 	GetRun(ctx context.Context, orgID, runID uuid.UUID) (*model.MetaLeadRun, error)
 	ListRuns(ctx context.Context, orgID uuid.UUID, limit int) ([]model.MetaLeadRun, error)
 	UpsertLead(ctx context.Context, lead *model.MetaLead) error
+	// UpsertInteraction stores a DM, comment or mention, appending a new
+	// message to an existing DM thread. It returns the stored lead, or
+	// ErrDuplicateEvent when eventID is already its newest event.
+	UpsertInteraction(ctx context.Context, lead *model.MetaLead, eventID string) (*model.MetaLead, error)
 	UpdateLeadAnalysis(ctx context.Context, orgID, leadID uuid.UUID, analysis json.RawMessage, status, errMsg string) error
 	UpdateLeadCRM(ctx context.Context, orgID, leadID uuid.UUID, contactID, website, errMsg string) error
 	GetLead(ctx context.Context, orgID, leadID uuid.UUID) (*model.MetaLead, error)
@@ -44,21 +50,22 @@ type Repo struct{ pool *pgxpool.Pool }
 // NewRepo builds a Store on pool.
 func NewRepo(pool *pgxpool.Pool) *Repo { return &Repo{pool: pool} }
 
-func (r *Repo) UpsertConnection(ctx context.Context, orgID uuid.UUID, name, pageID, pageName string, tokenEnc []byte, connectedBy *uuid.UUID) (*model.MetaLeadConnection, error) {
+func (r *Repo) UpsertConnection(ctx context.Context, orgID uuid.UUID, name, pageID, pageName, igAccountID string, tokenEnc []byte, connectedBy *uuid.UUID) (*model.MetaLeadConnection, error) {
 	id := uuid.New()
 	row := r.pool.QueryRow(ctx, `
-		INSERT INTO meta_lead_connections (id, org_id, name, page_id, page_name, access_token_enc, connected_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO meta_lead_connections (id, org_id, name, page_id, page_name, ig_account_id, access_token_enc, connected_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		ON CONFLICT (org_id, name) DO UPDATE SET
 			page_id = EXCLUDED.page_id,
 			page_name = EXCLUDED.page_name,
+			ig_account_id = EXCLUDED.ig_account_id,
 			access_token_enc = EXCLUDED.access_token_enc,
 			connected_by = COALESCE(EXCLUDED.connected_by, meta_lead_connections.connected_by),
 			updated_at = NOW()
-		RETURNING id, org_id, name, page_id, page_name, connected_by, created_at, updated_at`,
-		id, orgID, name, pageID, pageName, tokenEnc, connectedBy)
+		RETURNING id, org_id, name, page_id, page_name, ig_account_id, connected_by, created_at, updated_at`,
+		id, orgID, name, pageID, pageName, igAccountID, tokenEnc, connectedBy)
 	var c model.MetaLeadConnection
-	if err := row.Scan(&c.ID, &c.OrgID, &c.Name, &c.PageID, &c.PageName, &c.ConnectedBy, &c.CreatedAt, &c.UpdatedAt); err != nil {
+	if err := row.Scan(&c.ID, &c.OrgID, &c.Name, &c.PageID, &c.PageName, &c.IGAccountID, &c.ConnectedBy, &c.CreatedAt, &c.UpdatedAt); err != nil {
 		return nil, err
 	}
 	return &c, nil
@@ -66,32 +73,35 @@ func (r *Repo) UpsertConnection(ctx context.Context, orgID uuid.UUID, name, page
 
 func (r *Repo) GetConnectionByName(ctx context.Context, orgID uuid.UUID, name string) (*connRow, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id, org_id, name, page_id, page_name, access_token_enc, connected_by, created_at, updated_at
+		SELECT id, org_id, name, page_id, page_name, ig_account_id, access_token_enc, connected_by, created_at, updated_at
 		FROM meta_lead_connections WHERE org_id = $1 AND name = $2`, orgID, name)
 	var c connRow
-	err := row.Scan(&c.ID, &c.OrgID, &c.Name, &c.PageID, &c.PageName, &c.AccessTokenEnc, &c.ConnectedBy, &c.CreatedAt, &c.UpdatedAt)
+	err := row.Scan(&c.ID, &c.OrgID, &c.Name, &c.PageID, &c.PageName, &c.IGAccountID, &c.AccessTokenEnc, &c.ConnectedBy, &c.CreatedAt, &c.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("meta connection %q not found", name)
 	}
 	return &c, err
 }
 
-func (r *Repo) GetConnectionByPageID(ctx context.Context, pageID string) (*connRow, error) {
+func (r *Repo) GetConnectionByAccount(ctx context.Context, accountID string) (*connRow, error) {
+	if accountID == "" {
+		return nil, fmt.Errorf("no meta connection for an empty account id")
+	}
 	row := r.pool.QueryRow(ctx, `
-		SELECT id, org_id, name, page_id, page_name, access_token_enc, connected_by, created_at, updated_at
-		FROM meta_lead_connections WHERE page_id = $1
-		ORDER BY updated_at DESC LIMIT 1`, pageID)
+		SELECT id, org_id, name, page_id, page_name, ig_account_id, access_token_enc, connected_by, created_at, updated_at
+		FROM meta_lead_connections WHERE page_id = $1 OR ig_account_id = $1
+		ORDER BY updated_at DESC LIMIT 1`, accountID)
 	var c connRow
-	err := row.Scan(&c.ID, &c.OrgID, &c.Name, &c.PageID, &c.PageName, &c.AccessTokenEnc, &c.ConnectedBy, &c.CreatedAt, &c.UpdatedAt)
+	err := row.Scan(&c.ID, &c.OrgID, &c.Name, &c.PageID, &c.PageName, &c.IGAccountID, &c.AccessTokenEnc, &c.ConnectedBy, &c.CreatedAt, &c.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, fmt.Errorf("no meta connection for page %s", pageID)
+		return nil, fmt.Errorf("no meta connection for page or instagram account %s", accountID)
 	}
 	return &c, err
 }
 
 func (r *Repo) ListConnections(ctx context.Context, orgID uuid.UUID) ([]model.MetaLeadConnection, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, org_id, name, page_id, page_name, connected_by, created_at, updated_at
+		SELECT id, org_id, name, page_id, page_name, ig_account_id, connected_by, created_at, updated_at
 		FROM meta_lead_connections WHERE org_id = $1 ORDER BY name`, orgID)
 	if err != nil {
 		return nil, err
@@ -100,7 +110,7 @@ func (r *Repo) ListConnections(ctx context.Context, orgID uuid.UUID) ([]model.Me
 	var out []model.MetaLeadConnection
 	for rows.Next() {
 		var c model.MetaLeadConnection
-		if err := rows.Scan(&c.ID, &c.OrgID, &c.Name, &c.PageID, &c.PageName, &c.ConnectedBy, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.OrgID, &c.Name, &c.PageID, &c.PageName, &c.IGAccountID, &c.ConnectedBy, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -205,6 +215,34 @@ func (r *Repo) UpsertLead(ctx context.Context, lead *model.MetaLead) error {
 	return err
 }
 
+// ErrDuplicateEvent is an interaction event the lead already holds: a webhook
+// delivery Meta retried.
+var ErrDuplicateEvent = errors.New("meta interaction already recorded")
+
+func (r *Repo) UpsertInteraction(ctx context.Context, lead *model.MetaLead, eventID string) (*model.MetaLead, error) {
+	// A body keeps 4000 characters, a DM thread its last 4000: the newest
+	// messages are the ones that decide whether it is a lead.
+	row := r.pool.QueryRow(ctx, `
+		INSERT INTO meta_leads (id, org_id, connection_id, leadgen_id, source, author_id, author_name, body, permalink, last_event_id, created_time, status)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,left($8, 4000),$9,$10,$11,$12)
+		ON CONFLICT (org_id, leadgen_id) DO UPDATE SET
+			body = right(meta_leads.body || E'\n' || EXCLUDED.body, 4000),
+			author_name = COALESCE(NULLIF(EXCLUDED.author_name, ''), meta_leads.author_name),
+			permalink = COALESCE(NULLIF(EXCLUDED.permalink, ''), meta_leads.permalink),
+			last_event_id = EXCLUDED.last_event_id,
+			status = EXCLUDED.status,
+			updated_at = NOW()
+		WHERE meta_leads.last_event_id IS DISTINCT FROM EXCLUDED.last_event_id
+		RETURNING `+leadSelectCols,
+		uuid.New(), lead.OrgID, lead.ConnectionID, lead.LeadgenID, lead.Source, lead.AuthorID, lead.AuthorName,
+		lead.Body, lead.Permalink, eventID, lead.CreatedTime, lead.Status)
+	out, err := scanLead(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrDuplicateEvent
+	}
+	return out, err
+}
+
 func (r *Repo) UpdateLeadAnalysis(ctx context.Context, orgID, leadID uuid.UUID, analysis json.RawMessage, status, errMsg string) error {
 	_, err := r.pool.Exec(ctx, `
 		UPDATE meta_leads SET analysis=$2, status=$3, error_message=$4, updated_at=NOW()
@@ -226,7 +264,7 @@ func (r *Repo) UpdateLeadCRM(ctx context.Context, orgID, leadID uuid.UUID, conta
 }
 
 const leadSelectCols = `id, org_id, connection_id, run_id, leadgen_id, form_id, field_data, created_time, analysis, status, error_message,
-		crm_contact_id, crm_website, crm_synced_at, crm_error, created_at, updated_at`
+		crm_contact_id, crm_website, crm_synced_at, crm_error, source, author_id, author_name, body, permalink, created_at, updated_at`
 
 func (r *Repo) GetLead(ctx context.Context, orgID, leadID uuid.UUID) (*model.MetaLead, error) {
 	row := r.pool.QueryRow(ctx, `SELECT `+leadSelectCols+` FROM meta_leads WHERE org_id=$1 AND id=$2`, orgID, leadID)
@@ -283,6 +321,7 @@ func scanLead(row scannable) (*model.MetaLead, error) {
 	err := row.Scan(&l.ID, &l.OrgID, &l.ConnectionID, &l.RunID, &l.LeadgenID, &l.FormID,
 		&fieldData, &l.CreatedTime, &analysis, &l.Status, &l.ErrorMessage,
 		&l.CRMContactID, &l.CRMWebsite, &l.CRMSyncedAt, &l.CRMError,
+		&l.Source, &l.AuthorID, &l.AuthorName, &l.Body, &l.Permalink,
 		&l.CreatedAt, &l.UpdatedAt)
 	if err != nil {
 		return nil, err

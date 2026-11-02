@@ -41,26 +41,28 @@ func TestValidMetaSignature(t *testing.T) {
 }
 
 type memStore struct {
-	mu    sync.Mutex
-	conns map[string]*connRow // by name
-	byPage map[string]*connRow
-	runs  map[uuid.UUID]*model.MetaLeadRun
-	leads map[string]*model.MetaLead
+	mu        sync.Mutex
+	conns     map[string]*connRow // by name
+	byPage    map[string]*connRow
+	runs      map[uuid.UUID]*model.MetaLeadRun
+	leads     map[string]*model.MetaLead
+	lastEvent map[string]string // lead key → newest event folded in
 }
 
 func newMemStore() *memStore {
 	return &memStore{
-		conns:  map[string]*connRow{},
-		byPage: map[string]*connRow{},
-		runs:   map[uuid.UUID]*model.MetaLeadRun{},
-		leads:  map[string]*model.MetaLead{},
+		conns:     map[string]*connRow{},
+		byPage:    map[string]*connRow{},
+		runs:      map[uuid.UUID]*model.MetaLeadRun{},
+		leads:     map[string]*model.MetaLead{},
+		lastEvent: map[string]string{},
 	}
 }
 
-func (m *memStore) UpsertConnection(_ context.Context, orgID uuid.UUID, name, pageID, pageName string, tokenEnc []byte, connectedBy *uuid.UUID) (*model.MetaLeadConnection, error) {
+func (m *memStore) UpsertConnection(_ context.Context, orgID uuid.UUID, name, pageID, pageName, igAccountID string, tokenEnc []byte, connectedBy *uuid.UUID) (*model.MetaLeadConnection, error) {
 	c := &connRow{
 		MetaLeadConnection: model.MetaLeadConnection{
-			ID: uuid.New(), OrgID: orgID, Name: name, PageID: pageID, PageName: pageName,
+			ID: uuid.New(), OrgID: orgID, Name: name, PageID: pageID, PageName: pageName, IGAccountID: igAccountID,
 			ConnectedBy: connectedBy, CreatedAt: time.Now(), UpdatedAt: time.Now(),
 		},
 		AccessTokenEnc: tokenEnc,
@@ -69,6 +71,9 @@ func (m *memStore) UpsertConnection(_ context.Context, orgID uuid.UUID, name, pa
 	defer m.mu.Unlock()
 	m.conns[name] = c
 	m.byPage[pageID] = c
+	if igAccountID != "" {
+		m.byPage[igAccountID] = c
+	}
 	out := c.MetaLeadConnection
 	return &out, nil
 }
@@ -84,7 +89,7 @@ func (m *memStore) GetConnectionByName(_ context.Context, _ uuid.UUID, name stri
 	return &cp, nil
 }
 
-func (m *memStore) GetConnectionByPageID(_ context.Context, pageID string) (*connRow, error) {
+func (m *memStore) GetConnectionByAccount(_ context.Context, pageID string) (*connRow, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	c, ok := m.byPage[pageID]
@@ -144,6 +149,30 @@ func (m *memStore) UpsertLead(_ context.Context, lead *model.MetaLead) error {
 	m.leads[lead.LeadgenID] = &cp
 	return nil
 }
+func (m *memStore) UpsertInteraction(_ context.Context, lead *model.MetaLead, eventID string) (*model.MetaLead, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cur, ok := m.leads[lead.LeadgenID]
+	switch {
+	case !ok:
+		cp := *lead
+		cp.ID = uuid.New()
+		cur = &cp
+		m.leads[lead.LeadgenID] = cur
+	case m.lastEvent[lead.LeadgenID] == eventID:
+		return nil, ErrDuplicateEvent
+	default:
+		cur.Body += "\n" + lead.Body
+		if lead.AuthorName != "" {
+			cur.AuthorName = lead.AuthorName
+		}
+		cur.Status = lead.Status
+	}
+	m.lastEvent[lead.LeadgenID] = eventID
+	out := *cur
+	return &out, nil
+}
+
 func (m *memStore) UpdateLeadAnalysis(_ context.Context, _, leadID uuid.UUID, analysis json.RawMessage, status, errMsg string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -202,7 +231,19 @@ func (m *memStore) GetLeadByLeadgenID(_ context.Context, _ uuid.UUID, id string)
 	return &cp, nil
 }
 
-type fakeGraph struct{}
+// fakeGraph serves leads, and objects for Get by id (JSON). An id it does not
+// hold is a Graph error.
+type fakeGraph struct {
+	objects map[string]string
+}
+
+func (g fakeGraph) Get(_ context.Context, id, _, _ string, dest any) error {
+	raw, ok := g.objects[id]
+	if !ok {
+		return errNotFound(id)
+	}
+	return json.Unmarshal([]byte(raw), dest)
+}
 
 func (fakeGraph) ListForms(context.Context, string, string) ([]FormSummary, error) {
 	return []FormSummary{{ID: "f1", Name: "Demo"}}, nil
@@ -292,7 +333,21 @@ func TestHandleWebhookLeadgen(t *testing.T) {
 	if err := svc.HandleWebhook(context.Background(), body, sig); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := store.leads["lg1"]; !ok {
-		t.Fatal("expected lead stored")
+	// Processing runs after the reply.
+	waitFor(t, func() bool {
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		L, ok := store.leads["lg1"]
+		return ok && L.Status == model.MetaLeadStatusAnalysed
+	})
+}
+
+func waitFor(t *testing.T, done func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if done() {
+			return
+		}
 	}
+	t.Fatal("timed out")
 }

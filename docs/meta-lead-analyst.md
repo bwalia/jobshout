@@ -1,11 +1,14 @@
 # Meta Lead Analyst
 
-Builtin agent that pulls **Instagram / Facebook Lead Ads Instant Form**
-submissions via the Meta Graph API, runs an LLM brief per lead plus a run
-rollup, syncs contacts into **OpsAPI CRM**, and can ingest new leads in
-realtime through Meta’s `leadgen` webhook.
+Builtin agent that finds sales leads on a connected **Facebook Page** and its
+linked **Instagram professional account**:
 
-Organic DMs and comment forms are out of scope.
+- **DMs, comments and @mentions** arrive by webhook and are qualified one by
+  one (a DM thread is one lead per sender, re-qualified as messages arrive).
+- **Lead Ads Instant Form** submissions are pulled on launch (backfill) or
+  arrive through the `leadgen` webhook, with a run rollup.
+
+Real leads with an email or phone sync into **OpsAPI CRM**.
 
 ## What you need
 
@@ -13,7 +16,7 @@ Organic DMs and comment forms are out of scope.
 | --- | --- |
 | Meta app (App ID / App Secret) | [Meta for Developers](https://developers.facebook.com/) |
 | Long-lived **Page** access token | Meta Business Suite → Page → settings / Graph API Explorer |
-| Token scopes | `leads_retrieval`, plus Page ads/engagement scopes Meta documents for Lead Ads |
+| Token scopes | Forms: `leads_retrieval`. DMs/comments/mentions: see [Permissions](#permissions) |
 | Ring secrets | WSL Vault `jobshout/<ring>/meta` → K8s Secret `jobshout-meta` |
 | Named connection | Agent tab → Connection (name + Page ID + token) |
 | OpsAPI CRM | Same workspace as Marketing Manager (`marketing_api_key` with `crm` scope, or ring `OPSAPI_MARKETING_*`) |
@@ -44,25 +47,89 @@ Webhook verify also needs `META_APP_SECRET` + `META_WEBHOOK_VERIFY_TOKEN`.
 | `META_APP_SECRET` | Required to verify `X-Hub-Signature-256` on webhooks |
 | `META_WEBHOOK_VERIFY_TOKEN` | Shared string for the GET hub challenge |
 | `META_TOKEN_KEY` | AES key material for sealing Page tokens at rest |
-| `META_GRAPH_VERSION` | Optional; default `v21.0` (also chart `meta.graphVersion`) |
+| `META_GRAPH_VERSION` | Optional; default `v26.0` (also chart `meta.graphVersion`) |
 
 ## Webhook
 
 Public routes (same pattern as Jira/GitHub):
 
 - `GET  https://<host>/webhooks/meta` — Meta subscription verify
-- `POST https://<host>/webhooks/meta` — `leadgen` notifications
+- `POST https://<host>/webhooks/meta` — leadgen, DM, comment and mention notifications
 
-In the Meta app:
+The handler checks `X-Hub-Signature-256`, answers 200 at once and processes
+the events in the background (Meta retries a slow answer, and each event can
+be an LLM call). A retried delivery is recognised by message / comment id and
+not analysed twice.
 
-1. Add the webhook callback URL above.
-2. Use `META_WEBHOOK_VERIFY_TOKEN` as the verify token.
-3. Subscribe the **Page** to the `leadgen` field.
-4. Ensure a named JobShout connection exists for that Page ID so the handler
-   can decrypt the Page token and fetch `GET /{leadgen_id}`.
+In the Meta app (App Dashboard → Webhooks), set the callback URL above and
+`META_WEBHOOK_VERIFY_TOKEN`, then subscribe:
 
-Webhook path also pushes the analysed lead into OpsAPI CRM (skips high
-`spam_risk` and leads with no email/phone).
+| Object | Fields | Becomes |
+| --- | --- | --- |
+| **Page** | `leadgen` | Lead Ads form lead |
+| **Page** | `messages` | `facebook_dm` (one lead per sender) |
+| **Page** | `feed` | `facebook_comment` (new comments and visitor posts) |
+| **Page** | `mention` | `facebook_mention` (text read from Graph) |
+| **Instagram** | `messages` | `instagram_dm` (one lead per sender) |
+| **Instagram** | `comments` | `instagram_comment` |
+| **Instagram** | `mentions` | `instagram_mention` (text read from Graph) |
+
+Then install the app on the Page, which also turns on Instagram webhooks for
+the linked account (run with the Page token, e.g. in Graph API Explorer):
+
+```bash
+curl -X POST "https://graph.facebook.com/v26.0/<PAGE_ID>/subscribed_apps" \
+  -d "subscribed_fields=leadgen,messages,feed,mention" \
+  -d "access_token=<PAGE_TOKEN>"
+```
+
+Every event is matched to a JobShout connection by the entry's id: the Page
+id, or for Instagram the Page's linked account id, which is looked up when the
+connection is saved (the Connection tab shows it). Events for an account with
+no connection are ignored.
+
+## DMs, comments and mentions
+
+Each interaction gets one LLM brief with fixed definitions (the prompt is in
+`server/internal/metalead/analyse.go`):
+
+| Field | Meaning |
+| --- | --- |
+| `is_lead` | Wants to buy, order, book, get a price or quote, or propose paid business. Support, complaints, praise, friend tags, emoji-only and spam are not leads |
+| `category` | `buying`, `pricing`, `booking`, `partnership`, `support`, `complaint`, `spam`, `other` |
+| `fit_score` | 80+ clear intent with specifics · 50–79 interest, details missing · 20–49 vague (a bare "price?") · <20 not a lead |
+| `evidence` | The message's own words that show the intent. Dropped (flag `evidence_not_in_message`) if the message does not contain it |
+| `intent`, `next_action`, `summary`, `spam_risk`, `flags` | As for form leads |
+
+Emails and phone numbers come from the message text by pattern, never from the
+model. CRM push needs `is_lead` true, `spam_risk` not high, and an email or
+phone in the thread; a DM thread that only gets an email in its third message
+is pushed then. Without an LLM provider an interaction is stored with a
+"Review manually" brief.
+
+The model is `META_LEAD_MODEL` or the org's agent model: an env change, not a
+code change. Before trusting a model, label a few hundred real DMs and
+comments and compare candidates on precision, recall and run-to-run agreement.
+
+## Permissions
+
+The Page token needs, beyond `leads_retrieval` for forms:
+
+| For | Permissions |
+| --- | --- |
+| Facebook DMs | `pages_messaging`, `pages_manage_metadata` |
+| Facebook comments, mentions | `pages_read_engagement`, `pages_read_user_content`, `pages_manage_metadata` |
+| Instagram DMs | `instagram_basic`, `instagram_manage_messages`, `pages_manage_metadata`, `pages_read_engagement`, `pages_show_list` |
+| Instagram comments, mentions | `instagram_basic`, `instagram_manage_comments`, `pages_manage_metadata`, `pages_read_engagement`, `pages_show_list` |
+
+With **Standard Access** (an app in Development mode) Meta only delivers
+events from people with a role on the app — enough to test with your own
+accounts. Real customers' DMs and comments need **Advanced Access** for each
+permission, which means App Review (screencasts of the flow) and Business
+Verification. Start those early; they take weeks.
+
+Instagram DMs also need *Allow access to messages* switched on in the
+Instagram app (Messages and story replies → Connected tools).
 
 ## Connect a Page (manual token)
 
@@ -113,5 +180,8 @@ brief so ingest + CRM are not blocked.
 ## Out of scope
 
 - Meta OAuth UI for connecting Pages (manual token + named connection first)
-- Instagram Messaging / organic comment forms
+- Backfilling DMs, comments and photo tags from before the webhook was on
+  (Graph `conversations`, comments and `/tags`): webhooks only see new events
+- Replying from JobShout (Meta allows replies within 24 hours of the person's
+  last message, and one private reply per comment)
 - Auto email send from analyses (use Marketing Manager for campaigns)

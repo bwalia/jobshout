@@ -40,7 +40,7 @@ func LoadConfig() Config {
 		AnalyseTimeout:    durationEnv("META_LEAD_ANALYSE_TIMEOUT", 8*time.Minute),
 	}
 	if c.GraphVersion == "" {
-		c.GraphVersion = "v21.0"
+		c.GraphVersion = "v26.0"
 	}
 	if c.FrontendBaseURL == "" {
 		c.FrontendBaseURL = "http://localhost:3001"

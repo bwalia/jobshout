@@ -1,6 +1,7 @@
-// Package metalead is the Meta Lead Analyst: pull Instagram/Facebook Lead Ads
-// Instant Form submissions via Graph API (launch backfill + leadgen webhook)
-// and run LLM per-lead briefs plus a rollup summary.
+// Package metalead is the Meta Lead Analyst: find sales leads on a connected
+// Facebook Page and its Instagram account — Lead Ads Instant Form submissions
+// (launch backfill + leadgen webhook) and DMs, comments and @mentions (webhook)
+// — qualify each with an LLM brief, and sync real leads into OpsAPI CRM.
 //
 // Credentials are named server-side Page connections — never schema fields.
 // Registered with agentmodule; see .claude/rules/agent-modules.md.
@@ -53,15 +54,15 @@ type Runner interface {
 // Module is the Meta Lead Analyst specialist.
 func Module(run Runner) agentmodule.Module {
 	return agentmodule.Module{
-		Builtin:  model.BuiltinMetaLead,
-		Label:    model.AgentNameMetaLead,
-		Icon:     "users",
-		TabSlug:  TabSlug,
-		Hint:     "Pull Meta Lead Ads form submissions from Instagram/Facebook, analyse them, and sync contacts into OpsAPI CRM.",
-		ChatHint: "To analyse Meta Instant Form leads and push them into OpsAPI CRM, call agent_execute on the Meta Lead Analyst with connection (the named Page connection); optional form, since, limit, focus, website, and push_to_crm. Webhooks also analyse and sync new leadgen events for connected Pages.",
-		Schema:   schema(),
-		Seed:     Seed,
-		Launch:   launch(run),
+		Builtin:   model.BuiltinMetaLead,
+		Label:     model.AgentNameMetaLead,
+		Icon:      "users",
+		TabSlug:   TabSlug,
+		Hint:      "Find leads in Instagram and Facebook DMs, comments, mentions and Lead Ads forms, qualify them, and sync contacts into OpsAPI CRM.",
+		ChatHint:  "The Meta Lead Analyst qualifies Instagram and Facebook DMs, comments and @mentions as they arrive by webhook (nothing to launch) and lists them in its tab. To backfill Lead Ads Instant Form leads and push them into OpsAPI CRM, call agent_execute on it with connection (the named Page connection); optional form, since, limit, focus, website, and push_to_crm.",
+		Schema:    schema(),
+		Seed:      Seed,
+		Launch:    launch(run),
 		StayOnTab: true,
 		AbsorbPrompt: func(prompt string, vals map[string]string) {
 			if strings.TrimSpace(vals["focus"]) == "" && strings.TrimSpace(vals["connection"]) != "" {
@@ -116,8 +117,8 @@ func schema() agentschema.Schema {
 
 // Seed is the built-in Meta Lead Analyst.
 func Seed(orgID uuid.UUID) *model.Agent {
-	desc := "Pulls Instagram and Facebook Lead Ads Instant Form submissions via the Meta Graph API, runs LLM analysis (per-lead briefs + rollup), and syncs qualified contacts into OpsAPI CRM. New leads can also arrive through the leadgen webhook."
-	prompt := "You are the Meta Lead Analyst. You read Instant Form field data only — never invent contact details — write clear qualification notes, and sync contacts into the organisation's OpsAPI CRM when asked."
+	desc := "Finds sales leads in Instagram and Facebook: Lead Ads Instant Form submissions plus DMs, comments and @mentions arriving by webhook. Each one gets an LLM brief (is it a lead, intent, fit, evidence quote, next action) and qualified contacts sync into OpsAPI CRM."
+	prompt := "You are the Meta Lead Analyst. You qualify Instant Form submissions, DMs, comments and mentions from the data provided only — never invent contact details — write clear qualification notes, and sync real leads into the organisation's OpsAPI CRM."
 	return &model.Agent{
 		ID:           uuid.New(),
 		OrgID:        orgID,
