@@ -2,7 +2,8 @@
 
 Builtin agent that pulls **Instagram / Facebook Lead Ads Instant Form**
 submissions via the Meta Graph API, runs an LLM brief per lead plus a run
-rollup, and can ingest new leads in realtime through Meta’s `leadgen` webhook.
+rollup, syncs contacts into **OpsAPI CRM**, and can ingest new leads in
+realtime through Meta’s `leadgen` webhook.
 
 Organic DMs and comment forms are out of scope.
 
@@ -15,9 +16,25 @@ Organic DMs and comment forms are out of scope.
 | Token scopes | `leads_retrieval`, plus Page ads/engagement scopes Meta documents for Lead Ads |
 | Ring secrets | WSL Vault `jobshout/<ring>/meta` → K8s Secret `jobshout-meta` |
 | Named connection | Agent tab → Connection (name + Page ID + token) |
+| OpsAPI CRM | Same workspace as Marketing Manager (`marketing_api_key` with `crm` scope, or ring `OPSAPI_MARKETING_*`) |
 
 Never put a Page token in the launch schema. Launch only takes the connection
-**name** (and optional form / since / limit / focus).
+**name** (and optional form / since / limit / focus / website / push_to_crm).
+
+## Enable on int (ops)
+
+1. Seed Vault path `jobshout/int/meta` with:
+   - `META_APP_ID`, `META_APP_SECRET`
+   - `META_WEBHOOK_VERIFY_TOKEN` (any strong shared string)
+   - `META_TOKEN_KEY` (passphrase or 64-char hex — same style as `LINKEDIN_TOKEN_KEY`)
+2. Uncomment `jobshout-meta` under `extraSecretRefs` and `vaultSecrets` in
+   `deploy/helm/jobshout/values-int.yaml` (and prod when ready).
+3. Deploy / restart `jobshout-api` after ESO syncs the Secret.
+4. Confirm the agent tab Status shows **Seal tokens: yes**. Without
+   `META_TOKEN_KEY`, connections cannot be stored (analyse/CRM code still
+   degrades cleanly; Launch refuses with a clear error).
+
+Webhook verify also needs `META_APP_SECRET` + `META_WEBHOOK_VERIFY_TOKEN`.
 
 ## Vault keys (`jobshout/<ring>/meta`)
 
@@ -26,12 +43,8 @@ Never put a Page token in the launch schema. Launch only takes the connection
 | `META_APP_ID` | Meta app id (optional for Graph reads with a Page token; useful for ops) |
 | `META_APP_SECRET` | Required to verify `X-Hub-Signature-256` on webhooks |
 | `META_WEBHOOK_VERIFY_TOKEN` | Shared string for the GET hub challenge |
-| `META_TOKEN_KEY` | AES key material for sealing Page tokens at rest (same style as `GMAIL_TOKEN_KEY` / `LINKEDIN_TOKEN_KEY`) |
-| `META_GRAPH_VERSION` | Optional; default `v21.0` |
-
-Wire the Secret with `extraSecretRefs` + `vaultSecrets` (see
-[wsl-vault-secrets.md](wsl-vault-secrets.md)). Restart `jobshout-api` after the
-first sync.
+| `META_TOKEN_KEY` | AES key material for sealing Page tokens at rest |
+| `META_GRAPH_VERSION` | Optional; default `v21.0` (also chart `meta.graphVersion`) |
 
 ## Webhook
 
@@ -48,16 +61,19 @@ In the Meta app:
 4. Ensure a named JobShout connection exists for that Page ID so the handler
    can decrypt the Page token and fetch `GET /{leadgen_id}`.
 
-## Connect a Page (first version: manual)
+Webhook path also pushes the analysed lead into OpsAPI CRM (skips high
+`spam_risk` and leads with no email/phone).
+
+## Connect a Page (manual token)
 
 1. Mint a long-lived Page access token in Meta Business Suite / Graph Explorer.
 2. Open the Meta Lead Analyst Workspace tab → **Connection**.
 3. Save: connection **name** (e.g. `workstation-ig`), Page ID, optional Page
    name, and the token. The API stores only the sealed ciphertext.
 
-## Launch / chat
+## Launch / chat (via JobShout agent)
 
-Schema fields (also on New task / Run task / `agent_execute`):
+Schema fields (New task / Run task / `agent_execute`):
 
 | Field | Required | Notes |
 | --- | --- | --- |
@@ -66,9 +82,24 @@ Schema fields (also on New task / Run task / `agent_execute`):
 | `since` | no | `7d` or RFC3339 |
 | `limit` | no | Max leads (hard cap from `META_LEAD_MAX_LEADS`, max 200) |
 | `focus` | no | Qualification angle for the LLM |
+| `push_to_crm` | no | Default `yes` — create/update OpsAPI CRM contacts |
+| `website` | no | OpsAPI website name / namespace for CRM; empty = org default |
 
-Chat hint: call `agent_execute` on Meta Lead Analyst with `connection` (+
-optional form / focus). Webhooks also analyse new leads for connected Pages.
+Chat: call `agent_execute` on **Meta Lead Analyst** with `connection` (+
+optional form / focus / website). Example values:
+`connection=workstation-ig`, `since=7d`, `push_to_crm=yes`.
+
+## CRM push (OpsAPI)
+
+After analysis, each lead with an email or phone is upserted via
+`POST /api/v2/crm/contacts` on the org’s Marketing Manager workspace
+(dedupe by email). High `spam_risk` is skipped unless you force a re-push.
+
+Re-push from the agent tab or `POST /api/v1/meta-leads/leads/{id}/push-crm`
+with optional `{"website":"…","force":true}`.
+
+Synced leads store `crm_contact_id` / `crm_website` / `crm_synced_at` (or
+`crm_error` on failure).
 
 ## LLM output
 
@@ -77,10 +108,10 @@ Per lead: `intent`, `fit_score` (0–100), `next_action`, `spam_risk`, `flags[]`
 `lead_count`. Decode is tolerant of odd JSON shapes.
 
 Without an LLM provider the agent still stores leads and writes a heuristic
-brief so ingest is not blocked.
+brief so ingest + CRM are not blocked.
 
-## Out of scope (this version)
+## Out of scope
 
 - Meta OAuth UI for connecting Pages (manual token + named connection first)
-- Auto CRM push / outbound email from analyses
 - Instagram Messaging / organic comment forms
+- Auto email send from analyses (use Marketing Manager for campaigns)

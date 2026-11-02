@@ -26,6 +26,8 @@ type Store interface {
 	ListRuns(ctx context.Context, orgID uuid.UUID, limit int) ([]model.MetaLeadRun, error)
 	UpsertLead(ctx context.Context, lead *model.MetaLead) error
 	UpdateLeadAnalysis(ctx context.Context, orgID, leadID uuid.UUID, analysis json.RawMessage, status, errMsg string) error
+	UpdateLeadCRM(ctx context.Context, orgID, leadID uuid.UUID, contactID, website, errMsg string) error
+	GetLead(ctx context.Context, orgID, leadID uuid.UUID) (*model.MetaLead, error)
 	ListLeadsByRun(ctx context.Context, orgID, runID uuid.UUID) ([]model.MetaLead, error)
 	ListRecentLeads(ctx context.Context, orgID uuid.UUID, limit int) ([]model.MetaLead, error)
 	GetLeadByLeadgenID(ctx context.Context, orgID uuid.UUID, leadgenID string) (*model.MetaLead, error)
@@ -210,9 +212,34 @@ func (r *Repo) UpdateLeadAnalysis(ctx context.Context, orgID, leadID uuid.UUID, 
 	return err
 }
 
+func (r *Repo) UpdateLeadCRM(ctx context.Context, orgID, leadID uuid.UUID, contactID, website, errMsg string) error {
+	if contactID != "" {
+		_, err := r.pool.Exec(ctx, `
+			UPDATE meta_leads SET crm_contact_id=$2, crm_website=$3, crm_synced_at=NOW(), crm_error='', updated_at=NOW()
+			WHERE id=$1 AND org_id=$4`, leadID, contactID, website, orgID)
+		return err
+	}
+	_, err := r.pool.Exec(ctx, `
+		UPDATE meta_leads SET crm_error=$2, updated_at=NOW()
+		WHERE id=$1 AND org_id=$3`, leadID, errMsg, orgID)
+	return err
+}
+
+const leadSelectCols = `id, org_id, connection_id, run_id, leadgen_id, form_id, field_data, created_time, analysis, status, error_message,
+		crm_contact_id, crm_website, crm_synced_at, crm_error, created_at, updated_at`
+
+func (r *Repo) GetLead(ctx context.Context, orgID, leadID uuid.UUID) (*model.MetaLead, error) {
+	row := r.pool.QueryRow(ctx, `SELECT `+leadSelectCols+` FROM meta_leads WHERE org_id=$1 AND id=$2`, orgID, leadID)
+	l, err := scanLead(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("lead not found")
+	}
+	return l, err
+}
+
 func (r *Repo) ListLeadsByRun(ctx context.Context, orgID, runID uuid.UUID) ([]model.MetaLead, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, org_id, connection_id, run_id, leadgen_id, form_id, field_data, created_time, analysis, status, error_message, created_at, updated_at
+		SELECT `+leadSelectCols+`
 		FROM meta_leads WHERE org_id=$1 AND run_id=$2 ORDER BY created_time DESC NULLS LAST, created_at DESC`, orgID, runID)
 	if err != nil {
 		return nil, err
@@ -226,7 +253,7 @@ func (r *Repo) ListRecentLeads(ctx context.Context, orgID uuid.UUID, limit int) 
 		limit = 50
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, org_id, connection_id, run_id, leadgen_id, form_id, field_data, created_time, analysis, status, error_message, created_at, updated_at
+		SELECT `+leadSelectCols+`
 		FROM meta_leads WHERE org_id=$1 ORDER BY created_at DESC LIMIT $2`, orgID, limit)
 	if err != nil {
 		return nil, err
@@ -236,9 +263,7 @@ func (r *Repo) ListRecentLeads(ctx context.Context, orgID uuid.UUID, limit int) 
 }
 
 func (r *Repo) GetLeadByLeadgenID(ctx context.Context, orgID uuid.UUID, leadgenID string) (*model.MetaLead, error) {
-	row := r.pool.QueryRow(ctx, `
-		SELECT id, org_id, connection_id, run_id, leadgen_id, form_id, field_data, created_time, analysis, status, error_message, created_at, updated_at
-		FROM meta_leads WHERE org_id=$1 AND leadgen_id=$2`, orgID, leadgenID)
+	row := r.pool.QueryRow(ctx, `SELECT `+leadSelectCols+` FROM meta_leads WHERE org_id=$1 AND leadgen_id=$2`, orgID, leadgenID)
 	l, err := scanLead(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("lead not found")
@@ -256,7 +281,9 @@ func scanLead(row scannable) (*model.MetaLead, error) {
 	var l model.MetaLead
 	var fieldData, analysis []byte
 	err := row.Scan(&l.ID, &l.OrgID, &l.ConnectionID, &l.RunID, &l.LeadgenID, &l.FormID,
-		&fieldData, &l.CreatedTime, &analysis, &l.Status, &l.ErrorMessage, &l.CreatedAt, &l.UpdatedAt)
+		&fieldData, &l.CreatedTime, &analysis, &l.Status, &l.ErrorMessage,
+		&l.CRMContactID, &l.CRMWebsite, &l.CRMSyncedAt, &l.CRMError,
+		&l.CreatedAt, &l.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}

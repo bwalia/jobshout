@@ -25,10 +25,10 @@ extraSecretRefs:
   # LinkedIn Poster: LINKEDIN_CLIENT_ID / LINKEDIN_CLIENT_SECRET / LINKEDIN_TOKEN_KEY.
   # Without it the agent still drafts; connecting and posting stay disabled.
   - jobshout-linkedin
-  # Meta Lead Analyst (jobshout-meta ← jobshout/int/meta): enable after seeding
-  # META_APP_ID / META_APP_SECRET / META_WEBHOOK_VERIFY_TOKEN / META_TOKEN_KEY
-  # in Vault — see docs/meta-lead-analyst.md. Do not list the Secret here until
-  # the path exists or ESO will fail to sync.
+  # Meta Lead Analyst (jobshout-meta ← jobshout/int/meta): REQUIRED for Page
+  # connections + webhooks. Seed META_APP_ID / META_APP_SECRET /
+  # META_WEBHOOK_VERIFY_TOKEN / META_TOKEN_KEY in Vault first, then uncomment
+  # both this ref and the vaultSecrets entry below — see docs/meta-lead-analyst.md.
   # - jobshout-meta
   # wafLab.baseURL below is set, but the client stays disabled until it also has
   # a token (or username+password) — those arrive only through this secret.

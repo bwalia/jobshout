@@ -1046,6 +1046,9 @@ func main() {
 	)
 	// Its chat tools live with the agent (marketingmanager/chattools).
 	agentmodule.SetToolInstaller(model.BuiltinMarketingManager, mmchattools.Installer(marketingSvc))
+	// Meta Lead Analyst reuses the same OpsAPI marketing/CRM workspace for contact sync.
+	metaLeadSvc.BindCRM(&metalead.MarketingCRM{MM: marketingSvc})
+	logger.Info("meta lead CRM sync wired to OpsAPI marketing workspace")
 
 	// All specialists are wired this way: own package, then one Register call.
 	// A new agent does not need significant platform changes — register it.
@@ -1755,6 +1758,7 @@ func main() {
 				r.Get("/runs/{runID}", metaLeadHandler.GetRun)
 				r.Get("/runs/{runID}/leads", metaLeadHandler.ListRunLeads)
 				r.Get("/leads", metaLeadHandler.ListLeads)
+				r.Post("/leads/{leadID}/push-crm", metaLeadHandler.PushLeadCRM)
 			})
 
 			r.Route("/secrets-rotation", func(r chi.Router) {

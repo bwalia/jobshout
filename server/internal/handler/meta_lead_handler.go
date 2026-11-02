@@ -172,3 +172,29 @@ func (h *MetaLeadHandler) ListLeads(w http.ResponseWriter, r *http.Request) {
 	}
 	RespondJSON(w, http.StatusOK, map[string]any{"data": list})
 }
+
+type pushCRMBody struct {
+	Website string `json:"website"`
+	Force   bool   `json:"force"`
+}
+
+// PushLeadCRM syncs one analysed lead into OpsAPI CRM.
+func (h *MetaLeadHandler) PushLeadCRM(w http.ResponseWriter, r *http.Request) {
+	orgID, _, ok := h.ids(w, r)
+	if !ok {
+		return
+	}
+	leadID, err := uuid.Parse(chi.URLParam(r, "leadID"))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid lead id")
+		return
+	}
+	var body pushCRMBody
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	lead, err := h.svc.PushLeadToCRM(r.Context(), orgID, leadID, body.Website, body.Force)
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	RespondJSON(w, http.StatusOK, lead)
+}

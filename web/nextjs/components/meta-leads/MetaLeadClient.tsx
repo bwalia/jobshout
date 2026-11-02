@@ -10,6 +10,7 @@ import {
   listMetaLeads,
   listMetaRunLeads,
   listMetaRuns,
+  pushMetaLeadCRM,
   upsertMetaConnection,
   type MetaLead,
   type MetaLeadConnection,
@@ -115,14 +116,15 @@ export function MetaLeadClient() {
       <div>
         <h2 className="text-lg font-semibold text-foreground">Meta Lead Analyst</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Pull Instagram/Facebook Lead Ads Instant Form submissions and review LLM briefs.
-          Launch a run from New task with a named connection. Tokens stay server-side.
+          Pull Instagram/Facebook Lead Ads Instant Form submissions, review LLM briefs, and sync
+          contacts into OpsAPI CRM. Launch from New task with a named connection. Tokens stay
+          server-side.
         </p>
         {status ? (
           <p className="mt-2 text-xs text-muted-foreground">
             Seal tokens: {status.can_seal_tokens ? "yes" : "no"} · Webhook verify:{" "}
-            {status.webhook_verify ? "yes" : "no"} · LLM: {status.llm ? "yes" : "heuristic"} · Graph{" "}
-            {status.graph_version}
+            {status.webhook_verify ? "yes" : "no"} · LLM: {status.llm ? "yes" : "heuristic"} · CRM:{" "}
+            {status.crm ? "wired" : "off"} · Graph {status.graph_version}
           </p>
         ) : null}
       </div>
@@ -259,7 +261,7 @@ export function MetaLeadClient() {
                 )}
                 <div className="mt-4 space-y-2">
                   {runLeads.map((lead) => (
-                    <LeadCard key={lead.id} lead={lead} />
+                    <LeadCard key={lead.id} lead={lead} onPushed={refresh} crmReady={!!status?.crm} />
                   ))}
                 </div>
               </>
@@ -273,7 +275,9 @@ export function MetaLeadClient() {
           {leads.length === 0 ? (
             <p className="text-sm text-muted-foreground">No analysed leads yet.</p>
           ) : (
-            leads.map((lead) => <LeadCard key={lead.id} lead={lead} />)
+            leads.map((lead) => (
+              <LeadCard key={lead.id} lead={lead} onPushed={refresh} crmReady={!!status?.crm} />
+            ))
           )}
         </div>
       ) : null}
@@ -281,8 +285,31 @@ export function MetaLeadClient() {
   );
 }
 
-function LeadCard({ lead }: { lead: MetaLead }) {
+function LeadCard({
+  lead,
+  onPushed,
+  crmReady,
+}: {
+  lead: MetaLead;
+  onPushed: () => void | Promise<void>;
+  crmReady: boolean;
+}) {
   const a = lead.analysis;
+  const [pushing, setPushing] = useState(false);
+
+  async function onPush() {
+    setPushing(true);
+    try {
+      await pushMetaLeadCRM(lead.id, { force: true });
+      toast.success("Pushed to OpsAPI CRM");
+      await onPushed();
+    } catch (e) {
+      toast.error(apiErrorMessage(e, "CRM push failed"));
+    } finally {
+      setPushing(false);
+    }
+  }
+
   return (
     <div className="rounded-md border border-border px-3 py-2 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -294,6 +321,28 @@ function LeadCard({ lead }: { lead: MetaLead }) {
       </div>
       {a?.intent ? <p className="mt-1 text-muted-foreground">Intent: {a.intent}</p> : null}
       {a?.next_action ? <p className="text-muted-foreground">Next: {a.next_action}</p> : null}
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        {lead.crm_contact_id ? (
+          <span>
+            CRM {lead.crm_website || "OpsAPI"} · {lead.crm_contact_id}
+            {lead.crm_synced_at ? ` · ${new Date(lead.crm_synced_at).toLocaleString()}` : ""}
+          </span>
+        ) : lead.crm_error ? (
+          <span className="text-destructive">CRM: {lead.crm_error}</span>
+        ) : (
+          <span>CRM: not synced</span>
+        )}
+        {crmReady ? (
+          <button
+            type="button"
+            onClick={() => void onPush()}
+            disabled={pushing}
+            className="rounded border border-border px-2 py-0.5 text-foreground hover:bg-muted disabled:opacity-50"
+          >
+            {pushing ? "Pushing…" : lead.crm_contact_id ? "Re-push CRM" : "Push to CRM"}
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }

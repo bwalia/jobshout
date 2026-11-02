@@ -43,6 +43,10 @@ export type MetaLead = {
   };
   status: string;
   error_message?: string;
+  crm_contact_id?: string;
+  crm_website?: string;
+  crm_synced_at?: string;
+  crm_error?: string;
   created_at: string;
 };
 
@@ -52,6 +56,7 @@ export type MetaLeadStatus = {
   graph_version: string;
   webhook_verify: boolean;
   llm: boolean;
+  crm: boolean;
 };
 
 export async function getMetaLeadStatus() {
@@ -92,4 +97,9 @@ export async function listMetaRunLeads(runId: string) {
 export async function listMetaLeads() {
   const { data } = await apiClient.get<{ data: MetaLead[] }>("/meta-leads/leads");
   return data.data ?? [];
+}
+
+export async function pushMetaLeadCRM(leadId: string, body?: { website?: string; force?: boolean }) {
+  const { data } = await apiClient.post<MetaLead>(`/meta-leads/leads/${leadId}/push-crm`, body ?? {});
+  return data;
 }
