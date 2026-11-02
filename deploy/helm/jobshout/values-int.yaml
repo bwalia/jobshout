@@ -29,7 +29,7 @@ extraSecretRefs:
   # connections + webhooks. Seed META_APP_ID / META_APP_SECRET /
   # META_WEBHOOK_VERIFY_TOKEN / META_TOKEN_KEY in Vault first, then uncomment
   # both this ref and the vaultSecrets entry below — see docs/meta-lead-analyst.md.
-  # - jobshout-meta
+  - jobshout-meta
   # wafLab.baseURL below is set, but the client stays disabled until it also has
   # a token (or username+password) — those arrive only through this secret.
   - jobshout-wslproxy
@@ -88,9 +88,9 @@ vaultSecrets:
   - name: jobshout-linkedin
     store: wslvault-backend
     key: jobshout/int/linkedin
-  # - name: jobshout-meta
-  #   store: wslvault-backend
-  #   key: jobshout/int/meta
+  - name: jobshout-meta
+    store: wslvault-backend
+    key: jobshout/int/meta
   - name: jobshout-wslproxy
     store: wslvault-backend
     key: jobshout/int/wslproxy
