@@ -23,7 +23,7 @@ settings:
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
     MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "6"
+    CURRENT_PROJECT_VERSION: "7"
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     # Set your team locally or via xcodebuild DEVELOPMENT_TEAM=...; never commit it.
     DEVELOPMENT_TEAM: ""
@@ -63,8 +63,8 @@ targets:
         Staging:
           PRODUCT_BUNDLE_IDENTIFIER: com.jobshout.app.staging
         Release:
-          # App Store Connect Apple ID 511622488 — must match Developer Portal App ID exactly
-          PRODUCT_BUNDLE_IDENTIFIER: com.tenthmatrix.jobshout
+          # App Store Connect Apple ID 511622488 — ASC Bundle ID com.jobshout.app
+          PRODUCT_BUNDLE_IDENTIFIER: com.jobshout.app
     info:
       path: App/Info.plist
       properties:
