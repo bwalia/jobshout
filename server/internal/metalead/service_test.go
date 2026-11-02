@@ -156,6 +156,35 @@ func (m *memStore) UpdateLeadAnalysis(_ context.Context, _, leadID uuid.UUID, an
 	}
 	return nil
 }
+func (m *memStore) UpdateLeadCRM(_ context.Context, _, leadID uuid.UUID, contactID, website, errMsg string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, L := range m.leads {
+		if L.ID == leadID {
+			if contactID != "" {
+				L.CRMContactID = contactID
+				L.CRMWebsite = website
+				now := time.Now()
+				L.CRMSyncedAt = &now
+				L.CRMError = ""
+			} else {
+				L.CRMError = errMsg
+			}
+		}
+	}
+	return nil
+}
+func (m *memStore) GetLead(_ context.Context, _, leadID uuid.UUID) (*model.MetaLead, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, L := range m.leads {
+		if L.ID == leadID {
+			cp := *L
+			return &cp, nil
+		}
+	}
+	return nil, errNotFound(leadID.String())
+}
 func (m *memStore) ListLeadsByRun(context.Context, uuid.UUID, uuid.UUID) ([]model.MetaLead, error) {
 	return nil, nil
 }

@@ -69,8 +69,13 @@ type MetaLead struct {
 	Analysis     json.RawMessage `json:"analysis,omitempty"`
 	Status       string          `json:"status"`
 	ErrorMessage string          `json:"error_message,omitempty"`
-	CreatedAt    time.Time       `json:"created_at"`
-	UpdatedAt    time.Time       `json:"updated_at"`
+	// CRM sync into OpsAPI /api/v2/crm/contacts (Marketing Manager workspace).
+	CRMContactID string     `json:"crm_contact_id,omitempty"`
+	CRMWebsite   string     `json:"crm_website,omitempty"`
+	CRMSyncedAt  *time.Time `json:"crm_synced_at,omitempty"`
+	CRMError     string     `json:"crm_error,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
 // MetaLeadBrief is the per-lead LLM analysis shape.

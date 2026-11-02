@@ -27,12 +27,13 @@ type Tasks interface {
 
 // Service is the Meta Lead Analyst.
 type Service struct {
-	store  Store
-	graph  Graph
+	store   Store
+	graph   Graph
 	analyse *Analyser
-	cfg    Config
-	log    *zap.Logger
-	tasks Tasks
+	crm     CRMSync
+	cfg     Config
+	log     *zap.Logger
+	tasks   Tasks
 }
 
 // NewService wires the agent.
@@ -45,6 +46,9 @@ func NewService(store Store, graph Graph, analyse *Analyser, cfg Config, log *za
 
 // BindTasks enables board task status updates from a launch.
 func (s *Service) BindTasks(t Tasks) { s.tasks = t }
+
+// BindCRM enables OpsAPI CRM contact sync after analysis.
+func (s *Service) BindCRM(c CRMSync) { s.crm = c }
 
 // Configured reports webhook + sealing readiness.
 func (s *Service) Configured() bool {
@@ -88,6 +92,9 @@ func (s *Service) Launch(ctx context.Context, req LaunchRequest) (*LaunchResult,
 	}
 	go s.runLaunch(context.Background(), run.ID, req, conn, token, limit)
 	msg := fmt.Sprintf("Fetching and analysing Meta leads for connection %q", req.Connection)
+	if req.PushCRM {
+		msg += " (will sync into OpsAPI CRM)"
+	}
 	return &LaunchResult{RunID: run.ID, Message: msg}, nil
 }
 
@@ -187,6 +194,9 @@ func (s *Service) runLaunch(ctx context.Context, runID uuid.UUID, req LaunchRequ
 		}
 		raw, _ := json.Marshal(brief)
 		_ = s.store.UpdateLeadAnalysis(ctx, req.OrgID, lead.ID, raw, model.MetaLeadStatusAnalysed, "")
+		if req.PushCRM {
+			s.syncLeadCRM(ctx, req.OrgID, lead.ID, fields, brief, req.Website, false)
+		}
 		briefs = append(briefs, *brief)
 	}
 
@@ -321,11 +331,12 @@ func (s *Service) ListRecentLeads(ctx context.Context, orgID uuid.UUID, limit in
 
 func (s *Service) Status() map[string]any {
 	return map[string]any{
-		"configured":       s.Configured(),
-		"can_seal_tokens":  s.cfg.CanSealTokens(),
-		"graph_version":    s.cfg.GraphVersion,
-		"webhook_verify":   s.cfg.WebhookVerify != "",
-		"llm":              s.analyse != nil && s.analyse.LLM != nil,
+		"configured":      s.Configured(),
+		"can_seal_tokens": s.cfg.CanSealTokens(),
+		"graph_version":   s.cfg.GraphVersion,
+		"webhook_verify":  s.cfg.WebhookVerify != "",
+		"llm":             s.analyse != nil && s.analyse.LLM != nil,
+		"crm":             s.crm != nil,
 	}
 }
 
@@ -433,6 +444,7 @@ func (s *Service) processLeadgen(ctx context.Context, pageID, leadgenID, formID 
 	}
 	raw, _ := json.Marshal(brief)
 	_ = s.store.UpdateLeadAnalysis(ctx, conn.OrgID, lead.ID, raw, model.MetaLeadStatusAnalysed, "")
+	s.syncLeadCRM(ctx, conn.OrgID, lead.ID, detail.FieldData, brief, "", false)
 	if s.analyse != nil {
 		if rollup, err := s.analyse.AnalyseRollup(ctx, []model.MetaLeadBrief{*brief}, ""); err == nil && rollup != nil {
 			run.Rollup, _ = json.Marshal(rollup)
@@ -440,6 +452,57 @@ func (s *Service) processLeadgen(ctx context.Context, pageID, leadgenID, formID 
 	}
 	run.Status = model.MetaLeadRunStatusDone
 	return s.store.UpdateRun(ctx, run)
+}
+
+// PushLeadToCRM re-syncs one analysed lead into OpsAPI CRM (force includes high spam risk).
+func (s *Service) PushLeadToCRM(ctx context.Context, orgID, leadID uuid.UUID, website string, force bool) (*model.MetaLead, error) {
+	lead, err := s.store.GetLead(ctx, orgID, leadID)
+	if err != nil {
+		return nil, err
+	}
+	var fields []FieldData
+	if len(lead.FieldData) > 0 {
+		_ = json.Unmarshal(lead.FieldData, &fields)
+	}
+	var brief *model.MetaLeadBrief
+	if len(lead.Analysis) > 0 {
+		brief = &model.MetaLeadBrief{}
+		_ = json.Unmarshal(lead.Analysis, brief)
+	}
+	if err := s.syncLeadCRM(ctx, orgID, leadID, fields, brief, website, force); err != nil {
+		return nil, err
+	}
+	return s.store.GetLead(ctx, orgID, leadID)
+}
+
+func (s *Service) syncLeadCRM(ctx context.Context, orgID, leadID uuid.UUID, fields []FieldData, brief *model.MetaLeadBrief, website string, force bool) error {
+	if s.crm == nil {
+		return nil
+	}
+	if !ShouldPushCRM(brief, force) {
+		_ = s.store.UpdateLeadCRM(ctx, orgID, leadID, "", "", "skipped: high spam_risk")
+		return nil
+	}
+	existing, err := s.store.GetLead(ctx, orgID, leadID)
+	if err == nil && existing.CRMContactID != "" && !force {
+		return nil
+	}
+	contact := ContactFromFields(fields, brief, "")
+	if existing != nil {
+		contact.LeadgenID = existing.LeadgenID
+	}
+	if contact.Email == "" && contact.Phone == "" {
+		_ = s.store.UpdateLeadCRM(ctx, orgID, leadID, "", "", "skipped: no email or phone in form fields")
+		return nil
+	}
+	res, err := s.crm.UpsertContact(ctx, orgID, website, contact)
+	if err != nil {
+		msg := err.Error()
+		_ = s.store.UpdateLeadCRM(ctx, orgID, leadID, "", "", truncate(msg, 500)) // api.go truncate
+		s.log.Warn("meta lead CRM push", zap.Error(err), zap.String("lead_id", leadID.String()))
+		return err
+	}
+	return s.store.UpdateLeadCRM(ctx, orgID, leadID, res.ContactID, res.Website, "")
 }
 
 func validMetaSignature(appSecret string, body []byte, header string) bool {
