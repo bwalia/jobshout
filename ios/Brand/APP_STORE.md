@@ -50,4 +50,4 @@ See `ExportOptions-MacAppStore.plist` — fill `teamID` before export.
 ## iPhone TestFlight
 
 See [`TESTFLIGHT.md`](TESTFLIGHT.md) and `../scripts/release-ios-testflight.sh`
-for the `com.jobshout.app` App Store Connect track (permanent Apple ID `511622488`).
+for the `com.jobshout.app` App Store Connect track (permanent Apple ID `6829933699`).

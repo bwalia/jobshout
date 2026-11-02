@@ -4,7 +4,7 @@ require "shellwords"
 
 default_platform(:ios)
 
-# Release → TestFlight for ASC app 511622488 (com.jobshout.app).
+# Release → TestFlight for ASC app 6829933699 (com.jobshout.app).
 #
 # Auth (pick one):
 #   1) App Store Connect API key (preferred):
@@ -21,12 +21,12 @@ default_platform(:ios)
 
 platform :ios do
   TEAM_ID = "PAS2QUVJHC"
-  ASC_APPLE_ID = ENV.fetch("FL_APPLE_APP_ID", "511622488")
+  ASC_APPLE_ID = ENV.fetch("FL_APPLE_APP_ID", "6829933699")
   BUNDLE_ID = "com.jobshout.app"
   ARCHIVE_PATH = "/tmp/JobShout-iOS.xcarchive"
   EXPORT_DIR = "/tmp/JobShout-Fastlane-Export"
 
-  desc "Archive Release and upload to TestFlight (ASC 511622488)"
+  desc "Archive Release and upload to TestFlight (ASC 6829933699)"
   lane :beta do
     ensure_xcode_path
     generate_project
