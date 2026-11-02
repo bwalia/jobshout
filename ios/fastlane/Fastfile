@@ -4,7 +4,7 @@ require "shellwords"
 
 default_platform(:ios)
 
-# Release → TestFlight for ASC app 511622488 (com.tenthmatrix.jobshout).
+# Release → TestFlight for ASC app 511622488 (com.jobshout.app).
 #
 # Auth (pick one):
 #   1) App Store Connect API key (preferred):
@@ -22,7 +22,7 @@ default_platform(:ios)
 platform :ios do
   TEAM_ID = "PAS2QUVJHC"
   ASC_APPLE_ID = ENV.fetch("FL_APPLE_APP_ID", "511622488")
-  BUNDLE_ID = "com.tenthmatrix.jobshout"
+  BUNDLE_ID = "com.jobshout.app"
   ARCHIVE_PATH = "/tmp/JobShout-iOS.xcarchive"
   EXPORT_DIR = "/tmp/JobShout-Fastlane-Export"
 
@@ -179,7 +179,7 @@ platform :ios do
     if status != 0 || out =~ /EXPORT FAILED|not found on App Store Connect|error:/i
       UI.user_error!(
         "Upload failed for ASC #{ASC_APPLE_ID} (#{BUNDLE_ID}). " \
-        "Confirm App Information Bundle ID is #{BUNDLE_ID} (lowercase). " \
+        "Confirm App Information Bundle ID is #{BUNDLE_ID}. " \
         "ASC: https://appstoreconnect.apple.com/apps/#{ASC_APPLE_ID}"
       )
     end

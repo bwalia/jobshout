@@ -1,13 +1,13 @@
 # iPhone TestFlight (JobShout)
 
-Primary TestFlight track: **Release** → prod API → bundle `com.tenthmatrix.jobshout` → ASC Apple ID **`511622488`**.
+Primary TestFlight track: **Release** → prod API → bundle `com.jobshout.app` → ASC Apple ID **`511622488`**.
 
 | | |
 |---|---|
 | Display name | JobShout |
 | Scheme | `JobShout` |
 | Configuration | Release |
-| Bundle ID | `com.tenthmatrix.jobshout` (all lowercase — ASC + Developer Portal) |
+| Bundle ID | `com.jobshout.app` |
 | App Store Connect Apple ID | `511622488` (permanent) |
 | ASC URL | https://appstoreconnect.apple.com/apps/511622488/testflight/ios |
 | Marketing version | `0.1.0` (`MARKETING_VERSION` in `project.yml`) |
@@ -46,16 +46,14 @@ script put `/usr/bin` first on `PATH` so macOS openrsync is used.
 
 ## App Store Connect / Developer Portal checklist
 
-ASC Bundle ID must be selected from the **registered App ID** list as
-**`com.tenthmatrix.jobshout`** (all lowercase). Do not use
-`com.tenthmatrix.Jobshout` — Apple treats that as unavailable because the
-lowercase App ID already exists on team `PAS2QUVJHC`.
+ASC app **`511622488`** Bundle ID must be **`com.jobshout.app`** (same as the
+Developer Portal App ID + Store profile on team `PAS2QUVJHC`).
 
-- [x] Developer Portal App ID `com.tenthmatrix.jobshout` (Push + Sign in with Apple; Store profile on team `PAS2QUVJHC`)
-- [ ] ASC app `511622488` → App Information → Bundle ID → pick **`com.tenthmatrix.jobshout`** (lowercase) from the dropdown, then Save
+- [x] Developer Portal App ID `com.jobshout.app` (Push + Sign in with Apple; Store profile on team `PAS2QUVJHC`)
+- [x] ASC app `511622488` uses bundle `com.jobshout.app`
 - [ ] Xcode signed into team `PAS2QUVJHC`
 - [ ] Optional: App Store Connect API key (Issuer ID + Key ID + `.p8`) for non-interactive upload
-- [ ] Prod Helm `apple.clientIds` includes `com.tenthmatrix.jobshout`
+- [ ] Prod Helm `apple.clientIds` includes `com.jobshout.app`
 - [ ] Privacy: `ITSAppUsesNonExemptEncryption` is false in the app Info.plist
 - [ ] Internal testers added in TestFlight; build processed and enabled
 - [ ] Review notes (later public TF): Google OAuth uses `jobshout://`; SIWA on prod; agents core loop
