@@ -66,16 +66,35 @@ func TestRedrawImages_KeepsWhatItCannotReplace(t *testing.T) {
 }
 
 func TestGroundScene(t *testing.T) {
-	md := "Argo CD syncs the staging cluster. Deploys got 68% faster."
-	s := groundScene(coverScene{Layout: layoutBars, Labels: []string{"Argo CD", "staging", "quantum ledger"}, Stat: "-68%"}, md)
-	if len(s.Labels) != 2 || s.Stat != "-68%" {
-		t.Fatalf("got %+v", s)
+	md := "Argo CD syncs the staging cluster from a Helm chart. Deploys got 68% faster."
+	s, rejected, ok := groundScene(coverScene{Layout: layoutBars, Labels: []string{"Argo CD", "staging", "Helm chart", "quantum ledger"}, Stat: "-68%"}, md)
+	if !ok || len(s.Labels) != 3 || s.Stat != "-68%" || len(rejected) != 1 {
+		t.Fatalf("got %+v %v %v", s, rejected, ok)
 	}
-	s = groundScene(coverScene{Layout: layoutHub, Labels: []string{"quantum ledger", "Argo CD"}}, md)
-	if s.Layout != "" {
-		t.Fatalf("one grounded label must drop the scene: %+v", s)
+	// int drew a hub with "teams" and "data": two real labels are not enough.
+	if _, _, ok := groundScene(coverScene{Layout: layoutHub, Labels: []string{"Argo CD", "staging"}}, md); ok {
+		t.Fatal("a hub needs a centre and three real parts")
 	}
-	if s := groundScene(coverScene{Layout: layoutBars, Labels: []string{"Argo CD", "staging"}, Stat: "90%"}, md); s.Stat != "" {
+	if s, _, _ := groundScene(coverScene{Layout: layoutVersus, Labels: []string{"Argo CD", "staging"}, Stat: "90%"}, md); s.Stat != "" {
 		t.Fatalf("a stat the article does not state must go: %+v", s)
+	}
+}
+
+// A scene too thin to draw is planned once more, with the reason.
+func TestGroundedCover_RetriesWithTheReason(t *testing.T) {
+	r := testRunner(&noLetterIllustrator{fakeIllustrator{enabled: true}}).WithCoverStore(newMemCovers())
+	stub := &stubLLM{responses: []scriptedResponse{{
+		trigger: "cannot be drawn",
+		content: `{"layout":"hub","labels":["GitOps","Argo CD","staging cluster","Helm chart"],"eyebrow":"DevOps"}`,
+	}}}
+	r.llm = stub
+	md := "GitOps with Argo CD syncs the staging cluster from a Helm chart."
+	s := r.groundedCover(context.Background(), "T", md, coverScene{Layout: layoutHub, Labels: []string{"GitOps", "teams", "data"}})
+	if s.Layout != layoutHub || len(s.Labels) != 4 {
+		t.Fatalf("scene = %+v", s)
+	}
+	prompt := stub.calls[0].Messages[len(stub.calls[0].Messages)-1].Content
+	if !strings.Contains(prompt, "needs at least 4 labels") || !strings.Contains(prompt, "not in the article: teams, data") {
+		t.Fatalf("retry prompt does not say why:\n%s", prompt[:300])
 	}
 }

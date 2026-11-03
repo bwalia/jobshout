@@ -89,7 +89,7 @@ func (r *Runner) RedrawImages(ctx context.Context, orgID uuid.UUID, a *Generated
 	// The model's scene, held to the article's own words; an empty one falls
 	// back to the heuristic in coverSceneFor.
 	a.CoverMetaphor, a.CoverObjects, a.CoverAccent = "", "", ""
-	a.CoverScene = groundScene(scene, a.Markdown)
+	a.CoverScene = r.groundedCover(ctx, a.Title, md, scene)
 	if strings.TrimSpace(a.CoverAngle) == "" {
 		a.CoverAngle = strings.TrimSpace(a.Excerpt)
 	}
@@ -147,30 +147,82 @@ Respond with JSON only: {"cover_scene": {"layout": "...", "labels": ["...", "...
 	return plan, out.CoverScene, nil
 }
 
+// layoutMinLabels is how many real labels each layout needs before it fills
+// the rest with its own wording ("teams", "data", "input"): a model scene with
+// fewer would put words on the cover the article never uses.
+var layoutMinLabels = map[coverLayout]int{
+	layoutFlow: 3, layoutHub: 4, layoutLoop: 3, layoutBars: 3, layoutVersus: 2,
+	layoutRipple: 3, layoutTree: 1, layoutIceberg: 4, layoutHierarchy: 4, layoutThreshold: 4,
+}
+
 // groundScene keeps the cover labels the article supports: each must share a
 // word of four or more letters with it, so the cover cannot claim what the
-// piece does not say. A stat stays only when the article states it. With
-// fewer than two labels left the scene is dropped and the cover is derived
-// from the article instead.
-func groundScene(s coverScene, markdown string) coverScene {
+// piece does not say, and a stat stays only when the article states it. ok is
+// false when the layout is unknown or too few labels are left to draw it
+// without filler; rejected are the labels the article does not contain.
+func groundScene(s coverScene, markdown string) (scene coverScene, rejected []string, ok bool) {
 	text := strings.ToLower(markdown)
 	var kept []string
 	for _, l := range s.Labels {
+		grounded := false
 		for _, w := range strings.Fields(strings.ToLower(l)) {
 			if w = strings.Trim(w, ".,:;()\"'"); len([]rune(w)) >= 4 && strings.Contains(text, w) {
-				kept = append(kept, l)
+				grounded = true
 				break
 			}
 		}
-	}
-	if len(kept) < 2 {
-		return coverScene{}
+		if grounded {
+			kept = append(kept, l)
+		} else {
+			rejected = append(rejected, l)
+		}
 	}
 	s.Labels = kept
 	if stat := strings.TrimLeft(strings.TrimSpace(s.Stat), "+-−"); stat != "" && !strings.Contains(markdown, stat) {
 		s.Stat = ""
 	}
-	return s
+	need, known := layoutMinLabels[s.Layout]
+	return s, rejected, known && len(kept) >= need
+}
+
+// groundedCover is the model's cover scene held to the article. When it cannot
+// be drawn without filler, the model is asked once more, told why; when that
+// fails too, the scene is empty and coverSceneFor derives one from the text.
+func (r *Runner) groundedCover(ctx context.Context, title, markdown string, scene coverScene) coverScene {
+	s, rejected, ok := groundScene(scene, markdown)
+	if ok {
+		return s
+	}
+	why := "its layout is not one of those listed"
+	if need, known := layoutMinLabels[s.Layout]; known {
+		why = fmt.Sprintf("the %s layout needs at least %d labels found in the article, and %d were", s.Layout, need, len(s.Labels))
+		if len(rejected) > 0 {
+			why += fmt.Sprintf(" (not in the article: %s)", strings.Join(rejected, ", "))
+		}
+	}
+	body := markdown
+	if len(body) > maxRedrawArticleChars {
+		body = body[:maxRedrawArticleChars]
+	}
+	prompt := fmt.Sprintf(`The cover diagram planned for this article cannot be drawn: %s. Plan it again.
+
+Pick the one layout below whose meaning matches what the article argues (flow only when its point is a sequence of steps), and give the labels that layout needs, each 1-3 words copied from the article's own terms, a "stat" only when the article states that exact figure, and an "eyebrow" of 1-3 words naming the field.
+%s
+
+TITLE: %s
+ARTICLE:
+%s
+
+Respond with JSON only: {"layout": "...", "labels": ["...", "..."], "stat": "", "eyebrow": "..."}`,
+		why, coverLayoutGuide, title, body)
+	var retry coverScene
+	if err := r.generateJSON(ctx, r.structuredModel(GenerateRequest{}), "redraw-cover", prompt, 400, &retry); err != nil {
+		return coverScene{}
+	}
+	if s, _, ok := groundScene(retry, markdown); ok {
+		return s
+	}
+	return coverScene{}
 }
 
 // insertPlannedFigures puts a fence after the first paragraph of each section

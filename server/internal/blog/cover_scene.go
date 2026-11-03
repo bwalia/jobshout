@@ -136,6 +136,11 @@ func coverSceneFor(a *GeneratedArticle) coverScene {
 	if len(s.Labels) == 0 && s.Layout == derived.Layout {
 		s.Labels = derived.Labels
 	}
+	// A plan scene too thin for its layout would be padded with the layout's
+	// own wording ("teams", "data"); the article's derived scene is better.
+	if len(s.Labels) > 0 && len(s.Labels) < layoutMinLabels[s.Layout] {
+		s.Layout, s.Labels = derived.Layout, derived.Labels
+	}
 	if s.Stat == "" && s.Layout == layoutBars {
 		s.Stat = derived.Stat
 	}
