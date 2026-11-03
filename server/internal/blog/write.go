@@ -135,7 +135,8 @@ Decide:
    "ice", "copper") that still sits with teal/coral. Listing cards share a
    house style; only the metaphor and objects make each cover distinct.
 5. A cover diagram: the one layout below that best pictures this article's
-   argument, with 2-6 labels of 1-3 words each in this article's own terms
+   argument (do not default to flow: use flow only when the point is a
+   sequence of steps), with 2-6 labels of 1-3 words each in this article's own terms
    (section ideas, not sector names), a "stat" only when a finding states that
    exact figure (otherwise ""), and an "eyebrow" of 1-3 words naming the field.
 %s

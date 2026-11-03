@@ -393,7 +393,7 @@ func (p *pen) flow(s coverScene) {
 // hub: one core connected to the things around it.
 func (p *pen) hub(s coverScene) {
 	core := label(s.Labels, 0, "core")
-	spokes := padLabels(s.Labels[min(1, len(s.Labels)):], 4, 6, "tools", "data", "teams", "systems")
+	spokes := padLabels(s.Labels[min(1, len(s.Labels)):], 3, 6, "tools", "data", "teams", "systems")
 	cx, cy := 800.0, 390.0
 	type pt struct{ x, y float64 }
 	pos := make([]pt, len(spokes))

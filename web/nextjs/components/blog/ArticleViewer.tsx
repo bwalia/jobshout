@@ -52,11 +52,22 @@ export function ArticleViewer({ article }: { article: BlogArticle }) {
   async function redrawImages() {
     setRedrawing(true);
     try {
-      const { notes } = await redrawBlogArticleImages(article.id);
+      const res = await redrawBlogArticleImages(article.id);
       await qc.invalidateQueries({ queryKey: blogKeys.articles(article.run_id) });
-      toast.success(article.post_uuid ? "Images redrawn and the CMS post updated" : "Images redrawn", {
-        description: notes.length ? notes.join("; ") : undefined,
-      });
+      const description = res.notes.length ? res.notes.join("; ") : undefined;
+      const done = [
+        res.cover_redrawn ? "the cover" : "",
+        res.figures_drawn ? `${res.figures_drawn} figure${res.figures_drawn === 1 ? "" : "s"}` : "",
+      ].filter(Boolean);
+      // Success only for what changed: a redraw that kept everything (say the
+      // image store is full) must not read as done.
+      if (done.length === 0) {
+        toast.error("Nothing was redrawn", { description });
+      } else if (res.notes.length) {
+        toast.warning(`Redrew ${done.join(" and ")}`, { description });
+      } else {
+        toast.success(`Redrew ${done.join(" and ")}${article.post_uuid ? " and updated the CMS post" : ""}`);
+      }
     } catch (e) {
       toast.error(apiErrorMessage(e, "Could not redraw the images"));
     } finally {
