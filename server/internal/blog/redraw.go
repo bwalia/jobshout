@@ -12,11 +12,23 @@ import (
 	"github.com/jobshout/server/internal/imagestore"
 )
 
-// diagramFigureFormat is how a figure must be written for figureScene to draw
-// it: a list of short labels, which is also what makes a good diagram.
-const diagramFigureFormat = `   Write content as short labels in the article's own terms, 1-4 words each:
+// figureKinds is the figure kinds this runner can draw and the format to write
+// them in. Every figure is a list of short labels, even for a lettering model:
+// that is what a good figure shows, and it is what figureScene needs to draw it
+// as a diagram when the model fails (int's Gemini has no image quota). A
+// comparison has no faithful diagram, so it is offered only with a model.
+func (r *Runner) figureKinds() (kinds, format string) {
+	kinds = "flow, architecture, process, or concept"
+	format = `   Write content as short labels in the article's own terms, 1-4 words each:
    flow or process as 3-5 steps "step → step → step"; architecture or concept
-   as a core and 4-5 parts "core: part, part, part, part".`
+   as a core and 4-5 parts "core: part, part, part, part"`
+	if r.canLetterImages() {
+		kinds = "flow, comparison, architecture, process, or concept"
+		format += `; comparison as
+   "option vs option: aspect, aspect"`
+	}
+	return kinds, format + "."
+}
 
 // figureImage is a body figure this package wrote: a Markdown image on its own
 // line, served from the image store at a relative or absolute URL.
@@ -51,20 +63,14 @@ func (r *Runner) RedrawFigures(ctx context.Context, orgID uuid.UUID, a *Generate
 // to illustrate, in the format the configured drawing path can draw.
 func (r *Runner) planFigures(ctx context.Context, title, markdown string) (*writePlan, error) {
 	headings := collectH2s(markdown)
-	kinds := "- flow or process: 3-5 steps in order\n- architecture or concept: one core and the 4-5 parts around it"
-	format := diagramFigureFormat
-	if r.canLetterImages() {
-		kinds += "\n- comparison: the options and what they differ on"
-		format = "   Write content as the labels, rows or steps to put on the figure."
-	}
+	kinds, format := r.figureKinds()
 	body := markdown
 	if len(body) > maxRedrawArticleChars {
 		body = body[:maxRedrawArticleChars]
 	}
 	prompt := fmt.Sprintf(`Choose the one or two sections of this article where a figure would teach the reader most, and say what the figure shows. Use only facts from the article; skip the references.
 
-Kinds:
-%s
+Each figure names a kind (%s), a section, and its content.
 %s
 "section" is a heading copied exactly from HEADINGS.
 

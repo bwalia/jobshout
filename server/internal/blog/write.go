@@ -96,18 +96,14 @@ func (s flexibleString) String() string { return string(s) }
 func (r *Runner) plan(ctx context.Context, modelName string, brief model.BlogBrief, rb *research.Brief) (*writePlan, error) {
 	figureAsk, extraJSON := "", ""
 	if r.canLetterFigures() {
-		// Figures drawn as diagrams have no faithful comparison layout, and a
-		// comparison already belongs in a table; offer only what will be drawn.
-		kinds, example, format := "flow, comparison, architecture, process, or concept", "comparison", ""
-		if !r.canLetterImages() {
-			kinds, example, format = "flow, architecture, process, or concept", "process", "\n"+diagramFigureFormat
-		}
+		kinds, format := r.figureKinds()
 		figureAsk = `
 6. One or two in-article figures that would teach something. Each names a
    kind (` + kinds + `), the section
    it belongs under, and the facts to put on the figure — labels, rows or
-   steps, not a decorative scene.` + format
-		extraJSON = `, "figures": [{"kind":"` + example + `","section":"...","content":"..."}]`
+   steps, not a decorative scene.
+` + format
+		extraJSON = `, "figures": [{"kind":"process","section":"...","content":"..."}]`
 	}
 
 	reader := audience.For(brief.Audience)

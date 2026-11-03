@@ -120,3 +120,16 @@ func TestRedrawFigures(t *testing.T) {
 		t.Fatalf("HTML not re-rendered:\n%s", a.HTML)
 	}
 }
+
+// Figures are always asked for as lists, so a lettering model that fails (int's
+// Gemini has no image quota) still leaves something the diagram path can draw.
+func TestFigureKinds(t *testing.T) {
+	kinds, format := testRunner(&fakeIllustrator{enabled: true}).figureKinds()
+	if !strings.Contains(kinds, "comparison") || !strings.Contains(format, "step → step") || !strings.Contains(format, "vs") {
+		t.Fatalf("with a lettering model: %q %q", kinds, format)
+	}
+	kinds, format = testRunner(&noLetterIllustrator{fakeIllustrator{enabled: true}}).WithCoverStore(newMemCovers()).figureKinds()
+	if strings.Contains(kinds, "comparison") || !strings.Contains(format, "core: part") {
+		t.Fatalf("diagrams only: %q %q", kinds, format)
+	}
+}
