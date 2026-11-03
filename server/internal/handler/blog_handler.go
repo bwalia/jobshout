@@ -391,7 +391,8 @@ func (h *BlogHandler) RegenerateCover(w http.ResponseWriter, r *http.Request) {
 
 // RedrawImages handles POST /api/v1/blogs/articles/{articleID}/redraw-images.
 // Redraws the article's in-body figures and its cover; {"sync_cms":true} also
-// updates the filed CMS post. Answers {"article": …, "notes": […]}.
+// updates the filed CMS post. Answers {"article", "notes", "figures_drawn",
+// "cover_redrawn"}, so the caller can tell a redraw from one that kept all.
 func (h *BlogHandler) RedrawImages(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "articleID"))
 	if err != nil {
@@ -412,13 +413,19 @@ func (h *BlogHandler) RedrawImages(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	article, notes, err := h.svc.RedrawImages(r.Context(), orgID, id, body.SyncCMS)
+	article, res, err := h.svc.RedrawImages(r.Context(), orgID, id, body.SyncCMS)
+	notes := res.Notes
+	if notes == nil {
+		notes = []string{}
+	}
+	reply := map[string]any{"article": article, "notes": notes, "figures_drawn": res.Figures, "cover_redrawn": res.Cover}
 	if err != nil {
 		msg := err.Error()
 		switch {
 		case article != nil:
 			// Redrawn and saved; only the CMS update failed. Say so with the article.
-			RespondJSON(w, http.StatusOK, map[string]any{"article": article, "notes": append(notes, msg)})
+			reply["notes"] = append(notes, msg)
+			RespondJSON(w, http.StatusOK, reply)
 		case strings.Contains(msg, "not found"):
 			RespondError(w, http.StatusNotFound, msg)
 		case strings.Contains(msg, "does not belong"):
@@ -430,10 +437,7 @@ func (h *BlogHandler) RedrawImages(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if notes == nil {
-		notes = []string{}
-	}
-	RespondJSON(w, http.StatusOK, map[string]any{"article": article, "notes": notes})
+	RespondJSON(w, http.StatusOK, reply)
 }
 
 // CheckWebsite handles GET /api/v1/blogs/destinations/check?namespace=&base_url=

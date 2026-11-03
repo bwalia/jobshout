@@ -42,43 +42,80 @@ var figureImage = regexp.MustCompile(`(?m)^!\[[^\]\n]*\]\((?:https?://[^\s)]*)?`
 // piece still fits a local model's context.
 const maxRedrawArticleChars = 12000
 
-// RedrawFigures replaces a finished article's in-body figures: the ones it has
-// are removed, the model picks the sections a figure would teach most in and
-// what to put on it, and each is drawn again. Notes say what was dropped.
-func (r *Runner) RedrawFigures(ctx context.Context, orgID uuid.UUID, a *GeneratedArticle) ([]string, error) {
-	if !r.canLetterFigures() {
-		return nil, errors.New("blog: no image model or image store to draw figures with")
-	}
-	md := figureImage.ReplaceAllString(a.Markdown, "")
-	plan, err := r.planFigures(ctx, a.Title, md)
-	if err != nil {
-		return nil, fmt.Errorf("blog: plan figures: %w", err)
-	}
-	md, notes := r.illustrateBody(ctx, orgID, a.RunID, insertPlannedFigures(md, plan))
-	if len(plan.Figures) == 0 {
-		notes = append(notes, "the model found no section worth a figure")
-	}
-	// A redraw that drew nothing must not cost the article the figures it had:
-	// on int a full image store turned one figure into none.
-	if !figureImage.MatchString(md) && figureImage.MatchString(a.Markdown) {
-		return append(notes, "kept the article's figures: none could be redrawn"), nil
-	}
-	a.Markdown = tidyMarkdown(md, true)
-	return notes, a.render()
+// RedrawResult is what a redraw changed, so the caller can say so honestly
+// rather than reporting success for a redraw that kept everything.
+type RedrawResult struct {
+	Notes   []string
+	Figures int  // figures drawn into the body
+	Cover   bool // a new cover was stored
 }
 
-// planFigures asks the structured model which sections of a finished article
-// to illustrate, in the format the configured drawing path can draw.
-func (r *Runner) planFigures(ctx context.Context, title, markdown string) (*writePlan, error) {
+// RedrawImages redraws a finished article's cover and in-body figures from its
+// content. One model call reads the article and decides both: the cover layout
+// whose meaning matches the article's central claim, labelled with its own
+// terms, and the one or two sections a figure teaches most in. The figures it
+// had are kept when none can be drawn; the cover is kept when no new one can
+// be stored.
+func (r *Runner) RedrawImages(ctx context.Context, orgID uuid.UUID, a *GeneratedArticle) (RedrawResult, error) {
+	var res RedrawResult
+	if !r.canLetterFigures() && !r.canDrawCover() {
+		return res, errors.New("blog: no image model or image store to draw with")
+	}
+	md := figureImage.ReplaceAllString(a.Markdown, "")
+	plan, scene, err := r.planRedraw(ctx, a.Title, md)
+	if err != nil {
+		return res, fmt.Errorf("blog: plan the redraw: %w", err)
+	}
+
+	if r.canLetterFigures() {
+		body, notes := r.illustrateBody(ctx, orgID, a.RunID, insertPlannedFigures(md, plan))
+		res.Notes = notes
+		res.Figures = len(figureImage.FindAllString(body, -1))
+		switch {
+		case len(plan.Figures) == 0:
+			res.Notes = append(res.Notes, "the model found no section worth a figure")
+		case res.Figures == 0 && figureImage.MatchString(a.Markdown):
+			// On int a full image store turned one figure into none.
+			res.Notes = append(res.Notes, "kept the article's figures: none could be redrawn")
+		}
+		if res.Figures > 0 || !figureImage.MatchString(a.Markdown) {
+			a.Markdown = tidyMarkdown(body, true)
+			if err := a.render(); err != nil {
+				return res, err
+			}
+		}
+	}
+
+	// The model's scene, held to the article's own words; an empty one falls
+	// back to the heuristic in coverSceneFor.
+	a.CoverMetaphor, a.CoverObjects, a.CoverAccent = "", "", ""
+	a.CoverScene = groundScene(scene, a.Markdown)
+	if strings.TrimSpace(a.CoverAngle) == "" {
+		a.CoverAngle = strings.TrimSpace(a.Excerpt)
+	}
+	if err := r.redrawCover(ctx, orgID, a); err != nil {
+		res.Notes = append(res.Notes, "kept the cover: "+truncateRunes(err.Error(), 200))
+	} else {
+		res.Cover = true
+	}
+	return res, nil
+}
+
+// planRedraw asks the structured model, once, for a finished article's cover
+// diagram and figures.
+func (r *Runner) planRedraw(ctx context.Context, title, markdown string) (*writePlan, coverScene, error) {
 	headings := collectH2s(markdown)
 	kinds, format := r.figureKinds()
 	body := markdown
 	if len(body) > maxRedrawArticleChars {
 		body = body[:maxRedrawArticleChars]
 	}
-	prompt := fmt.Sprintf(`Choose the one or two sections of this article where a figure would teach the reader most, and say what the figure shows. Use only facts from the article; skip the references.
+	prompt := fmt.Sprintf(`Read this finished article and plan its pictures. Use only what the article says; skip the references.
 
-Each figure names a kind (%s), a section, and its content.
+1. A cover diagram of the article's central claim. Pick the one layout below whose meaning matches what the article argues. Do not default to flow: use flow only when the article's point is a sequence of steps. Give 2-6 labels of 1-3 words each, copied from the article's own terms (the things it names, not section titles or generic words), a "stat" only when the article states that exact figure (otherwise ""), and an "eyebrow" of 1-3 words naming the field.
+%s
+
+2. The one or two sections where a figure would teach the reader most. Each figure names a kind (%s), a section, and its content.
 %s
 "section" is a heading copied exactly from HEADINGS.
 
@@ -89,29 +126,56 @@ HEADINGS:
 ARTICLE:
 %s
 
-Respond with JSON only: {"figures": [{"kind": "process", "section": "...", "content": "..."}]}`,
-		kinds, format, title, strings.Join(headings, "\n- "), body)
+Respond with JSON only: {"cover_scene": {"layout": "...", "labels": ["...", "..."], "stat": "", "eyebrow": "..."}, "figures": [{"kind": "process", "section": "...", "content": "..."}]}`,
+		coverLayoutGuide, kinds, format, title, strings.Join(headings, "\n- "), body)
 
 	var out struct {
-		Figures []struct {
+		CoverScene coverScene `json:"cover_scene"`
+		Figures    []struct {
 			Kind    flexibleString `json:"kind"`
 			Section flexibleString `json:"section"`
 			Content flexibleString `json:"content"`
 		} `json:"figures"`
 	}
-	if err := r.generateJSON(ctx, r.structuredModel(GenerateRequest{}), "figures", prompt, 800, &out); err != nil {
-		return nil, err
+	if err := r.generateJSON(ctx, r.structuredModel(GenerateRequest{}), "redraw", prompt, 1000, &out); err != nil {
+		return nil, coverScene{}, err
 	}
 	plan := &writePlan{Title: title}
 	for _, f := range out.Figures {
 		plan.Figures = append(plan.Figures, figureBrief{Kind: string(f.Kind), Section: string(f.Section), Content: string(f.Content)})
 	}
-	return plan, nil
+	return plan, out.CoverScene, nil
+}
+
+// groundScene keeps the cover labels the article supports: each must share a
+// word of four or more letters with it, so the cover cannot claim what the
+// piece does not say. A stat stays only when the article states it. With
+// fewer than two labels left the scene is dropped and the cover is derived
+// from the article instead.
+func groundScene(s coverScene, markdown string) coverScene {
+	text := strings.ToLower(markdown)
+	var kept []string
+	for _, l := range s.Labels {
+		for _, w := range strings.Fields(strings.ToLower(l)) {
+			if w = strings.Trim(w, ".,:;()\"'"); len([]rune(w)) >= 4 && strings.Contains(text, w) {
+				kept = append(kept, l)
+				break
+			}
+		}
+	}
+	if len(kept) < 2 {
+		return coverScene{}
+	}
+	s.Labels = kept
+	if stat := strings.TrimLeft(strings.TrimSpace(s.Stat), "+-−"); stat != "" && !strings.Contains(markdown, stat) {
+		s.Stat = ""
+	}
+	return s
 }
 
 // insertPlannedFigures puts a fence after the first paragraph of each section
 // the plan drew a figure for, and nowhere else: a section-prose figure is what
-// RedrawFigures is replacing.
+// RedrawImages is replacing.
 func insertPlannedFigures(markdown string, plan *writePlan) string {
 	for range maxInlineIllustrations {
 		lines := strings.Split(markdown, "\n")

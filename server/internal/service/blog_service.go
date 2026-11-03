@@ -80,10 +80,11 @@ type BlogService interface {
 	// new cover is also written to opsapi's featured_image_url so listing
 	// cards update without re-publishing the body.
 	RegenerateCover(ctx context.Context, orgID, articleID uuid.UUID, syncCMS bool) (*model.BlogArticle, error)
-	// RedrawImages redraws one article's in-body figures and its cover. With
-	// syncCMS and a CMS post, the post's body and featured image are updated.
-	// The notes say which figures were dropped and why.
-	RedrawImages(ctx context.Context, orgID, articleID uuid.UUID, syncCMS bool) (*model.BlogArticle, []string, error)
+	// RedrawImages redraws one article's in-body figures and its cover from
+	// its content. With syncCMS and a CMS post, the post's body and featured
+	// image are updated. The result says what changed and, in its notes, why
+	// anything did not.
+	RedrawImages(ctx context.Context, orgID, articleID uuid.UUID, syncCMS bool) (*model.BlogArticle, blog.RedrawResult, error)
 	// BindTasks updates the Task Manager card when a launched run finishes.
 	BindTasks(tasks TaskService)
 	// BindIntegrations lets a writer agent file to its own website: the named
@@ -2095,21 +2096,22 @@ type postImagesUpdater interface {
 	UpdatePostImages(ctx context.Context, postUUID, contentHTML, imageURL string) (*opsapi.Post, error)
 }
 
-func (s *blogService) RedrawImages(ctx context.Context, orgID, articleID uuid.UUID, syncCMS bool) (*model.BlogArticle, []string, error) {
+func (s *blogService) RedrawImages(ctx context.Context, orgID, articleID uuid.UUID, syncCMS bool) (*model.BlogArticle, blog.RedrawResult, error) {
+	var res blog.RedrawResult
 	if s.runner == nil {
-		return nil, nil, fmt.Errorf("blog_svc: generator not configured")
+		return nil, res, fmt.Errorf("blog_svc: generator not configured")
 	}
 	a, err := s.repo.GetArticle(ctx, articleID)
 	if err != nil {
-		return nil, nil, err
+		return nil, res, err
 	}
 	if a == nil {
-		return nil, nil, fmt.Errorf("blog_svc: article not found")
+		return nil, res, fmt.Errorf("blog_svc: article not found")
 	}
 	if a.OrgID != orgID {
-		return nil, nil, fmt.Errorf("blog_svc: article does not belong to this organization")
+		return nil, res, fmt.Errorf("blog_svc: article does not belong to this organization")
 	}
-	// A figure plan and up to four drawings: minutes on a busy workstation.
+	// A plan call and up to four drawings: minutes on a busy workstation.
 	// A client that gives up must not leave the article half redrawn.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Minute)
 	defer cancel()
@@ -2120,43 +2122,42 @@ func (s *blogService) RedrawImages(ctx context.Context, orgID, articleID uuid.UU
 		Excerpt: articleExcerpt(a), CoverImageURL: a.CoverImageURL,
 		Audience: a.Audience, Industry: a.Industry, RunID: &runID,
 	}
-	notes, err := s.runner.RedrawFigures(ctx, orgID, gen)
+	res, err = s.runner.RedrawImages(ctx, orgID, gen)
 	if err != nil {
-		return nil, nil, err
+		return nil, res, err
 	}
-	if err := s.repo.UpdateArticleBody(ctx, a.ID, gen.Markdown, gen.HTML); err != nil {
-		return nil, nil, err
+	if gen.Markdown != a.Markdown {
+		if err := s.repo.UpdateArticleBody(ctx, a.ID, gen.Markdown, gen.HTML); err != nil {
+			return nil, res, err
+		}
+		a.Markdown, a.HTML = gen.Markdown, gen.HTML
 	}
-	a.Markdown, a.HTML = gen.Markdown, gen.HTML
-
-	if err := s.runner.RegenerateCover(ctx, orgID, gen); err != nil {
-		notes = append(notes, "kept the cover: "+err.Error())
-	} else {
+	if res.Cover {
 		meta := model.CoverImageMeta{
 			Provider: gen.CoverImageProvider, Model: gen.CoverImageModel, Seed: gen.CoverImageSeed,
 			Width: gen.CoverImageWidth, Height: gen.CoverImageHeight,
 		}
 		if err := s.repo.UpdateArticleCover(ctx, a.ID, gen.CoverImageURL, gen.CoverImagePrompt, meta); err != nil {
-			return a, notes, err
+			return a, res, err
 		}
 		a.CoverImageURL, a.CoverImagePrompt, a.CoverImageMeta = gen.CoverImageURL, gen.CoverImagePrompt, meta
 	}
 
-	if !syncCMS || a.PostUUID == nil || *a.PostUUID == "" {
-		return a, notes, nil
+	if !syncCMS || a.PostUUID == nil || *a.PostUUID == "" || (res.Figures == 0 && !res.Cover) {
+		return a, res, nil
 	}
 	cms, err := s.articleCMS(ctx, a)
 	if err != nil {
-		return a, notes, fmt.Errorf("blog_svc: images redrawn but CMS sync failed: %w", err)
+		return a, res, fmt.Errorf("blog_svc: images redrawn but CMS sync failed: %w", err)
 	}
 	updater, ok := cms.(postImagesUpdater)
 	if !ok || updater == nil {
-		return a, notes, fmt.Errorf("blog_svc: images redrawn but the CMS client cannot update posts")
+		return a, res, fmt.Errorf("blog_svc: images redrawn but the CMS client cannot update posts")
 	}
 	if _, err := updater.UpdatePostImages(ctx, *a.PostUUID, a.HTML, blog.PublicImageURL(s.runner.PublicBaseURL(), a.CoverImageURL)); err != nil {
-		return a, notes, fmt.Errorf("blog_svc: images redrawn but CMS post update failed: %w", err)
+		return a, res, fmt.Errorf("blog_svc: images redrawn but CMS post update failed: %w", err)
 	}
-	return a, notes, nil
+	return a, res, nil
 }
 
 // articleExcerpt prefers the stored HTML excerpt path used at publish time.

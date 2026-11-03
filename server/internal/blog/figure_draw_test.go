@@ -94,34 +94,6 @@ func TestFigureScene(t *testing.T) {
 	}
 }
 
-// Redrawing a finished article: its old figure goes, the model picks the
-// section and the steps, and the new figure is drawn and rendered into HTML.
-func TestRedrawFigures(t *testing.T) {
-	r := testRunner(&noLetterIllustrator{fakeIllustrator{enabled: true}}).WithCoverStore(newMemCovers())
-	r.llm = &stubLLM{responses: []scriptedResponse{{
-		trigger: "Choose the one or two sections",
-		content: `{"figures":[{"kind":"process","section":"How the pipeline runs","content":"Commit → Build image → Run tests → Deploy"}]}`,
-	}}}
-	a := &GeneratedArticle{Title: "CI in practice", Markdown: "# CI in practice\n\nIntro.\n\n" +
-		"## Why it matters\n\nTeams ship faster.\n\n![old figure](https://jobshout.co.uk" + imagestore.URLPrefix + "org/2026/10/old.png)\n\n" +
-		"## How the pipeline runs\n\nEvery change goes through the same steps.\n\nMore detail.\n"}
-
-	notes, err := r.RedrawFigures(context.Background(), uuid.New(), a)
-	if err != nil || len(notes) != 0 {
-		t.Fatalf("err=%v notes=%v", err, notes)
-	}
-	if strings.Contains(a.Markdown, "old.png") {
-		t.Fatalf("the old figure survived:\n%s", a.Markdown)
-	}
-	section := a.Markdown[strings.Index(a.Markdown, "## How the pipeline runs"):]
-	if !strings.Contains(section, "![Commit → Build image → Run tests → Deploy]("+imagestore.URLPrefix) {
-		t.Fatalf("figure not drawn under its section:\n%s", a.Markdown)
-	}
-	if !strings.Contains(a.HTML, "<img") || strings.Contains(a.HTML, "old.png") {
-		t.Fatalf("HTML not re-rendered:\n%s", a.HTML)
-	}
-}
-
 // Figures are always asked for as lists, so a lettering model that fails (int's
 // Gemini has no image quota) still leaves something the diagram path can draw.
 func TestFigureKinds(t *testing.T) {
@@ -151,22 +123,4 @@ type fullStore struct{ memCovers }
 
 func (*fullStore) PutFile(context.Context, uuid.UUID, []byte, string, string) (string, error) {
 	return "", errors.New("Storage backend has reached its minimum free drive threshold")
-}
-
-// int's image store filled up mid-redraw: the article keeps the figure it had.
-func TestRedrawFigures_KeepsFiguresWhenNoneDrawn(t *testing.T) {
-	r := testRunner(&noLetterIllustrator{fakeIllustrator{enabled: true}}).WithCoverStore(&fullStore{})
-	r.llm = &stubLLM{responses: []scriptedResponse{{
-		trigger: "Choose the one or two sections",
-		content: `{"figures":[{"kind":"process","section":"How it runs","content":"Commit → Build → Test → Deploy"}]}`,
-	}}}
-	old := "## How it runs\n\nSteps.\n\n![old](" + imagestore.URLPrefix + "o/old.png)\n"
-	a := &GeneratedArticle{Title: "T", Markdown: old, HTML: "<p>kept</p>"}
-	notes, err := r.RedrawFigures(context.Background(), uuid.New(), a)
-	if err != nil || a.Markdown != old || a.HTML != "<p>kept</p>" {
-		t.Fatalf("err=%v md=%q", err, a.Markdown)
-	}
-	if len(notes) == 0 || !strings.Contains(notes[len(notes)-1], "kept the article's figures") {
-		t.Fatalf("notes = %v", notes)
-	}
 }

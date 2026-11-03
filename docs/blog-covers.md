@@ -122,12 +122,21 @@ POST /api/v1/blogs/articles/{articleID}/redraw-images
 {"sync_cms": true}
 ```
 
-The figures the article has are removed, the structured model picks the one or
-two sections a figure would teach most in and writes their labels, and each is
-drawn again (with a lettering model if one is configured, otherwise as a
-diagram). The answer is `{"article": …, "notes": […]}`; notes say which figures
-were dropped and why. A failed CMS update still returns the saved article,
-with the reason in `notes`.
+One structured-model call reads the whole article and plans both:
+
+- the cover: the layout whose meaning matches the article's central claim (flow
+  only when the point really is a sequence of steps), labelled with the
+  article's own terms. Labels that share no word with the article are dropped,
+  and a stat stays only when the article states it; with fewer than two labels
+  left the cover falls back to the heuristic scene;
+- the one or two sections a figure teaches most in, as lists of labels, drawn
+  with a lettering model if one is configured, otherwise as diagrams.
+
+Nothing is lost when drawing fails: the article keeps its figures if no new one
+is drawn, and its cover if no new one can be stored. The answer is
+`{"article", "notes", "figures_drawn", "cover_redrawn"}`; the page reports
+success only for what changed, and `notes` say why anything did not (a full
+image store, a refused CMS update).
 
 ## Fix coverless live posts without a JobShout article row (last resort)
 

@@ -640,6 +640,13 @@ func (r *Runner) RegenerateCover(ctx context.Context, orgID uuid.UUID, a *Genera
 	if strings.TrimSpace(a.CoverAngle) == "" {
 		a.CoverAngle = strings.TrimSpace(a.Excerpt)
 	}
+	return r.redrawCover(ctx, orgID, a)
+}
+
+// redrawCover draws a's cover from what a holds, keeping a real cover already
+// in storage when drawing fails and storing the branded fallback for an
+// article that has none.
+func (r *Runner) redrawCover(ctx context.Context, orgID uuid.UUID, a *GeneratedArticle) error {
 	err := fmt.Errorf("cover drawing is not available")
 	if r.canDrawCover() {
 		if err = r.drawCover(ctx, orgID, a); err == nil {
