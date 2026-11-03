@@ -163,7 +163,7 @@ func (r *Runner) finalizeArticle(
 ) error {
 	// Illustration cannot fail the article: a piece without a picture is
 	// still complete; throwing it away because a GPU was busy is not.
-	if r.canIllustrate() {
+	if r.canLetterFigures() {
 		report(progress, model.BlogStepIllustrating,
 			fmt.Sprintf("Illustrating %s", article.Title), model.AgentNameArticleWriter)
 
@@ -186,7 +186,7 @@ func (r *Runner) finalizeArticle(
 		}
 	}
 
-	article.Markdown = tidyMarkdown(article.Markdown, r.canIllustrate())
+	article.Markdown = tidyMarkdown(article.Markdown, r.canLetterFigures())
 
 	report(progress, model.BlogStepConverting,
 		fmt.Sprintf("Converting %s to HTML", article.Title), model.AgentNameArticleWriter)

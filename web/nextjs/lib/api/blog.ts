@@ -107,3 +107,18 @@ export async function getBlogArticle(id: string): Promise<BlogArticle> {
   const { data } = await apiClient.get<BlogArticle>(`/blogs/articles/${id}`);
   return data;
 }
+
+/**
+ * Redraws an article's in-body figures and cover, and updates its CMS post
+ * when it has been filed. Minutes on a busy image service, hence the timeout.
+ */
+export async function redrawBlogArticleImages(
+  id: string
+): Promise<{ article: BlogArticle; notes: string[] }> {
+  const { data } = await apiClient.post<{ article: BlogArticle; notes: string[] }>(
+    `/blogs/articles/${id}/redraw-images`,
+    { sync_cms: true },
+    { timeout: 600_000 }
+  );
+  return data;
+}

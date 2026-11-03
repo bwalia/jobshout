@@ -295,9 +295,10 @@ type letteringIllustrator interface {
 	Letters() bool
 }
 
-// canLetterFigures reports whether in-body labeled figures are worth asking
-// for. Covers can still use workstation diffusion; comparison tables cannot.
-func (r *Runner) canLetterFigures() bool {
+// canLetterImages reports whether a configured image model can letter a
+// figure's labels. Covers can still use workstation diffusion; comparison
+// tables cannot.
+func (r *Runner) canLetterImages() bool {
 	if !r.canIllustrate() {
 		return false
 	}
@@ -305,6 +306,13 @@ func (r *Runner) canLetterFigures() bool {
 		return l.Letters()
 	}
 	return true
+}
+
+// canLetterFigures reports whether in-body labeled figures are worth asking
+// for: an image model can letter them, or they can be drawn as vector
+// diagrams into the image store, which needs no GPU or key.
+func (r *Runner) canLetterFigures() bool {
+	return r.canLetterImages() || r.covers != nil
 }
 
 // NewRunner wires the Runner with its dependencies. cms may be nil — generation

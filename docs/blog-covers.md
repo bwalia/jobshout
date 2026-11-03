@@ -111,6 +111,24 @@ Content-Type: application/json
 The regenerator derives a fresh metaphor from title, excerpt and body so two
 neighbouring topics never share the same focal objects.
 
+### Redraw all of an article's images
+
+The article page's **Redraw images** button redraws the in-article figures and
+the cover together, and updates the CMS post's body and featured image when
+the article has been filed:
+
+```http
+POST /api/v1/blogs/articles/{articleID}/redraw-images
+{"sync_cms": true}
+```
+
+The figures the article has are removed, the structured model picks the one or
+two sections a figure would teach most in and writes their labels, and each is
+drawn again (with a lettering model if one is configured, otherwise as a
+diagram). The answer is `{"article": …, "notes": […]}`; notes say which figures
+were dropped and why. A failed CMS update still returns the saved article,
+with the reason in `notes`.
+
 ## Fix coverless live posts without a JobShout article row (last resort)
 
 Never point a post at an asset that is not deployed yet: on 2026-10-23 three
@@ -135,8 +153,12 @@ if CMS update lags.
 
 When cloning a writer for a site ([writer-agents.md](./writer-agents.md)):
 
-- Covers default to `diagram`, which needs no image provider. Keep
-  `BLOG_COVER_IMAGES` on for in-article figures (and for `picture` covers).
+- Covers default to `diagram`, which needs no image provider. In-article
+  figures use a hosted image model that can letter labels (Gemini or OpenAI)
+  when one is configured, and are otherwise drawn as diagrams like the covers:
+  flow and process figures as steps, architecture and concept figures as a hub.
+  Comparison figures need a lettering model (a comparison belongs in a table
+  otherwise). `BLOG_COVER_IMAGES` turns on the hosted model and `picture` covers.
 - Do not put image credentials in the launch schema — covers use the ring's
   image providers.
 - After publishing, if the listing still shows the shared hero, call

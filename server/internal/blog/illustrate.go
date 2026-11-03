@@ -735,6 +735,34 @@ func (r *Runner) illustrateBody(ctx context.Context, orgID uuid.UUID, runID *uui
 			continue
 		}
 
+		url, note := r.drawFigure(ctx, orgID, runID, kind, description)
+		if url == "" {
+			notes = append(notes, note)
+			continue
+		}
+
+		drawn++
+		// Absolute, because the CMS posts this HTML to another site, where a
+		// /api/v1/images/… path would resolve against that site and 404.
+		if abs := publicImageURL(r.PublicBaseURL(), url); abs != "" {
+			url = abs
+		}
+		// The description becomes the alt text: it is a sentence describing the
+		// picture, written for this picture, which is exactly what alt text is.
+		out.WriteString(fmt.Sprintf("![%s](%s)", escapeAlt(description), url))
+	}
+
+	out.WriteString(markdown[last:])
+	return out.String(), notes
+}
+
+// drawFigure returns the URL of one body figure, or "" and the note saying
+// why there is none. An image model that letters labels goes first; without
+// one, or when it fails, the figure is drawn as a vector diagram from its own
+// terms, which letters them exactly and needs no GPU or key.
+func (r *Runner) drawFigure(ctx context.Context, orgID uuid.UUID, runID *uuid.UUID, kind illustrationKind, description string) (string, string) {
+	note := "dropped an illustration: no image model can letter labels"
+	if r.canLetterImages() {
 		width, height := inlineSize(kind)
 		img, err := r.images.Generate(ctx, IllustrationRequest{
 			OrgID:      orgID,
@@ -745,23 +773,30 @@ func (r *Runner) illustrateBody(ctx context.Context, orgID uuid.UUID, runID *uui
 			RunID:      runID,
 			NoFallback: true,
 		})
-		if err != nil || img == nil || img.URL == "" {
-			notes = append(notes, fmt.Sprintf("dropped an illustration that could not be drawn: %v", err))
-			continue
+		switch {
+		case err != nil || img == nil || img.URL == "":
+			note = fmt.Sprintf("dropped an illustration that could not be drawn: %v", err)
+		case !imageRendersLabels(img.Provider, img.Model):
+			note = "dropped an illustration from a model that cannot letter labels"
+		default:
+			return img.URL, ""
 		}
-		if !imageRendersLabels(img.Provider, img.Model) {
-			notes = append(notes, "dropped an illustration from a model that cannot letter labels")
-			continue
-		}
-
-		drawn++
-		// The description becomes the alt text: it is a sentence describing the
-		// picture, written for this picture, which is exactly what alt text is.
-		out.WriteString(fmt.Sprintf("![%s](%s)", escapeAlt(description), img.URL))
 	}
-
-	out.WriteString(markdown[last:])
-	return out.String(), notes
+	if r.covers == nil {
+		return "", note
+	}
+	scene, ok := figureScene(kind, description)
+	if !ok {
+		return "", note + "; it is not a list of steps or parts to draw as a diagram"
+	}
+	pic, err := drawDiagramCover(scene, "", description)
+	if err == nil {
+		var url string
+		if url, err = r.covers.PutFile(ctx, orgID, pic, "png", "image/png"); err == nil {
+			return url, ""
+		}
+	}
+	return "", fmt.Sprintf("%s; drawing it as a diagram failed: %v", note, err)
 }
 
 // illustrationFromMatch reads kind (group 1, optional) and body (group 2)

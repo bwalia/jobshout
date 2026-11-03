@@ -192,7 +192,8 @@ func requestTimeout(next http.Handler) http.Handler {
 		// One call to a single GPU, which draws for tens of seconds and may
 		// queue behind another generation first. Listing models is only an
 		// HTTP call to that service, so it keeps the default.
-		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/images/generate") {
+		if r.Method == http.MethodPost && (strings.HasSuffix(r.URL.Path, "/images/generate") ||
+			strings.HasSuffix(r.URL.Path, "/regenerate-cover") || strings.HasSuffix(r.URL.Path, "/redraw-images")) {
 			timeout = imageRequestTimeout
 		}
 		if r.Method == http.MethodPost && (strings.HasSuffix(r.URL.Path, "/messages") ||
@@ -1584,6 +1585,7 @@ func main() {
 				})
 				r.Get("/articles/{articleID}", blogHandler.GetArticle)
 				r.Post("/articles/{articleID}/regenerate-cover", blogHandler.RegenerateCover)
+				r.Post("/articles/{articleID}/redraw-images", blogHandler.RedrawImages)
 			})
 
 			// Research is exposed on its own, not only via the article

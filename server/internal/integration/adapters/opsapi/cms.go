@@ -214,6 +214,16 @@ func (c *Client) UpdateFeaturedImage(ctx context.Context, postUUID, imageURL str
 	return c.patchPost(ctx, postUUID, map[string]string{"featured_image_url": imageURL})
 }
 
+// UpdatePostImages replaces a post's body and featured image: what a
+// redrawn article changes.
+func (c *Client) UpdatePostImages(ctx context.Context, postUUID, contentHTML, imageURL string) (*Post, error) {
+	fields := map[string]string{"content_html": contentHTML}
+	if imageURL = strings.TrimSpace(imageURL); imageURL != "" {
+		fields["featured_image_url"] = imageURL
+	}
+	return c.patchPost(ctx, postUUID, fields)
+}
+
 // patchPost PUTs a partial field map to /api/v2/cms/posts/{uuid}.
 func (c *Client) patchPost(ctx context.Context, postUUID string, fields map[string]string) (*Post, error) {
 	postUUID = strings.TrimSpace(postUUID)
