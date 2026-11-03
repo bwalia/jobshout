@@ -36,7 +36,7 @@ func TestIllustrateBody_DrawsDiagramsWithoutALetteringModel(t *testing.T) {
 	if strings.Contains(out, "```illustration") || !strings.Contains(out, "Intro.") || !strings.Contains(out, "End.") {
 		t.Fatalf("fences survived or prose damaged:\n%s", out)
 	}
-	if len(notes) != 1 || !strings.Contains(notes[0], "too few labels to draw it as a diagram") {
+	if len(notes) != 1 || !strings.Contains(notes[0], "not a list of steps or parts") {
 		t.Fatalf("the comparison should be dropped with a reason: %v", notes)
 	}
 	if len(covers.objects) != 1 {
@@ -82,11 +82,41 @@ func TestFigureScene(t *testing.T) {
 		{kindProcess, "Plan → Ship", ""},                     // two steps would be padded with "output"
 		{kindConcept, "Gateway: auth service, Postgres", ""}, // a hub needs four real spokes
 		{kindComparison, "Polling vs webhooks vs queues vs streams", ""},
+		{kindFlow, "A control plane reconciles the desired state of every workload continuously", ""}, // prose, not a list
+		{kindProcess, "Steps: plan, build, and ship", layoutFlow},                                     // the "Steps:" title is not a step
 	}
 	for _, c := range cases {
 		s, ok := figureScene(c.kind, c.desc)
 		if ok != (c.want != "") || s.Layout != c.want {
 			t.Errorf("figureScene(%s, %q) = %+v %v, want %q", c.kind, c.desc, s, ok, c.want)
 		}
+	}
+}
+
+// Redrawing a finished article: its old figure goes, the model picks the
+// section and the steps, and the new figure is drawn and rendered into HTML.
+func TestRedrawFigures(t *testing.T) {
+	r := testRunner(&noLetterIllustrator{fakeIllustrator{enabled: true}}).WithCoverStore(newMemCovers())
+	r.llm = &stubLLM{responses: []scriptedResponse{{
+		trigger: "Choose the one or two sections",
+		content: `{"figures":[{"kind":"process","section":"How the pipeline runs","content":"Commit → Build image → Run tests → Deploy"}]}`,
+	}}}
+	a := &GeneratedArticle{Title: "CI in practice", Markdown: "# CI in practice\n\nIntro.\n\n" +
+		"## Why it matters\n\nTeams ship faster.\n\n![old figure](https://jobshout.co.uk" + imagestore.URLPrefix + "org/2026/10/old.png)\n\n" +
+		"## How the pipeline runs\n\nEvery change goes through the same steps.\n\nMore detail.\n"}
+
+	notes, err := r.RedrawFigures(context.Background(), uuid.New(), a)
+	if err != nil || len(notes) != 0 {
+		t.Fatalf("err=%v notes=%v", err, notes)
+	}
+	if strings.Contains(a.Markdown, "old.png") {
+		t.Fatalf("the old figure survived:\n%s", a.Markdown)
+	}
+	section := a.Markdown[strings.Index(a.Markdown, "## How the pipeline runs"):]
+	if !strings.Contains(section, "![Commit → Build image → Run tests → Deploy]("+imagestore.URLPrefix) {
+		t.Fatalf("figure not drawn under its section:\n%s", a.Markdown)
+	}
+	if !strings.Contains(a.HTML, "<img") || strings.Contains(a.HTML, "old.png") {
+		t.Fatalf("HTML not re-rendered:\n%s", a.HTML)
 	}
 }

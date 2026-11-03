@@ -787,7 +787,7 @@ func (r *Runner) drawFigure(ctx context.Context, orgID uuid.UUID, runID *uuid.UU
 	}
 	scene, ok := figureScene(kind, description)
 	if !ok {
-		return "", note + "; too few labels to draw it as a diagram"
+		return "", note + "; it is not a list of steps or parts to draw as a diagram"
 	}
 	pic, err := drawDiagramCover(scene, "", description)
 	if err == nil {

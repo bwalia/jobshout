@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -11,8 +13,13 @@ import {
   ExternalLink,
   FileText,
   Link2,
+  Loader2,
   Newspaper,
+  RefreshCw,
 } from "lucide-react";
+import { apiErrorMessage } from "@/lib/api/client";
+import { redrawBlogArticleImages } from "@/lib/api/blog";
+import { blogKeys } from "@/lib/hooks/useBlog";
 import { cn } from "@/lib/utils/cn";
 import { MermaidDiagram } from "@/components/blog/MermaidDiagram";
 import { StoredImage } from "@/components/image/StoredImage";
@@ -39,6 +46,23 @@ const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
 export function ArticleViewer({ article }: { article: BlogArticle }) {
   const [tab, setTab] = useState<Tab>("article");
   const [copied, setCopied] = useState(false);
+  const [redrawing, setRedrawing] = useState(false);
+  const qc = useQueryClient();
+
+  async function redrawImages() {
+    setRedrawing(true);
+    try {
+      const { notes } = await redrawBlogArticleImages(article.id);
+      await qc.invalidateQueries({ queryKey: blogKeys.articles(article.run_id) });
+      toast.success(article.post_uuid ? "Images redrawn and the CMS post updated" : "Images redrawn", {
+        description: notes.length ? notes.join("; ") : undefined,
+      });
+    } catch (e) {
+      toast.error(apiErrorMessage(e, "Could not redraw the images"));
+    } finally {
+      setRedrawing(false);
+    }
+  }
 
   // Articles written before references were stored have none, so this is
   // always a list rather than possibly undefined.
@@ -97,6 +121,24 @@ export function ArticleViewer({ article }: { article: BlogArticle }) {
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void redrawImages()}
+            disabled={redrawing}
+            title={
+              article.post_uuid
+                ? "Redraw the cover and in-article figures, and update the CMS post"
+                : "Redraw the cover and in-article figures"
+            }
+            className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+          >
+            {redrawing ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" />
+            )}
+            {redrawing ? "Redrawing…" : "Redraw images"}
+          </button>
           <button
             type="button"
             onClick={copyMarkdown}

@@ -423,51 +423,76 @@ func imageRendersLabels(provider, model string) bool {
 }
 
 // figureScene lays a body figure out as one of the cover diagrams, labelled
-// with the figure's own terms: the steps of a flow or process, or the core and
+// with the figure's own items: the steps of a flow or process, or the core and
 // parts of an architecture or concept. False when no layout says what the
 // figure means — versus would paint one side of a comparison as the bad one —
-// or when there are too few terms to draw it without generic filler labels.
+// when the figure is prose rather than a list, or when there are too few items
+// to draw it without generic filler labels.
 func figureScene(kind illustrationKind, description string) (coverScene, bool) {
-	var labels []string
-	for _, l := range cleanCoverLabels(figureTerms(description)) {
-		if l != "" {
-			labels = append(labels, l)
-		}
+	core, items, ok := figureItems(description)
+	if !ok {
+		return coverScene{}, false
 	}
-	switch {
-	case (kind == kindFlow || kind == kindProcess) && len(labels) >= 3:
-		return coverScene{Layout: layoutFlow, Labels: labels}, true
-	case (kind == kindArchitecture || kind == kindConcept) && len(labels) >= 5:
-		return coverScene{Layout: layoutHub, Labels: labels}, true
+	switch kind {
+	case kindFlow, kindProcess:
+		if labels := nonEmpty(cleanCoverLabels(items)); len(labels) >= 3 {
+			return coverScene{Layout: layoutFlow, Labels: labels}, true
+		}
+	case kindArchitecture, kindConcept:
+		if core == "" {
+			core, items = items[0], items[1:]
+		}
+		if labels := nonEmpty(cleanCoverLabels(append([]string{core}, items...))); len(labels) >= 5 {
+			return coverScene{Layout: layoutHub, Labels: labels}, true
+		}
 	}
 	return coverScene{}, false
 }
 
-// figureTerms is a figure's items: the phrases it lists when it lists them
-// (arrows, commas, semicolons, lines), articles dropped so a label keeps its
-// content words; otherwise its concrete terms. Splitting a listed step at
-// every stopword would turn "pushes a commit" into "commit".
-func figureTerms(description string) []string {
-	s := description
-	for _, sep := range []string{"→", "->", "\n", ";", ",", ":"} {
-		s = strings.ReplaceAll(s, sep, "|")
+// figureItems reads a figure written as a list — "core: part, part, part" or
+// "step → step → step" — dropping articles so a label keeps its content words.
+// ok is false for prose: an item of more than six words is a clause, and
+// clauses cut to four words make labels that say nothing.
+func figureItems(description string) (core string, items []string, ok bool) {
+	s := strings.TrimSpace(description)
+	if head, rest, found := strings.Cut(s, ":"); found && len(strings.Fields(head)) <= 6 {
+		core, s = labelWords(head), rest
 	}
+	for _, sep := range []string{"→", "->", "\n", ";"} {
+		s = strings.ReplaceAll(s, sep, ",")
+	}
+	for _, part := range strings.Split(s, ",") {
+		item := labelWords(part)
+		if item == "" {
+			continue
+		}
+		if len(strings.Fields(item)) > 6 {
+			return "", nil, false
+		}
+		items = append(items, item)
+	}
+	return core, items, len(items) >= 2
+}
+
+func labelWords(s string) string {
+	var words []string
+	for i, w := range strings.Fields(strings.Trim(strings.TrimSpace(s), ".")) {
+		switch lw := strings.ToLower(w); {
+		case lw == "a" || lw == "an" || lw == "the":
+		case i == 0 && (lw == "and" || lw == "or"):
+		default:
+			words = append(words, w)
+		}
+	}
+	return strings.Join(words, " ")
+}
+
+func nonEmpty(in []string) []string {
 	var out []string
-	for _, part := range strings.Split(s, "|") {
-		var words []string
-		for _, w := range strings.Fields(part) {
-			switch strings.ToLower(w) {
-			case "a", "an", "the":
-			default:
-				words = append(words, w)
-			}
+	for _, s := range in {
+		if s != "" {
+			out = append(out, s)
 		}
-		if len(words) > 0 {
-			out = append(out, strings.Join(words, " "))
-		}
-	}
-	if len(out) < 3 {
-		return concreteLabels(description)
 	}
 	return out
 }

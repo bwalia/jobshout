@@ -98,15 +98,15 @@ func (r *Runner) plan(ctx context.Context, modelName string, brief model.BlogBri
 	if r.canLetterFigures() {
 		// Figures drawn as diagrams have no faithful comparison layout, and a
 		// comparison already belongs in a table; offer only what will be drawn.
-		kinds, example := "flow, comparison, architecture, process, or concept", "comparison"
+		kinds, example, format := "flow, comparison, architecture, process, or concept", "comparison", ""
 		if !r.canLetterImages() {
-			kinds, example = "flow, architecture, process, or concept", "process"
+			kinds, example, format = "flow, architecture, process, or concept", "process", "\n"+diagramFigureFormat
 		}
 		figureAsk = `
 6. One or two in-article figures that would teach something. Each names a
    kind (` + kinds + `), the section
    it belongs under, and the facts to put on the figure — labels, rows or
-   steps, not a decorative scene.`
+   steps, not a decorative scene.` + format
 		extraJSON = `, "figures": [{"kind":"` + example + `","section":"...","content":"..."}]`
 	}
 

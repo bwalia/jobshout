@@ -53,6 +53,8 @@ type BlogRepository interface {
 	GetArticle(ctx context.Context, id uuid.UUID) (*model.BlogArticle, error)
 	// UpdateArticleCover writes a regenerated cover onto one article.
 	UpdateArticleCover(ctx context.Context, articleID uuid.UUID, coverURL, prompt string, meta model.CoverImageMeta) error
+	// UpdateArticleBody stores a redrawn article's markdown and the HTML it renders to.
+	UpdateArticleBody(ctx context.Context, articleID uuid.UUID, markdown, html string) error
 	// UpdateArticles writes the run's lightweight per-article summaries, so a
 	// brief can be persisted without a full terminal Update racing the step
 	// trace.
@@ -477,6 +479,17 @@ func (r *blogRepository) UpdateArticleCover(ctx context.Context, articleID uuid.
 	}
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("blog_repo: update article cover: article %s not found", articleID)
+	}
+	return nil
+}
+
+func (r *blogRepository) UpdateArticleBody(ctx context.Context, articleID uuid.UUID, markdown, html string) error {
+	tag, err := r.pool.Exec(ctx, `UPDATE blog_articles SET markdown = $2, html = $3 WHERE id = $1`, articleID, markdown, html)
+	if err != nil {
+		return fmt.Errorf("blog_repo: update article body: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("blog_repo: update article body: article %s not found", articleID)
 	}
 	return nil
 }

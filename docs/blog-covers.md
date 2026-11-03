@@ -111,6 +111,24 @@ Content-Type: application/json
 The regenerator derives a fresh metaphor from title, excerpt and body so two
 neighbouring topics never share the same focal objects.
 
+### Redraw all of an article's images
+
+The article page's **Redraw images** button redraws the in-article figures and
+the cover together, and updates the CMS post's body and featured image when
+the article has been filed:
+
+```http
+POST /api/v1/blogs/articles/{articleID}/redraw-images
+{"sync_cms": true}
+```
+
+The figures the article has are removed, the structured model picks the one or
+two sections a figure would teach most in and writes their labels, and each is
+drawn again (with a lettering model if one is configured, otherwise as a
+diagram). The answer is `{"article": …, "notes": […]}`; notes say which figures
+were dropped and why. A failed CMS update still returns the saved article,
+with the reason in `notes`.
+
 ## Fix coverless live posts without a JobShout article row (last resort)
 
 Never point a post at an asset that is not deployed yet: on 2026-10-23 three

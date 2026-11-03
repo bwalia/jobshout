@@ -389,6 +389,53 @@ func (h *BlogHandler) RegenerateCover(w http.ResponseWriter, r *http.Request) {
 	RespondJSON(w, http.StatusOK, article)
 }
 
+// RedrawImages handles POST /api/v1/blogs/articles/{articleID}/redraw-images.
+// Redraws the article's in-body figures and its cover; {"sync_cms":true} also
+// updates the filed CMS post. Answers {"article": …, "notes": […]}.
+func (h *BlogHandler) RedrawImages(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "articleID"))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid article ID")
+		return
+	}
+	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid org_id in token")
+		return
+	}
+	var body struct {
+		SyncCMS bool `json:"sync_cms"`
+	}
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil && err != io.EOF {
+			RespondError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+			return
+		}
+	}
+	article, notes, err := h.svc.RedrawImages(r.Context(), orgID, id, body.SyncCMS)
+	if err != nil {
+		msg := err.Error()
+		switch {
+		case article != nil:
+			// Redrawn and saved; only the CMS update failed. Say so with the article.
+			RespondJSON(w, http.StatusOK, map[string]any{"article": article, "notes": append(notes, msg)})
+		case strings.Contains(msg, "not found"):
+			RespondError(w, http.StatusNotFound, msg)
+		case strings.Contains(msg, "does not belong"):
+			RespondError(w, http.StatusForbidden, msg)
+		case strings.Contains(msg, "not configured"), strings.Contains(msg, "no image model"):
+			RespondError(w, http.StatusServiceUnavailable, msg)
+		default:
+			RespondError(w, http.StatusInternalServerError, msg)
+		}
+		return
+	}
+	if notes == nil {
+		notes = []string{}
+	}
+	RespondJSON(w, http.StatusOK, map[string]any{"article": article, "notes": notes})
+}
+
 // CheckWebsite handles GET /api/v1/blogs/destinations/check?namespace=&base_url=
 // — the add-website form's first step. base_url defaults to this ring's
 // OpsAPI. The answer never includes a key.
