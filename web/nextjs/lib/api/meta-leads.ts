@@ -6,6 +6,8 @@ export type MetaLeadConnection = {
   name: string;
   page_id: string;
   page_name: string;
+  /** The Page's linked Instagram account; empty means Facebook only. */
+  ig_account_id?: string;
   created_at: string;
   updated_at: string;
 };
@@ -31,9 +33,18 @@ export type MetaLeadRun = {
 export type MetaLead = {
   id: string;
   leadgen_id: string;
+  /** lead_form, or facebook_/instagram_ + dm, comment, mention. */
+  source: string;
+  author_name?: string;
+  /** The message; a DM thread's messages so far, newest last. */
+  body?: string;
+  permalink?: string;
   form_id?: string;
   field_data?: { name: string; values: string[] }[];
   analysis?: {
+    is_lead?: boolean;
+    category?: string;
+    evidence?: string;
     intent?: string;
     fit_score?: number;
     next_action?: string;

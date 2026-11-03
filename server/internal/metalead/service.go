@@ -305,8 +305,21 @@ func (s *Service) UpsertConnection(ctx context.Context, orgID, userID uuid.UUID,
 	if err != nil {
 		return nil, err
 	}
+	// Instagram webhooks name the Page's linked Instagram account, not the
+	// Page, so look it up now. Without it the connection is Facebook only.
+	var page struct {
+		IG struct {
+			ID string `json:"id"`
+		} `json:"instagram_business_account"`
+	}
+	if s.graph != nil {
+		if err := s.graph.Get(ctx, pageID, "instagram_business_account", accessToken, &page); err != nil {
+			s.log.Warn("meta: no Instagram account read for Page; Instagram events will not match this connection",
+				zap.String("page_id", pageID), zap.Error(err))
+		}
+	}
 	uid := userID
-	return s.store.UpsertConnection(ctx, orgID, name, pageID, strings.TrimSpace(pageName), enc, &uid)
+	return s.store.UpsertConnection(ctx, orgID, name, pageID, strings.TrimSpace(pageName), page.IG.ID, enc, &uid)
 }
 
 func (s *Service) ListConnections(ctx context.Context, orgID uuid.UUID) ([]model.MetaLeadConnection, error) {
@@ -351,7 +364,10 @@ func (s *Service) VerifyWebhookChallenge(mode, token, challenge string) (string,
 	return challenge, true
 }
 
-// HandleWebhook processes a signed leadgen notification.
+// HandleWebhook verifies a signed notification (leadgen, DMs, comments,
+// mentions) and processes it in the background: Meta retries a delivery it
+// does not see answered within seconds, and each event can be a Graph read
+// plus an LLM call.
 func (s *Service) HandleWebhook(ctx context.Context, raw []byte, signatureHeader string) error {
 	if s.cfg.AppSecret == "" {
 		return fmt.Errorf("META_APP_SECRET is not set")
@@ -359,44 +375,56 @@ func (s *Service) HandleWebhook(ctx context.Context, raw []byte, signatureHeader
 	if !validMetaSignature(s.cfg.AppSecret, raw, signatureHeader) {
 		return fmt.Errorf("invalid Meta webhook signature")
 	}
-	var payload struct {
-		Entry []struct {
-			ID      string `json:"id"` // page id
-			Changes []struct {
-				Field string `json:"field"`
-				Value struct {
-					LeadgenID string `json:"leadgen_id"`
-					PageID    string `json:"page_id"`
-					FormID    string `json:"form_id"`
-				} `json:"value"`
-			} `json:"changes"`
-		} `json:"entry"`
-	}
+	var payload webhookPayload
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return fmt.Errorf("webhook JSON: %w", err)
 	}
+	// ponytail: an event still in flight when the pod stops is lost; persist
+	// deliveries before replying if that ever matters.
+	go s.processWebhook(payload)
+	return nil
+}
+
+func (s *Service) processWebhook(payload webhookPayload) {
+	// Per event: Meta batches deliveries, and one slow event must not starve
+	// the rest of the batch.
+	timeout := s.cfg.AnalyseTimeout
+	if timeout <= 0 {
+		timeout = 8 * time.Minute
+	}
+	run := func(fn func(ctx context.Context) error) error {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		return fn(ctx)
+	}
 	for _, entry := range payload.Entry {
-		pageID := entry.ID
 		for _, ch := range entry.Changes {
 			if ch.Field != "leadgen" {
 				continue
 			}
-			if ch.Value.PageID != "" {
-				pageID = ch.Value.PageID
+			var v changeValue
+			if err := json.Unmarshal(ch.Value, &v); err != nil {
+				continue
 			}
-			if err := s.processLeadgen(ctx, pageID, ch.Value.LeadgenID, ch.Value.FormID); err != nil {
-				s.log.Warn("meta webhook leadgen", zap.Error(err), zap.String("leadgen_id", ch.Value.LeadgenID))
+			if err := run(func(ctx context.Context) error {
+				return s.processLeadgen(ctx, firstNonEmpty(v.PageID, entry.ID), v.LeadgenID, v.FormID)
+			}); err != nil {
+				s.log.Warn("meta webhook leadgen", zap.Error(err), zap.String("leadgen_id", v.LeadgenID))
+			}
+		}
+		for _, it := range interactionsFrom(payload.Object, entry) {
+			if err := run(func(ctx context.Context) error { return s.processInteraction(ctx, it) }); err != nil {
+				s.log.Warn("meta webhook interaction", zap.Error(err), zap.String("source", it.Source), zap.String("key", it.Key))
 			}
 		}
 	}
-	return nil
 }
 
 func (s *Service) processLeadgen(ctx context.Context, pageID, leadgenID, formID string) error {
 	if leadgenID == "" {
 		return fmt.Errorf("empty leadgen_id")
 	}
-	conn, err := s.store.GetConnectionByPageID(ctx, pageID)
+	conn, err := s.store.GetConnectionByAccount(ctx, pageID)
 	if err != nil {
 		return err
 	}
@@ -464,6 +492,9 @@ func (s *Service) PushLeadToCRM(ctx context.Context, orgID, leadID uuid.UUID, we
 	if len(lead.FieldData) > 0 {
 		_ = json.Unmarshal(lead.FieldData, &fields)
 	}
+	if len(fields) == 0 && lead.Body != "" {
+		fields = contactFields(lead.Body, lead.AuthorName)
+	}
 	var brief *model.MetaLeadBrief
 	if len(lead.Analysis) > 0 {
 		brief = &model.MetaLeadBrief{}
@@ -479,6 +510,9 @@ func (s *Service) syncLeadCRM(ctx context.Context, orgID, leadID uuid.UUID, fiel
 	if s.crm == nil {
 		return nil
 	}
+	if !force && brief != nil && brief.IsLead != nil && !*brief.IsLead {
+		return s.store.UpdateLeadCRM(ctx, orgID, leadID, "", "", "skipped: not a lead")
+	}
 	if !ShouldPushCRM(brief, force) {
 		_ = s.store.UpdateLeadCRM(ctx, orgID, leadID, "", "", "skipped: high spam_risk")
 		return nil
@@ -492,7 +526,7 @@ func (s *Service) syncLeadCRM(ctx context.Context, orgID, leadID uuid.UUID, fiel
 		contact.LeadgenID = existing.LeadgenID
 	}
 	if contact.Email == "" && contact.Phone == "" {
-		_ = s.store.UpdateLeadCRM(ctx, orgID, leadID, "", "", "skipped: no email or phone in form fields")
+		_ = s.store.UpdateLeadCRM(ctx, orgID, leadID, "", "", "skipped: no email or phone")
 		return nil
 	}
 	res, err := s.crm.UpsertContact(ctx, orgID, website, contact)

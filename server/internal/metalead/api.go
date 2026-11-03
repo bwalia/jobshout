@@ -3,6 +3,7 @@ package metalead
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,6 +17,8 @@ type Graph interface {
 	ListForms(ctx context.Context, pageID, token string) ([]FormSummary, error)
 	ListLeads(ctx context.Context, formID, token string, since *time.Time, limit int) ([]LeadSummary, error)
 	GetLead(ctx context.Context, leadgenID, token string) (*LeadDetail, error)
+	// Get reads fields of one Graph object (a Page, a user, a comment…) into dest.
+	Get(ctx context.Context, id, fields, token string, dest any) error
 }
 
 // FormSummary is a Lead Ads form on a Page.
@@ -52,10 +55,10 @@ type Client struct {
 	BaseURL string // override for tests
 }
 
-// NewClient builds a Graph client for version (e.g. v21.0).
+// NewClient builds a Graph client for version (e.g. v26.0).
 func NewClient(version string) *Client {
 	if strings.TrimSpace(version) == "" {
-		version = "v21.0"
+		version = "v26.0"
 	}
 	return &Client{
 		HTTP:    &http.Client{Timeout: 45 * time.Second},
@@ -129,6 +132,12 @@ func (c *Client) GetLead(ctx context.Context, leadgenID, token string) (*LeadDet
 	return &d, nil
 }
 
+func (c *Client) Get(ctx context.Context, id, fields, token string, dest any) error {
+	u := fmt.Sprintf("%s/%s/%s?fields=%s&access_token=%s",
+		c.base(), c.Version, url.PathEscape(id), url.QueryEscape(fields), url.QueryEscape(token))
+	return c.getJSON(ctx, u, dest)
+}
+
 func (c *Client) getJSON(ctx context.Context, rawURL string, dest any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
@@ -136,6 +145,11 @@ func (c *Client) getJSON(ctx context.Context, rawURL string, dest any) error {
 	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
+		// A *url.Error prints the URL, access_token and all; keep only its cause.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
 		return fmt.Errorf("meta graph: %w", err)
 	}
 	defer resp.Body.Close()
