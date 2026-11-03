@@ -725,6 +725,7 @@ func (r *Runner) illustrateBody(ctx context.Context, orgID uuid.UUID, runID *uui
 
 		var ok bool
 		kind, description, ok = salvageIllustration(kind, description)
+		description = dropTemplateLabel(description)
 		if !ok {
 			notes = append(notes, "dropped an illustration block with no facts to letter")
 			continue
@@ -775,7 +776,8 @@ func (r *Runner) drawFigure(ctx context.Context, orgID uuid.UUID, runID *uuid.UU
 		})
 		switch {
 		case err != nil || img == nil || img.URL == "":
-			note = fmt.Sprintf("dropped an illustration that could not be drawn: %v", err)
+			// A provider error can run to a page (Gemini's quota message does).
+			note = "dropped an illustration that could not be drawn: " + truncateRunes(fmt.Sprint(err), 200)
 		case !imageRendersLabels(img.Provider, img.Model):
 			note = "dropped an illustration from a model that cannot letter labels"
 		default:

@@ -19,13 +19,16 @@ import (
 // comparison has no faithful diagram, so it is offered only with a model.
 func (r *Runner) figureKinds() (kinds, format string) {
 	kinds = "flow, architecture, process, or concept"
-	format = `   Write content as short labels in the article's own terms, 1-4 words each:
-   flow or process as 3-5 steps "step → step → step"; architecture or concept
-   as a core and 4-5 parts "core: part, part, part, part"`
+	format = `   Write content as short labels in the article's own terms, 1-4 words each,
+   naming the real things, never placeholder words like "core" or "step":
+   flow or process as 3-5 steps, e.g. "Commit → Build image → Run tests → Deploy";
+   architecture or concept as the centre and its 4-5 parts, e.g.
+   "API gateway: auth service, orders service, billing service, Redis cache"`
 	if r.canLetterImages() {
 		kinds = "flow, comparison, architecture, process, or concept"
-		format += `; comparison as
-   "option vs option: aspect, aspect"`
+		format += `;
+   comparison as the options and what they differ on, e.g.
+   "Polling vs webhooks: latency, cost, complexity"`
 	}
 	return kinds, format + "."
 }
