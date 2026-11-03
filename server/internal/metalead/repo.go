@@ -28,15 +28,23 @@ type Store interface {
 	ListRuns(ctx context.Context, orgID uuid.UUID, limit int) ([]model.MetaLeadRun, error)
 	UpsertLead(ctx context.Context, lead *model.MetaLead) error
 	// UpsertInteraction stores a DM, comment or mention, appending a new
-	// message to an existing DM thread. It returns the stored lead, or
-	// ErrDuplicateEvent when eventID is already its newest event.
-	UpsertInteraction(ctx context.Context, lead *model.MetaLead, eventID string) (*model.MetaLead, error)
+	// message to an existing DM thread (replace: overwriting its body). It
+	// returns the stored lead, or ErrDuplicateEvent when eventID is already its
+	// newest event.
+	UpsertInteraction(ctx context.Context, lead *model.MetaLead, eventID string, replace bool) (*model.MetaLead, error)
 	UpdateLeadAnalysis(ctx context.Context, orgID, leadID uuid.UUID, analysis json.RawMessage, status, errMsg string) error
 	UpdateLeadCRM(ctx context.Context, orgID, leadID uuid.UUID, contactID, website, errMsg string) error
 	GetLead(ctx context.Context, orgID, leadID uuid.UUID) (*model.MetaLead, error)
 	ListLeadsByRun(ctx context.Context, orgID, runID uuid.UUID) ([]model.MetaLead, error)
 	ListRecentLeads(ctx context.Context, orgID uuid.UUID, limit int) ([]model.MetaLead, error)
 	GetLeadByLeadgenID(ctx context.Context, orgID uuid.UUID, leadgenID string) (*model.MetaLead, error)
+	// SetLeadLabel records a person's verdict (nil clears it).
+	SetLeadLabel(ctx context.Context, orgID, leadID uuid.UUID, isLead *bool) error
+	// ListLabelledLeads is the eval test set: labelled interactions, newest first.
+	ListLabelledLeads(ctx context.Context, orgID uuid.UUID, limit int) ([]model.MetaLead, error)
+	CreateEval(ctx context.Context, e *model.MetaLeadEval) error
+	UpdateEval(ctx context.Context, e *model.MetaLeadEval) error
+	ListEvals(ctx context.Context, orgID uuid.UUID, limit int) ([]model.MetaLeadEval, error)
 }
 
 type connRow struct {
@@ -219,14 +227,16 @@ func (r *Repo) UpsertLead(ctx context.Context, lead *model.MetaLead) error {
 // delivery Meta retried.
 var ErrDuplicateEvent = errors.New("meta interaction already recorded")
 
-func (r *Repo) UpsertInteraction(ctx context.Context, lead *model.MetaLead, eventID string) (*model.MetaLead, error) {
+func (r *Repo) UpsertInteraction(ctx context.Context, lead *model.MetaLead, eventID string, replace bool) (*model.MetaLead, error) {
 	// A body keeps 4000 characters, a DM thread its last 4000: the newest
 	// messages are the ones that decide whether it is a lead.
 	row := r.pool.QueryRow(ctx, `
-		INSERT INTO meta_leads (id, org_id, connection_id, leadgen_id, source, author_id, author_name, body, permalink, last_event_id, created_time, status)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,left($8, 4000),$9,$10,$11,$12)
+		INSERT INTO meta_leads (id, org_id, connection_id, leadgen_id, source, author_id, author_name, body, permalink, last_event_id, created_time, status, run_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,left($8, 4000),$9,$10,$11,$12,$13)
 		ON CONFLICT (org_id, leadgen_id) DO UPDATE SET
-			body = right(meta_leads.body || E'\n' || EXCLUDED.body, 4000),
+			body = CASE WHEN $14 THEN EXCLUDED.body ELSE right(meta_leads.body || E'\n' || EXCLUDED.body, 4000) END,
+			run_id = COALESCE(EXCLUDED.run_id, meta_leads.run_id),
+			created_time = COALESCE(EXCLUDED.created_time, meta_leads.created_time),
 			author_name = COALESCE(NULLIF(EXCLUDED.author_name, ''), meta_leads.author_name),
 			permalink = COALESCE(NULLIF(EXCLUDED.permalink, ''), meta_leads.permalink),
 			last_event_id = EXCLUDED.last_event_id,
@@ -235,7 +245,7 @@ func (r *Repo) UpsertInteraction(ctx context.Context, lead *model.MetaLead, even
 		WHERE meta_leads.last_event_id IS DISTINCT FROM EXCLUDED.last_event_id
 		RETURNING `+leadSelectCols,
 		uuid.New(), lead.OrgID, lead.ConnectionID, lead.LeadgenID, lead.Source, lead.AuthorID, lead.AuthorName,
-		lead.Body, lead.Permalink, eventID, lead.CreatedTime, lead.Status)
+		lead.Body, lead.Permalink, eventID, lead.CreatedTime, lead.Status, lead.RunID, replace)
 	out, err := scanLead(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrDuplicateEvent
@@ -264,7 +274,7 @@ func (r *Repo) UpdateLeadCRM(ctx context.Context, orgID, leadID uuid.UUID, conta
 }
 
 const leadSelectCols = `id, org_id, connection_id, run_id, leadgen_id, form_id, field_data, created_time, analysis, status, error_message,
-		crm_contact_id, crm_website, crm_synced_at, crm_error, source, author_id, author_name, body, permalink, created_at, updated_at`
+		crm_contact_id, crm_website, crm_synced_at, crm_error, source, author_id, author_name, body, permalink, label_is_lead, created_at, updated_at`
 
 func (r *Repo) GetLead(ctx context.Context, orgID, leadID uuid.UUID) (*model.MetaLead, error) {
 	row := r.pool.QueryRow(ctx, `SELECT `+leadSelectCols+` FROM meta_leads WHERE org_id=$1 AND id=$2`, orgID, leadID)
@@ -309,6 +319,70 @@ func (r *Repo) GetLeadByLeadgenID(ctx context.Context, orgID uuid.UUID, leadgenI
 	return l, err
 }
 
+func (r *Repo) SetLeadLabel(ctx context.Context, orgID, leadID uuid.UUID, isLead *bool) error {
+	tag, err := r.pool.Exec(ctx, `UPDATE meta_leads SET label_is_lead=$3 WHERE org_id=$1 AND id=$2`, orgID, leadID, isLead)
+	if err == nil && tag.RowsAffected() == 0 {
+		return fmt.Errorf("lead not found")
+	}
+	return err
+}
+
+func (r *Repo) ListLabelledLeads(ctx context.Context, orgID uuid.UUID, limit int) ([]model.MetaLead, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT `+leadSelectCols+`
+		FROM meta_leads WHERE org_id=$1 AND label_is_lead IS NOT NULL AND body <> ''
+		ORDER BY updated_at DESC LIMIT $2`, orgID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanLeads(rows)
+}
+
+const evalSelectCols = `id, org_id, status, models, runs, case_count, report, error_message, created_by, created_at, updated_at`
+
+func (r *Repo) CreateEval(ctx context.Context, e *model.MetaLeadEval) error {
+	models, _ := json.Marshal(e.Models)
+	return r.pool.QueryRow(ctx, `
+		INSERT INTO meta_lead_evals (org_id, status, models, runs, case_count, created_by)
+		VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, created_at, updated_at`,
+		e.OrgID, e.Status, models, e.Runs, e.CaseCount, e.CreatedBy).Scan(&e.ID, &e.CreatedAt, &e.UpdatedAt)
+}
+
+func (r *Repo) UpdateEval(ctx context.Context, e *model.MetaLeadEval) error {
+	var report []byte
+	if e.Report != nil {
+		report, _ = json.Marshal(e.Report)
+	}
+	_, err := r.pool.Exec(ctx, `
+		UPDATE meta_lead_evals SET status=$3, report=$4, error_message=$5, updated_at=NOW()
+		WHERE org_id=$1 AND id=$2`, e.OrgID, e.ID, e.Status, report, e.ErrorMessage)
+	return err
+}
+
+func (r *Repo) ListEvals(ctx context.Context, orgID uuid.UUID, limit int) ([]model.MetaLeadEval, error) {
+	rows, err := r.pool.Query(ctx, `SELECT `+evalSelectCols+` FROM meta_lead_evals WHERE org_id=$1 ORDER BY created_at DESC LIMIT $2`, orgID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.MetaLeadEval
+	for rows.Next() {
+		var e model.MetaLeadEval
+		var models, report []byte
+		if err := rows.Scan(&e.ID, &e.OrgID, &e.Status, &models, &e.Runs, &e.CaseCount, &report,
+			&e.ErrorMessage, &e.CreatedBy, &e.CreatedAt, &e.UpdatedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal(models, &e.Models)
+		if len(report) > 0 {
+			_ = json.Unmarshal(report, &e.Report)
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 type leadRows interface {
 	Next() bool
 	Scan(dest ...any) error
@@ -321,7 +395,7 @@ func scanLead(row scannable) (*model.MetaLead, error) {
 	err := row.Scan(&l.ID, &l.OrgID, &l.ConnectionID, &l.RunID, &l.LeadgenID, &l.FormID,
 		&fieldData, &l.CreatedTime, &analysis, &l.Status, &l.ErrorMessage,
 		&l.CRMContactID, &l.CRMWebsite, &l.CRMSyncedAt, &l.CRMError,
-		&l.Source, &l.AuthorID, &l.AuthorName, &l.Body, &l.Permalink,
+		&l.Source, &l.AuthorID, &l.AuthorName, &l.Body, &l.Permalink, &l.LabelIsLead,
 		&l.CreatedAt, &l.UpdatedAt)
 	if err != nil {
 		return nil, err

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"net/url"
 	"sync"
 	"testing"
 	"time"
@@ -47,6 +48,7 @@ type memStore struct {
 	runs      map[uuid.UUID]*model.MetaLeadRun
 	leads     map[string]*model.MetaLead
 	lastEvent map[string]string // lead key → newest event folded in
+	evals     []model.MetaLeadEval
 }
 
 func newMemStore() *memStore {
@@ -149,7 +151,7 @@ func (m *memStore) UpsertLead(_ context.Context, lead *model.MetaLead) error {
 	m.leads[lead.LeadgenID] = &cp
 	return nil
 }
-func (m *memStore) UpsertInteraction(_ context.Context, lead *model.MetaLead, eventID string) (*model.MetaLead, error) {
+func (m *memStore) UpsertInteraction(_ context.Context, lead *model.MetaLead, eventID string, replace bool) (*model.MetaLead, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	cur, ok := m.leads[lead.LeadgenID]
@@ -161,12 +163,18 @@ func (m *memStore) UpsertInteraction(_ context.Context, lead *model.MetaLead, ev
 		m.leads[lead.LeadgenID] = cur
 	case m.lastEvent[lead.LeadgenID] == eventID:
 		return nil, ErrDuplicateEvent
+	case replace:
+		cur.Body = lead.Body
+		cur.Status = lead.Status
 	default:
 		cur.Body += "\n" + lead.Body
 		if lead.AuthorName != "" {
 			cur.AuthorName = lead.AuthorName
 		}
 		cur.Status = lead.Status
+	}
+	if lead.RunID != nil {
+		cur.RunID = lead.RunID
 	}
 	m.lastEvent[lead.LeadgenID] = eventID
 	out := *cur
@@ -231,16 +239,69 @@ func (m *memStore) GetLeadByLeadgenID(_ context.Context, _ uuid.UUID, id string)
 	return &cp, nil
 }
 
-// fakeGraph serves leads, and objects for Get by id (JSON). An id it does not
-// hold is a Graph error.
+func (m *memStore) SetLeadLabel(_ context.Context, _, leadID uuid.UUID, isLead *bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, L := range m.leads {
+		if L.ID == leadID {
+			L.LabelIsLead = isLead
+			return nil
+		}
+	}
+	return errNotFound(leadID.String())
+}
+
+func (m *memStore) ListLabelledLeads(_ context.Context, _ uuid.UUID, limit int) ([]model.MetaLead, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []model.MetaLead
+	for _, L := range m.leads {
+		if L.LabelIsLead != nil && L.Body != "" && len(out) < limit {
+			out = append(out, *L)
+		}
+	}
+	return out, nil
+}
+
+func (m *memStore) CreateEval(_ context.Context, e *model.MetaLeadEval) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	e.ID, e.CreatedAt, e.UpdatedAt = uuid.New(), time.Now(), time.Now()
+	m.evals = append(m.evals, *e)
+	return nil
+}
+
+func (m *memStore) UpdateEval(_ context.Context, e *model.MetaLeadEval) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range m.evals {
+		if m.evals[i].ID == e.ID {
+			m.evals[i] = *e
+		}
+	}
+	return nil
+}
+
+func (m *memStore) ListEvals(context.Context, uuid.UUID, int) ([]model.MetaLeadEval, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]model.MetaLeadEval(nil), m.evals...), nil
+}
+
+// fakeGraph serves leads, and objects for Get by path (JSON); a path with a
+// platform parameter is keyed "path?platform=x". One it does not hold is a
+// Graph error.
 type fakeGraph struct {
 	objects map[string]string
 }
 
-func (g fakeGraph) Get(_ context.Context, id, _, _ string, dest any) error {
-	raw, ok := g.objects[id]
+func (g fakeGraph) Get(_ context.Context, path string, q url.Values, _ string, dest any) error {
+	if p := q.Get("platform"); p != "" {
+		path += "?platform=" + p
+	}
+	raw, ok := g.objects[path]
 	if !ok {
-		return errNotFound(id)
+		return errNotFound(path)
 	}
 	return json.Unmarshal([]byte(raw), dest)
 }

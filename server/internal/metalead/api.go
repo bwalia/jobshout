@@ -17,8 +17,9 @@ type Graph interface {
 	ListForms(ctx context.Context, pageID, token string) ([]FormSummary, error)
 	ListLeads(ctx context.Context, formID, token string, since *time.Time, limit int) ([]LeadSummary, error)
 	GetLead(ctx context.Context, leadgenID, token string) (*LeadDetail, error)
-	// Get reads fields of one Graph object (a Page, a user, a comment…) into dest.
-	Get(ctx context.Context, id, fields, token string, dest any) error
+	// Get reads a Graph object or edge ("123", "123/conversations") into dest;
+	// q holds fields, limit and the edge's other parameters.
+	Get(ctx context.Context, path string, q url.Values, token string, dest any) error
 }
 
 // FormSummary is a Lead Ads form on a Page.
@@ -132,11 +133,21 @@ func (c *Client) GetLead(ctx context.Context, leadgenID, token string) (*LeadDet
 	return &d, nil
 }
 
-func (c *Client) Get(ctx context.Context, id, fields, token string, dest any) error {
-	u := fmt.Sprintf("%s/%s/%s?fields=%s&access_token=%s",
-		c.base(), c.Version, url.PathEscape(id), url.QueryEscape(fields), url.QueryEscape(token))
-	return c.getJSON(ctx, u, dest)
+func (c *Client) Get(ctx context.Context, path string, q url.Values, token string, dest any) error {
+	segs := strings.Split(path, "/")
+	for i, s := range segs {
+		segs[i] = url.PathEscape(s)
+	}
+	params := url.Values{}
+	for k, v := range q {
+		params[k] = v
+	}
+	params.Set("access_token", token)
+	return c.getJSON(ctx, fmt.Sprintf("%s/%s/%s?%s", c.base(), c.Version, strings.Join(segs, "/"), params.Encode()), dest)
 }
+
+// fields is the query for a plain field read.
+func fields(f string) url.Values { return url.Values{"fields": {f}} }
 
 func (c *Client) getJSON(ctx context.Context, rawURL string, dest any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
