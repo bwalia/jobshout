@@ -58,6 +58,11 @@ func (r *Runner) RedrawFigures(ctx context.Context, orgID uuid.UUID, a *Generate
 	if len(plan.Figures) == 0 {
 		notes = append(notes, "the model found no section worth a figure")
 	}
+	// A redraw that drew nothing must not cost the article the figures it had:
+	// on int a full image store turned one figure into none.
+	if !figureImage.MatchString(md) && figureImage.MatchString(a.Markdown) {
+		return append(notes, "kept the article's figures: none could be redrawn"), nil
+	}
 	a.Markdown = tidyMarkdown(md, true)
 	return notes, a.render()
 }
