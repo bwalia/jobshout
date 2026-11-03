@@ -3,6 +3,7 @@ package blog
 import (
 	"bytes"
 	"context"
+	"errors"
 	"image/png"
 	"strings"
 	"testing"
@@ -143,5 +144,29 @@ func TestDropTemplateLabel(t *testing.T) {
 	}
 	if dropTemplateLabel("API gateway: auth, orders") != "API gateway: auth, orders" {
 		t.Fatal("a real centre must stay")
+	}
+}
+
+type fullStore struct{ memCovers }
+
+func (*fullStore) PutFile(context.Context, uuid.UUID, []byte, string, string) (string, error) {
+	return "", errors.New("Storage backend has reached its minimum free drive threshold")
+}
+
+// int's image store filled up mid-redraw: the article keeps the figure it had.
+func TestRedrawFigures_KeepsFiguresWhenNoneDrawn(t *testing.T) {
+	r := testRunner(&noLetterIllustrator{fakeIllustrator{enabled: true}}).WithCoverStore(&fullStore{})
+	r.llm = &stubLLM{responses: []scriptedResponse{{
+		trigger: "Choose the one or two sections",
+		content: `{"figures":[{"kind":"process","section":"How it runs","content":"Commit → Build → Test → Deploy"}]}`,
+	}}}
+	old := "## How it runs\n\nSteps.\n\n![old](" + imagestore.URLPrefix + "o/old.png)\n"
+	a := &GeneratedArticle{Title: "T", Markdown: old, HTML: "<p>kept</p>"}
+	notes, err := r.RedrawFigures(context.Background(), uuid.New(), a)
+	if err != nil || a.Markdown != old || a.HTML != "<p>kept</p>" {
+		t.Fatalf("err=%v md=%q", err, a.Markdown)
+	}
+	if len(notes) == 0 || !strings.Contains(notes[len(notes)-1], "kept the article's figures") {
+		t.Fatalf("notes = %v", notes)
 	}
 }
