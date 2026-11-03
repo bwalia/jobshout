@@ -135,8 +135,12 @@ if CMS update lags.
 
 When cloning a writer for a site ([writer-agents.md](./writer-agents.md)):
 
-- Covers default to `diagram`, which needs no image provider. Keep
-  `BLOG_COVER_IMAGES` on for in-article figures (and for `picture` covers).
+- Covers default to `diagram`, which needs no image provider. In-article
+  figures use a hosted image model that can letter labels (Gemini or OpenAI)
+  when one is configured, and are otherwise drawn as diagrams like the covers:
+  flow and process figures as steps, architecture and concept figures as a hub.
+  Comparison figures need a lettering model (a comparison belongs in a table
+  otherwise). `BLOG_COVER_IMAGES` turns on the hosted model and `picture` covers.
 - Do not put image credentials in the launch schema — covers use the ring's
   image providers.
 - After publishing, if the listing still shows the shared hero, call

@@ -421,3 +421,53 @@ func imageRendersLabels(provider, model string) bool {
 	}
 	return !strings.Contains(m, "z-image") && !strings.Contains(m, "qwen-image") && !strings.Contains(m, "flux")
 }
+
+// figureScene lays a body figure out as one of the cover diagrams, labelled
+// with the figure's own terms: the steps of a flow or process, or the core and
+// parts of an architecture or concept. False when no layout says what the
+// figure means — versus would paint one side of a comparison as the bad one —
+// or when there are too few terms to draw it without generic filler labels.
+func figureScene(kind illustrationKind, description string) (coverScene, bool) {
+	var labels []string
+	for _, l := range cleanCoverLabels(figureTerms(description)) {
+		if l != "" {
+			labels = append(labels, l)
+		}
+	}
+	switch {
+	case (kind == kindFlow || kind == kindProcess) && len(labels) >= 3:
+		return coverScene{Layout: layoutFlow, Labels: labels}, true
+	case (kind == kindArchitecture || kind == kindConcept) && len(labels) >= 5:
+		return coverScene{Layout: layoutHub, Labels: labels}, true
+	}
+	return coverScene{}, false
+}
+
+// figureTerms is a figure's items: the phrases it lists when it lists them
+// (arrows, commas, semicolons, lines), articles dropped so a label keeps its
+// content words; otherwise its concrete terms. Splitting a listed step at
+// every stopword would turn "pushes a commit" into "commit".
+func figureTerms(description string) []string {
+	s := description
+	for _, sep := range []string{"→", "->", "\n", ";", ",", ":"} {
+		s = strings.ReplaceAll(s, sep, "|")
+	}
+	var out []string
+	for _, part := range strings.Split(s, "|") {
+		var words []string
+		for _, w := range strings.Fields(part) {
+			switch strings.ToLower(w) {
+			case "a", "an", "the":
+			default:
+				words = append(words, w)
+			}
+		}
+		if len(words) > 0 {
+			out = append(out, strings.Join(words, " "))
+		}
+	}
+	if len(out) < 3 {
+		return concreteLabels(description)
+	}
+	return out
+}
