@@ -137,9 +137,14 @@ func coverSceneFor(a *GeneratedArticle) coverScene {
 		s.Labels = derived.Labels
 	}
 	// A plan scene too thin for its layout would be padded with the layout's
-	// own wording ("teams", "data"); the article's derived scene is better.
+	// own wording ("teams", "data"); a hub of what the article names, or its
+	// derived scene, is better.
 	if len(s.Labels) > 0 && len(s.Labels) < layoutMinLabels[s.Layout] {
-		s.Layout, s.Labels = derived.Layout, derived.Labels
+		if hub, ok := termsHub(a.Title, a.Markdown); ok {
+			s.Layout, s.Labels = hub.Layout, hub.Labels
+		} else {
+			s.Layout, s.Labels = derived.Layout, derived.Labels
+		}
 	}
 	if s.Stat == "" && s.Layout == layoutBars {
 		s.Stat = derived.Stat
@@ -190,6 +195,12 @@ func deriveCoverScene(title, topic, angle, excerpt, markdown string) coverScene 
 		}
 	}
 	if s.Layout == "" {
+		// Nothing in the title says which layout: a hub of what the article
+		// names says more about it than a flow of its headings.
+		if hub, ok := termsHub(title, markdown); ok {
+			hub.Eyebrow = s.Eyebrow
+			return hub
+		}
 		s.Layout = layoutFlow
 	}
 	if s.Layout == layoutBars {

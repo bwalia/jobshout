@@ -98,3 +98,37 @@ func TestGroundedCover_RetriesWithTheReason(t *testing.T) {
 		t.Fatalf("retry prompt does not say why:\n%s", prompt[:300])
 	}
 }
+
+func TestArticleTerms(t *testing.T) {
+	md := "# Title\n\n## Intro\n\nHowever, Agnost runs on Kubernetes. Install Agnost with one command, then use Kusk Gateway.\n" +
+		"Create a ReplicaSet for each version; the ReplicaSet keeps old pods. Kusk Gateway reads your OpenAPI file.\n" +
+		"Most APIs need an API key. Kubernetes schedules the pods.\n\n```bash\nkubectl apply -f Secret.yaml\n```\n\n" +
+		"## References\n\n1. [Helm Docs](https://helm.sh) — Helm\n"
+	got := strings.Join(articleTerms(md, 10), ", ")
+	for _, want := range []string{"Agnost", "Kubernetes", "Kusk Gateway", "ReplicaSet", "OpenAPI", "API"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in %s", want, got)
+		}
+	}
+	for _, bad := range []string{"However", "Create", "Install", "Most", "APIs", "Helm", "Secret", "Title", "Intro"} {
+		if strings.Contains(", "+got+",", ", "+bad+",") {
+			t.Errorf("unexpected %q in %s", bad, got)
+		}
+	}
+}
+
+// Both model scenes unusable: the cover is a hub of what the article names,
+// centred on the term its title names — not a flow of its headings.
+func TestGroundedCover_FallsBackToTheArticlesTerms(t *testing.T) {
+	r := testRunner(&noLetterIllustrator{fakeIllustrator{enabled: true}}).WithCoverStore(newMemCovers())
+	stub := &stubLLM{responses: []scriptedResponse{{trigger: "cannot be drawn", content: `{"layout":"hub","labels":["Argo CD","Flux"]}`}}}
+	r.llm = stub
+	md := "Agnost runs on Kubernetes. Install Agnost, then use Kusk Gateway. Create a ReplicaSet. Kusk Gateway reads OpenAPI. Kubernetes schedules pods."
+	s := r.groundedCover(context.Background(), "Shipping with Kusk Gateway", md, coverScene{Layout: layoutHub, Labels: []string{"Argo CD"}})
+	if s.Layout != layoutHub || len(s.Labels) < 4 || s.Labels[0] != "Kusk Gateway" {
+		t.Fatalf("scene = %+v", s)
+	}
+	if prompt := stub.calls[0].Messages[len(stub.calls[0].Messages)-1].Content; !strings.Contains(prompt, "THINGS THE ARTICLE NAMES: ") {
+		t.Fatal("the retry must offer the article's terms")
+	}
+}

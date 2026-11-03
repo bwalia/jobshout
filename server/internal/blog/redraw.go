@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -122,12 +123,13 @@ func (r *Runner) planRedraw(ctx context.Context, title, markdown string) (*write
 TITLE: %s
 HEADINGS:
 - %s
+THINGS THE ARTICLE NAMES (take cover labels from these): %s
 
 ARTICLE:
 %s
 
 Respond with JSON only: {"cover_scene": {"layout": "...", "labels": ["...", "..."], "stat": "", "eyebrow": "..."}, "figures": [{"kind": "process", "section": "...", "content": "..."}]}`,
-		coverLayoutGuide, kinds, format, title, strings.Join(headings, "\n- "), body)
+		coverLayoutGuide, kinds, format, title, strings.Join(headings, "\n- "), strings.Join(articleTerms(markdown, 12), ", "), body)
 
 	var out struct {
 		CoverScene coverScene `json:"cover_scene"`
@@ -187,7 +189,8 @@ func groundScene(s coverScene, markdown string) (scene coverScene, rejected []st
 
 // groundedCover is the model's cover scene held to the article. When it cannot
 // be drawn without filler, the model is asked once more, told why; when that
-// fails too, the scene is empty and coverSceneFor derives one from the text.
+// fails too, the cover is a hub of the things the article names, and with too
+// few of those the scene is empty and coverSceneFor derives one.
 func (r *Runner) groundedCover(ctx context.Context, title, markdown string, scene coverScene) coverScene {
 	s, rejected, ok := groundScene(scene, markdown)
 	if ok {
@@ -206,20 +209,25 @@ func (r *Runner) groundedCover(ctx context.Context, title, markdown string, scen
 	}
 	prompt := fmt.Sprintf(`The cover diagram planned for this article cannot be drawn: %s. Plan it again.
 
-Pick the one layout below whose meaning matches what the article argues (flow only when its point is a sequence of steps), and give the labels that layout needs, each 1-3 words copied from the article's own terms, a "stat" only when the article states that exact figure, and an "eyebrow" of 1-3 words naming the field.
+Pick the one layout below whose meaning matches what the article argues (flow only when its point is a sequence of steps), and give the labels that layout needs, chosen only from THINGS THE ARTICLE NAMES, a "stat" only when the article states that exact figure, and an "eyebrow" of 1-3 words naming the field.
 %s
 
 TITLE: %s
+THINGS THE ARTICLE NAMES: %s
 ARTICLE:
 %s
 
 Respond with JSON only: {"layout": "...", "labels": ["...", "..."], "stat": "", "eyebrow": "..."}`,
-		why, coverLayoutGuide, title, body)
+		why, coverLayoutGuide, title, strings.Join(articleTerms(markdown, 12), ", "), body)
 	var retry coverScene
-	if err := r.generateJSON(ctx, r.structuredModel(GenerateRequest{}), "redraw-cover", prompt, 400, &retry); err != nil {
-		return coverScene{}
+	if err := r.generateJSON(ctx, r.structuredModel(GenerateRequest{}), "redraw-cover", prompt, 400, &retry); err == nil {
+		if s, _, ok := groundScene(retry, markdown); ok {
+			return s
+		}
 	}
-	if s, _, ok := groundScene(retry, markdown); ok {
+	// Still nothing drawable: a hub of what the article names, which cannot
+	// be off-topic, rather than its headings.
+	if s, ok := termsHub(title, markdown); ok {
 		return s
 	}
 	return coverScene{}
@@ -248,4 +256,133 @@ func insertPlannedFigures(markdown string, plan *writePlan) string {
 		}
 	}
 	return markdown
+}
+
+var (
+	termRun = regexp.MustCompile(`[A-Z][A-Za-z0-9+]*(?:[-/][A-Za-z0-9+]+)*(?: [A-Z][A-Za-z0-9+]*(?:[-/][A-Za-z0-9+]+)*){0,2}`)
+	mdLink  = regexp.MustCompile(`\[([^\]]*)\]\([^)]*\)`)
+	wordRe  = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+]*(?:[-/][A-Za-z0-9+]+)*`)
+)
+
+// articleTerms lists the things an article names — products, technologies,
+// concepts such as "Kusk Gateway", "ReplicaSet", "OpenAPI" — most mentioned
+// first, from its prose (not headings, code or references). A lone
+// capitalised word counts only when it is CamelCase or an acronym, or when the
+// article never writes it in lower case and uses it mid-sentence at least
+// once: that keeps sentence starters like "Create" or "However" out.
+func articleTerms(markdown string, max int) []string {
+	text := articleProse(markdown)
+	plain := map[string]bool{}
+	for _, w := range wordRe.FindAllString(text, -1) {
+		if w == strings.ToLower(w) {
+			plain[w] = true
+		}
+	}
+	count := map[string]int{}
+	mid := map[string]bool{}
+	var order []string
+	for _, loc := range termRun.FindAllStringIndex(text, -1) {
+		at, words := loc[0], strings.Fields(text[loc[0]:loc[1]])
+		// Drop a starter glued to a name: "Use Kusk Gateway" is Kusk Gateway.
+		for len(words) > 1 && (labelStop[strings.ToLower(words[0])] || plain[strings.ToLower(words[0])]) {
+			at += len(words[0]) + 1
+			words = words[1:]
+		}
+		term := strings.Join(words, " ")
+		if len(words) == 1 {
+			w := words[0]
+			camel := len(w) > 1 && strings.ToLower(w[1:]) != w[1:]
+			if !camel && (plain[strings.ToLower(w)] || labelStop[strings.ToLower(w)]) {
+				continue
+			}
+		}
+		if count[term] == 0 {
+			order = append(order, term)
+		}
+		count[term]++
+		if !sentenceStart(text, at) {
+			mid[term] = true
+		}
+	}
+	var out []string
+	for _, t := range order {
+		if base := strings.TrimSuffix(t, "s"); base != t && count[base] > 0 {
+			count[base] += count[t] // "APIs" is "API"
+			continue
+		}
+		single := !strings.Contains(t, " ")
+		if single && strings.ToLower(t[1:]) == t[1:] && !mid[t] {
+			continue
+		}
+		out = append(out, t)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return count[out[i]] > count[out[j]] })
+	if len(out) > max {
+		out = out[:max]
+	}
+	return out
+}
+
+// articleProse is the article's running text: no headings, code, images or
+// references, with links reduced to their text.
+func articleProse(markdown string) string {
+	var prose []string
+	inCode := false
+	for _, line := range strings.Split(markdown, "\n") {
+		t := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(t, "```"):
+			inCode = !inCode
+		case inCode, strings.HasPrefix(t, "!["):
+		case strings.HasPrefix(t, "#"):
+			if strings.EqualFold(strings.TrimSpace(strings.TrimLeft(t, "# ")), "references") {
+				return strings.Join(prose, "\n")
+			}
+		default:
+			prose = append(prose, mdLink.ReplaceAllString(t, "$1"))
+		}
+	}
+	return strings.Join(prose, "\n")
+}
+
+// sentenceStart reports whether the word at i opens a sentence or list item.
+func sentenceStart(text string, i int) bool {
+	for i > 0 {
+		c := text[i-1]
+		switch {
+		case c == ' ' || c == '\t' || c == '*' || c == '"' || c == '(':
+			i--
+		case c == '\n' || c == '.' || c == '!' || c == '?' || c == ':':
+			return true
+		case c >= '0' && c <= '9' || c == '-':
+			i-- // "1. " and "- " list markers
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// termsHub is a cover of what an article names: the term its title names at
+// the centre (else the most mentioned), the next most mentioned around it.
+// Grounded by construction. False when the article names fewer than four.
+func termsHub(title, markdown string) (coverScene, bool) {
+	terms := articleTerms(markdown, 8)
+	if len(terms) < layoutMinLabels[layoutHub] {
+		return coverScene{}, false
+	}
+	centre, lt := 0, strings.ToLower(title)
+	for i, t := range terms {
+		if strings.Contains(lt, strings.ToLower(t)) {
+			centre = i
+			break
+		}
+	}
+	labels := []string{terms[centre]}
+	for i, t := range terms {
+		if i != centre && len(labels) < 6 {
+			labels = append(labels, t)
+		}
+	}
+	return coverScene{Layout: layoutHub, Labels: labels}, true
 }
