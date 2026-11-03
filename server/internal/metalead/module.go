@@ -1,7 +1,8 @@
 // Package metalead is the Meta Lead Analyst: find sales leads on a connected
-// Facebook Page and its Instagram account — Lead Ads Instant Form submissions
-// (launch backfill + leadgen webhook) and DMs, comments and @mentions (webhook)
-// — qualify each with an LLM brief, and sync real leads into OpsAPI CRM.
+// Facebook Page and its Instagram account — Lead Ads Instant Form submissions,
+// DMs, comments, @mentions and tags, by webhook as they arrive and by launch
+// backfill — qualify each with an LLM brief, and sync real leads into OpsAPI
+// CRM. People label verdicts in the tab, and an eval scores models on them.
 //
 // Credentials are named server-side Page connections — never schema fields.
 // Registered with agentmodule; see .claude/rules/agent-modules.md.
@@ -30,6 +31,7 @@ type LaunchRequest struct {
 	AgentID    uuid.UUID
 	TaskID     *uuid.UUID
 	Connection string // connection name
+	Include    string // IncludeAll (default), IncludeForms or IncludeInbox
 	Form       string // form id or name; empty = all forms (capped)
 	Since      string // RFC3339 or relative like 7d
 	Limit      int
@@ -58,8 +60,8 @@ func Module(run Runner) agentmodule.Module {
 		Label:     model.AgentNameMetaLead,
 		Icon:      "users",
 		TabSlug:   TabSlug,
-		Hint:      "Find leads in Instagram and Facebook DMs, comments, mentions and Lead Ads forms, qualify them, and sync contacts into OpsAPI CRM.",
-		ChatHint:  "The Meta Lead Analyst qualifies Instagram and Facebook DMs, comments and @mentions as they arrive by webhook (nothing to launch) and lists them in its tab. To backfill Lead Ads Instant Form leads and push them into OpsAPI CRM, call agent_execute on it with connection (the named Page connection); optional form, since, limit, focus, website, and push_to_crm.",
+		Hint:      "Find leads in Instagram and Facebook DMs, comments, mentions, tags and Lead Ads forms, qualify them, and sync contacts into OpsAPI CRM.",
+		ChatHint:  "The Meta Lead Analyst qualifies Instagram and Facebook DMs, comments and @mentions as they arrive by webhook (nothing to launch) and lists them in its tab. To backfill past DMs, comments, tags and Lead Ads form leads and push them into OpsAPI CRM, call agent_execute on it with connection (the named Page connection); optional include (all, forms or inbox), form, since, limit, focus, website, and push_to_crm.",
 		Schema:    schema(),
 		Seed:      Seed,
 		Launch:    launch(run),
@@ -75,21 +77,28 @@ func Module(run Runner) agentmodule.Module {
 func schema() agentschema.Schema {
 	return agentschema.Schema{
 		Builtin: model.BuiltinMetaLead,
-		Hint:    "Pull Lead Ads Instant Form leads, analyse them, and sync into OpsAPI CRM contacts. Tokens stay server-side.",
+		Hint:    "Backfill recent DMs, comments, tags and Lead Ads form leads, qualify them, and sync real leads into OpsAPI CRM contacts. Tokens stay server-side.",
 		Fields: []agentschema.Field{
 			{Key: "connection", Label: "Page connection", Type: "text", Required: true,
 				Placeholder: "e.g. workstation-ig",
 				Question:    "Which named Meta Page connection should I use?",
 				Help:        "Name of a server-side Page connection (token stored encrypted). Never paste an access token here."},
+			{Key: "include", Label: "What to pull", Type: "select", Default: IncludeAll,
+				Options: []model.ClarifyOption{
+					{Label: "Everything: forms, DMs, comments and tags", Value: IncludeAll},
+					{Label: "Lead Ads forms only", Value: IncludeForms},
+					{Label: "DMs, comments and tags only", Value: IncludeInbox},
+				},
+				Help: "DMs, comments and tags are the recent ones Graph lists; items already captured by webhook are not analysed again."},
 			{Key: "form", Label: "Lead form (optional)", Type: "text",
 				Placeholder: "Form ID or name",
 				Help:        "Empty = recent leads across forms on that Page (capped)."},
 			{Key: "since", Label: "Since (optional)", Type: "text",
 				Placeholder: "7d or 2026-10-01T00:00:00Z",
 				Help:        "Only leads created after this time."},
-			{Key: "limit", Label: "Max leads (optional)", Type: "text", Default: "25",
+			{Key: "limit", Label: "Max items (optional)", Type: "text", Default: "25",
 				Placeholder: "25",
-				Help:        "Hard cap per launch (max 200)."},
+				Help:        "The newest this many across forms, DMs, comments and tags (max 200)."},
 			{Key: "focus", Label: "Analysis focus (optional)", Type: "textarea",
 				Placeholder: "Qualify for UK B2B SaaS demo; flag students and freelancers as low fit",
 				Help:        "Angle for fit scoring and next actions."},
@@ -150,6 +159,7 @@ func launch(run Runner) agentmodule.LaunchFunc {
 			UserID:     in.UserID,
 			AgentID:    in.Agent.ID,
 			Connection: conn,
+			Include:    parseInclude(in.Values["include"]),
 			Form:       strings.TrimSpace(in.Values["form"]),
 			Since:      strings.TrimSpace(in.Values["since"]),
 			Limit:      parseLimit(in.Values["limit"]),
@@ -183,6 +193,14 @@ func parseLimit(v string) int {
 		return 25
 	}
 	return n
+}
+
+func parseInclude(v string) string {
+	switch v = strings.ToLower(strings.TrimSpace(v)); v {
+	case IncludeForms, IncludeInbox:
+		return v
+	}
+	return IncludeAll
 }
 
 func parsePushCRM(v string) bool {

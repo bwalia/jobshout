@@ -12,6 +12,7 @@ import (
 	"errors"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -82,6 +83,7 @@ type interaction struct {
 	AuthorName string
 	Text       string
 	Permalink  string
+	At         *time.Time // when it was sent; set by backfill only
 	// Meta sends a mention without its text; these say where to read it.
 	CommentID, MediaID string
 }
@@ -146,7 +148,7 @@ func interactionsFrom(object string, e webhookEntry) []interaction {
 }
 
 // processInteraction stores, qualifies and (when it is a lead) syncs one
-// interaction.
+// interaction from a webhook.
 func (s *Service) processInteraction(ctx context.Context, it interaction) error {
 	conn, err := s.store.GetConnectionByAccount(ctx, it.AccountID)
 	if err != nil {
@@ -156,36 +158,48 @@ func (s *Service) processInteraction(ctx context.Context, it interaction) error 
 	if err != nil {
 		return err
 	}
+	lead, brief, err := s.qualifyInteraction(ctx, conn, token, it, nil, false)
+	if err != nil || lead == nil {
+		return err
+	}
+	return s.syncLeadCRM(ctx, conn.OrgID, lead.ID, contactFields(lead.Body, lead.AuthorName), brief, "", false)
+}
+
+// qualifyInteraction stores and qualifies one interaction. A nil lead means
+// there was nothing new: a retried event, or a mention Graph would not show.
+// replace makes it.Text the whole body, for a backfilled DM thread that
+// already holds the messages a webhook may have stored.
+func (s *Service) qualifyInteraction(ctx context.Context, conn *connRow, token string, it interaction, runID *uuid.UUID, replace bool) (*model.MetaLead, *model.MetaLeadBrief, error) {
 	if strings.TrimSpace(it.Text) == "" {
 		s.readMention(ctx, &it, token)
 	}
 	if strings.TrimSpace(it.Text) == "" {
-		return nil // a mention Graph would not show us: nothing to qualify
+		return nil, nil, nil
 	}
 	if it.AuthorName == "" && it.AuthorID != "" {
 		it.AuthorName = s.authorName(ctx, conn.OrgID, it, token)
 	}
 	lead, err := s.store.UpsertInteraction(ctx, &model.MetaLead{
-		OrgID: conn.OrgID, ConnectionID: conn.ID, LeadgenID: it.Key, Source: it.Source,
+		OrgID: conn.OrgID, ConnectionID: conn.ID, RunID: runID, LeadgenID: it.Key, Source: it.Source,
 		AuthorID: it.AuthorID, AuthorName: it.AuthorName, Body: it.Text, Permalink: it.Permalink,
-		Status: model.MetaLeadStatusAnalysing,
-	}, it.EventID)
+		CreatedTime: it.At, Status: model.MetaLeadStatusAnalysing,
+	}, it.EventID, replace)
 	if errors.Is(err, ErrDuplicateEvent) {
-		return nil
+		return nil, nil, nil
 	}
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	brief, err := s.analyseInteraction(ctx, lead)
 	if err != nil {
 		_ = s.store.UpdateLeadAnalysis(ctx, conn.OrgID, lead.ID, nil, model.MetaLeadStatusFailed, err.Error())
-		return err
+		return nil, nil, err
 	}
 	raw, _ := json.Marshal(brief)
 	if err := s.store.UpdateLeadAnalysis(ctx, conn.OrgID, lead.ID, raw, model.MetaLeadStatusAnalysed, ""); err != nil {
-		return err
+		return nil, nil, err
 	}
-	return s.syncLeadCRM(ctx, conn.OrgID, lead.ID, contactFields(lead.Body, lead.AuthorName), brief, "", false)
+	return lead, brief, nil
 }
 
 func (s *Service) analyseInteraction(ctx context.Context, lead *model.MetaLead) (*model.MetaLeadBrief, error) {
@@ -217,7 +231,7 @@ func (s *Service) readMention(ctx context.Context, it *interaction, token string
 				Name string `json:"name"`
 			} `json:"from"`
 		}
-		if err = s.graph.Get(ctx, it.Key, "message,from,permalink_url", token, &v); err == nil {
+		if err = s.graph.Get(ctx, it.Key, fields("message,from,permalink_url"), token, &v); err == nil {
 			it.Text, it.Permalink = v.Message, v.Permalink
 			if it.AuthorID == "" {
 				it.AuthorID, it.AuthorName = v.From.ID, v.From.Name
@@ -229,7 +243,7 @@ func (s *Service) readMention(ctx context.Context, it *interaction, token string
 				Text string `json:"text"`
 			} `json:"mentioned_comment"`
 		}
-		if err = s.graph.Get(ctx, it.AccountID, "mentioned_comment.comment_id("+it.CommentID+"){text}", token, &v); err == nil {
+		if err = s.graph.Get(ctx, it.AccountID, fields("mentioned_comment.comment_id("+it.CommentID+"){text}"), token, &v); err == nil {
 			it.Text = v.Comment.Text
 		}
 	case it.Source == model.MetaLeadSourceIGMention && it.MediaID != "":
@@ -239,7 +253,7 @@ func (s *Service) readMention(ctx context.Context, it *interaction, token string
 				Username string `json:"username"`
 			} `json:"mentioned_media"`
 		}
-		if err = s.graph.Get(ctx, it.AccountID, "mentioned_media.media_id("+it.MediaID+"){caption,username}", token, &v); err == nil {
+		if err = s.graph.Get(ctx, it.AccountID, fields("mentioned_media.media_id("+it.MediaID+"){caption,username}"), token, &v); err == nil {
 			it.Text, it.AuthorName = v.Media.Caption, v.Media.Username
 		}
 	}
@@ -254,15 +268,15 @@ func (s *Service) authorName(ctx context.Context, orgID uuid.UUID, it interactio
 	if prev, err := s.store.GetLeadByLeadgenID(ctx, orgID, it.Key); err == nil && prev.AuthorName != "" {
 		return prev.AuthorName
 	}
-	fields := "name"
+	f := "name"
 	if it.Source == model.MetaLeadSourceIGDM {
-		fields = "name,username"
+		f = "name,username"
 	}
 	var p struct {
 		Name     string `json:"name"`
 		Username string `json:"username"`
 	}
-	if err := s.graph.Get(ctx, it.AuthorID, fields, token, &p); err != nil {
+	if err := s.graph.Get(ctx, it.AuthorID, fields(f), token, &p); err != nil {
 		s.log.Debug("meta profile read", zap.String("source", it.Source), zap.Error(err))
 		return ""
 	}

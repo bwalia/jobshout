@@ -6,9 +6,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -34,6 +36,7 @@ type Service struct {
 	cfg     Config
 	log     *zap.Logger
 	tasks   Tasks
+	models  ModelResolver
 }
 
 // NewService wires the agent.
@@ -91,7 +94,11 @@ func (s *Service) Launch(ctx context.Context, req LaunchRequest) (*LaunchResult,
 		return nil, err
 	}
 	go s.runLaunch(context.Background(), run.ID, req, conn, token, limit)
-	msg := fmt.Sprintf("Fetching and analysing Meta leads for connection %q", req.Connection)
+	what := map[string]string{IncludeForms: "Lead Ads form leads", IncludeInbox: "DMs, comments and tags"}[req.Include]
+	if what == "" {
+		what = "form leads, DMs, comments and tags"
+	}
+	msg := fmt.Sprintf("Fetching and analysing %s for connection %q", what, req.Connection)
 	if req.PushCRM {
 		msg += " (will sync into OpsAPI CRM)"
 	}
@@ -127,80 +134,70 @@ func (s *Service) runLaunch(ctx context.Context, runID uuid.UUID, req LaunchRequ
 		return
 	}
 
-	formIDs, formName, err := s.resolveForms(ctx, conn.PageID, token, req.Form)
-	if err != nil {
-		s.failRun(ctx, run, err.Error())
-		return
+	// Forms and inbox items together, newest first, the newest limit kept.
+	type item struct {
+		form *formLead
+		it   *interaction
+		at   time.Time
 	}
-	run.FormName = formName
-	if len(formIDs) == 1 {
-		run.FormID = formIDs[0]
-	}
-
-	type tagged struct {
-		LeadSummary
-		FormID string
-	}
-	var taggedLeads []tagged
-	remaining := limit
-	for _, fid := range formIDs {
-		if remaining <= 0 {
-			break
-		}
-		leads, err := s.graph.ListLeads(ctx, fid, token, since, remaining)
-		if err != nil {
+	var items []item
+	var warns []string
+	if req.Include != IncludeInbox {
+		leads, err := s.formLeads(ctx, run, conn, token, req.Form, since, limit)
+		switch {
+		case err == nil:
+		case req.Include == IncludeForms || strings.TrimSpace(req.Form) != "":
 			s.failRun(ctx, run, err.Error())
 			return
+		case !errors.Is(err, errNoForms):
+			warns = append(warns, "Lead Ads forms: "+err.Error())
 		}
-		for _, L := range leads {
-			taggedLeads = append(taggedLeads, tagged{LeadSummary: L, FormID: fid})
+		for i := range leads {
+			at := ParseCreatedTime(leads[i].CreatedTime)
+			items = append(items, item{form: &leads[i], at: derefTime(at)})
 		}
-		remaining -= len(leads)
 	}
-
-	briefs := make([]model.MetaLeadBrief, 0, len(taggedLeads))
-	for _, tl := range taggedLeads {
-		fields := tl.FieldData
-		formID := tl.FormID
-		if len(fields) == 0 {
-			detail, err := s.graph.GetLead(ctx, tl.ID, token)
-			if err != nil {
-				s.log.Warn("meta get lead", zap.String("id", tl.ID), zap.Error(err))
+	if req.Include != IncludeForms {
+		its, w := s.backfillInbox(ctx, conn, token)
+		warns = append(warns, w...)
+		for i := range its {
+			if since != nil && its[i].At != nil && its[i].At.Before(*since) {
 				continue
 			}
-			fields = detail.FieldData
-			if formID == "" {
-				formID = detail.FormID
+			items = append(items, item{it: &its[i], at: derefTime(its[i].At)})
+		}
+	}
+	sort.SliceStable(items, func(i, j int) bool { return items[i].at.After(items[j].at) })
+	if len(items) > limit {
+		items = items[:limit]
+	}
+
+	briefs := make([]model.MetaLeadBrief, 0, len(items))
+	for _, x := range items {
+		var brief *model.MetaLeadBrief
+		if x.form != nil {
+			brief = s.qualifyFormLead(ctx, req, run.ID, conn, token, *x.form)
+		} else {
+			lead, b, err := s.qualifyInteraction(ctx, conn, token, *x.it, &run.ID, true)
+			if err != nil {
+				s.log.Warn("meta backfill item", zap.String("source", x.it.Source), zap.Error(err))
 			}
+			if lead != nil && req.PushCRM {
+				_ = s.syncLeadCRM(ctx, req.OrgID, lead.ID, contactFields(lead.Body, lead.AuthorName), b, req.Website, false)
+			}
+			brief = b
 		}
-		lead := &model.MetaLead{
-			OrgID:        req.OrgID,
-			ConnectionID: conn.ID,
-			RunID:        &run.ID,
-			LeadgenID:    tl.ID,
-			FormID:       formID,
-			FieldData:    FieldDataJSON(fields),
-			CreatedTime:  ParseCreatedTime(tl.CreatedTime),
-			Status:       model.MetaLeadStatusAnalysing,
+		if brief != nil {
+			briefs = append(briefs, *brief)
 		}
-		if err := s.store.UpsertLead(ctx, lead); err != nil {
-			s.log.Warn("meta upsert lead", zap.Error(err))
-			continue
-		}
-		brief, err := s.analyseLead(ctx, fields, req.Focus)
-		if err != nil {
-			_ = s.store.UpdateLeadAnalysis(ctx, req.OrgID, lead.ID, nil, model.MetaLeadStatusFailed, err.Error())
-			continue
-		}
-		raw, _ := json.Marshal(brief)
-		_ = s.store.UpdateLeadAnalysis(ctx, req.OrgID, lead.ID, raw, model.MetaLeadStatusAnalysed, "")
-		if req.PushCRM {
-			s.syncLeadCRM(ctx, req.OrgID, lead.ID, fields, brief, req.Website, false)
-		}
-		briefs = append(briefs, *brief)
 	}
 
 	run.LeadCount = len(briefs)
+	run.ErrorMessage = truncate(strings.Join(warns, "; "), 1000)
+	if len(items) == 0 && len(warns) > 0 {
+		s.failRun(ctx, run, run.ErrorMessage)
+		return
+	}
 	if s.analyse != nil && len(briefs) > 0 {
 		rollup, err := s.analyse.AnalyseRollup(ctx, briefs, req.Focus)
 		if err != nil {
@@ -213,6 +210,89 @@ func (s *Service) runLaunch(ctx context.Context, runID uuid.UUID, req LaunchRequ
 	if err := s.store.UpdateRun(ctx, run); err != nil {
 		s.log.Error("meta update run", zap.Error(err))
 	}
+}
+
+// formLead is a Lead Ads lead and the form it came from.
+type formLead struct {
+	LeadSummary
+	FormID string
+}
+
+// formLeads lists up to limit leads across the chosen forms.
+func (s *Service) formLeads(ctx context.Context, run *model.MetaLeadRun, conn *connRow, token, formSpec string, since *time.Time, limit int) ([]formLead, error) {
+	formIDs, formName, err := s.resolveForms(ctx, conn.PageID, token, formSpec)
+	if err != nil {
+		return nil, err
+	}
+	run.FormName = formName
+	if len(formIDs) == 1 {
+		run.FormID = formIDs[0]
+	}
+	var out []formLead
+	remaining := limit
+	for _, fid := range formIDs {
+		if remaining <= 0 {
+			break
+		}
+		leads, err := s.graph.ListLeads(ctx, fid, token, since, remaining)
+		if err != nil {
+			return nil, err
+		}
+		for _, L := range leads {
+			out = append(out, formLead{LeadSummary: L, FormID: fid})
+		}
+		remaining -= len(leads)
+	}
+	return out, nil
+}
+
+// qualifyFormLead stores, analyses and (with PushCRM) syncs one form lead. A
+// nil brief means it was skipped or failed.
+func (s *Service) qualifyFormLead(ctx context.Context, req LaunchRequest, runID uuid.UUID, conn *connRow, token string, fl formLead) *model.MetaLeadBrief {
+	fields, formID := fl.FieldData, fl.FormID
+	if len(fields) == 0 {
+		detail, err := s.graph.GetLead(ctx, fl.ID, token)
+		if err != nil {
+			s.log.Warn("meta get lead", zap.String("id", fl.ID), zap.Error(err))
+			return nil
+		}
+		fields = detail.FieldData
+		if formID == "" {
+			formID = detail.FormID
+		}
+	}
+	lead := &model.MetaLead{
+		OrgID:        req.OrgID,
+		ConnectionID: conn.ID,
+		RunID:        &runID,
+		LeadgenID:    fl.ID,
+		FormID:       formID,
+		FieldData:    FieldDataJSON(fields),
+		CreatedTime:  ParseCreatedTime(fl.CreatedTime),
+		Status:       model.MetaLeadStatusAnalysing,
+	}
+	if err := s.store.UpsertLead(ctx, lead); err != nil {
+		s.log.Warn("meta upsert lead", zap.Error(err))
+		return nil
+	}
+	brief, err := s.analyseLead(ctx, fields, req.Focus)
+	if err != nil {
+		_ = s.store.UpdateLeadAnalysis(ctx, req.OrgID, lead.ID, nil, model.MetaLeadStatusFailed, err.Error())
+		return nil
+	}
+	raw, _ := json.Marshal(brief)
+	_ = s.store.UpdateLeadAnalysis(ctx, req.OrgID, lead.ID, raw, model.MetaLeadStatusAnalysed, "")
+	if req.PushCRM {
+		_ = s.syncLeadCRM(ctx, req.OrgID, lead.ID, fields, brief, req.Website, false)
+	}
+	return brief
+}
+
+func derefTime(t *time.Time) time.Time {
+	if t == nil {
+		return time.Time{}
+	}
+	return *t
 }
 
 func (s *Service) analyseLead(ctx context.Context, fields []FieldData, focus string) (*model.MetaLeadBrief, error) {
@@ -236,6 +316,8 @@ func heuristicBrief(fields []FieldData) *model.MetaLeadBrief {
 	}
 }
 
+var errNoForms = errors.New("no Lead Ads forms on this Page")
+
 func (s *Service) resolveForms(ctx context.Context, pageID, token, formSpec string) (ids []string, name string, err error) {
 	formSpec = strings.TrimSpace(formSpec)
 	forms, err := s.graph.ListForms(ctx, pageID, token)
@@ -247,7 +329,7 @@ func (s *Service) resolveForms(ctx context.Context, pageID, token, formSpec stri
 			ids = append(ids, f.ID)
 		}
 		if len(ids) == 0 {
-			return nil, "", fmt.Errorf("no Lead Ads forms on this Page")
+			return nil, "", errNoForms
 		}
 		return ids, "", nil
 	}
@@ -313,7 +395,7 @@ func (s *Service) UpsertConnection(ctx context.Context, orgID, userID uuid.UUID,
 		} `json:"instagram_business_account"`
 	}
 	if s.graph != nil {
-		if err := s.graph.Get(ctx, pageID, "instagram_business_account", accessToken, &page); err != nil {
+		if err := s.graph.Get(ctx, pageID, fields("instagram_business_account"), accessToken, &page); err != nil {
 			s.log.Warn("meta: no Instagram account read for Page; Instagram events will not match this connection",
 				zap.String("page_id", pageID), zap.Error(err))
 		}

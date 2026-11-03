@@ -4,8 +4,10 @@ import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { apiErrorMessage } from "@/lib/api/client";
+import { ModelEval } from "@/components/meta-leads/ModelEval";
 import {
   getMetaLeadStatus,
+  labelMetaLead,
   listMetaConnections,
   listMetaLeads,
   listMetaRunLeads,
@@ -21,7 +23,7 @@ import {
 const inputClass =
   "mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50";
 
-type Tab = "leads" | "runs" | "connection";
+type Tab = "leads" | "runs" | "models" | "connection";
 
 export function MetaLeadClient() {
   const [tab, setTab] = useState<Tab>("leads");
@@ -82,6 +84,12 @@ export function MetaLeadClient() {
     };
   }, [selectedRun]);
 
+  function replaceLead(u: MetaLead) {
+    const swap = (ls: MetaLead[]) => ls.map((l) => (l.id === u.id ? u : l));
+    setLeads(swap);
+    setRunLeads(swap);
+  }
+
   async function onSaveConnection(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
@@ -116,9 +124,10 @@ export function MetaLeadClient() {
       <div>
         <h2 className="text-lg font-semibold text-foreground">Meta Lead Analyst</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Instagram and Facebook DMs, comments and @mentions are qualified as they arrive; Lead Ads
-          form submissions are pulled from New task with a named connection. Real leads with an
-          email or phone sync into OpsAPI CRM. Tokens stay server-side.
+          Instagram and Facebook DMs, comments and @mentions are qualified as they arrive. Run a task
+          to backfill past DMs, comments, tags and Lead Ads form leads. Real leads with an email or
+          phone sync into OpsAPI CRM. Label verdicts to compare models in Models. Tokens stay
+          server-side.
         </p>
         {status ? (
           <p className="mt-2 text-xs text-muted-foreground">
@@ -130,7 +139,7 @@ export function MetaLeadClient() {
       </div>
 
       <div className="flex gap-2 border-b border-border pb-2 text-sm">
-        {(["leads", "runs", "connection"] as Tab[]).map((t) => (
+        {(["leads", "runs", "models", "connection"] as Tab[]).map((t) => (
           <button
             key={t}
             type="button"
@@ -237,6 +246,9 @@ export function MetaLeadClient() {
             ) : (
               <>
                 <h3 className="font-semibold">Run detail</h3>
+                {selectedRun.error_message ? (
+                  <p className="mt-2 text-xs text-muted-foreground">Skipped: {selectedRun.error_message}</p>
+                ) : null}
                 {selectedRun.rollup ? (
                   <div className="mt-3 space-y-2">
                     <p>
@@ -262,7 +274,7 @@ export function MetaLeadClient() {
                 )}
                 <div className="mt-4 space-y-2">
                   {runLeads.map((lead) => (
-                    <LeadCard key={lead.id} lead={lead} onPushed={refresh} crmReady={!!status?.crm} />
+                    <LeadCard key={lead.id} lead={lead} onPushed={refresh} onLabelled={replaceLead} crmReady={!!status?.crm} />
                   ))}
                 </div>
               </>
@@ -270,6 +282,8 @@ export function MetaLeadClient() {
           </div>
         </div>
       ) : null}
+
+      {tab === "models" ? <ModelEval /> : null}
 
       {tab === "leads" ? (
         <div className="space-y-2">
@@ -279,7 +293,7 @@ export function MetaLeadClient() {
             </p>
           ) : (
             leads.map((lead) => (
-              <LeadCard key={lead.id} lead={lead} onPushed={refresh} crmReady={!!status?.crm} />
+              <LeadCard key={lead.id} lead={lead} onPushed={refresh} onLabelled={replaceLead} crmReady={!!status?.crm} />
             ))
           )}
         </div>
@@ -291,14 +305,26 @@ export function MetaLeadClient() {
 function LeadCard({
   lead,
   onPushed,
+  onLabelled,
   crmReady,
 }: {
   lead: MetaLead;
   onPushed: () => void | Promise<void>;
+  onLabelled: (lead: MetaLead) => void;
   crmReady: boolean;
 }) {
   const a = lead.analysis;
   const [pushing, setPushing] = useState(false);
+  const label = lead.label_is_lead;
+
+  async function onLabel(v: boolean) {
+    try {
+      // Clicking the active verdict clears it.
+      onLabelled(await labelMetaLead(lead.id, label === v ? null : v));
+    } catch (e) {
+      toast.error(apiErrorMessage(e, "Could not save the label"));
+    }
+  }
 
   async function onPush() {
     setPushing(true);
@@ -359,6 +385,23 @@ function LeadCard({
         ) : (
           <span>CRM: not synced</span>
         )}
+        {lead.source !== "lead_form" && lead.body ? (
+          <span className="ml-auto flex items-center gap-1" title="Your verdict, used to compare models">
+            {([true, false] as const).map((v) => (
+              <button
+                key={String(v)}
+                type="button"
+                onClick={() => void onLabel(v)}
+                aria-pressed={label === v}
+                className={`rounded border px-2 py-0.5 ${
+                  label === v ? "border-primary bg-muted text-foreground" : "border-border hover:bg-muted"
+                }`}
+              >
+                {v ? "✓ Lead" : "✗ Not a lead"}
+              </button>
+            ))}
+          </span>
+        ) : null}
         {crmReady ? (
           <button
             type="button"

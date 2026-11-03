@@ -35,6 +35,9 @@ const (
 	MetaLeadSourceIGDM      = "instagram_dm"
 	MetaLeadSourceIGComment = "instagram_comment"
 	MetaLeadSourceIGMention = "instagram_mention"
+	// MetaLeadSourceIGTag is a post the account is photo-tagged in. Meta sends
+	// no webhook for those, so only a launch's backfill finds them.
+	MetaLeadSourceIGTag = "instagram_tag"
 )
 
 // MetaLeadConnection is a named Page connection for an org. The access token
@@ -99,8 +102,51 @@ type MetaLead struct {
 	CRMWebsite   string     `json:"crm_website,omitempty"`
 	CRMSyncedAt  *time.Time `json:"crm_synced_at,omitempty"`
 	CRMError     string     `json:"crm_error,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	// LabelIsLead is a person's verdict, for measuring models; nil: unlabelled.
+	LabelIsLead *bool     `json:"label_is_lead,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// MetaLeadEval runs the labelled DMs, comments and mentions through each
+// chosen model, Runs times each, and scores the verdicts against the labels.
+type MetaLeadEval struct {
+	ID           uuid.UUID         `json:"id"`
+	OrgID        uuid.UUID         `json:"org_id"`
+	Status       string            `json:"status"` // running | completed | failed
+	Models       []string          `json:"models"` // provider:model
+	Runs         int               `json:"runs"`
+	CaseCount    int               `json:"case_count"`
+	Report       []MetaLeadEvalRow `json:"report,omitempty"`
+	ErrorMessage string            `json:"error_message,omitempty"`
+	CreatedBy    *uuid.UUID        `json:"created_by,omitempty"`
+	CreatedAt    time.Time         `json:"created_at"`
+	UpdatedAt    time.Time         `json:"updated_at"`
+}
+
+// MetaLeadEvalRow is one model's score. Accuracy, precision and recall use
+// each case's majority verdict; Consistency is the share of cases where every
+// run agreed; Grounded is the share of "is a lead" answers whose evidence
+// quote is really in the message.
+type MetaLeadEvalRow struct {
+	Model        string             `json:"model"`
+	Error        string             `json:"error,omitempty"`
+	Accuracy     float64            `json:"accuracy"`
+	Precision    float64            `json:"precision"`
+	Recall       float64            `json:"recall"`
+	Consistency  float64            `json:"consistency"`
+	Grounded     float64            `json:"grounded"`
+	Failures     int                `json:"failures"`
+	AvgLatencyMS int64              `json:"avg_latency_ms"`
+	Misses       []MetaLeadEvalMiss `json:"misses,omitempty"`
+}
+
+// MetaLeadEvalMiss is a case the model got wrong, for a person to review.
+type MetaLeadEvalMiss struct {
+	LeadID uuid.UUID `json:"lead_id"`
+	Body   string    `json:"body"`
+	Label  bool      `json:"label"`
+	Votes  string    `json:"votes"` // e.g. "lead 1/3"
 }
 
 // MetaLeadBrief is the per-lead LLM analysis shape. IsLead, Category and

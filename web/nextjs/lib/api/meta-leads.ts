@@ -33,7 +33,7 @@ export type MetaLeadRun = {
 export type MetaLead = {
   id: string;
   leadgen_id: string;
-  /** lead_form, or facebook_/instagram_ + dm, comment, mention. */
+  /** lead_form, or facebook_/instagram_ + dm, comment, mention; instagram_tag. */
   source: string;
   author_name?: string;
   /** The message; a DM thread's messages so far, newest last. */
@@ -58,6 +58,33 @@ export type MetaLead = {
   crm_website?: string;
   crm_synced_at?: string;
   crm_error?: string;
+  /** A person's verdict, the eval's ground truth; absent means unlabelled. */
+  label_is_lead?: boolean;
+  created_at: string;
+};
+
+export type MetaLeadEvalRow = {
+  /** provider:model */
+  model: string;
+  error?: string;
+  accuracy: number;
+  precision: number;
+  recall: number;
+  consistency: number;
+  grounded: number;
+  failures: number;
+  avg_latency_ms: number;
+  misses?: { lead_id: string; body: string; label: boolean; votes: string }[];
+};
+
+export type MetaLeadEval = {
+  id: string;
+  status: string;
+  models: string[];
+  runs: number;
+  case_count: number;
+  report?: MetaLeadEvalRow[];
+  error_message?: string;
   created_at: string;
 };
 
@@ -112,5 +139,22 @@ export async function listMetaLeads() {
 
 export async function pushMetaLeadCRM(leadId: string, body?: { website?: string; force?: boolean }) {
   const { data } = await apiClient.post<MetaLead>(`/meta-leads/leads/${leadId}/push-crm`, body ?? {});
+  return data;
+}
+
+/** Records a person's verdict on a DM, comment or mention; null clears it. */
+export async function labelMetaLead(leadId: string, isLead: boolean | null) {
+  const { data } = await apiClient.put<MetaLead>(`/meta-leads/leads/${leadId}/label`, { is_lead: isLead });
+  return data;
+}
+
+export async function listMetaEvals() {
+  const { data } = await apiClient.get<{ data: MetaLeadEval[] | null; labelled: number }>("/meta-leads/evals");
+  return { evals: data.data ?? [], labelled: data.labelled };
+}
+
+/** Compares models (provider:model) on the labelled messages, runs times each. */
+export async function startMetaEval(models: string[], runs: number) {
+  const { data } = await apiClient.post<MetaLeadEval>("/meta-leads/evals", { models, runs });
   return data;
 }

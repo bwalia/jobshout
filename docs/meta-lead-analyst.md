@@ -5,10 +5,14 @@ linked **Instagram professional account**:
 
 - **DMs, comments and @mentions** arrive by webhook and are qualified one by
   one (a DM thread is one lead per sender, re-qualified as messages arrive).
-- **Lead Ads Instant Form** submissions are pulled on launch (backfill) or
-  arrive through the `leadgen` webhook, with a run rollup.
+- **Lead Ads Instant Form** submissions arrive through the `leadgen` webhook.
+- A **launch backfills** what came before: recent DM threads, comments,
+  visitor posts, Page tags, Instagram photo tags (which have no webhook) and
+  form leads, with a run rollup.
 
-Real leads with an email or phone sync into **OpsAPI CRM**.
+Real leads with an email or phone sync into **OpsAPI CRM**. People mark
+verdicts right or wrong in the tab, and **Models** compares LLMs on those
+labels — see [Choosing the model](#choosing-the-model).
 
 ## What you need
 
@@ -22,7 +26,7 @@ Real leads with an email or phone sync into **OpsAPI CRM**.
 | OpsAPI CRM | Same workspace as Marketing Manager (`marketing_api_key` with `crm` scope, or ring `OPSAPI_MARKETING_*`) |
 
 Never put a Page token in the launch schema. Launch only takes the connection
-**name** (and optional form / since / limit / focus / website / push_to_crm).
+**name** (and optional include / form / since / limit / focus / website / push_to_crm).
 
 ## Enable on int (ops)
 
@@ -30,8 +34,9 @@ Never put a Page token in the launch schema. Launch only takes the connection
    - `META_APP_ID`, `META_APP_SECRET`
    - `META_WEBHOOK_VERIFY_TOKEN` (any strong shared string)
    - `META_TOKEN_KEY` (passphrase or 64-char hex — same style as `LINKEDIN_TOKEN_KEY`)
-2. Uncomment `jobshout-meta` under `extraSecretRefs` and `vaultSecrets` in
-   `deploy/helm/jobshout/values-int.yaml` (and prod when ready).
+2. `jobshout-meta` is in `extraSecretRefs` and `vaultSecrets` in
+   `deploy/helm/jobshout/values-int.yaml`; add the same two entries for other
+   rings when they get a Meta app.
 3. Deploy / restart `jobshout-api` after ESO syncs the Secret.
 4. Confirm the agent tab Status shows **Seal tokens: yes**. Without
    `META_TOKEN_KEY`, connections cannot be stored (analyse/CRM code still
@@ -107,9 +112,7 @@ phone in the thread; a DM thread that only gets an email in its third message
 is pushed then. Without an LLM provider an interaction is stored with a
 "Review manually" brief.
 
-The model is `META_LEAD_MODEL` or the org's agent model: an env change, not a
-code change. Before trusting a model, label a few hundred real DMs and
-comments and compare candidates on precision, recall and run-to-run agreement.
+The model is configuration, not code: see [Choosing the model](#choosing-the-model).
 
 ## Permissions
 
@@ -121,6 +124,13 @@ The Page token needs, beyond `leads_retrieval` for forms:
 | Facebook comments, mentions | `pages_read_engagement`, `pages_read_user_content`, `pages_manage_metadata` |
 | Instagram DMs | `instagram_basic`, `instagram_manage_messages`, `pages_manage_metadata`, `pages_read_engagement`, `pages_show_list` |
 | Instagram comments, mentions | `instagram_basic`, `instagram_manage_comments`, `pages_manage_metadata`, `pages_read_engagement`, `pages_show_list` |
+| Backfill: Facebook DMs | as Facebook DMs, plus `pages_read_engagement` |
+| Backfill: Page tags (`/tagged`) | `pages_read_engagement`, `pages_read_user_content` |
+| Backfill: Instagram photo tags (`/tags`) | `instagram_basic`, `instagram_manage_comments`, `pages_read_engagement` (plus `ads_read` if your Page role comes from Business Manager) |
+
+Reading Instagram DM history through the Page also needs the app to be owned
+by a verified business. A list the token cannot read is listed under the
+run's "Skipped" note; the rest of the backfill still runs.
 
 With **Standard Access** (an app in Development mode) Meta only delivers
 events from people with a role on the app — enough to test with your own
@@ -145,9 +155,10 @@ Schema fields (New task / Run task / `agent_execute`):
 | Field | Required | Notes |
 | --- | --- | --- |
 | `connection` | yes | Named Page connection |
+| `include` | no | `all` (default), `forms` (Lead Ads only) or `inbox` (DMs, comments and tags only) |
 | `form` | no | Form ID or name; empty = forms on the Page (capped) |
 | `since` | no | `7d` or RFC3339 |
-| `limit` | no | Max leads (hard cap from `META_LEAD_MAX_LEADS`, max 200) |
+| `limit` | no | The newest this many across forms and inbox (hard cap from `META_LEAD_MAX_LEADS`, max 200) |
 | `focus` | no | Qualification angle for the LLM |
 | `push_to_crm` | no | Default `yes` — create/update OpsAPI CRM contacts |
 | `website` | no | OpsAPI website name / namespace for CRM; empty = org default |
@@ -155,6 +166,23 @@ Schema fields (New task / Run task / `agent_execute`):
 Chat: call `agent_execute` on **Meta Lead Analyst** with `connection` (+
 optional form / focus / website). Example values:
 `connection=workstation-ig`, `since=7d`, `push_to_crm=yes`.
+
+### Backfill
+
+| Graph list | Becomes |
+| --- | --- |
+| `/{page}/conversations?platform=messenger` | `facebook_dm` thread |
+| `/{page}/feed` (+ each post's comments) | `facebook_comment` (comments and visitor posts) |
+| `/{page}/tagged` | `facebook_mention` |
+| `/{page}/conversations?platform=instagram` | `instagram_dm` thread |
+| `/{ig}/media` (+ each post's comments) | `instagram_comment` |
+| `/{ig}/tags` | `instagram_tag` (photo tags: no webhook exists) |
+
+Each list is read once, newest 25 (comments: 25 per post; DM threads: the
+20 newest messages, Graph's limit). Items get the webhook's keys, so one a
+webhook already stored is skipped, and a DM thread is rewritten from Graph
+rather than appended to, so messages are not repeated. The page's and
+account's own messages, comments and posts are left out.
 
 ## CRM push (OpsAPI)
 
@@ -168,6 +196,35 @@ with optional `{"website":"…","force":true}`.
 Synced leads store `crm_contact_id` / `crm_website` / `crm_synced_at` (or
 `crm_error` on failure).
 
+## Choosing the model
+
+1. In the **Leads** tab, mark DMs, comments and mentions **✓ Lead** or
+   **✗ Not a lead** (click again to clear). 200–300 real messages with both
+   kinds give a reliable comparison; a backfill is the quickest way to get them.
+2. In **Models**, tick up to four `provider:model` options (those the ring's
+   providers offer) and the runs per message (3 by default), then **Compare**.
+   Each model qualifies every labelled message with the live prompt, calling
+   the provider directly (no Ollama fallback), up to the 300 newest labels.
+3. Read the report:
+
+| Column | Meaning |
+| --- | --- |
+| Accuracy | The majority verdict matches the label (a tie counts as wrong) |
+| Precision | Of the messages it called leads, the share that were |
+| Recall | Of the real leads, the share it found |
+| Consistency | Every run gave the same verdict |
+| Grounded | Lead verdicts whose evidence quote is really in the message |
+| Failed calls | Errors or answers with no `is_lead` |
+
+4. Switch with configuration only: `AGENT_PROVIDER__META_LEAD_ANALYST` and
+   `AGENT_MODEL__META_LEAD_ANALYST` (or `META_LEAD_MODEL`) in the ring's chart
+   values, then restart `jobshout-api`.
+
+API: `PUT /api/v1/meta-leads/leads/{id}/label` `{"is_lead":true|false|null}`,
+`GET /api/v1/meta-leads/evals`, `POST /api/v1/meta-leads/evals`
+`{"models":["claude:…"],"runs":3}`. A comparison runs in the API pod for up
+to 90 minutes; one cut short by a restart shows as interrupted.
+
 ## LLM output
 
 Per lead: `intent`, `fit_score` (0–100), `next_action`, `spam_risk`, `flags[]`,
@@ -180,8 +237,7 @@ brief so ingest + CRM are not blocked.
 ## Out of scope
 
 - Meta OAuth UI for connecting Pages (manual token + named connection first)
-- Backfilling DMs, comments and photo tags from before the webhook was on
-  (Graph `conversations`, comments and `/tags`): webhooks only see new events
+- Backfill past the first page of each Graph list (no `paging.next`)
 - Replying from JobShout (Meta allows replies within 24 hours of the person's
   last message, and one private reply per comment)
 - Auto email send from analyses (use Marketing Manager for campaigns)

@@ -198,3 +198,69 @@ func (h *MetaLeadHandler) PushLeadCRM(w http.ResponseWriter, r *http.Request) {
 	}
 	RespondJSON(w, http.StatusOK, lead)
 }
+
+type labelBody struct {
+	IsLead *bool `json:"is_lead"` // null clears the label
+}
+
+// LabelLead records a person's verdict on a DM, comment or mention.
+func (h *MetaLeadHandler) LabelLead(w http.ResponseWriter, r *http.Request) {
+	orgID, _, ok := h.ids(w, r)
+	if !ok {
+		return
+	}
+	leadID, err := uuid.Parse(chi.URLParam(r, "leadID"))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid lead id")
+		return
+	}
+	var body labelBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	lead, err := h.svc.SetLabel(r.Context(), orgID, leadID, body.IsLead)
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	RespondJSON(w, http.StatusOK, lead)
+}
+
+// ListEvals returns recent model comparisons and the labelled-case count.
+func (h *MetaLeadHandler) ListEvals(w http.ResponseWriter, r *http.Request) {
+	orgID, _, ok := h.ids(w, r)
+	if !ok {
+		return
+	}
+	evals, labelled, err := h.svc.ListEvals(r.Context(), orgID)
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	RespondJSON(w, http.StatusOK, map[string]any{"data": evals, "labelled": labelled})
+}
+
+type evalBody struct {
+	Models []string `json:"models"` // provider:model
+	Runs   int      `json:"runs"`
+}
+
+// StartEval compares models on the labelled cases.
+func (h *MetaLeadHandler) StartEval(w http.ResponseWriter, r *http.Request) {
+	orgID, userID, ok := h.ids(w, r)
+	if !ok {
+		return
+	}
+	var body evalBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	e, err := h.svc.StartEval(r.Context(), orgID, userID, body.Models, body.Runs)
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	RespondJSON(w, http.StatusAccepted, e)
+}

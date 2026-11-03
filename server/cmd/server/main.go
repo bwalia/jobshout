@@ -992,6 +992,15 @@ func main() {
 		logger,
 	)
 	metaLeadSvc.BindTasks(taskSvc)
+	// Comparisons call the named provider directly: no Ollama fallback, so a
+	// score is the model's own.
+	metaLeadSvc.BindModels(func(provider, name string) (metalead.Completer, error) {
+		c, err := llmRouter.For(provider)
+		if err != nil {
+			return nil, err
+		}
+		return metalead.NewClientCompleter(c, name), nil
+	})
 	logger.Info("meta lead analyst initialised",
 		zap.Bool("configured", metaLeadSvc.Configured()),
 		zap.Bool("can_seal_tokens", metaLeadCfg.CanSealTokens()),
@@ -1759,6 +1768,9 @@ func main() {
 				r.Get("/runs/{runID}/leads", metaLeadHandler.ListRunLeads)
 				r.Get("/leads", metaLeadHandler.ListLeads)
 				r.Post("/leads/{leadID}/push-crm", metaLeadHandler.PushLeadCRM)
+				r.Put("/leads/{leadID}/label", metaLeadHandler.LabelLead)
+				r.Get("/evals", metaLeadHandler.ListEvals)
+				r.Post("/evals", metaLeadHandler.StartEval)
 			})
 
 			r.Route("/secrets-rotation", func(r chi.Router) {
