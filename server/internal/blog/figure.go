@@ -474,6 +474,21 @@ func figureItems(description string) (core string, items []string, ok bool) {
 	return core, items, len(items) >= 2
 }
 
+// dropTemplateLabel removes a heading the model copied from the format
+// example instead of naming the real thing — "core: Agnost, Kusk Gateway"
+// drew a hub labelled "core". The first item then becomes the centre.
+func dropTemplateLabel(description string) string {
+	head, rest, found := strings.Cut(description, ":")
+	if !found {
+		return description
+	}
+	switch strings.ToLower(strings.TrimSpace(head)) {
+	case "core", "centre", "center", "hub", "step", "steps", "part", "parts", "items", "components":
+		return strings.TrimSpace(rest)
+	}
+	return description
+}
+
 func labelWords(s string) string {
 	var words []string
 	for i, w := range strings.Fields(strings.Trim(strings.TrimSpace(s), ".")) {

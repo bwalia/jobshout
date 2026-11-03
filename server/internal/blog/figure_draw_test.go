@@ -125,11 +125,23 @@ func TestRedrawFigures(t *testing.T) {
 // Gemini has no image quota) still leaves something the diagram path can draw.
 func TestFigureKinds(t *testing.T) {
 	kinds, format := testRunner(&fakeIllustrator{enabled: true}).figureKinds()
-	if !strings.Contains(kinds, "comparison") || !strings.Contains(format, "step → step") || !strings.Contains(format, "vs") {
+	if !strings.Contains(kinds, "comparison") || !strings.Contains(format, "Commit → Build image") || !strings.Contains(format, "vs") {
 		t.Fatalf("with a lettering model: %q %q", kinds, format)
 	}
 	kinds, format = testRunner(&noLetterIllustrator{fakeIllustrator{enabled: true}}).WithCoverStore(newMemCovers()).figureKinds()
-	if strings.Contains(kinds, "comparison") || !strings.Contains(format, "core: part") {
+	if strings.Contains(kinds, "comparison") || !strings.Contains(format, "API gateway: auth service") {
 		t.Fatalf("diagrams only: %q %q", kinds, format)
+	}
+}
+
+// int drew a hub labelled "core" when the model copied the format example.
+func TestDropTemplateLabel(t *testing.T) {
+	got := dropTemplateLabel("core: Agnost, Kusk Gateway, OpenAPI definition, Ingress controller, application")
+	s, ok := figureScene(kindArchitecture, got)
+	if !ok || s.Labels[0] != "Agnost" || len(s.Labels) != 5 {
+		t.Fatalf("got %q -> %+v %v", got, s, ok)
+	}
+	if dropTemplateLabel("API gateway: auth, orders") != "API gateway: auth, orders" {
+		t.Fatal("a real centre must stay")
 	}
 }
