@@ -40,10 +40,10 @@ func (b *blogIllustrator) Generate(ctx context.Context, req blog.IllustrationReq
 		Steps:  req.Steps,
 		// Unseeded: two articles about the same subject should not get the same
 		// picture, which is what a fixed seed would produce.
-		Seed:       -1,
-		Source:     req.Source,
-		BlogRunID:  req.RunID,
-		NoFallback: req.NoFallback,
+		Seed:      -1,
+		Source:    req.Source,
+		BlogRunID: req.RunID,
+		NeedsText: req.NeedsText,
 	})
 	if err != nil {
 		return nil, err

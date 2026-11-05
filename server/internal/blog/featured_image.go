@@ -120,21 +120,21 @@ const (
 	// CoverStyleDiagram draws the article's idea as a vector diagram in the
 	// house style. No GPU or provider: it only needs the cover store.
 	CoverStyleDiagram = "diagram"
-	// CoverStylePicture asks the image service for a generated picture.
+	// CoverStylePicture asks the image service for a picture of the article's
+	// idea with its labels lettered, which needs a model that letters text
+	// (Nano Banana, ERNIE-Image). Without one the cover is the diagram: a
+	// picture whose labels are gibberish is worse than either.
 	CoverStylePicture = "picture"
 )
 
 func (r *Runner) coverPictures() bool {
-	return strings.EqualFold(strings.TrimSpace(r.cfg.CoverStyle), CoverStylePicture)
+	return strings.EqualFold(strings.TrimSpace(r.cfg.CoverStyle), CoverStylePicture) && r.canLetterImages()
 }
 
 // canDrawCover reports whether this run can give an article a real cover in
 // the configured style.
 func (r *Runner) canDrawCover() bool {
-	if r.coverPictures() {
-		return r.canIllustrate()
-	}
-	return r.covers != nil
+	return r.coverPictures() || r.covers != nil
 }
 
 // drawCover gives a its cover in the configured style.

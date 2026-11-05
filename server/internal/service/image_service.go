@@ -64,8 +64,9 @@ type GenerateImageRequest struct {
 	// BlogRunID links the image to the article run it was drawn for. Nil when
 	// no article asked for it.
 	BlogRunID *uuid.UUID
-	// NoFallback skips the workstation path after a hosted failure.
-	NoFallback bool
+	// NeedsText marks a picture whose labels must be readable: a hosted
+	// failure falls back only to a workstation model that letters them.
+	NeedsText bool
 }
 
 // GenerateImageResult is the produced image, plus where it went.
@@ -109,13 +110,13 @@ func (s *ImageService) Generate(ctx context.Context, req GenerateImageRequest) (
 	}
 
 	resp, err := s.router.Generate(ctx, req.Provider, imagegen.GenerateRequest{
-		Prompt:     req.Prompt,
-		Model:      req.Model,
-		Width:      req.Width,
-		Height:     req.Height,
-		Steps:      req.Steps,
-		Seed:       seed,
-		NoFallback: req.NoFallback,
+		Prompt:    req.Prompt,
+		Model:     req.Model,
+		Width:     req.Width,
+		Height:    req.Height,
+		Steps:     req.Steps,
+		Seed:      seed,
+		NeedsText: req.NeedsText,
 	})
 	if err != nil {
 		return nil, err
@@ -188,18 +189,9 @@ func (s *ImageService) DefaultProvider() string {
 }
 
 // CanLetter reports whether a configured provider can render readable
-// on-image text. Workstation diffusion cannot; Gemini and OpenAI can.
+// on-image text with its default model (imagegen.Letters).
 func (s *ImageService) CanLetter() bool {
-	if s == nil || s.router == nil {
-		return false
-	}
-	for _, p := range s.router.Providers() {
-		switch p {
-		case imagegen.ProviderGemini, imagegen.ProviderOpenAI:
-			return true
-		}
-	}
-	return false
+	return s != nil && s.router.CanLetter()
 }
 
 // Recent lists the images this org has generated, newest first.

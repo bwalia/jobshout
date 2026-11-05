@@ -576,23 +576,42 @@ func TestRouter_CancelledContextDoesNotFallBack(t *testing.T) {
 	}
 }
 
-func TestRouter_NoFallbackSkipsWorkstation(t *testing.T) {
-	gemini := &stubClient{provider: ProviderGemini, err: fmt.Errorf("down")}
-	mflux := &stubClient{provider: ProviderMFlux}
-	r := NewTestRouter(ProviderGemini, map[string]Client{
-		ProviderGemini: gemini,
-		ProviderMFlux:  mflux,
-	})
+// workstationStub is an mflux stub that says which model it draws with.
+type workstationStub struct {
+	*stubClient
+	model string
+}
 
-	_, err := r.Generate(context.Background(), ProviderGemini, GenerateRequest{
-		Prompt:     "a labeled comparison table",
-		NoFallback: true,
-	})
-	if err == nil {
-		t.Fatal("expected Gemini's error when fallback is forbidden")
+func (w workstationStub) DefaultModel() string { return w.model }
+
+// A picture whose labels must be readable falls back from Gemini only to a
+// workstation model that letters them.
+func TestRouter_NeedsTextFallsBackOnlyToALetteringModel(t *testing.T) {
+	for _, tc := range []struct {
+		model    string
+		fallback bool
+	}{{"z-image-turbo", false}, {"ernie-image-turbo", true}} {
+		mflux := workstationStub{&stubClient{provider: ProviderMFlux}, tc.model}
+		r := NewTestRouter(ProviderGemini, map[string]Client{
+			ProviderGemini: &stubClient{provider: ProviderGemini, err: fmt.Errorf("down")},
+			ProviderMFlux:  mflux,
+		})
+		_, err := r.Generate(context.Background(), ProviderGemini, GenerateRequest{
+			Prompt: "a labeled comparison table", NeedsText: true,
+		})
+		if (mflux.generateCalls == 1) != tc.fallback || (err == nil) != tc.fallback {
+			t.Errorf("%s: fallback calls = %d err = %v, want fallback %v", tc.model, mflux.generateCalls, err, tc.fallback)
+		}
+		if r.CanLetter() != true {
+			t.Errorf("%s: Gemini letters, so the router can", tc.model)
+		}
 	}
-	if mflux.generateCalls != 0 {
-		t.Error("NoFallback must not draw a labeled figure on the workstation")
+	// The workstation alone letters only with a model built for text.
+	for model, want := range map[string]bool{"z-image-turbo": false, "ernie-image-turbo": true} {
+		r := NewTestRouter(ProviderMFlux, map[string]Client{ProviderMFlux: workstationStub{&stubClient{provider: ProviderMFlux}, model}})
+		if r.CanLetter() != want {
+			t.Errorf("workstation on %s: CanLetter = %v, want %v", model, !want, want)
+		}
 	}
 }
 

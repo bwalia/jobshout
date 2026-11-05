@@ -5,7 +5,8 @@ import (
 	"testing"
 )
 
-func TestWritePlanCoverObjectsShapes(t *testing.T) {
+// A model's hint field decodes from any shape it is given.
+func TestFlexibleStringShapes(t *testing.T) {
 	cases := map[string]string{
 		`"lighthouse, hull"`:                                 "lighthouse, hull",
 		`["lighthouse", " hull ", ""]`:                       "lighthouse, hull",
@@ -14,12 +15,12 @@ func TestWritePlanCoverObjectsShapes(t *testing.T) {
 		`null`: "",
 	}
 	for in, want := range cases {
-		var p writePlan
-		if err := json.Unmarshal([]byte(`{"title":"t","cover_objects":`+in+`}`), &p); err != nil {
+		var got flexibleString
+		if err := json.Unmarshal([]byte(in), &got); err != nil {
 			t.Fatalf("%s: %v", in, err)
 		}
-		if string(p.CoverObjects) != want {
-			t.Errorf("%s: got %q, want %q", in, p.CoverObjects, want)
+		if string(got) != want {
+			t.Errorf("%s: got %q, want %q", in, got, want)
 		}
 	}
 }

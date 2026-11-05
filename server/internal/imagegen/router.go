@@ -146,10 +146,7 @@ func (r *Router) Generate(ctx context.Context, provider string, req GenerateRequ
 		if ctx.Err() != nil {
 			return nil, err
 		}
-		if req.NoFallback {
-			return nil, err
-		}
-		if fb := r.workstationFallback(); fb != nil {
+		if fb := r.workstationFallback(); fb != nil && (!req.NeedsText || clientLetters(fb)) {
 			if r.logger != nil {
 				r.logger.Warn("gemini image generation failed; falling back to workstation",
 					zap.Error(err), zap.String("fallback", fb.Provider()))
@@ -207,6 +204,29 @@ func (r *Router) workstationFallback() Client {
 		return c
 	}
 	return nil
+}
+
+// CanLetter reports whether some configured provider letters readable text
+// with the model it uses by default.
+func (r *Router) CanLetter() bool {
+	if r == nil {
+		return false
+	}
+	for _, c := range r.clients {
+		if clientLetters(c) {
+			return true
+		}
+	}
+	return false
+}
+
+// clientLetters reports whether c's default model letters readable text.
+func clientLetters(c Client) bool {
+	model := ""
+	if d, ok := c.(interface{ DefaultModel() string }); ok {
+		model = d.DefaultModel()
+	}
+	return Letters(c.Provider(), model)
 }
 
 // Providers lists the registered provider names, in a stable order.

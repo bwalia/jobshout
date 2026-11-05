@@ -53,9 +53,24 @@ type GenerateRequest struct {
 	// such concept rather than being faked with prompt text, which would change
 	// the meaning of the prompt the caller wrote.
 	NegativePrompt string
-	// NoFallback skips the workstation path after a Gemini failure. Use it
-	// when the picture must letter readable labels: z-image-turbo cannot.
-	NoFallback bool
+	// NeedsText marks a picture whose labels must be readable. After a Gemini
+	// failure it falls back to the workstation only when the workstation's
+	// model can letter them (see Letters): z-image-turbo cannot.
+	NeedsText bool
+}
+
+// Letters reports whether model, served by provider, renders readable
+// on-image text such as a diagram's labels. The hosted models do; on the
+// workstation only ERNIE-Image, built for posters and infographics, does.
+// z-image-turbo, FLUX and the rest letter a short title at best.
+func Letters(provider, model string) bool {
+	switch provider {
+	case ProviderGemini, ProviderOpenAI:
+		return true
+	case ProviderMFlux:
+		return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "ernie-image")
+	}
+	return false
 }
 
 // GenerateResponse holds the produced image and what produced it.

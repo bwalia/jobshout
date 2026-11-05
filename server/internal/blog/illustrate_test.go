@@ -96,7 +96,7 @@ func TestIllustrateBody_ReplacesBlocksWithImages(t *testing.T) {
 	if !strings.Contains(prompt, "informational") && !strings.Contains(prompt, "labels") {
 		t.Errorf("inline prompt is not asking for a labeled figure:\n%s", prompt)
 	}
-	if !fake.calls[0].NoFallback {
+	if !fake.calls[0].NeedsText {
 		t.Error("inline figures must not fall back to workstation diffusion")
 	}
 }
@@ -217,61 +217,6 @@ func TestEscapeAlt_NeutralisesBracketsAndNewlines(t *testing.T) {
 	}
 }
 
-func TestCoverPrompt_NamesASubjectAndPinsTheStyle(t *testing.T) {
-	got := coverPrompt("What the Gateway API Actually Changes", "kubernetes networking",
-		"operators move off kube-proxy", "", "", "")
-	if !strings.Contains(got, "kubernetes networking") {
-		t.Errorf("prompt lost the topic subject: %q", got)
-	}
-	if !strings.Contains(got, "operators move off kube-proxy") {
-		t.Errorf("prompt should include the article angle: %q", got)
-	}
-	// Short title lettering is intentional for z-image-turbo dark covers.
-	if !strings.Contains(got, `"WHAT THE GATEWAY API ACTUALLY"`) {
-		t.Errorf("prompt should letter a ≤5-word title: %q", got)
-	}
-	if !strings.Contains(got, "charcoal navy") || !strings.Contains(got, "dark-mode") {
-		t.Errorf("prompt should pin the dark cover template: %q", got)
-	}
-	if !strings.Contains(strings.ToLower(got), "flat vector") {
-		t.Errorf("prompt lost the flat vector style: %q", got)
-	}
-	if !strings.Contains(got, "16:9") {
-		t.Errorf("prompt should ask for a wide cover: %q", got)
-	}
-	if !strings.Contains(got, "LEFT") {
-		t.Errorf("prompt should place title text on the left: %q", got)
-	}
-
-	fallback := coverPrompt("", "kubernetes networking", "", "", "", "")
-	if !strings.Contains(fallback, "kubernetes networking") {
-		t.Errorf("empty title should fall back to the topic: %q", fallback)
-	}
-	if !strings.Contains(fallback, `"KUBERNETES NETWORKING"`) {
-		t.Errorf("empty title should letter the topic as the title: %q", fallback)
-	}
-}
-
-func TestDeriveCoverBrief_DiffersByTopic(t *testing.T) {
-	m1, o1, _ := deriveCoverBrief("Gateway API Shifts Cluster Networking", "gateway api", "", "", "")
-	m2, o2, _ := deriveCoverBrief("Agentic AI in Production", "agentic ai", "", "", "")
-	if m1 == m2 || o1 == o2 {
-		t.Fatalf("different topics produced the same brief: %q/%q vs %q/%q", m1, o1, m2, o2)
-	}
-	if !strings.Contains(strings.ToLower(m1), "gateway") {
-		t.Errorf("gateway article metaphor = %q", m1)
-	}
-}
-
-func TestCoverTitleText_CapsAtFiveWords(t *testing.T) {
-	got := coverTitleText("What the Gateway API Actually Changes Today", "ignored")
-	if got != "WHAT THE GATEWAY API ACTUALLY" {
-		t.Errorf("title text = %q", got)
-	}
-}
-
-// A cover that was drawn but has nowhere to live is not a cover: the CMS would
-// receive an empty src.
 func TestGenerateCover_TreatsAnUnstorableImageAsFailure(t *testing.T) {
 	r := testRunner(&fakeIllustrator{enabled: true, noURL: true})
 
@@ -315,6 +260,40 @@ func TestGenerateCover_RecordsTheSeedForReproduction(t *testing.T) {
 	}
 	if call.Steps != coverSteps {
 		t.Errorf("cover steps = %d, want %d", call.Steps, coverSteps)
+	}
+}
+
+// A picture cover explains the article: its title and its idea as a diagram
+// labelled in the article's own terms, drawn only by a model that letters.
+func TestGenerateCover_LetteringModelDrawsTheArticlesIdea(t *testing.T) {
+	article := func() *GeneratedArticle {
+		return &GeneratedArticle{
+			Title: "Gateway API Replaces Ingress", Topic: "kubernetes networking",
+			Excerpt:    "Gateway API splits routing between platform and app teams [2].",
+			CoverScene: coverScene{Layout: layoutHub, Labels: []string{"Gateway API", "GatewayClass", "Gateway", "HTTPRoute", "GRPCRoute"}},
+		}
+	}
+	fake := &fakeIllustrator{enabled: true}
+	if err := testRunner(fake).generateCover(context.Background(), uuid.New(), article()); err != nil {
+		t.Fatal(err)
+	}
+	call := fake.calls[0]
+	for _, want := range []string{`"Gateway API Replaces Ingress"`, "- GatewayClass\n", "- GRPCRoute\n",
+		"one core connecting 4-6 things", "splits routing between platform and app teams.", "#7dd3fc"} {
+		if !strings.Contains(call.Prompt, want) {
+			t.Errorf("cover prompt lacks %q:\n%s", want, call.Prompt)
+		}
+	}
+	if strings.Contains(call.Prompt, "[2]") || !call.NeedsText {
+		t.Errorf("citation in prompt or NeedsText unset (%v):\n%s", call.NeedsText, call.Prompt)
+	}
+
+	// Without a model that letters, a picture cover is the diagram.
+	plain := testRunner(&noLetterIllustrator{fakeIllustrator{enabled: true}})
+	plain.cfg.CoverStyle = CoverStylePicture
+	plain.covers = newMemCovers()
+	if plain.coverPictures() || !plain.canDrawCover() {
+		t.Error("picture style without lettering must draw the diagram")
 	}
 }
 

@@ -238,7 +238,9 @@ ai:
   imageTimeout: "30m"
   imageOpenaiModel: "gpt-image-1"
   # Tried first when GEMINI_API_KEY is set; mflux (imageBaseURL) is the fallback.
-  imageGeminiModel: "gemini-3.1-flash-lite-image"
+  # Nano Banana Pro: the most legible lettering for picture covers and figures
+  # (~$0.13 an image, no free tier). gemini-nano-banana-2.1 is the cheaper one.
+  imageGeminiModel: "gemini-3-pro-image"
   geminiBaseURL: "https://generativelanguage.googleapis.com"
   # Text model for agents set to the gemini provider (same GEMINI_API_KEY).
   geminiModel: "gemini-flash-latest"
@@ -249,9 +251,11 @@ ai:
   # generation stays available on demand either way.
   blogCoverImages: false
   # What a cover is. "diagram": the article's idea drawn as a vector diagram
-  # (no GPU, needs only the image store). "picture": a generated image, which
-  # also needs blogCoverImages. Body figures follow blogCoverImages either way.
-  blogCoverStyle: diagram
+  # (no GPU, needs only the image store). "picture": the article's title and
+  # idea as a lettered infographic, drawn only by a model that letters text
+  # (Gemini, or imageModel ernie-image-turbo); with none it is the diagram.
+  # Needs blogCoverImages. Body figures follow blogCoverImages either way.
+  blogCoverStyle: picture
   # How long a running row may sit without a heartbeat before the reconciler
   # marks it failed. Must outlast a legitimate long LLM call. Max runtime is
   # the wall-clock budget PER ARTICLE (a run gets it times its article count);

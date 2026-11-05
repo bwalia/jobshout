@@ -160,8 +160,8 @@ func coverSceneFor(a *GeneratedArticle) coverScene {
 var percentStat = regexp.MustCompile(`[-+−]?\d{1,3}(?:\.\d+)?\s?%`)
 
 // deriveCoverScene picks a layout and labels from article text when no plan
-// supplied them. Heuristic, not an LLM call, for the same reason as
-// deriveCoverBrief: redrawing old covers must not need a model round-trip.
+// supplied them. Heuristic, not an LLM call: redrawing old covers must not
+// need a model round-trip.
 func deriveCoverScene(title, topic, angle, excerpt, markdown string) coverScene {
 	head := strings.ToLower(strings.Join([]string{title, topic}, " "))
 	blob := strings.ToLower(strings.Join([]string{title, topic, angle, excerpt}, " "))

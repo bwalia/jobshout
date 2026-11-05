@@ -37,6 +37,9 @@ type MFluxClient struct {
 	httpClient   *http.Client
 }
 
+// DefaultModel is the model a request that names none is drawn with.
+func (c *MFluxClient) DefaultModel() string { return c.defaultModel }
+
 // NewMFluxClient builds a client for the image service at baseURL.
 //
 // An empty secret means no gateway — a service running on the same machine as
