@@ -78,3 +78,45 @@ func TestParseCreatedTime(t *testing.T) {
 		t.Fatal("expected parse")
 	}
 }
+
+// Form leads follow Graph's next link to the limit, with our token and host,
+// never the token or host in the link.
+func TestClientListLeadsPages(t *testing.T) {
+	var srvURL string
+	var pages []string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v21.0/form9/leads", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		pages = append(pages, q.Get("after"))
+		if q.Get("access_token") != "tok" || q.Get("fields") == "" {
+			t.Errorf("page query = %s", r.URL.RawQuery)
+		}
+		lead := func(id string) map[string]any {
+			return map[string]any{"id": id, "created_time": "2026-10-01T12:00:00+0000"}
+		}
+		body := map[string]any{"data": []map[string]any{lead("l3"), lead("l2")},
+			"paging": map[string]any{"next": "https://graph.example/v21.0/form9/leads?fields=id&limit=2&after=c2&access_token=leaked"}}
+		if q.Get("after") == "c2" {
+			body = map[string]any{"data": []map[string]any{lead("l1"), lead("l0")},
+				"paging": map[string]any{"next": srvURL + "/v21.0/form9/leads?after=c3"}}
+		}
+		_ = json.NewEncoder(w).Encode(body)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	srvURL = srv.URL
+	c := NewClient("v21.0")
+	c.BaseURL, c.HTTP = srv.URL, srv.Client()
+
+	leads, err := c.ListLeads(context.Background(), "form9", "tok", nil, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, l := range leads {
+		ids = append(ids, l.ID)
+	}
+	if strings.Join(ids, ",") != "l3,l2,l1" || strings.Join(pages, ",") != ",c2" {
+		t.Fatalf("leads = %v pages = %v", ids, pages)
+	}
+}
