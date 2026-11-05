@@ -148,10 +148,10 @@ ai:
   # Ollama model. Runtime stays generous while Gemini timings are measured.
   blogMaxRuntime: "120m"
   imageBaseURL: "https://images.workstation.co.uk"
-  # The workstation's default image model. It cannot letter labels, so picture
-  # covers fall back to the diagram unless Gemini draws them; ernie-image-turbo
-  # (31.6 GB, download it on the workstation first) letters them.
-  imageModel: "z-image-turbo"
+  # Letters labels, so picture covers and figures can use the workstation
+  # (~6 min a cover). Its weights are in the workstation's HF cache; a model
+  # named here that is not would be downloaded inside the first request.
+  imageModel: "ernie-image-turbo"
   imageTimeout: "30m"
   # On. images.workstation.co.uk is registered on the edge behind the JWT
   # gateway. int is the ring where a cover is worth watching before the rest

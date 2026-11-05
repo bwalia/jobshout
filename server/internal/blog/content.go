@@ -54,7 +54,7 @@ type GeneratedArticle struct {
 	CoverImageHeight   int
 
 	// Cover brief from the plan step. CoverAngle is the article's one-sentence
-	// angle: a cover's gist when the article has no excerpt.
+	// angle; redrawing a cover derives its scene from it.
 	CoverAngle  string
 	CoverAccent string
 	// CoverScene is the diagram a drawn cover shows (layout + labels). Empty

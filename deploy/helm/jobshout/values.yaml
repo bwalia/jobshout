@@ -233,7 +233,7 @@ ai:
   # the workstation host is registered on the edge.
   imageProvider: mflux
   imageBaseURL: ""
-  imageModel: "z-image-turbo"
+  imageModel: "ernie-image-turbo"
   # Covers at 1536×864 / 28 steps need headroom past a cold qwen load.
   imageTimeout: "30m"
   imageOpenaiModel: "gpt-image-1"

@@ -279,13 +279,15 @@ func TestGenerateCover_LetteringModelDrawsTheArticlesIdea(t *testing.T) {
 	}
 	call := fake.calls[0]
 	for _, want := range []string{`"Gateway API Replaces Ingress"`, "- GatewayClass\n", "- GRPCRoute\n",
-		"one core connecting 4-6 things", "splits routing between platform and app teams.", "#7dd3fc"} {
+		"one core connecting things", `centre, a large node labelled "Gateway API"`, "exactly 4 smaller nodes", "#7dd3fc"} {
 		if !strings.Contains(call.Prompt, want) {
 			t.Errorf("cover prompt lacks %q:\n%s", want, call.Prompt)
 		}
 	}
-	if strings.Contains(call.Prompt, "[2]") || !call.NeedsText {
-		t.Errorf("citation in prompt or NeedsText unset (%v):\n%s", call.NeedsText, call.Prompt)
+	// A diffusion model letters every word it is given: no excerpt, no
+	// "do not print" asides.
+	if strings.Contains(call.Prompt, "splits routing") || strings.Contains(call.Prompt, "(labels =") || !call.NeedsText {
+		t.Errorf("prompt carries text not meant for the cover, or NeedsText unset (%v):\n%s", call.NeedsText, call.Prompt)
 	}
 
 	// Without a model that letters, a picture cover is the diagram.

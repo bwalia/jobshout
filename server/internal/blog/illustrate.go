@@ -96,8 +96,10 @@ const coverMaxAttempts = 3
 // Banana, ERNIE-Image): the article's title over its idea drawn as one
 // labelled diagram, in the article's own terms (the cover scene), so the card
 // says what the piece argues. The house style is fixed, so covers read as one
-// series on the listing page; gist steers the icons and is not printed.
-func infographicCoverPrompt(title, gist string, scene coverScene, accent string) string {
+// series on the listing page. Every word in the prompt may end up printed —
+// diffusion models letter what they read, "do not print" included — so it
+// holds only the words the cover should show.
+func infographicCoverPrompt(title string, scene coverScene, accent string) string {
 	var b strings.Builder
 	b.WriteString("A 16:9 cover image for a technical blog article. It explains the article at a glance, " +
 		"like a well-designed infographic; it is not decoration.\n\n")
@@ -105,24 +107,37 @@ func infographicCoverPrompt(title, gist string, scene coverScene, accent string)
 	if scene.Eyebrow != "" {
 		fmt.Fprintf(&b, "Small uppercase tag above the headline, in the accent colour: %q\n", scene.Eyebrow)
 	}
-	how := string(scene.Layout)
+	// The guide line is "what it shows (labels = their roles; extras)"; the
+	// extras carry examples a diffusion model would letter.
+	how, roles := string(scene.Layout), "in this order"
 	for _, line := range strings.Split(coverLayoutGuide, "\n") {
 		if rest, ok := strings.CutPrefix(line, "- "+how+": "); ok {
-			how = rest
+			how, roles, _ = strings.Cut(rest, " (labels = ")
+			roles, _, _ = strings.Cut(strings.TrimSuffix(roles, ")"), ";")
+			roles, _, _ = strings.Cut(roles, ", optionally")
 		}
 	}
+	// A range ("4-6 things") invites the model to draw more parts than there
+	// are labels and to fill them with repeats; it is told the exact count.
+	how, roles = labelRange.ReplaceAllString(how, ""), labelRange.ReplaceAllString(roles, "")
 	fmt.Fprintf(&b, "\nBeside the headline, one clear diagram of the article's idea: %s.\n", how)
-	if len(scene.Labels) > 0 {
-		b.WriteString("Label it with exactly these words, each spelled exactly, with a simple flat icon beside each showing what it is:\n")
-		for _, l := range scene.Labels {
-			fmt.Fprintf(&b, "- %s\n", l)
-		}
+	labels := scene.Labels
+	switch {
+	case len(labels) == 0:
+	case scene.Layout == layoutHub && len(labels) > 1:
+		fmt.Fprintf(&b, "In its centre, a large node labelled %q. Around it, exactly %d smaller nodes, "+
+			"no more, each labelled once in large clear type, spelled exactly, with a simple flat icon:\n",
+			labels[0], len(labels)-1)
+		labels = labels[1:]
+	default:
+		fmt.Fprintf(&b, "Exactly %d labelled parts, no more, %s, each labelled once in large clear type, "+
+			"spelled exactly, with a simple flat icon:\n", len(labels), roles)
+	}
+	for _, l := range labels {
+		fmt.Fprintf(&b, "- %s\n", l)
 	}
 	if scene.Stat != "" {
 		fmt.Fprintf(&b, "A large callout figure in the accent colour: %q\n", scene.Stat)
-	}
-	if gist = strings.TrimSpace(spacedCitation.ReplaceAllString(gist, "")); gist != "" {
-		fmt.Fprintf(&b, "\nWhat the article argues, to choose the icons and arrows (do not print this): %s\n", truncateRunes(gist, 400))
 	}
 	pal, ok := fallbackPalettes[accent]
 	if !ok {
@@ -151,13 +166,12 @@ func accentForTopic(title, topic, angle string) string {
 	}
 }
 
+// labelRange is a count range in the layout guide, such as "4-6 ".
+var labelRange = regexp.MustCompile(`\d+-\d+ `)
+
 // citationMark strips [1]-style citation markers so they do not leak into
 // an image prompt.
 var citationMark = regexp.MustCompile(`\[\d+\]`)
-
-// spacedCitation is a citation marker with the space before it, so stripping
-// "Ingress [2]." leaves "Ingress." rather than "Ingress .".
-var spacedCitation = regexp.MustCompile(`\s*\[\d+\]`)
 
 // ensureIllustrationFences adds 1–2 informational figures when the writer
 // omitted them and the section has enough facts to letter. Mermaid diagrams
@@ -436,11 +450,7 @@ func (r *Runner) generateCover(ctx context.Context, orgID uuid.UUID, a *Generate
 		a.CoverAccent = accentForTopic(a.Title, a.Topic, a.CoverAngle)
 	}
 	a.CoverScene = coverSceneFor(a)
-	gist := a.Excerpt
-	if strings.TrimSpace(gist) == "" {
-		gist = a.CoverAngle
-	}
-	prompt := infographicCoverPrompt(a.Title, gist, a.CoverScene, a.CoverAccent)
+	prompt := infographicCoverPrompt(a.Title, a.CoverScene, a.CoverAccent)
 
 	var lastErr error
 	for attempt := 1; attempt <= coverMaxAttempts; attempt++ {

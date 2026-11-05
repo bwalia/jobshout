@@ -92,7 +92,12 @@ icons) is fixed in `infographicCoverPrompt`, so covers read as one series.
    `GEMINI_API_KEY` is set. Image output has no free tier: the key needs billing.
 2. Otherwise, or when Gemini fails, the workstation, but only with a model that
    letters (`imagegen.Letters`: ERNIE-Image, Apache-2.0, close to Nano Banana 2
-   on LongText-Bench). With `IMAGE_DEFAULT_MODEL=z-image-turbo` it is skipped.
+   on LongText-Bench). Every ring sets `ai.imageModel: ernie-image-turbo`; its
+   weights (22 GB, no prompt enhancer) are in the workstation's HF cache. About
+   6 minutes a cover beside Ollama; headline and tag are reliable, small labels
+   that look alike ("Gateway", "GatewayClass") can still slip. The prompt holds
+   only words meant for the cover: a diffusion model letters whatever it reads.
+   With `z-image-turbo` this step is skipped.
 3. With neither, or when drawing fails, the diagram is filed: a cover whose
    labels are gibberish is worse than the diagram.
 
