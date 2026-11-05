@@ -27,11 +27,8 @@ type writePlan struct {
 	// into the draft prompt to keep a long article pointed the same way.
 	Angle    string   `json:"angle"`
 	Sections []string `json:"sections"`
-	// Cover fields keep the house style (charcoal navy, teal/coral) while
-	// giving each article its own metaphor so covers do not look identical.
-	CoverMetaphor string         `json:"cover_metaphor"`
-	CoverObjects  flexibleString `json:"cover_objects"`
-	CoverAccent   string         `json:"cover_accent"`
+	// CoverAccent is the cover's one accent colour (fallbackPalettes).
+	CoverAccent string `json:"cover_accent"`
 	// CoverScene is the diagram a drawn cover shows. Decoded tolerantly: an
 	// odd shape leaves it empty and the cover derives one from the article.
 	CoverScene coverScene `json:"cover_scene"`
@@ -128,12 +125,8 @@ Decide:
    %s
 2. One sentence on the angle: what a reader gets from this piece.
 3. %s section headings that deliver that angle.
-4. A cover brief grounded in THIS article's angle and findings — one concrete
-   visual metaphor unique to this title, one or two focal objects that could
-   not illustrate a different article on a neighbouring topic (not generic
-   "tools, documents, agents"), and a one-word accent note (e.g. "amber",
-   "ice", "copper") that still sits with teal/coral. Listing cards share a
-   house style; only the metaphor and objects make each cover distinct.
+4. The cover's accent colour, one word that suits the subject: amber,
+   emerald, ice, violet or copper.
 5. A cover diagram: the one layout below that best pictures this article's
    argument (do not default to flow: use flow only when the point is a
    sequence of steps), with 2-6 labels of 1-3 words each in this article's own terms
@@ -144,7 +137,7 @@ Decide:
 The title must be about the TOPIC given above; research that wandered off it is not a reason to change subject.
 
 Respond with JSON only, in exactly this shape:
-{"title": "...", "angle": "...", "sections": ["...", "..."], "cover_metaphor": "...", "cover_objects": "...", "cover_accent": "...", "cover_scene": {"layout": "...", "labels": ["...", "..."], "stat": "", "eyebrow": "..."}%s}`,
+{"title": "...", "angle": "...", "sections": ["...", "..."], "cover_accent": "...", "cover_scene": {"layout": "...", "labels": ["...", "..."], "stat": "", "eyebrow": "..."}%s}`,
 		reader.PlanningLine(),
 		brief.Topic,
 		guidanceOrNone(brief.Context),

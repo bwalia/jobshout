@@ -3,6 +3,8 @@ package blog
 import (
 	"fmt"
 	"strings"
+
+	"github.com/jobshout/server/internal/imagegen"
 )
 
 // illustrationKind is the type of informational figure a fence asks for.
@@ -411,13 +413,13 @@ func salvageIllustration(kind illustrationKind, desc string) (illustrationKind, 
 }
 
 // imageRendersLabels reports whether a finished image came from a model that
-// can letter a table or flowchart. Workstation diffusion (mflux / z-image)
-// cannot; putting its output in the article is the original bug.
+// can letter a table or flowchart. Workstation diffusion mostly cannot
+// (z-image-turbo); putting its output in the article is the original bug.
 func imageRendersLabels(provider, model string) bool {
 	p := strings.ToLower(strings.TrimSpace(provider))
 	m := strings.ToLower(strings.TrimSpace(model))
-	if p == "mflux" {
-		return false
+	if p == imagegen.ProviderMFlux {
+		return imagegen.Letters(p, m)
 	}
 	return !strings.Contains(m, "z-image") && !strings.Contains(m, "qwen-image") && !strings.Contains(m, "flux")
 }

@@ -10,7 +10,8 @@ ai:
   chatModelFallback: "llama3.1:8b"
   mailModel: "muse-glimmer:latest"
   imageBaseURL: "https://images.workstation.co.uk"
-  imageModel: "z-image-turbo"
+  # Letters labels, so picture covers and figures can use the workstation.
+  imageModel: "ernie-image-turbo"
   blogCoverImages: true
   # Article writer on qwen3.8, as proved on int (see values-int.yaml): 120m per
   # article, 45m per call, 16384-token window for prose. Research and the JSON

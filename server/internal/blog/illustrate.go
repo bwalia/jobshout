@@ -34,10 +34,10 @@ type IllustrationRequest struct {
 	// RunID is the article run the picture is for, recorded on the image so
 	// it can open its article. Nil outside a run.
 	RunID *uuid.UUID
-	// NoFallback skips the workstation (mflux) path. Labeled figures become
-	// unreadable lettering on z-image-turbo; an article without a picture is
-	// better than one with that picture.
-	NoFallback bool
+	// NeedsText marks a picture whose labels must be readable: it is never
+	// drawn by a model that cannot letter them (z-image-turbo), because an
+	// article without a picture is better than one with that picture.
+	NeedsText bool
 }
 
 // Illustration is what came back.
@@ -92,178 +92,62 @@ var illustrationFence = regexp.MustCompile("(?s)```illustration(?:[ \t]+([A-Za-z
 // holding a blog run open through a dead image host.
 const coverMaxAttempts = 3
 
-// coverTitleMaxWords caps on-image title lettering. Z-Image-Turbo renders short
-// quoted titles reliably; long headlines turn into gibberish.
-const coverTitleMaxWords = 5
-
-// coverSubtitleMaxWords keeps the subtitle thin and readable under the title.
-const coverSubtitleMaxWords = 6
-
-// coverTitleText is the large on-image headline: at most coverTitleMaxWords,
-// uppercased for cover contrast.
-func coverTitleText(title, topic string) string {
-	s := strings.TrimSpace(title)
-	if s == "" {
-		s = strings.TrimSpace(topic)
+// infographicCoverPrompt is the cover for a model that letters text (Nano
+// Banana, ERNIE-Image): the article's title over its idea drawn as one
+// labelled diagram, in the article's own terms (the cover scene), so the card
+// says what the piece argues. The house style is fixed, so covers read as one
+// series on the listing page. Every word in the prompt may end up printed —
+// diffusion models letter what they read, "do not print" included — so it
+// holds only the words the cover should show.
+func infographicCoverPrompt(title string, scene coverScene, accent string) string {
+	var b strings.Builder
+	b.WriteString("A 16:9 cover image for a technical blog article. It explains the article at a glance, " +
+		"like a well-designed infographic; it is not decoration.\n\n")
+	fmt.Fprintf(&b, "Headline, top left, large bold white sans-serif, spelled exactly: %q\n", strings.TrimSpace(title))
+	if scene.Eyebrow != "" {
+		fmt.Fprintf(&b, "Small uppercase tag above the headline, in the accent colour: %q\n", scene.Eyebrow)
 	}
-	if s == "" {
-		s = "Tech Briefing"
-	}
-	words := strings.Fields(s)
-	if len(words) > coverTitleMaxWords {
-		words = words[:coverTitleMaxWords]
-	}
-	return strings.ToUpper(strings.Join(words, " "))
-}
-
-// coverSubtitleText is the thin accent line under the title.
-func coverSubtitleText(title, topic string) string {
-	topic = strings.TrimSpace(topic)
-	title = strings.TrimSpace(title)
-	s := topic
-	if s == "" || strings.EqualFold(s, title) {
-		s = "A closer look"
-	}
-	words := strings.Fields(s)
-	if len(words) > coverSubtitleMaxWords {
-		words = words[:coverSubtitleMaxWords]
-	}
-	// Title-case-ish without pulling in cases: leave as written for readability.
-	return strings.Join(words, " ")
-}
-
-// coverPrompt fills the dark-mode editorial cover template for z-image-turbo.
-//
-// Turbo ignores separate negative prompts, so exclusions and exact title
-// strings live in the positive prompt. The article's angle and cover brief
-// drive a unique metaphor; the title (trimmed) is lettered on the left.
-// Two articles must not share the same focal objects — angle + metaphor are
-// what keep listing cards visually distinct.
-func coverPrompt(title, topic, angle, metaphor, objects, accent string) string {
-	topic = strings.TrimSpace(topic)
-	title = strings.TrimSpace(title)
-	angle = strings.TrimSpace(angle)
-	metaphor = strings.TrimSpace(metaphor)
-	objects = strings.TrimSpace(objects)
-	accent = strings.TrimSpace(accent)
-
-	subject := topic
-	if subject == "" {
-		subject = title
-	}
-	if subject == "" {
-		subject = "software engineering"
-	}
-	if angle != "" {
-		subject = subject + " — " + angle
-	}
-
-	headline := coverTitleText(title, topic)
-	subtitle := coverSubtitleText(title, topic)
-
-	focal := "a concrete visual metaphor unique to this article's angle"
-	if metaphor != "" {
-		focal = metaphor
-	}
-	if objects != "" {
-		focal += " — " + objects
-	} else if metaphor == "" {
-		focal += " drawn from the article's concrete claims, not a generic tech collage"
-	}
-	accentClause := "small coral accent dots and thin geometric lines floating nearby"
-	if accent != "" {
-		accentClause = "small " + accent + " and coral accent dots and thin geometric lines floating nearby"
-	}
-
-	return fmt.Sprintf(
-		"A high-quality, ultra-detailed modern editorial blog cover illustration "+
-			"about %s on a deep charcoal navy background with a subtle dark gradient. "+
-			"Large bold white sans-serif title text on the LEFT side that says %q, "+
-			"with a smaller thin teal subtitle below it that says %q, "+
-			"both razor-sharp, crisp, high contrast, and easy to read. "+
-			"On the opposite side, one or two glowing visual objects as the focal point — "+
-			"%s — "+
-			"emitting soft teal and cyan light that gently illuminates the dark surroundings, "+
-			"%s. "+
-			"Flat vector illustration style with finely detailed subtle grain texture and smooth polished gradient shading, "+
-			"soft rim glow around the subject, gentle ambient light falloff, crisp clean edges, "+
-			"meticulous professional finish, balanced asymmetric composition, wide 16:9 landscape framing, "+
-			"sharp high-resolution rendering, premium dark-mode tech-blog aesthetic, "+
-			"uncluttered layout with generous breathing room around the text. "+
-			"No logos, no watermarks, no UI chrome, no extra text beyond the title and subtitle.",
-		subject, headline, subtitle, focal, accentClause,
-	)
-}
-
-// ensureCoverBrief fills metaphor / objects / accent from the finished article
-// when the plan step left them empty — regenerating a cover for an already
-// written piece, or a plan that skipped the brief. It prefers concrete nouns
-// from the title and excerpt over a generic "tools and agents" scene so
-// listing cards stay distinct.
-func ensureCoverBrief(a *GeneratedArticle) {
-	if a == nil {
-		return
-	}
-	if strings.TrimSpace(a.CoverMetaphor) != "" && strings.TrimSpace(a.CoverObjects) != "" {
-		if strings.TrimSpace(a.CoverAccent) == "" {
-			a.CoverAccent = accentForTopic(a.Title, a.Topic, a.CoverAngle)
-		}
-		return
-	}
-	metaphor, objects, accent := deriveCoverBrief(a.Title, a.Topic, a.CoverAngle, a.Excerpt, a.Markdown)
-	if strings.TrimSpace(a.CoverMetaphor) == "" {
-		a.CoverMetaphor = metaphor
-	}
-	if strings.TrimSpace(a.CoverObjects) == "" {
-		a.CoverObjects = objects
-	}
-	if strings.TrimSpace(a.CoverAccent) == "" {
-		a.CoverAccent = accent
-	}
-}
-
-// deriveCoverBrief invents a unique cover brief from article text when none
-// was planned. Heuristic, not an LLM call: regenerating six covers must not
-// depend on a second model round-trip.
-func deriveCoverBrief(title, topic, angle, excerpt, markdown string) (metaphor, objects, accent string) {
-	blob := strings.ToLower(strings.Join([]string{title, topic, angle, excerpt, firstParagraph(markdown)}, " "))
-	accent = accentForTopic(title, topic, angle)
-
-	type hint struct {
-		needles []string
-		meta    string
-		objs    string
-	}
-	hints := []hint{
-		{[]string{"gateway api", "gateway", "kube-proxy", "ingress"}, "a luminous API gateway arch routing traffic past a fading proxy node", "gateway arch, route lines, fading kube-proxy glyph"},
-		{[]string{"resilience hub", "resilience", "aws"}, "a fortified hub with radiating health spokes across workload islands", "resilience hub core, workload islands, green health spokes"},
-		{[]string{"unit test", "reliability", "regulated", "chaos"}, "a layered shield over a live system with fault injectors at the edge", "reliability shield, live service glyph, fault-injection bolts"},
-		{[]string{"agentic", "autonomous", "guardrail"}, "autonomous agents orbiting a goal with a guardrail ring", "agent orbs, goal beacon, guardrail ring"},
-		{[]string{"mcp", "model context", "tool"}, "a model-context protocol bus linking tools as glowing sockets", "MCP bus, tool sockets, audited connection lines"},
-		{[]string{"devops", "double-edged", "ai's", "cicd", "ci/cd"}, "a double-edged AI blade cutting a delivery pipeline — one edge speeds, one edge risks", "AI blade, pipeline stages, warning and boost accents"},
-		{[]string{"observability", "prometheus", "otel", "opentelemetry"}, "a single pane of glass gathering metrics, logs and traces as light streams", "observability pane, metric streams, trace lattice"},
-		{[]string{"vault", "secret", "tenant"}, "sealed vault chambers with cryptographically isolated tenant keys", "vault chambers, tenant keys, isolation barriers"},
-		{[]string{"kubernetes", "cluster", "networking"}, "a cluster fabric of pods linked by glowing network paths", "pods, network paths, control-plane core"},
-	}
-	for _, h := range hints {
-		for _, n := range h.needles {
-			if strings.Contains(blob, n) {
-				return h.meta, h.objs, accent
-			}
+	// The guide line is "what it shows (labels = their roles; extras)"; the
+	// extras carry examples a diffusion model would letter.
+	how, roles := string(scene.Layout), "in this order"
+	for _, line := range strings.Split(coverLayoutGuide, "\n") {
+		if rest, ok := strings.CutPrefix(line, "- "+how+": "); ok {
+			how, roles, _ = strings.Cut(rest, " (labels = ")
+			roles, _, _ = strings.Cut(strings.TrimSuffix(roles, ")"), ";")
+			roles, _, _ = strings.Cut(roles, ", optionally")
 		}
 	}
-	// Last resort: use the headline nouns so two unrelated topics still differ.
-	words := strings.Fields(coverTitleText(title, topic))
-	if len(words) > 3 {
-		words = words[:3]
+	// A range ("4-6 things") invites the model to draw more parts than there
+	// are labels and to fill them with repeats; it is told the exact count.
+	how, roles = labelRange.ReplaceAllString(how, ""), labelRange.ReplaceAllString(roles, "")
+	fmt.Fprintf(&b, "\nBeside the headline, one clear diagram of the article's idea: %s.\n", how)
+	labels := scene.Labels
+	switch {
+	case len(labels) == 0:
+	case scene.Layout == layoutHub && len(labels) > 1:
+		fmt.Fprintf(&b, "In its centre, a large node labelled %q. Around it, exactly %d smaller nodes, "+
+			"no more, each labelled once in large clear type, spelled exactly, with a simple flat icon:\n",
+			labels[0], len(labels)-1)
+		labels = labels[1:]
+	default:
+		fmt.Fprintf(&b, "Exactly %d labelled parts, no more, %s, each labelled once in large clear type, "+
+			"spelled exactly, with a simple flat icon:\n", len(labels), roles)
 	}
-	label := strings.ToLower(strings.Join(words, " "))
-	if label == "" {
-		label = "the topic"
+	for _, l := range labels {
+		fmt.Fprintf(&b, "- %s\n", l)
 	}
-	return "a glowing emblem for " + label + " as a unique focal sculpture",
-		"emblem of " + label + ", soft teal light ribbons",
-		accent
+	if scene.Stat != "" {
+		fmt.Fprintf(&b, "A large callout figure in the accent colour: %q\n", scene.Stat)
+	}
+	pal, ok := fallbackPalettes[accent]
+	if !ok {
+		accent, pal = "copper", fallbackPalettes["copper"]
+	}
+	fmt.Fprintf(&b, "\nHouse style, the same on every cover in this series: deep navy background, one %s accent colour "+
+		"(#%02x%02x%02x), white and light-grey text, flat vector icons with thin outlines, a faint grid, generous margins, "+
+		"crisp edges, high contrast, legible as a small thumbnail.\n", accent, pal[2].R, pal[2].G, pal[2].B)
+	b.WriteString("No other text, no numbers beyond those given, no logos, brand marks, watermarks, people or photographs.")
+	return b.String()
 }
 
 func accentForTopic(title, topic, angle string) string {
@@ -281,6 +165,9 @@ func accentForTopic(title, topic, angle string) string {
 		return "copper"
 	}
 }
+
+// labelRange is a count range in the layout guide, such as "4-6 ".
+var labelRange = regexp.MustCompile(`\d+-\d+ `)
 
 // citationMark strips [1]-style citation markers so they do not leak into
 // an image prompt.
@@ -547,30 +434,35 @@ func firstSentence(s string) string {
 	return strings.TrimSpace(cut)
 }
 
-// generateCover draws an article's cover image.
+// generateCover draws an article's cover as a picture: its title over its
+// idea as a labelled diagram (infographicCoverPrompt).
 //
 // The model is left unset so the platform default applies: Gemini first when
-// a key is set, then mflux on the workstation. Naming z-image-turbo here used
-// to skip Gemini. Steps stay set so a workstation fallback still gets the
-// turbo step count.
+// a key is set, then the workstation, but only a workstation model that
+// letters the labels (NeedsText). Steps suit a turbo model (ERNIE-Image-Turbo);
+// Gemini ignores them.
 //
 // Transient upstream failures (WSL-proxy 502s, busy GPU, timeouts) are retried
 // with backoff. A failure after every attempt is returned, not swallowed — the
 // caller decides whether an article without a picture is still an article.
 func (r *Runner) generateCover(ctx context.Context, orgID uuid.UUID, a *GeneratedArticle) error {
-	ensureCoverBrief(a)
-	prompt := coverPrompt(a.Title, a.Topic, a.CoverAngle, a.CoverMetaphor, a.CoverObjects, a.CoverAccent)
+	if strings.TrimSpace(a.CoverAccent) == "" {
+		a.CoverAccent = accentForTopic(a.Title, a.Topic, a.CoverAngle)
+	}
+	a.CoverScene = coverSceneFor(a)
+	prompt := infographicCoverPrompt(a.Title, a.CoverScene, a.CoverAccent)
 
 	var lastErr error
 	for attempt := 1; attempt <= coverMaxAttempts; attempt++ {
 		img, err := r.images.Generate(ctx, IllustrationRequest{
-			OrgID:  orgID,
-			Prompt: prompt,
-			Width:  coverWidth,
-			Height: coverHeight,
-			Steps:  coverSteps,
-			Source: "blog_cover",
-			RunID:  a.RunID,
+			OrgID:     orgID,
+			Prompt:    prompt,
+			Width:     coverWidth,
+			Height:    coverHeight,
+			Steps:     coverSteps,
+			Source:    "blog_cover",
+			RunID:     a.RunID,
+			NeedsText: true,
 		})
 		if err == nil && img != nil && img.URL != "" {
 			a.CoverImageURL = img.URL
@@ -633,8 +525,6 @@ func (r *Runner) RegenerateCover(ctx context.Context, orgID uuid.UUID, a *Genera
 	}
 	// Force a fresh brief from the written piece so a missing or generic plan
 	// brief cannot keep producing the same fallback scene.
-	a.CoverMetaphor = ""
-	a.CoverObjects = ""
 	a.CoverAccent = ""
 	a.CoverScene = coverScene{}
 	if strings.TrimSpace(a.CoverAngle) == "" {
@@ -773,13 +663,13 @@ func (r *Runner) drawFigure(ctx context.Context, orgID uuid.UUID, runID *uuid.UU
 	if r.canLetterImages() {
 		width, height := inlineSize(kind)
 		img, err := r.images.Generate(ctx, IllustrationRequest{
-			OrgID:      orgID,
-			Prompt:     inlineImagePrompt(kind, description),
-			Width:      width,
-			Height:     height,
-			Source:     "blog_inline",
-			RunID:      runID,
-			NoFallback: true,
+			OrgID:     orgID,
+			Prompt:    inlineImagePrompt(kind, description),
+			Width:     width,
+			Height:    height,
+			Source:    "blog_inline",
+			RunID:     runID,
+			NeedsText: true,
 		})
 		switch {
 		case err != nil || img == nil || img.URL == "":

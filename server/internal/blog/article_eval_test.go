@@ -2,7 +2,6 @@ package blog
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -27,23 +26,6 @@ func TestEval_EnsureFencesUsesPlannedFigure(t *testing.T) {
 	}
 	if !strings.Contains(out, "Latency, operational cost") {
 		t.Fatalf("planned facts were not written:\n%s", out)
-	}
-}
-
-func TestEval_CoverObjectsAcceptsStringOrArray(t *testing.T) {
-	var asString writePlan
-	if err := json.Unmarshal([]byte(`{"title":"T","cover_objects":"lighthouse and hull"}`), &asString); err != nil {
-		t.Fatal(err)
-	}
-	if asString.CoverObjects.String() != "lighthouse and hull" {
-		t.Fatalf("string: %q", asString.CoverObjects)
-	}
-	var asArray writePlan
-	if err := json.Unmarshal([]byte(`{"title":"T","cover_objects":["lighthouse","hull silhouettes"]}`), &asArray); err != nil {
-		t.Fatal(err)
-	}
-	if asArray.CoverObjects.String() != "lighthouse, hull silhouettes" {
-		t.Fatalf("array: %q", asArray.CoverObjects)
 	}
 }
 
@@ -116,29 +98,6 @@ func TestEval_DraftWithFencesStillReplaced(t *testing.T) {
 	}
 	if !strings.Contains(out, "![A control plane reconciling desired state]") {
 		t.Fatalf("image missing:\n%s", out)
-	}
-}
-
-func TestEval_CoverPromptsShareHouseStyleAndDifferByMetaphor(t *testing.T) {
-	a := coverPrompt("Gateway Changes", "kubernetes networking",
-		"operators move off kube-proxy",
-		"a harbour lighthouse guiding container ships", "lighthouse and hull silhouettes", "ice")
-	b := coverPrompt("Postgres Vacuum", "database maintenance",
-		"keepers reclaim dead tuples without downtime",
-		"a clockwork broom sweeping parchment scrolls", "gears and a broom", "amber")
-
-	for _, p := range []string{a, b} {
-		for _, token := range []string{"charcoal navy", "LEFT", "teal", "coral", "Flat vector", "16:9"} {
-			if !strings.Contains(p, token) {
-				t.Errorf("house-style token %q missing from:\n%s", token, p)
-			}
-		}
-	}
-	if !strings.Contains(a, "lighthouse") || !strings.Contains(b, "broom") {
-		t.Fatal("each cover should carry its own metaphor")
-	}
-	if strings.Contains(a, "broom") || strings.Contains(b, "lighthouse") {
-		t.Fatal("metaphors leaked across topics")
 	}
 }
 

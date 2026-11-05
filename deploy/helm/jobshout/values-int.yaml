@@ -148,8 +148,10 @@ ai:
   # Ollama model. Runtime stays generous while Gemini timings are measured.
   blogMaxRuntime: "120m"
   imageBaseURL: "https://images.workstation.co.uk"
-  # Blog covers use z-image-turbo (dark editorial template, ~8 steps, ~1 min).
-  imageModel: "z-image-turbo"
+  # Letters labels, so picture covers and figures can use the workstation
+  # (~6 min a cover). Its weights are in the workstation's HF cache; a model
+  # named here that is not would be downloaded inside the first request.
+  imageModel: "ernie-image-turbo"
   imageTimeout: "30m"
   # On. images.workstation.co.uk is registered on the edge behind the JWT
   # gateway. int is the ring where a cover is worth watching before the rest

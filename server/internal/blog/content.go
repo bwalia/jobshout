@@ -53,13 +53,10 @@ type GeneratedArticle struct {
 	CoverImageWidth    int
 	CoverImageHeight   int
 
-	// Cover brief from the plan step — unique metaphor, shared house style.
-	// CoverAngle is the article's one-sentence angle; it steers the cover so
-	// two pieces on a similar topic still get different focal objects.
-	CoverAngle    string
-	CoverMetaphor string
-	CoverObjects  string
-	CoverAccent   string
+	// Cover brief from the plan step. CoverAngle is the article's one-sentence
+	// angle; redrawing a cover derives its scene from it.
+	CoverAngle  string
+	CoverAccent string
 	// CoverScene is the diagram a drawn cover shows (layout + labels). Empty
 	// means derive one from the written piece.
 	CoverScene coverScene
@@ -361,18 +358,16 @@ func (r *Runner) writeOne(
 	}
 
 	return &GeneratedArticle{
-		Topic:         brief.Topic,
-		Title:         plan.Title,
-		Markdown:      markdown,
-		References:    refs,
-		WordCount:     len(strings.Fields(markdown)),
-		CoverAngle:    plan.Angle,
-		CoverMetaphor: plan.CoverMetaphor,
-		CoverObjects:  plan.CoverObjects.String(),
-		CoverAccent:   plan.CoverAccent,
-		CoverScene:    plan.CoverScene,
-		Audience:      brief.Audience,
-		Industry:      brief.Industry,
+		Topic:       brief.Topic,
+		Title:       plan.Title,
+		Markdown:    markdown,
+		References:  refs,
+		WordCount:   len(strings.Fields(markdown)),
+		CoverAngle:  plan.Angle,
+		CoverAccent: plan.CoverAccent,
+		CoverScene:  plan.CoverScene,
+		Audience:    brief.Audience,
+		Industry:    brief.Industry,
 	}, nil
 }
 

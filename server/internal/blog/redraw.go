@@ -89,7 +89,7 @@ func (r *Runner) RedrawImages(ctx context.Context, orgID uuid.UUID, a *Generated
 
 	// The model's scene, held to the article's own words; an empty one falls
 	// back to the heuristic in coverSceneFor.
-	a.CoverMetaphor, a.CoverObjects, a.CoverAccent = "", "", ""
+	a.CoverAccent = ""
 	a.CoverScene = r.groundedCover(ctx, a.Title, md, scene)
 	if strings.TrimSpace(a.CoverAngle) == "" {
 		a.CoverAngle = strings.TrimSpace(a.Excerpt)

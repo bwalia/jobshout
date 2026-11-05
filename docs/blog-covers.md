@@ -79,15 +79,27 @@ Preview every layout from real posts:
 cd server && COVER_PREVIEW_DIR=/tmp/covers go test ./internal/blog -run TestDiagramCover
 ```
 
-### `picture`
+### `picture` (chart default)
 
-A generated image (needs `BLOG_COVER_IMAGES=true`):
+An infographic cover drawn by an image model that letters text (needs
+`BLOG_COVER_IMAGES=true`): the article's title, its eyebrow tag, and the same
+`cover_scene` as the diagram drawn as one labelled diagram with an icon per
+label, plus the stat if there is one. The excerpt steers the icons and is not
+printed. The house style (deep navy, one accent from `cover_accent`, flat
+icons) is fixed in `infographicCoverPrompt`, so covers read as one series.
 
-1. Plans a **cover brief** (`cover_metaphor`, `cover_objects`, `cover_accent`)
-   grounded in the article's angle — not a generic tech collage.
-2. Draws a 1536×864 cover (Gemini → mflux → OpenAI).
-3. Publishes it as OpsAPI `featured_image_url` (absolute URL), via the
-   guarantee above. If the picture cannot be drawn, the diagram is filed.
+1. Gemini (`IMAGE_GEMINI_MODEL`, Nano Banana Pro by default) when
+   `GEMINI_API_KEY` is set. Image output has no free tier: the key needs billing.
+2. Otherwise, or when Gemini fails, the workstation, but only with a model that
+   letters (`imagegen.Letters`: ERNIE-Image, Apache-2.0, close to Nano Banana 2
+   on LongText-Bench). Every ring sets `ai.imageModel: ernie-image-turbo`; its
+   weights (22 GB, no prompt enhancer) are in the workstation's HF cache. About
+   6 minutes a cover beside Ollama; headline and tag are reliable, small labels
+   that look alike ("Gateway", "GatewayClass") can still slip. The prompt holds
+   only words meant for the cover: a diffusion model letters whatever it reads.
+   With `z-image-turbo` this step is skipped.
+3. With neither, or when drawing fails, the diagram is filed: a cover whose
+   labels are gibberish is worse than the diagram.
 
 See [image-generation.md](./image-generation.md) for providers and rings.
 
@@ -108,8 +120,7 @@ Content-Type: application/json
 - With `sync_cms: true` and a stored `post_uuid`, OpsAPI
   `featured_image_url` is updated too (needs `cms:update` on the key).
 
-The regenerator derives a fresh metaphor from title, excerpt and body so two
-neighbouring topics never share the same focal objects.
+The regenerator derives a fresh scene from title, excerpt and body.
 
 ### Redraw all of an article's images
 
@@ -162,9 +173,9 @@ if CMS update lags.
 
 When cloning a writer for a site ([writer-agents.md](./writer-agents.md)):
 
-- Covers default to `diagram`, which needs no image provider. In-article
-  figures use a hosted image model that can letter labels (Gemini or OpenAI)
-  when one is configured, and are otherwise drawn as diagrams like the covers:
+- Covers are `picture` on the chart and fall back to `diagram`, which needs no
+  image provider. In-article figures use an image model that can letter labels
+  (Gemini, OpenAI, or ERNIE-Image on the workstation) when one is configured, and are otherwise drawn as diagrams like the covers:
   flow and process figures as steps, architecture and concept figures as a hub.
   Comparison figures need a lettering model (a comparison belongs in a table
   otherwise). `BLOG_COVER_IMAGES` turns on the hosted model and `picture` covers.
