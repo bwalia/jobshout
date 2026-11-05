@@ -8,9 +8,11 @@ package metalead
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/jobshout/server/internal/model"
 )
@@ -22,10 +24,10 @@ const (
 	IncludeInbox = "inbox"
 )
 
-// backfillPage is how many items each Graph list is read for: its first page,
-// newest first. Nested comments are read the same way per post.
-// ponytail: no paging.next; a launch reaches the newest 25 posts, threads and
-// tags. Follow paging if older items matter.
+// backfillPage is the page size each Graph list is read in, newest first, and
+// how many comments are read per post.
+// ponytail: a post's comments are its newest 25 (nested lists are not paged);
+// page them too if busy posts lose leads.
 const backfillPage = "25"
 
 type graphFrom struct {
@@ -47,15 +49,17 @@ type graphItem struct {
 	Permalink    string     `json:"permalink"`     // Instagram
 	CreatedTime  string     `json:"created_time"`  // Facebook
 	Timestamp    string     `json:"timestamp"`     // Instagram
+	UpdatedTime  string     `json:"updated_time"`  // conversation
 	Comments     *graphList `json:"comments"`
 	Messages     *graphList `json:"messages"`
 }
 
 type graphList struct {
-	Data []graphItem `json:"data"`
+	Data   []graphItem `json:"data"`
+	Paging graphPaging `json:"paging"`
 }
 
-func (g graphItem) when() string { return firstNonEmpty(g.CreatedTime, g.Timestamp) }
+func (g graphItem) when() string { return firstNonEmpty(g.CreatedTime, g.Timestamp, g.UpdatedTime) }
 
 func (g graphItem) children(l *graphList) []graphItem {
 	if l == nil {
@@ -73,6 +77,13 @@ func asInteraction(src, account string, g graphItem, link string) interaction {
 		Text: firstNonEmpty(g.Message, g.Text, g.Caption), Permalink: firstNonEmpty(g.PermalinkURL, g.Permalink, link),
 		At: ParseCreatedTime(g.when()),
 	}
+}
+
+// olderThan reports whether a list item predates since, so the pages after it
+// (Graph lists newest first) need not be read. An item with no time is not.
+func olderThan(g graphItem, since *time.Time) bool {
+	at := ParseCreatedTime(g.when())
+	return since != nil && at != nil && at.Before(*since)
 }
 
 // dmThread folds a conversation's messages from the customer, oldest first,
@@ -104,21 +115,32 @@ func dmThread(c graphItem, src, account string, own func(string) bool) (interact
 	return it, true
 }
 
-// backfillInbox lists a connection's recent DMs, comments and tags. A list
-// Graph refuses (a permission not granted, say) is a warning, not a failure:
-// the rest still count.
-func (s *Service) backfillInbox(ctx context.Context, conn *connRow, token string) ([]interaction, []string) {
+// backfillInbox lists a connection's recent DMs, comments and tags. Each list
+// is paged, newest first, until it has given want items or reaches since. A
+// list Graph refuses (a permission not granted, say) is a warning, not a
+// failure: the rest still count.
+func (s *Service) backfillInbox(ctx context.Context, conn *connRow, token string, since *time.Time, want int) ([]interaction, []string) {
 	var out []interaction
 	var warns []string
 	read := func(label, path string, q url.Values, each func(graphItem)) {
 		q.Set("limit", backfillPage)
-		var l graphList
-		if err := s.graph.Get(ctx, path, q, token, &l); err != nil {
-			warns = append(warns, label+": "+err.Error())
-			return
-		}
-		for _, g := range l.Data {
-			each(g)
+		start := len(out)
+		for page := 0; page < maxGraphPages; page++ {
+			var l graphList
+			if err := s.graph.Get(ctx, path, q, token, &l); err != nil {
+				if page > 0 {
+					label = fmt.Sprintf("%s, page %d", label, page+1)
+				}
+				warns = append(warns, label+": "+err.Error())
+				return
+			}
+			for _, g := range l.Data {
+				each(g)
+			}
+			if q = nextPage(l.Paging); q == nil || len(out)-start >= want || len(l.Data) == 0 ||
+				olderThan(l.Data[len(l.Data)-1], since) {
+				return
+			}
 		}
 	}
 	page, ig := conn.PageID, conn.IGAccountID
@@ -135,7 +157,7 @@ func (s *Service) backfillInbox(ctx context.Context, conn *connRow, token string
 			}
 		}
 	}
-	const convFields = "messages.limit(20){id,message,from,created_time}"
+	const convFields = "updated_time,messages.limit(20){id,message,from,created_time}"
 
 	read("Facebook DMs", page+"/conversations", url.Values{"platform": {"messenger"}, "fields": {convFields}},
 		threads(model.MetaLeadSourceFBDM, page))

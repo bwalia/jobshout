@@ -158,7 +158,7 @@ func (s *Service) runLaunch(ctx context.Context, runID uuid.UUID, req LaunchRequ
 		}
 	}
 	if req.Include != IncludeForms {
-		its, w := s.backfillInbox(ctx, conn, token)
+		its, w := s.backfillInbox(ctx, conn, token, since, limit)
 		warns = append(warns, w...)
 		for i := range its {
 			if since != nil && its[i].At != nil && its[i].At.Before(*since) {

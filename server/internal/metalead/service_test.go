@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"sync"
 	"testing"
@@ -289,15 +290,21 @@ func (m *memStore) ListEvals(context.Context, uuid.UUID, int) ([]model.MetaLeadE
 }
 
 // fakeGraph serves leads, and objects for Get by path (JSON); a path with a
-// platform parameter is keyed "path?platform=x". One it does not hold is a
-// Graph error.
+// platform parameter is keyed "path?platform=x", a later page "path#cursor"
+// (its after or __paging_token). One it does not hold is a Graph error.
 type fakeGraph struct {
 	objects map[string]string
 }
 
 func (g fakeGraph) Get(_ context.Context, path string, q url.Values, _ string, dest any) error {
+	if q.Has("access_token") {
+		return fmt.Errorf("a token in the query: the client adds its own")
+	}
 	if p := q.Get("platform"); p != "" {
 		path += "?platform=" + p
+	}
+	if c := q.Get("after") + q.Get("__paging_token"); c != "" {
+		path += "#" + c
 	}
 	raw, ok := g.objects[path]
 	if !ok {

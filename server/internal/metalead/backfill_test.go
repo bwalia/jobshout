@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -42,7 +43,7 @@ func backfillGraph() fakeGraph {
 func TestBackfillInbox(t *testing.T) {
 	svc := NewService(newMemStore(), backfillGraph(), nil, Config{}, nil)
 	conn := &connRow{MetaLeadConnection: model.MetaLeadConnection{PageID: "page1", IGAccountID: "ig1"}}
-	its, warns := svc.backfillInbox(context.Background(), conn, "tok")
+	its, warns := svc.backfillInbox(context.Background(), conn, "tok", nil, 50)
 	if len(warns) != 0 {
 		t.Fatalf("warns = %v", warns)
 	}
@@ -67,9 +68,59 @@ func TestBackfillInbox(t *testing.T) {
 	g := backfillGraph()
 	delete(g.objects, "page1/conversations?platform=messenger")
 	svc = NewService(newMemStore(), g, nil, Config{}, nil)
-	its, warns = svc.backfillInbox(context.Background(), &connRow{MetaLeadConnection: model.MetaLeadConnection{PageID: "page1"}}, "tok")
+	its, warns = svc.backfillInbox(context.Background(), &connRow{MetaLeadConnection: model.MetaLeadConnection{PageID: "page1"}}, "tok", nil, 50)
 	if len(warns) != 1 || !strings.HasPrefix(warns[0], "Facebook DMs: ") || len(its) != 3 {
 		t.Fatalf("warns = %v its = %s", warns, keys(its))
+	}
+}
+
+// Each list is read past its first page: by cursor or by time, as Graph's next
+// link says, until the list has given enough items or reaches since.
+func TestBackfillInboxPages(t *testing.T) {
+	// next links are Graph's own: another host, our token in them. Only their
+	// paging parameters may be reused.
+	next := func(edge, param string) string {
+		return `"paging":{"next":"https://graph.facebook.com/v26.0/page1/` + edge + `?limit=25&` + param + `&access_token=leaked"}`
+	}
+	g := fakeGraph{objects: map[string]string{
+		"page1/feed": `{"data":[{"id":"p3","message":"price list?","from":{"id":"x1"},"created_time":"2026-11-03T09:00:00+0000"}],` +
+			next("feed", "after=c2") + `}`,
+		"page1/feed#c2": `{"data":[{"id":"p2","message":"open on Sunday?","from":{"id":"x2"},"created_time":"2026-10-20T09:00:00+0000"}],` +
+			next("feed", "after=c1") + `}`,
+		"page1/feed#c1": `{"data":[{"id":"p1","message":"old question","from":{"id":"x3"},"created_time":"2026-09-01T09:00:00+0000"}]}`,
+		"page1/tagged": `{"data":[{"id":"t2","message":"@us rocks","from":{"id":"x4"},"created_time":"2026-11-02T09:00:00+0000"}],` +
+			next("tagged", "until=1761900000&__paging_token=tok2") + `}`,
+		"page1/tagged#tok2": `{"data":[{"id":"t1","message":"@us again","from":{"id":"x5"},"created_time":"2026-10-25T09:00:00+0000"}],"paging":{}}`,
+	}}
+	svc := NewService(newMemStore(), g, nil, Config{}, nil)
+	conn := &connRow{MetaLeadConnection: model.MetaLeadConnection{PageID: "page1"}}
+	read := func(since *time.Time, want int) (string, []string) {
+		its, warns := svc.backfillInbox(context.Background(), conn, "tok", since, want)
+		return keys(its), warns
+	}
+
+	// Every page, cursor and time paging alike (the DM list is refused).
+	got, warns := read(nil, 50)
+	if got != "facebook_comment=p3 facebook_comment=p2 facebook_comment=p1 facebook_mention=t2 facebook_mention=t1" || len(warns) != 1 {
+		t.Fatalf("got %s warns %v", got, warns)
+	}
+	// since 2026-10-22: the feed's second page already reaches it, so its
+	// third is never read; the run drops p2 itself.
+	cut := time.Date(2026, 10, 22, 0, 0, 0, 0, time.UTC)
+	delete(g.objects, "page1/feed#c1")
+	if got, warns = read(&cut, 50); got != "facebook_comment=p3 facebook_comment=p2 facebook_mention=t2 facebook_mention=t1" || len(warns) != 1 {
+		t.Fatalf("since: got %s warns %v", got, warns)
+	}
+	// One wanted: one page per list.
+	delete(g.objects, "page1/feed#c2")
+	delete(g.objects, "page1/tagged#tok2")
+	if got, warns = read(nil, 1); got != "facebook_comment=p3 facebook_mention=t2" || len(warns) != 1 {
+		t.Fatalf("want 1: got %s warns %v", got, warns)
+	}
+	// A page Graph refuses keeps what came before it and says how far it got.
+	if got, warns = read(nil, 50); !strings.Contains(strings.Join(warns, " | "), "Facebook comments, page 2: ") ||
+		got != "facebook_comment=p3 facebook_mention=t2" {
+		t.Fatalf("refused page: got %s warns %v", got, warns)
 	}
 }
 

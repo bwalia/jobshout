@@ -101,26 +101,58 @@ func (c *Client) ListLeads(ctx context.Context, formID, token string, since *tim
 			since.Unix(),
 		))
 	}
-	u := fmt.Sprintf("%s/%s/%s/leads?%s", c.base(), c.Version, url.PathEscape(formID), q.Encode())
-	var out struct {
-		Data []struct {
-			ID          string      `json:"id"`
-			CreatedTime string      `json:"created_time"`
-			FieldData   []FieldData `json:"field_data"`
-		} `json:"data"`
+	var leads []LeadSummary
+	for page := 0; page < maxGraphPages && len(leads) < limit; page++ {
+		u := fmt.Sprintf("%s/%s/%s/leads?%s", c.base(), c.Version, url.PathEscape(formID), q.Encode())
+		var out struct {
+			Data []struct {
+				ID          string      `json:"id"`
+				CreatedTime string      `json:"created_time"`
+				FieldData   []FieldData `json:"field_data"`
+			} `json:"data"`
+			Paging graphPaging `json:"paging"`
+		}
+		if err := c.getJSON(ctx, u, &out); err != nil {
+			return nil, err
+		}
+		for _, d := range out.Data {
+			leads = append(leads, LeadSummary{ID: d.ID, CreatedTime: d.CreatedTime, FieldData: d.FieldData})
+		}
+		if q = nextPage(out.Paging); q == nil {
+			break
+		}
+		q.Set("access_token", token)
 	}
-	if err := c.getJSON(ctx, u, &out); err != nil {
-		return nil, err
-	}
-	leads := make([]LeadSummary, 0, len(out.Data))
-	for _, d := range out.Data {
-		leads = append(leads, LeadSummary{
-			ID:          d.ID,
-			CreatedTime: d.CreatedTime,
-			FieldData:   d.FieldData,
-		})
+	if len(leads) > limit {
+		leads = leads[:limit]
 	}
 	return leads, nil
+}
+
+// maxGraphPages bounds how many pages one Graph list is read for, whatever
+// the caller still wants: a guard against a list that never ends.
+const maxGraphPages = 20
+
+// graphPaging is a Graph list's paging block. Lists page by cursor or by time
+// (until + __paging_token) depending on the edge; next carries either.
+type graphPaging struct {
+	Next string `json:"next"`
+}
+
+// nextPage is the query for the page after this one, taken from Graph's own
+// next link without its access_token, or nil on the last page. Only the query
+// is reused: the request still goes to our base URL and path.
+func nextPage(p graphPaging) url.Values {
+	if p.Next == "" {
+		return nil
+	}
+	u, err := url.Parse(p.Next)
+	if err != nil {
+		return nil
+	}
+	q := u.Query()
+	q.Del("access_token")
+	return q
 }
 
 func (c *Client) GetLead(ctx context.Context, leadgenID, token string) (*LeadDetail, error) {

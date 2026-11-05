@@ -178,8 +178,12 @@ optional form / focus / website). Example values:
 | `/{ig}/media` (+ each post's comments) | `instagram_comment` |
 | `/{ig}/tags` | `instagram_tag` (photo tags: no webhook exists) |
 
-Each list is read once, newest 25 (comments: 25 per post; DM threads: the
-20 newest messages, Graph's limit). Items get the webhook's keys, so one a
+Each list is read newest first, 25 at a time, following Graph's next page
+until it has given the launch's `limit` items or reaches `since` (at most 20
+pages). Lead Ads form leads page the same way. Nested lists are not paged:
+the 25 newest comments per post, and a DM thread's 20 newest messages
+(Graph's limit). A page Graph refuses keeps the pages before it and is listed
+under "Skipped" as e.g. "Facebook comments, page 2". Items get the webhook's keys, so one a
 webhook already stored is skipped, and a DM thread is rewritten from Graph
 rather than appended to, so messages are not repeated. The page's and
 account's own messages, comments and posts are left out.
@@ -237,7 +241,7 @@ brief so ingest + CRM are not blocked.
 ## Out of scope
 
 - Meta OAuth UI for connecting Pages (manual token + named connection first)
-- Backfill past the first page of each Graph list (no `paging.next`)
+- Paging a post's comments past its newest 25
 - Replying from JobShout (Meta allows replies within 24 hours of the person's
   last message, and one private reply per comment)
 - Auto email send from analyses (use Marketing Manager for campaigns)
