@@ -70,18 +70,19 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     }
 
     // MARK: UNUserNotificationCenterDelegate
+    // Delegate methods are nonisolated (Swift 6); hop to MainActor for AppModel.
 
-    func userNotificationCenter(
+    nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let info = response.notification.request.content.userInfo
-        Task { @MainActor in app?.openApprovalsFromNotification(userInfo: info) }
+        Task { @MainActor in self.app?.openApprovalsFromNotification(userInfo: info) }
         completionHandler()
     }
 
-    func userNotificationCenter(
+    nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
