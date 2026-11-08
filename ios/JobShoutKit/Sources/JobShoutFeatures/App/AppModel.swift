@@ -111,10 +111,10 @@ public final class AppModel {
     /// Notification tap / deep-link into Approvals. Server APNs delivery for
     /// `approval.requested` is not wired yet — this handles the payload shape
     /// once it is, and still refreshes the badge from a local/test notification.
-    public func openApprovalsFromNotification(userInfo: [AnyHashable: Any] = [:]) {
+    public func openApprovalsFromNotification(type: String? = nil) {
         approvalsFocus += 1
         revisions[.approvals, default: 0] += 1
-        if let type = userInfo["type"] as? String, type.contains("approval") {
+        if let type, type.contains("approval") {
             Log.push.debug("opened approvals from push type=\(type, privacy: .public)")
         }
         Task { await refreshApprovalCount() }

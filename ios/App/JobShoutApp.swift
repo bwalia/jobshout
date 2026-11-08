@@ -77,8 +77,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        let info = response.notification.request.content.userInfo
-        Task { @MainActor in self.app?.openApprovalsFromNotification(userInfo: info) }
+        let type = response.notification.request.content.userInfo["type"] as? String
+        Task { @MainActor in self.app?.openApprovalsFromNotification(type: type) }
         completionHandler()
     }
 
