@@ -18,10 +18,13 @@ import {
   Pencil,
   ChevronRight,
   Play,
+  MessageSquare,
+  ListPlus,
 } from "lucide-react";
 import { useRunFailures } from "@/lib/hooks/useRunFailures";
 import { BuiltinAgentTab } from "@/components/task-manager/BuiltinAgentTab";
 import { AGENT_CLIENTS } from "@/lib/agents/tab-clients";
+import { hasAgentClient } from "@/lib/agents/specialist";
 import { useUiStore } from "@/lib/store/ui-store";
 import { useAgentSchemas } from "@/lib/hooks/useAgentSchemas";
 import { useProjects } from "@/lib/hooks/useProjects";
@@ -29,7 +32,14 @@ import { taskKeys } from "@/lib/hooks/useTasks";
 import type { LaunchResult } from "@/lib/agents/launch";
 import { providerName } from "@/components/agent/ModelPicker";
 import { useBreadcrumbs } from "@/lib/store/breadcrumb-store";
-import { agentHref, type AgentTab } from "@/lib/agents/links";
+import {
+  AGENT_CONFIGURE_TABS,
+  AGENT_PRIMARY_TABS,
+  agentHref,
+  askInChatHref,
+  newTaskHref,
+  type AgentTab,
+} from "@/lib/agents/links";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AgentStatusBadge } from "@/components/agent/AgentStatusBadge";
@@ -64,15 +74,34 @@ import { PRIORITY_BADGE, THEME_BADGE } from "@/lib/status-colors";
 // ---------------------------------------------------------------------------
 type Tab = AgentTab;
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: "overview", label: "Overview" },
-  { id: "models", label: "Models" },
-  { id: "workspace", label: "Workspace" },
-  { id: "tasks", label: "Tasks" },
-  { id: "metrics", label: "Metrics" },
-  { id: "knowledge", label: "Knowledge" },
-  { id: "skills", label: "Skills" },
-];
+const TAB_LABELS: Record<Tab, string> = {
+  overview: "Overview",
+  workspace: "Workspace",
+  tasks: "Tasks",
+  models: "Models",
+  knowledge: "Knowledge",
+  skills: "Skills",
+  metrics: "Metrics",
+};
+
+function tabIcon(tabId: Tab) {
+  switch (tabId) {
+    case "overview":
+      return <StickyNote className="h-4 w-4" />;
+    case "models":
+      return <Cpu className="h-4 w-4" />;
+    case "workspace":
+      return <LayoutGrid className="h-4 w-4" />;
+    case "tasks":
+      return <Activity className="h-4 w-4" />;
+    case "metrics":
+      return <Activity className="h-4 w-4" />;
+    case "knowledge":
+      return <BookOpen className="h-4 w-4" />;
+    case "skills":
+      return <Sparkles className="h-4 w-4" />;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Avatar helpers (mirrored from AgentCard to keep consistency)
@@ -1080,22 +1109,39 @@ export default function AgentProfilePage() {
   const search = useSearchParams();
   const { data: agent, isLoading, isError } = useAgent(id);
   const isBuiltin = Boolean(agent?.metadata?.builtin);
-  const tabs = useMemo(
-    () => TABS.filter((t) => t.id !== "workspace" || isBuiltin),
-    [isBuiltin]
+  const hasClient = hasAgentClient(agent?.metadata?.builtin);
+  const availableTabs = useMemo(() => {
+    const ids: Tab[] = [
+      ...AGENT_PRIMARY_TABS.filter((t) => t !== "workspace" || isBuiltin),
+      ...AGENT_CONFIGURE_TABS,
+    ];
+    return ids;
+  }, [isBuiltin]);
+  const primaryTabs = useMemo(
+    () => AGENT_PRIMARY_TABS.filter((t) => availableTabs.includes(t)),
+    [availableTabs],
+  );
+  const configureTabs = useMemo(
+    () => AGENT_CONFIGURE_TABS.filter((t) => availableTabs.includes(t)),
+    [availableTabs],
   );
   const { failures, byAgent } = useRunFailures();
   const failed = byAgent.get(id)?.failed ?? 0;
   const latestFailure = failures.find((f) => f.agentId === id);
   const requested = search.get("tab") as Tab | null;
-  const activeTab: Tab = tabs.some((t) => t.id === requested) ? (requested as Tab) : "overview";
+  // Specialists with a registered Workspace client land there by default so
+  // the product UI is one click from All agents (≤2 from the sidebar).
+  const defaultTab: Tab = hasClient ? "workspace" : "overview";
+  const activeTab: Tab = availableTabs.includes(requested as Tab)
+    ? (requested as Tab)
+    : defaultTab;
   const setActiveTab = (tab: Tab) => router.replace(agentHref(id, tab), { scroll: false });
 
   useBreadcrumbs(
     agent
       ? [
-          { label: agent.name, href: agentHref(agent.id) },
-          { label: tabs.find((t) => t.id === activeTab)?.label ?? "Overview" },
+          { label: agent.name, href: agentHref(agent.id, hasClient ? "workspace" : undefined) },
+          { label: TAB_LABELS[activeTab] },
         ]
       : []
   );
@@ -1168,16 +1214,6 @@ export default function AgentProfilePage() {
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <AgentStatusBadge status={agent.status} />
 
-                {isBuiltin && (
-                  <Link
-                    href={agentHref(agent.id, "workspace")}
-                    scroll={false}
-                    className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary hover:underline"
-                  >
-                    Open workspace
-                  </Link>
-                )}
-
                 <Link
                   href={agentHref(agent.id, "models")}
                   scroll={false}
@@ -1191,24 +1227,49 @@ export default function AgentProfilePage() {
             </div>
           </div>
 
-          {/* Actions. (A "performance" score used to sit here; nothing ever
-              computed it, so it read 0% for every agent — see the Metrics tab.) */}
           <div className="flex flex-col items-start gap-2 sm:items-end">
-            <div className="flex flex-wrap justify-end gap-2">
+            <div
+              className="flex flex-wrap justify-end gap-2"
+              role="group"
+              aria-label="Primary agent actions"
+            >
               <RunAgentButton agentId={agent.id} />
+              {isBuiltin && (
+                <Link
+                  href={agentHref(agent.id, "workspace")}
+                  scroll={false}
+                  className={
+                    hasClient
+                      ? "inline-flex h-9 items-center gap-1.5 rounded-md border border-primary/40 bg-primary/10 px-3 text-sm font-medium text-primary hover:bg-primary/15"
+                      : "inline-flex h-9 items-center gap-1.5 rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent"
+                  }
+                >
+                  <LayoutGrid className="h-4 w-4" />
+                  Workspace
+                </Link>
+              )}
               <Link
-                href={`/panel/tasks?new=1&agent=${agent.id}`}
+                href={askInChatHref(agent.name)}
                 className="inline-flex h-9 items-center gap-1.5 rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent"
               >
+                <MessageSquare className="h-4 w-4" />
+                Ask in chat
+              </Link>
+              <Link
+                href={newTaskHref(agent.id)}
+                className="inline-flex h-9 items-center gap-1.5 rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent"
+              >
+                <ListPlus className="h-4 w-4" />
                 New task
               </Link>
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
               <ExportAgentButton agentId={agent.id} />
               <RemoveAgentButton
                 agent={agent}
                 onRemoved={() => router.push("/panel/agents")}
               />
             </div>
-
           </div>
         </div>
       </div>
@@ -1249,10 +1310,10 @@ export default function AgentProfilePage() {
         </div>
       )}
 
-      {/* Tab bar */}
-      <div className="border-b border-border">
-        <nav className="-mb-px flex gap-0" aria-label="Agent profile tabs">
-          {tabs.map(({ id: tabId, label }) => (
+      {/* Primary work tabs, then Configure (models / knowledge / skills / metrics). */}
+      <div className="flex flex-col gap-2 border-b border-border sm:flex-row sm:items-end sm:justify-between">
+        <nav className="-mb-px flex gap-0 overflow-x-auto" aria-label="Agent work tabs">
+          {primaryTabs.map((tabId) => (
             <button
               key={tabId}
               type="button"
@@ -1264,14 +1325,32 @@ export default function AgentProfilePage() {
               }`}
               aria-current={activeTab === tabId ? "page" : undefined}
             >
-              {tabId === "overview" && <StickyNote className="h-4 w-4" />}
-              {tabId === "models" && <Cpu className="h-4 w-4" />}
-              {tabId === "workspace" && <LayoutGrid className="h-4 w-4" />}
-              {tabId === "tasks" && <Activity className="h-4 w-4" />}
-              {tabId === "metrics" && <Activity className="h-4 w-4" />}
-              {tabId === "knowledge" && <BookOpen className="h-4 w-4" />}
-              {tabId === "skills" && <Sparkles className="h-4 w-4" />}
-              {label}
+              {tabIcon(tabId)}
+              {TAB_LABELS[tabId]}
+            </button>
+          ))}
+        </nav>
+        <nav
+          className="-mb-px flex flex-wrap items-center gap-1 pb-2 sm:pb-0"
+          aria-label="Configure agent"
+        >
+          <span className="mr-1 hidden text-2xs font-semibold uppercase tracking-wide text-muted-foreground sm:inline">
+            Configure
+          </span>
+          {configureTabs.map((tabId) => (
+            <button
+              key={tabId}
+              type="button"
+              onClick={() => setActiveTab(tabId)}
+              className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                activeTab === tabId
+                  ? "bg-muted text-foreground"
+                  : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+              }`}
+              aria-current={activeTab === tabId ? "page" : undefined}
+            >
+              {tabIcon(tabId)}
+              {TAB_LABELS[tabId]}
             </button>
           ))}
         </nav>

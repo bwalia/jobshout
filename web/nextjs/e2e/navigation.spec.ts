@@ -78,6 +78,28 @@ test.describe("Navigation & Layout", () => {
     await expect(page.getByRole("navigation", { name: "Breadcrumb" })).toContainText(/All agents[\s\S]*Article Writer[\s\S]*Models/);
   });
 
+  test("All agents → specialist Workspace is the primary path", async ({ page }) => {
+    const res = await fetch(`${process.env.E2E_API_URL ?? "http://localhost:8090/api/v1"}/agents?per_page=100`, {
+      headers: { Authorization: `Bearer ${creds.token}` },
+    });
+    const writer = (await res.json()).data.find(
+      (a: { metadata?: { builtin?: string }; name: string }) => a.metadata?.builtin === "article_writer"
+    );
+    expect(writer?.id).toBeTruthy();
+
+    await page.goto("/panel/agents");
+    await page.getByRole("link", { name: writer.name }).first().click();
+    await page.waitForURL(new RegExp(`/panel/agents/${writer.id}\\?tab=workspace`), {
+      timeout: 10_000,
+    });
+    await expect(
+      page.getByRole("group", { name: "Primary agent actions" }).getByRole("button", { name: "Run" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("group", { name: "Primary agent actions" }).getByRole("link", { name: "Ask in chat" }),
+    ).toBeVisible();
+  });
+
   test("old Task Board and Task Manager URLs redirect", async ({ page }) => {
     await page.goto("/panel/task-board?view=agents");
     await page.waitForURL(/\/panel\/tasks\?.*group=agent/, { timeout: 10_000 });

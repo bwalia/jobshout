@@ -67,7 +67,7 @@ export function LegacyTaskRedirect({ from }: { from: "task-board" | "task-manage
   return (
     <div className="flex h-40 items-center justify-center gap-2 text-sm text-muted-foreground">
       <Loader2 className="h-4 w-4 animate-spin" />
-      {from === "task-manager" ? "Task Manager moved — taking you there…" : "Task Board moved to Tasks…"}
+      {from === "task-manager" ? "Opening agent workspace…" : "Task Board moved to Tasks…"}
     </div>
   );
 }
