@@ -13,14 +13,20 @@ public typealias Device = Components.Schemas.Device
 public typealias User = Components.Schemas.User
 public typealias LaunchResult = Components.Schemas.LaunchResult
 public typealias Schedule = Components.Schemas.Schedule
+public typealias ChatSession = Components.Schemas.ChatSession
+public typealias ChatMessage = Components.Schemas.ChatMessage
+public typealias KnowledgeFile = Components.Schemas.KnowledgeFile
+public typealias Skill = Components.Schemas.Skill
 
 /// The calls the screens make, each mapped to a value or an `APIError`.
 /// Screens never see generated output enums.
 public struct PlatformAPI: Sendable {
     let client: Client
+    let chatStream: ChatStreamClient
 
-    public init(client: Client) {
+    public init(client: Client, chatStream: ChatStreamClient) {
         self.client = client
+        self.chatStream = chatStream
     }
 
     public func me() async throws -> User {
@@ -165,6 +171,125 @@ public struct PlatformAPI: Sendable {
             case .undocumented(let s, _): throw APIError.undocumented(s)
             }
         }
+    }
+
+    public func createSchedule(
+        name: String,
+        agentID: String,
+        prompt: String,
+        preset: String
+    ) async throws -> Schedule {
+        try await map {
+            let body = Components.Schemas.ScheduleRequest(
+                name: name,
+                taskType: .agent,
+                agentId: agentID,
+                inputPrompt: prompt,
+                schedulePreset: Components.Schemas.ScheduleRequest.SchedulePresetPayload(rawValue: preset),
+                scheduleType: .cron
+            )
+            switch try await client.createSchedule(body: .json(body)) {
+            case .created(let r): return try r.body.json
+            case .badRequest(let r): throw APIError.server(400, try? r.body.json)
+            case .undocumented(let s, _): throw APIError.undocumented(s)
+            }
+        }
+    }
+
+    public func createTask(
+        projectID: String,
+        title: String,
+        description: String?,
+        agentID: String?,
+        status: String = "backlog"
+    ) async throws -> WorkTask {
+        try await map {
+            let body = Components.Schemas.CreateTaskRequest(
+                projectId: projectID,
+                title: title,
+                description: description,
+                status: Components.Schemas.TaskStatus(rawValue: status),
+                assignedAgentId: agentID
+            )
+            switch try await client.createTask(body: .json(body)) {
+            case .created(let r): return try r.body.json
+            case .badRequest(let r): throw APIError.server(400, try? r.body.json)
+            case .undocumented(let s, _): throw APIError.undocumented(s)
+            }
+        }
+    }
+
+    public func knowledge(agentID: String) async throws -> [KnowledgeFile] {
+        try await map {
+            switch try await client.listAgentKnowledge(path: .init(agentID: agentID)) {
+            case .ok(let r): return try r.body.json
+            case .notFound(let r): throw APIError.server(404, try? r.body.json)
+            case .undocumented(let s, _): throw APIError.undocumented(s)
+            }
+        }
+    }
+
+    public func skills(agentID: String) async throws -> [Skill] {
+        try await map {
+            switch try await client.listAgentSkills(path: .init(agentID: agentID)) {
+            case .ok(let r): return try r.body.json
+            case .notFound(let r): throw APIError.server(404, try? r.body.json)
+            case .undocumented(let s, _): throw APIError.undocumented(s)
+            }
+        }
+    }
+
+    public func chatSessions(perPage: Int = 50) async throws -> [ChatSession] {
+        try await map {
+            switch try await client.listChatSessions(query: .init(page: 1, perPage: perPage)) {
+            case .ok(let r): return try r.body.json.data
+            case .undocumented(let s, _): throw APIError.undocumented(s)
+            }
+        }
+    }
+
+    public func startChatSession(agentID: String? = nil) async throws -> ChatSession {
+        try await map {
+            let body = Components.Schemas.StartChatSessionRequest(agentId: agentID, source: "ios")
+            switch try await client.startChatSession(body: .json(body)) {
+            case .created(let r): return try r.body.json
+            case .undocumented(let s, _): throw APIError.undocumented(s)
+            }
+        }
+    }
+
+    public func chatMessages(sessionID: String, limit: Int = 100) async throws -> [ChatMessage] {
+        try await map {
+            switch try await client.listChatMessages(path: .init(sessionID: sessionID), query: .init(limit: limit)) {
+            case .ok(let r): return try r.body.json
+            case .notFound(let r): throw APIError.server(404, try? r.body.json)
+            case .undocumented(let s, _): throw APIError.undocumented(s)
+            }
+        }
+    }
+
+    public func deleteChatSession(_ id: String) async throws {
+        try await map {
+            switch try await client.deleteChatSession(path: .init(sessionID: id)) {
+            case .noContent: return
+            case .notFound(let r): throw APIError.server(404, try? r.body.json)
+            case .undocumented(let s, _): throw APIError.undocumented(s)
+            }
+        }
+    }
+
+    public func streamChat(
+        sessionID: String,
+        content: String,
+        confirmationToken: String? = nil,
+        displayContent: String? = nil
+    ) -> AsyncThrowingStream<ChatStreamEvent, Error> {
+        chatStream.stream(
+            sessionID: sessionID,
+            content: content,
+            confirmationToken: confirmationToken,
+            displayContent: displayContent
+        )
     }
 
     public func approvals(status: String? = "pending") async throws -> [Approval] {

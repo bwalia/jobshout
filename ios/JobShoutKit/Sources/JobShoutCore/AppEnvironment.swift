@@ -21,6 +21,19 @@ public enum AppEnvironment: String, CaseIterable, Sendable, Codable {
     public var apiBaseURL: URL { URL(string: "\(self == .local ? "http" : "https")://\(host)/api/v1")! }
     public var liveEventsURL: URL { URL(string: "\(self == .local ? "ws" : "wss")://\(host)/api/v1/ws")! }
 
+    /// Web panel origin for the same ring (specialist Workspace handoff).
+    public var webBaseURL: URL {
+        URL(string: "\(self == .local ? "http" : "https")://\(host)")!
+    }
+
+    /// Agent profile Workspace tab on web — used when a builtin has an `AGENT_CLIENTS` UI.
+    public func agentWorkspaceURL(agentID: String) -> URL {
+        var comps = URLComponents(url: webBaseURL, resolvingAgainstBaseURL: false)!
+        comps.path = "/panel/agents/\(agentID)"
+        comps.queryItems = [URLQueryItem(name: "tab", value: "workspace")]
+        return comps.url!
+    }
+
     /// Google OAuth start URL for native apps (`native=1` → `jobshout://` finish).
     public func googleStartURL(intent: String = "login", orgName: String? = nil) -> URL {
         var comps = URLComponents(url: apiBaseURL.appending(path: "auth/google/start"), resolvingAgainstBaseURL: false)!

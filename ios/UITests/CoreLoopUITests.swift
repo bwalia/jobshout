@@ -1,8 +1,8 @@
 import XCTest
 
-/// The phase-1 loop against a real server: sign in, find an agent, call it,
-/// see the work. Needs a running API and an account on it, so it skips unless
-/// told where:
+/// Core Agents loop against a real server: sign in, find an agent, open Run,
+/// see Work / Chat / Schedules. Needs a running API and an account on it, so
+/// it skips unless told where:
 ///
 ///   JOBSHOUT_UITEST_EMAIL, JOBSHOUT_UITEST_PASSWORD   an existing account
 ///   JOBSHOUT_UITEST_PORT                              local API port (8190)
@@ -41,18 +41,27 @@ final class CoreLoopUITests: XCTestCase {
         snapshot(app, "agents")
         agent.tap()
 
-        XCTAssertTrue(app.buttons["Call agent"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["Run"].waitForExistence(timeout: 10))
         snapshot(app, "agent")
-        app.buttons["Call agent"].tap()
+        app.buttons["Run"].tap()
 
         XCTAssertTrue(app.navigationBars.buttons["Run now"].waitForExistence(timeout: 10), "launch form should load")
         let createProject = app.buttons["Create a project for this work"]
         if createProject.waitForExistence(timeout: 2) {
             createProject.tap()
         }
-        snapshot(app, "call-agent")
+        snapshot(app, "run-agent")
 
         app.buttons["Cancel"].tap()
+
+        app.tabBars.buttons["Chat"].tap()
+        XCTAssertTrue(app.navigationBars["Chat"].waitForExistence(timeout: 10))
+        snapshot(app, "chat")
+
+        app.tabBars.buttons["Schedules"].tap()
+        XCTAssertTrue(app.buttons["create-schedule"].waitForExistence(timeout: 10))
+        snapshot(app, "schedules")
+
         app.tabBars.buttons["Work"].tap()
         XCTAssertTrue(app.segmentedControls.buttons["All"].waitForExistence(timeout: 5))
         app.segmentedControls.buttons["All"].tap()

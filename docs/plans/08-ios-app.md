@@ -71,7 +71,7 @@ ios/
 | 39–40 | Offline, background refresh | client-only | 2 |
 | 41–43 | Voice, camera/files, share extension | 🟡 CV upload; ❌ malware scanning on uploads | 3 |
 | 47 | Monetisation | ❌ | 4 |
-| 52 | Chat | ✅ SSE-over-POST `/chat/sessions/{id}/messages/stream` with confirmation events | 2 |
+| 52 | Chat | ✅ SSE-over-POST `/chat/sessions/{id}/messages/stream` with confirmation events; iOS Chat tab + OpenAPI surface (parity Phase B) | 2 |
 | 56–58 | App Store, tests, CI | ❌ | 1 (CI) / 4 (store) |
 
 ## Phases

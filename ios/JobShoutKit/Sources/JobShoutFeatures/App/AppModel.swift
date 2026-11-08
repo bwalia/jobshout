@@ -34,8 +34,12 @@ public final class AppModel {
         let session = SessionManager(store: store) { refreshToken in try await auth.refresh(refreshToken) }
         self.auth = auth
         self.session = session
-        self.api = PlatformAPI(client: APIClientFactory.make(environment: environment, tokens: session))
-        self.live = LiveEventsClient(url: environment.liveEventsURL, tokens: session)
+        let tokens = session
+        self.api = PlatformAPI(
+            client: APIClientFactory.make(environment: environment, tokens: tokens),
+            chatStream: ChatStreamClient(environment: environment, tokens: tokens)
+        )
+        self.live = LiveEventsClient(url: environment.liveEventsURL, tokens: tokens)
     }
 
     public func start() async {

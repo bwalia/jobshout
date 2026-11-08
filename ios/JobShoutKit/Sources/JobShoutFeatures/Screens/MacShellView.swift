@@ -27,6 +27,9 @@ struct MacShellView: View {
                     Label("All agents", systemImage: "sparkles")
                         .tag(MacDestination.agents)
                         .accessibilityIdentifier("sidebar-agents")
+                    Label("Chat", systemImage: "bubble.left.and.bubble.right")
+                        .tag(MacDestination.chat)
+                        .accessibilityIdentifier("sidebar-chat")
                 }
                 Section("Marketplace") {
                     Label("Projects", systemImage: "briefcase")
@@ -59,6 +62,7 @@ struct MacShellView: View {
                     case .tasks: WorkView()
                     case .board: TaskBoardView()
                     case .agents: AgentsView()
+                    case .chat: ChatView()
                     case .projects: FreelanceProjectsView()
                     case .schedules: SchedulesView()
                     case .approvals: ApprovalsView()
@@ -73,7 +77,7 @@ struct MacShellView: View {
 }
 
 enum MacDestination: Hashable {
-    case home, tasks, board, agents, projects, schedules, approvals, settings
+    case home, tasks, board, agents, chat, projects, schedules, approvals, settings
 }
 
 #endif
