@@ -130,7 +130,7 @@ struct ChatSessionView: View {
             HStack(alignment: .bottom, spacing: 8) {
                 TextField("Message", text: $draft, axis: .vertical)
                     .lineLimit(1...5)
-                    .textFieldStyle(.roundedBorder)
+                    .roundedBorderField()
                     .disabled(sending)
                     .accessibilityIdentifier("chat-input")
                 Button {

@@ -60,4 +60,13 @@ extension View {
         background(.bar)
         #endif
     }
+
+    /// Rounded border text field on phone/Mac; plain on watch (`.roundedBorder` unavailable).
+    func roundedBorderField() -> some View {
+        #if os(watchOS)
+        self
+        #else
+        textFieldStyle(.roundedBorder)
+        #endif
+    }
 }
