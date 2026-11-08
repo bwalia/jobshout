@@ -41,7 +41,7 @@ struct HomeView: View {
                 }
                 Section("Recent work") {
                     if s.recent.isEmpty {
-                        Text("Nothing yet. Call an agent from the Agents tab.").foregroundStyle(.secondary)
+                        Text("Nothing yet. Run an agent from the Agents tab.").foregroundStyle(.secondary)
                     }
                     ForEach(s.recent.prefix(8), id: \.id) { task in
                         NavigationLink(value: TaskRoute(id: task.id)) { TaskRow(task: task) }

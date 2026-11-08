@@ -285,6 +285,38 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Agent' }
         '404': { $ref: '#/components/responses/Error' }
+  /agents/{agentID}/knowledge:
+    get:
+      operationId: listAgentKnowledge
+      tags: [agents]
+      description: Knowledge files attached to the agent (read-only on mobile).
+      parameters:
+        - { name: agentID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Files
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/KnowledgeFile' }
+        '404': { $ref: '#/components/responses/Error' }
+  /agents/{agentID}/skills:
+    get:
+      operationId: listAgentSkills
+      tags: [agents]
+      description: Skills enabled on the agent (read-only on mobile).
+      parameters:
+        - { name: agentID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Skills
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Skill' }
+        '404': { $ref: '#/components/responses/Error' }
   /agent-schemas:
     get:
       operationId: listAgentSchemas
@@ -361,6 +393,22 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/TaskPage' }
+    post:
+      operationId: createTask
+      tags: [work]
+      description: Create a board task without starting a run (New task).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTaskRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        '400': { $ref: '#/components/responses/Error' }
   /tasks/launch:
     post:
       operationId: launchTask
@@ -559,6 +607,101 @@ paths:
         - $ref: '#/components/parameters/TaskID'
       responses:
         '204': { description: Deleted }
+
+  /chat/sessions:
+    get:
+      operationId: listChatSessions
+      tags: [chat]
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Sessions for the caller
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChatSessionPage' }
+    post:
+      operationId: startChatSession
+      tags: [chat]
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StartChatSessionRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChatSession' }
+  /chat/sessions/{sessionID}:
+    delete:
+      operationId: deleteChatSession
+      tags: [chat]
+      parameters:
+        - $ref: '#/components/parameters/SessionID'
+      responses:
+        '204': { description: Deleted }
+        '404': { $ref: '#/components/responses/Error' }
+  /chat/sessions/{sessionID}/messages:
+    get:
+      operationId: listChatMessages
+      tags: [chat]
+      parameters:
+        - $ref: '#/components/parameters/SessionID'
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200 } }
+      responses:
+        '200':
+          description: History, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ChatMessage' }
+        '404': { $ref: '#/components/responses/Error' }
+    post:
+      operationId: sendChatMessage
+      tags: [chat]
+      description: Non-streaming turn. Prefer `/messages/stream` on mobile.
+      parameters:
+        - $ref: '#/components/parameters/SessionID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SendChatMessageRequest' }
+      responses:
+        '200':
+          description: Turn result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChatTurnResult' }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /chat/sessions/{sessionID}/messages/stream:
+    post:
+      operationId: streamChatMessage
+      tags: [chat]
+      description: >-
+        SSE-over-POST (`text/event-stream`). Each event is a JSON `ChatStreamEvent`
+        (`token`, `tool_call`, `tool_result`, `confirmation`, `clarify`, `done`,
+        `error`, `model`). Native clients usually consume this with URLSession
+        rather than the generated OpenAPI client.
+      parameters:
+        - $ref: '#/components/parameters/SessionID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SendChatMessageRequest' }
+      responses:
+        '200':
+          description: Event stream
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
 
   # ─── OpsAPI integration (see docs/opsapi-integration.md) ──────────────────
   /api-keys:
@@ -774,6 +917,7 @@ components:
     DeviceID: { name: deviceID, in: path, required: true, schema: { type: string, format: uuid } }
     TaskID: { name: taskID, in: path, required: true, schema: { type: string, format: uuid } }
     ApprovalID: { name: approvalID, in: path, required: true, schema: { type: string, format: uuid } }
+    SessionID: { name: sessionID, in: path, required: true, schema: { type: string, format: uuid } }
 
   responses:
     Auth:
@@ -959,6 +1103,16 @@ components:
         page: { type: integer }
         per_page: { type: integer }
         total_pages: { type: integer }
+    CreateTaskRequest:
+      type: object
+      required: [project_id, title]
+      properties:
+        project_id: { type: string, format: uuid }
+        title: { type: string, minLength: 2 }
+        description: { type: string }
+        status: { $ref: '#/components/schemas/TaskStatus' }
+        priority: { type: string, enum: [low, medium, high, critical] }
+        assigned_agent_id: { type: string, format: uuid }
     TaskStatus:
       type: string
       enum: [backlog, todo, in_progress, review, done]
@@ -1141,6 +1295,83 @@ components:
         per_page: { type: integer }
         total_pages: { type: integer }
 
+    KnowledgeFile:
+      type: object
+      required: [id, agent_id, filename, size_bytes]
+      properties:
+        id: { type: string, format: uuid }
+        agent_id: { type: string, format: uuid }
+        filename: { type: string }
+        content: { type: string }
+        size_bytes: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    Skill:
+      type: object
+      required: [id, slug, name, kind, version, status]
+      properties:
+        id: { type: string, format: uuid }
+        slug: { type: string }
+        name: { type: string }
+        description: { type: [string, 'null'] }
+        kind: { type: string }
+        version: { type: string }
+        status: { type: string }
+
+    ChatSession:
+      type: object
+      required: [id, org_id, user_id, source, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        org_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        agent_id: { type: [string, 'null'], format: uuid }
+        source: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ChatSessionPage:
+      type: object
+      required: [data, total, page, per_page, total_pages]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ChatSession' }
+        total: { type: integer }
+        page: { type: integer }
+        per_page: { type: integer }
+        total_pages: { type: integer }
+    ChatMessage:
+      type: object
+      required: [id, session_id, org_id, role, source, content, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        session_id: { type: string, format: uuid }
+        org_id: { type: string, format: uuid }
+        role: { type: string, description: 'user, agent, system or tool.' }
+        source: { type: string }
+        content: { type: string }
+        created_at: { type: string, format: date-time }
+    StartChatSessionRequest:
+      type: object
+      properties:
+        agent_id: { type: string, format: uuid }
+        source: { type: string, description: 'web, api, telegram, ios, …' }
+    SendChatMessageRequest:
+      type: object
+      required: [content]
+      properties:
+        content: { type: string, minLength: 1 }
+        source: { type: string }
+        confirmation_token: { type: string }
+        display_content: { type: string }
+    ChatTurnResult:
+      type: object
+      properties:
+        user_message: { $ref: '#/components/schemas/ChatMessage' }
+        agent_message: { $ref: '#/components/schemas/ChatMessage' }
+        response:
+          type: object
+          additionalProperties: true
 
     LiveEvent:
       type: object

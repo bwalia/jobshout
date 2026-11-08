@@ -35,6 +35,9 @@ struct MainTabView: View {
             Tab("Agents", systemImage: "sparkles") {
                 NavigationStack { AgentsView().detailDestinations() }
             }
+            Tab("Chat", systemImage: "bubble.left.and.bubble.right") {
+                NavigationStack { ChatView().detailDestinations() }
+            }
             #if os(iOS)
             Tab("Projects", systemImage: "briefcase") {
                 NavigationStack { FreelanceProjectsView().detailDestinations() }

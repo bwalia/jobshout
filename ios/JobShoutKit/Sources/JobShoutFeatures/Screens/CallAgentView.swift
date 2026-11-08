@@ -27,7 +27,7 @@ struct CallAgentView: View {
                     ProgressView()
                 }
             }
-            .navigationTitle("Call \(agent.name)")
+            .navigationTitle("Run \(agent.name)")
             .inlineTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -37,6 +37,7 @@ struct CallAgentView: View {
                     Button("Run now") { Task { await run() } }
                         .bold()
                         .disabled(form == nil || projectID == nil || sending)
+                        .accessibilityIdentifier("run-now")
                 }
             }
             .task { await load() }

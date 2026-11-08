@@ -41,6 +41,21 @@ import Testing
         let google = AppEnvironment.int.googleStartURL(intent: "login")
         #expect(google.absoluteString.contains("/auth/google/start"))
         #expect(google.absoluteString.contains("native=1"))
+        let workspace = AppEnvironment.int.agentWorkspaceURL(agentID: "a1")
+        #expect(workspace.absoluteString == "https://int.jobshout.co.uk/panel/agents/a1?tab=workspace")
+    }
+
+    @Test func parsesChatSSEEvents() {
+        let token = ChatStreamClient.parse(type: "token", data: #"{"type":"token","token":"Hi"}"#)
+        #expect(token?.token == "Hi")
+        let done = ChatStreamClient.parse(type: "done", data: #"{"type":"done","response":{"message":"Done"}}"#)
+        #expect(done?.doneMessage == "Done")
+        let confirm = ChatStreamClient.parse(
+            type: "confirmation",
+            data: #"{"type":"confirmation","confirmation":{"token":"t1","summary":"Ship","effect":"create"}}"#
+        )
+        #expect(confirm?.confirmationToken == "t1")
+        #expect(confirm?.confirmationSummary == "Ship")
     }
 
     @Test func parsesGoTimestamps() throws {

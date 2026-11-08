@@ -61,11 +61,13 @@ Developer Portal App ID + Store profile on team `PAS2QUVJHC`).
 
 ## What this build covers
 
-Home → Agents → **Projects** (Upwork-style freelance catalog + submit bid) → Call agent → Work → Approvals → Schedules → Me.
+Home → Agents (richer detail: model, knowledge/skills, **Run**, New task, Ask in chat) → **Chat** (sessions + SSE stream against the ring) → **Projects** (freelance catalog + bid) → Work → Approvals → Schedules (**create** + pause/resume) → Me.
+
+Specialists with a web Workspace (`AGENT_CLIENTS`) get **Open workspace on web** → `/panel/agents/{id}?tab=workspace` (no per-builtin Swift clones). Debug builds talk to int.
 
 Projects/bids mirror jobshout.com `/projects` (same seeded catalog until the Rust freelance API is auth-wired through Go).
 
-Not in this track yet: Showcase / Insights, chat, Career UI, APNs delivery from the server.
+Not in this track yet: Showcase / Insights, Career UI, APNs delivery from the server, full knowledge/skills editors.
 
 ## Related
 

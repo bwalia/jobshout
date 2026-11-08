@@ -1,4 +1,5 @@
 import JobShoutAPI
+import JobShoutCore
 import SwiftUI
 
 struct AgentsView: View {
@@ -73,9 +74,15 @@ struct AgentAvatar: View {
 
 struct AgentDetailView: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.openURL) private var openURL
     let agentID: String
     @State private var agent = Resource<Agent>()
-    @State private var calling = false
+    @State private var knowledge: [KnowledgeFile] = []
+    @State private var skills: [Skill] = []
+    @State private var extrasError: String?
+    @State private var running = false
+    @State private var creatingTask = false
+    @State private var askInChat: ChatRoute?
     @State private var launchedTask: TaskRoute?
 
     var body: some View {
@@ -95,11 +102,12 @@ struct AgentDetailView: View {
                         Text(description)
                     }
                 }
+
                 Section {
                     Button {
-                        calling = true
+                        running = true
                     } label: {
-                        Label("Call agent", systemImage: "bolt.fill")
+                        Label("Run", systemImage: "play.fill")
                             .font(.headline)
                             .frame(maxWidth: .infinity)
                     }
@@ -107,18 +115,72 @@ struct AgentDetailView: View {
                     .controlSize(.large)
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
+                    .accessibilityIdentifier("run-agent")
+
+                    Button {
+                        creatingTask = true
+                    } label: {
+                        Label("New task", systemImage: "plus.square.on.square")
+                    }
+
+                    Button {
+                        Task { await startChat(for: agent) }
+                    } label: {
+                        Label("Ask in chat", systemImage: "bubble.left.and.bubble.right")
+                    }
+
+                    if AgentWebWorkspace.hasWebClient(agent.builtin) {
+                        Button {
+                            openURL(app.environment.agentWorkspaceURL(agentID: agent.id))
+                        } label: {
+                            Label("Open workspace on web", systemImage: "safari")
+                        }
+                        .accessibilityIdentifier("open-workspace-web")
+                    }
                 } footer: {
-                    Text("The agent runs on JobShout, not on this phone. Anything that needs approval comes back to you first.")
+                    Text(footerCopy(for: agent))
                 }
-                Section("Details") {
+
+                Section("Model") {
                     LabeledContent("Engine", value: agent.engineType)
-                    if let model = agent.modelName { LabeledContent("Model", value: model) }
-                    if let kind = agent.builtin { LabeledContent("Specialist", value: kind) }
+                    LabeledContent("Model", value: agent.modelName ?? "Default")
+                    if let kind = agent.builtin {
+                        LabeledContent("Specialist", value: kind)
+                    }
+                    if let score = agent.performanceScore, score != 0 {
+                        LabeledContent("Score", value: String(format: "%.0f", score))
+                    }
+                }
+
+                if !knowledge.isEmpty || !skills.isEmpty || extrasError != nil {
+                    Section("Knowledge & skills") {
+                        if let extrasError {
+                            Text(extrasError).foregroundStyle(.secondary)
+                        }
+                        ForEach(knowledge, id: \.id) { file in
+                            Label(file.filename, systemImage: "doc.text")
+                        }
+                        ForEach(skills, id: \.id) { skill in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(skill.name)
+                                Text(skill.slug).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        if knowledge.isEmpty && skills.isEmpty && extrasError == nil {
+                            Text("None enabled yet.").foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
-            .sheet(isPresented: $calling) {
+            .sheet(isPresented: $running) {
                 CallAgentView(agent: agent) { taskID in
-                    calling = false
+                    running = false
+                    launchedTask = TaskRoute(id: taskID)
+                }
+            }
+            .sheet(isPresented: $creatingTask) {
+                NewTaskView(agent: agent) { taskID in
+                    creatingTask = false
                     launchedTask = TaskRoute(id: taskID)
                 }
             }
@@ -126,10 +188,39 @@ struct AgentDetailView: View {
         .navigationTitle("Agent")
         .inlineTitle()
         .navigationDestination(item: $launchedTask) { TaskDetailView(taskID: $0.id) }
+        .navigationDestination(item: $askInChat) { ChatSessionView(sessionID: $0.id, title: $0.title) }
         .task { await load() }
+    }
+
+    private func footerCopy(for agent: Agent) -> String {
+        if AgentWebWorkspace.hasWebClient(agent.builtin) {
+            return "Run starts work on JobShout. Specialist results live in the web Workspace; open it from here when you need the full console."
+        }
+        return "The agent runs on JobShout, not on this phone. Anything that needs approval comes back to you first."
     }
 
     private func load() async {
         await agent.load { try await app.api.agent(agentID) }
+        extrasError = nil
+        do {
+            async let k = app.api.knowledge(agentID: agentID)
+            async let s = app.api.skills(agentID: agentID)
+            let (files, skillList) = try await (k, s)
+            knowledge = files
+            skills = skillList
+        } catch {
+            extrasError = APIError.from(error).message
+            knowledge = []
+            skills = []
+        }
+    }
+
+    private func startChat(for agent: Agent) async {
+        do {
+            let session = try await app.api.startChatSession(agentID: agent.id)
+            askInChat = ChatRoute(id: session.id, title: agent.name)
+        } catch {
+            extrasError = APIError.from(error).message
+        }
     }
 }

@@ -7,6 +7,10 @@ struct TaskRoute: Hashable { let id: String }
 struct ApprovalRoute: Hashable { let id: String }
 struct FreelanceProjectRoute: Hashable { let id: String }
 struct FreelanceBidRoute: Hashable { let projectID: String }
+struct ChatRoute: Hashable {
+    let id: String
+    var title: String = "Chat"
+}
 
 extension View {
     /// Every tab can reach every detail screen (Home links to tasks and
@@ -17,5 +21,6 @@ extension View {
             .navigationDestination(for: ApprovalRoute.self) { ApprovalDetailView(approvalID: $0.id) }
             .navigationDestination(for: FreelanceProjectRoute.self) { FreelanceProjectDetailView(projectID: $0.id) }
             .navigationDestination(for: FreelanceBidRoute.self) { SubmitBidView(projectID: $0.projectID) }
+            .navigationDestination(for: ChatRoute.self) { ChatSessionView(sessionID: $0.id, title: $0.title) }
     }
 }
