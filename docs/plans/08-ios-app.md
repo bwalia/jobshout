@@ -100,6 +100,14 @@ A user can sign in with Apple, browse Showcase and Insights, find an agent, see 
 - Inventing reliability numbers. Stats come from recorded executions only, with the sample size shown.
 - A WebView shell.
 
+## Parity status (Agents web + iOS)
+
+See `docs/prompts/agents-web-ios-parity.md`. **P1–P10** covered by Phase A (web UX) + Phase B (iOS chat, schedules create, specialist web handoff). Phase C polish:
+
+- Work live WS: client keepalive pings + foreground resync/reconnect; server `liveevents` already broadcasts task/execution/approval changes (plan table above is stale on “nothing calls BroadcastToOrg”).
+- **Freelance** tab (was “Projects”) so marketplace gigs are not confused with workspace board projects.
+- APNs: device token registration + tap→Approvals on client; **server APNs sender still missing** (approvals notify Slack/Teams/Telegram only). Documented in `ios/Brand/TESTFLIGHT.md`.
+
 ## Implementation order (PRs)
 
 1. This plan.

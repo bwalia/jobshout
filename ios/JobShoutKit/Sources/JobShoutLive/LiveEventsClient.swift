@@ -13,6 +13,10 @@ public final class LiveEventsClient: Sendable {
         public let state: State
     }
 
+    /// How often to ping while connected. Idle sockets die quietly behind NATs;
+    /// a failed ping cancels the receive loop and triggers reconnect.
+    static let keepaliveInterval: Duration = .seconds(25)
+
     private let url: URL
     private let tokens: AccessTokenProvider
     private let session: URLSession
@@ -66,6 +70,19 @@ public final class LiveEventsClient: Sendable {
             try await ping(socket)
             receivedAny = true
             continuation.yield(Update(event: nil, state: .connected))
+
+            let keepalive = Task {
+                do {
+                    while !Task.isCancelled {
+                        try await Task.sleep(for: Self.keepaliveInterval)
+                        try await ping(socket)
+                    }
+                } catch {
+                    socket.cancel(with: .goingAway, reason: nil)
+                }
+            }
+            defer { keepalive.cancel() }
+
             while !Task.isCancelled {
                 let message = try await socket.receive()
                 let data: Data? = switch message {
