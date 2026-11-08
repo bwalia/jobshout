@@ -32,9 +32,9 @@ struct MacShellView: View {
                         .accessibilityIdentifier("sidebar-chat")
                 }
                 Section("Marketplace") {
-                    Label("Projects", systemImage: "briefcase")
+                    Label("Freelance", systemImage: "briefcase")
                         .tag(MacDestination.projects)
-                        .accessibilityIdentifier("sidebar-projects")
+                        .accessibilityIdentifier("sidebar-freelance")
                 }
                 Section("Automation") {
                     Label("Schedules", systemImage: "clock")

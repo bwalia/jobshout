@@ -61,13 +61,18 @@ Developer Portal App ID + Store profile on team `PAS2QUVJHC`).
 
 ## What this build covers
 
-Home → Agents (richer detail: model, knowledge/skills, **Run**, New task, Ask in chat) → **Chat** (sessions + SSE stream against the ring) → **Projects** (freelance catalog + bid) → Work → Approvals → Schedules (**create** + pause/resume) → Me.
+Home → Agents (richer detail: model, knowledge/skills, **Run**, New task, Ask in chat) → **Chat** (sessions + SSE stream against the ring) → **Freelance** (jobshout.com marketplace catalog + bid; deliberately not named “Projects” to avoid colliding with workspace board projects) → **Work** (WS live + keepalive + foreground resync; polling remains truth) → Approvals → Schedules (**create** + pause/resume) → Me.
 
 Specialists with a web Workspace (`AGENT_CLIENTS`) get **Open workspace on web** → `/panel/agents/{id}?tab=workspace` (no per-builtin Swift clones). Debug builds talk to int.
 
-Projects/bids mirror jobshout.com `/projects` (same seeded catalog until the Rust freelance API is auth-wired through Go).
+Parity IDs from `docs/prompts/agents-web-ios-parity.md`: **P1–P10** shipped for Agents core loop (Phase A web + Phase B iOS). Phase C polish: Work WS reliability, Freelance naming, client push registration + tap→Approvals.
 
-Not in this track yet: Showcase / Insights, Career UI, APNs delivery from the server, full knowledge/skills editors.
+Freelance/bids mirror jobshout.com `/projects` (same seeded catalog until the Rust freelance API is auth-wired through Go).
+
+### APNs gap (intentional leftover)
+
+- **Client:** registers for remote notifications, uploads device push token via `PUT /devices/{id}/push`, opens Approvals on notification tap.
+- **Server:** no APNs sender yet. Approval notices still go through Slack/Teams/Telegram (`notifyManager` → `notifSvc`). Device table + token storage exist; push-when-approval-needed waits on an APNs sender that reads `devices.push_token`.
 
 ## Related
 

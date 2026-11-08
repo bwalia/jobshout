@@ -18,9 +18,9 @@ struct FreelanceProjectsView: View {
         List {
             Section {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Find freelance projects worth shouting about")
+                    Text("Freelance gigs on jobshout.com")
                         .font(.title3.bold())
-                    Text("Browse short-term projects, submit bids, and work with clients on flexible terms.")
+                    Text("Marketplace listings to bid on — not your org’s workspace board projects.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -39,10 +39,10 @@ struct FreelanceProjectsView: View {
                     ContentUnavailableView.search(text: search)
                 }
             } footer: {
-                Text("Same catalog as jobshout.com /projects. Live API wiring follows.")
+                Text("Same catalog as jobshout.com /projects. Workspace agent tasks live under Work.")
             }
         }
-        .navigationTitle("Projects")
+        .navigationTitle("Freelance")
         .searchable(text: $search, prompt: "React, design, writing…")
     }
 }

@@ -32,6 +32,11 @@ import Testing
             #expect(d <= .seconds(36))
         }
     }
+
+    @Test func keepaliveIntervalIsUnderTypicalNATIdleTimeout() {
+        #expect(LiveEventsClient.keepaliveInterval >= .seconds(15))
+        #expect(LiveEventsClient.keepaliveInterval <= .seconds(45))
+    }
 }
 
 @Suite struct CoreTests {

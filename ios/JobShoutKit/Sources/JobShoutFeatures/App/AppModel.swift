@@ -18,6 +18,8 @@ public final class AppModel {
     /// `.task(id:)` key to refetch.
     public private(set) var revisions: [LiveEvent.Topic: Int] = [:]
     public private(set) var pendingApprovals = 0
+    /// Bumped when a push/deep-link asks to show Approvals (MainTabView selects it).
+    public private(set) var approvalsFocus = 0
     public private(set) var deviceID: String?
     public private(set) var userID: String?
 
@@ -106,6 +108,18 @@ public final class AppModel {
         Task { await uploadPushToken() }
     }
 
+    /// Notification tap / deep-link into Approvals. Server APNs delivery for
+    /// `approval.requested` is not wired yet — this handles the payload shape
+    /// once it is, and still refreshes the badge from a local/test notification.
+    public func openApprovalsFromNotification(userInfo: [AnyHashable: Any] = [:]) {
+        approvalsFocus += 1
+        revisions[.approvals, default: 0] += 1
+        if let type = userInfo["type"] as? String, type.contains("approval") {
+            Log.push.debug("opened approvals from push type=\(type, privacy: .public)")
+        }
+        Task { await refreshApprovalCount() }
+    }
+
     private func uploadPushToken() async {
         guard phase == .signedIn, let deviceID, let pushToken else { return }
         do {
@@ -113,6 +127,22 @@ public final class AppModel {
         } catch {
             Log.push.error("push token upload failed: \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    // MARK: Lifecycle / live
+
+    /// Called when the app returns to the foreground. Missed WS frames while
+    /// suspended cost latency only if we refetch; also restart the socket in
+    /// case iOS killed it quietly in the background.
+    public func noteBecameActive() {
+        guard phase == .signedIn else { return }
+        for topic in [LiveEvent.Topic.work, .approvals, .agents] {
+            revisions[topic, default: 0] += 1
+        }
+        Task { await refreshApprovalCount() }
+        #if !os(watchOS)
+        startLive()
+        #endif
     }
 
     // MARK: Approvals badge
