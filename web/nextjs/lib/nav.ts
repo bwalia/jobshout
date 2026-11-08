@@ -113,8 +113,10 @@ export const NAV_SECTIONS: NavSection[] = [
         label: "All agents",
         href: "/panel/agents",
         icon: Bot,
+        // /panel/task-manager is a legacy redirect into an agent Workspace;
+        // keep it active so old bookmarks still highlight All agents.
         match: ["/panel/agents", "/panel/task-manager", "/agents"],
-        keywords: ["agents", "task manager", "specialists"],
+        keywords: ["agents", "specialists", "run agent", "workspace"],
         badge: "failed-agents",
       },
       {

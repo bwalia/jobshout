@@ -6,6 +6,7 @@ import { Search } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { ALL_NAV_ITEMS } from "@/lib/nav";
 import { agentHref } from "@/lib/agents/links";
+import { hasAgentClient } from "@/lib/agents/specialist";
 import {
   artifactsFromBlogRuns,
   artifactsFromImages,
@@ -86,7 +87,9 @@ export function CommandPalette() {
         label: a.name,
         hint: a.role,
         keywords: `${a.role} ${a.model_name ?? ""}`,
-        href: agentHref(a.id),
+        href: hasAgentClient(a.metadata?.builtin)
+          ? agentHref(a.id, "workspace")
+          : agentHref(a.id),
       })),
       ...(projectsResp?.data ?? []).map((p): Item => ({
         kind: "link",

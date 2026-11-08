@@ -68,6 +68,61 @@ test.describe("Agents (All agents + profile)", () => {
     );
   });
 
+  test("profile primary actions: Run, Ask in chat, New task", async ({ page }) => {
+    await navigateTo(page, "/panel/agents");
+    await page.getByRole("link", { name: "Playwright Test Agent" }).first().click();
+    await page.waitForURL("**/panel/agents/**", { timeout: 5_000 });
+
+    const actions = page.getByRole("group", { name: "Primary agent actions" });
+    await expect(actions.getByRole("button", { name: "Run" })).toBeVisible();
+    await expect(actions.getByRole("link", { name: "Ask in chat" })).toBeVisible();
+    await expect(actions.getByRole("link", { name: "New task" })).toBeVisible();
+    // Custom agents have no Workspace product UI — that CTA is for builtins.
+    await expect(actions.getByRole("link", { name: "Workspace" })).toHaveCount(0);
+
+    await expect(page.getByRole("navigation", { name: "Configure agent" })).toBeVisible();
+    await expect(
+      page.getByRole("navigation", { name: "Configure agent" }).getByRole("button", { name: "Models" }),
+    ).toBeVisible();
+  });
+
+  test("Ask in chat prefills the composer", async ({ page }) => {
+    await navigateTo(page, "/panel/agents");
+    await page.getByRole("link", { name: "Playwright Test Agent" }).first().click();
+    await page.waitForURL("**/panel/agents/**", { timeout: 5_000 });
+
+    await page.getByRole("group", { name: "Primary agent actions" })
+      .getByRole("link", { name: "Ask in chat" })
+      .click();
+    await page.waitForURL("**/chat**", { timeout: 10_000 });
+    await expect(page.locator("#chat-composer")).toHaveValue(
+      /Help me work with Playwright Test Agent/,
+    );
+  });
+
+  test("specialist with a Workspace client opens on Workspace", async ({ page }) => {
+    const res = await fetch(
+      `${process.env.E2E_API_URL ?? "http://localhost:8090/api/v1"}/agents?per_page=100`,
+      { headers: { Authorization: `Bearer ${creds.token}` } },
+    );
+    const mail = (await res.json()).data.find(
+      (a: { metadata?: { builtin?: string } }) => a.metadata?.builtin === "mail",
+    );
+    expect(mail?.id).toBeTruthy();
+
+    await navigateTo(page, "/panel/agents");
+    await page.getByRole("link", { name: mail.name }).first().click();
+    await page.waitForURL(new RegExp(`/panel/agents/${mail.id}\\?tab=workspace`), {
+      timeout: 10_000,
+    });
+    const actions = page.getByRole("group", { name: "Primary agent actions" });
+    await expect(actions.getByRole("link", { name: "Workspace" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Workspace", exact: true })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+  });
+
   test("create agent validation - empty name shows error", async ({
     page,
   }) => {

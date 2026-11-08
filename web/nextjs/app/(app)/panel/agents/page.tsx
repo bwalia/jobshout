@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, Bot, CheckCircle2, Cpu, Download, Loader2, Plus, Search } from "lucide-react";
+import { AlertTriangle, Bot, CheckCircle2, Cpu, Download, Loader2, MessageSquare, Plus, Search } from "lucide-react";
 import { CreateAgentDialog } from "@/components/agent/CreateAgentDialog";
 import { ImportAgentPackageDialog } from "@/components/agent/ImportAgentPackageDialog";
 import { providerName } from "@/components/agent/ModelPicker";
 import { agentHref } from "@/lib/agents/links";
+import { hasAgentClient } from "@/lib/agents/specialist";
 import { useAgents } from "@/lib/hooks/useAgents";
 import { useBlogConfig } from "@/lib/hooks/useBlog";
 import { useRunFailures, type AgentRunStats } from "@/lib/hooks/useRunFailures";
@@ -70,9 +71,16 @@ function LastRunCell({ stats }: { stats?: AgentRunStats }) {
  * from the sidebar. Each row opens the agent's profile; the model cell opens
  * its Models tab.
  */
+function profileHref(agent: Agent): string {
+  // Specialists with a Workspace client open there so work starts in ≤2 clicks.
+  return hasAgentClient(agent.metadata?.builtin)
+    ? agentHref(agent.id, "workspace")
+    : agentHref(agent.id);
+}
+
 export default function AgentsPage() {
   const router = useRouter();
-  const { data, isLoading } = useAgents({ per_page: 100 });
+  const { data, isLoading, isError, refetch } = useAgents({ per_page: 100 });
   const { data: blogConfig } = useBlogConfig();
   const { byAgent } = useRunFailures();
   const [query, setQuery] = useState("");
@@ -107,7 +115,7 @@ export default function AgentsPage() {
         <div>
           <h1 className="text-2xl">All agents</h1>
           <p className="text-sm text-muted-foreground">
-            Every agent in this workspace. Open one to change its model, run it, or see its tasks.
+            Open an agent to Run it, open its Workspace, or Ask in chat. Specialists open on Workspace.
           </p>
         </div>
         <div className="flex gap-2">
@@ -142,19 +150,69 @@ export default function AgentsPage() {
 
       {isLoading ? (
         <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+      ) : isError ? (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-10 text-center">
+          <AlertTriangle className="mx-auto mb-2 h-6 w-6 text-destructive" />
+          <p className="text-sm font-medium text-foreground">Couldn&apos;t load agents.</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Try again, or ask in Chat while we sort this out.
+          </p>
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={() => void refetch()}
+              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90"
+            >
+              Try again
+            </button>
+            <Link
+              href="/chat"
+              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"
+            >
+              <MessageSquare className="h-4 w-4" /> Open Chat
+            </Link>
+            <button
+              type="button"
+              onClick={() => setCreateOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"
+            >
+              <Plus className="h-4 w-4" /> New agent
+            </button>
+          </div>
+        </div>
       ) : agents.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border p-10 text-center">
           <Bot className="mx-auto mb-2 h-6 w-6 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">
-            {query ? `No agent matches “${query}”.` : "No agents yet."}
+            {query ? `No agent matches “${query}”.` : "No agents yet. Create one, or ask Chat to help you get started."}
           </p>
-          <button
-            type="button"
-            onClick={() => (query ? setQuery("") : setCreateOpen(true))}
-            className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90"
-          >
-            {query ? "Clear search" : (<><Plus className="h-4 w-4" /> Create an agent</>)}
-          </button>
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+            {query ? (
+              <button
+                type="button"
+                onClick={() => setQuery("")}
+                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90"
+              >
+                Clear search
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setCreateOpen(true)}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90"
+                >
+                  <Plus className="h-4 w-4" /> New agent
+                </button>
+                <Link
+                  href="/chat"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"
+                >
+                  <MessageSquare className="h-4 w-4" /> Ask in Chat
+                </Link>
+              </>
+            )}
+          </div>
         </div>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-border bg-card">
@@ -179,12 +237,12 @@ export default function AgentsPage() {
                 return (
                   <tr
                     key={a.id}
-                    onClick={() => router.push(agentHref(a.id))}
+                    onClick={() => router.push(profileHref(a))}
                     className="cursor-pointer hover:bg-muted/40"
                   >
                     <td className="px-4 py-3">
                       <Link
-                        href={agentHref(a.id)}
+                        href={profileHref(a)}
                         onClick={(e) => e.stopPropagation()}
                         className="font-semibold text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       >

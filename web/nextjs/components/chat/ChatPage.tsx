@@ -26,6 +26,7 @@ export function ChatPage({ className }: { className?: string }) {
   const searchParams = useSearchParams();
   const createSession = useCreateChatSession();
   const sessionFromUrl = searchParams.get("session");
+  const askFromUrl = searchParams.get("ask");
   const [sessionId, setSessionId] = useState<string | null>(sessionFromUrl);
   const [draft, setDraft] = useState("");
   const [failedDraft, setFailedDraft] = useState<string | null>(null);
@@ -64,6 +65,18 @@ export function ChatPage({ className }: { className?: string }) {
     setServingModel(null);
     setDraft("");
   }, [sessionFromUrl]);
+
+  // Agent profile "Ask in chat" lands here with ?ask=… — prefill once, then drop
+  // the query so a refresh doesn't keep rewriting the composer.
+  useEffect(() => {
+    if (!askFromUrl) return;
+    setDraft(askFromUrl);
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete("ask");
+    const qs = next.toString();
+    router.replace(qs ? `/chat?${qs}` : "/chat", { scroll: false });
+    requestAnimationFrame(() => document.getElementById("chat-composer")?.focus());
+  }, [askFromUrl, router, searchParams]);
 
   const ensureSession = useCallback(async () => {
     if (sessionId) return sessionId;

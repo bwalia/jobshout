@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { agentHref } from "@/lib/agents/links";
+import { hasAgentClient } from "@/lib/agents/specialist";
 import { AgentStatusBadge } from "@/components/agent/AgentStatusBadge";
 import type { Agent } from "@/lib/types/agent";
 
@@ -50,9 +51,13 @@ export function AgentCard({ agent, currentTask }: AgentCardProps) {
   const avatarColour = getAvatarColour(agent.name);
   const initials = getInitials(agent.name);
 
+  const href = hasAgentClient(agent.metadata?.builtin)
+    ? agentHref(agent.id, "workspace")
+    : agentHref(agent.id);
+
   return (
     <Link
-      href={agentHref(agent.id)}
+      href={href}
       className="group flex flex-col gap-4 rounded-xl border border-border bg-card p-5 shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:shadow-card-hover"
     >
       {/* Top row: avatar + status */}
