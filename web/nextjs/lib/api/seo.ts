@@ -2,6 +2,7 @@ import { apiClient } from "@/lib/api/client";
 
 export type SEORunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 export type SEOMode = "analyze" | "improve" | "publish";
+export type SEOSource = "urls" | "github";
 
 export interface SEOScore {
   overall: number;
@@ -35,6 +36,29 @@ export interface SEOSuggestion {
   proposed?: string;
 }
 
+export interface SEOPageReport {
+  path: string;
+  source_url?: string;
+  status: string;
+  error?: string;
+  title?: string;
+  meta_description?: string;
+  h1?: string[];
+  keywords_found?: string[];
+  score?: SEOScore | null;
+  issues?: SEOIssue[];
+  suggestions?: SEOSuggestion[];
+  meta_patch?: Record<string, string>;
+  proposed_diff?: string;
+}
+
+export interface SEOProgress {
+  total: number;
+  completed: number;
+  current?: string;
+  phase?: string;
+}
+
 export interface SEOReport {
   final_url: string;
   status_code: number;
@@ -53,6 +77,9 @@ export interface SEOReport {
   proposed_slug?: string;
   sitemap_xml?: string;
   meta_patch?: Record<string, string>;
+  page_count?: number;
+  keywords?: string[];
+  rollup_summary?: string;
   site_structure?: {
     content_root?: string;
     public_root?: string;
@@ -80,15 +107,21 @@ export interface SEORun {
   org_id: string;
   status: SEORunStatus;
   mode: SEOMode | string;
+  source?: SEOSource | string;
   url: string;
   platform: string;
   detected_cms?: string;
   git_repo?: string;
   git_branch?: string;
+  github_connection?: string;
+  path_glob?: string;
+  max_pages?: number;
   keywords?: string;
   instruction?: string | null;
   score?: SEOScore | null;
   report?: SEOReport | null;
+  pages?: SEOPageReport[];
+  progress?: SEOProgress | null;
   publish?: SEOPublishResult | null;
   error_message?: string | null;
   requested_by?: string | null;
@@ -101,14 +134,34 @@ export interface SEORun {
 export interface CreateSEORunRequest {
   agent_id: string;
   task_id?: string;
-  url: string;
+  source?: SEOSource | string;
+  url?: string;
+  urls?: string;
   mode: SEOMode | string;
   platform?: string;
   git_repo?: string;
   git_branch?: string;
+  github_connection?: string;
+  path_glob?: string;
+  max_pages?: number;
   sitemap_path?: string;
-  keywords?: string;
+  keywords: string;
   instruction?: string;
+}
+
+export interface SEOGitHubConnection {
+  id: string;
+  name: string;
+  repo: string;
+  default_branch: string;
+  connected_by?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SEOStatus {
+  can_seal_tokens: boolean;
+  connections: boolean;
 }
 
 export interface PaginatedSEORuns {
@@ -117,6 +170,33 @@ export interface PaginatedSEORuns {
   page: number;
   per_page: number;
   total_pages: number;
+}
+
+export async function getSEOStatus() {
+  const { data } = await apiClient.get<SEOStatus>("/seo/status");
+  return data;
+}
+
+export async function listSEOConnections() {
+  const { data } = await apiClient.get<{ data: SEOGitHubConnection[] }>("/seo/connections");
+  return data.data ?? [];
+}
+
+export async function upsertSEOConnection(body: {
+  name: string;
+  repo: string;
+  default_branch?: string;
+  access_token: string;
+}) {
+  const { data } = await apiClient.put<SEOGitHubConnection>("/seo/connections", body);
+  return data;
+}
+
+export async function deleteSEOConnection(name: string) {
+  const { data } = await apiClient.delete<{ status: string }>(
+    `/seo/connections/${encodeURIComponent(name)}`
+  );
+  return data;
 }
 
 export async function listSEORuns(page = 1, perPage = 10) {

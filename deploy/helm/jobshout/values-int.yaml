@@ -27,7 +27,9 @@ extraSecretRefs:
   - jobshout-linkedin
   # Meta Lead Analyst: META_APP_ID / META_APP_SECRET / META_WEBHOOK_VERIFY_TOKEN /
   # META_TOKEN_KEY, for Page connections and the /webhooks/meta callback. See
-  # docs/meta-lead-analyst.md.
+  # docs/meta-lead-analyst.md. SEO Analyst reuses META_TOKEN_KEY to seal named
+  # GitHub PATs when SEO_TOKEN_KEY is unset (docs/seo-agent.md); optional
+  # jobshout-seo vault path can supply SEO_TOKEN_KEY later.
   - jobshout-meta
   # wafLab.baseURL below is set, but the client stays disabled until it also has
   # a token (or username+password) — those arrive only through this secret.

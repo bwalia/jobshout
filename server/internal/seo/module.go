@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -21,22 +22,25 @@ type Runner interface {
 // Module is the SEO Analyst / Manager specialist.
 func Module(run Runner) agentmodule.Module {
 	return agentmodule.Module{
-		Builtin:   model.BuiltinSEOAnalyst,
-		Label:     "SEO Analyst",
-		Icon:      "search",
-		TabSlug:   "seo",
-		Hint:      "Analyse a site’s SEO, propose meta/slug/sitemap fixes, and publish via WordPress, OpsAPI, or a git PR.",
-		ChatHint:  "To analyse or improve SEO, call agent_execute on the SEO Analyst. Pass a public URL; add git_repo to open a PR when CMS APIs are unavailable.",
-		Schema:    schema(),
-		Seed:      Seed,
-		Launch:    launch(run),
+		Builtin:  model.BuiltinSEOAnalyst,
+		Label:    "SEO Analyst",
+		Icon:     "search",
+		TabSlug:  "seo",
+		Hint:     "Audit URLs or GitHub site files against a keyword set; propose meta/frontmatter fixes and open a PR via a named connection.",
+		ChatHint: "To analyse SEO, call agent_execute on the SEO Analyst. Pass source=urls with urls + keywords, or source=github with github_connection (named credential) + keywords and optional path_glob / max_pages. Never paste a GitHub token.",
+		Schema:   schema(),
+		Seed:     Seed,
+		Launch:   launch(run),
 		StayOnTab: true,
 		AbsorbPrompt: func(prompt string, vals map[string]string) {
-			if vals["url"] != "" {
+			if vals["urls"] != "" || vals["url"] != "" {
 				return
 			}
 			if u := extractURL(prompt); u != "" {
-				vals["url"] = u
+				vals["urls"] = u
+				if vals["source"] == "" {
+					vals["source"] = "urls"
+				}
 			}
 		},
 	}
@@ -45,18 +49,45 @@ func Module(run Runner) agentmodule.Module {
 func schema() agentschema.Schema {
 	return agentschema.Schema{
 		Builtin: model.BuiltinSEOAnalyst,
-		Hint:    "Analyse SEO health and optionally improve + publish (CMS API or git PR).",
+		Hint:    "Keyword-driven SEO: audit public URLs one-by-one, or analyse GitHub site files via a named connection (token never in the form).",
 		Fields: []agentschema.Field{
-			{Key: "url", Label: "Website URL", Type: "text", Required: true, MinLength: 3,
-				Placeholder: "https://example.com",
-				Help:        "Public page to crawl", Question: "Which website URL should I analyse?"},
-			{Key: "mode", Label: "Mode", Type: "select", Required: true, Default: "analyze",
+			{Key: "source", Label: "Source", Type: "select", Required: true, Default: "urls",
 				Options: []model.ClarifyOption{
-					{Label: "Analyse only", Value: "analyze"},
-					{Label: "Analyse + improve plan", Value: "improve"},
-					{Label: "Improve + publish", Value: "publish"},
+					{Label: "URL audit (no GitHub)", Value: "urls"},
+					{Label: "GitHub site optimise", Value: "github"},
 				},
-				Question: "Analyse only, also propose fixes, or publish?"},
+				Question: "Audit public URLs, or analyse files in a connected GitHub repo?",
+				Help:     "URL mode fetches pages. GitHub mode reads files via a named server-side connection."},
+			{Key: "keywords", Label: "Focus keywords", Type: "textarea", Required: true,
+				Placeholder: "devops jobs\nsite reliability\nhire engineers",
+				Help:        "One per line or comma-separated. Every recommendation is driven by this set.",
+				Question:    "Which focus keywords should guide the analysis?"},
+			{Key: "urls", Label: "URLs (one per line)", Type: "textarea", Required: false,
+				Placeholder: "https://example.com/\nhttps://example.com/about",
+				Help:        "Required for URL audit. Analysed one-by-one up to max pages.",
+				Question:    "Which URLs should I audit?"},
+			{Key: "github_connection", Label: "GitHub connection name", Type: "text", Required: false,
+				Placeholder: "e.g. marketing-site",
+				Help:        "Named credential saved in the SEO Workspace tab. Never paste a token here.",
+				Question:    "Which named GitHub connection should I use?"},
+			{Key: "git_repo", Label: "Repo override (optional)", Type: "text", Required: false,
+				Placeholder: "owner/repo",
+				Help:        "Defaults to the repo on the named connection."},
+			{Key: "git_branch", Label: "Branch", Type: "text", Required: false, Default: "main",
+				Placeholder: "main"},
+			{Key: "path_glob", Label: "Path glob", Type: "text", Required: false,
+				Placeholder: "content/**/*.md",
+				Help:        "GitHub only. Empty = common .html/.md/.mdx under the tree (capped)."},
+			{Key: "max_pages", Label: "Max pages", Type: "text", Required: false, Default: "10",
+				Placeholder: "10",
+				Help:        "Cap how many pages are analysed in one run (max 50)."},
+			{Key: "mode", Label: "Action", Type: "select", Required: true, Default: "analyze",
+				Options: []model.ClarifyOption{
+					{Label: "Analyse + report", Value: "analyze"},
+					{Label: "Analyse + propose fixes", Value: "improve"},
+					{Label: "Propose + publish / open PR", Value: "publish"},
+				},
+				Question: "Analyse only, also propose fixes, or publish / open a PR?"},
 			{Key: "platform", Label: "CMS / site type", Type: "select", Required: false, Default: "auto",
 				Options: []model.ClarifyOption{
 					{Label: "Auto-detect", Value: "auto"},
@@ -64,26 +95,23 @@ func schema() agentschema.Schema {
 					{Label: "OpsAPI contents API", Value: "opsapi"},
 					{Label: "Static / HTML (git)", Value: "static"},
 				}},
-			{Key: "keywords", Label: "Focus keywords", Type: "text", Required: false,
-				Placeholder: "devops, kubernetes, hiring",
-				Help:        "Comma-separated; checked against title/meta/body"},
-			{Key: "git_repo", Label: "GitHub repo (for PR fallback)", Type: "text", Required: false,
-				Placeholder: "owner/repo",
-				Help:        "When CMS APIs fail or platform is static, open a PR with sitemap + SEO_PATCH.md"},
-			{Key: "git_branch", Label: "Base branch", Type: "text", Required: false, Default: "main",
-				Placeholder: "main"},
 			{Key: "sitemap_path", Label: "Sitemap path in repo", Type: "text", Required: false,
 				Default: "sitemap.xml", Placeholder: "public/sitemap.xml"},
 			{Key: "instruction", Label: "Note (optional)", Type: "textarea",
 				Placeholder: "e.g. prefer UK English; keep brand voice"},
 		},
+		RequireAny: []agentschema.RequireGroup{
+			{Keys: []string{"urls", "github_connection"}, Slot: "target",
+				Question: "Provide URLs (URL audit) or a GitHub connection name (repo mode)."},
+		},
 		TitleRules: []agentschema.TitleRule{
-			{Prefix: "SEO: ", FromKey: "url", Fallback: "site"},
+			{Prefix: "SEO: ", FromKey: "keywords", Fallback: "keywords"},
 		},
 		DescRules: []agentschema.DescRule{
-			{Key: "mode", Prefix: "Mode: "},
-			{Key: "platform", Prefix: "Platform: "},
-			{Key: "keywords", Prefix: "Keywords: "},
+			{Key: "source", Prefix: "Source: "},
+			{Key: "mode", Prefix: "Action: "},
+			{Key: "github_connection", Prefix: "GitHub: "},
+			{Key: "path_glob", Prefix: "Glob: "},
 			{Key: "instruction"},
 		},
 	}
@@ -91,8 +119,8 @@ func schema() agentschema.Schema {
 
 // Seed is the built-in SEO Analyst agent.
 func Seed(orgID uuid.UUID) *model.Agent {
-	desc := "Analyses SEO for a URL (title, meta, headings, sitemap, robots), proposes slug/meta/sitemap fixes, and publishes via WordPress, OpsAPI, or a git PR when a repo is provided."
-	prompt := "You are the SEO Analyst agent. Crawl the given URL, score SEO health, propose concrete fixes (meta tags, URL slug, sitemap.xml), and when asked to publish use WordPress REST, OpsAPI CMS, or open a GitHub PR with sitemap + SEO_PATCH.md. Prefer API publish; fall back to git PR when APIs fail or the site is static. Use site-structure skills (README/STRUCTURE.md, public/, content/) to place files correctly."
+	desc := "Analyses pages against a configurable keyword set — public URLs one-by-one, or files in a GitHub repo via a named connection. Proposes title/meta/H1/frontmatter fixes and can open a PR when the connection has write scope."
+	prompt := "You are the SEO Analyst agent. Drive every recommendation from the operator's keyword set. For source=urls, fetch each URL and score title/meta/H1/content gaps. For source=github, use the named server-side GitHub connection (never ask for a token) to list matching files and analyse them. Propose concrete meta/frontmatter patches; when publishing, prefer opening a PR with seo-patches/ + SEO_PATCH.md. Prefer API publish for WordPress/OpsAPI when configured."
 	return &model.Agent{
 		ID:           uuid.New(),
 		OrgID:        orgID,
@@ -112,15 +140,17 @@ func launch(run Runner) agentmodule.LaunchFunc {
 		if run == nil {
 			return nil, fmt.Errorf("SEO Analyst is not configured")
 		}
-		rawURL := strings.TrimSpace(in.Values["url"])
-		if rawURL == "" {
-			return nil, fmt.Errorf("url is required")
+		source := strings.ToLower(strings.TrimSpace(in.Values["source"]))
+		if source == "" {
+			source = "urls"
 		}
-		if _, err := url.ParseRequestURI(ensureScheme(rawURL)); err != nil {
-			// allow host-only
-			if !strings.Contains(rawURL, ".") {
-				return nil, fmt.Errorf("invalid url")
-			}
+		urls := strings.TrimSpace(in.Values["urls"])
+		if urls == "" {
+			urls = strings.TrimSpace(in.Values["url"])
+		}
+		keywords := strings.TrimSpace(in.Values["keywords"])
+		if keywords == "" {
+			return nil, fmt.Errorf("keywords are required")
 		}
 		mode := strings.TrimSpace(in.Values["mode"])
 		if mode == "" {
@@ -130,17 +160,43 @@ func launch(run Runner) agentmodule.LaunchFunc {
 		if platform == "" {
 			platform = "auto"
 		}
+		maxPages := 10
+		if n, err := strconv.Atoi(strings.TrimSpace(in.Values["max_pages"])); err == nil && n > 0 {
+			maxPages = n
+		}
+		if source == "urls" {
+			for _, u := range ParseURLs(urls) {
+				if _, err := url.ParseRequestURI(ensureScheme(u)); err != nil && !strings.Contains(u, ".") {
+					return nil, fmt.Errorf("invalid url: %s", u)
+				}
+			}
+			if len(ParseURLs(urls)) == 0 {
+				return nil, fmt.Errorf("urls is required for URL audit")
+			}
+		}
+		if source == "github" && strings.TrimSpace(in.Values["github_connection"]) == "" {
+			return nil, fmt.Errorf("github_connection is required for GitHub mode")
+		}
+		firstURL := ""
+		if parsed := ParseURLs(urls); len(parsed) > 0 {
+			firstURL = parsed[0]
+		}
 		payload := model.CreateSEORunRequest{
-			AgentID:     in.Agent.ID,
-			TaskID:      &in.Task.ID,
-			URL:         rawURL,
-			Mode:        mode,
-			Platform:    platform,
-			GitRepo:     strings.TrimSpace(in.Values["git_repo"]),
-			GitBranch:   strings.TrimSpace(in.Values["git_branch"]),
-			SiteMapPath: strings.TrimSpace(in.Values["sitemap_path"]),
-			Keywords:    strings.TrimSpace(in.Values["keywords"]),
-			Instruction: strings.TrimSpace(in.Values["instruction"]),
+			AgentID:          in.Agent.ID,
+			TaskID:           &in.Task.ID,
+			Source:           source,
+			URL:              firstURL,
+			URLs:             urls,
+			Mode:             mode,
+			Platform:         platform,
+			GitRepo:          strings.TrimSpace(in.Values["git_repo"]),
+			GitBranch:        strings.TrimSpace(in.Values["git_branch"]),
+			GitHubConnection: strings.TrimSpace(in.Values["github_connection"]),
+			PathGlob:         strings.TrimSpace(in.Values["path_glob"]),
+			MaxPages:         maxPages,
+			SiteMapPath:      strings.TrimSpace(in.Values["sitemap_path"]),
+			Keywords:         keywords,
+			Instruction:      strings.TrimSpace(in.Values["instruction"]),
 		}
 		created, err := run.CreateRun(ctx, payload, in.OrgID, &in.UserID)
 		if err != nil {

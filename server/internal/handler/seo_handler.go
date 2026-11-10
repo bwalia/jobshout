@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
@@ -25,10 +26,94 @@ func NewSEOHandler(svc service.SEOService) *SEOHandler {
 	return &SEOHandler{svc: svc, validate: validator.New()}
 }
 
+// Status GET /api/v1/seo/status
+func (h *SEOHandler) Status(w http.ResponseWriter, r *http.Request) {
+	RespondJSON(w, http.StatusOK, h.svc.Status(r.Context()))
+}
+
+// ListConnections GET /api/v1/seo/connections
+func (h *SEOHandler) ListConnections(w http.ResponseWriter, r *http.Request) {
+	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid org_id in token")
+		return
+	}
+	rows, err := h.svc.ListConnections(r.Context(), orgID)
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	RespondJSON(w, http.StatusOK, map[string]any{"data": rows})
+}
+
+type upsertSEOConnectionRequest struct {
+	Name          string `json:"name"`
+	Repo          string `json:"repo"`
+	DefaultBranch string `json:"default_branch"`
+	AccessToken   string `json:"access_token"`
+}
+
+// UpsertConnection PUT /api/v1/seo/connections
+func (h *SEOHandler) UpsertConnection(w http.ResponseWriter, r *http.Request) {
+	var req upsertSEOConnectionRequest
+	if !DecodeJSON(w, r, &req) {
+		return
+	}
+	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid org_id in token")
+		return
+	}
+	var userID *uuid.UUID
+	if uid, err := uuid.Parse(middleware.GetUserID(r.Context())); err == nil {
+		userID = &uid
+	}
+	conn, err := h.svc.UpsertConnection(r.Context(), orgID, userID, req.Name, req.Repo, req.DefaultBranch, req.AccessToken)
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	RespondJSON(w, http.StatusOK, conn)
+}
+
+// DeleteConnection DELETE /api/v1/seo/connections/{name}
+func (h *SEOHandler) DeleteConnection(w http.ResponseWriter, r *http.Request) {
+	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid org_id in token")
+		return
+	}
+	name := strings.TrimSpace(chi.URLParam(r, "name"))
+	if name == "" {
+		RespondError(w, http.StatusBadRequest, "name required")
+		return
+	}
+	if err := h.svc.DeleteConnection(r.Context(), orgID, name); err != nil {
+		RespondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	RespondJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
 // CreateRun POST /api/v1/seo/runs
 func (h *SEOHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 	var req model.CreateSEORunRequest
 	if !DecodeJSON(w, r, &req) {
+		return
+	}
+	// Soften legacy clients that still send only url.
+	if strings.TrimSpace(req.URLs) == "" && strings.TrimSpace(req.URL) != "" {
+		req.URLs = req.URL
+	}
+	if strings.TrimSpace(req.Source) == "" {
+		if strings.TrimSpace(req.GitHubConnection) != "" {
+			req.Source = "github"
+		} else {
+			req.Source = "urls"
+		}
+	}
+	if strings.TrimSpace(req.Keywords) == "" {
+		RespondError(w, http.StatusBadRequest, "keywords are required")
 		return
 	}
 	if err := h.validate.Struct(req); err != nil {
