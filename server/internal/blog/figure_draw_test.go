@@ -119,7 +119,7 @@ func TestIllustrateBody_DropsFiguresTheArticleDoesNotSupport(t *testing.T) {
 		"```illustration architecture\nAPI gateway: auth service, orders service, billing service, Redis cache\n```\n\n" +
 		"```illustration concept\nDistribution: Ingress objects, Score: tenant-supplied snippets, Alert: secret exfiltration, Record: CVE-2021-25742\n```\n"
 	out, notes := r.illustrateBody(context.Background(), uuid.New(), nil, md)
-	if strings.Contains(out, "![") || len(notes) != 2 || !strings.Contains(notes[0], "orders service") {
+	if strings.Contains(out, "![") || len(notes) != 2 || !strings.Contains(notes[0], "orders service") || !strings.Contains(notes[1], "key: value") {
 		t.Fatalf("notes=%v\n%s", notes, out)
 	}
 }
@@ -155,11 +155,11 @@ func TestFigureScene(t *testing.T) {
 // Gemini has no image quota) still leaves something the diagram path can draw.
 func TestFigureKinds(t *testing.T) {
 	kinds, format := testRunner(&fakeIllustrator{enabled: true}).figureKinds()
-	if !strings.Contains(kinds, "comparison") || !strings.Contains(format, "Commit → Build image") || !strings.Contains(format, "vs") {
+	if !strings.Contains(kinds, "comparison") || !strings.Contains(format, "Mix dough → Proof") || !strings.Contains(format, "vs") {
 		t.Fatalf("with a lettering model: %q %q", kinds, format)
 	}
 	kinds, format = testRunner(&noLetterIllustrator{fakeIllustrator{enabled: true}}).WithCoverStore(newMemCovers()).figureKinds()
-	if strings.Contains(kinds, "comparison") || !strings.Contains(format, "API gateway: auth service") {
+	if strings.Contains(kinds, "comparison") || !strings.Contains(format, "Bakery: oven") {
 		t.Fatalf("diagrams only: %q %q", kinds, format)
 	}
 }

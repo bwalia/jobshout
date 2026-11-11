@@ -509,6 +509,19 @@ func ungroundedLabels(description, text string) []string {
 	return out
 }
 
+// figureMisfit says why a figure described this way cannot stand in an article
+// whose text is text, or "" when it can. One label may be the model's own
+// wording ("Build" for "built"); a copied example misses several.
+func figureMisfit(description, text string) string {
+	if _, rest, found := strings.Cut(description, ":"); found && strings.Contains(rest, ":") {
+		return "it is a list of key: value pairs, not labels"
+	}
+	if missing := ungroundedLabels(description, text); len(missing) > 1 {
+		return "it names what the article does not: " + strings.Join(missing, ", ")
+	}
+	return ""
+}
+
 // dropTemplateLabel removes a heading the model copied from the format
 // example instead of naming the real thing — "core: Agnost, Kusk Gateway"
 // drew a hub labelled "core". The first item then becomes the centre.
