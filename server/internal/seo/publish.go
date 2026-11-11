@@ -19,21 +19,23 @@ import (
 
 // PublishInput drives CMS / git publish after improve.
 type PublishInput struct {
-	SiteURL      string
-	Platform     string // wordpress | opsapi | static | auto
-	DetectedCMS  string
-	GitRepo      string // owner/repo
-	GitBranch    string // base
-	SitemapPath  string
-	SitemapXML   string
-	MetaPatch    map[string]string
-	ProposedSlug string
-	Keywords     []string
-	Structure    *SiteStructure
-	OpsAPIBase   string
-	OpsAPIKey    string
-	OpsNamespace string
-	WPUser       string
+	SiteURL       string
+	Platform      string // wordpress | opsapi | static | auto
+	DetectedCMS   string
+	GitRepo       string // owner/repo
+	GitBranch     string // base
+	GitToken      string // named connection PAT (preferred over env)
+	SitemapPath   string
+	SitemapXML    string
+	MetaPatch     map[string]string
+	ProposedSlug  string
+	Keywords      []string
+	FilePatches   map[string]string // path → new content (GitHub optimise)
+	Structure     *SiteStructure
+	OpsAPIBase    string
+	OpsAPIKey     string
+	OpsNamespace  string
+	WPUser        string
 	WPAppPassword string
 }
 
@@ -194,12 +196,15 @@ func publishOpsAPI(ctx context.Context, in PublishInput) PublishResult {
 }
 
 func publishGitPR(ctx context.Context, in PublishInput) PublishResult {
-	token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
+	token := strings.TrimSpace(in.GitToken)
+	if token == "" {
+		token = strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
+	}
 	if token == "" {
 		token = strings.TrimSpace(os.Getenv("GH_TOKEN"))
 	}
 	if token == "" {
-		return PublishResult{Channel: "git_pr", Success: false, Message: "GITHUB_TOKEN not set — cannot open PR"}
+		return PublishResult{Channel: "git_pr", Success: false, Message: "No GitHub token — save a named connection or set GITHUB_TOKEN"}
 	}
 	owner, repo, err := parseRepo(in.GitRepo)
 	if err != nil {
@@ -217,6 +222,11 @@ func publishGitPR(ctx context.Context, in PublishInput) PublishResult {
 	}
 
 	files := map[string]string{}
+	for p, content := range in.FilePatches {
+		if strings.TrimSpace(p) != "" && content != "" {
+			files[p] = content
+		}
+	}
 	sitemapPath := in.SitemapPath
 	if in.Structure != nil && in.Structure.PublicRoot != "" && !strings.Contains(sitemapPath, "/") {
 		sitemapPath = strings.TrimSuffix(in.Structure.PublicRoot, "/") + "/" + sitemapPath
@@ -224,13 +234,15 @@ func publishGitPR(ctx context.Context, in PublishInput) PublishResult {
 	if in.SitemapXML != "" {
 		files[sitemapPath] = in.SitemapXML
 	}
-	// robots.txt Sitemap: line helper
-	robots := "User-agent: *\nAllow: /\nSitemap: " + strings.TrimRight(in.SiteURL, "/") + "/sitemap.xml\n"
-	robotsPath := "robots.txt"
-	if in.Structure != nil && in.Structure.PublicRoot != "" {
-		robotsPath = strings.TrimSuffix(in.Structure.PublicRoot, "/") + "/robots.txt"
+	if len(in.FilePatches) == 0 {
+		// robots.txt Sitemap: line helper for classic single-URL publish
+		robots := "User-agent: *\nAllow: /\nSitemap: " + strings.TrimRight(in.SiteURL, "/") + "/sitemap.xml\n"
+		robotsPath := "robots.txt"
+		if in.Structure != nil && in.Structure.PublicRoot != "" {
+			robotsPath = strings.TrimSuffix(in.Structure.PublicRoot, "/") + "/robots.txt"
+		}
+		files[robotsPath] = robots
 	}
-	files[robotsPath] = robots
 
 	// SEO patch notes as markdown for humans / other agents
 	var md strings.Builder
@@ -241,6 +253,12 @@ func publishGitPR(ctx context.Context, in PublishInput) PublishResult {
 	}
 	for k, v := range in.MetaPatch {
 		fmt.Fprintf(&md, "- Meta `%s`: %s\n", k, v)
+	}
+	if len(in.FilePatches) > 0 {
+		md.WriteString("\n## File patches\n\n")
+		for p := range in.FilePatches {
+			md.WriteString("- `" + p + "`\n")
+		}
 	}
 	md.WriteString("\n## Skills\n\n")
 	for _, h := range SkillHints {
@@ -265,7 +283,7 @@ func publishGitPR(ctx context.Context, in PublishInput) PublishResult {
 	return PublishResult{
 		Channel:   "git_pr",
 		Success:   true,
-		Message:   "Opened PR with sitemap, robots.txt, and SEO_PATCH.md",
+		Message:   "Opened PR with SEO patches",
 		PRURL:     pr.HTMLURL,
 		PRNumber:  pr.Number,
 		RemoteRef: branch,

@@ -39,6 +39,7 @@ import (
 	mmchattools "github.com/jobshout/server/internal/marketingmanager/chattools"
 	"github.com/jobshout/server/internal/scheduler"
 	"github.com/jobshout/server/internal/secretsrot"
+	"github.com/jobshout/server/internal/seo"
 	"github.com/jobshout/server/internal/simpro"
 	"github.com/jobshout/server/internal/video"
 	"github.com/jobshout/server/internal/waflab"
@@ -871,7 +872,9 @@ func main() {
 	wafLabCfg := waflab.LoadConfig()
 	wafLabClient := waflab.NewClient(wafLabCfg, logger)
 	wafLabSvc := service.NewWAFLabServiceWithEvents(wafLabRunRepo, securityFindingEventRepo, agentRepo, wafLabCfg, wafLabClient, logger)
-	seoSvc := service.NewSEOService(seoRunRepo, agentRepo, logger)
+	seoCfg := seo.LoadConfig()
+	seoSvc := service.NewSEOServiceFull(seoRunRepo, agentRepo, pool, seoCfg, logger)
+	logger.Info("seo analyst initialised", zap.Bool("can_seal_tokens", seoCfg.CanSealTokens()))
 	courseCfg := course.LoadConfig()
 	courseProvider, courseModel := agentLLM(cfg, model.BuiltinCourseGenerator)
 	courseCfg.Provider = courseProvider
@@ -1723,6 +1726,10 @@ func main() {
 			})
 
 			r.Route("/seo", func(r chi.Router) {
+				r.Get("/status", seoHandler.Status)
+				r.Get("/connections", seoHandler.ListConnections)
+				r.Put("/connections", seoHandler.UpsertConnection)
+				r.Delete("/connections/{name}", seoHandler.DeleteConnection)
 				r.Get("/runs", seoHandler.ListRuns)
 				r.Post("/runs", seoHandler.CreateRun)
 				r.Get("/runs/{runID}", seoHandler.GetRun)
