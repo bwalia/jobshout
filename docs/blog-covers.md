@@ -102,7 +102,10 @@ so covers read as one series.
    times in three, so every cover and figure it draws is read back (Apple
    Vision OCR, `image-service/app/textcheck.py`) against the words it must
    show; a missing, misspelt, repeated or extra word gets it redrawn with a new
-   seed (`IMAGE_TEXT_ATTEMPTS`, default 2), and a picture still wrong is
+   seed (`IMAGE_TEXT_ATTEMPTS`, default 2, but only while the try fits before
+   `IMAGE_TEXT_DEADLINE`, 540 s: the edge drops a request at 600 s, so a cover
+   gets one try per request and the platform asks again, up to 3 times), and a
+   picture still wrong is
    refused, so the diagram of the same scene is filed instead — on a redraw
    too, rather than keeping the old cover. The prompt holds
    only words meant for the cover: a diffusion model letters whatever it reads.

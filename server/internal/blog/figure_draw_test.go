@@ -189,7 +189,7 @@ func TestFigureMisfit_LabelsTooLongToFit(t *testing.T) {
 		"The API gateway handles load balancing, security and rate limiting."
 	for _, d := range []string{
 		"Tenant creates Ingress object → Tenant injects custom snippet → Snippet obtains secrets",
-		"API gateway handles load balancing, API gateway handles security, API gateway handles rate limiting",
+		"Gateway: API gateway handles load balancing, API gateway handles security, API gateway handles rate limiting",
 	} {
 		if why := figureMisfit(d, text); !strings.Contains(why, "cut short") {
 			t.Errorf("%q: %q", d, why)
@@ -207,5 +207,19 @@ func TestCoverSceneFor_FlowKeepsItsDestination(t *testing.T) {
 		Labels: []string{"HTTP request", "auth", "rate limit", "routing policy", "forward request", "proxy to pod"}}}
 	if got := coverSceneFor(a).Labels; len(got) != 5 || got[3] != "routing policy" || got[4] != "proxy to pod" {
 		t.Fatalf("labels = %v", got)
+	}
+}
+
+// int, v1.0.210: five vendors with neither arrows nor a centre were drawn as a
+// five-step flow.
+func TestFigureMisfit_BareListHasNoShape(t *testing.T) {
+	text := "Kong Inc., HAProxy, Shieldfy, Contour and Armosec all sell API gateways; each gateway checks requests."
+	if why := figureMisfit("Kong Inc., HAProxy, Shieldfy, Contour, Armosec", text); !strings.Contains(why, "bare list") {
+		t.Fatalf("got %q", why)
+	}
+	for _, ok := range []string{"API gateway: Kong Inc., HAProxy, Shieldfy, Contour", "Kong Inc. → HAProxy → Contour"} {
+		if why := figureMisfit(ok, text); why != "" {
+			t.Errorf("%q refused: %q", ok, why)
+		}
 	}
 }

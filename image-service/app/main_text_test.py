@@ -37,9 +37,10 @@ class GenerateLetteringTests(unittest.TestCase):
         auth.start()
         self.addCleanup(auth.stop)
 
-    def post(self, readings: list[str], **body):
+    def post(self, readings: list[str], deadline: float = 540, **body):
         with mock.patch.object(main.textcheck, "read_text", side_effect=readings), \
-                mock.patch.object(main.config, "TEXT_ATTEMPTS", 2):
+                mock.patch.object(main.config, "TEXT_ATTEMPTS", 2), \
+                mock.patch.object(main.config, "TEXT_DEADLINE", deadline):
             r = self.client.post("/api/generate", json={"prompt": "a figure", "seed": 7, **body})
         self.assertEqual(r.status_code, 200, r.text)
         return r.json()
@@ -55,6 +56,10 @@ class GenerateLetteringTests(unittest.TestCase):
         got = self.post(["AUTH\nAUTH\n", "AUTH\nAUTH\n"], expect_text=["auth"])
         self.assertEqual((got["text_ok"], got["attempts"]), (False, 2))
         self.assertEqual(got["text_problems"], ["repeated AUTH"])
+
+    def test_no_redraw_that_would_end_past_the_deadline(self) -> None:
+        got = self.post(["AUTH\nAUTH\n"], deadline=-1, expect_text=["auth"])
+        self.assertEqual((got["text_ok"], got["attempts"], len(self.seeds)), (False, 1, 1))
 
     def test_nothing_expected_is_drawn_once_and_not_read(self) -> None:
         got = self.post([])

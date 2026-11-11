@@ -519,9 +519,14 @@ func figureMisfit(description, text string) string {
 	if missing := ungroundedLabels(description, text); len(missing) > 1 {
 		return "it names what the article does not: " + strings.Join(missing, ", ")
 	}
-	// A longer label is cut to fit its box: "Tenant injects custom snippet"
-	// was drawn as "Tenant injects custom".
 	if core, items, ok := figureItems(description); ok {
+		// Neither steps nor a centre: five vendors were drawn as a five-step
+		// flow, as if each led to the next.
+		if core == "" && !strings.Contains(description, "→") && !strings.Contains(description, "->") {
+			return "it is a bare list: write steps as a → b → c, or a centre and its parts as centre: part, part"
+		}
+		// A longer label is cut to fit its box: "Tenant injects custom
+		// snippet" was drawn as "Tenant injects custom".
 		var long []string
 		for _, l := range append([]string{core}, items...) {
 			if len(l) > maxCoverLabel {
