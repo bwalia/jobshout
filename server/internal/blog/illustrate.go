@@ -9,6 +9,8 @@ import (
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
+
+	"github.com/jobshout/server/internal/imagegen"
 )
 
 // Illustrator is the slice of the platform's image service this package
@@ -34,10 +36,10 @@ type IllustrationRequest struct {
 	// RunID is the article run the picture is for, recorded on the image so
 	// it can open its article. Nil outside a run.
 	RunID *uuid.UUID
-	// NeedsText marks a picture whose labels must be readable: it is never
-	// drawn by a model that cannot letter them (z-image-turbo), because an
-	// article without a picture is better than one with that picture.
-	NeedsText bool
+	// Text is how much readable text the picture carries: it is never drawn
+	// by a model that cannot letter that much, because an article without a
+	// picture is better than one with misspelt labels.
+	Text imagegen.TextNeed
 }
 
 // Illustration is what came back.
@@ -92,20 +94,20 @@ var illustrationFence = regexp.MustCompile("(?s)```illustration(?:[ \t]+([A-Za-z
 // holding a blog run open through a dead image host.
 const coverMaxAttempts = 3
 
-// infographicCoverPrompt is the cover for a model that letters text (Nano
-// Banana, ERNIE-Image): the article's title over its idea drawn as one
-// labelled diagram, in the article's own terms (the cover scene), so the card
-// says what the piece argues. The house style is fixed, so covers read as one
-// series on the listing page. Every word in the prompt may end up printed —
-// diffusion models letter what they read, "do not print" included — so it
-// holds only the words the cover should show.
-func infographicCoverPrompt(title string, scene coverScene, accent string) string {
+// infographicCoverPrompt is the cover for a model that captions (Nano Banana,
+// ERNIE-Image): the article's idea drawn as one labelled diagram, in the
+// article's own terms (the cover scene), so the card says what the piece
+// argues. The house style is fixed, so covers read as one series on the
+// listing page. Every word in the prompt may end up printed — diffusion models
+// letter what they read, "do not print" included — so it holds only the words
+// the cover should show. The title is not one of them: the site prints it
+// under the card, and ERNIE misspelt a 7-word one ("Kubernates").
+func infographicCoverPrompt(scene coverScene, accent string) string {
 	var b strings.Builder
 	b.WriteString("A 16:9 cover image for a technical blog article. It explains the article at a glance, " +
 		"like a well-designed infographic; it is not decoration.\n\n")
-	fmt.Fprintf(&b, "Headline, top left, large bold white sans-serif, spelled exactly: %q\n", strings.TrimSpace(title))
 	if scene.Eyebrow != "" {
-		fmt.Fprintf(&b, "Small uppercase tag above the headline, in the accent colour: %q\n", scene.Eyebrow)
+		fmt.Fprintf(&b, "Small uppercase tag, top left, in the accent colour: %q\n", scene.Eyebrow)
 	}
 	// The guide line is "what it shows (labels = their roles; extras)"; the
 	// extras carry examples a diffusion model would letter.
@@ -120,7 +122,7 @@ func infographicCoverPrompt(title string, scene coverScene, accent string) strin
 	// A range ("4-6 things") invites the model to draw more parts than there
 	// are labels and to fill them with repeats; it is told the exact count.
 	how, roles = labelRange.ReplaceAllString(how, ""), labelRange.ReplaceAllString(roles, "")
-	fmt.Fprintf(&b, "\nBeside the headline, one clear diagram of the article's idea: %s.\n", how)
+	fmt.Fprintf(&b, "\nFilling the image, one clear diagram of the article's idea: %s.\n", how)
 	labels := scene.Labels
 	switch {
 	case len(labels) == 0:
@@ -434,12 +436,12 @@ func firstSentence(s string) string {
 	return strings.TrimSpace(cut)
 }
 
-// generateCover draws an article's cover as a picture: its title over its
-// idea as a labelled diagram (infographicCoverPrompt).
+// generateCover draws an article's cover as a picture: its idea as a labelled
+// diagram (infographicCoverPrompt).
 //
 // The model is left unset so the platform default applies: Gemini first when
 // a key is set, then the workstation, but only a workstation model that
-// letters the labels (NeedsText). Steps suit a turbo model (ERNIE-Image-Turbo);
+// captions (imagegen.TextCaptions). Steps suit a turbo model (ERNIE-Image-Turbo);
 // Gemini ignores them.
 //
 // Transient upstream failures (WSL-proxy 502s, busy GPU, timeouts) are retried
@@ -450,19 +452,19 @@ func (r *Runner) generateCover(ctx context.Context, orgID uuid.UUID, a *Generate
 		a.CoverAccent = accentForTopic(a.Title, a.Topic, a.CoverAngle)
 	}
 	a.CoverScene = coverSceneFor(a)
-	prompt := infographicCoverPrompt(a.Title, a.CoverScene, a.CoverAccent)
+	prompt := infographicCoverPrompt(a.CoverScene, a.CoverAccent)
 
 	var lastErr error
 	for attempt := 1; attempt <= coverMaxAttempts; attempt++ {
 		img, err := r.images.Generate(ctx, IllustrationRequest{
-			OrgID:     orgID,
-			Prompt:    prompt,
-			Width:     coverWidth,
-			Height:    coverHeight,
-			Steps:     coverSteps,
-			Source:    "blog_cover",
-			RunID:     a.RunID,
-			NeedsText: true,
+			OrgID:  orgID,
+			Prompt: prompt,
+			Width:  coverWidth,
+			Height: coverHeight,
+			Steps:  coverSteps,
+			Source: "blog_cover",
+			RunID:  a.RunID,
+			Text:   imagegen.TextCaptions,
 		})
 		if err == nil && img != nil && img.URL != "" {
 			a.CoverImageURL = img.URL
@@ -663,13 +665,13 @@ func (r *Runner) drawFigure(ctx context.Context, orgID uuid.UUID, runID *uuid.UU
 	if r.canLetterImages() {
 		width, height := inlineSize(kind)
 		img, err := r.images.Generate(ctx, IllustrationRequest{
-			OrgID:     orgID,
-			Prompt:    inlineImagePrompt(kind, description),
-			Width:     width,
-			Height:    height,
-			Source:    "blog_inline",
-			RunID:     runID,
-			NeedsText: true,
+			OrgID:  orgID,
+			Prompt: inlineImagePrompt(kind, description),
+			Width:  width,
+			Height: height,
+			Source: "blog_inline",
+			RunID:  runID,
+			Text:   imagegen.TextLabels,
 		})
 		switch {
 		case err != nil || img == nil || img.URL == "":

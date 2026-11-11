@@ -251,9 +251,9 @@ ai:
   # generation stays available on demand either way.
   blogCoverImages: false
   # What a cover is. "diagram": the article's idea drawn as a vector diagram
-  # (no GPU, needs only the image store). "picture": the article's title and
-  # idea as a lettered infographic, drawn only by a model that letters text
-  # (Gemini, or imageModel ernie-image-turbo); with none it is the diagram.
+  # (no GPU, needs only the image store). "picture": the article's idea as a
+  # lettered infographic, drawn only by a model that captions (Gemini, or
+  # imageModel ernie-image-turbo); with none it is the diagram.
   # Needs blogCoverImages. Body figures follow blogCoverImages either way.
   blogCoverStyle: picture
   # How long a running row may sit without a heartbeat before the reconciler

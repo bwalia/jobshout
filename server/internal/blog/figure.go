@@ -369,23 +369,26 @@ func inlineImagePrompt(kind illustrationKind, description string) string {
 		kind = inferIllustrationKind(description)
 	}
 	description = strings.TrimSpace(description)
-	labelBlock := description
+	// The description names the labels again. Unmarked, that read as a second
+	// set to draw: int's figures repeated boxes ("Ingress Controller" three
+	// times). It is kept for how the labels connect, and said to be the same.
+	labelBlock, relation := description, ""
 	if labels := concreteLabels(description); len(labels) > 0 {
-		labelBlock = strings.Join(labels, "\n- ")
-		labelBlock = "- " + labelBlock
+		labelBlock = "- " + strings.Join(labels, "\n- ")
+		relation = "How they connect (the same labels, not more of them):\n" + description + "\n\n"
 	}
 	return fmt.Sprintf(
 		"Create an informational %s for a technical article. "+
 			"A reader who only sees this image should learn the article's point.\n\n"+
-			"Required labels — render each, spelled exactly, large enough to read:\n%s\n\n"+
-			"Context:\n%s\n\n"+
+			"Required labels — render each exactly once, spelled exactly, large enough to read:\n%s\n\n"+
+			"%s"+
 			"Layout: %s\n\n"+
 			"Style: %s. "+
 			"Do not invent brand names, product logos, extra claims, or extra labels. "+
 			"No decorative characters, mascots, animations, metaphorical scenes, "+
 			"stock offices, server rooms, or abstract art. "+
 			"No watermarks, no UI chrome, no extra title beyond what the content names.",
-		kindNoun(kind), labelBlock, description, kindLayoutInstruction(kind), figurePromptStyle,
+		kindNoun(kind), labelBlock, relation, kindLayoutInstruction(kind), figurePromptStyle,
 	)
 }
 
@@ -413,13 +416,13 @@ func salvageIllustration(kind illustrationKind, desc string) (illustrationKind, 
 }
 
 // imageRendersLabels reports whether a finished image came from a model that
-// can letter a table or flowchart. Workstation diffusion mostly cannot
-// (z-image-turbo); putting its output in the article is the original bug.
+// can letter a table or flowchart. Workstation diffusion cannot, ERNIE-Image
+// included; putting its output in the article is the original bug.
 func imageRendersLabels(provider, model string) bool {
 	p := strings.ToLower(strings.TrimSpace(provider))
 	m := strings.ToLower(strings.TrimSpace(model))
 	if p == imagegen.ProviderMFlux {
-		return imagegen.Letters(p, m)
+		return imagegen.Letters(p, m, imagegen.TextLabels)
 	}
 	return !strings.Contains(m, "z-image") && !strings.Contains(m, "qwen-image") && !strings.Contains(m, "flux")
 }

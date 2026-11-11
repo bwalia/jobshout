@@ -81,21 +81,25 @@ cd server && COVER_PREVIEW_DIR=/tmp/covers go test ./internal/blog -run TestDiag
 
 ### `picture` (chart default)
 
-An infographic cover drawn by an image model that letters text (needs
-`BLOG_COVER_IMAGES=true`): the article's title, its eyebrow tag, and the same
-`cover_scene` as the diagram drawn as one labelled diagram with an icon per
-label, plus the stat if there is one. The excerpt steers the icons and is not
-printed. The house style (deep navy, one accent from `cover_accent`, flat
-icons) is fixed in `infographicCoverPrompt`, so covers read as one series.
+An infographic cover drawn by an image model that captions (needs
+`BLOG_COVER_IMAGES=true`): its eyebrow tag and the same `cover_scene` as the
+diagram, drawn as one labelled diagram with an icon per label, plus the stat if
+there is one. No title: the site prints it under the card, and ERNIE misspelt
+a 7-word one ("Premptive", "Kubernates"). The house style (deep navy, one
+accent from `cover_accent`, flat icons) is fixed in `infographicCoverPrompt`,
+so covers read as one series.
+
+`imagegen.Letters(provider, model, need)` decides who may draw what:
+`TextCaptions` (a cover's few labels) needs Gemini, OpenAI or ERNIE-Image;
+`TextLabels` (a figure's table or flowchart) needs Gemini or OpenAI.
 
 1. Gemini (`IMAGE_GEMINI_MODEL`, Nano Banana Pro by default) when
    `GEMINI_API_KEY` is set. Image output has no free tier: the key needs billing.
 2. Otherwise, or when Gemini fails, the workstation, but only with a model that
-   letters (`imagegen.Letters`: ERNIE-Image, Apache-2.0, close to Nano Banana 2
-   on LongText-Bench). Every ring sets `ai.imageModel: ernie-image-turbo`; its
+   captions (ERNIE-Image, Apache-2.0, close to Nano Banana 2 on LongText-Bench). Every ring sets `ai.imageModel: ernie-image-turbo`; its
    weights (22 GB, no prompt enhancer) are in the workstation's HF cache. About
-   6 minutes a cover beside Ollama; headline and tag are reliable, small labels
-   that look alike ("Gateway", "GatewayClass") can still slip. The prompt holds
+   6 minutes a cover beside Ollama; labels that look alike ("Gateway",
+   "GatewayClass") can still slip. Exact lettering needs Gemini. The prompt holds
    only words meant for the cover: a diffusion model letters whatever it reads.
    With `z-image-turbo` this step is skipped.
 3. With neither, or when drawing fails, the diagram is filed: a cover whose
@@ -174,8 +178,9 @@ if CMS update lags.
 When cloning a writer for a site ([writer-agents.md](./writer-agents.md)):
 
 - Covers are `picture` on the chart and fall back to `diagram`, which needs no
-  image provider. In-article figures use an image model that can letter labels
-  (Gemini, OpenAI, or ERNIE-Image on the workstation) when one is configured, and are otherwise drawn as diagrams like the covers:
+  image provider. In-article figures use a hosted image model that can letter
+  labels (Gemini or OpenAI) when one is configured; ERNIE-Image's figures came
+  out with repeated boxes and misspellings. Otherwise they are drawn as diagrams like the covers:
   flow and process figures as steps, architecture and concept figures as a hub.
   Comparison figures need a lettering model (a comparison belongs in a table
   otherwise). `BLOG_COVER_IMAGES` turns on the hosted model and `picture` covers.

@@ -584,33 +584,41 @@ type workstationStub struct {
 
 func (w workstationStub) DefaultModel() string { return w.model }
 
-// A picture whose labels must be readable falls back from Gemini only to a
-// workstation model that letters them.
-func TestRouter_NeedsTextFallsBackOnlyToALetteringModel(t *testing.T) {
+// After a Gemini failure a picture falls back to the workstation only when
+// its model letters that much text: ERNIE captions a cover but does not letter
+// a table, and z-image-turbo letters neither.
+func TestRouter_TextFallsBackOnlyToAModelThatLettersIt(t *testing.T) {
 	for _, tc := range []struct {
 		model    string
+		need     TextNeed
 		fallback bool
-	}{{"z-image-turbo", false}, {"ernie-image-turbo", true}} {
+	}{
+		{"z-image-turbo", TextNone, true},
+		{"z-image-turbo", TextCaptions, false},
+		{"ernie-image-turbo", TextCaptions, true},
+		{"ernie-image-turbo", TextLabels, false},
+	} {
 		mflux := workstationStub{&stubClient{provider: ProviderMFlux}, tc.model}
 		r := NewTestRouter(ProviderGemini, map[string]Client{
 			ProviderGemini: &stubClient{provider: ProviderGemini, err: fmt.Errorf("down")},
 			ProviderMFlux:  mflux,
 		})
-		_, err := r.Generate(context.Background(), ProviderGemini, GenerateRequest{
-			Prompt: "a labeled comparison table", NeedsText: true,
-		})
+		_, err := r.Generate(context.Background(), ProviderGemini, GenerateRequest{Prompt: "a figure", Text: tc.need})
 		if (mflux.generateCalls == 1) != tc.fallback || (err == nil) != tc.fallback {
-			t.Errorf("%s: fallback calls = %d err = %v, want fallback %v", tc.model, mflux.generateCalls, err, tc.fallback)
+			t.Errorf("%s/%d: fallback calls = %d err = %v, want fallback %v", tc.model, tc.need, mflux.generateCalls, err, tc.fallback)
 		}
-		if r.CanLetter() != true {
-			t.Errorf("%s: Gemini letters, so the router can", tc.model)
+		if !r.CanLetter(TextLabels) {
+			t.Errorf("%s: Gemini letters anything, so the router can", tc.model)
 		}
 	}
-	// The workstation alone letters only with a model built for text.
-	for model, want := range map[string]bool{"z-image-turbo": false, "ernie-image-turbo": true} {
-		r := NewTestRouter(ProviderMFlux, map[string]Client{ProviderMFlux: workstationStub{&stubClient{provider: ProviderMFlux}, model}})
-		if r.CanLetter() != want {
-			t.Errorf("workstation on %s: CanLetter = %v, want %v", model, !want, want)
+	// The workstation alone: ERNIE captions, nothing there letters labels.
+	for _, tc := range []struct {
+		model    string
+		captions bool
+	}{{"z-image-turbo", false}, {"ernie-image-turbo", true}} {
+		r := NewTestRouter(ProviderMFlux, map[string]Client{ProviderMFlux: workstationStub{&stubClient{provider: ProviderMFlux}, tc.model}})
+		if r.CanLetter(TextCaptions) != tc.captions || r.CanLetter(TextLabels) {
+			t.Errorf("workstation on %s: captions %v labels %v", tc.model, r.CanLetter(TextCaptions), r.CanLetter(TextLabels))
 		}
 	}
 }

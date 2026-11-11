@@ -3,6 +3,8 @@ package blog
 import (
 	"strings"
 	"testing"
+
+	"github.com/jobshout/server/internal/imagegen"
 )
 
 // A server that cannot draw must not tell the model it can. Otherwise the model
@@ -35,7 +37,15 @@ func TestVisualRules_OffersIllustrationsOnlyWhenItCanDraw(t *testing.T) {
 
 type noLetterIllustrator struct{ fakeIllustrator }
 
-func (n *noLetterIllustrator) Letters() bool { return false }
+func (n *noLetterIllustrator) Letters(imagegen.TextNeed) bool { return false }
+
+// captionIllustrator is the workstation on ERNIE-Image: it captions a cover
+// but does not letter a figure.
+type captionIllustrator struct{ fakeIllustrator }
+
+func (c *captionIllustrator) Letters(need imagegen.TextNeed) bool {
+	return need <= imagegen.TextCaptions
+}
 
 // The fence the prompt teaches has to be the fence illustrateBody matches, or
 // the feature is wired to nothing.

@@ -9,6 +9,8 @@ import (
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
+
+	"github.com/jobshout/server/internal/imagegen"
 )
 
 // fakeIllustrator draws nothing and records what it was asked for.
@@ -96,7 +98,7 @@ func TestIllustrateBody_ReplacesBlocksWithImages(t *testing.T) {
 	if !strings.Contains(prompt, "informational") && !strings.Contains(prompt, "labels") {
 		t.Errorf("inline prompt is not asking for a labeled figure:\n%s", prompt)
 	}
-	if !fake.calls[0].NeedsText {
+	if fake.calls[0].Text != imagegen.TextLabels {
 		t.Error("inline figures must not fall back to workstation diffusion")
 	}
 }
@@ -263,8 +265,9 @@ func TestGenerateCover_RecordsTheSeedForReproduction(t *testing.T) {
 	}
 }
 
-// A picture cover explains the article: its title and its idea as a diagram
-// labelled in the article's own terms, drawn only by a model that letters.
+// A picture cover explains the article: its idea as a diagram labelled in the
+// article's own terms, drawn only by a model that captions. The title is left
+// to the site, which prints it under the card.
 func TestGenerateCover_LetteringModelDrawsTheArticlesIdea(t *testing.T) {
 	article := func() *GeneratedArticle {
 		return &GeneratedArticle{
@@ -278,7 +281,7 @@ func TestGenerateCover_LetteringModelDrawsTheArticlesIdea(t *testing.T) {
 		t.Fatal(err)
 	}
 	call := fake.calls[0]
-	for _, want := range []string{`"Gateway API Replaces Ingress"`, "- GatewayClass\n", "- GRPCRoute\n",
+	for _, want := range []string{"- GatewayClass\n", "- GRPCRoute\n",
 		"one core connecting things", `centre, a large node labelled "Gateway API"`, "exactly 4 smaller nodes", "#7dd3fc"} {
 		if !strings.Contains(call.Prompt, want) {
 			t.Errorf("cover prompt lacks %q:\n%s", want, call.Prompt)
@@ -286,16 +289,30 @@ func TestGenerateCover_LetteringModelDrawsTheArticlesIdea(t *testing.T) {
 	}
 	// A diffusion model letters every word it is given: no excerpt, no
 	// "do not print" asides.
-	if strings.Contains(call.Prompt, "splits routing") || strings.Contains(call.Prompt, "(labels =") || !call.NeedsText {
-		t.Errorf("prompt carries text not meant for the cover, or NeedsText unset (%v):\n%s", call.NeedsText, call.Prompt)
+	for _, not := range []string{"splits routing", "(labels =", "Replaces Ingress"} {
+		if strings.Contains(call.Prompt, not) {
+			t.Errorf("prompt carries %q, not meant for the cover:\n%s", not, call.Prompt)
+		}
+	}
+	if call.Text != imagegen.TextCaptions {
+		t.Errorf("cover text need = %d, want captions", call.Text)
 	}
 
-	// Without a model that letters, a picture cover is the diagram.
-	plain := testRunner(&noLetterIllustrator{fakeIllustrator{enabled: true}})
-	plain.cfg.CoverStyle = CoverStylePicture
-	plain.covers = newMemCovers()
-	if plain.coverPictures() || !plain.canDrawCover() {
-		t.Error("picture style without lettering must draw the diagram")
+	// ERNIE alone captions covers but does not letter figures; with nothing
+	// that captions, a picture cover is the diagram.
+	for _, tc := range []struct {
+		images            Illustrator
+		pictures, figures bool
+	}{
+		{&captionIllustrator{fakeIllustrator{enabled: true}}, true, false},
+		{&noLetterIllustrator{fakeIllustrator{enabled: true}}, false, false},
+	} {
+		r := testRunner(tc.images)
+		r.cfg.CoverStyle = CoverStylePicture
+		r.covers = newMemCovers()
+		if r.coverPictures() != tc.pictures || r.canLetterImages() != tc.figures || !r.canDrawCover() {
+			t.Errorf("%T: picture covers %v, lettered figures %v", tc.images, r.coverPictures(), r.canLetterImages())
+		}
 	}
 }
 

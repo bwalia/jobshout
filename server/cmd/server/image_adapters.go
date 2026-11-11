@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/jobshout/server/internal/blog"
+	"github.com/jobshout/server/internal/imagegen"
 	"github.com/jobshout/server/internal/marketingemail"
 	"github.com/jobshout/server/internal/service"
 	"github.com/jobshout/server/internal/tools"
@@ -28,7 +29,7 @@ type blogIllustrator struct {
 
 func (b *blogIllustrator) Enabled() bool { return b.images.Enabled() }
 
-func (b *blogIllustrator) Letters() bool { return b.images.CanLetter() }
+func (b *blogIllustrator) Letters(need imagegen.TextNeed) bool { return b.images.CanLetter(need) }
 
 func (b *blogIllustrator) Generate(ctx context.Context, req blog.IllustrationRequest) (*blog.Illustration, error) {
 	result, err := b.images.Generate(ctx, service.GenerateImageRequest{
@@ -43,7 +44,7 @@ func (b *blogIllustrator) Generate(ctx context.Context, req blog.IllustrationReq
 		Seed:      -1,
 		Source:    req.Source,
 		BlogRunID: req.RunID,
-		NeedsText: req.NeedsText,
+		Text:      req.Text,
 	})
 	if err != nil {
 		return nil, err

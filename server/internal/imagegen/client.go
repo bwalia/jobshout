@@ -53,21 +53,35 @@ type GenerateRequest struct {
 	// such concept rather than being faked with prompt text, which would change
 	// the meaning of the prompt the caller wrote.
 	NegativePrompt string
-	// NeedsText marks a picture whose labels must be readable. After a Gemini
+	// Text is how much readable text the picture carries. After a Gemini
 	// failure it falls back to the workstation only when the workstation's
-	// model can letter them (see Letters): z-image-turbo cannot.
-	NeedsText bool
+	// model letters that much (see Letters).
+	Text TextNeed
 }
 
-// Letters reports whether model, served by provider, renders readable
-// on-image text such as a diagram's labels. The hosted models do; on the
-// workstation only ERNIE-Image, built for posters and infographics, does.
-// z-image-turbo, FLUX and the rest letter a short title at best.
-func Letters(provider, model string) bool {
-	switch provider {
-	case ProviderGemini, ProviderOpenAI:
+// TextNeed is how much readable text a picture carries, which decides the
+// models that may draw it.
+type TextNeed int
+
+const (
+	// TextNone is a picture with no words that matter.
+	TextNone TextNeed = iota
+	// TextCaptions is a few short words, such as a cover's diagram labels.
+	TextCaptions
+	// TextLabels is dense lettering, such as a table or a flowchart.
+	TextLabels
+)
+
+// Letters reports whether model, served by provider, letters need's text
+// legibly. The hosted models letter anything. On the workstation ERNIE-Image
+// letters short captions, with the odd slip ("Kubernates" in a 7-word title on
+// int); its tables came out with repeated boxes and misspellings, so dense
+// labels stay hosted. z-image-turbo, FLUX and the rest letter neither.
+func Letters(provider, model string, need TextNeed) bool {
+	switch {
+	case need == TextNone, provider == ProviderGemini, provider == ProviderOpenAI:
 		return true
-	case ProviderMFlux:
+	case provider == ProviderMFlux && need == TextCaptions:
 		return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "ernie-image")
 	}
 	return false

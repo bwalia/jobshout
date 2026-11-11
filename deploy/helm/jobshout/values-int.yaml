@@ -148,8 +148,8 @@ ai:
   # Ollama model. Runtime stays generous while Gemini timings are measured.
   blogMaxRuntime: "120m"
   imageBaseURL: "https://images.workstation.co.uk"
-  # Letters labels, so picture covers and figures can use the workstation
-  # (~6 min a cover). Its weights are in the workstation's HF cache; a model
+  # Captions picture covers on the workstation (~6 min a cover); figures need
+  # a hosted model to letter them. Its weights are in the workstation's HF cache; a model
   # named here that is not would be downloaded inside the first request.
   imageModel: "ernie-image-turbo"
   imageTimeout: "30m"
