@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/jobshout/server/internal/imagegen"
 	"github.com/jobshout/server/internal/imagestore"
 )
 
@@ -61,14 +62,47 @@ func TestIllustrateBody_FigureLinksAreAbsolute(t *testing.T) {
 	}
 }
 
-// A lettering model that fails still leaves the article its figure.
+// A lettering model that fails is asked once more for the figure's simpler
+// scene, and the vector diagram still leaves the article its figure.
 func TestIllustrateBody_FallsBackToDiagram(t *testing.T) {
 	gpu := &fakeIllustrator{enabled: true, failAfter: -1}
 	r := testRunner(gpu).WithCoverStore(newMemCovers())
 	out, notes := r.illustrateBody(context.Background(), uuid.New(), nil,
 		"```illustration architecture\nAPI gateway: auth service, orders service, billing service, Postgres, Redis cache\n```\n")
-	if len(gpu.calls) != 1 || len(notes) != 0 || !strings.Contains(out, "]("+imagestore.URLPrefix) {
+	if len(gpu.calls) != 2 || gpu.calls[0].Text != imagegen.TextLabels || gpu.calls[1].Text != imagegen.TextCaptions ||
+		len(notes) != 0 || !strings.Contains(out, "]("+imagestore.URLPrefix) {
 		t.Fatalf("calls=%d notes=%v out=%s", len(gpu.calls), notes, out)
+	}
+}
+
+// The workstation on ERNIE draws a flow or hub figure as it draws a cover: the
+// scene's labels, each once, with no figure text to repeat or misspell. A
+// comparison has no scene and is left to a model that letters; a picture
+// from a model that cannot caption is not used.
+func TestIllustrateBody_ErnieDrawsFigureScenes(t *testing.T) {
+	ernie := &captionIllustrator{fakeIllustrator{enabled: true, provider: "mflux", model: "ernie-image-turbo"}}
+	r := testRunner(ernie).WithCoverStore(newMemCovers())
+	md := "```illustration architecture\nClient → API Gateway → Ingress Controller → Service Pod\n```\n\n" +
+		"```illustration comparison\nPolling vs webhooks: latency, cost\n```\n"
+	out, notes := r.illustrateBody(context.Background(), uuid.New(), nil, md)
+	if len(ernie.calls) != 1 {
+		t.Fatalf("calls = %d, want one (the flow's scene)", len(ernie.calls))
+	}
+	call := ernie.calls[0]
+	if call.Text != imagegen.TextCaptions || !strings.HasPrefix(call.Prompt, figureOpening) ||
+		!strings.Contains(call.Prompt, "Exactly 4 labelled parts") || strings.Count(call.Prompt, "Ingress Controller") != 1 {
+		t.Fatalf("figure scene prompt:\n%s", call.Prompt)
+	}
+	// ERNIE's picture, not the vector fallback, and only one figure.
+	if !strings.Contains(out, "/api/v1/images/file/img-1.png") || strings.Count(out, "![") != 1 || len(notes) != 1 {
+		t.Fatalf("want ERNIE's flow and the comparison dropped: notes=%v\n%s", notes, out)
+	}
+
+	// The same scene from z-image-turbo would be lettering it cannot do.
+	zimage := &captionIllustrator{fakeIllustrator{enabled: true, provider: "mflux", model: "z-image-turbo"}}
+	out, _ = testRunner(zimage).WithCoverStore(newMemCovers()).illustrateBody(context.Background(), uuid.New(), nil, md)
+	if strings.Contains(out, "img-1.png") || !strings.Contains(out, "]("+imagestore.URLPrefix) {
+		t.Fatalf("z-image's figure was used, or no vector figure replaced it:\n%s", out)
 	}
 }
 
