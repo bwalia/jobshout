@@ -85,6 +85,11 @@ func TestFigureScene(t *testing.T) {
 		{kindComparison, "Polling vs webhooks vs queues vs streams", ""},
 		{kindFlow, "A control plane reconciles the desired state of every workload continuously", ""}, // prose, not a list
 		{kindProcess, "Steps: plan, build, and ship", layoutFlow},                                     // the "Steps:" title is not a step
+		// int's redraw, 2026-11-11: the planner's kinds did not match the lists.
+		{kindArchitecture, "Client → API Gateway → Ingress Controller → Service Pod", layoutFlow},
+		{kindConcept, "Tenant creates Ingress object → Ingress controller injects snippet → Secret exfiltration", layoutFlow},
+		{kindComparison, "API Gateway: auth service, orders service, billing service, Redis cache", layoutHub},
+		{kindComparison, "Polling vs webhooks: latency, cost, complexity, failure modes", ""},
 	}
 	for _, c := range cases {
 		s, ok := figureScene(c.kind, c.desc)

@@ -428,28 +428,31 @@ func imageRendersLabels(provider, model string) bool {
 }
 
 // figureScene lays a body figure out as one of the cover diagrams, labelled
-// with the figure's own items: the steps of a flow or process, or the core and
-// parts of an architecture or concept. False when no layout says what the
-// figure means — versus would paint one side of a comparison as the bad one —
-// when the figure is prose rather than a list, or when there are too few items
-// to draw it without generic filler labels.
+// with the figure's own items: a flow of its steps, or a hub of its core and
+// parts. The shape of the list decides before the figure's kind: planners tag
+// "A → B → C" as architecture, and on int (2026-11-11) every figure of a
+// redraw was refused that way and the article kept its misspelt ones. Arrows
+// are a flow; otherwise a flow or process kind is a flow and the rest a hub.
+// False for a real comparison ("vs") — versus would paint one side as the bad
+// one — for prose rather than a list, and when there are too few items to draw
+// without generic filler labels.
 func figureScene(kind illustrationKind, description string) (coverScene, bool) {
 	core, items, ok := figureItems(description)
-	if !ok {
+	lower := strings.ToLower(description)
+	if !ok || (kind == kindComparison && (strings.Contains(lower, " vs") || strings.Contains(lower, "versus"))) {
 		return coverScene{}, false
 	}
-	switch kind {
-	case kindFlow, kindProcess:
+	if strings.Contains(description, "→") || strings.Contains(description, "->") || kind == kindFlow || kind == kindProcess {
 		if labels := nonEmpty(cleanCoverLabels(items)); len(labels) >= 3 {
 			return coverScene{Layout: layoutFlow, Labels: labels}, true
 		}
-	case kindArchitecture, kindConcept:
-		if core == "" {
-			core, items = items[0], items[1:]
-		}
-		if labels := nonEmpty(cleanCoverLabels(append([]string{core}, items...))); len(labels) >= 5 {
-			return coverScene{Layout: layoutHub, Labels: labels}, true
-		}
+		return coverScene{}, false
+	}
+	if core == "" {
+		core, items = items[0], items[1:]
+	}
+	if labels := nonEmpty(cleanCoverLabels(append([]string{core}, items...))); len(labels) >= 5 {
+		return coverScene{Layout: layoutHub, Labels: labels}, true
 	}
 	return coverScene{}, false
 }
