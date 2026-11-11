@@ -90,7 +90,8 @@ func TestIllustrateBody_ErnieDrawsFigureScenes(t *testing.T) {
 	}
 	call := ernie.calls[0]
 	if call.Text != imagegen.TextCaptions || !strings.HasPrefix(call.Prompt, figureOpening) ||
-		!strings.Contains(call.Prompt, "Exactly 4 labelled parts") || strings.Count(call.Prompt, "Ingress Controller") != 1 {
+		!strings.Contains(call.Prompt, "Exactly 4 labelled parts") || strings.Count(call.Prompt, "Ingress Controller") != 1 ||
+		strings.Join(call.ExpectText, "|") != "Client|API Gateway|Ingress Controller|Service Pod" {
 		t.Fatalf("figure scene prompt:\n%s", call.Prompt)
 	}
 	// ERNIE's picture, not the vector fallback, and only one figure.

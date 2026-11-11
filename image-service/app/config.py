@@ -40,6 +40,10 @@ DISABLED_MODELS = frozenset(
 _default_steps_raw = os.getenv("IMAGE_DEFAULT_STEPS", "").strip()
 DEFAULT_STEPS = int(_default_steps_raw) if _default_steps_raw else None
 
+# How many times a picture with named lettering (expect_text) is drawn before
+# its best reading is returned as wrong. Each try is minutes of the GPU.
+TEXT_ATTEMPTS = max(1, int(os.getenv("IMAGE_TEXT_ATTEMPTS", "2")))
+
 # Ceilings. This service is one process in front of one GPU, so an unbounded
 # step count or dimension is not merely a slow request — it is a denial of
 # service against every other caller waiting on the lock.

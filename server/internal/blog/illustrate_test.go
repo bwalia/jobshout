@@ -297,8 +297,8 @@ func TestGenerateCover_LetteringModelDrawsTheArticlesIdea(t *testing.T) {
 			t.Errorf("prompt carries %q, not meant for the cover:\n%s", not, call.Prompt)
 		}
 	}
-	if call.Text != imagegen.TextCaptions {
-		t.Errorf("cover text need = %d, want captions", call.Text)
+	if call.Text != imagegen.TextCaptions || strings.Join(call.ExpectText, "|") != "KUBERNETES|Gateway API|GatewayClass|Gateway|HTTPRoute|GRPCRoute" {
+		t.Errorf("cover text need = %d, expected words %v", call.Text, call.ExpectText)
 	}
 
 	// ERNIE alone captions covers but does not letter figures; with nothing

@@ -64,6 +64,8 @@ type GenerateImageRequest struct {
 	// BlogRunID links the image to the article run it was drawn for. Nil when
 	// no article asked for it.
 	BlogRunID *uuid.UUID
+	// ExpectText is every word the picture must show (imagegen.GenerateRequest).
+	ExpectText []string
 	// Text is how much readable text the picture carries: a hosted failure
 	// falls back only to a workstation model that letters that much.
 	Text imagegen.TextNeed
@@ -110,13 +112,14 @@ func (s *ImageService) Generate(ctx context.Context, req GenerateImageRequest) (
 	}
 
 	resp, err := s.router.Generate(ctx, req.Provider, imagegen.GenerateRequest{
-		Prompt: req.Prompt,
-		Model:  req.Model,
-		Width:  req.Width,
-		Height: req.Height,
-		Steps:  req.Steps,
-		Seed:   seed,
-		Text:   req.Text,
+		Prompt:     req.Prompt,
+		Model:      req.Model,
+		Width:      req.Width,
+		Height:     req.Height,
+		Steps:      req.Steps,
+		Seed:       seed,
+		Text:       req.Text,
+		ExpectText: req.ExpectText,
 	})
 	if err != nil {
 		return nil, err

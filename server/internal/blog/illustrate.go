@@ -36,6 +36,9 @@ type IllustrationRequest struct {
 	// RunID is the article run the picture is for, recorded on the image so
 	// it can open its article. Nil outside a run.
 	RunID *uuid.UUID
+	// ExpectText is every word the picture must show; a picture whose
+	// lettering reads back otherwise is redrawn, and then refused.
+	ExpectText []string
 	// Text is how much readable text the picture carries: it is never drawn
 	// by a model that cannot letter that much, because an article without a
 	// picture is better than one with misspelt labels.
@@ -93,6 +96,12 @@ var illustrationFence = regexp.MustCompile("(?s)```illustration(?:[ \t]+([A-Za-z
 // service. Three is enough to ride out a Gemini blip or a busy GPU without
 // holding a blog run open through a dead image host.
 const coverMaxAttempts = 3
+
+// sceneText is every word infographicPrompt asks a picture of scene to show:
+// its tag, its labels and its stat, for reading the picture back.
+func sceneText(scene coverScene) []string {
+	return nonEmpty(append([]string{scene.Eyebrow, scene.Stat}, scene.Labels...))
+}
 
 // Openings for infographicPrompt.
 const (
@@ -467,14 +476,15 @@ func (r *Runner) generateCover(ctx context.Context, orgID uuid.UUID, a *Generate
 	var lastErr error
 	for attempt := 1; attempt <= coverMaxAttempts; attempt++ {
 		img, err := r.images.Generate(ctx, IllustrationRequest{
-			OrgID:  orgID,
-			Prompt: prompt,
-			Width:  coverWidth,
-			Height: coverHeight,
-			Steps:  coverSteps,
-			Source: "blog_cover",
-			RunID:  a.RunID,
-			Text:   imagegen.TextCaptions,
+			OrgID:      orgID,
+			Prompt:     prompt,
+			Width:      coverWidth,
+			Height:     coverHeight,
+			Steps:      coverSteps,
+			Source:     "blog_cover",
+			RunID:      a.RunID,
+			Text:       imagegen.TextCaptions,
+			ExpectText: sceneText(a.CoverScene),
 		})
 		if err == nil && img != nil && img.URL != "" {
 			a.CoverImageURL = img.URL
@@ -700,14 +710,15 @@ func (r *Runner) drawFigure(ctx context.Context, orgID uuid.UUID, runID *uuid.UU
 	scene, ok := figureScene(kind, description)
 	if ok && r.canLetter(imagegen.TextCaptions) {
 		img, err := r.images.Generate(ctx, IllustrationRequest{
-			OrgID:  orgID,
-			Prompt: infographicPrompt(figureOpening, scene, figureAccent),
-			Width:  width,
-			Height: height,
-			Steps:  coverSteps,
-			Source: "blog_inline",
-			RunID:  runID,
-			Text:   imagegen.TextCaptions,
+			OrgID:      orgID,
+			Prompt:     infographicPrompt(figureOpening, scene, figureAccent),
+			Width:      width,
+			Height:     height,
+			Steps:      coverSteps,
+			Source:     "blog_inline",
+			RunID:      runID,
+			Text:       imagegen.TextCaptions,
+			ExpectText: sceneText(scene),
 		})
 		switch {
 		case err != nil || img == nil || img.URL == "":
