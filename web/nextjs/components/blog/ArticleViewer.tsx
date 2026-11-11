@@ -17,7 +17,7 @@ import {
   Newspaper,
   RefreshCw,
 } from "lucide-react";
-import { apiErrorMessage } from "@/lib/api/client";
+import { apiErrorMessage, isRequestTimeout } from "@/lib/api/client";
 import { redrawBlogArticleImages } from "@/lib/api/blog";
 import { blogKeys } from "@/lib/hooks/useBlog";
 import { cn } from "@/lib/utils/cn";
@@ -69,7 +69,15 @@ export function ArticleViewer({ article }: { article: BlogArticle }) {
         toast.success(`Redrew ${done.join(" and ")}${article.post_uuid ? " and updated the CMS post" : ""}`);
       }
     } catch (e) {
-      toast.error(apiErrorMessage(e, "Could not redraw the images"));
+      if (isRequestTimeout(e)) {
+        // The server keeps drawing after the browser stops waiting and saves
+        // what it draws: on the workstation a redraw takes up to 20 minutes.
+        toast.info("Still redrawing", {
+          description: "The image service takes up to 20 minutes. Reload this page then to see the new images.",
+        });
+      } else {
+        toast.error(apiErrorMessage(e, "Could not redraw the images"));
+      }
     } finally {
       setRedrawing(false);
     }

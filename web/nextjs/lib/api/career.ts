@@ -1,5 +1,4 @@
-import axios from "axios";
-import { apiClient } from "@/lib/api/client";
+import { apiClient, isRequestTimeout } from "@/lib/api/client";
 import type {
   CareerApplication,
   CareerApplyResult,
@@ -282,11 +281,5 @@ export async function careerBatchEvaluate(payload?: { limit?: number; urls?: str
   return data as { evaluated?: number; skipped?: number };
 }
 
-/**
- * True when the browser stopped waiting rather than the server failing. Career
- * work carries on server-side after that, so callers should reload instead of
- * reporting the work as lost.
- */
-export function isCareerRequestTimeout(err: unknown): boolean {
-  return axios.isAxiosError(err) && (err.code === "ECONNABORTED" || err.code === "ETIMEDOUT");
-}
+/** Career work carries on server-side after the browser stops waiting. */
+export const isCareerRequestTimeout = isRequestTimeout;
