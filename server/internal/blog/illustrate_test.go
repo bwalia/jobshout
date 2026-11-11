@@ -110,7 +110,7 @@ func TestIllustrateBody_TypedFenceSetsKindAndSize(t *testing.T) {
 	fake := &fakeIllustrator{enabled: true}
 	r := testRunner(fake)
 
-	markdown := "```illustration comparison\nPolling vs webhooks: latency, cost, failure modes\n```\n"
+	markdown := "Polling and webhooks differ on latency, cost and failure modes.\n\n```illustration comparison\nPolling vs webhooks: latency, cost, failure modes\n```\n"
 	out, notes := r.illustrateBody(context.Background(), uuid.New(), nil, markdown)
 
 	if strings.Contains(out, "```illustration") {
@@ -331,7 +331,7 @@ func TestIllustrations_CarryTheirRun(t *testing.T) {
 		t.Fatalf("generateCover: %v", err)
 	}
 	r.illustrateBody(context.Background(), uuid.New(), &runID,
-		"Intro.\n\n```illustration flow\nRequest -> Gateway -> Service\n```\n")
+		"Intro. A request goes through the gateway to a service.\n\n```illustration flow\nRequest -> Gateway -> Service\n```\n")
 
 	if len(fake.calls) != 2 {
 		t.Fatalf("want a cover and an inline call, got %d", len(fake.calls))

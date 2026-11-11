@@ -634,6 +634,7 @@ func (r *Runner) illustrateBody(ctx context.Context, orgID uuid.UUID, runID *uui
 	var out strings.Builder
 	last := 0
 	drawn := 0
+	prose := illustrationFence.ReplaceAllString(markdown, "")
 
 	for _, m := range matches {
 		start, end := m[0], m[1]
@@ -647,6 +648,12 @@ func (r *Runner) illustrateBody(ctx context.Context, orgID uuid.UUID, runID *uui
 		description = dropTemplateLabel(description)
 		if !ok {
 			notes = append(notes, "dropped an illustration block with no facts to letter")
+			continue
+		}
+		// One label may be the model's own wording ("Build" for "built"); a
+		// copied example misses several.
+		if missing := ungroundedLabels(description, prose); len(missing) > 1 {
+			notes = append(notes, "dropped an illustration naming what the article does not: "+strings.Join(missing, ", "))
 			continue
 		}
 		if drawn >= maxInlineIllustrations {

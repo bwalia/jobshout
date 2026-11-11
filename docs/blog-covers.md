@@ -103,7 +103,8 @@ so covers read as one series.
    Vision OCR, `image-service/app/textcheck.py`) against the words it must
    show; a missing, misspelt, repeated or extra word gets it redrawn with a new
    seed (`IMAGE_TEXT_ATTEMPTS`, default 2), and a picture still wrong is
-   refused, so the diagram is filed instead. The prompt holds
+   refused, so the diagram of the same scene is filed instead — on a redraw
+   too, rather than keeping the old cover. The prompt holds
    only words meant for the cover: a diffusion model letters whatever it reads.
    With `z-image-turbo` this step is skipped.
 3. With neither, or when drawing fails, the diagram is filed: a cover whose
@@ -189,7 +190,10 @@ When cloning a writer for a site ([writer-agents.md](./writer-agents.md)):
   misspell boxes); otherwise it is drawn as a vector diagram like the covers:
   flow and process figures as steps, architecture and concept figures as a hub.
   Comparison figures need a lettering model (a comparison belongs in a table
-  otherwise). `BLOG_COVER_IMAGES` turns on the hosted model and `picture` covers.
+  otherwise). A figure is dropped when two or more labels name something the
+  article never mentions (a label's words of 4+ letters must be in it — models
+  copy the prompt's example figure), and a list of `key: value` pairs is not drawn as a
+  hub or flow. `BLOG_COVER_IMAGES` turns on the hosted model and `picture` covers.
 - Do not put image credentials in the launch schema — covers use the ring's
   image providers.
 - After publishing, if the listing still shows the shared hero, call

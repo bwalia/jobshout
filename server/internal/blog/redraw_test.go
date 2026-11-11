@@ -23,7 +23,7 @@ func TestRedrawImages(t *testing.T) {
 	a := &GeneratedArticle{Title: "CI in practice", Markdown: "# CI in practice\n\n" +
 		"Argo CD syncs the staging cluster from a Git repository and a Helm chart.\n\n" +
 		"## Why it matters\n\nTeams ship faster.\n\n![old figure](https://jobshout.co.uk" + imagestore.URLPrefix + "org/2026/10/old.png)\n\n" +
-		"## How the pipeline runs\n\nEvery change goes through the same steps.\n\nMore detail.\n"}
+		"## How the pipeline runs\n\nEvery commit builds an image, runs the tests, then we deploy.\n\nMore detail.\n"}
 
 	res, err := r.RedrawImages(context.Background(), uuid.New(), a)
 	if err != nil || res.Figures != 1 || !res.Cover {
