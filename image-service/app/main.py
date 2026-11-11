@@ -4,6 +4,7 @@ See README.md for why this runs on the workstation rather than in the cluster.
 """
 
 import asyncio
+import base64
 import logging
 import random
 from typing import Literal
@@ -16,7 +17,7 @@ from pydantic import BaseModel, Field
 # thread — unlike catalogue(), it derives the count from the model name and never
 # touches mflux or the Hugging Face cache, so it does not belong on the dedicated
 # MLX thread that the rest of this module now routes work to.
-from app import config, models, video
+from app import config, models, textcheck, video
 from app.auth import require_auth
 from app.generator import GenerationBusy, UnknownModel, generator
 
@@ -46,6 +47,10 @@ class GenerateRequest(BaseModel):
     seed: int = -1
     guidance: float | None = None
     negative_prompt: str = ""
+    # The words the picture must show, each label once. When set, the picture
+    # is read back (textcheck) and redrawn with a new seed while its lettering
+    # is wrong, up to IMAGE_TEXT_ATTEMPTS tries.
+    expect_text: list[str] = Field(default_factory=list, max_length=40)
 
 
 class GenerateResponse(BaseModel):
@@ -56,6 +61,11 @@ class GenerateResponse(BaseModel):
     height: int
     steps: int
     duration_ms: int
+    # Whether the lettering read back as expect_text: None when nothing was
+    # expected or it could not be read here; text_problems says what was wrong.
+    text_ok: bool | None = None
+    text_problems: list[str] = Field(default_factory=list)
+    attempts: int = 1
 
 
 class ModelEntry(BaseModel):
@@ -148,13 +158,38 @@ async def generate(req: GenerateRequest, caller: str = Depends(require_auth)):
         caller, model_name, width, height, steps, seed,
     )
 
+    attempts = config.TEXT_ATTEMPTS if req.expect_text else 1
+    text_ok: bool | None = None
+    issues: list[str] = []
+    for attempt in range(1, attempts + 1):
+        result = await _draw(req, model_name, width, height, steps, seed)
+        if not req.expect_text:
+            break
+        seen = await asyncio.to_thread(textcheck.read_text, base64.b64decode(result.image_base64))
+        if seen is None:
+            break
+        issues = textcheck.problems(req.expect_text, seen)
+        text_ok = not issues
+        logger.info(
+            "generate: lettering %s (attempt %d/%d)%s",
+            "ok" if text_ok else "wrong", attempt, attempts, "" if text_ok else ": " + "; ".join(issues[:8]),
+        )
+        if text_ok:
+            break
+        seed = random.randrange(0, 2**31 - 1)
+
+    return GenerateResponse(**vars(result), text_ok=text_ok, text_problems=issues[:12], attempts=attempt)
+
+
+async def _draw(req: GenerateRequest, model_name: str, width: int, height: int, steps: int, seed: int):
+    """One generation, with the service's errors mapped to HTTP."""
     try:
         # Off the event loop so /health stays responsive during a long
         # generate. generator.generate itself re-dispatches MLX load/infer
         # onto a single dedicated worker thread — required because MLX GPU
         # streams are thread-local and asyncio.to_thread's default pool
         # would otherwise reuse a cached model from the wrong thread.
-        result = await asyncio.to_thread(
+        return await asyncio.to_thread(
             generator.generate,
             prompt=req.prompt,
             model_name=model_name,
@@ -178,8 +213,6 @@ async def generate(req: GenerateRequest, caller: str = Depends(require_auth)):
     except Exception as exc:  # noqa: BLE001 — the boundary turns anything into a 500
         logger.exception("generation failed")
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"generation failed: {exc}")
-
-    return GenerateResponse(**vars(result))
 
 
 # ─── Video ───────────────────────────────────────────────────────────────────

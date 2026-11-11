@@ -53,6 +53,10 @@ type GenerateRequest struct {
 	// such concept rather than being faked with prompt text, which would change
 	// the meaning of the prompt the caller wrote.
 	NegativePrompt string
+	// ExpectText is every word the picture must show, each label once. The
+	// workstation reads its picture back and redraws one whose lettering is
+	// wrong; a picture still wrong is an error. Hosted models ignore it.
+	ExpectText []string
 	// Text is how much readable text the picture carries. After a Gemini
 	// failure it falls back to the workstation only when the workstation's
 	// model letters that much (see Letters).

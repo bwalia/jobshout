@@ -138,6 +138,39 @@ func TestMFluxClient_SignsRequests(t *testing.T) {
 	}
 }
 
+// The words a picture must show go to the service, which reads its picture
+// back and redraws it; lettering still wrong after that is an error, and a
+// service that could not read it (text_ok absent) is taken at its word.
+func TestMFluxClient_LetteringReadBack(t *testing.T) {
+	var sent mfluxGenerateRequest
+	var textOK *bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&sent)
+		_ = json.NewEncoder(w).Encode(mfluxGenerateResponse{
+			ImageBase64: base64.StdEncoding.EncodeToString(onePixelPNG(t)), Model: "ernie-image-turbo",
+			TextOK: textOK, TextProblems: []string{"missing ORDERS", "extra ORDNG"}, Attempts: 2,
+		})
+	}))
+	defer srv.Close()
+	c := NewMFluxClient(srv.URL, "ernie-image-turbo", "", 0)
+	req := GenerateRequest{Prompt: "a hub", ExpectText: []string{"API Gateway", "orders service"}}
+
+	no, yes := false, true
+	textOK = &no
+	if _, err := c.Generate(context.Background(), req); err == nil || !strings.Contains(err.Error(), "missing ORDERS; extra ORDNG") {
+		t.Fatalf("wrong lettering: err = %v", err)
+	}
+	if strings.Join(sent.ExpectText, "|") != "API Gateway|orders service" {
+		t.Fatalf("expect_text sent = %v", sent.ExpectText)
+	}
+	for _, ok := range []*bool{&yes, nil} {
+		textOK = ok
+		if _, err := c.Generate(context.Background(), req); err != nil {
+			t.Fatalf("text_ok %v: %v", ok, err)
+		}
+	}
+}
+
 // Without a secret the client must talk to the service unsigned — that is what
 // makes a local run work.
 func TestMFluxClient_NoSecretSendsNoHeader(t *testing.T) {

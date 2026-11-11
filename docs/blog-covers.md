@@ -98,8 +98,12 @@ so covers read as one series.
 2. Otherwise, or when Gemini fails, the workstation, but only with a model that
    captions (ERNIE-Image, Apache-2.0, close to Nano Banana 2 on LongText-Bench). Every ring sets `ai.imageModel: ernie-image-turbo`; its
    weights (22 GB, no prompt enhancer) are in the workstation's HF cache. About
-   6 minutes a cover beside Ollama; labels that look alike ("Gateway",
-   "GatewayClass") can still slip. Exact lettering needs Gemini. The prompt holds
+   6 minutes a cover beside Ollama. ERNIE letters a picture right about two
+   times in three, so every cover and figure it draws is read back (Apple
+   Vision OCR, `image-service/app/textcheck.py`) against the words it must
+   show; a missing, misspelt, repeated or extra word gets it redrawn with a new
+   seed (`IMAGE_TEXT_ATTEMPTS`, default 2), and a picture still wrong is
+   refused, so the diagram is filed instead. The prompt holds
    only words meant for the cover: a diffusion model letters whatever it reads.
    With `z-image-turbo` this step is skipped.
 3. With neither, or when drawing fails, the diagram is filed: a cover whose

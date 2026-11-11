@@ -64,3 +64,6 @@ strix_runs/
 # against the same checkout without fighting the first over .next/.
 web/nextjs/.next-*
 web/nextjs/.next.*
+
+# image-service's OCR tool, compiled by image-service/run.sh
+image-service/ocr/ocr

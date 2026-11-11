@@ -35,6 +35,13 @@ if ! "$PYTHON" -c "import fastapi, uvicorn, jwt" >/dev/null 2>&1; then
   uv pip install --quiet --python "$PYTHON" -r requirements.txt
 fi
 
+# The lettering check (app/textcheck.py) reads pictures back with Apple Vision.
+# Built here, once per change to its source; without swiftc the service still
+# runs and lettering goes unchecked.
+if command -v swiftc >/dev/null 2>&1 && [[ ! -x ocr/ocr || ocr/ocr.swift -nt ocr/ocr ]]; then
+  swiftc -O ocr/ocr.swift -o ocr/ocr || echo "WARNING: the OCR tool did not build; lettering is not checked" >&2
+fi
+
 export IMAGE_HOST="${IMAGE_HOST:-0.0.0.0}"
 export IMAGE_PORT="${IMAGE_PORT:-11435}"
 

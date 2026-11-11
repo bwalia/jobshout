@@ -2097,9 +2097,10 @@ type postImagesUpdater interface {
 }
 
 // redrawBudget bounds the drawing in one Redraw images: a plan call and up to
-// three pictures. ERNIE-Image on the shared workstation takes about 5 minutes
-// a picture; at 15 minutes the budget ran out at the cover on int.
-var redrawBudget = 45 * time.Minute
+// four pictures. ERNIE-Image on the shared workstation takes about 5 minutes
+// a picture, and one whose lettering reads back wrong is drawn twice; at 15
+// minutes the budget ran out at the cover on int.
+var redrawBudget = 60 * time.Minute
 
 func (s *blogService) RedrawImages(ctx context.Context, orgID, articleID uuid.UUID, syncCMS bool) (*model.BlogArticle, blog.RedrawResult, error) {
 	var res blog.RedrawResult

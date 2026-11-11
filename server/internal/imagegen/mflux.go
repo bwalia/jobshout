@@ -73,6 +73,7 @@ type mfluxGenerateRequest struct {
 	Seed           int64    `json:"seed"`
 	Guidance       *float64 `json:"guidance,omitempty"`
 	NegativePrompt string   `json:"negative_prompt,omitempty"`
+	ExpectText     []string `json:"expect_text,omitempty"`
 }
 
 type mfluxGenerateResponse struct {
@@ -83,6 +84,11 @@ type mfluxGenerateResponse struct {
 	Height      int    `json:"height"`
 	Steps       int    `json:"steps"`
 	DurationMS  int    `json:"duration_ms"`
+	// TextOK is whether the lettering read back as ExpectText; nil when the
+	// service could not read it (or predates the check).
+	TextOK       *bool    `json:"text_ok"`
+	TextProblems []string `json:"text_problems"`
+	Attempts     int      `json:"attempts"`
 }
 
 type mfluxModelsResponse struct {
@@ -170,6 +176,7 @@ func (c *MFluxClient) Generate(ctx context.Context, req GenerateRequest) (*Gener
 		Steps:          req.Steps,
 		Seed:           req.Seed,
 		NegativePrompt: req.NegativePrompt,
+		ExpectText:     req.ExpectText,
 	})
 	if err != nil {
 		return nil, err
@@ -178,6 +185,10 @@ func (c *MFluxClient) Generate(ctx context.Context, req GenerateRequest) (*Gener
 	var parsed mfluxGenerateResponse
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		return nil, fmt.Errorf("imagegen: decode image service response: %w", err)
+	}
+	if len(req.ExpectText) > 0 && parsed.TextOK != nil && !*parsed.TextOK {
+		return nil, fmt.Errorf("imagegen: the lettering came out wrong in %d tries (%s)",
+			parsed.Attempts, strings.Join(parsed.TextProblems, "; "))
 	}
 
 	png, err := base64.StdEncoding.DecodeString(parsed.ImageBase64)
