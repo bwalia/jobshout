@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/jobshout/server/internal/imagegen"
 	"github.com/jobshout/server/internal/imagestore"
 	"github.com/jobshout/server/internal/model"
 )
@@ -128,7 +129,7 @@ const (
 )
 
 func (r *Runner) coverPictures() bool {
-	return strings.EqualFold(strings.TrimSpace(r.cfg.CoverStyle), CoverStylePicture) && r.canLetterImages()
+	return strings.EqualFold(strings.TrimSpace(r.cfg.CoverStyle), CoverStylePicture) && r.canLetter(imagegen.TextCaptions)
 }
 
 // canDrawCover reports whether this run can give an article a real cover in

@@ -10,7 +10,8 @@ ai:
   chatModelFallback: "llama3.1:8b"
   mailModel: "muse-glimmer:latest"
   imageBaseURL: "https://images.workstation.co.uk"
-  # Letters labels, so picture covers and figures can use the workstation.
+  # Captions picture covers on the workstation. Figures need a hosted model
+  # (Gemini) to letter them, and are drawn as vector diagrams without one.
   imageModel: "ernie-image-turbo"
   blogCoverImages: true
   # Article writer on qwen3.8, as proved on int (see values-int.yaml): 120m per

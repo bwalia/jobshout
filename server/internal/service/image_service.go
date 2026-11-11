@@ -64,9 +64,9 @@ type GenerateImageRequest struct {
 	// BlogRunID links the image to the article run it was drawn for. Nil when
 	// no article asked for it.
 	BlogRunID *uuid.UUID
-	// NeedsText marks a picture whose labels must be readable: a hosted
-	// failure falls back only to a workstation model that letters them.
-	NeedsText bool
+	// Text is how much readable text the picture carries: a hosted failure
+	// falls back only to a workstation model that letters that much.
+	Text imagegen.TextNeed
 }
 
 // GenerateImageResult is the produced image, plus where it went.
@@ -110,13 +110,13 @@ func (s *ImageService) Generate(ctx context.Context, req GenerateImageRequest) (
 	}
 
 	resp, err := s.router.Generate(ctx, req.Provider, imagegen.GenerateRequest{
-		Prompt:    req.Prompt,
-		Model:     req.Model,
-		Width:     req.Width,
-		Height:    req.Height,
-		Steps:     req.Steps,
-		Seed:      seed,
-		NeedsText: req.NeedsText,
+		Prompt: req.Prompt,
+		Model:  req.Model,
+		Width:  req.Width,
+		Height: req.Height,
+		Steps:  req.Steps,
+		Seed:   seed,
+		Text:   req.Text,
 	})
 	if err != nil {
 		return nil, err
@@ -188,10 +188,10 @@ func (s *ImageService) DefaultProvider() string {
 	return s.router.DefaultProvider()
 }
 
-// CanLetter reports whether a configured provider can render readable
-// on-image text with its default model (imagegen.Letters).
-func (s *ImageService) CanLetter() bool {
-	return s != nil && s.router.CanLetter()
+// CanLetter reports whether a configured provider letters need's text with
+// its default model (imagegen.Letters).
+func (s *ImageService) CanLetter(need imagegen.TextNeed) bool {
+	return s != nil && s.router.CanLetter(need)
 }
 
 // Recent lists the images this org has generated, newest first.

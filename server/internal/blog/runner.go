@@ -30,6 +30,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/jobshout/server/internal/audience"
+	"github.com/jobshout/server/internal/imagegen"
 	"github.com/jobshout/server/internal/integration/adapters/opsapi"
 	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/model"
@@ -288,25 +289,29 @@ func (r *Runner) canIllustrate() bool {
 	return r.images != nil && r.images.Enabled()
 }
 
-// letteringIllustrator is implemented by the production adapter when a
-// configured provider can render readable on-image text. Test fakes omit it;
-// canLetterFigures then assumes a working fake can letter.
+// letteringIllustrator is implemented by the production adapter: whether a
+// configured model letters that much text (imagegen.Letters). Test fakes omit
+// it, and a working fake is taken to letter anything.
 type letteringIllustrator interface {
-	Letters() bool
+	Letters(need imagegen.TextNeed) bool
 }
 
-// canLetterImages reports whether a configured image model can letter a
-// figure's labels. Covers can still use workstation diffusion; comparison
-// tables cannot.
-func (r *Runner) canLetterImages() bool {
+// canLetter reports whether a configured image model letters need's text:
+// TextLabels for a figure's table or flowchart, TextCaptions for a cover.
+func (r *Runner) canLetter(need imagegen.TextNeed) bool {
 	if !r.canIllustrate() {
 		return false
 	}
 	if l, ok := r.images.(letteringIllustrator); ok {
-		return l.Letters()
+		return l.Letters(need)
 	}
 	return true
 }
+
+// canLetterImages reports whether a configured image model can letter a
+// figure's labels. Covers can use a model that only captions; comparison
+// tables cannot.
+func (r *Runner) canLetterImages() bool { return r.canLetter(imagegen.TextLabels) }
 
 // canLetterFigures reports whether in-body labeled figures are worth asking
 // for: an image model can letter them, or they can be drawn as vector

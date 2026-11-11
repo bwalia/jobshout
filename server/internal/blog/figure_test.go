@@ -81,6 +81,15 @@ func TestInlineImagePrompt_RequiresLabelsAndForbidsScenes(t *testing.T) {
 	if strings.Contains(got, "Strictly no text") {
 		t.Fatal("prompt still bans text")
 	}
+
+	// Labels named twice (as labels and in the description) came out as
+	// repeated boxes on int: each is asked for once, and the description is
+	// marked as the same labels.
+	flow := inlineImagePrompt(kindFlow, "Client → API Gateway → Ingress Controller → Service Pod")
+	if !strings.Contains(flow, "render each exactly once") || !strings.Contains(flow, "the same labels, not more of them") ||
+		strings.Count(flow, "Ingress Controller") != 2 {
+		t.Errorf("flow prompt does not keep each label to one box:\n%s", flow)
+	}
 }
 
 func TestInlineSize_WidensDiagrams(t *testing.T) {
@@ -180,8 +189,8 @@ func TestSalvageIllustration_DropsPureScenes(t *testing.T) {
 }
 
 func TestImageRendersLabels(t *testing.T) {
-	if imageRendersLabels("mflux", "z-image-turbo") {
-		t.Fatal("workstation diffusion cannot letter")
+	if imageRendersLabels("mflux", "z-image-turbo") || imageRendersLabels("mflux", "ernie-image-turbo") {
+		t.Fatal("workstation diffusion cannot letter a figure, ERNIE included")
 	}
 	if !imageRendersLabels("gemini", "gemini-3.1-flash-lite-image") {
 		t.Fatal("Gemini should be treated as able to letter")
