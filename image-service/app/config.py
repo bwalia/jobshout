@@ -44,6 +44,12 @@ DEFAULT_STEPS = int(_default_steps_raw) if _default_steps_raw else None
 # its best reading is returned as wrong. Each try is minutes of the GPU.
 TEXT_ATTEMPTS = max(1, int(os.getenv("IMAGE_TEXT_ATTEMPTS", "2")))
 
+# Seconds by which a request with named lettering must be answered. The edge
+# proxy drops a request at 600 s: a cover's second try (about 5½ minutes each
+# beside Ollama) ran past it, the caller retried, and the good picture was lost
+# while the retries queued behind it. Another try is made only if it fits.
+TEXT_DEADLINE = float(os.getenv("IMAGE_TEXT_DEADLINE", "540"))
+
 # Ceilings. This service is one process in front of one GPU, so an unbounded
 # step count or dimension is not merely a slow request — it is a denial of
 # service against every other caller waiting on the lock.

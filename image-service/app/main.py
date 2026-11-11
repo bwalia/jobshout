@@ -7,6 +7,7 @@ import asyncio
 import base64
 import logging
 import random
+import time
 from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Response, status
@@ -161,7 +162,9 @@ async def generate(req: GenerateRequest, caller: str = Depends(require_auth)):
     attempts = config.TEXT_ATTEMPTS if req.expect_text else 1
     text_ok: bool | None = None
     issues: list[str] = []
+    started = time.monotonic()
     for attempt in range(1, attempts + 1):
+        began = time.monotonic()
         result = await _draw(req, model_name, width, height, steps, seed)
         if not req.expect_text:
             break
@@ -176,6 +179,9 @@ async def generate(req: GenerateRequest, caller: str = Depends(require_auth)):
         )
         if text_ok:
             break
+        now = time.monotonic()
+        if now - started + (now - began) > config.TEXT_DEADLINE:
+            break  # another try would end past the deadline; the caller retries
         seed = random.randrange(0, 2**31 - 1)
 
     return GenerateResponse(**vars(result), text_ok=text_ok, text_problems=issues[:12], attempts=attempt)

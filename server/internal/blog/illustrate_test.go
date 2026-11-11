@@ -374,6 +374,9 @@ func TestTransientImageErr(t *testing.T) {
 	if transientImageErr(fmt.Errorf("imagegen: the image gateway rejected the request (status 401)")) {
 		t.Error("auth rejection must not be retried")
 	}
+	if !transientImageErr(fmt.Errorf("imagegen: the lettering came out wrong in 1 tries (missing REQUEST)")) {
+		t.Error("a cover with wrong lettering should be asked for again (a new seed)")
+	}
 }
 
 // failNThenSucceedIllustrator fails the first N calls with a transient error,

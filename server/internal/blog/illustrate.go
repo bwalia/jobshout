@@ -609,6 +609,10 @@ func transientImageErr(err error) bool {
 		"timeout", "deadline exceeded",
 		"connection reset", "connection refused",
 		"busy", "server error", "wsl proxy",
+		// Not a fault, but the next try is a new seed: the image service
+		// makes one try per request when a second would outlast the edge's
+		// 600 s, so a cover's further tries are asked for from here.
+		"lettering came out wrong",
 	} {
 		if strings.Contains(msg, needle) {
 			return true
