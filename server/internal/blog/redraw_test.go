@@ -42,6 +42,53 @@ func TestRedrawImages(t *testing.T) {
 	}
 }
 
+// int, 2026-11-11: Gemini planned the prompt's own example for an API-gateway
+// article. The plan is asked again, told why, and the second answer is drawn.
+func TestRedrawImages_ReplansFiguresTheArticleDoesNotSupport(t *testing.T) {
+	r := testRunner(&noLetterIllustrator{fakeIllustrator{enabled: true}}).WithCoverStore(newMemCovers())
+	stub := &stubLLM{responses: []scriptedResponse{
+		{trigger: "Read this finished article", content: `{"figures":[{"kind":"architecture","section":"The gateway",` +
+			`"content":"API gateway: auth service, orders service, billing service, Redis cache"}]}`},
+		{trigger: "The figures planned for this article cannot be drawn", content: `{"figures":[{"kind":"flow",` +
+			`"section":"The gateway","content":"Client → API gateway → Ingress controller → Service pod"}]}`},
+	}}
+	r.llm = stub
+	a := &GeneratedArticle{Title: "Ingress security", Markdown: "# Ingress security\n\n## The gateway\n\n" +
+		"A client request passes the API gateway, then the ingress controller, then a service pod.\n"}
+
+	res, err := r.RedrawImages(context.Background(), uuid.New(), a)
+	if err != nil || res.Figures != 1 || !strings.Contains(a.Markdown, "![Client → API gateway → Ingress controller → Service pod](") {
+		t.Fatalf("err=%v res=%+v\n%s", err, res, a.Markdown)
+	}
+	retry := stub.calls[1].Messages[len(stub.calls[1].Messages)-1].Content
+	if !strings.Contains(retry, "orders service") || !strings.Contains(retry, "names what the article does not") {
+		t.Fatalf("the retry should say what was wrong:\n%s", retry)
+	}
+}
+
+// When nothing new can be drawn, the old figures stay — except those the
+// article does not support, like int's copied example and key: value hub.
+func TestRedrawImages_PrunesOldFiguresTheArticleDoesNotSupport(t *testing.T) {
+	r := testRunner(&noLetterIllustrator{fakeIllustrator{enabled: true}}).WithCoverStore(&fullStore{*newMemCovers()})
+	r.llm = &stubLLM{responses: []scriptedResponse{{trigger: "Read this finished article", content: `{"figures":[]}`}}}
+	img := func(alt, name string) string {
+		return "![" + alt + "](" + imagestore.URLPrefix + "o/" + name + ".png)\n\n"
+	}
+	a := &GeneratedArticle{Title: "T", Markdown: "## The gateway\n\nA client passes the API gateway and the ingress controller to a service pod; " +
+		"tenants inject snippets to exfiltrate secrets (CVE-2021-25742).\n\n" +
+		img("Client → API Gateway → Ingress Controller → Service Pod", "good") +
+		img("API Gateway: auth service, orders service, billing service, Redis cache", "copied") +
+		img("Distribution: Ingress objects, Score: tenant-supplied snippets, Alert: secret exfiltration", "pairs")}
+
+	res, err := r.RedrawImages(context.Background(), uuid.New(), a)
+	if err != nil || !strings.Contains(a.Markdown, "good.png") || strings.Contains(a.Markdown, "copied.png") || strings.Contains(a.Markdown, "pairs.png") {
+		t.Fatalf("err=%v notes=%v\n%s", err, res.Notes, a.Markdown)
+	}
+	if !strings.Contains(strings.Join(res.Notes, " | "), "removed 2 old figure(s)") {
+		t.Fatalf("notes = %v", res.Notes)
+	}
+}
+
 // int's image store filled up mid-redraw: the article keeps the figure and the
 // cover it had, and the result says nothing was redrawn.
 func TestRedrawImages_KeepsWhatItCannotReplace(t *testing.T) {
@@ -52,7 +99,7 @@ func TestRedrawImages_KeepsWhatItCannotReplace(t *testing.T) {
 		trigger: "Read this finished article",
 		content: `{"figures":[{"kind":"process","section":"How it runs","content":"Commit → Build → Test → Deploy"}]}`,
 	}}}
-	old := "## How it runs\n\nSteps.\n\n![old](" + imagestore.URLPrefix + "o/old.png)\n"
+	old := "## How it runs\n\nCommit, build, test, deploy.\n\n![old](" + imagestore.URLPrefix + "o/old.png)\n"
 	a := &GeneratedArticle{Title: "T", Markdown: old, HTML: "<p>kept</p>", CoverImageURL: coverURL}
 
 	res, err := r.RedrawImages(context.Background(), uuid.New(), a)

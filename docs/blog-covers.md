@@ -152,8 +152,10 @@ One structured-model call reads the whole article and plans both:
 - the one or two sections a figure teaches most in, as lists of labels, drawn
   with a lettering model if one is configured, otherwise as diagrams.
 
-Nothing is lost when drawing fails: the article keeps its figures if no new one
-is drawn, and its cover if no new one can be stored. The answer is
+A planned figure the article does not support (copied labels, `key: value`
+pairs) is planned once more, told why. Nothing is lost when drawing fails: the
+article keeps its figures if no new one is drawn — less any it does not
+support — and its cover if no new one can be stored. The answer is
 `{"article", "notes", "figures_drawn", "cover_redrawn"}`; the page reports
 success only for what changed, and `notes` say why anything did not (a full
 image store, a refused CMS update).

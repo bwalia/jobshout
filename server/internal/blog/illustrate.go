@@ -650,10 +650,8 @@ func (r *Runner) illustrateBody(ctx context.Context, orgID uuid.UUID, runID *uui
 			notes = append(notes, "dropped an illustration block with no facts to letter")
 			continue
 		}
-		// One label may be the model's own wording ("Build" for "built"); a
-		// copied example misses several.
-		if missing := ungroundedLabels(description, prose); len(missing) > 1 {
-			notes = append(notes, "dropped an illustration naming what the article does not: "+strings.Join(missing, ", "))
+		if why := figureMisfit(description, prose); why != "" {
+			notes = append(notes, "dropped an illustration: "+why)
 			continue
 		}
 		if drawn >= maxInlineIllustrations {

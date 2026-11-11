@@ -20,16 +20,20 @@ import (
 // comparison has no faithful diagram, so it is offered only with a model.
 func (r *Runner) figureKinds() (kinds, format string) {
 	kinds = "flow, architecture, process, or concept"
+	// The examples come from a bakery so a copied one cannot pass for the
+	// article: Gemini put "API gateway: auth service, orders service…" into an
+	// API-gateway article that never mentions orders.
 	format = `   Write content as short labels in the article's own terms, 1-4 words each,
-   naming the real things, never placeholder words like "core" or "step":
-   flow or process as 3-5 steps, e.g. "Commit → Build image → Run tests → Deploy";
+   naming the real things, never placeholder words like "core" or "step".
+   The shapes, shown from an unrelated field whose words must not be reused:
+   flow or process as 3-5 steps, e.g. "Mix dough → Proof → Shape loaves → Bake";
    architecture or concept as the centre and its 4-5 parts, e.g.
-   "API gateway: auth service, orders service, billing service, Redis cache"`
+   "Bakery: oven, flour store, packing line, delivery van"`
 	if r.canLetterImages() {
 		kinds = "flow, comparison, architecture, process, or concept"
 		format += `;
    comparison as the options and what they differ on, e.g.
-   "Polling vs webhooks: latency, cost, complexity"`
+   "Sourdough vs yeast: rise time, flavour, cost"`
 	}
 	return kinds, format + "."
 }
@@ -72,14 +76,22 @@ func (r *Runner) RedrawImages(ctx context.Context, orgID uuid.UUID, a *Generated
 		body, notes := r.illustrateBody(ctx, orgID, a.RunID, insertPlannedFigures(md, plan))
 		res.Notes = notes
 		res.Figures = len(figureImage.FindAllString(body, -1))
+		if res.Figures == 0 && figureImage.MatchString(a.Markdown) {
+			// None redrawn (on int a full image store turned one figure into
+			// none): keep the figures it had, less those it does not support.
+			var dropped int
+			body, dropped = pruneMisfitFigures(a.Markdown, md)
+			if dropped > 0 {
+				res.Notes = append(res.Notes, fmt.Sprintf("removed %d old figure(s) the article does not support", dropped))
+			}
+		}
 		switch {
 		case len(plan.Figures) == 0:
 			res.Notes = append(res.Notes, "the model found no section worth a figure")
-		case res.Figures == 0 && figureImage.MatchString(a.Markdown):
-			// On int a full image store turned one figure into none.
+		case res.Figures == 0 && figureImage.MatchString(body):
 			res.Notes = append(res.Notes, "kept the article's figures: none could be redrawn")
 		}
-		if res.Figures > 0 || !figureImage.MatchString(a.Markdown) {
+		if body != a.Markdown {
 			a.Markdown = tidyMarkdown(body, true)
 			if err := a.render(); err != nil {
 				return res, err
@@ -123,7 +135,7 @@ func (r *Runner) planRedraw(ctx context.Context, title, markdown string) (*write
 TITLE: %s
 HEADINGS:
 - %s
-THINGS THE ARTICLE NAMES (take cover labels from these): %s
+THINGS THE ARTICLE NAMES (take cover and figure labels from these): %s
 
 ARTICLE:
 %s
@@ -132,21 +144,89 @@ Respond with JSON only: {"cover_scene": {"layout": "...", "labels": ["...", "...
 		coverLayoutGuide, kinds, format, title, strings.Join(headings, "\n- "), strings.Join(articleTerms(markdown, 12), ", "), body)
 
 	var out struct {
-		CoverScene coverScene `json:"cover_scene"`
-		Figures    []struct {
-			Kind    flexibleString `json:"kind"`
-			Section flexibleString `json:"section"`
-			Content flexibleString `json:"content"`
-		} `json:"figures"`
+		CoverScene coverScene   `json:"cover_scene"`
+		Figures    []figureJSON `json:"figures"`
 	}
 	if err := r.generateJSON(ctx, r.structuredModel(GenerateRequest{}), "redraw", prompt, 1000, &out); err != nil {
 		return nil, coverScene{}, err
 	}
 	plan := &writePlan{Title: title}
-	for _, f := range out.Figures {
-		plan.Figures = append(plan.Figures, figureBrief{Kind: string(f.Kind), Section: string(f.Section), Content: string(f.Content)})
+	var misfits []string
+	plan.Figures, misfits = fitFigures(out.Figures, markdown)
+	if len(plan.Figures) == 0 && len(misfits) > 0 {
+		plan.Figures = r.replanFigures(ctx, title, markdown, headings, misfits)
 	}
 	return plan, out.CoverScene, nil
+}
+
+type figureJSON struct {
+	Kind    flexibleString `json:"kind"`
+	Section flexibleString `json:"section"`
+	Content flexibleString `json:"content"`
+}
+
+// fitFigures splits planned figures into those the article supports and, for
+// the rest, why not.
+func fitFigures(in []figureJSON, markdown string) (fit []figureBrief, misfits []string) {
+	for _, f := range in {
+		if why := figureMisfit(string(f.Content), markdown); why != "" {
+			misfits = append(misfits, fmt.Sprintf("%q: %s", string(f.Content), why))
+			continue
+		}
+		fit = append(fit, figureBrief{Kind: string(f.Kind), Section: string(f.Section), Content: string(f.Content)})
+	}
+	return fit, misfits
+}
+
+// replanFigures asks once more, saying why, when no planned figure fits the
+// article — groundedCover's retry, for figures. Without it a redraw whose
+// plan copied the prompt's example drew nothing and kept the old figures.
+func (r *Runner) replanFigures(ctx context.Context, title, markdown string, headings, misfits []string) []figureBrief {
+	kinds, format := r.figureKinds()
+	body := markdown
+	if len(body) > maxRedrawArticleChars {
+		body = body[:maxRedrawArticleChars]
+	}
+	prompt := fmt.Sprintf(`The figures planned for this article cannot be drawn:
+- %s
+
+Plan them again: the one or two sections where a figure would teach the reader most. Each figure names a kind (%s), a section, and its content.
+%s
+Every label is something this article names. "section" is a heading copied exactly from HEADINGS.
+
+TITLE: %s
+HEADINGS:
+- %s
+THINGS THE ARTICLE NAMES: %s
+
+ARTICLE:
+%s
+
+Respond with JSON only: {"figures": [{"kind": "process", "section": "...", "content": "..."}]}`,
+		strings.Join(misfits, "\n- "), kinds, format, title, strings.Join(headings, "\n- "), strings.Join(articleTerms(markdown, 12), ", "), body)
+	var out struct {
+		Figures []figureJSON `json:"figures"`
+	}
+	if err := r.generateJSON(ctx, r.structuredModel(GenerateRequest{}), "redraw-figures", prompt, 600, &out); err != nil {
+		return nil
+	}
+	fit, _ := fitFigures(out.Figures, markdown)
+	return fit
+}
+
+// pruneMisfitFigures drops the article's figures whose alt text — the
+// description each was drawn from — the article does not support.
+func pruneMisfitFigures(markdown, text string) (string, int) {
+	n := 0
+	out := figureImage.ReplaceAllStringFunc(markdown, func(img string) string {
+		alt := img[2:strings.Index(img, "](")]
+		if figureMisfit(alt, text) == "" {
+			return img
+		}
+		n++
+		return ""
+	})
+	return out, n
 }
 
 // layoutMinLabels is how many real labels each layout needs before it fills
