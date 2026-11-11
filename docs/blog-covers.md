@@ -194,8 +194,9 @@ When cloning a writer for a site ([writer-agents.md](./writer-agents.md)):
   Comparison figures need a lettering model (a comparison belongs in a table
   otherwise). A figure is dropped when two or more labels name something the
   article never mentions (a label's words of 4+ letters must be in it — models
-  copy the prompt's example figure), and a list of `key: value` pairs is not drawn as a
-  hub or flow. `BLOG_COVER_IMAGES` turns on the hosted model and `picture` covers.
+  copy the prompt's example figure), when a label is over 24 characters (it
+  would be cut mid-phrase to fit its box), and a list of `key: value` pairs is
+  not drawn as a hub or flow. A flow cover keeps five steps, its destination last. `BLOG_COVER_IMAGES` turns on the hosted model and `picture` covers.
 - Do not put image credentials in the launch schema — covers use the ring's
   image providers.
 - After publishing, if the listing still shows the shared hero, call

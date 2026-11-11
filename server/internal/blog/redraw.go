@@ -23,8 +23,9 @@ func (r *Runner) figureKinds() (kinds, format string) {
 	// The examples come from a bakery so a copied one cannot pass for the
 	// article: Gemini put "API gateway: auth service, orders service…" into an
 	// API-gateway article that never mentions orders.
-	format = `   Write content as short labels in the article's own terms, 1-4 words each,
-   naming the real things, never placeholder words like "core" or "step".
+	format = `   Write content as short labels in the article's own terms, 1-4 words and at
+   most 24 characters each: names of the real things, not sentences, never
+   placeholder words like "core" or "step".
    The shapes, shown from an unrelated field whose words must not be reused:
    flow or process as 3-5 steps, e.g. "Mix dough → Proof → Shape loaves → Bake";
    architecture or concept as the centre and its 4-5 parts, e.g.

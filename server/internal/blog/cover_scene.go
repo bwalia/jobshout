@@ -149,6 +149,12 @@ func coverSceneFor(a *GeneratedArticle) coverScene {
 	if s.Stat == "" && s.Layout == layoutBars {
 		s.Stat = derived.Stat
 	}
+	// A flow draws five steps, and its last is the one it highlights: keep the
+	// destination ("proxy to pod") rather than the sixth step's absence. ERNIE
+	// also letters five steps far more reliably than six.
+	if s.Layout == layoutFlow && len(s.Labels) > 5 {
+		s.Labels = append(s.Labels[:4:4], s.Labels[len(s.Labels)-1])
+	}
 	if strings.TrimSpace(s.Eyebrow) == "" {
 		s.Eyebrow = derived.Eyebrow
 	}
