@@ -94,17 +94,27 @@ var illustrationFence = regexp.MustCompile("(?s)```illustration(?:[ \t]+([A-Za-z
 // holding a blog run open through a dead image host.
 const coverMaxAttempts = 3
 
-// infographicCoverPrompt is the cover for a model that captions (Nano Banana,
-// ERNIE-Image): the article's idea drawn as one labelled diagram, in the
+// Openings for infographicPrompt.
+const (
+	coverOpening  = "A 16:9 cover image for a technical blog article"
+	figureOpening = "A figure inside a technical blog article"
+)
+
+// figureAccent is the one accent every drawn figure uses, so figures read as
+// one set whatever the article's cover accent.
+const figureAccent = "ice"
+
+// infographicPrompt is a cover or figure for a model that captions (Nano
+// Banana, ERNIE-Image): the article's idea drawn as one labelled diagram, in the
 // article's own terms (the cover scene), so the card says what the piece
 // argues. The house style is fixed, so covers read as one series on the
 // listing page. Every word in the prompt may end up printed — diffusion models
 // letter what they read, "do not print" included — so it holds only the words
 // the cover should show. The title is not one of them: the site prints it
 // under the card, and ERNIE misspelt a 7-word one ("Kubernates").
-func infographicCoverPrompt(scene coverScene, accent string) string {
+func infographicPrompt(opening string, scene coverScene, accent string) string {
 	var b strings.Builder
-	b.WriteString("A 16:9 cover image for a technical blog article. It explains the article at a glance, " +
+	b.WriteString(opening + ". It explains the article at a glance, " +
 		"like a well-designed infographic; it is not decoration.\n\n")
 	if scene.Eyebrow != "" {
 		fmt.Fprintf(&b, "Small uppercase tag, top left, in the accent colour: %q\n", scene.Eyebrow)
@@ -437,7 +447,7 @@ func firstSentence(s string) string {
 }
 
 // generateCover draws an article's cover as a picture: its idea as a labelled
-// diagram (infographicCoverPrompt).
+// diagram (infographicPrompt).
 //
 // The model is left unset so the platform default applies: Gemini first when
 // a key is set, then the workstation, but only a workstation model that
@@ -452,7 +462,7 @@ func (r *Runner) generateCover(ctx context.Context, orgID uuid.UUID, a *Generate
 		a.CoverAccent = accentForTopic(a.Title, a.Topic, a.CoverAngle)
 	}
 	a.CoverScene = coverSceneFor(a)
-	prompt := infographicCoverPrompt(a.CoverScene, a.CoverAccent)
+	prompt := infographicPrompt(coverOpening, a.CoverScene, a.CoverAccent)
 
 	var lastErr error
 	for attempt := 1; attempt <= coverMaxAttempts; attempt++ {
@@ -662,8 +672,8 @@ func (r *Runner) illustrateBody(ctx context.Context, orgID uuid.UUID, runID *uui
 // terms, which letters them exactly and needs no GPU or key.
 func (r *Runner) drawFigure(ctx context.Context, orgID uuid.UUID, runID *uuid.UUID, kind illustrationKind, description string) (string, string) {
 	note := "dropped an illustration: no image model can letter labels"
+	width, height := inlineSize(kind)
 	if r.canLetterImages() {
-		width, height := inlineSize(kind)
 		img, err := r.images.Generate(ctx, IllustrationRequest{
 			OrgID:  orgID,
 			Prompt: inlineImagePrompt(kind, description),
@@ -683,10 +693,34 @@ func (r *Runner) drawFigure(ctx context.Context, orgID uuid.UUID, runID *uuid.UU
 			return img.URL, ""
 		}
 	}
+	// A flow or a hub is drawn as a cover is, by a model that only captions
+	// (ERNIE on the workstation): a few labels, each once. That prompt came
+	// out clean on int where the full figure prompt repeated and misspelt its
+	// boxes. A table or prose has no scene, and needs a model that letters.
+	scene, ok := figureScene(kind, description)
+	if ok && r.canLetter(imagegen.TextCaptions) {
+		img, err := r.images.Generate(ctx, IllustrationRequest{
+			OrgID:  orgID,
+			Prompt: infographicPrompt(figureOpening, scene, figureAccent),
+			Width:  width,
+			Height: height,
+			Steps:  coverSteps,
+			Source: "blog_inline",
+			RunID:  runID,
+			Text:   imagegen.TextCaptions,
+		})
+		switch {
+		case err != nil || img == nil || img.URL == "":
+			note = "dropped an illustration that could not be drawn: " + truncateRunes(fmt.Sprint(err), 200)
+		case !imagegen.Letters(img.Provider, img.Model, imagegen.TextCaptions):
+			note = "dropped an illustration from a model that cannot letter labels"
+		default:
+			return img.URL, ""
+		}
+	}
 	if r.covers == nil {
 		return "", note
 	}
-	scene, ok := figureScene(kind, description)
 	if !ok {
 		return "", note + "; it is not a list of steps or parts to draw as a diagram"
 	}

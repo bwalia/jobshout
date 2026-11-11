@@ -22,9 +22,9 @@ type fakeIllustrator struct {
 	failAfter int
 	// noURL simulates a generator that works but has nowhere to store output.
 	noURL bool
-	// provider overrides the reported provider. Empty means gemini, which is
-	// the path that can letter labels.
-	provider string
+	// provider and model override what is reported. Empty means gemini, which
+	// is the path that can letter labels, and the request's model.
+	provider, model string
 	// store, when set, receives each image the way the real image service
 	// stores before returning a URL.
 	store *memCovers
@@ -45,6 +45,9 @@ func (f *fakeIllustrator) Generate(ctx context.Context, req IllustrationRequest)
 		url = ""
 	}
 	model := req.Model
+	if f.model != "" {
+		model = f.model
+	}
 	if model == "" {
 		model = "gemini-3.1-flash-lite-image"
 	}

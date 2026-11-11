@@ -178,9 +178,11 @@ if CMS update lags.
 When cloning a writer for a site ([writer-agents.md](./writer-agents.md)):
 
 - Covers are `picture` on the chart and fall back to `diagram`, which needs no
-  image provider. In-article figures use a hosted image model that can letter
-  labels (Gemini or OpenAI) when one is configured; ERNIE-Image's figures came
-  out with repeated boxes and misspellings. Otherwise they are drawn as diagrams like the covers:
+  image provider. In-article figures, in order: a hosted model that letters
+  labels (Gemini or OpenAI) draws the full figure; a flow or hub figure is then
+  drawn by a model that captions (ERNIE-Image) with the cover's prompt, its
+  scene's labels each once (the full figure prompt made ERNIE repeat and
+  misspell boxes); otherwise it is drawn as a vector diagram like the covers:
   flow and process figures as steps, architecture and concept figures as a hub.
   Comparison figures need a lettering model (a comparison belongs in a table
   otherwise). `BLOG_COVER_IMAGES` turns on the hosted model and `picture` covers.
