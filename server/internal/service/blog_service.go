@@ -2096,6 +2096,11 @@ type postImagesUpdater interface {
 	UpdatePostImages(ctx context.Context, postUUID, contentHTML, imageURL string) (*opsapi.Post, error)
 }
 
+// redrawBudget bounds the drawing in one Redraw images: a plan call and up to
+// three pictures. ERNIE-Image on the shared workstation takes about 5 minutes
+// a picture; at 15 minutes the budget ran out at the cover on int.
+var redrawBudget = 45 * time.Minute
+
 func (s *blogService) RedrawImages(ctx context.Context, orgID, articleID uuid.UUID, syncCMS bool) (*model.BlogArticle, blog.RedrawResult, error) {
 	var res blog.RedrawResult
 	if s.runner == nil {
@@ -2111,9 +2116,12 @@ func (s *blogService) RedrawImages(ctx context.Context, orgID, articleID uuid.UU
 	if a.OrgID != orgID {
 		return nil, res, fmt.Errorf("blog_svc: article does not belong to this organization")
 	}
-	// A plan call and up to four drawings: minutes on a busy workstation.
-	// A client that gives up must not leave the article half redrawn.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Minute)
+	// The client gives up long before the drawing is done (the edge closes a
+	// request after about 100 s). Neither that nor the drawing budget may
+	// leave the article half redrawn: the saves below use ctx, which has no
+	// deadline, so what was drawn in time is kept.
+	ctx = context.WithoutCancel(ctx)
+	drawCtx, cancel := context.WithTimeout(ctx, redrawBudget)
 	defer cancel()
 
 	runID := a.RunID
@@ -2122,7 +2130,7 @@ func (s *blogService) RedrawImages(ctx context.Context, orgID, articleID uuid.UU
 		Excerpt: articleExcerpt(a), CoverImageURL: a.CoverImageURL,
 		Audience: a.Audience, Industry: a.Industry, RunID: &runID,
 	}
-	res, err = s.runner.RedrawImages(ctx, orgID, gen)
+	res, err = s.runner.RedrawImages(drawCtx, orgID, gen)
 	if err != nil {
 		return nil, res, err
 	}

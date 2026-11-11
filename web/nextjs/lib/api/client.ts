@@ -108,6 +108,18 @@ export interface APIError {
  * — "publishing is not configured", "run has already been published" — and
  * that is what belongs in the toast. Falls back when the shape is unexpected.
  */
+/**
+ * True when the browser or the gateway stopped waiting rather than the server
+ * failing. Long work (career scoring, image redraws) carries on server-side
+ * after that, so callers should say so and reload instead of reporting it lost.
+ */
+export function isRequestTimeout(err: unknown): boolean {
+  return (
+    axios.isAxiosError(err) &&
+    (err.code === "ECONNABORTED" || err.code === "ETIMEDOUT" || err.response?.status === 504)
+  );
+}
+
 export function apiErrorMessage(err: unknown, fallback: string): string {
   if (axios.isAxiosError(err)) {
     const data = err.response?.data as APIError | undefined;
