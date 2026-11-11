@@ -181,3 +181,31 @@ type fullStore struct{ memCovers }
 func (*fullStore) PutFile(context.Context, uuid.UUID, []byte, string, string) (string, error) {
 	return "", errors.New("Storage backend has reached its minimum free drive threshold")
 }
+
+// int, v1.0.209: the planner wrote sentences, cut to fit their boxes as
+// "Tenant injects custom" and "API gateway handles load".
+func TestFigureMisfit_LabelsTooLongToFit(t *testing.T) {
+	text := "A tenant creates an Ingress object and injects a custom snippet; the snippet obtains secrets. " +
+		"The API gateway handles load balancing, security and rate limiting."
+	for _, d := range []string{
+		"Tenant creates Ingress object → Tenant injects custom snippet → Snippet obtains secrets",
+		"API gateway handles load balancing, API gateway handles security, API gateway handles rate limiting",
+	} {
+		if why := figureMisfit(d, text); !strings.Contains(why, "cut short") {
+			t.Errorf("%q: %q", d, why)
+		}
+	}
+	if why := figureMisfit("Tenant → Ingress object → Custom snippet → Secrets", text); why != "" {
+		t.Errorf("short labels refused: %q", why)
+	}
+}
+
+// A flow draws five steps and highlights the last; a sixth used to push the
+// destination ("proxy to pod") off the cover.
+func TestCoverSceneFor_FlowKeepsItsDestination(t *testing.T) {
+	a := &GeneratedArticle{Title: "T", CoverScene: coverScene{Layout: layoutFlow,
+		Labels: []string{"HTTP request", "auth", "rate limit", "routing policy", "forward request", "proxy to pod"}}}
+	if got := coverSceneFor(a).Labels; len(got) != 5 || got[3] != "routing policy" || got[4] != "proxy to pod" {
+		t.Fatalf("labels = %v", got)
+	}
+}
