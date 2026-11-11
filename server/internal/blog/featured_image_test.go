@@ -80,20 +80,22 @@ func TestRegenerateCover_CoverlessFallsBackWhenDrawingUnavailable(t *testing.T) 
 	}
 }
 
-// A failed redraw must not replace a real, stored cover with the fallback.
-func TestRegenerateCover_KeepsRealCoverWhenRedrawFails(t *testing.T) {
+// A redraw whose picture fails (ERNIE's lettering still wrong) draws the same
+// scene as a diagram rather than keeping the old cover, typos and all.
+func TestRegenerateCover_FailedPictureBecomesItsDiagram(t *testing.T) {
 	r := newTestRunner(&fakeCMS{})
 	r.cfg.CoverStyle = CoverStylePicture
 	r.WithIllustrator(&fakeIllustrator{enabled: true, failAfter: -1})
 	defer func(f func(int) time.Duration) { coverRetryWaitFn = f }(coverRetryWaitFn)
 	coverRetryWaitFn = func(int) time.Duration { return 0 }
+	old := "/api/v1/images/file/org/2026/10/real.png"
 	r.covers.(*memCovers).objects["org/2026/10/real.png"] = []byte("png")
-	a := &GeneratedArticle{Title: "T", Slug: "t", CoverImageURL: "/api/v1/images/file/org/2026/10/real.png"}
+	a := &GeneratedArticle{Title: "T", Slug: "t", CoverImageURL: old}
 
-	if err := r.RegenerateCover(context.Background(), uuid.New(), a); err == nil {
-		t.Fatal("a failed redraw should be reported")
+	if err := r.RegenerateCover(context.Background(), uuid.New(), a); err != nil {
+		t.Fatalf("the diagram should stand in: %v", err)
 	}
-	if a.CoverImageURL != "/api/v1/images/file/org/2026/10/real.png" {
-		t.Fatalf("the real cover was replaced: %q", a.CoverImageURL)
+	if a.CoverImageURL == old || a.CoverImageProvider != "diagram" || !r.coverStored(context.Background(), a.CoverImageURL) {
+		t.Fatalf("cover=%q provider=%q", a.CoverImageURL, a.CoverImageProvider)
 	}
 }

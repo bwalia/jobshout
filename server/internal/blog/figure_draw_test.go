@@ -25,7 +25,8 @@ func TestIllustrateBody_DrawsDiagramsWithoutALetteringModel(t *testing.T) {
 	if !strings.Contains(r.visualRules(), "```illustration") {
 		t.Fatal("a runner that can draw diagrams must offer figures")
 	}
-	md := "Intro.\n\n```illustration process\nCommit → Build image → Run tests → Deploy to staging\n```\n\n" +
+	md := "Intro. Each commit builds an image and runs the tests before we deploy to staging; polling and webhooks differ on latency and cost.\n\n" +
+		"```illustration process\nCommit → Build image → Run tests → Deploy to staging\n```\n\n" +
 		"```illustration comparison\nPolling vs webhooks: latency, cost\n```\n\nEnd.\n"
 	out, notes := r.illustrateBody(context.Background(), uuid.New(), nil, md)
 
@@ -56,7 +57,7 @@ func TestIllustrateBody_DrawsDiagramsWithoutALetteringModel(t *testing.T) {
 func TestIllustrateBody_FigureLinksAreAbsolute(t *testing.T) {
 	r := testRunner(&noLetterIllustrator{fakeIllustrator{enabled: true}}).WithCoverStore(newMemCovers())
 	r.cfg.PublicBaseURL = "https://jobshout.co.uk/"
-	out, _ := r.illustrateBody(context.Background(), uuid.New(), nil, "```illustration flow\nPlan → Build → Ship\n```\n")
+	out, _ := r.illustrateBody(context.Background(), uuid.New(), nil, "We plan, build and ship.\n\n```illustration flow\nPlan → Build → Ship\n```\n")
 	if !strings.Contains(out, "](https://jobshout.co.uk"+imagestore.URLPrefix) {
 		t.Fatalf("figure link is not absolute: %s", out)
 	}
@@ -68,7 +69,8 @@ func TestIllustrateBody_FallsBackToDiagram(t *testing.T) {
 	gpu := &fakeIllustrator{enabled: true, failAfter: -1}
 	r := testRunner(gpu).WithCoverStore(newMemCovers())
 	out, notes := r.illustrateBody(context.Background(), uuid.New(), nil,
-		"```illustration architecture\nAPI gateway: auth service, orders service, billing service, Postgres, Redis cache\n```\n")
+		"The API gateway fronts the auth, orders and billing services, backed by Postgres and a Redis cache.\n\n"+
+			"```illustration architecture\nAPI gateway: auth service, orders service, billing service, Postgres, Redis cache\n```\n")
 	if len(gpu.calls) != 2 || gpu.calls[0].Text != imagegen.TextLabels || gpu.calls[1].Text != imagegen.TextCaptions ||
 		len(notes) != 0 || !strings.Contains(out, "]("+imagestore.URLPrefix) {
 		t.Fatalf("calls=%d notes=%v out=%s", len(gpu.calls), notes, out)
@@ -82,7 +84,8 @@ func TestIllustrateBody_FallsBackToDiagram(t *testing.T) {
 func TestIllustrateBody_ErnieDrawsFigureScenes(t *testing.T) {
 	ernie := &captionIllustrator{fakeIllustrator{enabled: true, provider: "mflux", model: "ernie-image-turbo"}}
 	r := testRunner(ernie).WithCoverStore(newMemCovers())
-	md := "```illustration architecture\nClient → API Gateway → Ingress Controller → Service Pod\n```\n\n" +
+	md := "A client reaches the service pod through the API gateway and the ingress controller; polling and webhooks differ on latency and cost.\n\n" +
+		"```illustration architecture\nClient → API Gateway → Ingress Controller → Service Pod\n```\n\n" +
 		"```illustration comparison\nPolling vs webhooks: latency, cost\n```\n"
 	out, notes := r.illustrateBody(context.Background(), uuid.New(), nil, md)
 	if len(ernie.calls) != 1 {
@@ -104,6 +107,20 @@ func TestIllustrateBody_ErnieDrawsFigureScenes(t *testing.T) {
 	out, _ = testRunner(zimage).WithCoverStore(newMemCovers()).illustrateBody(context.Background(), uuid.New(), nil, md)
 	if strings.Contains(out, "img-1.png") || !strings.Contains(out, "]("+imagestore.URLPrefix) {
 		t.Fatalf("z-image's figure was used, or no vector figure replaced it:\n%s", out)
+	}
+}
+
+// The two figures int drew on 2026-11-11 that said nothing about the article:
+// the prompt's own example, and key: value pairs drawn as a hub around
+// "Distribution".
+func TestIllustrateBody_DropsFiguresTheArticleDoesNotSupport(t *testing.T) {
+	r := testRunner(&noLetterIllustrator{fakeIllustrator{enabled: true}}).WithCoverStore(newMemCovers())
+	md := "Tenants who create Ingress objects can inject snippets; CVE-2021-25742 let them exfiltrate secrets past the API gateway.\n\n" +
+		"```illustration architecture\nAPI gateway: auth service, orders service, billing service, Redis cache\n```\n\n" +
+		"```illustration concept\nDistribution: Ingress objects, Score: tenant-supplied snippets, Alert: secret exfiltration, Record: CVE-2021-25742\n```\n"
+	out, notes := r.illustrateBody(context.Background(), uuid.New(), nil, md)
+	if strings.Contains(out, "![") || len(notes) != 2 || !strings.Contains(notes[0], "orders service") {
+		t.Fatalf("notes=%v\n%s", notes, out)
 	}
 }
 

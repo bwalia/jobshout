@@ -138,10 +138,20 @@ func (r *Runner) canDrawCover() bool {
 	return r.coverPictures() || r.covers != nil
 }
 
-// drawCover gives a its cover in the configured style.
+// drawCover gives a its cover in the configured style. A picture that fails —
+// its lettering still wrong after the image service's retries, or no model
+// free — becomes the diagram of the same scene, which letters it exactly: a
+// redraw would otherwise keep the old cover, typos and all.
 func (r *Runner) drawCover(ctx context.Context, orgID uuid.UUID, a *GeneratedArticle) error {
 	if r.coverPictures() {
-		return r.generateCover(ctx, orgID, a)
+		err := r.generateCover(ctx, orgID, a)
+		if err == nil || r.covers == nil {
+			return err
+		}
+		if r.logger != nil {
+			r.logger.Warn("blog: cover picture failed; drawing its diagram",
+				zap.String("title", a.Title), zap.Error(err))
+		}
 	}
 	return r.storeDiagramCover(ctx, orgID, a)
 }

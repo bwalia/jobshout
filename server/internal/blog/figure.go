@@ -474,12 +474,39 @@ func figureItems(description string) (core string, items []string, ok bool) {
 		if item == "" {
 			continue
 		}
-		if len(strings.Fields(item)) > 6 {
+		// "Score: tenant-supplied snippets" is a key and its value, not a
+		// label: a list of pairs is neither a hub nor a path.
+		if len(strings.Fields(item)) > 6 || strings.Contains(item, ":") {
 			return "", nil, false
 		}
 		items = append(items, item)
 	}
 	return core, items, len(items) >= 2
+}
+
+// ungroundedLabels returns the figure's labels naming something text never
+// mentions. A label stands when each of its words of four or more letters is
+// in text. Models copy the prompt's example ("API gateway: auth service,
+// orders service, billing service, Redis cache") into articles about neither
+// orders nor billing; a figure has to show this article's facts. Prose has no
+// labels to check and returns none.
+func ungroundedLabels(description, text string) []string {
+	core, items, ok := figureItems(description)
+	if !ok {
+		return nil
+	}
+	text = strings.ToLower(text)
+	var out []string
+	for _, l := range append([]string{core}, items...) {
+		for _, w := range strings.Fields(strings.ToLower(l)) {
+			w = strings.TrimSuffix(strings.Trim(w, ".,;()\"'"), "s")
+			if len([]rune(w)) >= 4 && !strings.Contains(text, w) {
+				out = append(out, l)
+				break
+			}
+		}
+	}
+	return out
 }
 
 // dropTemplateLabel removes a heading the model copied from the format

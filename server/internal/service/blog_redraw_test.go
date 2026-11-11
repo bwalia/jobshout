@@ -55,7 +55,7 @@ func TestRedrawImages_SavesWhatItDrewWhenTheBudgetRunsOut(t *testing.T) {
 	store := &redrawStore{article: model.BlogArticle{
 		ID: uuid.New(), OrgID: org, RunID: uuid.New(), Title: "CI in practice",
 		Markdown: "# CI in practice\n\nArgo CD syncs the staging cluster from a Git repository.\n\n" +
-			"## How the pipeline runs\n\nEvery change goes through the same steps.\n\nMore detail.\n",
+			"## How the pipeline runs\n\nEvery commit is built, tested, then we deploy.\n\nMore detail.\n",
 	}}
 	svc := &blogService{repo: store, logger: zap.NewNop()}
 	svc.runner = blog.NewRunner(blog.Config{}, scriptLLM{reply: `{"cover_scene":{"layout":"hub",` +
