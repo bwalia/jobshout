@@ -1,6 +1,6 @@
 [package]
 name = "jobshout-com-worker"
-description = "JobShout.com worker (Phase 1 stub)"
+description = "JobShout.com worker (email outbox mailer)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,5 +10,11 @@ name = "jobshout-worker"
 path = "src/main.rs"
 
 [dependencies]
-tracing = { workspace = true }
+anyhow = { workspace = true }
+dotenvy = { workspace = true }
+jobshout-notifications = { path = "../../crates/jobshout-notifications" }
 jobshout-observability = { path = "../../crates/jobshout-observability" }
+jobshout-storage = { path = "../../crates/jobshout-storage" }
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-rustls-tls", "builder", "hostname"] }
+tokio = { workspace = true }
+tracing = { workspace = true }

@@ -38,15 +38,20 @@ COPY migrations ./migrations
 
 RUN set -eux; \
     rust_target="$(cat /rust_target)"; \
-    cargo build --release --target "$rust_target" -p jobshout-com-api; \
-    # Lift the binary out of the target-specific path so the runtime stage has
+    cargo build --release --target "$rust_target" \
+      -p jobshout-com-api -p jobshout-com-worker -p jobshout-com-scheduler; \
+    # Lift binaries out of the target-specific path so the runtime stage has
     # one stable location to copy from.
-    cp "target/$rust_target/release/jobshout-api" /app/jobshout-api
+    cp "target/$rust_target/release/jobshout-api" /app/jobshout-api; \
+    cp "target/$rust_target/release/jobshout-worker" /app/jobshout-worker; \
+    cp "target/$rust_target/release/jobshout-scheduler" /app/jobshout-scheduler
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/jobshout-api /usr/local/bin/jobshout-api
+COPY --from=builder /app/jobshout-worker /usr/local/bin/jobshout-worker
+COPY --from=builder /app/jobshout-scheduler /usr/local/bin/jobshout-scheduler
 ENV HOST=0.0.0.0 PORT=8088
 EXPOSE 8088
 CMD ["jobshout-api"]

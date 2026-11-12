@@ -58,7 +58,13 @@ fn same(a: &[u8], b: &[u8]) -> bool {
 }
 
 /// The signed-in user, if the web tier forwarded one.
-pub(crate) fn actor(state: &AppState, headers: &HeaderMap) -> Result<Option<Actor>, ApiError> {
+///
+/// Staff is the `staff` account role (bootstrapped from INSIGHTS_STAFF_EMAILS).
+/// The allowlist on InsightService remains as a fallback during dual-read.
+pub(crate) async fn actor(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<Option<Actor>, ApiError> {
     let text = |name: &str| {
         headers
             .get(name)
@@ -87,13 +93,16 @@ pub(crate) fn actor(state: &AppState, headers: &HeaderMap) -> Result<Option<Acto
     if !agent.is_empty() {
         return state.insights.agent_actor(&agent).map(Some).map_err(err);
     }
-    Ok(Some(
-        state.insights.actor(&email, &text("x-jobshout-user-name")),
-    ))
+    let mut who = state.insights.actor(&email, &text("x-jobshout-user-name"));
+    if let Ok(account) = state.accounts.ensure(&who.email, &who.name, false).await {
+        who.is_staff = who.is_staff || account.is_staff();
+    }
+    Ok(Some(who))
 }
 
-pub(crate) fn signed_in(state: &AppState, headers: &HeaderMap) -> Result<Actor, ApiError> {
-    actor(state, headers)?
+pub(crate) async fn signed_in(state: &AppState, headers: &HeaderMap) -> Result<Actor, ApiError> {
+    actor(state, headers)
+        .await?
         .ok_or_else(|| err(DomainError::Unauthorized("sign in to do that".into())))
 }
 
@@ -176,7 +185,7 @@ async fn get_one(
     headers: HeaderMap,
     Path(key): Path<String>,
 ) -> Result<Json<Insight>, ApiError> {
-    let who = actor(&state, &headers)?;
+    let who = actor(&state, &headers).await?;
     Ok(Json(
         state
             .insights
@@ -214,7 +223,7 @@ async fn mine(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<DataResponse<Vec<Insight>>>, ApiError> {
-    let who = signed_in(&state, &headers)?;
+    let who = signed_in(&state, &headers).await?;
     Ok(Json(DataResponse {
         data: state.insights.list_mine(&who).await.map_err(err)?,
     }))
@@ -230,7 +239,7 @@ async fn whoami(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<WhoAmI>, ApiError> {
-    let who = signed_in(&state, &headers)?;
+    let who = signed_in(&state, &headers).await?;
     Ok(Json(WhoAmI {
         email: who.email,
         is_staff: who.is_staff,
@@ -241,7 +250,7 @@ async fn review_queue(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<DataResponse<Vec<Insight>>>, ApiError> {
-    let who = signed_in(&state, &headers)?;
+    let who = signed_in(&state, &headers).await?;
     Ok(Json(DataResponse {
         data: state.insights.review_queue(&who).await.map_err(err)?,
     }))
@@ -335,7 +344,7 @@ async fn create(
     headers: HeaderMap,
     Json(body): Json<InsightInput>,
 ) -> Result<(StatusCode, Json<Insight>), ApiError> {
-    let who = signed_in(&state, &headers)?;
+    let who = signed_in(&state, &headers).await?;
     crate::members::ensure_member(&state, &who).await;
     let item = state.insights.create(&who, body).await.map_err(err)?;
     Ok((StatusCode::CREATED, Json(item)))
@@ -347,7 +356,7 @@ async fn update(
     Path(key): Path<String>,
     Json(body): Json<InsightInput>,
 ) -> Result<Json<Insight>, ApiError> {
-    let who = signed_in(&state, &headers)?;
+    let who = signed_in(&state, &headers).await?;
     let id = parse_id(&key)?;
     Ok(Json(
         state.insights.update(&who, id, body).await.map_err(err)?,
@@ -359,7 +368,7 @@ async fn remove(
     headers: HeaderMap,
     Path(key): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    let who = signed_in(&state, &headers)?;
+    let who = signed_in(&state, &headers).await?;
     state
         .insights
         .delete(&who, parse_id(&key)?)
@@ -382,7 +391,7 @@ async fn moderate(
     Path(key): Path<String>,
     Json(body): Json<ModerateBody>,
 ) -> Result<Json<Insight>, ApiError> {
-    let who = signed_in(&state, &headers)?;
+    let who = signed_in(&state, &headers).await?;
     let action = match body.action.as_str() {
         "approve" => Moderation::Approve,
         "reject" => Moderation::Reject { note: body.note },
@@ -423,12 +432,31 @@ async fn subscribe(
 ) -> Result<(StatusCode, Json<SubscriptionResponse>), ApiError> {
     match state.insights.subscribe(&body.email).await.map_err(err)? {
         Some(token) => {
-            // No mailer is wired up yet: the confirmation link goes to the log
-            // so the flow can be exercised end to end. Swap for an email send.
-            tracing::info!(
-                confirm_url = %format!("{}/newsletter/confirm?token={token}", state.site_url),
-                "newsletter confirmation pending (no mailer configured)"
-            );
+            let confirm_url = format!("{}/newsletter/confirm?token={token}", state.site_url);
+            if state.email_outbox_enabled {
+                let subject = "Confirm your JobShout newsletter subscription";
+                let body_text = format!(
+                    "Confirm your subscription to the JobShout newsletter:\n\n{confirm_url}\n\nIf you did not request this, ignore this email."
+                );
+                let body_html = format!(
+                    "<p>Confirm your subscription to the JobShout newsletter:</p><p><a href=\"{confirm_url}\">{confirm_url}</a></p><p>If you did not request this, ignore this email.</p>"
+                );
+                match state
+                    .notifications
+                    .enqueue_email(&body.email, subject, &body_text, &body_html)
+                    .await
+                {
+                    Ok(_) => tracing::info!(%confirm_url, "newsletter confirmation queued"),
+                    Err(e) => {
+                        tracing::error!(error = ?e, %confirm_url, "failed to queue newsletter email")
+                    }
+                }
+            } else {
+                tracing::info!(
+                    %confirm_url,
+                    "newsletter confirmation pending (EMAIL_OUTBOX_ENABLED off)"
+                );
+            }
             Ok((
                 StatusCode::ACCEPTED,
                 Json(SubscriptionResponse { status: "pending" }),

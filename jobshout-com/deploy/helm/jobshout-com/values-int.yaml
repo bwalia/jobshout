@@ -29,6 +29,14 @@ nebuladb:
 showcase:
   seedSamples: true
 
+# Phase 0 flags dark on int until SMTP is wired in Vault.
+emailOutbox:
+  enabled: false
+worker:
+  enabled: false
+scheduler:
+  enabled: false
+
 # int's stateless pods landed on bwalia-latitude7300, a laptop that drops out of
 # the cluster when it sleeps (26 Sep 2026: every int page returned 502). Keep
 # them on a LAN worker with headroom.

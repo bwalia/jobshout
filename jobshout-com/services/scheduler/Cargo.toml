@@ -1,6 +1,6 @@
 [package]
 name = "jobshout-com-scheduler"
-description = "JobShout.com scheduler (Phase 1 stub)"
+description = "JobShout.com scheduler (periodic maintenance ticks)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,5 +10,11 @@ name = "jobshout-scheduler"
 path = "src/main.rs"
 
 [dependencies]
-tracing = { workspace = true }
+anyhow = { workspace = true }
+chrono = { workspace = true }
+dotenvy = { workspace = true }
 jobshout-observability = { path = "../../crates/jobshout-observability" }
+jobshout-storage = { path = "../../crates/jobshout-storage" }
+sqlx = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

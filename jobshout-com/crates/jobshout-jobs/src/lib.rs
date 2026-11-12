@@ -40,27 +40,40 @@ impl JobService {
         self.repo.get(id).await
     }
 
-    /// `poster_email` is the signed-in user posting it, if any. It decides
-    /// who may link the job from the AI Showcase and is never shown.
+    /// `poster_email` is the signed-in user posting it. It decides who may
+    /// link the job from the AI Showcase and who may see applications; it is
+    /// never returned by the jobs API.
     pub async fn create(
         &self,
         req: CreateJobRequest,
-        poster_email: Option<&str>,
+        poster_email: &str,
     ) -> Result<Job, DomainError> {
         validate_create(&req)?;
+        let poster = poster_email.trim();
+        if poster.is_empty() {
+            return Err(DomainError::Unauthorized("sign in to post a job".into()));
+        }
         let status = if req.publish {
             JobStatus::Published
         } else {
             JobStatus::Draft
         };
         self.repo
-            .create(
-                self.default_org_id,
-                req,
-                status,
-                poster_email.unwrap_or_default(),
-            )
+            .create(self.default_org_id, req, status, poster)
             .await
+    }
+
+    pub async fn poster_email(&self, id: JobId) -> Result<String, DomainError> {
+        self.repo.poster_email(id).await
+    }
+
+    pub async fn update(&self, id: JobId, req: CreateJobRequest) -> Result<Job, DomainError> {
+        validate_create(&req)?;
+        self.repo.update(id, req).await
+    }
+
+    pub async fn close(&self, id: JobId) -> Result<Job, DomainError> {
+        self.repo.close(id).await
     }
 
     pub fn default_org_id(&self) -> OrganisationId {

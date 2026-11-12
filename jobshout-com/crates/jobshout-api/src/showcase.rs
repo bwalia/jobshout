@@ -134,7 +134,7 @@ async fn list(
     headers: HeaderMap,
     Query(p): Query<ListParams>,
 ) -> Result<Json<ListResponse>, ApiError> {
-    let who = actor(&state, &headers)?;
+    let who = actor(&state, &headers).await?;
     let capability = p
         .capability
         .map(|c| c.trim().to_ascii_lowercase())
@@ -268,7 +268,7 @@ async fn unclassified(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<DataResponse<Vec<ShowcaseApp>>>, ApiError> {
-    let who = signed_in(&state, &headers)?;
+    let who = signed_in(&state, &headers).await?;
     Ok(Json(DataResponse {
         data: state.showcase.unclassified(&who).await.map_err(err)?,
     }))
@@ -286,7 +286,7 @@ async fn set_industries(
     Path(key): Path<String>,
     Json(body): Json<IndustriesBody>,
 ) -> Result<Json<ShowcaseApp>, ApiError> {
-    let who = signed_in(&state, &headers)?;
+    let who = signed_in(&state, &headers).await?;
     Ok(Json(
         state
             .showcase
@@ -301,7 +301,7 @@ async fn get_one(
     headers: HeaderMap,
     Path(key): Path<String>,
 ) -> Result<Json<ShowcaseApp>, ApiError> {
-    let who = actor(&state, &headers)?;
+    let who = actor(&state, &headers).await?;
     Ok(Json(
         state
             .showcase
@@ -336,7 +336,7 @@ async fn used_in(
     headers: HeaderMap,
     Path(key): Path<String>,
 ) -> Result<Json<UsedInResponse>, ApiError> {
-    let who = actor(&state, &headers)?;
+    let who = actor(&state, &headers).await?;
     let (apps, teams) = state
         .showcase
         .used_in(&key, who.as_ref())
@@ -356,7 +356,7 @@ async fn link_candidates(
     headers: HeaderMap,
     Query(p): Query<CandidateParams>,
 ) -> Result<Json<DataResponse<Vec<ShowcaseApp>>>, ApiError> {
-    let who = signed_in(&state, &headers)?;
+    let who = signed_in(&state, &headers).await?;
     let kind = parse_kind(p.kind.as_deref())?;
     if kind == ShowcaseKind::App {
         return Err(bad_request("only agents and teams can be linked"));
@@ -374,7 +374,7 @@ async fn linkable_jobs(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<DataResponse<Vec<Job>>>, ApiError> {
-    let who = signed_in(&state, &headers)?;
+    let who = signed_in(&state, &headers).await?;
     Ok(Json(DataResponse {
         data: state.showcase.linkable_jobs(&who).await.map_err(err)?,
     }))
@@ -393,7 +393,7 @@ async fn mine(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<DataResponse<Vec<ShowcaseApp>>>, ApiError> {
-    let who = signed_in(&state, &headers)?;
+    let who = signed_in(&state, &headers).await?;
     Ok(Json(DataResponse {
         data: state.showcase.list_mine(&who).await.map_err(err)?,
     }))
@@ -403,7 +403,7 @@ async fn review_queue(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<DataResponse<Vec<ShowcaseApp>>>, ApiError> {
-    let who = signed_in(&state, &headers)?;
+    let who = signed_in(&state, &headers).await?;
     Ok(Json(DataResponse {
         data: state.showcase.review_queue(&who).await.map_err(err)?,
     }))
@@ -414,7 +414,7 @@ async fn create(
     headers: HeaderMap,
     Json(body): Json<ShowcaseAppInput>,
 ) -> Result<(StatusCode, Json<ShowcaseApp>), ApiError> {
-    let who = signed_in(&state, &headers)?;
+    let who = signed_in(&state, &headers).await?;
     crate::members::ensure_member(&state, &who).await;
     let app = state.showcase.create(&who, body).await.map_err(err)?;
     Ok((StatusCode::CREATED, Json(app)))
@@ -426,7 +426,7 @@ async fn update(
     Path(key): Path<String>,
     Json(body): Json<ShowcaseAppInput>,
 ) -> Result<Json<ShowcaseApp>, ApiError> {
-    let who = signed_in(&state, &headers)?;
+    let who = signed_in(&state, &headers).await?;
     Ok(Json(
         state
             .showcase
@@ -441,7 +441,7 @@ async fn remove(
     headers: HeaderMap,
     Path(key): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    let who = signed_in(&state, &headers)?;
+    let who = signed_in(&state, &headers).await?;
     state
         .showcase
         .delete(&who, parse_id(&key)?)
@@ -464,7 +464,7 @@ async fn moderate(
     Path(key): Path<String>,
     Json(body): Json<ModerateBody>,
 ) -> Result<Json<ShowcaseApp>, ApiError> {
-    let who = signed_in(&state, &headers)?;
+    let who = signed_in(&state, &headers).await?;
     let action = match body.action.as_str() {
         "approve" => Moderation::Approve,
         "reject" => Moderation::Reject { note: body.note },
@@ -494,7 +494,7 @@ async fn set_star(
     slug: String,
     on: bool,
 ) -> Result<Json<StarResponse>, ApiError> {
-    let who = signed_in(&state, &headers)?;
+    let who = signed_in(&state, &headers).await?;
     let star_count = state.showcase.star(&who, &slug, on).await.map_err(err)?;
     Ok(Json(StarResponse {
         starred: on,
@@ -524,7 +524,7 @@ async fn set_follow(
     slug: String,
     on: bool,
 ) -> Result<Json<FollowState>, ApiError> {
-    let who = signed_in(&state, &headers)?;
+    let who = signed_in(&state, &headers).await?;
     let follower_count = state.showcase.follow(&who, &slug, on).await.map_err(err)?;
     Ok(Json(FollowState {
         following: on,

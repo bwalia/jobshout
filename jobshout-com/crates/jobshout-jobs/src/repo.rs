@@ -115,6 +115,101 @@ impl JobRepository {
 
         self.get(id).await
     }
+
+    pub async fn poster_email(&self, id: JobId) -> Result<String, DomainError> {
+        let row: Option<(String,)> = sqlx::query_as("SELECT poster_email FROM jobs WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| DomainError::Other(e.into()))?;
+        match row {
+            Some((email,)) => Ok(email),
+            None => Err(DomainError::NotFound),
+        }
+    }
+
+    pub async fn update(&self, id: JobId, req: CreateJobRequest) -> Result<Job, DomainError> {
+        let now = Utc::now();
+        let location =
+            serde_json::to_value(&req.location).map_err(|e| DomainError::Other(e.into()))?;
+        let compensation =
+            serde_json::to_value(&req.compensation).map_err(|e| DomainError::Other(e.into()))?;
+        let requirements =
+            serde_json::to_value(&req.requirements).map_err(|e| DomainError::Other(e.into()))?;
+        // Publish when asked; otherwise leave status alone (drafts stay drafts).
+        let publish = req.publish;
+        let result = if publish {
+            sqlx::query(
+                r#"
+                UPDATE jobs SET
+                  title = $2, summary = $3, description = $4, employment_type = $5,
+                  location = $6, compensation = $7, requirements = $8,
+                  status = $9,
+                  published_at = COALESCE(published_at, $10),
+                  updated_at = $10
+                WHERE id = $1
+                "#,
+            )
+            .bind(id)
+            .bind(req.title.trim())
+            .bind(req.summary.trim())
+            .bind(req.description.trim())
+            .bind(req.employment_type.as_str())
+            .bind(location)
+            .bind(compensation)
+            .bind(requirements)
+            .bind(JobStatus::Published.as_str())
+            .bind(now)
+            .execute(&self.pool)
+            .await
+        } else {
+            sqlx::query(
+                r#"
+                UPDATE jobs SET
+                  title = $2, summary = $3, description = $4, employment_type = $5,
+                  location = $6, compensation = $7, requirements = $8,
+                  updated_at = $9
+                WHERE id = $1
+                "#,
+            )
+            .bind(id)
+            .bind(req.title.trim())
+            .bind(req.summary.trim())
+            .bind(req.description.trim())
+            .bind(req.employment_type.as_str())
+            .bind(location)
+            .bind(compensation)
+            .bind(requirements)
+            .bind(now)
+            .execute(&self.pool)
+            .await
+        }
+        .map_err(|e| DomainError::Other(e.into()))?;
+        if result.rows_affected() == 0 {
+            return Err(DomainError::NotFound);
+        }
+        self.get(id).await
+    }
+
+    pub async fn close(&self, id: JobId) -> Result<Job, DomainError> {
+        let now = Utc::now();
+        let result = sqlx::query(
+            r#"
+            UPDATE jobs SET status = 'closed', updated_at = $2
+            WHERE id = $1 AND status <> 'closed'
+            "#,
+        )
+        .bind(id)
+        .bind(now)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| DomainError::Other(e.into()))?;
+        if result.rows_affected() == 0 {
+            // Already closed or missing — distinguish.
+            let _ = self.get(id).await?;
+        }
+        self.get(id).await
+    }
 }
 
 /// Map one `jobs` row into a [`Job`]. Shared with other crates that join on jobs.

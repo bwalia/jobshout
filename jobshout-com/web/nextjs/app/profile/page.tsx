@@ -4,8 +4,9 @@ import { getServerSession } from "next-auth";
 import { ProfileForm } from "@/components/ProfileForm";
 import { Badge, ErrorNotice } from "@/components/ui";
 import { TargetIcon } from "@/components/icons";
-import { getProfileByEmail, type CandidateProfile } from "@/lib/api";
+import { getMyProfile, type CandidateProfile } from "@/lib/api";
 import { authOptions } from "@/lib/auth";
+import { currentViewer } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -14,19 +15,15 @@ export const metadata: Metadata = {
   description: "The profile your Career Agent uses to rank open roles for you.",
 };
 
-export default async function ProfilePage({
-  searchParams,
-}: {
-  searchParams: { email?: string };
-}) {
+export default async function ProfilePage() {
   const session = await getServerSession(authOptions());
-  const emailHint = searchParams.email || session?.user?.email || "";
+  const viewer = await currentViewer();
 
   let existing: CandidateProfile | null = null;
   let error = "";
-  if (emailHint) {
+  if (viewer) {
     try {
-      existing = await getProfileByEmail(emailHint);
+      existing = await getMyProfile(viewer);
     } catch (e) {
       error = e instanceof Error ? e.message : "Could not load your profile";
     }
@@ -80,7 +77,7 @@ export default async function ProfilePage({
           <div className="mt-9">
             <ProfileForm
               initial={existing}
-              defaultEmail={emailHint}
+              defaultEmail={viewer?.email ?? ""}
               defaultName={session?.user?.name ?? ""}
             />
           </div>

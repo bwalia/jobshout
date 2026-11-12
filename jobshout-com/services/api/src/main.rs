@@ -1,9 +1,12 @@
 use anyhow::Context;
 use jobshout_api::{router, AppState};
 use jobshout_applications::ApplicationService;
+use jobshout_auth::AccountService;
 use jobshout_candidates::CandidateService;
 use jobshout_content::InsightService;
+use jobshout_events::EventService;
 use jobshout_jobs::{seed_organisation_id, JobService};
+use jobshout_notifications::NotificationService;
 use jobshout_showcase::ShowcaseService;
 use jobshout_users::MemberService;
 use std::net::SocketAddr;
@@ -28,6 +31,12 @@ async fn main() -> anyhow::Result<()> {
     // Agents whose submissions publish without review — only those whose
     // platform has a person approve each item before sending it.
     let trusted_agents = std::env::var("INSIGHTS_TRUSTED_AGENTS").unwrap_or_default();
+    let accounts = AccountService::new(pool.clone(), staff_emails.split(',').map(str::to_string));
+    match accounts.sync_bootstrap_staff().await {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(count = n, "synced bootstrap staff roles"),
+        Err(e) => tracing::warn!(error = ?e, "could not sync bootstrap staff"),
+    }
     let insights = InsightService::new(pool.clone(), staff_emails.split(',').map(str::to_string))
         .with_trusted_agents(trusted_agents.split(',').map(str::to_string));
     if env_flag("INSIGHTS_SEED_SAMPLES") {
@@ -80,22 +89,27 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    let email_outbox_enabled = env_flag("EMAIL_OUTBOX_ENABLED");
     let state = AppState {
         jobs: JobService::new(pool.clone(), seed_organisation_id()),
         candidates: CandidateService::new(pool.clone()),
-        applications: ApplicationService::new(pool),
+        applications: ApplicationService::new(pool.clone()),
         insights,
         showcase,
         members,
+        accounts,
+        events: EventService::new(pool.clone()),
+        notifications: NotificationService::new(pool),
         site_url: site_url.trim_end_matches('/').into(),
         internal_token: internal_token.map(Into::into),
+        email_outbox_enabled,
     };
 
     let app = router(state);
     let addr: SocketAddr = format!("{host}:{port}")
         .parse()
         .context("parse bind address")?;
-    tracing::info!(%addr, "jobshout-com API listening");
+    tracing::info!(%addr, email_outbox_enabled, "jobshout-com API listening");
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
     Ok(())

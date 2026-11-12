@@ -1,11 +1,16 @@
 [package]
 name = "jobshout-storage"
-description = "PostgreSQL / SQLx helpers for JobShout.com"
+description = "Postgres pool + optional MinIO signed uploads"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+chrono = { workspace = true }
+hex = "0.4"
+hmac = "0.12"
+serde = { workspace = true }
+sha2 = "0.10"
 sqlx = { workspace = true }
 tracing = { workspace = true }

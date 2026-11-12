@@ -176,8 +176,8 @@ export async function getJob(id: string): Promise<Job | null> {
   return (await res.json()) as Job;
 }
 
-/** Posting is open to anyone; a signed-in poster is recorded (never shown) so
- * they can link the job from their AI Showcase entries. */
+/** Posting requires sign-in; the poster is recorded (never shown) so they can
+ * link the job from their AI Showcase entries and review applications. */
 export async function createJob(input: CreateJobInput, viewer?: Viewer | null): Promise<Job> {
   const res = await fetch(`${API_BASE}/api/v1/jobs`, {
     method: "POST",
@@ -189,24 +189,44 @@ export async function createJob(input: CreateJobInput, viewer?: Viewer | null): 
   return (await res.json()) as Job;
 }
 
+export async function closeJob(jobId: string, viewer?: Viewer | null): Promise<Job> {
+  const res = await fetch(`${API_BASE}/api/v1/jobs/${jobId}/close`, {
+    method: "POST",
+    headers: identityHeaders(viewer),
+    cache: "no-store",
+  });
+  if (!res.ok) throw await failure(res, "Failed to close job");
+  return (await res.json()) as Job;
+}
+
 /* --- Candidate profiles --------------------------------------------------- */
 
-export async function getProfileByEmail(email: string): Promise<CandidateProfile | null> {
-  const res = await fetch(
-    `${API_BASE}/api/v1/profiles/by-email?email=${encodeURIComponent(email)}`,
-    { cache: "no-store" },
-  );
-  if (res.status === 404) return null;
+/** Load the signed-in user's matching profile (owner-only). */
+export async function getMyProfile(viewer?: Viewer | null): Promise<CandidateProfile | null> {
+  const res = await fetch(`${API_BASE}/api/v1/profiles/me`, {
+    headers: identityHeaders(viewer),
+    cache: "no-store",
+  });
+  if (res.status === 401 || res.status === 404) return null;
   if (!res.ok) throw await failure(res, "Failed to load profile");
   return (await res.json()) as CandidateProfile;
 }
 
+/** @deprecated Use getMyProfile — email query access was removed in Phase 0. */
+export async function getProfileByEmail(
+  _email: string,
+  viewer?: Viewer | null,
+): Promise<CandidateProfile | null> {
+  return getMyProfile(viewer);
+}
+
 export async function upsertProfile(
   input: UpsertCandidateProfileInput,
+  viewer?: Viewer | null,
 ): Promise<CandidateProfile> {
   const res = await fetch(`${API_BASE}/api/v1/profiles`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: identityHeaders(viewer),
     body: JSON.stringify(input),
     cache: "no-store",
   });
@@ -214,8 +234,12 @@ export async function upsertProfile(
   return (await res.json()) as CandidateProfile;
 }
 
-export async function listProfileMatches(profileId: string): Promise<JobMatch[]> {
+export async function listProfileMatches(
+  profileId: string,
+  viewer?: Viewer | null,
+): Promise<JobMatch[]> {
   const res = await fetch(`${API_BASE}/api/v1/profiles/${profileId}/matches?limit=20`, {
+    headers: identityHeaders(viewer),
     cache: "no-store",
   });
   if (!res.ok) throw await failure(res, "Failed to load matches");
@@ -228,10 +252,11 @@ export async function listProfileMatches(profileId: string): Promise<JobMatch[]>
 export async function applyToJob(
   jobId: string,
   input: CreateJobApplicationInput,
+  viewer?: Viewer | null,
 ): Promise<JobApplication> {
   const res = await fetch(`${API_BASE}/api/v1/jobs/${jobId}/applications`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: identityHeaders(viewer),
     body: JSON.stringify(input),
     cache: "no-store",
   });
@@ -239,18 +264,24 @@ export async function applyToJob(
   return (await res.json()) as JobApplication;
 }
 
-export async function listMyApplications(email: string): Promise<JobApplicationWithJob[]> {
-  const res = await fetch(
-    `${API_BASE}/api/v1/applications?email=${encodeURIComponent(email)}&limit=50`,
-    { cache: "no-store" },
-  );
+export async function listMyApplications(
+  viewer?: Viewer | null,
+): Promise<JobApplicationWithJob[]> {
+  const res = await fetch(`${API_BASE}/api/v1/applications?limit=50`, {
+    headers: identityHeaders(viewer),
+    cache: "no-store",
+  });
   if (!res.ok) throw await failure(res, "Failed to load applications");
   const body = (await res.json()) as { data: JobApplicationWithJob[] };
   return body.data;
 }
 
-export async function countApplications(jobId: string): Promise<number> {
+export async function countApplications(
+  jobId: string,
+  viewer?: Viewer | null,
+): Promise<number> {
   const res = await fetch(`${API_BASE}/api/v1/jobs/${jobId}/applications?limit=1`, {
+    headers: identityHeaders(viewer),
     cache: "no-store",
   });
   if (!res.ok) return 0;

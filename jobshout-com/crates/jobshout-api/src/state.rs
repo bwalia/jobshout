@@ -1,9 +1,12 @@
 use std::sync::Arc;
 
 use jobshout_applications::ApplicationService;
+use jobshout_auth::AccountService;
 use jobshout_candidates::CandidateService;
 use jobshout_content::InsightService;
+use jobshout_events::EventService;
 use jobshout_jobs::JobService;
+use jobshout_notifications::NotificationService;
 use jobshout_showcase::ShowcaseService;
 use jobshout_users::MemberService;
 
@@ -15,9 +18,14 @@ pub struct AppState {
     pub insights: InsightService,
     pub showcase: ShowcaseService,
     pub members: MemberService,
+    pub accounts: AccountService,
+    pub events: EventService,
+    pub notifications: NotificationService,
     /// Public origin used in feed links and newsletter confirmation links.
     pub site_url: Arc<str>,
     /// Identity headers are only trusted alongside this token. `None` means
     /// the operator opted out (local dev only) via JOBSHOUT_ALLOW_UNSIGNED_IDENTITY.
     pub internal_token: Option<Arc<str>>,
+    /// When true, newsletter confirmations are enqueued to the email outbox.
+    pub email_outbox_enabled: bool,
 }

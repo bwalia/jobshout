@@ -1,10 +1,14 @@
-//! PostgreSQL pool helpers.
+//! PostgreSQL pool helpers and optional MinIO signed uploads.
 
 #![forbid(unsafe_code)]
+
+pub mod uploads;
 
 use anyhow::{Context, Result};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
+
+pub use uploads::{SignedUpload, UploadConfig};
 
 pub async fn connect(database_url: &str) -> Result<PgPool> {
     let pool = PgPoolOptions::new()

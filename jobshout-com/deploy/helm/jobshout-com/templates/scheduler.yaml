@@ -1,0 +1,41 @@
+{{- if (.Values.scheduler).enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jobshout-com-scheduler
+  labels:
+    {{- include "jobshout-com.labels" . | nindent 4 }}
+    {{- include "jobshout-com.selector" (dict "name" "scheduler") | nindent 4 }}
+spec:
+  replicas: {{ .Values.scheduler.replicas | default 1 }}
+  selector:
+    matchLabels:
+      {{- include "jobshout-com.selector" (dict "name" "scheduler") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "jobshout-com.selector" (dict "name" "scheduler") | nindent 8 }}
+    spec:
+      {{- include "jobshout-com.imagePullSecrets" . | nindent 6 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: scheduler
+          image: {{ include "jobshout-com.image" (dict "ctx" . "repo" "api") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["jobshout-scheduler"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: jobshout-com-db
+                  key: DATABASE_URL
+            - name: SCHEDULER_ENABLED
+              value: "true"
+            - name: SCHEDULER_TICK_SECS
+              value: {{ .Values.scheduler.tickSecs | default 60 | quote }}
+          resources:
+            {{- toYaml .Values.scheduler.resources | nindent 12 }}
+{{- end }}

@@ -15,9 +15,12 @@ axum = { workspace = true }
 dotenvy = { workspace = true }
 jobshout-api = { path = "../../crates/jobshout-api" }
 jobshout-applications = { path = "../../crates/jobshout-applications" }
+jobshout-auth = { path = "../../crates/jobshout-auth" }
 jobshout-candidates = { path = "../../crates/jobshout-candidates" }
 jobshout-content = { path = "../../crates/jobshout-content" }
+jobshout-events = { path = "../../crates/jobshout-events" }
 jobshout-jobs = { path = "../../crates/jobshout-jobs" }
+jobshout-notifications = { path = "../../crates/jobshout-notifications" }
 jobshout-observability = { path = "../../crates/jobshout-observability" }
 jobshout-showcase = { path = "../../crates/jobshout-showcase" }
 jobshout-storage = { path = "../../crates/jobshout-storage" }
