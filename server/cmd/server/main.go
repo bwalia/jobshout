@@ -50,8 +50,10 @@ import (
 	"github.com/jobshout/server/internal/database"
 	"github.com/jobshout/server/internal/engine"
 	"github.com/jobshout/server/internal/executor"
+	"github.com/jobshout/server/internal/freelancerassist"
 	"github.com/jobshout/server/internal/googleauth"
 	"github.com/jobshout/server/internal/handler"
+	"github.com/jobshout/server/internal/hiringassist"
 	"github.com/jobshout/server/internal/imagegen"
 	"github.com/jobshout/server/internal/imagestore"
 	integ "github.com/jobshout/server/internal/integration"
@@ -86,9 +88,11 @@ import (
 	"github.com/jobshout/server/internal/secretbox"
 	"github.com/jobshout/server/internal/selector"
 	"github.com/jobshout/server/internal/service"
+	"github.com/jobshout/server/internal/skillgap"
 	"github.com/jobshout/server/internal/strix"
 	"github.com/jobshout/server/internal/talentmatch"
 	"github.com/jobshout/server/internal/tasklaunch"
+	"github.com/jobshout/server/internal/teambuilder"
 	"github.com/jobshout/server/internal/tools"
 	ws "github.com/jobshout/server/internal/websocket"
 	wfengine "github.com/jobshout/server/internal/workflow"
@@ -1094,6 +1098,10 @@ func main() {
 		ProposalGen:      proposalgen.Heuristic{},
 		ProjectBreakdown: projectbreakdown.Heuristic{},
 		TalentMatch:      talentmatch.Heuristic{},
+		FreelancerAssist: freelancerassist.Heuristic{},
+		HiringAssist:     hiringassist.Heuristic{},
+		TeamBuilder:      teambuilder.Heuristic{},
+		SkillGap:         skillgap.Heuristic{},
 	})
 
 	// ─── Autonomous agent engine ────────────────────────────────────────────

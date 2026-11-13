@@ -17,6 +17,8 @@ import (
 	"github.com/jobshout/server/internal/companyweb"
 	"github.com/jobshout/server/internal/course"
 	"github.com/jobshout/server/internal/creditcontroller"
+	"github.com/jobshout/server/internal/freelancerassist"
+	"github.com/jobshout/server/internal/hiringassist"
 	"github.com/jobshout/server/internal/images"
 	"github.com/jobshout/server/internal/jobshoutcomwriter"
 	"github.com/jobshout/server/internal/linkedin"
@@ -34,7 +36,9 @@ import (
 	"github.com/jobshout/server/internal/seo"
 	"github.com/jobshout/server/internal/service"
 	"github.com/jobshout/server/internal/simpro"
+	"github.com/jobshout/server/internal/skillgap"
 	"github.com/jobshout/server/internal/talentmatch"
+	"github.com/jobshout/server/internal/teambuilder"
 	"github.com/jobshout/server/internal/video"
 	"github.com/jobshout/server/internal/waflab"
 )
@@ -67,6 +71,10 @@ type Deps struct {
 	ProposalGen      proposalgen.Runner
 	ProjectBreakdown projectbreakdown.Runner
 	TalentMatch      talentmatch.Runner
+	FreelancerAssist freelancerassist.Runner
+	HiringAssist     hiringassist.Runner
+	TeamBuilder      teambuilder.Runner
+	SkillGap         skillgap.Runner
 }
 
 func init() {
@@ -108,6 +116,10 @@ func Register(d Deps) {
 	agentmodule.Register(proposalgen.Module(d.ProposalGen))
 	agentmodule.Register(projectbreakdown.Module(d.ProjectBreakdown))
 	agentmodule.Register(talentmatch.Module(d.TalentMatch))
+	agentmodule.Register(freelancerassist.Module(d.FreelancerAssist))
+	agentmodule.Register(hiringassist.Module(d.HiringAssist))
+	agentmodule.Register(teambuilder.Module(d.TeamBuilder))
+	agentmodule.Register(skillgap.Module(d.SkillGap))
 }
 
 type imageAdapter struct{ svc *service.ImageService }
