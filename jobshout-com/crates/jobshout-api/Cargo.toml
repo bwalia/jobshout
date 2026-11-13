@@ -17,6 +17,7 @@ jobshout-content = { path = "../jobshout-content" }
 jobshout-domain = { path = "../jobshout-domain" }
 jobshout-events = { path = "../jobshout-events" }
 jobshout-freelance = { path = "../jobshout-freelance" }
+jobshout-hire = { path = "../jobshout-hire" }
 jobshout-integrations = { path = "../jobshout-integrations" }
 jobshout-jobs = { path = "../jobshout-jobs" }
 jobshout-matching = { path = "../jobshout-matching" }

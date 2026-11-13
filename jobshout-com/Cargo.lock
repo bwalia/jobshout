@@ -993,6 +993,7 @@ dependencies = [
  "jobshout-domain",
  "jobshout-events",
  "jobshout-freelance",
+ "jobshout-hire",
  "jobshout-integrations",
  "jobshout-jobs",
  "jobshout-matching",
@@ -1097,6 +1098,7 @@ dependencies = [
  "jobshout-content",
  "jobshout-events",
  "jobshout-freelance",
+ "jobshout-hire",
  "jobshout-integrations",
  "jobshout-jobs",
  "jobshout-messaging",
@@ -1230,6 +1232,19 @@ dependencies = [
  "sqlx",
  "thiserror",
  "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "jobshout-hire"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "jobshout-domain",
+ "serde",
+ "serde_json",
+ "sqlx",
  "tracing",
  "uuid",
 ]

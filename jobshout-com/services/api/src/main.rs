@@ -7,6 +7,7 @@ use jobshout_candidates::CandidateService;
 use jobshout_content::InsightService;
 use jobshout_events::EventService;
 use jobshout_freelance::FreelanceService;
+use jobshout_hire::HireService;
 use jobshout_integrations::PlatformClient;
 use jobshout_jobs::{seed_organisation_id, JobService};
 use jobshout_messaging::MessagingService;
@@ -101,7 +102,9 @@ async fn main() -> anyhow::Result<()> {
     let credits_enabled = env_flag("CREDITS_ENABLED");
     let purchases_enabled = env_flag("PURCHASES_ENABLED");
     let ai_features = env_flag("AI_FEATURES");
+    let hire_enabled = env_flag("HIRE_ENABLED");
     let freelance = FreelanceService::new(pool.clone());
+    let hire = HireService::new(pool.clone());
     let billing = BillingService::new(pool.clone());
     let platform = PlatformClient::from_env();
     if ai_features && platform.is_none() {
@@ -133,6 +136,7 @@ async fn main() -> anyhow::Result<()> {
         notifications: NotificationService::new(pool.clone()),
         messaging: MessagingService::new(pool.clone()),
         freelance,
+        hire,
         billing,
         ai_pool: Some(pool.clone()),
         platform,
@@ -146,6 +150,7 @@ async fn main() -> anyhow::Result<()> {
         credits_enabled,
         purchases_enabled,
         ai_features,
+        hire_enabled,
     };
 
     let app = router(state);

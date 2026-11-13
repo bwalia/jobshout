@@ -7,6 +7,7 @@ mod applications;
 mod billing;
 mod dashboard;
 mod error;
+mod hire;
 mod insights;
 mod jobs;
 mod members;
@@ -46,6 +47,7 @@ pub fn router(state: AppState) -> Router {
         .merge(projects::routes())
         .merge(billing::routes())
         .merge(ai::routes())
+        .merge(hire::routes())
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
         .with_state(state)
