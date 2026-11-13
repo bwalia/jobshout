@@ -60,6 +60,8 @@ type GeneratedArticle struct {
 	// CoverScene is the diagram a drawn cover shows (layout + labels). Empty
 	// means derive one from the written piece.
 	CoverScene coverScene
+	// CoverNote says why a cover meant to be a picture is its diagram alone.
+	CoverNote string
 
 	// Audience and Industry are the reader this was written for, carried out of
 	// the pipeline so the caller can store them on the article and the CMS

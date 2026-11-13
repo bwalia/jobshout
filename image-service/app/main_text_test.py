@@ -61,6 +61,12 @@ class GenerateLetteringTests(unittest.TestCase):
         got = self.post(["AUTH\nAUTH\n"], deadline=-1, expect_text=["auth"])
         self.assertEqual((got["text_ok"], got["attempts"], len(self.seeds)), (False, 1, 1))
 
+    def test_words_in_a_wordless_picture_are_redrawn(self) -> None:
+        got = self.post(["KUBERNETES\n", "\n"], no_text=True)
+        self.assertEqual((got["text_ok"], got["attempts"], got["text_problems"]), (True, 2, []))
+        got = self.post(["INGRESS\n", "PODS\n"], no_text=True)
+        self.assertEqual((got["text_ok"], got["text_problems"]), (False, ["extra PODS"]))
+
     def test_nothing_expected_is_drawn_once_and_not_read(self) -> None:
         got = self.post([])
         self.assertEqual((got["text_ok"], got["attempts"], self.seeds), (None, 1, [7]))

@@ -16,7 +16,6 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
-	"github.com/jobshout/server/internal/imagegen"
 	"github.com/jobshout/server/internal/imagestore"
 	"github.com/jobshout/server/internal/model"
 )
@@ -129,7 +128,7 @@ const (
 )
 
 func (r *Runner) coverPictures() bool {
-	return strings.EqualFold(strings.TrimSpace(r.cfg.CoverStyle), CoverStylePicture) && r.canLetter(imagegen.TextCaptions)
+	return strings.EqualFold(strings.TrimSpace(r.cfg.CoverStyle), CoverStylePicture) && r.canIllustrate()
 }
 
 // canDrawCover reports whether this run can give an article a real cover in
@@ -139,15 +138,16 @@ func (r *Runner) canDrawCover() bool {
 }
 
 // drawCover gives a its cover in the configured style. A picture that fails —
-// its lettering still wrong after the image service's retries, or no model
-// free — becomes the diagram of the same scene, which letters it exactly: a
-// redraw would otherwise keep the old cover, typos and all.
+// no model free, or words in a picture meant to have none — becomes the
+// diagram of the same scene alone, which still letters it exactly: a redraw
+// would otherwise keep the old cover, typos and all.
 func (r *Runner) drawCover(ctx context.Context, orgID uuid.UUID, a *GeneratedArticle) error {
 	if r.coverPictures() {
-		err := r.generateCover(ctx, orgID, a)
+		err := r.pictureCover(ctx, orgID, a)
 		if err == nil || r.covers == nil {
 			return err
 		}
+		a.CoverNote = "the cover is its diagram alone: " + truncateRunes(err.Error(), 200)
 		if r.logger != nil {
 			r.logger.Warn("blog: cover picture failed; drawing its diagram",
 				zap.String("title", a.Title), zap.Error(err))
@@ -156,9 +156,33 @@ func (r *Runner) drawCover(ctx context.Context, orgID uuid.UUID, a *GeneratedArt
 	return r.storeDiagramCover(ctx, orgID, a)
 }
 
+// pictureCover draws a's cover as a picture. A hosted model that letters
+// labels (Gemini, OpenAI) draws it whole. Otherwise, or when that fails, a
+// picture with no words goes under the cover's diagram, which letters the
+// words itself: ERNIE misspelt a five-step cover three times in three on int.
+func (r *Runner) pictureCover(ctx context.Context, orgID uuid.UUID, a *GeneratedArticle) error {
+	if r.canLetterImages() {
+		err := r.generateCover(ctx, orgID, a)
+		if err == nil || r.covers == nil {
+			return err
+		}
+		if r.logger != nil {
+			r.logger.Warn("blog: lettered cover failed; drawing its diagram over a picture",
+				zap.String("title", a.Title), zap.Error(err))
+		}
+	}
+	return r.storeSceneCover(ctx, orgID, a, true)
+}
+
 // storeDiagramCover draws a's cover diagram and records it as a's cover. The
 // scene is kept as the prompt, so the article shows what was drawn and why.
 func (r *Runner) storeDiagramCover(ctx context.Context, orgID uuid.UUID, a *GeneratedArticle) error {
+	return r.storeSceneCover(ctx, orgID, a, false)
+}
+
+// storeSceneCover is storeDiagramCover, over a picture with no words when
+// withArt is set.
+func (r *Runner) storeSceneCover(ctx context.Context, orgID uuid.UUID, a *GeneratedArticle, withArt bool) error {
 	if r.covers == nil {
 		return errors.New("no image store is configured")
 	}
@@ -171,7 +195,16 @@ func (r *Runner) storeDiagramCover(ctx context.Context, orgID uuid.UUID, a *Gene
 	if seed == "" {
 		seed = a.Title
 	}
-	img, err := drawDiagramCover(scene, accent, seed)
+	var art image.Image
+	provider, drawnBy, artSeed := "diagram", "scene:"+string(scene.Layout), int64(0)
+	if withArt {
+		pic, drawn, err := r.drawArt(ctx, orgID, a.RunID, scene, accent, "blog_cover")
+		if err != nil {
+			return err
+		}
+		art, provider, drawnBy, artSeed = pic, drawn.Provider, drawn.Model+"+"+drawnBy, drawn.Seed
+	}
+	img, err := drawSceneOn(art, scene, accent, seed)
 	if err != nil {
 		return err
 	}
@@ -183,9 +216,9 @@ func (r *Runner) storeDiagramCover(ctx context.Context, orgID uuid.UUID, a *Gene
 	a.CoverScene = scene
 	a.CoverImageURL = url
 	a.CoverImagePrompt = string(spec)
-	a.CoverImageProvider = "diagram"
-	a.CoverImageModel = "scene:" + string(scene.Layout)
-	a.CoverImageSeed = 0
+	a.CoverImageProvider = provider
+	a.CoverImageModel = drawnBy
+	a.CoverImageSeed = artSeed
 	a.CoverImageWidth, a.CoverImageHeight = int(designW), int(designH)
 	return nil
 }

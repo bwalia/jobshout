@@ -2102,8 +2102,7 @@ type postImagesUpdater interface {
 // minutes the budget ran out at the cover on int.
 var redrawBudget = 60 * time.Minute
 
-func (s *blogService) RedrawImages(ctx context.Context, orgID, articleID uuid.UUID, syncCMS bool) (*model.BlogArticle, blog.RedrawResult, error) {
-	var res blog.RedrawResult
+func (s *blogService) RedrawImages(ctx context.Context, orgID, articleID uuid.UUID, syncCMS bool) (out *model.BlogArticle, res blog.RedrawResult, err error) {
 	if s.runner == nil {
 		return nil, res, fmt.Errorf("blog_svc: generator not configured")
 	}
@@ -2124,6 +2123,20 @@ func (s *blogService) RedrawImages(ctx context.Context, orgID, articleID uuid.UU
 	ctx = context.WithoutCancel(ctx)
 	drawCtx, cancel := context.WithTimeout(ctx, redrawBudget)
 	defer cancel()
+	// Whatever happens is kept on the article: the page has usually stopped
+	// waiting, and these notes say why a figure or the cover picture is missing.
+	defer func() {
+		rec := model.ImageRedraw{At: time.Now().UTC(), Notes: append([]string{}, res.Notes...), FiguresDrawn: res.Figures, CoverRedrawn: res.Cover}
+		if err != nil {
+			rec.Notes = append(rec.Notes, err.Error())
+		}
+		if werr := s.repo.UpdateArticleImageRedraw(ctx, articleID, rec); werr != nil {
+			s.logger.Warn("blog_svc: record image redraw", zap.String("article_id", articleID.String()), zap.Error(werr))
+		}
+		if out != nil {
+			out.ImageRedraw = &rec
+		}
+	}()
 
 	runID := a.RunID
 	gen := &blog.GeneratedArticle{

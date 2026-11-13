@@ -1,8 +1,11 @@
 package blog
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"image"
 	"regexp"
 	"strings"
 	"time"
@@ -39,6 +42,9 @@ type IllustrationRequest struct {
 	// ExpectText is every word the picture must show; a picture whose
 	// lettering reads back otherwise is redrawn, and then refused.
 	ExpectText []string
+	// NoText asks for a picture with no words at all; one that shows any is
+	// redrawn, and then refused.
+	NoText bool
 	// Text is how much readable text the picture carries: it is never drawn
 	// by a model that cannot letter that much, because an article without a
 	// picture is better than one with misspelt labels.
@@ -103,11 +109,8 @@ func sceneText(scene coverScene) []string {
 	return nonEmpty(append([]string{scene.Eyebrow, scene.Stat}, scene.Labels...))
 }
 
-// Openings for infographicPrompt.
-const (
-	coverOpening  = "A 16:9 cover image for a technical blog article"
-	figureOpening = "A figure inside a technical blog article"
-)
+// coverOpening opens infographicPrompt.
+const coverOpening = "A 16:9 cover image for a technical blog article"
 
 // figureAccent is the one accent every drawn figure uses, so figures read as
 // one set whatever the article's cover accent.
@@ -169,6 +172,60 @@ func infographicPrompt(opening string, scene coverScene, accent string) string {
 		"crisp edges, high contrast, legible as a small thumbnail.\n", accent, pal[2].R, pal[2].G, pal[2].B)
 	b.WriteString("No other text, no numbers beyond those given, no logos, brand marks, watermarks, people or photographs.")
 	return b.String()
+}
+
+// artWidth and artHeight size the picture under a lettered diagram: 16:9 like
+// the cover, and smaller than a cover drawn whole, since it is dimmed behind
+// the diagram; ERNIE draws it in about two thirds of the time.
+const (
+	artWidth  = 1280
+	artHeight = 720
+)
+
+// artPrompt asks for the picture under a scene's diagram: the scene's things
+// as objects in the house style, and no words, which the diagram carries.
+func artPrompt(scene coverScene, accent string) string {
+	pal, ok := fallbackPalettes[accent]
+	if !ok {
+		accent, pal = "copper", fallbackPalettes["copper"]
+	}
+	subject := strings.ToLower(strings.Join(scene.Labels, ", "))
+	if scene.Eyebrow != "" {
+		subject = strings.ToLower(scene.Eyebrow) + ": " + subject
+	}
+	return fmt.Sprintf("A wide, atmospheric editorial illustration for a technology article about %s, "+
+		"pictured as objects, machines and symbols, never as written words. "+
+		"Deep navy background, one %s accent colour (#%02x%02x%02x) as soft glowing light, isometric 3D, "+
+		"cinematic depth of field, rich detail toward the edges and a calm, uncluttered middle. "+
+		"No text, letters, numbers, labels, captions, signs, screens with writing, logos, watermarks or people.",
+		subject, accent, pal[2].R, pal[2].G, pal[2].B)
+}
+
+// drawArt has a picture with no words drawn for scene, to go under its
+// diagram. Any image model will do, since the words are lettered in code; one
+// that shows words anyway is redrawn by the image service, and then refused.
+func (r *Runner) drawArt(ctx context.Context, orgID uuid.UUID, runID *uuid.UUID, scene coverScene, accent, source string) (image.Image, *Illustration, error) {
+	img, err := r.images.Generate(ctx, IllustrationRequest{
+		OrgID:  orgID,
+		Prompt: artPrompt(scene, accent),
+		Width:  artWidth,
+		Height: artHeight,
+		Steps:  coverSteps,
+		Source: source,
+		RunID:  runID,
+		NoText: true,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	if img == nil || len(img.PNG) == 0 {
+		return nil, nil, errors.New("the image service returned no picture")
+	}
+	art, _, err := image.Decode(bytes.NewReader(img.PNG))
+	if err != nil {
+		return nil, nil, fmt.Errorf("decode the picture: %w", err)
+	}
+	return art, img, nil
 }
 
 func accentForTopic(title, topic, angle string) string {
@@ -456,12 +513,9 @@ func firstSentence(s string) string {
 }
 
 // generateCover draws an article's cover as a picture: its idea as a labelled
-// diagram (infographicPrompt).
-//
-// The model is left unset so the platform default applies: Gemini first when
-// a key is set, then the workstation, but only a workstation model that
-// captions (imagegen.TextCaptions). Steps suit a turbo model (ERNIE-Image-Turbo);
-// Gemini ignores them.
+// diagram (infographicPrompt), lettered by a hosted model that letters labels
+// (imagegen.TextLabels: Gemini, OpenAI), never by the workstation, whose
+// ERNIE misspelt them (pictureCover draws those covers instead).
 //
 // Transient upstream failures (WSL-proxy 502s, busy GPU, timeouts) are retried
 // with backoff. A failure after every attempt is returned, not swallowed — the
@@ -483,7 +537,7 @@ func (r *Runner) generateCover(ctx context.Context, orgID uuid.UUID, a *Generate
 			Steps:      coverSteps,
 			Source:     "blog_cover",
 			RunID:      a.RunID,
-			Text:       imagegen.TextCaptions,
+			Text:       imagegen.TextLabels,
 			ExpectText: sceneText(a.CoverScene),
 		})
 		if err == nil && img != nil && img.URL != "" {
@@ -712,39 +766,25 @@ func (r *Runner) drawFigure(ctx context.Context, orgID uuid.UUID, runID *uuid.UU
 			return img.URL, ""
 		}
 	}
-	// A flow or a hub is drawn as a cover is, by a model that only captions
-	// (ERNIE on the workstation): a few labels, each once. That prompt came
-	// out clean on int where the full figure prompt repeated and misspelt its
-	// boxes. A table or prose has no scene, and needs a model that letters.
+	// A flow or a hub is drawn as a diagram lettered here, over a picture with
+	// no words when an image model is free: ERNIE misspelt and repeated the
+	// labels it was asked to letter. A table or prose has no scene, and needs
+	// a model that letters.
 	scene, ok := figureScene(kind, description)
-	if ok && r.canLetter(imagegen.TextCaptions) {
-		img, err := r.images.Generate(ctx, IllustrationRequest{
-			OrgID:      orgID,
-			Prompt:     infographicPrompt(figureOpening, scene, figureAccent),
-			Width:      width,
-			Height:     height,
-			Steps:      coverSteps,
-			Source:     "blog_inline",
-			RunID:      runID,
-			Text:       imagegen.TextCaptions,
-			ExpectText: sceneText(scene),
-		})
-		switch {
-		case err != nil || img == nil || img.URL == "":
-			note = "dropped an illustration that could not be drawn: " + truncateRunes(fmt.Sprint(err), 200)
-		case !imagegen.Letters(img.Provider, img.Model, imagegen.TextCaptions):
-			note = "dropped an illustration from a model that cannot letter labels"
-		default:
-			return img.URL, ""
-		}
-	}
 	if r.covers == nil {
 		return "", note
 	}
 	if !ok {
 		return "", note + "; it is not a list of steps or parts to draw as a diagram"
 	}
-	pic, err := drawDiagramCover(scene, "", description)
+	var art image.Image
+	if r.canIllustrate() {
+		var err error
+		if art, _, err = r.drawArt(ctx, orgID, runID, scene, figureAccent, "blog_inline"); err != nil && r.logger != nil {
+			r.logger.Warn("blog: figure picture failed; drawing its diagram alone", zap.Error(err))
+		}
+	}
+	pic, err := drawSceneOn(art, scene, figureAccent, description)
 	if err == nil {
 		var url string
 		if url, err = r.covers.PutFile(ctx, orgID, pic, "png", "image/png"); err == nil {

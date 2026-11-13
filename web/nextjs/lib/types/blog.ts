@@ -117,6 +117,14 @@ export interface BlogArticle {
     width?: number;
     height?: number;
   };
+  /** What the last Redraw images did. Kept because the page stops waiting
+   *  long before a redraw on the workstation ends. */
+  image_redraw?: {
+    at: string;
+    notes: string[];
+    figures_drawn: number;
+    cover_redrawn: boolean;
+  };
 }
 
 export interface BlogRunOptions {

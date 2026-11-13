@@ -66,6 +66,26 @@ func TestRedrawImages_ReplansFiguresTheArticleDoesNotSupport(t *testing.T) {
 	}
 }
 
+// On int the re-plan fitted no better and the article lost its figure with no
+// word why: the redraw's notes now say what the plans got wrong.
+func TestRedrawImages_SaysWhyNoFigureWasPlanned(t *testing.T) {
+	r := testRunner(&noLetterIllustrator{fakeIllustrator{enabled: true}}).WithCoverStore(newMemCovers())
+	r.llm = &stubLLM{responses: []scriptedResponse{
+		{trigger: "Read this finished article", content: `{"figures":[{"kind":"flow","section":"The gateway",` +
+			`"content":"Kong, HAProxy, Shieldfy, Contour"}]}`},
+		{trigger: "The figures planned for this article cannot be drawn", content: `{"figures":[{"kind":"flow",` +
+			`"section":"The gateway","content":"Kong, HAProxy, Contour"}]}`},
+	}}
+	a := &GeneratedArticle{Title: "Ingress security", Markdown: "# Ingress security\n\n## The gateway\n\n" +
+		"Kong, HAProxy, Shieldfy and Contour all sit in front of the cluster.\n"}
+
+	res, err := r.RedrawImages(context.Background(), uuid.New(), a)
+	notes := strings.Join(res.Notes, " | ")
+	if err != nil || res.Figures != 0 || !strings.Contains(notes, "no planned figure fits the article") || !strings.Contains(notes, "bare list") {
+		t.Fatalf("err=%v res=%+v", err, res)
+	}
+}
+
 // When nothing new can be drawn, the old figures stay — except those the
 // article does not support, like int's copied example and key: value hub.
 func TestRedrawImages_PrunesOldFiguresTheArticleDoesNotSupport(t *testing.T) {

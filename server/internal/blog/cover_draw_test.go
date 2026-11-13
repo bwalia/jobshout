@@ -4,6 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"image"
+	"image/color"
+	"image/draw"
+	_ "image/jpeg"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -145,5 +149,43 @@ func TestEnsureCover_DrawsDiagramWithoutImageService(t *testing.T) {
 	}
 	if !strings.Contains(a.CoverImagePrompt, `"layout":"ripple"`) {
 		t.Fatalf("scene not recorded: %q", a.CoverImagePrompt)
+	}
+}
+
+// A picture under the diagram shows through it: the cover is the art, dimmed,
+// with the scene lettered on top. COVER_ART names a picture to preview with.
+func TestDrawSceneOn_ArtShowsThrough(t *testing.T) {
+	var art image.Image
+	if f := os.Getenv("COVER_ART"); f != "" {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if art, _, err = image.Decode(bytes.NewReader(b)); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		art = image.NewRGBA(image.Rect(0, 0, 1280, 720))
+		draw.Draw(art.(*image.RGBA), art.Bounds(), image.NewUniform(color.RGBA{0xf0, 0x80, 0x20, 0xff}), image.Point{}, draw.Src)
+	}
+	scene := coverScene{Layout: layoutFlow, Labels: []string{"HTTP request", "auth", "rate limit", "routing policy", "proxy to pod"}, Eyebrow: "API SECURITY"}
+	over, err := drawSceneOn(art, scene, "amber", "seed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, _ := drawDiagramCover(scene, "amber", "seed")
+	if dir := os.Getenv("COVER_PREVIEW_DIR"); dir != "" {
+		_ = os.WriteFile(filepath.Join(dir, "art-flow.png"), over, 0o644)
+	}
+	a, _ := png.Decode(bytes.NewReader(over))
+	g, _ := png.Decode(bytes.NewReader(plain))
+	if bnd := a.Bounds(); bnd.Dx() != int(designW) || bnd.Dy() != int(designH) {
+		t.Fatalf("%v, want %vx%v", bnd, designW, designH)
+	}
+	// A corner, outside the diagram, is the art dimmed: warmer than the ground.
+	ar, _, _, _ := a.At(20, 20).RGBA()
+	gr, _, _, _ := g.At(20, 20).RGBA()
+	if ar <= gr {
+		t.Fatalf("corner red %d over art, %d on the ground: the art does not show", ar>>8, gr>>8)
 	}
 }

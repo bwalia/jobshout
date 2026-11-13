@@ -28,6 +28,7 @@ type redrawStore struct {
 	repository.BlogRepository
 	article     model.BlogArticle
 	body, cover bool
+	redraw      *model.ImageRedraw
 }
 
 func (s *redrawStore) GetArticle(context.Context, uuid.UUID) (*model.BlogArticle, error) {
@@ -37,6 +38,11 @@ func (s *redrawStore) GetArticle(context.Context, uuid.UUID) (*model.BlogArticle
 
 func (s *redrawStore) UpdateArticleBody(ctx context.Context, _ uuid.UUID, _, _ string) error {
 	s.body = ctx.Err() == nil
+	return ctx.Err()
+}
+
+func (s *redrawStore) UpdateArticleImageRedraw(ctx context.Context, _ uuid.UUID, rd model.ImageRedraw) error {
+	s.redraw = &rd
 	return ctx.Err()
 }
 
@@ -66,5 +72,9 @@ func TestRedrawImages_SavesWhatItDrewWhenTheBudgetRunsOut(t *testing.T) {
 	_, res, err := svc.RedrawImages(context.Background(), org, store.article.ID, false)
 	if err != nil || res.Figures != 1 || !res.Cover || !store.body || !store.cover {
 		t.Fatalf("err=%v res=%+v saved body=%v cover=%v", err, res, store.body, store.cover)
+	}
+	// What it did is kept for the page, which stopped waiting long before.
+	if rd := store.redraw; rd == nil || rd.FiguresDrawn != 1 || !rd.CoverRedrawn || rd.At.IsZero() {
+		t.Fatalf("redraw not recorded: %+v", rd)
 	}
 }

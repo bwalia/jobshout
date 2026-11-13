@@ -169,6 +169,12 @@ func TestMFluxClient_LetteringReadBack(t *testing.T) {
 			t.Fatalf("text_ok %v: %v", ok, err)
 		}
 	}
+
+	// A picture meant to have no words that shows some is refused too.
+	textOK = &no
+	if _, err := c.Generate(context.Background(), GenerateRequest{Prompt: "art", NoText: true}); err == nil || !sent.NoText {
+		t.Fatalf("words in a wordless picture: err = %v, no_text sent = %v", err, sent.NoText)
+	}
 }
 
 // Without a secret the client must talk to the service unsigned — that is what

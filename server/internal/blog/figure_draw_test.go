@@ -14,9 +14,9 @@ import (
 	"github.com/jobshout/server/internal/imagestore"
 )
 
-// Prod's case: the workstation draws covers but cannot letter a figure, and
-// there is no hosted image model. Body figures are drawn as diagrams instead
-// of being left out of every article, and the GPU is never asked.
+// Prod's case: the workstation cannot letter a figure, and there is no hosted
+// image model. Body figures are drawn as diagrams instead of being left out of
+// every article; the GPU is asked only for a picture with no words under one.
 func TestIllustrateBody_DrawsDiagramsWithoutALetteringModel(t *testing.T) {
 	gpu := &noLetterIllustrator{fakeIllustrator{enabled: true}}
 	covers := newMemCovers()
@@ -30,8 +30,8 @@ func TestIllustrateBody_DrawsDiagramsWithoutALetteringModel(t *testing.T) {
 		"```illustration comparison\nPolling vs webhooks: latency, cost\n```\n\nEnd.\n"
 	out, notes := r.illustrateBody(context.Background(), uuid.New(), nil, md)
 
-	if len(gpu.calls) != 0 {
-		t.Fatalf("asked the GPU %d times for figures it cannot letter", len(gpu.calls))
+	if len(gpu.calls) != 1 || !gpu.calls[0].NoText || len(gpu.calls[0].ExpectText) != 0 {
+		t.Fatalf("want one picture with no words under the process figure, got %+v", gpu.calls)
 	}
 	if !strings.Contains(out, "![Commit → Build image → Run tests → Deploy to staging]("+imagestore.URLPrefix) {
 		t.Fatalf("process figure not drawn:\n%s", out)
@@ -63,50 +63,47 @@ func TestIllustrateBody_FigureLinksAreAbsolute(t *testing.T) {
 	}
 }
 
-// A lettering model that fails is asked once more for the figure's simpler
-// scene, and the vector diagram still leaves the article its figure.
+// A lettering model that fails is asked once more, for a picture with no words
+// under the figure's diagram, and the diagram alone still leaves the article
+// its figure when that fails too.
 func TestIllustrateBody_FallsBackToDiagram(t *testing.T) {
 	gpu := &fakeIllustrator{enabled: true, failAfter: -1}
 	r := testRunner(gpu).WithCoverStore(newMemCovers())
 	out, notes := r.illustrateBody(context.Background(), uuid.New(), nil,
 		"The API gateway fronts the auth, orders and billing services, backed by Postgres and a Redis cache.\n\n"+
 			"```illustration architecture\nAPI gateway: auth service, orders service, billing service, Postgres, Redis cache\n```\n")
-	if len(gpu.calls) != 2 || gpu.calls[0].Text != imagegen.TextLabels || gpu.calls[1].Text != imagegen.TextCaptions ||
+	if len(gpu.calls) != 2 || gpu.calls[0].Text != imagegen.TextLabels || !gpu.calls[1].NoText ||
 		len(notes) != 0 || !strings.Contains(out, "]("+imagestore.URLPrefix) {
 		t.Fatalf("calls=%d notes=%v out=%s", len(gpu.calls), notes, out)
 	}
 }
 
-// The workstation on ERNIE draws a flow or hub figure as it draws a cover: the
-// scene's labels, each once, with no figure text to repeat or misspell. A
-// comparison has no scene and is left to a model that letters; a picture
-// from a model that cannot caption is not used.
-func TestIllustrateBody_ErnieDrawsFigureScenes(t *testing.T) {
+// The workstation on ERNIE draws the picture under a flow or hub figure, with
+// no words: ERNIE misspelt and repeated the labels it was asked to letter, so
+// the diagram over it letters them. A comparison has no scene and is left to
+// a model that letters.
+func TestIllustrateBody_ErnieDrawsThePictureUnderAFigure(t *testing.T) {
 	ernie := &captionIllustrator{fakeIllustrator{enabled: true, provider: "mflux", model: "ernie-image-turbo"}}
-	r := testRunner(ernie).WithCoverStore(newMemCovers())
+	covers := newMemCovers()
+	r := testRunner(ernie).WithCoverStore(covers)
 	md := "A client reaches the service pod through the API gateway and the ingress controller; polling and webhooks differ on latency and cost.\n\n" +
 		"```illustration architecture\nClient → API Gateway → Ingress Controller → Service Pod\n```\n\n" +
 		"```illustration comparison\nPolling vs webhooks: latency, cost\n```\n"
 	out, notes := r.illustrateBody(context.Background(), uuid.New(), nil, md)
 	if len(ernie.calls) != 1 {
-		t.Fatalf("calls = %d, want one (the flow's scene)", len(ernie.calls))
+		t.Fatalf("calls = %d, want one (the picture under the flow)", len(ernie.calls))
 	}
 	call := ernie.calls[0]
-	if call.Text != imagegen.TextCaptions || !strings.HasPrefix(call.Prompt, figureOpening) ||
-		!strings.Contains(call.Prompt, "Exactly 4 labelled parts") || strings.Count(call.Prompt, "Ingress Controller") != 1 ||
-		strings.Join(call.ExpectText, "|") != "Client|API Gateway|Ingress Controller|Service Pod" {
-		t.Fatalf("figure scene prompt:\n%s", call.Prompt)
+	if !call.NoText || len(call.ExpectText) != 0 || call.Width != artWidth ||
+		!strings.Contains(call.Prompt, "client, api gateway, ingress controller, service pod") || !strings.Contains(call.Prompt, "No text") {
+		t.Fatalf("picture request: %+v", call)
 	}
-	// ERNIE's picture, not the vector fallback, and only one figure.
-	if !strings.Contains(out, "/api/v1/images/file/img-1.png") || strings.Count(out, "![") != 1 || len(notes) != 1 {
-		t.Fatalf("want ERNIE's flow and the comparison dropped: notes=%v\n%s", notes, out)
+	// The diagram drawn over ERNIE's picture, not ERNIE's picture itself.
+	if strings.Contains(out, "img-1.png") || !strings.Contains(out, "]("+imagestore.URLPrefix) || strings.Count(out, "![") != 1 || len(notes) != 1 {
+		t.Fatalf("want the flow over a picture and the comparison dropped: notes=%v\n%s", notes, out)
 	}
-
-	// The same scene from z-image-turbo would be lettering it cannot do.
-	zimage := &captionIllustrator{fakeIllustrator{enabled: true, provider: "mflux", model: "z-image-turbo"}}
-	out, _ = testRunner(zimage).WithCoverStore(newMemCovers()).illustrateBody(context.Background(), uuid.New(), nil, md)
-	if strings.Contains(out, "img-1.png") || !strings.Contains(out, "]("+imagestore.URLPrefix) {
-		t.Fatalf("z-image's figure was used, or no vector figure replaced it:\n%s", out)
+	if len(covers.objects) != 1 {
+		t.Fatalf("stored %d images, want the figure", len(covers.objects))
 	}
 }
 

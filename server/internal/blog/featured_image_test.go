@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"image/png"
+	"strings"
 	"testing"
 	"time"
 
@@ -97,5 +98,34 @@ func TestRegenerateCover_FailedPictureBecomesItsDiagram(t *testing.T) {
 	}
 	if a.CoverImageURL == old || a.CoverImageProvider != "diagram" || !r.coverStored(context.Background(), a.CoverImageURL) {
 		t.Fatalf("cover=%q provider=%q", a.CoverImageURL, a.CoverImageProvider)
+	}
+	if !strings.Contains(a.CoverNote, "diagram alone") {
+		t.Fatalf("no note says why the cover is a plain diagram: %q", a.CoverNote)
+	}
+}
+
+// ERNIE misspelt a five-step cover three times in three on int. With no model
+// that letters labels, it draws only the picture, with no words, and the
+// cover's diagram is lettered over it here.
+func TestDrawCover_ErnieDrawsThePictureUnderTheDiagram(t *testing.T) {
+	ernie := &captionIllustrator{fakeIllustrator{enabled: true, provider: "mflux", model: "ernie-image-turbo"}}
+	r := newTestRunner(&fakeCMS{})
+	r.cfg.CoverStyle = CoverStylePicture
+	r.WithIllustrator(ernie)
+	a := &GeneratedArticle{Title: "Preemptive security for ingress", Slug: "ingress",
+		CoverScene: coverScene{Layout: layoutFlow, Labels: []string{"HTTP request", "auth", "rate limit", "proxy to pod"}, Eyebrow: "API security"}}
+
+	if err := r.drawCover(context.Background(), uuid.New(), a); err != nil {
+		t.Fatal(err)
+	}
+	if len(ernie.calls) != 1 || !ernie.calls[0].NoText || len(ernie.calls[0].ExpectText) != 0 {
+		t.Fatalf("want one picture with no words, got %+v", ernie.calls)
+	}
+	if !strings.Contains(ernie.calls[0].Prompt, "api security: http request, auth, rate limit, proxy to pod") {
+		t.Fatalf("the picture is not of the cover's things:\n%s", ernie.calls[0].Prompt)
+	}
+	if a.CoverImageProvider != "mflux" || a.CoverImageModel != "ernie-image-turbo+scene:flow" || a.CoverNote != "" ||
+		a.CoverImageWidth != int(designW) || !r.coverStored(context.Background(), a.CoverImageURL) {
+		t.Fatalf("cover=%q provider=%q model=%q note=%q", a.CoverImageURL, a.CoverImageProvider, a.CoverImageModel, a.CoverNote)
 	}
 }
