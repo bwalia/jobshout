@@ -21,6 +21,7 @@ export const config = {
     "/dashboard/:path*",
     "/messages",
     "/messages/:path*",
+    "/projects/post",
     "/showcase/mine",
     "/showcase/new",
     "/showcase/review",

@@ -69,6 +69,10 @@ spec:
               value: {{ (.Values.dashboard).enabled | default false | quote }}
             - name: MESSAGING_ENABLED
               value: {{ (.Values.messaging).enabled | default false | quote }}
+            - name: PROJECTS_LIVE
+              value: {{ (.Values.projectsLive).enabled | default false | quote }}
+            - name: PROJECTS_SEED_SAMPLES
+              value: {{ (.Values.projectsLive).seedSamples | default false | quote }}
           # envFrom, not env+valueFrom: see the note in web.yaml.
           envFrom:
             - secretRef:

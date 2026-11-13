@@ -40,12 +40,16 @@ impl ProjectRepository {
         let rows = sqlx::query(
             r#"
             SELECT
-                p.id, p.job_id, p.project_type, p.budget_min, p.budget_max,
+                p.id, p.job_id, p.owner_account_id, p.title, p.description, p.summary,
+                p.project_type, p.status, p.visibility, p.budget_min, p.budget_max,
                 p.currency, p.duration_estimate, p.skills_required, p.deliverables,
                 p.milestones, p.bidding_end_at, p.max_bids, p.escrow_required,
-                p.created_at, p.updated_at
+                p.experience_level, p.featured_until, p.created_at, p.updated_at,
+                (SELECT COUNT(*) FROM bids b WHERE b.project_id = p.id) AS bid_count
             FROM projects p
-            WHERE ($1::text IS NULL OR p.project_type = $1)
+            WHERE p.status = 'open'
+              AND p.visibility = 'public'
+              AND ($1::text IS NULL OR p.project_type = $1)
               AND (
                 $2::uuid[] IS NULL
                 OR EXISTS (
@@ -53,7 +57,7 @@ impl ProjectRepository {
                     WHERE pcm.project_id = p.id AND pcm.category_id = ANY($2)
                 )
               )
-            ORDER BY p.created_at DESC
+            ORDER BY p.featured_until DESC NULLS LAST, p.created_at DESC
             LIMIT $3 OFFSET $4
             "#,
         )
@@ -75,9 +79,12 @@ impl ProjectRepository {
         let row = sqlx::query(
             r#"
             SELECT
-                p.id, p.job_id, p.project_type, p.budget_min, p.budget_max,
+                p.id, p.job_id, p.owner_account_id, p.title, p.description, p.summary,
+                p.project_type, p.status, p.visibility, p.budget_min, p.budget_max,
                 p.currency, p.duration_estimate, p.skills_required, p.deliverables,
                 p.milestones, p.bidding_end_at, p.max_bids, p.escrow_required,
+                p.experience_level, p.featured_until,
+                (SELECT COUNT(*) FROM bids b WHERE b.project_id = p.id) AS bid_count,
                 p.created_at, p.updated_at
             FROM projects p
             WHERE p.id = $1
@@ -97,7 +104,11 @@ impl ProjectRepository {
         }
     }
 
-    pub async fn create(&self, req: &CreateProjectRequest) -> Result<Project, DomainError> {
+    pub async fn create(
+        &self,
+        req: &CreateProjectRequest,
+        owner_account_id: Uuid,
+    ) -> Result<Project, DomainError> {
         let now = Utc::now();
         let milestones = req
             .milestones
@@ -105,24 +116,49 @@ impl ProjectRepository {
             .map(serde_json::to_value)
             .transpose()
             .map_err(|e| DomainError::Other(e.into()))?;
+        let status = req
+            .status
+            .unwrap_or(jobshout_domain::ProjectStatus::Open)
+            .as_str();
+        let visibility = req
+            .visibility
+            .unwrap_or(jobshout_domain::ProjectVisibility::Public)
+            .as_str();
+        let experience = req
+            .experience_level
+            .clone()
+            .unwrap_or_default()
+            .chars()
+            .take(64)
+            .collect::<String>();
 
         let row = sqlx::query(
             r#"
             INSERT INTO projects (
-                job_id, project_type, budget_min, budget_max, currency,
+                job_id, owner_account_id, title, description, summary,
+                project_type, status, visibility, budget_min, budget_max, currency,
                 duration_estimate, skills_required, deliverables, milestones,
-                bidding_end_at, max_bids, escrow_required, created_at, updated_at
+                bidding_end_at, max_bids, escrow_required, experience_level,
+                created_at, updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
             RETURNING
-                id, job_id, project_type, budget_min, budget_max,
+                id, job_id, owner_account_id, title, description, summary,
+                project_type, status, visibility, budget_min, budget_max,
                 currency, duration_estimate, skills_required, deliverables,
                 milestones, bidding_end_at, max_bids, escrow_required,
-                created_at, updated_at
+                experience_level, featured_until, created_at, updated_at,
+                0::bigint AS bid_count
             "#,
         )
         .bind(Option::<Uuid>::None)
+        .bind(owner_account_id)
+        .bind(req.title.trim())
+        .bind(req.description.trim())
+        .bind(req.summary.trim())
         .bind(req.project_type.as_str())
+        .bind(status)
+        .bind(visibility)
         .bind(req.budget_min)
         .bind(req.budget_max)
         .bind(&req.currency)
@@ -133,6 +169,7 @@ impl ProjectRepository {
         .bind(req.bidding_end_at)
         .bind(req.max_bids)
         .bind(req.escrow_required)
+        .bind(experience)
         .bind(now)
         .bind(now)
         .fetch_one(&self.pool)
@@ -143,6 +180,85 @@ impl ProjectRepository {
         })?;
 
         project_from_row(row)
+    }
+
+    /// Close projects whose bidding window has ended.
+    pub async fn close_expired_bidding(&self) -> Result<u64, DomainError> {
+        let res = sqlx::query(
+            r#"
+            UPDATE projects
+            SET status = 'closed', updated_at = NOW()
+            WHERE status = 'open'
+              AND bidding_end_at IS NOT NULL
+              AND bidding_end_at < NOW()
+            "#,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| DomainError::Other(e.into()))?;
+        Ok(res.rows_affected())
+    }
+
+    pub async fn seed_samples(&self, owner_account_id: Uuid) -> Result<usize, DomainError> {
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projects")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| DomainError::Other(e.into()))?;
+        if count > 0 {
+            return Ok(0);
+        }
+        let samples = [
+            (
+                "Rust Axum API for marketplace matching",
+                "Build ranked job/project matches with explainable reasons.",
+                "fixed_price",
+                "2500",
+                "5000",
+                vec!["Rust", "Axum", "Postgres"],
+            ),
+            (
+                "Next.js dashboard polish",
+                "Responsive command-centre widgets for JobShout.com.",
+                "hourly",
+                "60",
+                "90",
+                vec!["Next.js", "TypeScript", "Tailwind"],
+            ),
+            (
+                "AI proposal draft reviewer",
+                "Review AI-generated proposals before they go to clients.",
+                "fixed_price",
+                "800",
+                "1500",
+                vec!["LLM", "Evaluation", "Product"],
+            ),
+        ];
+        let mut n = 0;
+        for (title, summary, ptype, min, max, skills) in samples {
+            let req = CreateProjectRequest {
+                title: format!("[Sample] {title}"),
+                description: format!("{summary}\n\nLabelled sample for int / local only."),
+                summary: summary.into(),
+                project_type: ProjectType::parse(ptype).unwrap_or(ProjectType::FixedPrice),
+                budget_min: Some(min.parse().unwrap_or_default()),
+                budget_max: Some(max.parse().unwrap_or_default()),
+                currency: "GBP".into(),
+                duration_estimate: Some("2–4 weeks".into()),
+                skills_required: skills.into_iter().map(str::to_string).collect(),
+                deliverables: vec!["Working deliverable".into(), "Handover notes".into()],
+                milestones: None,
+                bidding_end_at: Some(Utc::now() + chrono::Duration::days(14)),
+                max_bids: Some(30),
+                escrow_required: false,
+                requirements: Vec::new(),
+                visibility: Some(jobshout_domain::ProjectVisibility::Public),
+                experience_level: Some("intermediate".into()),
+                status: Some(jobshout_domain::ProjectStatus::Open),
+            };
+            self.create(&req, owner_account_id).await?;
+            n += 1;
+        }
+        Ok(n)
     }
 
     pub async fn list_categories(&self) -> Result<Vec<ProjectCategory>, DomainError> {
@@ -290,7 +406,7 @@ impl BidRepository {
                 id, project_id, freelancer_id, bid_amount, hourly_rate,
                 estimated_hours, proposal, delivery_timeline, attachments,
                 status, is_shortlisted, client_rating, client_feedback,
-                freelancer_rating, freelancer_feedback, created_at, updated_at
+                freelancer_rating, freelancer_feedback, credits_spent, viewed_at, decline_reason, created_at, updated_at
             "#,
         )
         .bind(project_id)
@@ -365,7 +481,7 @@ impl BidRepository {
                 id, project_id, freelancer_id, bid_amount, hourly_rate,
                 estimated_hours, proposal, delivery_timeline, attachments,
                 status, is_shortlisted, client_rating, client_feedback,
-                freelancer_rating, freelancer_feedback, created_at, updated_at
+                freelancer_rating, freelancer_feedback, credits_spent, viewed_at, decline_reason, created_at, updated_at
             "#,
         )
         .bind(status.as_str())
@@ -483,6 +599,10 @@ fn project_from_row(row: PgRow) -> Result<Project, DomainError> {
     let milestones: Option<serde_json::Value> = row
         .try_get("milestones")
         .map_err(|e| DomainError::Other(e.into()))?;
+    let status: String = row.try_get("status").unwrap_or_else(|_| "open".into());
+    let visibility: String = row
+        .try_get("visibility")
+        .unwrap_or_else(|_| "public".into());
     Ok(Project {
         id: row
             .try_get("id")
@@ -490,7 +610,13 @@ fn project_from_row(row: PgRow) -> Result<Project, DomainError> {
         job_id: row
             .try_get("job_id")
             .map_err(|e| DomainError::Other(e.into()))?,
+        owner_account_id: row.try_get("owner_account_id").unwrap_or(None),
+        title: row.try_get("title").unwrap_or_default(),
+        description: row.try_get("description").unwrap_or_default(),
+        summary: row.try_get("summary").unwrap_or_default(),
         project_type: ProjectType::parse(&project_type).unwrap_or(ProjectType::FixedPrice),
+        status: jobshout_domain::ProjectStatus::parse(&status).unwrap_or_default(),
+        visibility: jobshout_domain::ProjectVisibility::parse(&visibility).unwrap_or_default(),
         budget_min: row
             .try_get("budget_min")
             .map_err(|e| DomainError::Other(e.into()))?,
@@ -519,6 +645,9 @@ fn project_from_row(row: PgRow) -> Result<Project, DomainError> {
         escrow_required: row
             .try_get("escrow_required")
             .map_err(|e| DomainError::Other(e.into()))?,
+        experience_level: row.try_get("experience_level").unwrap_or_default(),
+        featured_until: row.try_get("featured_until").unwrap_or(None),
+        bid_count: row.try_get("bid_count").unwrap_or(0),
         created_at: row
             .try_get("created_at")
             .map_err(|e| DomainError::Other(e.into()))?,
@@ -565,6 +694,9 @@ fn bid_from_row(row: PgRow) -> Result<Bid, DomainError> {
         is_shortlisted: row
             .try_get("is_shortlisted")
             .map_err(|e| DomainError::Other(e.into()))?,
+        credits_spent: row.try_get("credits_spent").unwrap_or(0),
+        viewed_at: row.try_get("viewed_at").unwrap_or(None),
+        decline_reason: row.try_get("decline_reason").unwrap_or_default(),
         client_rating: row
             .try_get("client_rating")
             .map_err(|e| DomainError::Other(e.into()))?,

@@ -60,6 +60,22 @@ async fn tick_once(pool: &sqlx::PgPool) -> anyhow::Result<()> {
     if n > 0 {
         tracing::info!(recovered = n, "recovered stale outbox rows");
     }
+    // Phase 2a: close projects past bidding_end_at.
+    let closed = sqlx::query(
+        r#"
+        UPDATE projects
+        SET status = 'closed', updated_at = NOW()
+        WHERE status = 'open'
+          AND bidding_end_at IS NOT NULL
+          AND bidding_end_at < NOW()
+        "#,
+    )
+    .execute(pool)
+    .await?
+    .rows_affected();
+    if closed > 0 {
+        tracing::info!(closed, "closed projects past bidding window");
+    }
     tracing::debug!(at = %chrono::Utc::now(), "scheduler heartbeat");
     Ok(())
 }

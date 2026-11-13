@@ -14,6 +14,7 @@ use jobshout_auth::AccountService;
 use jobshout_candidates::CandidateService;
 use jobshout_content::InsightService;
 use jobshout_events::EventService;
+use jobshout_freelance::FreelanceService;
 use jobshout_jobs::{seed_organisation_id, JobService};
 use jobshout_messaging::MessagingService;
 use jobshout_notifications::NotificationService;
@@ -79,13 +80,15 @@ fn state(pool: PgPool) -> AppState {
         accounts: AccountService::new(pool.clone(), std::iter::empty::<String>()),
         events: EventService::new(pool.clone()),
         notifications: NotificationService::new(pool.clone()),
-        messaging: MessagingService::new(pool),
+        messaging: MessagingService::new(pool.clone()),
+        freelance: FreelanceService::new(pool),
         site_url: Arc::from("https://example.test"),
         internal_token: Some(token),
         email_outbox_enabled: false,
         members_rich_enabled: true,
         dashboard_enabled: true,
         messaging_enabled: true,
+        projects_live: true,
     }
 }
 

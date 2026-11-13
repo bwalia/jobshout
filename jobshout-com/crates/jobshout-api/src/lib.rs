@@ -11,6 +11,7 @@ mod members;
 mod messaging;
 mod privacy;
 mod profiles;
+mod projects;
 mod showcase;
 mod state;
 
@@ -40,6 +41,7 @@ pub fn router(state: AppState) -> Router {
         .merge(members::routes())
         .merge(dashboard::routes())
         .merge(messaging::routes())
+        .merge(projects::routes())
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
         .with_state(state)

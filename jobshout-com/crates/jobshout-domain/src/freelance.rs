@@ -109,13 +109,43 @@ pub struct Milestone {
     pub due_date: Option<DateTime<Utc>>,
 }
 
+string_enum! {
+    ProjectStatus {
+        Draft => "draft",
+        Open => "open",
+        InReview => "in_review",
+        Awarded => "awarded",
+        Closed => "closed",
+        Cancelled => "cancelled",
+    }
+}
+
+string_enum! {
+    ProjectVisibility {
+        Public => "public",
+        InviteOnly => "invite_only",
+    }
+}
+
 /// Project model for freelancer marketplace
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project {
     pub id: Uuid,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub job_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_account_id: Option<Uuid>,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub summary: String,
     pub project_type: ProjectType,
+    #[serde(default)]
+    pub status: ProjectStatus,
+    #[serde(default)]
+    pub visibility: ProjectVisibility,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub budget_min: Option<Decimal>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -132,8 +162,26 @@ pub struct Project {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_bids: Option<i32>,
     pub escrow_required: bool,
+    #[serde(default)]
+    pub experience_level: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub featured_until: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub bid_count: i64,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+impl Default for ProjectStatus {
+    fn default() -> Self {
+        Self::Open
+    }
+}
+
+impl Default for ProjectVisibility {
+    fn default() -> Self {
+        Self::Public
+    }
 }
 
 /// Request to create a new project
@@ -166,6 +214,12 @@ pub struct CreateProjectRequest {
     pub escrow_required: bool,
     #[serde(default)]
     pub requirements: Vec<String>,
+    #[serde(default)]
+    pub visibility: Option<ProjectVisibility>,
+    #[serde(default)]
+    pub experience_level: Option<String>,
+    #[serde(default)]
+    pub status: Option<ProjectStatus>,
 }
 
 fn default_currency() -> String {
@@ -191,6 +245,12 @@ pub struct Bid {
     pub attachments: Option<Vec<Attachment>>,
     pub status: BidStatus,
     pub is_shortlisted: bool,
+    #[serde(default)]
+    pub credits_spent: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewed_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub decline_reason: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_rating: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

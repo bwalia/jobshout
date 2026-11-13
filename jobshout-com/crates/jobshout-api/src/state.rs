@@ -5,6 +5,7 @@ use jobshout_auth::AccountService;
 use jobshout_candidates::CandidateService;
 use jobshout_content::InsightService;
 use jobshout_events::EventService;
+use jobshout_freelance::FreelanceService;
 use jobshout_jobs::JobService;
 use jobshout_messaging::MessagingService;
 use jobshout_notifications::NotificationService;
@@ -23,6 +24,7 @@ pub struct AppState {
     pub events: EventService,
     pub notifications: NotificationService,
     pub messaging: MessagingService,
+    pub freelance: FreelanceService,
     /// Public origin used in feed links and newsletter confirmation links.
     pub site_url: Arc<str>,
     /// Identity headers are only trusted alongside this token. `None` means
@@ -34,4 +36,6 @@ pub struct AppState {
     pub members_rich_enabled: bool,
     pub dashboard_enabled: bool,
     pub messaging_enabled: bool,
+    /// Phase 2a: live projects marketplace.
+    pub projects_live: bool,
 }
