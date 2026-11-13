@@ -77,6 +77,15 @@ runtime arch.
 Both images are cross-built (no push) on every PR by `pr-image-check.yml`, so a
 broken Dockerfile fails the PR instead of the post-merge release run.
 
+## Deploy identity (footer)
+
+The site footer shows `ring · tag · sha · Build #id · deployed at GMT` from:
+
+- Helm (per ring): `APP_VERSION` (`image.tag`), `APP_ENV`, `APP_DEPLOYED_AT`
+- Image bake (CI): `APP_GIT_SHA` (`GITHUB_SHA`), `APP_BUILD_ID` (`GITHUB_RUN_ID`)
+
+See `docs/deploy-identity.md` in the repo root.
+
 ## Helm
 Chart: `jobshout-com/deploy/helm/jobshout-com`  
 Overlays: `values-{int,test,acc,prod}.yaml`  

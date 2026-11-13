@@ -2,32 +2,11 @@
 
 import { BrandLockup } from "@/components/brand/BrandMark";
 import { useHealth } from "@/lib/hooks/useHealth";
-
-function formatDeployed(iso?: string): string | null {
-  if (!iso) return null;
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return null;
-  const secs = Math.round((Date.now() - then) / 1000);
-  if (secs < 60) return "just now";
-  const mins = Math.round(secs / 60);
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.round(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.round(hrs / 24);
-  return `${days}d ago`;
-}
+import { formatDeployIdentity } from "@/lib/deploy-identity";
 
 export function LoginBrand() {
   const health = useHealth();
-  const version = health.data?.version;
-  const deployed = formatDeployed(health.data?.deployed_at);
-  const stamp = [
-    version ? `JobShout ${version}` : null,
-    health.data?.env,
-    deployed ? `Deployed ${deployed}` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const stamp = formatDeployIdentity(health.data) || "JobShout";
 
   return (
     <div className="hidden lg:flex lg:w-1/2 lg:flex-col lg:justify-between bg-sidebar p-10">
@@ -41,7 +20,7 @@ export function LoginBrand() {
           projects, track work, and automate workflows.
         </p>
       </div>
-      <p className="text-xs text-muted-foreground">{stamp || "JobShout"}</p>
+      <p className="font-mono text-xs text-muted-foreground">{stamp}</p>
     </div>
   );
 }

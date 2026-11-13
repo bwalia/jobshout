@@ -18,6 +18,14 @@ RUN npm run build
 FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
+# Deploy identity: SHA + Actions run travel with the image; Helm overrides
+# APP_VERSION / APP_ENV / APP_DEPLOYED_AT per ring at deploy time.
+ARG APP_VERSION=dev
+ARG APP_GIT_SHA=
+ARG APP_BUILD_ID=
+ENV APP_VERSION=$APP_VERSION
+ENV APP_GIT_SHA=$APP_GIT_SHA
+ENV APP_BUILD_ID=$APP_BUILD_ID
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json

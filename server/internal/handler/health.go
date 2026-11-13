@@ -13,6 +13,8 @@ import (
 type RuntimeInfo struct {
 	Version    string
 	Env        string
+	GitSHA     string
+	BuildID    string
 	DeployedAt time.Time
 }
 
@@ -21,6 +23,8 @@ type HealthResponse struct {
 	Status     string `json:"status"`
 	Version    string `json:"version"`
 	Env        string `json:"env,omitempty"`
+	GitSHA     string `json:"git_sha,omitempty"`
+	BuildID    string `json:"build_id,omitempty"`
 	DeployedAt string `json:"deployed_at,omitempty"`
 	DB         string `json:"db"`
 }
@@ -49,6 +53,8 @@ func Health(pool *pgxpool.Pool, info RuntimeInfo) http.HandlerFunc {
 			Status:  status,
 			Version: info.Version,
 			Env:     info.Env,
+			GitSHA:  info.GitSHA,
+			BuildID: info.BuildID,
 			DB:      dbStatus,
 		}
 		if !info.DeployedAt.IsZero() {
