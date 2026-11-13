@@ -143,8 +143,12 @@ Implemented:
   `/api/v1/hire/*` are org-scoped. Web `/hire`. Flag `HIRE_ENABLED` dark on int.
   Interviews/scorecards and recruiter analytics still thin.
 
+- **Linked Groups (Phase 4, flag-gated):** crate `jobshout-groups`, migration `0018`
+  (groups, members, posts, comments, reactions, reports). Secret groups excluded
+  from list/search. Seed official groups. Web `/groups`. Flag `GROUPS_ENABLED` dark.
+
 Deferred: employer-side application review UI, MCP, interviews depth, iOS,
-Linked Groups, remaining AI, Teams/Agencies.
+remaining AI assistants, Teams/Agencies & analytics.
 
 North-star: the full Rust + Next.js + Swift build prompt (agents, MCP, interviews,
 policy, globalisation).

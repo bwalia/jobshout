@@ -139,6 +139,10 @@ aiFeatures:
 hire:
   enabled: false
 
+# Phase 4: Linked Groups.
+groups:
+  enabled: false
+
 # Phase 0 event spine. Worker drains email_outbox; scheduler recovers stale rows.
 # SMTP credentials come from WSL Vault (see vault comments below) — never commit values.
 emailOutbox:
