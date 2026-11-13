@@ -976,6 +976,13 @@ version = "0.1.0"
 [[package]]
 name = "jobshout-analytics"
 version = "0.1.0"
+dependencies = [
+ "chrono",
+ "jobshout-domain",
+ "serde",
+ "sqlx",
+ "uuid",
+]
 
 [[package]]
 name = "jobshout-api"
@@ -985,6 +992,7 @@ dependencies = [
  "chrono",
  "http",
  "http-body-util",
+ "jobshout-analytics",
  "jobshout-applications",
  "jobshout-auth",
  "jobshout-billing",
@@ -1091,6 +1099,7 @@ dependencies = [
  "anyhow",
  "axum",
  "dotenvy",
+ "jobshout-analytics",
  "jobshout-api",
  "jobshout-applications",
  "jobshout-auth",

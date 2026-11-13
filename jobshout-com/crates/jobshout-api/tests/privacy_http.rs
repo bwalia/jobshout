@@ -8,6 +8,7 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
+use jobshout_analytics::AnalyticsService;
 use jobshout_api::{router, AppState};
 use jobshout_applications::ApplicationService;
 use jobshout_auth::AccountService;
@@ -87,6 +88,7 @@ fn state(pool: PgPool) -> AppState {
         freelance: FreelanceService::new(pool.clone()),
         hire: HireService::new(pool.clone()),
         groups: GroupsService::new(pool.clone()),
+        analytics: AnalyticsService::new(pool.clone()),
         billing: BillingService::new(pool.clone()),
         ai_pool: Some(pool),
         platform: None,
@@ -102,6 +104,7 @@ fn state(pool: PgPool) -> AppState {
         ai_features: false,
         hire_enabled: false,
         groups_enabled: false,
+        teams_enabled: false,
     }
 }
 

@@ -88,6 +88,8 @@ spec:
               value: {{ (.Values.hire).enabled | default false | quote }}
             - name: GROUPS_ENABLED
               value: {{ (.Values.groups).enabled | default false | quote }}
+            - name: TEAMS_ENABLED
+              value: {{ (.Values.teams).enabled | default false | quote }}
 
           # envFrom, not env+valueFrom: see the note in web.yaml.
           envFrom:

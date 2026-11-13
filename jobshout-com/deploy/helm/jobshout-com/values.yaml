@@ -143,6 +143,10 @@ hire:
 groups:
   enabled: false
 
+# Phase 6: Teams / agencies / analytics.
+teams:
+  enabled: false
+
 # Phase 0 event spine. Worker drains email_outbox; scheduler recovers stale rows.
 # SMTP credentials come from WSL Vault (see vault comments below) — never commit values.
 emailOutbox:
