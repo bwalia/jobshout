@@ -147,8 +147,12 @@ Implemented:
   (groups, members, posts, comments, reactions, reports). Secret groups excluded
   from list/search. Seed official groups. Web `/groups`. Flag `GROUPS_ENABLED` dark.
 
+- **Remaining AI (Phase 5b):** Freelancer Assistant, Hiring Assistant, Team Builder,
+  Skill Gap Analysis registered as Go builtins (Career Assistant / Interview Prep
+  reuse Career Ops; Course Generator already exists). Drafts only; human confirms.
+
 Deferred: employer-side application review UI, MCP, interviews depth, iOS,
-remaining AI assistants, Teams/Agencies & analytics.
+Teams/Agencies & analytics polish.
 
 North-star: the full Rust + Next.js + Swift build prompt (agents, MCP, interviews,
 policy, globalisation).
