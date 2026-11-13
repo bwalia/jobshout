@@ -69,18 +69,18 @@ pub fn applications_with_job_owner_json(items: &[JobApplicationWithJob]) -> Valu
 
 /// True when a serialised profile JSON contains no private keys.
 pub fn profile_json_is_redacted(v: &Value) -> bool {
-    !v.get("email").is_some()
-        && !v.get("cv_text").is_some()
-        && !v.get("salary_expectation").is_some()
-        && !v.get("phone").is_some()
+    v.get("email").is_none()
+        && v.get("cv_text").is_none()
+        && v.get("salary_expectation").is_none()
+        && v.get("phone").is_none()
 }
 
 /// True when a serialised application JSON contains no private keys.
 pub fn application_json_is_redacted(v: &Value) -> bool {
-    !v.get("email").is_some()
-        && !v.get("phone").is_some()
-        && !v.get("cv_text").is_some()
-        && !v.get("cv_url").is_some()
+    v.get("email").is_none()
+        && v.get("phone").is_none()
+        && v.get("cv_text").is_none()
+        && v.get("cv_url").is_none()
 }
 
 #[cfg(test)]

@@ -115,6 +115,14 @@ showcase:
   # Fill an empty showcase with clearly-labelled sample apps. Never in prod.
   seedSamples: false
 
+# Phase 1 product flags. Keep dark on int until reviewed.
+membersRich:
+  enabled: false
+dashboard:
+  enabled: false
+messaging:
+  enabled: false
+
 # Phase 0 event spine. Worker drains email_outbox; scheduler recovers stale rows.
 # SMTP credentials come from WSL Vault (see vault comments below) — never commit values.
 emailOutbox:

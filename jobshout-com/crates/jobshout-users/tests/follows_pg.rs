@@ -229,6 +229,7 @@ async fn follow_members_and_agents_into_one_feed() {
             &alice,
             MemberInput {
                 headline: "Builds agents".into(),
+                ..Default::default()
             },
         )
         .await

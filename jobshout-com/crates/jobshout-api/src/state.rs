@@ -6,6 +6,7 @@ use jobshout_candidates::CandidateService;
 use jobshout_content::InsightService;
 use jobshout_events::EventService;
 use jobshout_jobs::JobService;
+use jobshout_messaging::MessagingService;
 use jobshout_notifications::NotificationService;
 use jobshout_showcase::ShowcaseService;
 use jobshout_users::MemberService;
@@ -21,6 +22,7 @@ pub struct AppState {
     pub accounts: AccountService,
     pub events: EventService,
     pub notifications: NotificationService,
+    pub messaging: MessagingService,
     /// Public origin used in feed links and newsletter confirmation links.
     pub site_url: Arc<str>,
     /// Identity headers are only trusted alongside this token. `None` means
@@ -28,4 +30,8 @@ pub struct AppState {
     pub internal_token: Option<Arc<str>>,
     /// When true, newsletter confirmations are enqueued to the email outbox.
     pub email_outbox_enabled: bool,
+    /// Phase 1 feature flags (dark on int by default).
+    pub members_rich_enabled: bool,
+    pub dashboard_enabled: bool,
+    pub messaging_enabled: bool,
 }

@@ -8,7 +8,8 @@ use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use jobshout_content::Actor;
 use jobshout_domain::{
-    DomainError, FeedItem, FollowState, FollowedEntry, Insight, Member, MemberInput, ShowcaseApp,
+    ConnectionStatus, DomainError, FeedItem, FollowState, FollowedEntry, Insight, Member,
+    MemberInput, RichMemberProfile, ShowcaseApp, TalentSearchQuery,
 };
 use serde::{Deserialize, Serialize};
 
@@ -19,11 +20,18 @@ use crate::state::AppState;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/v1/members", get(directory))
+        .route("/api/v1/members/talent", get(talent))
         .route("/api/v1/members/me", get(me).patch(update_me))
+        .route("/api/v1/members/me/gdpr", axum::routing::post(gdpr))
         .route("/api/v1/members/{handle}", get(profile))
+        .route("/api/v1/members/{handle}/rich", get(rich_profile))
         .route(
             "/api/v1/members/{handle}/follow",
             put(follow).delete(unfollow),
+        )
+        .route(
+            "/api/v1/members/{handle}/connect",
+            put(connect).post(respond_connect),
         )
         .route("/api/v1/following", get(following))
         .route("/api/v1/following/feed", get(feed))
@@ -207,4 +215,121 @@ async fn feed(
             .await
             .map_err(err)?,
     }))
+}
+
+#[derive(Debug, Deserialize)]
+struct TalentParams {
+    q: Option<String>,
+    availability: Option<String>,
+    open_to_work: Option<bool>,
+    is_agent: Option<bool>,
+    #[serde(default = "default_limit")]
+    limit: i64,
+    #[serde(default)]
+    offset: i64,
+}
+
+async fn talent(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(p): Query<TalentParams>,
+) -> Result<Json<DirectoryResponse>, ApiError> {
+    if !state.members_rich_enabled {
+        return Err(ApiError::from_domain(DomainError::NotFound));
+    }
+    let who = actor(&state, &headers).await?;
+    let query = TalentSearchQuery {
+        q: p.q,
+        availability: p.availability,
+        open_to_work: p.open_to_work,
+        is_agent: p.is_agent,
+        limit: p.limit,
+        offset: p.offset,
+    };
+    let (data, total) = state
+        .members
+        .talent_search(query, who.as_ref())
+        .await
+        .map_err(err)?;
+    Ok(Json(DirectoryResponse {
+        data,
+        total,
+        limit: p.limit.clamp(1, 50),
+        offset: p.offset.max(0),
+    }))
+}
+
+async fn rich_profile(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(handle): Path<String>,
+) -> Result<Json<RichMemberProfile>, ApiError> {
+    if !state.members_rich_enabled {
+        return Err(ApiError::from_domain(DomainError::NotFound));
+    }
+    let who = actor(&state, &headers).await?;
+    let (rich, _) = state
+        .members
+        .rich_profile(&handle, who.as_ref())
+        .await
+        .map_err(err)?;
+    Ok(Json(rich))
+}
+
+async fn connect(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(handle): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if !state.members_rich_enabled {
+        return Err(ApiError::from_domain(DomainError::NotFound));
+    }
+    let who = signed_in(&state, &headers).await?;
+    let status = state.members.connect(&who, &handle).await.map_err(err)?;
+    Ok(Json(serde_json::json!({ "status": status })))
+}
+
+#[derive(Debug, Deserialize)]
+struct RespondConnectBody {
+    accept: bool,
+}
+
+async fn respond_connect(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(handle): Path<String>,
+    Json(body): Json<RespondConnectBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if !state.members_rich_enabled {
+        return Err(ApiError::from_domain(DomainError::NotFound));
+    }
+    let who = signed_in(&state, &headers).await?;
+    let status: ConnectionStatus = state
+        .members
+        .respond_connect(&who, &handle, body.accept)
+        .await
+        .map_err(err)?;
+    Ok(Json(serde_json::json!({ "status": status })))
+}
+
+#[derive(Debug, Deserialize)]
+struct GdprBody {
+    kind: String,
+}
+
+async fn gdpr(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<GdprBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if !state.members_rich_enabled {
+        return Err(ApiError::from_domain(DomainError::NotFound));
+    }
+    let who = signed_in(&state, &headers).await?;
+    let id = state
+        .members
+        .request_gdpr(&who, &body.kind)
+        .await
+        .map_err(err)?;
+    Ok(Json(serde_json::json!({ "id": id, "status": "pending" })))
 }

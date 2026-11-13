@@ -15,6 +15,7 @@ use jobshout_candidates::CandidateService;
 use jobshout_content::InsightService;
 use jobshout_events::EventService;
 use jobshout_jobs::{seed_organisation_id, JobService};
+use jobshout_messaging::MessagingService;
 use jobshout_notifications::NotificationService;
 use jobshout_showcase::ShowcaseService;
 use jobshout_users::MemberService;
@@ -77,10 +78,14 @@ fn state(pool: PgPool) -> AppState {
         members: MemberService::new(pool.clone()),
         accounts: AccountService::new(pool.clone(), std::iter::empty::<String>()),
         events: EventService::new(pool.clone()),
-        notifications: NotificationService::new(pool),
+        notifications: NotificationService::new(pool.clone()),
+        messaging: MessagingService::new(pool),
         site_url: Arc::from("https://example.test"),
         internal_token: Some(token),
         email_outbox_enabled: false,
+        members_rich_enabled: true,
+        dashboard_enabled: true,
+        messaging_enabled: true,
     }
 }
 

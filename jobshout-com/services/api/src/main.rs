@@ -6,6 +6,7 @@ use jobshout_candidates::CandidateService;
 use jobshout_content::InsightService;
 use jobshout_events::EventService;
 use jobshout_jobs::{seed_organisation_id, JobService};
+use jobshout_messaging::MessagingService;
 use jobshout_notifications::NotificationService;
 use jobshout_showcase::ShowcaseService;
 use jobshout_users::MemberService;
@@ -90,6 +91,9 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let email_outbox_enabled = env_flag("EMAIL_OUTBOX_ENABLED");
+    let members_rich_enabled = env_flag("MEMBERS_RICH_ENABLED");
+    let dashboard_enabled = env_flag("DASHBOARD_ENABLED");
+    let messaging_enabled = env_flag("MESSAGING_ENABLED");
     let state = AppState {
         jobs: JobService::new(pool.clone(), seed_organisation_id()),
         candidates: CandidateService::new(pool.clone()),
@@ -99,10 +103,14 @@ async fn main() -> anyhow::Result<()> {
         members,
         accounts,
         events: EventService::new(pool.clone()),
-        notifications: NotificationService::new(pool),
+        notifications: NotificationService::new(pool.clone()),
+        messaging: MessagingService::new(pool),
         site_url: site_url.trim_end_matches('/').into(),
         internal_token: internal_token.map(Into::into),
         email_outbox_enabled,
+        members_rich_enabled,
+        dashboard_enabled,
+        messaging_enabled,
     };
 
     let app = router(state);

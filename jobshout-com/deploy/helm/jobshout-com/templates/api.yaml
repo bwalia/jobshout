@@ -63,6 +63,12 @@ spec:
               value: {{ (.Values.showcase).seedSamples | default false | quote }}
             - name: EMAIL_OUTBOX_ENABLED
               value: {{ (.Values.emailOutbox).enabled | default false | quote }}
+            - name: MEMBERS_RICH_ENABLED
+              value: {{ (.Values.membersRich).enabled | default false | quote }}
+            - name: DASHBOARD_ENABLED
+              value: {{ (.Values.dashboard).enabled | default false | quote }}
+            - name: MESSAGING_ENABLED
+              value: {{ (.Values.messaging).enabled | default false | quote }}
           # envFrom, not env+valueFrom: see the note in web.yaml.
           envFrom:
             - secretRef:

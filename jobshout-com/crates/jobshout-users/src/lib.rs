@@ -14,7 +14,11 @@ mod repo;
 pub mod rules;
 
 use jobshout_content::Actor;
-use jobshout_domain::{DomainError, FeedItem, FollowState, FollowedEntry, Member, MemberInput};
+use jobshout_domain::{
+    ConnectionStatus, Dashboard, DashboardAction, DashboardCredits, DashboardOpportunity,
+    DashboardPipelineItem, DashboardStats, DomainError, FeedItem, FollowState, FollowedEntry,
+    Member, MemberInput, RichMemberProfile, TalentSearchQuery,
+};
 
 use repo::MemberRepository;
 
@@ -129,9 +133,226 @@ impl MemberService {
     ) -> Result<Member, DomainError> {
         let headline = rules::clean_headline(&input.headline)?;
         let me = self.ensure(actor).await?;
-        self.repo.set_headline(me.id, &headline).await?;
+        self.repo
+            .update_rich_profile(me.id, &input, &headline)
+            .await?;
         self.member_by_email(&actor.email.to_ascii_lowercase())
             .await
+    }
+
+    /// Full profile payload for `/members/{handle}` tabs.
+    pub async fn rich_profile(
+        &self,
+        handle: &str,
+        viewer: Option<&Actor>,
+    ) -> Result<(RichMemberProfile, String), DomainError> {
+        let (member, email) = self.profile(handle, viewer).await?;
+        let id = member.id;
+        Ok((
+            RichMemberProfile {
+                experience: self.repo.list_experience(id).await?,
+                education: self.repo.list_education(id).await?,
+                certifications: self.repo.list_certifications(id).await?,
+                portfolio: self.repo.list_portfolio(id).await?,
+                skills: self.repo.list_skills(id).await?,
+                reviews: self.repo.list_reviews(id).await?,
+                achievements: self.repo.list_achievements(id).await?,
+                member,
+            },
+            email,
+        ))
+    }
+
+    pub async fn talent_search(
+        &self,
+        query: TalentSearchQuery,
+        viewer: Option<&Actor>,
+    ) -> Result<(Vec<Member>, i64), DomainError> {
+        let q = query.q.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        let availability = query
+            .availability
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        self.repo
+            .talent_search(&query, q, availability, viewer.map(|a| a.email.as_str()))
+            .await
+    }
+
+    pub async fn connect(
+        &self,
+        actor: &Actor,
+        handle: &str,
+    ) -> Result<ConnectionStatus, DomainError> {
+        let me = self.ensure(actor).await?;
+        let (them, _) = self.profile(handle, Some(actor)).await?;
+        self.repo.request_connection(me.id, them.id).await
+    }
+
+    pub async fn respond_connect(
+        &self,
+        actor: &Actor,
+        handle: &str,
+        accept: bool,
+    ) -> Result<ConnectionStatus, DomainError> {
+        let me = self.ensure(actor).await?;
+        let (them, _) = self.profile(handle, Some(actor)).await?;
+        self.repo.respond_connection(me.id, them.id, accept).await
+    }
+
+    pub async fn request_gdpr(&self, actor: &Actor, kind: &str) -> Result<uuid::Uuid, DomainError> {
+        if kind != "export" && kind != "delete" {
+            return Err(DomainError::Validation(
+                "kind must be export or delete".into(),
+            ));
+        }
+        let me = self.ensure(actor).await?;
+        self.repo.create_gdpr_request(me.id, kind).await
+    }
+
+    pub async fn save_dashboard_widgets(
+        &self,
+        actor: &Actor,
+        widgets: Vec<String>,
+    ) -> Result<Vec<String>, DomainError> {
+        let me = self.ensure(actor).await?;
+        let cleaned: Vec<String> = widgets
+            .into_iter()
+            .map(|w| w.trim().to_string())
+            .filter(|w| !w.is_empty())
+            .take(20)
+            .collect();
+        self.repo.save_dashboard_layout(me.id, &cleaned).await?;
+        Ok(cleaned)
+    }
+
+    /// Command-centre payload. AI brief / credits / approvals are stubs until
+    /// later phases wire real data; the shape is stable.
+    pub async fn dashboard(&self, actor: &Actor) -> Result<Dashboard, DomainError> {
+        let me = self.ensure(actor).await?;
+        let widgets = self.repo.dashboard_layout(me.id).await?;
+        let mut today = Vec::new();
+        if me.headline.is_empty() {
+            today.push(DashboardAction {
+                id: "headline".into(),
+                title: "Add a headline".into(),
+                reason: "Profiles with a headline are found more often in talent search.".into(),
+                href: "/members/me".into(),
+                kind: "profile".into(),
+            });
+        }
+        if me.bio.is_empty() {
+            today.push(DashboardAction {
+                id: "bio".into(),
+                title: "Write a short bio".into(),
+                reason: "A bio helps hirers understand what you do in one glance.".into(),
+                href: "/dashboard".into(),
+                kind: "profile".into(),
+            });
+        }
+        let skills = self.repo.list_skills(me.id).await?;
+        if skills.is_empty() {
+            today.push(DashboardAction {
+                id: "skills".into(),
+                title: "Add skills with evidence".into(),
+                reason: "Skill evidence unlocks better project and job matches.".into(),
+                href: format!("/members/{}", me.handle),
+                kind: "profile".into(),
+            });
+        }
+        if today.is_empty() {
+            today.push(DashboardAction {
+                id: "browse-projects".into(),
+                title: "Browse open projects".into(),
+                reason: "Stay visible — check new work that fits your skills.".into(),
+                href: "/projects".into(),
+                kind: "opportunity".into(),
+            });
+        }
+
+        let mut fixes = Vec::new();
+        let mut strength = 40;
+        if !me.headline.is_empty() {
+            strength += 10;
+        } else {
+            fixes.push("Add a headline".into());
+        }
+        if !me.bio.is_empty() {
+            strength += 10;
+        } else {
+            fixes.push("Add a bio".into());
+        }
+        if !skills.is_empty() {
+            strength += 15;
+        } else {
+            fixes.push("Add at least one skill".into());
+        }
+        if !me.avatar_url.is_empty() {
+            strength += 10;
+        } else {
+            fixes.push("Upload an avatar".into());
+        }
+        if me.open_to_work || me.open_to_hire {
+            strength += 5;
+        }
+        strength = strength.min(100);
+
+        let opportunities = if me.open_to_work || !skills.is_empty() {
+            vec![DashboardOpportunity {
+                id: "projects-radar".into(),
+                kind: "project".into(),
+                title: "Projects matching your profile".into(),
+                summary: "Browse live projects once PROJECTS_LIVE is on.".into(),
+                href: "/projects".into(),
+                score: 0.72,
+                reasons: vec![
+                    "Based on your skills and availability".into(),
+                    "Budgets in a typical freelancer range".into(),
+                ],
+            }]
+        } else {
+            Vec::new()
+        };
+
+        Ok(Dashboard {
+            today,
+            opportunities,
+            pipeline: vec![DashboardPipelineItem {
+                id: "applications".into(),
+                kind: "application".into(),
+                title: "Job applications".into(),
+                stage: "track".into(),
+                next_step: "Review status".into(),
+                href: "/applications".into(),
+            }],
+            stats: DashboardStats {
+                profile_views_7d: 0,
+                search_appearances_7d: 0,
+                follower_growth_7d: 0,
+                invitation_rate: 0.0,
+                proposal_win_rate: 0.0,
+                profile_strength: strength,
+                profile_fixes: fixes,
+            },
+            credits: DashboardCredits {
+                balance: 0,
+                expiring_soon: 0,
+                plan: "free".into(),
+            },
+            earnings_reported: 0.0,
+            unread_messages: 0,
+            unread_notifications: 0,
+            approval_inbox: Vec::new(),
+            weekly_goals: vec![DashboardAction {
+                id: "goal-proposals".into(),
+                title: "Send 5 proposals this week".into(),
+                reason: "Steady outreach compounds.".into(),
+                href: "/projects".into(),
+                kind: "goal".into(),
+            }],
+            roles: vec!["member".into()],
+            widgets,
+        })
     }
 
     pub async fn follow(

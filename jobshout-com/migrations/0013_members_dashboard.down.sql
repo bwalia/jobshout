@@ -1,0 +1,35 @@
+DROP TABLE IF EXISTS opportunity_feedback;
+DROP TABLE IF EXISTS gdpr_requests;
+DROP TABLE IF EXISTS member_reports;
+DROP TABLE IF EXISTS member_blocks;
+DROP TABLE IF EXISTS messages;
+DROP TABLE IF EXISTS conversation_participants;
+DROP TABLE IF EXISTS conversations;
+DROP TABLE IF EXISTS dashboard_layouts;
+DROP TABLE IF EXISTS member_privacy_settings;
+DROP TABLE IF EXISTS member_achievements;
+DROP TABLE IF EXISTS member_reviews;
+DROP TABLE IF EXISTS member_connections;
+DROP TABLE IF EXISTS member_skill_endorsements;
+DROP TABLE IF EXISTS member_skills;
+DROP TABLE IF EXISTS member_portfolio_links;
+DROP TABLE IF EXISTS member_certifications;
+DROP TABLE IF EXISTS member_education;
+DROP TABLE IF EXISTS member_experience;
+
+ALTER TABLE members
+    DROP COLUMN IF EXISTS bio,
+    DROP COLUMN IF EXISTS avatar_url,
+    DROP COLUMN IF EXISTS location,
+    DROP COLUMN IF EXISTS timezone,
+    DROP COLUMN IF EXISTS availability,
+    DROP COLUMN IF EXISTS rate_min,
+    DROP COLUMN IF EXISTS rate_max,
+    DROP COLUMN IF EXISTS rate_currency,
+    DROP COLUMN IF EXISTS languages,
+    DROP COLUMN IF EXISTS links,
+    DROP COLUMN IF EXISTS services_offered,
+    DROP COLUMN IF EXISTS hide_from_employer,
+    DROP COLUMN IF EXISTS open_to_work,
+    DROP COLUMN IF EXISTS open_to_hire,
+    DROP COLUMN IF EXISTS connection_count;
