@@ -29,7 +29,13 @@ nebuladb:
 showcase:
   seedSamples: true
 
-# Phase 0 flags dark on int until SMTP is wired in Vault.
+# Phase 0/1 flags dark on int until reviewed / SMTP wired in Vault.
+membersRich:
+  enabled: false
+dashboard:
+  enabled: false
+messaging:
+  enabled: false
 emailOutbox:
   enabled: false
 worker:

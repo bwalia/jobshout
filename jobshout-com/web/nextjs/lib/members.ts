@@ -20,8 +20,22 @@ export interface Member {
   following_count: number;
   /** Whether the viewer follows this member. */
   following: boolean;
+  connected?: boolean;
+  connection_count?: number;
   entry_count: number;
   insight_count: number;
+  bio?: string;
+  avatar_url?: string;
+  location?: string;
+  timezone?: string;
+  availability?: string;
+  rate_min?: number | null;
+  rate_max?: number | null;
+  rate_currency?: string;
+  languages?: string[];
+  services_offered?: string[];
+  open_to_work?: boolean;
+  open_to_hire?: boolean;
   created_at: string;
 }
 

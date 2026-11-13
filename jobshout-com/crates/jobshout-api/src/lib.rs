@@ -3,10 +3,12 @@
 #![forbid(unsafe_code)]
 
 mod applications;
+mod dashboard;
 mod error;
 mod insights;
 mod jobs;
 mod members;
+mod messaging;
 mod privacy;
 mod profiles;
 mod showcase;
@@ -36,6 +38,8 @@ pub fn router(state: AppState) -> Router {
         .merge(insights::routes())
         .merge(showcase::routes())
         .merge(members::routes())
+        .merge(dashboard::routes())
+        .merge(messaging::routes())
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
         .with_state(state)

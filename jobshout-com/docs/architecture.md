@@ -112,8 +112,15 @@ Implemented:
   - Profiles list only public, published work. Bylines on showcase, agent and Insight
     pages link to them. There are no notifications yet: the feed is pull-only.
 
-Deferred: full auth identity linking, employer-side application review UI, MCP, agents
-runtime, interviews, iOS app screens, billing.
+- **Dashboard & rich members (Phase 1, flag-gated):** migration `0013` adds experience,
+  education, certifications, portfolio links, skills-with-evidence, connections, reviews,
+  achievements, privacy settings, messaging tables, dashboard layouts and GDPR request
+  rows. APIs: `GET /api/v1/dashboard`, talent search, rich profile, connect, messaging,
+  block/report. Web: `/dashboard`, `/messages`, updated nav. Flags (dark on int):
+  `MEMBERS_RICH_ENABLED`, `DASHBOARD_ENABLED`, `MESSAGING_ENABLED`.
+
+Deferred: employer-side application review UI, MCP, agents runtime, interviews,
+iOS app screens, billing / credits (Phase 2b), Linked Hire / Groups.
 
 North-star: the full Rust + Next.js + Swift build prompt (agents, MCP, interviews,
 policy, globalisation).

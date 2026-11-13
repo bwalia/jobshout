@@ -937,6 +937,7 @@ dependencies = [
  "jobshout-events",
  "jobshout-jobs",
  "jobshout-matching",
+ "jobshout-messaging",
  "jobshout-notifications",
  "jobshout-policy",
  "jobshout-showcase",
@@ -1024,6 +1025,7 @@ dependencies = [
  "jobshout-content",
  "jobshout-events",
  "jobshout-jobs",
+ "jobshout-messaging",
  "jobshout-notifications",
  "jobshout-observability",
  "jobshout-showcase",
@@ -1209,6 +1211,16 @@ version = "0.1.0"
 [[package]]
 name = "jobshout-messaging"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "jobshout-domain",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tracing",
+ "uuid",
+]
 
 [[package]]
 name = "jobshout-notifications"
@@ -1297,6 +1309,8 @@ dependencies = [
  "jobshout-domain",
  "jobshout-showcase",
  "jobshout-storage",
+ "serde",
+ "serde_json",
  "sqlx",
  "tokio",
  "tracing",

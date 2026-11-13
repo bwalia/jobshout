@@ -3,16 +3,17 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+/** Phase 1 nav: Home · Work · Network · Discover (+ legacy shortcuts). */
 const LINKS = [
-  { href: "/showcase", label: "AI Showcase" },
+  { href: "/dashboard", label: "Home" },
+  { href: "/jobs", label: "Jobs" },
+  { href: "/projects", label: "Projects" },
+  { href: "/members", label: "Network" },
+  { href: "/showcase", label: "Showcase" },
   { href: "/agents", label: "Agents" },
   { href: "/insights", label: "Insights" },
-  { href: "/members", label: "Members" },
-  { href: "/jobs", label: "Find jobs" },
-  { href: "/projects", label: "Projects" },
+  { href: "/messages", label: "Messages" },
   { href: "/post-job", label: "Post a job" },
-  { href: "/profile", label: "Profile" },
-  { href: "/applications", label: "Applications" },
 ];
 
 export function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
