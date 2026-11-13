@@ -564,7 +564,14 @@ langfuse:
       requests: { cpu: 50m, memory: 128Mi }
       limits: { cpu: 250m, memory: 384Mi }
   minio:
-    image: minio/minio:latest
+    # Our mirror, not Docker Hub: docker.io minio/minio now fails with
+    # "insufficient_scope" from every k3s1 node, and quay.io/minio answers 401.
+    # With `:latest` (implicit pullPolicy Always) the next restart could never
+    # start. This is the exact digest that was running
+    # (sha256:14cea493…, RELEASE.2025-09-07T16-13-09Z), mirrored 2026-11-13.
+    # Pulled with image.pullSecret. See diy-tax-return-infra
+    # docs/runbooks/KNOWN_ISSUES.md §11 for mirroring another tag.
+    image: int-spectoncr.diytaxreturn.co.uk/mirror/minio:RELEASE.2025-09-07T16-13-09Z
     storage: 5Gi
     resources:
       requests: { cpu: 50m, memory: 128Mi }
