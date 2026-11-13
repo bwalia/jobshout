@@ -1,8 +1,13 @@
 package blog
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/png"
 	"strings"
 	"testing"
 	"time"
@@ -57,9 +62,18 @@ func (f *fakeIllustrator) Generate(ctx context.Context, req IllustrationRequest)
 	}
 	return &Illustration{
 		URL: url, Provider: provider, Model: model,
-		Seed: int64(len(f.calls)), Width: req.Width, Height: req.Height,
+		Seed: int64(len(f.calls)), Width: req.Width, Height: req.Height, PNG: fakePicture,
 	}, nil
 }
+
+// fakePicture is a small real PNG, so a fake picture can go under a diagram.
+var fakePicture = func() []byte {
+	pic := image.NewRGBA(image.Rect(0, 0, 32, 18))
+	draw.Draw(pic, pic.Bounds(), image.NewUniform(color.RGBA{0xf0, 0x80, 0x20, 0xff}), image.Point{}, draw.Src)
+	var buf bytes.Buffer
+	_ = png.Encode(&buf, pic)
+	return buf.Bytes()
+}()
 
 func testRunner(images Illustrator) *Runner {
 	r := &Runner{logger: zap.NewNop()}
@@ -297,18 +311,18 @@ func TestGenerateCover_LetteringModelDrawsTheArticlesIdea(t *testing.T) {
 			t.Errorf("prompt carries %q, not meant for the cover:\n%s", not, call.Prompt)
 		}
 	}
-	if call.Text != imagegen.TextCaptions || strings.Join(call.ExpectText, "|") != "KUBERNETES|Gateway API|GatewayClass|Gateway|HTTPRoute|GRPCRoute" {
+	if call.Text != imagegen.TextLabels || strings.Join(call.ExpectText, "|") != "KUBERNETES|Gateway API|GatewayClass|Gateway|HTTPRoute|GRPCRoute" {
 		t.Errorf("cover text need = %d, expected words %v", call.Text, call.ExpectText)
 	}
 
-	// ERNIE alone captions covers but does not letter figures; with nothing
-	// that captions, a picture cover is the diagram.
+	// ERNIE alone does not letter figures, and a picture cover needs no model
+	// that letters: its picture has no words.
 	for _, tc := range []struct {
 		images            Illustrator
 		pictures, figures bool
 	}{
 		{&captionIllustrator{fakeIllustrator{enabled: true}}, true, false},
-		{&noLetterIllustrator{fakeIllustrator{enabled: true}}, false, false},
+		{&noLetterIllustrator{fakeIllustrator{enabled: true}}, true, false},
 	} {
 		r := testRunner(tc.images)
 		r.cfg.CoverStyle = CoverStylePicture

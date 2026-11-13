@@ -73,7 +73,8 @@ export function ArticleViewer({ article }: { article: BlogArticle }) {
         // The server keeps drawing after the browser stops waiting and saves
         // what it draws: on the workstation a redraw takes up to 20 minutes.
         toast.info("Still redrawing", {
-          description: "The image service takes up to 20 minutes. Reload this page then to see the new images.",
+          description:
+            "The image service takes up to 20 minutes. Reload this page then to see the new images and what the redraw did.",
         });
       } else {
         toast.error(apiErrorMessage(e, "Could not redraw the images"));
@@ -180,6 +181,7 @@ export function ArticleViewer({ article }: { article: BlogArticle }) {
           </button>
         </div>
       </div>
+      {article.image_redraw && <LastRedraw redraw={article.image_redraw} />}
 
       {/* Tabs. Sticky rather than an inner scroll region: the page scrolls in
           the shell's <main>, and nothing between it and this component has a
@@ -355,5 +357,30 @@ function SourceList({ references }: { references: BlogReference[] }) {
         </li>
       ))}
     </ol>
+  );
+}
+
+/** What the last Redraw images did, and why anything was not redrawn. */
+function LastRedraw({ redraw }: { redraw: NonNullable<BlogArticle["image_redraw"]> }) {
+  const drew =
+    [
+      redraw.cover_redrawn ? "the cover" : "",
+      redraw.figures_drawn ? `${redraw.figures_drawn} figure${redraw.figures_drawn === 1 ? "" : "s"}` : "",
+    ]
+      .filter(Boolean)
+      .join(" and ") || "nothing";
+  return (
+    <div className="mb-3 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+      <p>
+        Last redraw, {new Date(redraw.at).toLocaleString()}: drew {drew}.
+      </p>
+      {redraw.notes.length > 0 && (
+        <ul className="mt-1 list-disc space-y-0.5 pl-4">
+          {redraw.notes.map((n, i) => (
+            <li key={i}>{n}</li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }

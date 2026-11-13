@@ -46,6 +46,7 @@ func (b *blogIllustrator) Generate(ctx context.Context, req blog.IllustrationReq
 		BlogRunID:  req.RunID,
 		Text:       req.Text,
 		ExpectText: req.ExpectText,
+		NoText:     req.NoText,
 	})
 	if err != nil {
 		return nil, err

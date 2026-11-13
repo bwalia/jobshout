@@ -336,6 +336,17 @@ type BlogArticle struct {
 	// is the part that matters: without it a cover that came out well can be
 	// regenerated but never reproduced.
 	CoverImageMeta CoverImageMeta `json:"cover_image_meta,omitempty"`
+	// ImageRedraw is what the last Redraw images did. Kept because the page
+	// stops waiting long before a redraw on the workstation ends.
+	ImageRedraw *ImageRedraw `json:"image_redraw,omitempty"`
+}
+
+// ImageRedraw is the outcome of one Redraw images.
+type ImageRedraw struct {
+	At           time.Time `json:"at"`
+	Notes        []string  `json:"notes"`
+	FiguresDrawn int       `json:"figures_drawn"`
+	CoverRedrawn bool      `json:"cover_redrawn"`
 }
 
 // BlogArticlePost is the result of posting one article, written back to

@@ -66,6 +66,8 @@ type GenerateImageRequest struct {
 	BlogRunID *uuid.UUID
 	// ExpectText is every word the picture must show (imagegen.GenerateRequest).
 	ExpectText []string
+	// NoText asks for a picture with no words (imagegen.GenerateRequest).
+	NoText bool
 	// Text is how much readable text the picture carries: a hosted failure
 	// falls back only to a workstation model that letters that much.
 	Text imagegen.TextNeed
@@ -120,6 +122,7 @@ func (s *ImageService) Generate(ctx context.Context, req GenerateImageRequest) (
 		Seed:       seed,
 		Text:       req.Text,
 		ExpectText: req.ExpectText,
+		NoText:     req.NoText,
 	})
 	if err != nil {
 		return nil, err

@@ -53,6 +53,8 @@ type BlogRepository interface {
 	GetArticle(ctx context.Context, id uuid.UUID) (*model.BlogArticle, error)
 	// UpdateArticleCover writes a regenerated cover onto one article.
 	UpdateArticleCover(ctx context.Context, articleID uuid.UUID, coverURL, prompt string, meta model.CoverImageMeta) error
+	// UpdateArticleImageRedraw records what the article's last Redraw images did.
+	UpdateArticleImageRedraw(ctx context.Context, articleID uuid.UUID, redraw model.ImageRedraw) error
 	// UpdateArticleBody stores a redrawn article's markdown and the HTML it renders to.
 	UpdateArticleBody(ctx context.Context, articleID uuid.UUID, markdown, html string) error
 	// UpdateArticles writes the run's lightweight per-article summaries, so a
@@ -149,7 +151,7 @@ const blogArticleColumns = `
 	id, run_id, org_id, topic, title, slug, path, references_json, markdown, html,
 	post_uuid, post_status, posted_at, word_count, created_at,
 	cover_image_url, cover_image_prompt, cover_image_meta,
-	insights_item_id, insights_slug, insights_status, insights_posted_at, audience, industry`
+	insights_item_id, insights_slug, insights_status, insights_posted_at, audience, industry, image_redraw`
 
 // scanBlogArticle reads one row in blogArticleColumns order.
 func scanBlogArticle(row pgx.Row) (*model.BlogArticle, error) {
@@ -166,12 +168,13 @@ func scanBlogArticle(row pgx.Row) (*model.BlogArticle, error) {
 	// audience/industry are nullable: every article written before readers
 	// existed is a developer piece, which the audience package spells as empty.
 	var aud, industry *string
+	var redrawRaw []byte
 	err := row.Scan(
 		&a.ID, &a.RunID, &a.OrgID, &a.Topic, &title, &a.Slug, &a.Path, &referencesRaw,
 		&a.Markdown, &a.HTML,
 		&a.PostUUID, &a.PostStatus, &a.PostedAt, &a.WordCount, &a.CreatedAt,
 		&coverURL, &coverPrompt, &coverMetaRaw,
-		&a.InsightsItemID, &a.InsightsSlug, &a.InsightsStatus, &a.InsightsPostedAt, &aud, &industry,
+		&a.InsightsItemID, &a.InsightsSlug, &a.InsightsStatus, &a.InsightsPostedAt, &aud, &industry, &redrawRaw,
 	)
 	if err != nil {
 		return nil, err
@@ -194,6 +197,12 @@ func scanBlogArticle(row pgx.Row) (*model.BlogArticle, error) {
 	// Ignored on error, like references above: a malformed meta blob costs the
 	// seed, not the article.
 	_ = json.Unmarshal(coverMetaRaw, &a.CoverImageMeta)
+	if len(redrawRaw) > 0 {
+		var rd model.ImageRedraw
+		if json.Unmarshal(redrawRaw, &rd) == nil {
+			a.ImageRedraw = &rd
+		}
+	}
 	// Fall back to the topic so the UI always has something to show, matching
 	// what articleTitle did when the title was derived on every read.
 	if a.Title == "" {
@@ -479,6 +488,17 @@ func (r *blogRepository) UpdateArticleCover(ctx context.Context, articleID uuid.
 	}
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("blog_repo: update article cover: article %s not found", articleID)
+	}
+	return nil
+}
+
+func (r *blogRepository) UpdateArticleImageRedraw(ctx context.Context, articleID uuid.UUID, redraw model.ImageRedraw) error {
+	raw, err := json.Marshal(redraw)
+	if err != nil {
+		return fmt.Errorf("blog_repo: encode image redraw: %w", err)
+	}
+	if _, err := r.pool.Exec(ctx, `UPDATE blog_articles SET image_redraw = $2 WHERE id = $1`, articleID, raw); err != nil {
+		return fmt.Errorf("blog_repo: update article image redraw: %w", err)
 	}
 	return nil
 }

@@ -57,6 +57,9 @@ type GenerateRequest struct {
 	// workstation reads its picture back and redraws one whose lettering is
 	// wrong; a picture still wrong is an error. Hosted models ignore it.
 	ExpectText []string
+	// NoText asks for a picture with no words at all: the workstation reads it
+	// back and redraws one that shows any, like a wrong ExpectText.
+	NoText bool
 	// Text is how much readable text the picture carries. After a Gemini
 	// failure it falls back to the workstation only when the workstation's
 	// model letters that much (see Letters).

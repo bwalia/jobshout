@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"hash/fnv"
+	"image"
 	"image/color"
 	"image/png"
 	"math"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/fogleman/gg"
 	"github.com/golang/freetype/truetype"
+	xdraw "golang.org/x/image/draw"
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/gofont/gobold"
 	"golang.org/x/image/font/gofont/gomedium"
@@ -280,6 +282,13 @@ func padLabels(labels []string, minN, maxN int, defs ...string) []string {
 // seed (the slug) fixes the scatter in layouts that have any, so a redraw of
 // the same article gives the same picture.
 func drawDiagramCover(scene coverScene, accent, seed string) ([]byte, error) {
+	return drawSceneOn(nil, scene, accent, seed)
+}
+
+// drawSceneOn draws scene over art, a picture with no words, or over the
+// house ground when art is nil. The picture gives the cover its look; the
+// diagram, lettered here, gives it its words, so they are always spelt right.
+func drawSceneOn(art image.Image, scene coverScene, accent, seed string) ([]byte, error) {
 	if err := coverFonts(); err != nil {
 		return nil, fmt.Errorf("cover fonts: %w", err)
 	}
@@ -289,7 +298,11 @@ func drawDiagramCover(scene coverScene, accent, seed string) ([]byte, error) {
 	p := &pen{dc: dc, accent: coverAccentColour(accent), faces: map[string]font.Face{}, rnd: rand.New(rand.NewSource(int64(h.Sum64())))}
 	dc.SetLineJoin(gg.LineJoinRound)
 
-	p.ground()
+	if art != nil {
+		p.backdrop(art)
+	} else {
+		p.ground()
+	}
 	switch scene.Layout {
 	case layoutHub:
 		p.hub(scene)
@@ -338,6 +351,38 @@ func (p *pen) ground() {
 	p.fill(color.NRGBA{255, 255, 255, 13})
 	glow := gg.NewRadialGradient(800, 414, 0, 800, 414, 880)
 	glow.AddColorStop(0, p.accent.a(0.2))
+	glow.AddColorStop(1, p.accent.a(0))
+	dc.SetFillStyle(glow)
+	dc.DrawRectangle(0, 0, designW, designH)
+	dc.Fill()
+}
+
+// backdrop fills the frame with art, cropped to 16:9, and dims it toward the
+// house navy, most behind the diagram's band, so the boxes and labels stay the
+// brightest thing on the cover.
+func (p *pen) backdrop(art image.Image) {
+	b := art.Bounds()
+	crop := b
+	if w := b.Dy() * int(designW) / int(designH); w < b.Dx() {
+		crop.Min.X += (b.Dx() - w) / 2
+		crop.Max.X = crop.Min.X + w
+	} else if h := b.Dx() * int(designH) / int(designW); h < b.Dy() {
+		crop.Min.Y += (b.Dy() - h) / 2
+		crop.Max.Y = crop.Min.Y + h
+	}
+	dst := image.NewRGBA(image.Rect(0, 0, int(designW), int(designH)))
+	xdraw.CatmullRom.Scale(dst, dst.Bounds(), art, crop, xdraw.Src, nil)
+	dc := p.dc
+	dc.DrawImage(dst, 0, 0)
+	scrim := gg.NewLinearGradient(0, 0, 0, designH)
+	scrim.AddColorStop(0, cInk.a(0.5))
+	scrim.AddColorStop(0.45, cInk.a(0.8))
+	scrim.AddColorStop(1, cInk.a(0.62))
+	dc.SetFillStyle(scrim)
+	dc.DrawRectangle(0, 0, designW, designH)
+	dc.Fill()
+	glow := gg.NewRadialGradient(800, 414, 0, 800, 414, 880)
+	glow.AddColorStop(0, p.accent.a(0.14))
 	glow.AddColorStop(1, p.accent.a(0))
 	dc.SetFillStyle(glow)
 	dc.DrawRectangle(0, 0, designW, designH)

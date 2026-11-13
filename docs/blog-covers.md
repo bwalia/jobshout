@@ -81,37 +81,33 @@ cd server && COVER_PREVIEW_DIR=/tmp/covers go test ./internal/blog -run TestDiag
 
 ### `picture` (chart default)
 
-An infographic cover drawn by an image model that captions (needs
-`BLOG_COVER_IMAGES=true`): its eyebrow tag and the same `cover_scene` as the
-diagram, drawn as one labelled diagram with an icon per label, plus the stat if
-there is one. No title: the site prints it under the card, and ERNIE misspelt
-a 7-word one ("Premptive", "Kubernates"). The house style (deep navy, one
-accent from `cover_accent`, flat icons) is fixed in `infographicCoverPrompt`,
-so covers read as one series.
+A cover with a picture in it (needs `BLOG_COVER_IMAGES=true`), carrying the
+same `cover_scene` and eyebrow as the diagram. No title: the site prints it
+under the card. The house style (deep navy, one accent from `cover_accent`) is
+fixed in the prompts, so covers read as one series.
 
-`imagegen.Letters(provider, model, need)` decides who may draw what:
-`TextCaptions` (a cover's few labels) needs Gemini, OpenAI or ERNIE-Image;
-`TextLabels` (a figure's table or flowchart) needs Gemini or OpenAI.
+`imagegen.Letters(provider, model, need)` decides who may letter what:
+`TextLabels` (a cover's or figure's labels) needs Gemini or OpenAI.
 
-1. Gemini (`IMAGE_GEMINI_MODEL`, Nano Banana Pro by default) when
-   `GEMINI_API_KEY` is set. Image output has no free tier: the key needs billing.
-2. Otherwise, or when Gemini fails, the workstation, but only with a model that
-   captions (ERNIE-Image, Apache-2.0, close to Nano Banana 2 on LongText-Bench). Every ring sets `ai.imageModel: ernie-image-turbo`; its
-   weights (22 GB, no prompt enhancer) are in the workstation's HF cache. About
-   6 minutes a cover beside Ollama. ERNIE letters a picture right about two
-   times in three, so every cover and figure it draws is read back (Apple
-   Vision OCR, `image-service/app/textcheck.py`) against the words it must
-   show; a missing, misspelt, repeated or extra word gets it redrawn with a new
-   seed (`IMAGE_TEXT_ATTEMPTS`, default 2, but only while the try fits before
-   `IMAGE_TEXT_DEADLINE`, 540 s: the edge drops a request at 600 s, so a cover
-   gets one try per request and the platform asks again, up to 3 times), and a
-   picture still wrong is
-   refused, so the diagram of the same scene is filed instead — on a redraw
-   too, rather than keeping the old cover. The prompt holds
-   only words meant for the cover: a diffusion model letters whatever it reads.
-   With `z-image-turbo` this step is skipped.
-3. With neither, or when drawing fails, the diagram is filed: a cover whose
-   labels are gibberish is worse than the diagram.
+1. **A model that letters labels** — Gemini (`IMAGE_GEMINI_MODEL`, Nano Banana
+   Pro by default) when `GEMINI_API_KEY` is set (image output has no free tier:
+   the key needs billing), or OpenAI — draws the whole cover: one labelled
+   diagram with an icon per label (`infographicPrompt`). It never falls back to
+   the workstation for lettering.
+2. **Otherwise, or when that fails, a picture with no words under the diagram.**
+   Any image model draws an illustration of the scene's things (`artPrompt`,
+   1280×720, no text); the cover's diagram is then drawn over it in Go
+   (`drawSceneOn`), dimmed behind the boxes, so every label is spelt exactly.
+   ERNIE-Image letters labels badly — on int it misspelt a five-step cover three
+   times in three ("TPOD", "PROD" for "request") — so it is never asked to
+   letter. The workstation reads the picture back (Apple Vision OCR,
+   `image-service/app/textcheck.py`, `no_text`) and redraws one that shows any
+   word (`IMAGE_TEXT_ATTEMPTS`, default 2, only while the try ends before
+   `IMAGE_TEXT_DEADLINE`, 540 s: the edge drops a request at 600 s); a picture
+   still showing words is refused. The cover's meta is the picture's provider
+   and model plus `+scene:<layout>`.
+3. With no picture, the diagram alone is filed — on a redraw too, rather than
+   keeping the old cover — and the redraw's notes say why.
 
 See [image-generation.md](./image-generation.md) for providers and rings.
 
@@ -156,12 +152,15 @@ One structured-model call reads the whole article and plans both:
   with a lettering model if one is configured, otherwise as diagrams.
 
 A planned figure the article does not support (copied labels, `key: value`
-pairs) is planned once more, told why. Nothing is lost when drawing fails: the
-article keeps its figures if no new one is drawn — less any it does not
-support — and its cover if no new one can be stored. The answer is
+pairs, a bare list) is planned once more, told why. Nothing is lost when drawing
+fails: the article keeps its figures if no new one is drawn — less any it does
+not support — and its cover if no new one can be stored. The answer is
 `{"article", "notes", "figures_drawn", "cover_redrawn"}`; the page reports
-success only for what changed, and `notes` say why anything did not (a full
-image store, a refused CMS update).
+success only for what changed, and `notes` say why anything did not (no figure
+fits the article, the cover is its diagram alone, a full image store, a refused
+CMS update). A redraw on the workstation outlasts the page's 10-minute wait, so
+the outcome is also kept on the article (`image_redraw`, migration 078) and
+shown above its tabs.
 
 ## Fix coverless live posts without a JobShout article row (last resort)
 
@@ -189,11 +188,11 @@ When cloning a writer for a site ([writer-agents.md](./writer-agents.md)):
 
 - Covers are `picture` on the chart and fall back to `diagram`, which needs no
   image provider. In-article figures, in order: a hosted model that letters
-  labels (Gemini or OpenAI) draws the full figure; a flow or hub figure is then
-  drawn by a model that captions (ERNIE-Image) with the cover's prompt, its
-  scene's labels each once (the full figure prompt made ERNIE repeat and
-  misspell boxes); otherwise it is drawn as a vector diagram like the covers:
-  flow and process figures as steps, architecture and concept figures as a hub.
+  labels (Gemini or OpenAI) draws the full figure; otherwise a flow or hub
+  figure is drawn as a vector diagram like the covers — flow and process
+  figures as steps, architecture and concept figures as a hub — over a picture
+  with no words when an image model is free (ERNIE repeated and misspelt the
+  boxes it was asked to letter).
   Comparison figures need a lettering model (a comparison belongs in a table
   otherwise). A figure is dropped when two or more labels name something the
   article never mentions (a label's words of 4+ letters must be in it — models

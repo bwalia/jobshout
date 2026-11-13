@@ -52,6 +52,9 @@ class GenerateRequest(BaseModel):
     # is read back (textcheck) and redrawn with a new seed while its lettering
     # is wrong, up to IMAGE_TEXT_ATTEMPTS tries.
     expect_text: list[str] = Field(default_factory=list, max_length=40)
+    # A picture meant to have no words at all (a diagram is lettered over it):
+    # read back like expect_text, and redrawn when it shows any.
+    no_text: bool = False
 
 
 class GenerateResponse(BaseModel):
@@ -159,14 +162,15 @@ async def generate(req: GenerateRequest, caller: str = Depends(require_auth)):
         caller, model_name, width, height, steps, seed,
     )
 
-    attempts = config.TEXT_ATTEMPTS if req.expect_text else 1
+    check = bool(req.expect_text) or req.no_text
+    attempts = config.TEXT_ATTEMPTS if check else 1
     text_ok: bool | None = None
     issues: list[str] = []
     started = time.monotonic()
     for attempt in range(1, attempts + 1):
         began = time.monotonic()
         result = await _draw(req, model_name, width, height, steps, seed)
-        if not req.expect_text:
+        if not check:
             break
         seen = await asyncio.to_thread(textcheck.read_text, base64.b64decode(result.image_base64))
         if seen is None:
