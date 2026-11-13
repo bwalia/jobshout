@@ -16,6 +16,7 @@ dotenvy = { workspace = true }
 jobshout-api = { path = "../../crates/jobshout-api" }
 jobshout-applications = { path = "../../crates/jobshout-applications" }
 jobshout-auth = { path = "../../crates/jobshout-auth" }
+jobshout-billing = { path = "../../crates/jobshout-billing" }
 jobshout-candidates = { path = "../../crates/jobshout-candidates" }
 jobshout-content = { path = "../../crates/jobshout-content" }
 jobshout-events = { path = "../../crates/jobshout-events" }

@@ -2,6 +2,7 @@ use anyhow::Context;
 use jobshout_api::{router, AppState};
 use jobshout_applications::ApplicationService;
 use jobshout_auth::AccountService;
+use jobshout_billing::BillingService;
 use jobshout_candidates::CandidateService;
 use jobshout_content::InsightService;
 use jobshout_events::EventService;
@@ -96,7 +97,10 @@ async fn main() -> anyhow::Result<()> {
     let dashboard_enabled = env_flag("DASHBOARD_ENABLED");
     let messaging_enabled = env_flag("MESSAGING_ENABLED");
     let projects_live = env_flag("PROJECTS_LIVE");
+    let credits_enabled = env_flag("CREDITS_ENABLED");
+    let purchases_enabled = env_flag("PURCHASES_ENABLED");
     let freelance = FreelanceService::new(pool.clone());
+    let billing = BillingService::new(pool.clone());
     if projects_live && env_flag("PROJECTS_SEED_SAMPLES") {
         // Seed under a synthetic owner account so samples have an owner_account_id.
         match accounts
@@ -123,6 +127,7 @@ async fn main() -> anyhow::Result<()> {
         notifications: NotificationService::new(pool.clone()),
         messaging: MessagingService::new(pool.clone()),
         freelance,
+        billing,
         site_url: site_url.trim_end_matches('/').into(),
         internal_token: internal_token.map(Into::into),
         email_outbox_enabled,
@@ -130,6 +135,8 @@ async fn main() -> anyhow::Result<()> {
         dashboard_enabled,
         messaging_enabled,
         projects_live,
+        credits_enabled,
+        purchases_enabled,
     };
 
     let app = router(state);

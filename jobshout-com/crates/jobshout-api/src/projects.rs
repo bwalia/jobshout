@@ -180,13 +180,35 @@ async fn submit_bid(
     require_live(&state)?;
     let who = signed_in(&state, &headers).await?;
     let profile = ensure_candidate(&state, &who.email, &who.name).await?;
-    Ok(Json(
-        state
-            .freelance
-            .submit_bid(id, req, profile.id)
+    let account = state
+        .accounts
+        .ensure(&who.email, &who.name, who.agent)
+        .await
+        .map_err(err)?;
+    let project = state.freelance.get_project(id).await.map_err(err)?;
+    let mut bid = state
+        .freelance
+        .submit_bid(id, req, profile.id)
+        .await
+        .map_err(err)?;
+    if state.credits_enabled {
+        let cost = jobshout_billing::bid_cost_for_budget(
+            jobshout_freelance::FreelanceService::project_budget_for_cost(&project),
+        );
+        let spent = state
+            .billing
+            .spend_for_bid(account.id, bid.id, cost)
             .await
-            .map_err(err)?,
-    ))
+            .map_err(err)?;
+        if spent > 0 {
+            bid = state
+                .freelance
+                .set_bid_credits_spent(bid.id, spent)
+                .await
+                .map_err(err)?;
+        }
+    }
+    Ok(Json(bid))
 }
 
 async fn my_bids(

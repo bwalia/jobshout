@@ -126,6 +126,19 @@ impl FreelanceService {
         Ok(bid)
     }
 
+    pub async fn set_bid_credits_spent(
+        &self,
+        bid_id: BidId,
+        credits_spent: i32,
+    ) -> Result<Bid, DomainError> {
+        self.bid_repo.set_credits_spent(bid_id, credits_spent).await
+    }
+
+    /// Budget figure used for bid-cost bands (max if set, else min).
+    pub fn project_budget_for_cost(project: &Project) -> Option<rust_decimal::Decimal> {
+        project.budget_max.or(project.budget_min)
+    }
+
     pub async fn list_my_bids(
         &self,
         freelancer_id: UserId,

@@ -431,6 +431,35 @@ impl BidRepository {
         bid_from_row(row)
     }
 
+    pub async fn set_credits_spent(
+        &self,
+        bid_id: BidId,
+        credits_spent: i32,
+    ) -> Result<Bid, DomainError> {
+        let row = sqlx::query(
+            r#"
+            UPDATE bids
+            SET credits_spent = $2, updated_at = NOW()
+            WHERE id = $1
+            RETURNING
+                id, project_id, freelancer_id, bid_amount, hourly_rate,
+                estimated_hours, proposal, delivery_timeline, attachments,
+                status, is_shortlisted, client_rating, client_feedback,
+                freelancer_rating, freelancer_feedback, credits_spent, viewed_at,
+                decline_reason, created_at, updated_at
+            "#,
+        )
+        .bind(bid_id)
+        .bind(credits_spent)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| DomainError::Other(e.into()))?;
+        match row {
+            Some(r) => bid_from_row(r),
+            None => Err(DomainError::NotFound),
+        }
+    }
+
     pub async fn list_by_freelancer(
         &self,
         freelancer_id: Uuid,
