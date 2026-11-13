@@ -138,8 +138,13 @@ Implemented:
   `PlatformClient`; results land in `ai_drafts` for human approve/discard.
   Flag `AI_FEATURES` dark on int. No second AI runtime.
 
-Deferred: employer-side application review UI, MCP, interviews, iOS app screens,
-Linked Hire / Groups, remaining AI assistants, Teams/Agencies.
+- **Linked Hire (Phase 3, flag-gated):** crate `jobshout-hire`, migration `0017`
+  (orgs, members, requisitions, pipeline stages, shortlist, invitations). APIs under
+  `/api/v1/hire/*` are org-scoped. Web `/hire`. Flag `HIRE_ENABLED` dark on int.
+  Interviews/scorecards and recruiter analytics still thin.
+
+Deferred: employer-side application review UI, MCP, interviews depth, iOS,
+Linked Groups, remaining AI, Teams/Agencies.
 
 North-star: the full Rust + Next.js + Swift build prompt (agents, MCP, interviews,
 policy, globalisation).

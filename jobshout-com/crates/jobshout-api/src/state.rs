@@ -7,6 +7,7 @@ use jobshout_candidates::CandidateService;
 use jobshout_content::InsightService;
 use jobshout_events::EventService;
 use jobshout_freelance::FreelanceService;
+use jobshout_hire::HireService;
 use jobshout_integrations::PlatformClient;
 use jobshout_jobs::JobService;
 use jobshout_messaging::MessagingService;
@@ -28,6 +29,7 @@ pub struct AppState {
     pub notifications: NotificationService,
     pub messaging: MessagingService,
     pub freelance: FreelanceService,
+    pub hire: HireService,
     pub billing: BillingService,
     /// Shared pool for AI draft persistence (Phase 5a).
     pub ai_pool: Option<PgPool>,
@@ -52,4 +54,6 @@ pub struct AppState {
     pub purchases_enabled: bool,
     /// Phase 5a: marketplace AI assistants (drafts only; human confirms).
     pub ai_features: bool,
+    /// Phase 3: Linked Hire.
+    pub hire_enabled: bool,
 }

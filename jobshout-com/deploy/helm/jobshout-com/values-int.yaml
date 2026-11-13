@@ -44,6 +44,8 @@ credits:
   purchasesEnabled: false
 aiFeatures:
   enabled: false
+hire:
+  enabled: false
 emailOutbox:
   enabled: false
 worker:

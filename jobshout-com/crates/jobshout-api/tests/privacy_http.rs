@@ -16,6 +16,7 @@ use jobshout_candidates::CandidateService;
 use jobshout_content::InsightService;
 use jobshout_events::EventService;
 use jobshout_freelance::FreelanceService;
+use jobshout_hire::HireService;
 use jobshout_jobs::{seed_organisation_id, JobService};
 use jobshout_messaging::MessagingService;
 use jobshout_notifications::NotificationService;
@@ -83,6 +84,7 @@ fn state(pool: PgPool) -> AppState {
         notifications: NotificationService::new(pool.clone()),
         messaging: MessagingService::new(pool.clone()),
         freelance: FreelanceService::new(pool.clone()),
+        hire: HireService::new(pool.clone()),
         billing: BillingService::new(pool.clone()),
         ai_pool: Some(pool),
         platform: None,
@@ -96,6 +98,7 @@ fn state(pool: PgPool) -> AppState {
         credits_enabled: false,
         purchases_enabled: false,
         ai_features: false,
+        hire_enabled: false,
     }
 }
 
