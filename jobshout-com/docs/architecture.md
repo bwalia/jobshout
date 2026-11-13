@@ -151,8 +151,13 @@ Implemented:
   Skill Gap Analysis registered as Go builtins (Career Assistant / Interview Prep
   reuse Career Ops; Course Generator already exists). Drafts only; human confirms.
 
+- **Teams & agencies (Phase 6, flag-gated):** migration `0019` (`marketplace_teams`,
+  members, `bids.team_id`, `analytics_daily`). APIs `/api/v1/teams`, analytics
+  read. Web `/teams`. Flag `TEAMS_ENABLED` dark. Pooled credits and rich
+  dashboards still thin.
+
 Deferred: employer-side application review UI, MCP, interviews depth, iOS,
-Teams/Agencies & analytics polish.
+deeper Hire/Groups UX, Stripe live checkout, polished analytics.
 
 North-star: the full Rust + Next.js + Swift build prompt (agents, MCP, interviews,
 policy, globalisation).

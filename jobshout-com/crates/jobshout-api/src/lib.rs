@@ -18,6 +18,7 @@ mod profiles;
 mod projects;
 mod showcase;
 mod state;
+mod teams;
 
 use axum::{routing::get, Json, Router};
 use serde::Serialize;
@@ -50,6 +51,7 @@ pub fn router(state: AppState) -> Router {
         .merge(ai::routes())
         .merge(hire::routes())
         .merge(groups::routes())
+        .merge(teams::routes())
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
         .with_state(state)

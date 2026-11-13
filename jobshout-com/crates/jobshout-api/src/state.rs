@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use jobshout_analytics::AnalyticsService;
 use jobshout_applications::ApplicationService;
 use jobshout_auth::AccountService;
 use jobshout_billing::BillingService;
@@ -32,6 +33,7 @@ pub struct AppState {
     pub freelance: FreelanceService,
     pub hire: HireService,
     pub groups: GroupsService,
+    pub analytics: AnalyticsService,
     pub billing: BillingService,
     /// Shared pool for AI draft persistence (Phase 5a).
     pub ai_pool: Option<PgPool>,
@@ -60,4 +62,6 @@ pub struct AppState {
     pub hire_enabled: bool,
     /// Phase 4: Linked Groups.
     pub groups_enabled: bool,
+    /// Phase 6: Teams / agencies / analytics.
+    pub teams_enabled: bool,
 }

@@ -1,4 +1,5 @@
 use anyhow::Context;
+use jobshout_analytics::AnalyticsService;
 use jobshout_api::{router, AppState};
 use jobshout_applications::ApplicationService;
 use jobshout_auth::AccountService;
@@ -105,9 +106,11 @@ async fn main() -> anyhow::Result<()> {
     let ai_features = env_flag("AI_FEATURES");
     let hire_enabled = env_flag("HIRE_ENABLED");
     let groups_enabled = env_flag("GROUPS_ENABLED");
+    let teams_enabled = env_flag("TEAMS_ENABLED");
     let freelance = FreelanceService::new(pool.clone());
     let hire = HireService::new(pool.clone());
     let groups = GroupsService::new(pool.clone());
+    let analytics = AnalyticsService::new(pool.clone());
     let billing = BillingService::new(pool.clone());
     let platform = PlatformClient::from_env();
     if ai_features && platform.is_none() {
@@ -141,6 +144,7 @@ async fn main() -> anyhow::Result<()> {
         freelance,
         hire,
         groups,
+        analytics,
         billing,
         ai_pool: Some(pool.clone()),
         platform,
@@ -156,6 +160,7 @@ async fn main() -> anyhow::Result<()> {
         ai_features,
         hire_enabled,
         groups_enabled,
+        teams_enabled,
     };
 
     let app = router(state);

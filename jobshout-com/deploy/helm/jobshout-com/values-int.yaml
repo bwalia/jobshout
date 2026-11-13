@@ -48,6 +48,8 @@ hire:
   enabled: false
 groups:
   enabled: false
+teams:
+  enabled: false
 emailOutbox:
   enabled: false
 worker:
