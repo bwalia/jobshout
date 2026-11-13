@@ -17,6 +17,7 @@ jobshout-content = { path = "../jobshout-content" }
 jobshout-domain = { path = "../jobshout-domain" }
 jobshout-events = { path = "../jobshout-events" }
 jobshout-freelance = { path = "../jobshout-freelance" }
+jobshout-integrations = { path = "../jobshout-integrations" }
 jobshout-jobs = { path = "../jobshout-jobs" }
 jobshout-matching = { path = "../jobshout-matching" }
 jobshout-messaging = { path = "../jobshout-messaging" }
@@ -26,6 +27,7 @@ jobshout-showcase = { path = "../jobshout-showcase" }
 jobshout-users = { path = "../jobshout-users" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sqlx = { workspace = true }
 tower-http = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }

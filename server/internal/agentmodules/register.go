@@ -26,12 +26,15 @@ import (
 	"github.com/jobshout/server/internal/marketingmanager"
 	"github.com/jobshout/server/internal/metalead"
 	"github.com/jobshout/server/internal/pentester"
+	"github.com/jobshout/server/internal/projectbreakdown"
+	"github.com/jobshout/server/internal/proposalgen"
 	"github.com/jobshout/server/internal/prreview"
 	"github.com/jobshout/server/internal/research"
 	"github.com/jobshout/server/internal/secretsrot"
 	"github.com/jobshout/server/internal/seo"
 	"github.com/jobshout/server/internal/service"
 	"github.com/jobshout/server/internal/simpro"
+	"github.com/jobshout/server/internal/talentmatch"
 	"github.com/jobshout/server/internal/video"
 	"github.com/jobshout/server/internal/waflab"
 )
@@ -61,6 +64,9 @@ type Deps struct {
 	MarketingEmail   marketingemail.Runner
 	Marketing        *marketingmanager.Service
 	MetaLead         metalead.Runner
+	ProposalGen      proposalgen.Runner
+	ProjectBreakdown projectbreakdown.Runner
+	TalentMatch      talentmatch.Runner
 }
 
 func init() {
@@ -99,6 +105,9 @@ func Register(d Deps) {
 	agentmodule.Register(marketingemail.Module(d.MarketingEmail))
 	agentmodule.Register(marketingmanager.Module(d.Marketing))
 	agentmodule.Register(metalead.Module(d.MetaLead))
+	agentmodule.Register(proposalgen.Module(d.ProposalGen))
+	agentmodule.Register(projectbreakdown.Module(d.ProjectBreakdown))
+	agentmodule.Register(talentmatch.Module(d.TalentMatch))
 }
 
 type imageAdapter struct{ svc *service.ImageService }

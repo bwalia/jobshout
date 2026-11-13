@@ -79,6 +79,12 @@ spec:
               value: {{ (.Values.credits).purchasesEnabled | default false | quote }}
             # Stripe keys from Vault when purchasesEnabled (never chart literals):
             # jobshout-com/<ring>/stripe → STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET
+            - name: AI_FEATURES
+              value: {{ (.Values.aiFeatures).enabled | default false | quote }}
+            # Platform launch (Vault jobshout-com/<ring>/platform): JOBSHOUT_PLATFORM_URL,
+            # JOBSHOUT_PLATFORM_API_KEY, JOBSHOUT_PLATFORM_PROJECT_ID,
+            # JOBSHOUT_PLATFORM_AGENT_{PROPOSAL,BREAKDOWN,TALENT}
+
           # envFrom, not env+valueFrom: see the note in web.yaml.
           envFrom:
             - secretRef:
