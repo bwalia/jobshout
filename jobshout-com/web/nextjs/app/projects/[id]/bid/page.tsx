@@ -11,17 +11,21 @@ import {
 } from "@/components/icons";
 import {
   formatProjectBudget,
-  getMockProject,
+  getProject,
   projectTypeLabel,
 } from "@/lib/projects";
 
-export function generateMetadata({ params }: { params: { id: string } }): Metadata {
-  const project = getMockProject(params.id);
+export const dynamic = "force-dynamic";
+
+type Params = { params: { id: string } };
+
+export async function generateMetadata({ params }: Params): Promise<Metadata> {
+  const project = await getProject(params.id).catch(() => null);
   return { title: project ? `Bid · ${project.title}` : "Submit bid" };
 }
 
-export default function ProjectBidPage({ params }: { params: { id: string } }) {
-  const project = getMockProject(params.id);
+export default async function ProjectBidPage({ params }: Params) {
+  const project = await getProject(params.id);
   if (!project) notFound();
 
   return (
@@ -41,8 +45,7 @@ export default function ProjectBidPage({ params }: { params: { id: string } }) {
           </h1>
           <p className="mt-3 max-w-xl text-base leading-relaxed text-mute">
             Propose your price, timeline, and approach for{" "}
-            <span className="font-semibold text-ink">{project.title}</span>. The client sees this
-            alongside other freelancers’ bids.
+            <span className="font-semibold text-ink">{project.title}</span>.
           </p>
 
           <div className="mt-9">
@@ -53,8 +56,8 @@ export default function ProjectBidPage({ params }: { params: { id: string } }) {
         <aside className="lg:sticky lg:top-24 lg:self-start">
           <div className="surface-card p-5">
             <div className="flex flex-wrap gap-1.5">
-              <Badge tone="neutral">{projectTypeLabel(project.type)}</Badge>
-              <Badge tone="brand">{project.bids} bids so far</Badge>
+              <Badge tone="neutral">{projectTypeLabel(project.project_type)}</Badge>
+              <Badge tone="brand">{project.bid_count ?? 0} bids so far</Badge>
             </div>
             <p className="mt-3 break-words font-display text-base font-semibold leading-snug text-ink">
               {project.title}
@@ -63,23 +66,23 @@ export default function ProjectBidPage({ params }: { params: { id: string } }) {
 
             <dl className="mt-5 space-y-3 border-t border-line pt-4 text-sm">
               <Row icon={<WalletIcon className="h-4 w-4" />} label="Budget">
-                {formatProjectBudget(project.budget)}
+                {formatProjectBudget(project)}
               </Row>
               <Row icon={<ClockIcon className="h-4 w-4" />} label="Duration">
-                {project.duration}
+                {project.duration_estimate || "Flexible"}
               </Row>
-              <Row icon={<BriefcaseIcon className="h-4 w-4" />} label="Client">
-                {project.client.name}
+              <Row icon={<BriefcaseIcon className="h-4 w-4" />} label="Level">
+                {project.experience_level || "Any"}
               </Row>
             </dl>
 
-            {project.deliverables.length > 0 ? (
+            {(project.deliverables?.length ?? 0) > 0 ? (
               <div className="mt-5 border-t border-line pt-4">
                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-mute">
                   Deliverables
                 </p>
                 <ul className="mt-3 space-y-1.5">
-                  {project.deliverables.slice(0, 4).map((d) => (
+                  {project.deliverables.slice(0, 4).map((d: string) => (
                     <li key={d} className="text-xs leading-relaxed text-body">
                       · {d}
                     </li>
@@ -106,9 +109,9 @@ function Row({
   return (
     <div className="flex items-start gap-2.5">
       <span className="mt-0.5 text-mute">{icon}</span>
-      <div className="min-w-0">
-        <dt className="text-xs text-mute">{label}</dt>
-        <dd className="text-sm font-medium text-ink">{children}</dd>
+      <div>
+        <dt className="text-xs uppercase tracking-[0.12em] text-mute">{label}</dt>
+        <dd className="mt-0.5 font-medium text-ink">{children}</dd>
       </div>
     </div>
   );

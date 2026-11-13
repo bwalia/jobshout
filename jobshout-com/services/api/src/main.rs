@@ -5,6 +5,7 @@ use jobshout_auth::AccountService;
 use jobshout_candidates::CandidateService;
 use jobshout_content::InsightService;
 use jobshout_events::EventService;
+use jobshout_freelance::FreelanceService;
 use jobshout_jobs::{seed_organisation_id, JobService};
 use jobshout_messaging::MessagingService;
 use jobshout_notifications::NotificationService;
@@ -94,6 +95,22 @@ async fn main() -> anyhow::Result<()> {
     let members_rich_enabled = env_flag("MEMBERS_RICH_ENABLED");
     let dashboard_enabled = env_flag("DASHBOARD_ENABLED");
     let messaging_enabled = env_flag("MESSAGING_ENABLED");
+    let projects_live = env_flag("PROJECTS_LIVE");
+    let freelance = FreelanceService::new(pool.clone());
+    if projects_live && env_flag("PROJECTS_SEED_SAMPLES") {
+        // Seed under a synthetic owner account so samples have an owner_account_id.
+        match accounts
+            .ensure("projects-samples@jobshout.local", "Sample Projects", true)
+            .await
+        {
+            Ok(owner) => match freelance.seed_samples(owner.id).await {
+                Ok(0) => {}
+                Ok(n) => tracing::info!(count = n, "seeded sample projects"),
+                Err(e) => tracing::warn!(error = ?e, "could not seed sample projects"),
+            },
+            Err(e) => tracing::warn!(error = ?e, "could not ensure sample projects owner"),
+        }
+    }
     let state = AppState {
         jobs: JobService::new(pool.clone(), seed_organisation_id()),
         candidates: CandidateService::new(pool.clone()),
@@ -104,13 +121,15 @@ async fn main() -> anyhow::Result<()> {
         accounts,
         events: EventService::new(pool.clone()),
         notifications: NotificationService::new(pool.clone()),
-        messaging: MessagingService::new(pool),
+        messaging: MessagingService::new(pool.clone()),
+        freelance,
         site_url: site_url.trim_end_matches('/').into(),
         internal_token: internal_token.map(Into::into),
         email_outbox_enabled,
         members_rich_enabled,
         dashboard_enabled,
         messaging_enabled,
+        projects_live,
     };
 
     let app = router(state);

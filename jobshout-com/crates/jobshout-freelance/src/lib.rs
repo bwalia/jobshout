@@ -53,16 +53,24 @@ impl FreelanceService {
     pub async fn create_project(
         &self,
         req: CreateProjectRequest,
-        _client_id: UserId,
+        owner_account_id: UserId,
     ) -> Result<Project, DomainError> {
         validate_create_project(&req)?;
-        let project = self.project_repo.create(&req).await?;
+        let project = self.project_repo.create(&req, owner_account_id).await?;
         tracing::info!(
             project_id = %project.id,
             project_type = project.project_type.as_str(),
             "project created"
         );
         Ok(project)
+    }
+
+    pub async fn close_expired_bidding(&self) -> Result<u64, DomainError> {
+        self.project_repo.close_expired_bidding().await
+    }
+
+    pub async fn seed_samples(&self, owner_account_id: UserId) -> Result<usize, DomainError> {
+        self.project_repo.seed_samples(owner_account_id).await
     }
 
     pub async fn list_bids(

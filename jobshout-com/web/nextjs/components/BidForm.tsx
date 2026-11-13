@@ -2,15 +2,18 @@
 
 import Link from "next/link";
 import { FormEvent, useState } from "react";
+import { useSession } from "next-auth/react";
 import { Button, ErrorNotice, Field, Input, Textarea, buttonClass } from "@/components/ui";
 import { CheckCircleIcon, SendIcon } from "@/components/icons";
-import type { MockProject } from "@/lib/projects";
-import { formatProjectBudget } from "@/lib/projects";
+import { formatProjectBudget, submitBid, type Project } from "@/lib/projects";
 
-type FieldErrors = Partial<Record<"amount" | "hourly_rate" | "estimated_hours" | "proposal" | "delivery_timeline", string>>;
+type FieldErrors = Partial<
+  Record<"amount" | "hourly_rate" | "estimated_hours" | "proposal" | "delivery_timeline", string>
+>;
 
-export function BidForm({ project }: { project: MockProject }) {
-  const isHourly = project.type === "hourly" || project.budget.kind === "hourly";
+export function BidForm({ project }: { project: Project }) {
+  const { data: session } = useSession();
+  const isHourly = project.project_type === "hourly";
   const [submitted, setSubmitted] = useState(false);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -25,7 +28,7 @@ export function BidForm({ project }: { project: MockProject }) {
         <h2 className="mt-5 font-display text-2xl font-semibold text-ink">Bid submitted</h2>
         <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-mute">
           Your proposal for <span className="font-semibold text-ink">{project.title}</span> is with
-          the client. They can shortlist or message you from their project inbox.
+          the client.
         </p>
         <div className="mt-7 flex flex-wrap justify-center gap-3">
           <Link href={`/projects/${project.id}`} className={buttonClass("primary", "md")}>
@@ -39,157 +42,91 @@ export function BidForm({ project }: { project: MockProject }) {
     );
   }
 
-  function onSubmit(e: FormEvent<HTMLFormElement>) {
+  async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setFormError(null);
+    if (!session?.user?.email) {
+      setFormError("Sign in to submit a proposal.");
+      return;
+    }
     const fd = new FormData(e.currentTarget);
     const proposal = String(fd.get("proposal") ?? "").trim();
     const delivery = String(fd.get("delivery_timeline") ?? "").trim();
     const next: FieldErrors = {};
 
     if (proposal.length < 40) {
-      next.proposal = "Write at least a short proposal (40+ characters) so the client knows your plan.";
+      next.proposal = "Write at least a short proposal (40+ characters).";
     }
-    if (!delivery) {
-      next.delivery_timeline = "How long will this take?";
-    }
+    if (!delivery) next.delivery_timeline = "How long will this take?";
 
+    let bid_amount: number | null = null;
+    let hourly_rate: number | null = null;
+    let estimated_hours: number | null = null;
     if (isHourly) {
-      const rate = Number(fd.get("hourly_rate"));
-      const hours = Number(fd.get("estimated_hours"));
-      if (!rate || rate <= 0) next.hourly_rate = "Enter a positive hourly rate.";
-      if (!hours || hours <= 0) next.estimated_hours = "Estimate total hours.";
+      hourly_rate = Number(fd.get("hourly_rate")) || null;
+      estimated_hours = Number(fd.get("estimated_hours")) || null;
+      if (!hourly_rate || hourly_rate <= 0) next.hourly_rate = "Enter a positive hourly rate.";
+      if (!estimated_hours || estimated_hours <= 0) next.estimated_hours = "Estimate hours.";
     } else {
-      const amount = Number(fd.get("amount"));
-      if (!amount || amount <= 0) next.amount = "Enter your fixed bid amount.";
-      if (project.budget.kind === "fixed") {
-        if (amount < project.budget.min) {
-          next.amount = `Below the client’s minimum ($${project.budget.min}).`;
-        } else if (amount > project.budget.max * 1.5) {
-          next.amount = `Far above the stated budget ($${project.budget.max}). Explain why in the proposal if intentional.`;
-        }
-      }
+      bid_amount = Number(fd.get("amount")) || null;
+      if (!bid_amount || bid_amount <= 0) next.amount = "Enter a positive bid amount.";
     }
 
     setErrors(next);
-    if (Object.keys(next).length > 0) {
-      setFormError("Fix the highlighted fields and try again.");
-      return;
-    }
+    if (Object.keys(next).length) return;
 
     setPending(true);
-    // Mock submit until the freelance API is wired to these pages.
-    window.setTimeout(() => {
-      setPending(false);
+    try {
+      await submitBid(
+        { email: session.user.email, name: session.user.name ?? null },
+        project.id,
+        {
+          bid_amount,
+          hourly_rate,
+          estimated_hours,
+          proposal,
+          delivery_timeline: delivery,
+        },
+      );
       setSubmitted(true);
-    }, 600);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Could not submit bid");
+    } finally {
+      setPending(false);
+    }
   }
 
   return (
-    <form onSubmit={onSubmit} className="space-y-6" noValidate>
+    <form onSubmit={onSubmit} className="surface-card space-y-4 p-5 sm:p-6">
+      <div>
+        <h3 className="font-display text-lg font-semibold text-ink">Your proposal</h3>
+        <p className="mt-1 text-sm text-mute">Budget: {formatProjectBudget(project)}</p>
+      </div>
       {formError ? <ErrorNotice title={formError} /> : null}
-
-      <p className="rounded-xl border border-line bg-subtle px-4 py-3 text-sm text-body">
-        Client budget: <span className="font-semibold text-ink">{formatProjectBudget(project.budget)}</span>
-        {" · "}
-        {project.type.replace(/_/g, " ")}
-      </p>
-
       {isHourly ? (
-        <div className="grid gap-5 sm:grid-cols-2">
-          <Field label="Your hourly rate (USD)" htmlFor="hourly_rate" required error={errors.hourly_rate}>
-            <Input
-              id="hourly_rate"
-              name="hourly_rate"
-              type="number"
-              min={1}
-              step="1"
-              placeholder={project.budget.kind === "hourly" ? String(project.budget.rate) : "55"}
-              aria-invalid={Boolean(errors.hourly_rate)}
-            />
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Hourly rate" htmlFor="hourly_rate" error={errors.hourly_rate}>
+            <Input id="hourly_rate" name="hourly_rate" type="number" min={1} step="1" />
           </Field>
-          <Field label="Estimated hours" htmlFor="estimated_hours" required error={errors.estimated_hours}>
-            <Input
-              id="estimated_hours"
-              name="estimated_hours"
-              type="number"
-              min={1}
-              step="1"
-              placeholder="40"
-              aria-invalid={Boolean(errors.estimated_hours)}
-            />
+          <Field label="Estimated hours" htmlFor="estimated_hours" error={errors.estimated_hours}>
+            <Input id="estimated_hours" name="estimated_hours" type="number" min={1} step="1" />
           </Field>
         </div>
       ) : (
-        <Field label="Your bid amount (USD)" htmlFor="amount" required error={errors.amount}>
-          <Input
-            id="amount"
-            name="amount"
-            type="number"
-            min={1}
-            step="1"
-            placeholder={
-              project.budget.kind === "fixed"
-                ? String(Math.round((project.budget.min + project.budget.max) / 2))
-                : "2500"
-            }
-            aria-invalid={Boolean(errors.amount)}
-          />
+        <Field label="Bid amount" htmlFor="amount" error={errors.amount}>
+          <Input id="amount" name="amount" type="number" min={1} step="1" />
         </Field>
       )}
-
-      <Field
-        label="Delivery timeline"
-        htmlFor="delivery_timeline"
-        required
-        hint="Be specific — e.g. “3 weeks after kickoff” or “10 business days”."
-        error={errors.delivery_timeline}
-      >
-        <Input
-          id="delivery_timeline"
-          name="delivery_timeline"
-          placeholder={project.duration}
-          aria-invalid={Boolean(errors.delivery_timeline)}
-        />
+      <Field label="Proposal" htmlFor="proposal" error={errors.proposal}>
+        <Textarea id="proposal" name="proposal" rows={6} required />
       </Field>
-
-      <Field
-        label="Proposal"
-        htmlFor="proposal"
-        required
-        hint="Cover approach, relevant experience, and how you’ll hit the deliverables."
-        error={errors.proposal}
-      >
-        <Textarea
-          id="proposal"
-          name="proposal"
-          rows={8}
-          placeholder="I’ve shipped similar storefronts… Here’s how I’d approach your milestones…"
-          aria-invalid={Boolean(errors.proposal)}
-        />
+      <Field label="Delivery timeline" htmlFor="delivery_timeline" error={errors.delivery_timeline}>
+        <Input id="delivery_timeline" name="delivery_timeline" placeholder="2 weeks" />
       </Field>
-
-      <div className="flex flex-wrap items-center gap-3 pt-2">
-        <Button type="submit" size="lg" disabled={pending}>
-          {pending ? (
-            <>
-              <span
-                aria-hidden
-                className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
-              />
-              Submitting…
-            </>
-          ) : (
-            <>
-              <SendIcon className="h-4 w-4" />
-              Submit bid
-            </>
-          )}
-        </Button>
-        <Link href={`/projects/${project.id}`} className={buttonClass("ghost", "md")}>
-          Cancel
-        </Link>
-      </div>
+      <Button type="submit" disabled={pending}>
+        <SendIcon className="h-4 w-4" />
+        {pending ? "Submitting…" : "Submit proposal"}
+      </Button>
     </form>
   );
 }

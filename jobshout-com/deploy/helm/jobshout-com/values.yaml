@@ -122,6 +122,9 @@ dashboard:
   enabled: false
 messaging:
   enabled: false
+projectsLive:
+  enabled: false
+  seedSamples: false
 
 # Phase 0 event spine. Worker drains email_outbox; scheduler recovers stale rows.
 # SMTP credentials come from WSL Vault (see vault comments below) — never commit values.

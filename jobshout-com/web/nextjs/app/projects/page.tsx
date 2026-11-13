@@ -1,27 +1,39 @@
 import Link from "next/link";
-import { buttonClass } from "@/components/ui";
+import type { Metadata } from "next";
+import { buttonClass, EmptyState } from "@/components/ui";
 import { SearchIcon, SlidersIcon, BriefcaseIcon, WalletIcon, ClockIcon } from "@/components/icons";
-import { MOCK_PROJECTS, formatProjectBudget, projectTypeLabel } from "@/lib/projects";
+import {
+  formatProjectBudget,
+  listProjects,
+  projectTypeLabel,
+  type Project,
+} from "@/lib/projects";
 
-export default function ProjectsPage() {
-  const projects = MOCK_PROJECTS;
+export const dynamic = "force-dynamic";
 
-  const categories = [
-    { name: "Web Development", count: 42 },
-    { name: "Mobile Development", count: 28 },
-    { name: "Design & Creative", count: 35 },
-    { name: "Writing & Content", count: 19 },
-    { name: "Marketing & Sales", count: 23 },
-    { name: "DevOps & Cloud", count: 31 },
-  ];
+export const metadata: Metadata = {
+  title: "Projects",
+  description: "Browse freelance projects and submit proposals on JobShout.",
+  alternates: { canonical: "/projects" },
+};
+
+export default async function ProjectsPage() {
+  let projects: Project[] = [];
+  let dark = false;
+  let error = "";
+  try {
+    projects = await listProjects();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Could not load projects";
+    if (msg.includes("(404)")) dark = true;
+    else error = msg;
+  }
 
   return (
     <div className="mx-auto max-w-board px-5 py-8 sm:px-8">
-      {/* Hero Section */}
       <div className="mb-10 text-center">
         <h1 className="font-display text-[clamp(2.5rem,6vw,3.5rem)] font-semibold leading-[1.02] tracking-[-0.035em] text-ink">
-          Find freelance projects worth
-          <br className="hidden sm:block" />{" "}
+          Find freelance projects worth{" "}
           <span className="relative inline-block">
             shouting about
             <span
@@ -35,180 +47,85 @@ export default function ProjectsPage() {
         </p>
       </div>
 
-      {/* Stats */}
-      <div className="mx-auto mb-10 grid max-w-2xl grid-cols-1 gap-px overflow-hidden rounded-card border border-line bg-line sm:grid-cols-4">
-        <div className="bg-surface p-6 text-center">
-          <div className="font-display text-2xl font-semibold text-ink">156</div>
-          <div className="mt-1 text-sm text-mute">Active Projects</div>
+      <div className="mb-8 flex flex-wrap items-center gap-4">
+        <div className="relative min-w-[12rem] flex-1">
+          <SearchIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-mute" />
+          <input
+            type="search"
+            placeholder="Search projects (React, design, writing, etc.)"
+            className="w-full rounded-pill border border-line bg-bg py-2.5 pl-10 pr-4 text-ink placeholder:text-mute"
+            disabled
+            aria-disabled
+          />
         </div>
-        <div className="bg-surface p-6 text-center">
-          <div className="font-display text-2xl font-semibold text-ink">$42K</div>
-          <div className="mt-1 text-sm text-mute">Average Budget</div>
-        </div>
-        <div className="bg-surface p-6 text-center">
-          <div className="font-display text-2xl font-semibold text-ink">824</div>
-          <div className="mt-1 text-sm text-mute">Freelancers</div>
-        </div>
-        <div className="bg-surface p-6 text-center">
-          <div className="font-display text-2xl font-semibold text-ink">4.8</div>
-          <div className="mt-1 text-sm text-mute">Avg. Rating</div>
-        </div>
+        <button type="button" className={buttonClass("secondary", "md")} disabled>
+          <SlidersIcon className="h-4 w-4" />
+          Filters
+        </button>
+        <Link href="/projects/post" className={buttonClass("primary", "md")}>
+          <BriefcaseIcon className="h-4 w-4" />
+          Post Project
+        </Link>
       </div>
 
-      {/* Search & Filters */}
-      <div className="mb-8">
-        <div className="flex items-center gap-4">
-          <div className="flex-1">
-            <div className="relative">
-              <SearchIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-mute" />
-              <input
-                type="search"
-                placeholder="Search projects (React, design, writing, etc.)"
-                className="w-full rounded-pill border border-line bg-bg py-2.5 pl-10 pr-4 text-ink placeholder:text-mute"
-              />
-            </div>
-          </div>
-          <button className={buttonClass("secondary", "md")}>
-            <SlidersIcon className="h-4 w-4" />
-            Filters
-          </button>
-          <Link href="/projects/post" className={buttonClass("primary", "md")}>
-            <BriefcaseIcon className="h-4 w-4" />
-            Post Project
-          </Link>
-        </div>
-      </div>
+      {dark ? (
+        <EmptyState
+          icon={<BriefcaseIcon className="h-6 w-6" />}
+          title="Projects marketplace is dark on this ring"
+          body="Set PROJECTS_LIVE to list and post real projects. Until then, the board stays empty."
+        />
+      ) : null}
+      {error ? <p className="text-mute">{error}</p> : null}
 
-      <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
-        {/* Main Content */}
-        <div className="lg:col-span-2">
-          <div className="space-y-6">
-            {projects.map((project) => (
-              <div key={project.id} className="rounded-card border border-line bg-surface p-6">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <h3 className="font-display text-xl font-semibold text-ink">
-                      <Link href={`/projects/${project.id}`} className="hover:text-shout">
-                        {project.title}
-                      </Link>
-                    </h3>
-                    <p className="mt-2 text-body">{project.summary}</p>
+      {!dark && !error && projects.length === 0 ? (
+        <EmptyState
+          icon={<BriefcaseIcon className="h-6 w-6" />}
+          title="No open projects yet"
+          body="Be the first to post a project, or ask an admin to enable sample seeding on int."
+          action={
+            <Link href="/projects/post" className={buttonClass("primary", "md")}>
+              Post a project
+            </Link>
+          }
+        />
+      ) : null}
 
-                    <div className="mt-4 flex flex-wrap items-center gap-4 text-sm">
-                      <span className="inline-flex items-center gap-1.5 rounded-pill bg-brand/10 px-2.5 py-1 font-medium text-brand">
-                        <WalletIcon className="h-3 w-3" />
-                        {formatProjectBudget(project.budget)}
-                      </span>
-                      <span className="inline-flex items-center gap-1.5 rounded-pill bg-line/50 px-2.5 py-1 text-mute">
-                        <ClockIcon className="h-3 w-3" />
-                        {projectTypeLabel(project.type)}
-                      </span>
-                      <span className="text-mute">{project.posted}</span>
-                      <span className="text-mute">{project.bids} bids</span>
-                    </div>
-
-                    <div className="mt-4">
-                      <div className="flex flex-wrap gap-1.5">
-                        {project.skills.map((skill) => (
-                          <span
-                            key={skill}
-                            className="rounded-pill border border-line px-2.5 py-1 text-xs font-medium"
-                          >
-                            {skill}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="ml-4">
-                    <Link
-                      href={`/projects/${project.id}/bid`}
-                      className={buttonClass("primary", "sm")}
-                    >
-                      Submit Bid
-                    </Link>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="mt-8 text-center">
-            <button className={buttonClass("secondary", "md")}>
-              Load More Projects
-            </button>
-          </div>
-        </div>
-
-        {/* Sidebar */}
-        <div className="space-y-6">
-          {/* Categories */}
-          <div className="rounded-card border border-line bg-surface p-6">
-            <h3 className="font-display text-lg font-semibold text-ink">Categories</h3>
-            <div className="mt-4 space-y-2">
-              {categories.map((category) => (
-                <a
-                  key={category.name}
-                  href="#"
-                  className="flex items-center justify-between rounded-pill px-3 py-2 text-sm hover:bg-bg"
-                >
-                  <span className="text-body">{category.name}</span>
-                  <span className="rounded-full bg-line px-2 py-0.5 text-xs">
-                    {category.count}
+      <div className="space-y-6">
+        {projects.map((project) => (
+          <article key={project.id} className="rounded-card border border-line bg-surface p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <h2 className="font-display text-xl font-semibold text-ink">
+                  <Link href={`/projects/${project.id}`} className="hover:text-shout">
+                    {project.title || "Untitled project"}
+                  </Link>
+                </h2>
+                <p className="mt-2 text-body">{project.summary || project.description.slice(0, 180)}</p>
+                <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
+                  <span className="inline-flex items-center gap-1.5 rounded-pill bg-raised px-2.5 py-1 font-medium text-ink">
+                    <WalletIcon className="h-3 w-3" />
+                    {formatProjectBudget(project)}
                   </span>
-                </a>
-              ))}
-            </div>
-          </div>
-
-          {/* Quick Stats */}
-          <div className="rounded-card border border-line bg-surface p-6">
-            <h3 className="font-display text-lg font-semibold text-ink">Project Stats</h3>
-            <div className="mt-4 space-y-4">
-              <div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-mute">Fixed Price</span>
-                  <span className="font-medium">68%</span>
+                  <span className="inline-flex items-center gap-1.5 text-mute">
+                    <ClockIcon className="h-3 w-3" />
+                    {project.duration_estimate || "Flexible"}
+                  </span>
+                  <span className="text-mute">{projectTypeLabel(project.project_type)}</span>
+                  <span className="text-mute">{project.bid_count ?? 0} bids</span>
                 </div>
-                <div className="mt-1 h-1.5 w-full rounded-full bg-line">
-                  <div className="h-full w-2/3 rounded-full bg-brand" />
-                </div>
-              </div>
-              <div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-mute">Hourly</span>
-                  <span className="font-medium">32%</span>
-                </div>
-                <div className="mt-1 h-1.5 w-full rounded-full bg-line">
-                  <div className="h-full w-1/3 rounded-full bg-green-500" />
-                </div>
+                {project.skills_required?.length ? (
+                  <ul className="mt-4 flex flex-wrap gap-2">
+                    {project.skills_required.map((s) => (
+                      <li key={s} className="rounded-pill border border-line px-2.5 py-1 text-xs text-mute">
+                        {s}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
               </div>
             </div>
-          </div>
-
-          {/* CTA for Freelancers */}
-          <div className="rounded-card border border-shout/30 bg-shout/5 p-6">
-            <h3 className="font-display text-lg font-semibold text-ink">Start Freelancing</h3>
-            <p className="mt-2 text-sm text-body">
-              Create your freelancer profile to start bidding on projects and build your portfolio.
-            </p>
-            <Link href="/freelancers/create" className={buttonClass("primary", "sm", "mt-4 w-full")}>
-              Create Profile
-            </Link>
-          </div>
-
-          {/* CTA for Clients */}
-          <div className="rounded-card border border-line bg-surface p-6">
-            <h3 className="font-display text-lg font-semibold text-ink">Need work done?</h3>
-            <p className="mt-2 text-sm text-body">
-              Post your project and get competitive bids from talented freelancers.
-            </p>
-            <Link href="/projects/post" className={buttonClass("secondary", "sm", "mt-4 w-full")}>
-              Post a Project
-            </Link>
-          </div>
-        </div>
+          </article>
+        ))}
       </div>
     </div>
   );

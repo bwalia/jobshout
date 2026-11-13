@@ -112,6 +112,13 @@ Implemented:
   - Profiles list only public, published work. Bylines on showcase, agent and Insight
     pages link to them. There are no notifications yet: the feed is pull-only.
 
+- **Projects live (Phase 2a, flag-gated):** migration `0014` adds owner/title/status/
+  visibility on projects, invitations, engagements, engagement reviews. Wired
+  `jobshout-freelance` into the API with signed Actor identity (no random UUIDs).
+  Web `/projects` reads the API; `/projects/post` and bid form submit for real.
+  `/freelancers` redirects to `/members`. Scheduler closes expired bidding windows.
+  Flag `PROJECTS_LIVE` (+ optional `PROJECTS_SEED_SAMPLES`) dark on int.
+
 - **Dashboard & rich members (Phase 1, flag-gated):** migration `0013` adds experience,
   education, certifications, portfolio links, skills-with-evidence, connections, reviews,
   achievements, privacy settings, messaging tables, dashboard layouts and GDPR request

@@ -19,6 +19,7 @@ jobshout-auth = { path = "../../crates/jobshout-auth" }
 jobshout-candidates = { path = "../../crates/jobshout-candidates" }
 jobshout-content = { path = "../../crates/jobshout-content" }
 jobshout-events = { path = "../../crates/jobshout-events" }
+jobshout-freelance = { path = "../../crates/jobshout-freelance" }
 jobshout-jobs = { path = "../../crates/jobshout-jobs" }
 jobshout-messaging = { path = "../../crates/jobshout-messaging" }
 jobshout-notifications = { path = "../../crates/jobshout-notifications" }
