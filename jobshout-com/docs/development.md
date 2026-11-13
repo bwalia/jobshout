@@ -42,13 +42,19 @@ JOB_ID=$(curl -s http://127.0.0.1:8088/api/v1/jobs | jq -r '.data[0].id')
 
 curl -s -X POST "http://127.0.0.1:8088/api/v1/jobs/$JOB_ID/applications" \
   -H 'content-type: application/json' \
+  -H "x-jobshout-user-email: ada@example.com" \
+  -H "x-jobshout-user-name: Ada" \
+  -H "x-jobshout-internal-token: $INTERNAL_TOKEN" \
   -d '{"full_name":"Ada Lovelace","email":"ada@example.com","cover_letter":"…"}' | jq .
 
 # Everything one candidate has applied to, with the job attached
-curl -s "http://127.0.0.1:8088/api/v1/applications?email=ada@example.com" | jq '.data[].job.title'
+curl -s -H "x-jobshout-user-email: ada@example.com" \
+  -H "x-jobshout-user-name: Ada" \
+  -H "x-jobshout-internal-token: $INTERNAL_TOKEN" \
+  "http://127.0.0.1:8088/api/v1/applications" | jq '.data[].job.title'
 ```
 
-Track them in the UI at http://127.0.0.1:3010/applications?email=ada@example.com.
+Track them in the UI at http://127.0.0.1:3010/applications (sign-in required).
 
 ## Theming
 

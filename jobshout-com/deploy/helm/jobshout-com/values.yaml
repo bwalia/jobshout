@@ -115,6 +115,27 @@ showcase:
   # Fill an empty showcase with clearly-labelled sample apps. Never in prod.
   seedSamples: false
 
+# Phase 0 event spine. Worker drains email_outbox; scheduler recovers stale rows.
+# SMTP credentials come from WSL Vault (see vault comments below) — never commit values.
+emailOutbox:
+  enabled: false
+worker:
+  enabled: false
+  replicas: 1
+  pollSecs: 15
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits: { cpu: 250m, memory: 256Mi }
+  # Vault path (comment only — values materialised by ESO / extraSecretRefs):
+  #   jobshout-com/<ring>/smtp  keys: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM
+scheduler:
+  enabled: false
+  replicas: 1
+  tickSecs: 60
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits: { cpu: 250m, memory: 256Mi }
+
 # Pin stateless pods (web, api, gateway, workers) to nodes with these labels,
 # e.g. {kubernetes.io/hostname: debian004}. Databases and PVC-backed pods are
 # never pinned: forcing them onto another node can strand their volume. Empty

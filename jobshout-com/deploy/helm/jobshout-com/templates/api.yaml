@@ -61,6 +61,8 @@ spec:
               value: {{ .Values.insights.seedSamples | default false | quote }}
             - name: SHOWCASE_SEED_SAMPLES
               value: {{ (.Values.showcase).seedSamples | default false | quote }}
+            - name: EMAIL_OUTBOX_ENABLED
+              value: {{ (.Values.emailOutbox).enabled | default false | quote }}
           # envFrom, not env+valueFrom: see the note in web.yaml.
           envFrom:
             - secretRef:

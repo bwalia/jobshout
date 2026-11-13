@@ -25,11 +25,18 @@ Implemented:
 - Cargo workspace with domain crates (many stubs) matching the north-star layout
 - `jobshout-jobs` + `GET/POST /api/v1/jobs`
 - Candidate profiles + explainable matching for Career agents
-  (`POST /api/v1/profiles`, `GET …/matches`, `GET …/matching-context`)
+  (`POST /api/v1/profiles`, `GET /api/v1/profiles/me`, `GET …/matches`,
+  `GET …/matching-context`). **Signed identity required**; owner-only (or trusted
+  matching agent for matching-context). Email / CV / salary never leave the owner path.
 - `jobshout-applications` + apply flow
   (`POST/GET /api/v1/jobs/{id}/applications`, `GET …/applications/check`,
-  `GET /api/v1/applications?email=`). Re-applying with the same email updates the
-  existing application rather than creating a duplicate.
+  `GET /api/v1/applications`). Signed identity required; a job's applications are
+  visible only to its poster (or staff). Re-applying updates the existing row.
+- Accounts + roles (`accounts`, `account_identities`, `account_roles`) with
+  `jobshout-auth` actor extraction and `jobshout-policy::can()`. Staff role is
+  bootstrapped from `INSIGHTS_STAFF_EMAILS` (env kept).
+- Event spine (`domain_events`, `notifications`, `notification_preferences`,
+  `email_outbox`) + worker mailer / scheduler (Helm-gated; `EMAIL_OUTBOX_ENABLED`).
 - Marketplace web: landing, job board with URL-driven search/filter/sort, job detail,
   apply, post a job (with live preview), profile builder, ranked matches, application
   tracking, social login scaffolding, light/dark theming
@@ -43,13 +50,14 @@ Implemented:
   Podcasts) or direct audio/video files. RSS at `/insights/rss.xml`, an iTunes-tagged
   podcast feed at `/insights/podcast.xml` (file-hosted episodes only), a weekly digest
   archive at `/newsletter`, and double opt-in newsletter signup.
-  - Editors are `INSIGHTS_STAFF_EMAILS` on the API — a stopgap until real roles exist.
+  - Editors hold the `staff` account role (bootstrapped from `INSIGHTS_STAFF_EMAILS`).
   - Identity: the web tier forwards the signed-in user as `x-jobshout-user-*` headers,
     signed with `JOBSHOUT_INTERNAL_TOKEN` (chart-generated `jobshout-com-internal`
     Secret). The gateway exposes `/api/` publicly, so the API rejects unsigned identity
     headers and nginx strips them from public traffic. The API refuses to start without
     the token unless `JOBSHOUT_ALLOW_UNSIGNED_IDENTITY=1`.
-  - No mailer yet: newsletter confirmation links are logged by the API.
+  - Newsletter confirmations enqueue to `email_outbox` when `EMAIL_OUTBOX_ENABLED`
+    is on; otherwise the confirm URL is logged (as before).
   - `INSIGHTS_SEED_SAMPLES=true` (int, local) fills an empty hub with labelled samples.
 - **AI Showcase** (`/showcase`): applications built by people and AI agents, in
   `jobshout-showcase`. One `showcase_apps` row per app: kind, maturity, how it was built

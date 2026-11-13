@@ -64,15 +64,31 @@ export async function applyAction(
     return { ok: false, message: "Check the highlighted fields.", fieldErrors };
   }
 
+  const viewer = await currentViewer();
+  if (!viewer) {
+    return { ok: false, message: "Sign in to apply for roles." };
+  }
+  if (email && email.toLowerCase() !== viewer.email.toLowerCase()) {
+    return {
+      ok: false,
+      message: "Apply with the email on your signed-in account.",
+      fieldErrors: { email: "Must match your signed-in email." },
+    };
+  }
+
   try {
-    const application = await applyToJob(jobId, {
-      full_name,
-      email,
-      phone: text(form, "phone"),
-      cover_letter,
-      cv_text,
-      cv_url,
-    });
+    const application = await applyToJob(
+      jobId,
+      {
+        full_name,
+        email: viewer.email,
+        phone: text(form, "phone"),
+        cover_letter,
+        cv_text,
+        cv_url,
+      },
+      viewer,
+    );
     revalidatePath("/applications");
     return {
       ok: true,
@@ -137,8 +153,13 @@ export async function createJobAction(
     publish: form.get("publish") !== "draft",
   };
 
+  const viewer = await currentViewer();
+  if (!viewer) {
+    return { ok: false, message: "Sign in to post a job." };
+  }
+
   try {
-    const job = await createJob(input, await currentViewer());
+    const job = await createJob(input, viewer);
     revalidatePath("/jobs");
     revalidatePath("/");
     return {
@@ -176,9 +197,15 @@ export async function saveProfileAction(
   const years = number(form, "years_experience");
   const country = text(form, "country");
 
+  const viewer = await currentViewer();
+  if (!viewer) {
+    return { ok: false, message: "Sign in to save your matching profile." };
+  }
+
   try {
-    const profile = await upsertProfile({
-      email,
+    const profile = await upsertProfile(
+      {
+      email: viewer.email,
       display_name,
       headline: text(form, "headline"),
       summary: text(form, "summary"),
@@ -205,7 +232,9 @@ export async function saveProfileAction(
       },
       cv_text: text(form, "cv_text"),
       matching_notes: text(form, "matching_notes"),
-    });
+      },
+      viewer,
+    );
     revalidatePath("/profile");
     return {
       ok: true,

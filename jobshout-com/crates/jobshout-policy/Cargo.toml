@@ -6,3 +6,9 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+jobshout-auth = { path = "../jobshout-auth" }
+jobshout-domain = { path = "../jobshout-domain" }
+serde = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]

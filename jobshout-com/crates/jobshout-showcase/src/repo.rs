@@ -965,17 +965,43 @@ impl ShowcaseRepository {
         on: bool,
     ) -> Result<i32, DomainError> {
         let mut tx = self.pool.begin().await.map_err(db)?;
-        let change = if on {
-            "INSERT INTO showcase_follows (app_id, user_email) VALUES ($1, lower($2)) ON CONFLICT DO NOTHING"
-        } else {
-            "DELETE FROM showcase_follows WHERE app_id = $1 AND user_email = lower($2)"
-        };
-        sqlx::query(change)
+        let follower_member_id: Option<Uuid> =
+            sqlx::query_scalar("SELECT id FROM members WHERE email = lower($1) LIMIT 1")
+                .bind(email)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(db)?;
+        if on {
+            sqlx::query(
+                r#"
+                INSERT INTO showcase_follows (app_id, user_email, follower_member_id)
+                VALUES ($1, lower($2), $3)
+                ON CONFLICT (app_id, user_email) DO UPDATE
+                  SET follower_member_id = COALESCE(EXCLUDED.follower_member_id, showcase_follows.follower_member_id)
+                "#,
+            )
             .bind(id)
             .bind(email)
+            .bind(follower_member_id)
             .execute(&mut *tx)
             .await
             .map_err(db)?;
+        } else {
+            sqlx::query(
+                r#"
+                DELETE FROM showcase_follows
+                WHERE app_id = $1
+                  AND (user_email = lower($2)
+                       OR ($3::uuid IS NOT NULL AND follower_member_id = $3))
+                "#,
+            )
+            .bind(id)
+            .bind(email)
+            .bind(follower_member_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db)?;
+        }
         let count: i32 = sqlx::query_scalar(
             r#"
             UPDATE showcase_apps

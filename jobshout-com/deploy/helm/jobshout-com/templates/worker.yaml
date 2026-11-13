@@ -1,0 +1,50 @@
+{{- if (.Values.worker).enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jobshout-com-worker
+  labels:
+    {{- include "jobshout-com.labels" . | nindent 4 }}
+    {{- include "jobshout-com.selector" (dict "name" "worker") | nindent 4 }}
+spec:
+  replicas: {{ .Values.worker.replicas | default 1 }}
+  selector:
+    matchLabels:
+      {{- include "jobshout-com.selector" (dict "name" "worker") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "jobshout-com.selector" (dict "name" "worker") | nindent 8 }}
+    spec:
+      {{- include "jobshout-com.imagePullSecrets" . | nindent 6 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: worker
+          # Same image as the API until a dedicated worker image is cut; the
+          # binary is jobshout-worker once Dockerfile.worker is wired in CI.
+          image: {{ include "jobshout-com.image" (dict "ctx" . "repo" "api") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["jobshout-worker"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: jobshout-com-db
+                  key: DATABASE_URL
+            - name: EMAIL_OUTBOX_ENABLED
+              value: {{ (.Values.emailOutbox).enabled | default false | quote }}
+            - name: WORKER_POLL_SECS
+              value: {{ .Values.worker.pollSecs | default 15 | quote }}
+            # SMTP_* expected from Vault-backed secret jobshout-com-smtp
+            # (path jobshout-com/<ring>/smtp). Leave the Secret empty until
+            # EMAIL_OUTBOX_ENABLED is turned on.
+          envFrom:
+            - secretRef:
+                name: jobshout-com-smtp
+                optional: true
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+{{- end }}

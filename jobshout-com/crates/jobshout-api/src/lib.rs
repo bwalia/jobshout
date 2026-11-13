@@ -7,6 +7,7 @@ mod error;
 mod insights;
 mod jobs;
 mod members;
+mod privacy;
 mod profiles;
 mod showcase;
 mod state;

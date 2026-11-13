@@ -18,11 +18,15 @@ fn db(e: sqlx::Error) -> DomainError {
 const MEMBER: &str = r#"
     SELECT m.id, m.handle, m.email, m.display_name, m.headline, m.is_agent,
            m.follower_count, m.created_at,
-           (SELECT COUNT(*) FROM member_follows f WHERE f.follower_email = m.email)
+           (SELECT COUNT(*) FROM member_follows f WHERE f.follower_email = m.email
+              OR f.follower_member_id = m.id)
              AS following_count,
            ($1::text IS NOT NULL AND EXISTS (
              SELECT 1 FROM member_follows f
-             WHERE f.member_id = m.id AND f.follower_email = lower($1))) AS following,
+             WHERE f.member_id = m.id
+               AND (f.follower_email = lower($1)
+                    OR f.follower_member_id = (
+                         SELECT id FROM members WHERE email = lower($1) LIMIT 1)))) AS following,
            (SELECT COUNT(*) FROM showcase_apps a
              WHERE lower(a.creator_email) = m.email
                AND a.status = 'published' AND a.visibility = 'public') AS entry_count,
@@ -197,6 +201,8 @@ impl MemberRepository {
 
     /// Follow or unfollow and return the new follower count, recomputed in
     /// the same transaction so concurrent follows cannot drift it.
+    ///
+    /// Dual-writes `follower_email` (legacy) and `follower_member_id` (Phase 0).
     pub async fn set_follow(
         &self,
         member: MemberId,
@@ -204,17 +210,43 @@ impl MemberRepository {
         on: bool,
     ) -> Result<i32, DomainError> {
         let mut tx = self.pool.begin().await.map_err(db)?;
-        let change = if on {
-            "INSERT INTO member_follows (member_id, follower_email) VALUES ($1, lower($2)) ON CONFLICT DO NOTHING"
-        } else {
-            "DELETE FROM member_follows WHERE member_id = $1 AND follower_email = lower($2)"
-        };
-        sqlx::query(change)
+        let follower_member_id: Option<Uuid> =
+            sqlx::query_scalar("SELECT id FROM members WHERE email = lower($1) LIMIT 1")
+                .bind(follower_email.trim())
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(db)?;
+        if on {
+            sqlx::query(
+                r#"
+                INSERT INTO member_follows (member_id, follower_email, follower_member_id)
+                VALUES ($1, lower($2), $3)
+                ON CONFLICT (member_id, follower_email) DO UPDATE
+                  SET follower_member_id = COALESCE(EXCLUDED.follower_member_id, member_follows.follower_member_id)
+                "#,
+            )
             .bind(member)
             .bind(follower_email.trim())
+            .bind(follower_member_id)
             .execute(&mut *tx)
             .await
             .map_err(db)?;
+        } else {
+            sqlx::query(
+                r#"
+                DELETE FROM member_follows
+                WHERE member_id = $1
+                  AND (follower_email = lower($2)
+                       OR ($3::uuid IS NOT NULL AND follower_member_id = $3))
+                "#,
+            )
+            .bind(member)
+            .bind(follower_email.trim())
+            .bind(follower_member_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db)?;
+        }
         let count: i32 = sqlx::query_scalar(
             r#"
             UPDATE members
@@ -235,7 +267,9 @@ impl MemberRepository {
         let sql = format!(
             r#"
             {MEMBER}
-            JOIN member_follows mf ON mf.member_id = m.id AND mf.follower_email = lower($1)
+            JOIN member_follows mf ON mf.member_id = m.id
+              AND (mf.follower_email = lower($1)
+                   OR mf.follower_member_id = (SELECT id FROM members WHERE email = lower($1) LIMIT 1))
             ORDER BY mf.created_at DESC
             LIMIT 200
             "#
@@ -257,7 +291,8 @@ impl MemberRepository {
             SELECT a.slug AS e_slug, a.kind AS e_kind, a.name AS e_name, a.tagline AS e_tagline,
                    a.logo_url AS e_logo, a.version AS e_version, a.follower_count
             FROM showcase_follows f JOIN showcase_apps a ON a.id = f.app_id
-            WHERE f.user_email = lower($1)
+            WHERE (f.user_email = lower($1)
+                   OR f.follower_member_id = (SELECT id FROM members WHERE email = lower($1) LIMIT 1))
               AND a.status = 'published' AND a.visibility <> 'private'
             ORDER BY f.created_at DESC
             LIMIT 200
@@ -312,7 +347,7 @@ impl MemberRepository {
               FROM member_follows f
               JOIN members m ON m.id = f.member_id
               JOIN showcase_apps a ON lower(a.creator_email) = m.email
-              WHERE f.follower_email = lower($1)
+              WHERE (f.follower_email = lower($1) OR f.follower_member_id = (SELECT id FROM members WHERE email = lower($1) LIMIT 1))
                 AND a.status = 'published' AND a.visibility = 'public'
 
               UNION ALL
@@ -321,14 +356,14 @@ impl MemberRepository {
               FROM member_follows f
               JOIN members m ON m.id = f.member_id
               JOIN insights_items i ON lower(i.author_email) = m.email
-              WHERE f.follower_email = lower($1) AND i.status = 'published'
+              WHERE (f.follower_email = lower($1) OR f.follower_member_id = (SELECT id FROM members WHERE email = lower($1) LIMIT 1)) AND i.status = 'published'
 
               UNION ALL
               SELECT 'entry_updated', a.revised_at, {NO_ACTOR}, {a_entry},
                      {NO_USES}, {NO_INSIGHT}
               FROM showcase_follows sf
               JOIN showcase_apps a ON a.id = sf.app_id
-              WHERE sf.user_email = lower($1)
+              WHERE (sf.user_email = lower($1) OR sf.follower_member_id = (SELECT id FROM members WHERE email = lower($1) LIMIT 1))
                 AND a.status = 'published' AND a.visibility = 'public'
                 AND a.revised_at IS NOT NULL
 
@@ -339,7 +374,7 @@ impl MemberRepository {
               JOIN showcase_apps t ON t.id = sf.app_id
               JOIN showcase_links l ON l.to_id = t.id
               JOIN showcase_apps u ON u.id = l.from_id
-              WHERE sf.user_email = lower($1)
+              WHERE (sf.user_email = lower($1) OR sf.follower_member_id = (SELECT id FROM members WHERE email = lower($1) LIMIT 1))
                 AND t.status = 'published' AND t.visibility <> 'private'
                 AND u.status = 'published' AND u.visibility = 'public'
             ) feed

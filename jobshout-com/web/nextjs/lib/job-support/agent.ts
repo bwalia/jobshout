@@ -9,6 +9,7 @@
  */
 
 import { applyToJob, getJob, listJobs } from "@/lib/api";
+import { currentViewer } from "@/lib/session";
 import { crmEnabled, upsertJobSupportLead } from "./crm";
 import type { JobSupportEvent, MatchItem } from "./events";
 import {
@@ -231,13 +232,25 @@ async function maybeSubmitApplication(
     const cover =
       session.brief ||
       `Application via Recruiting chat for ${session.jobTitle || "this role"}.`;
-    await applyToJob(session.jobId, {
-      full_name: session.name.trim(),
-      email: session.email.trim(),
-      phone: session.phone || undefined,
-      cover_letter: cover.slice(0, 8_000),
-      cv_text: session.cv.slice(0, 20_000) || undefined,
-    });
+    const viewer = await currentViewer();
+    if (!viewer) {
+      emit({
+        type: "status",
+        message: "Sign in to send your application, then try again.",
+      });
+      return session;
+    }
+    await applyToJob(
+      session.jobId,
+      {
+        full_name: session.name.trim() || viewer.name || viewer.email,
+        email: viewer.email,
+        phone: session.phone || undefined,
+        cover_letter: cover.slice(0, 8_000),
+        cv_text: session.cv.slice(0, 20_000) || undefined,
+      },
+      viewer,
+    );
     session.applied = true;
     emit({ type: "status", message: "Application sent — you can track it under Applications." });
   } catch (err) {

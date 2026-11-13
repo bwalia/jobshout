@@ -72,7 +72,7 @@ async fn directory(
     headers: HeaderMap,
     Query(p): Query<DirectoryParams>,
 ) -> Result<Json<DirectoryResponse>, ApiError> {
-    let who = actor(&state, &headers)?;
+    let who = actor(&state, &headers).await?;
     let (data, total) = state
         .members
         .directory(p.q, who.as_ref(), p.limit, p.offset)
@@ -87,7 +87,7 @@ async fn directory(
 }
 
 async fn me(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<Member>, ApiError> {
-    let who = signed_in(&state, &headers)?;
+    let who = signed_in(&state, &headers).await?;
     Ok(Json(state.members.ensure(&who).await.map_err(err)?))
 }
 
@@ -96,7 +96,7 @@ async fn update_me(
     headers: HeaderMap,
     Json(body): Json<MemberInput>,
 ) -> Result<Json<Member>, ApiError> {
-    let who = signed_in(&state, &headers)?;
+    let who = signed_in(&state, &headers).await?;
     Ok(Json(
         state.members.set_profile(&who, body).await.map_err(err)?,
     ))
@@ -118,7 +118,7 @@ async fn profile(
     headers: HeaderMap,
     Path(handle): Path<String>,
 ) -> Result<Json<ProfileResponse>, ApiError> {
-    let who = actor(&state, &headers)?;
+    let who = actor(&state, &headers).await?;
     let (member, email) = state
         .members
         .profile(&handle, who.as_ref())
@@ -145,7 +145,7 @@ async fn set_follow(
     handle: String,
     on: bool,
 ) -> Result<Json<FollowState>, ApiError> {
-    let who = signed_in(&state, &headers)?;
+    let who = signed_in(&state, &headers).await?;
     Ok(Json(
         state.members.follow(&who, &handle, on).await.map_err(err)?,
     ))
@@ -177,7 +177,7 @@ async fn following(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<FollowingResponse>, ApiError> {
-    let who = signed_in(&state, &headers)?;
+    let who = signed_in(&state, &headers).await?;
     let (members, entries) = state.members.following(&who).await.map_err(err)?;
     Ok(Json(FollowingResponse { members, entries }))
 }
@@ -199,7 +199,7 @@ async fn feed(
     headers: HeaderMap,
     Query(p): Query<FeedParams>,
 ) -> Result<Json<DataResponse<Vec<FeedItem>>>, ApiError> {
-    let who = signed_in(&state, &headers)?;
+    let who = signed_in(&state, &headers).await?;
     Ok(Json(DataResponse {
         data: state
             .members
