@@ -131,6 +131,10 @@ credits:
   enabled: false
   purchasesEnabled: false
 
+# Phase 5a: Proposal / Breakdown / Talent Match via Go POST /tasks/launch.
+aiFeatures:
+  enabled: false
+
 # Phase 0 event spine. Worker drains email_outbox; scheduler recovers stale rows.
 # SMTP credentials come from WSL Vault (see vault comments below) — never commit values.
 emailOutbox:

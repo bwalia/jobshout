@@ -132,8 +132,14 @@ Implemented:
   `CREDITS_ENABLED`; purchases/`PURCHASES_ENABLED` stay off until volume. Web `/pricing`
   and `/credits`. No escrow or payouts.
 
-Deferred: employer-side application review UI, MCP, agents runtime, interviews,
-iOS app screens, Linked Hire / Groups, remaining AI assistants.
+- **First AI (Phase 5a, flag-gated):** Go builtins `proposal_generator`,
+  `project_breakdown`, `talent_matchmaker` (own packages, registered via
+  agentmodules). jobshout.com calls platform `POST /tasks/launch` through
+  `PlatformClient`; results land in `ai_drafts` for human approve/discard.
+  Flag `AI_FEATURES` dark on int. No second AI runtime.
+
+Deferred: employer-side application review UI, MCP, interviews, iOS app screens,
+Linked Hire / Groups, remaining AI assistants, Teams/Agencies.
 
 North-star: the full Rust + Next.js + Swift build prompt (agents, MCP, interviews,
 policy, globalisation).

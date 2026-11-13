@@ -42,6 +42,8 @@ projectsLive:
 credits:
   enabled: false
   purchasesEnabled: false
+aiFeatures:
+  enabled: false
 emailOutbox:
   enabled: false
 worker:

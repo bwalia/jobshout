@@ -7,11 +7,13 @@ use jobshout_candidates::CandidateService;
 use jobshout_content::InsightService;
 use jobshout_events::EventService;
 use jobshout_freelance::FreelanceService;
+use jobshout_integrations::PlatformClient;
 use jobshout_jobs::JobService;
 use jobshout_messaging::MessagingService;
 use jobshout_notifications::NotificationService;
 use jobshout_showcase::ShowcaseService;
 use jobshout_users::MemberService;
+use sqlx::PgPool;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -27,6 +29,10 @@ pub struct AppState {
     pub messaging: MessagingService,
     pub freelance: FreelanceService,
     pub billing: BillingService,
+    /// Shared pool for AI draft persistence (Phase 5a).
+    pub ai_pool: Option<PgPool>,
+    /// Go platform client for `POST /tasks/launch`.
+    pub platform: Option<PlatformClient>,
     /// Public origin used in feed links and newsletter confirmation links.
     pub site_url: Arc<str>,
     /// Identity headers are only trusted alongside this token. `None` means
@@ -44,4 +50,6 @@ pub struct AppState {
     pub credits_enabled: bool,
     /// Phase 2b: Stripe packs/subscriptions (stays off until volume).
     pub purchases_enabled: bool,
+    /// Phase 5a: marketplace AI assistants (drafts only; human confirms).
+    pub ai_features: bool,
 }

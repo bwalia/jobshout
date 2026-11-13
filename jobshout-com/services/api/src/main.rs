@@ -7,6 +7,7 @@ use jobshout_candidates::CandidateService;
 use jobshout_content::InsightService;
 use jobshout_events::EventService;
 use jobshout_freelance::FreelanceService;
+use jobshout_integrations::PlatformClient;
 use jobshout_jobs::{seed_organisation_id, JobService};
 use jobshout_messaging::MessagingService;
 use jobshout_notifications::NotificationService;
@@ -99,8 +100,13 @@ async fn main() -> anyhow::Result<()> {
     let projects_live = env_flag("PROJECTS_LIVE");
     let credits_enabled = env_flag("CREDITS_ENABLED");
     let purchases_enabled = env_flag("PURCHASES_ENABLED");
+    let ai_features = env_flag("AI_FEATURES");
     let freelance = FreelanceService::new(pool.clone());
     let billing = BillingService::new(pool.clone());
+    let platform = PlatformClient::from_env();
+    if ai_features && platform.is_none() {
+        tracing::warn!("AI_FEATURES on but JOBSHOUT_PLATFORM_URL/API_KEY unset");
+    }
     if projects_live && env_flag("PROJECTS_SEED_SAMPLES") {
         // Seed under a synthetic owner account so samples have an owner_account_id.
         match accounts
@@ -128,6 +134,8 @@ async fn main() -> anyhow::Result<()> {
         messaging: MessagingService::new(pool.clone()),
         freelance,
         billing,
+        ai_pool: Some(pool.clone()),
+        platform,
         site_url: site_url.trim_end_matches('/').into(),
         internal_token: internal_token.map(Into::into),
         email_outbox_enabled,
@@ -137,6 +145,7 @@ async fn main() -> anyhow::Result<()> {
         projects_live,
         credits_enabled,
         purchases_enabled,
+        ai_features,
     };
 
     let app = router(state);

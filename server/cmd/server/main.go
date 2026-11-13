@@ -77,7 +77,9 @@ import (
 	"github.com/jobshout/server/internal/modelselect"
 	"github.com/jobshout/server/internal/orgroute"
 	"github.com/jobshout/server/internal/platformtools"
+	"github.com/jobshout/server/internal/projectbreakdown"
 	"github.com/jobshout/server/internal/propertypa"
+	"github.com/jobshout/server/internal/proposalgen"
 	"github.com/jobshout/server/internal/repository"
 	"github.com/jobshout/server/internal/research"
 	"github.com/jobshout/server/internal/reviewbot"
@@ -85,6 +87,7 @@ import (
 	"github.com/jobshout/server/internal/selector"
 	"github.com/jobshout/server/internal/service"
 	"github.com/jobshout/server/internal/strix"
+	"github.com/jobshout/server/internal/talentmatch"
 	"github.com/jobshout/server/internal/tasklaunch"
 	"github.com/jobshout/server/internal/tools"
 	ws "github.com/jobshout/server/internal/websocket"
@@ -1087,6 +1090,10 @@ func main() {
 		MarketingEmail:   emailSvc,
 		Marketing:        marketingSvc,
 		MetaLead:         metaLeadSvc,
+		// JobShout.com marketplace AI — heuristic always works; LLM wrap later.
+		ProposalGen:      proposalgen.Heuristic{},
+		ProjectBreakdown: projectbreakdown.Heuristic{},
+		TalentMatch:      talentmatch.Heuristic{},
 	})
 
 	// ─── Autonomous agent engine ────────────────────────────────────────────
