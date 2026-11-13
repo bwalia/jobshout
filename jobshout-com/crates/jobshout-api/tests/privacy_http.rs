@@ -83,7 +83,9 @@ fn state(pool: PgPool) -> AppState {
         notifications: NotificationService::new(pool.clone()),
         messaging: MessagingService::new(pool.clone()),
         freelance: FreelanceService::new(pool.clone()),
-        billing: BillingService::new(pool),
+        billing: BillingService::new(pool.clone()),
+        ai_pool: Some(pool),
+        platform: None,
         site_url: Arc::from("https://example.test"),
         internal_token: Some(token),
         email_outbox_enabled: false,
@@ -93,6 +95,7 @@ fn state(pool: PgPool) -> AppState {
         projects_live: true,
         credits_enabled: false,
         purchases_enabled: false,
+        ai_features: false,
     }
 }
 

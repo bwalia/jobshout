@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+mod ai;
 mod applications;
 mod billing;
 mod dashboard;
@@ -44,6 +45,7 @@ pub fn router(state: AppState) -> Router {
         .merge(messaging::routes())
         .merge(projects::routes())
         .merge(billing::routes())
+        .merge(ai::routes())
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
         .with_state(state)
