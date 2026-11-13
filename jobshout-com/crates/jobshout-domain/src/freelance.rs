@@ -172,12 +172,15 @@ pub struct Project {
     pub updated_at: DateTime<Utc>,
 }
 
+// Open / Public are not the first variants; keep explicit Default.
+#[allow(clippy::derivable_impls)]
 impl Default for ProjectStatus {
     fn default() -> Self {
         Self::Open
     }
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for ProjectVisibility {
     fn default() -> Self {
         Self::Public
