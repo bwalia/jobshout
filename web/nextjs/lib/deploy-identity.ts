@@ -50,7 +50,8 @@ export function formatDeployIdentity(info?: DeployIdentity | null): string {
   if (!info) return "";
   const parts: string[] = [];
   if (info.env?.trim()) parts.push(info.env.trim());
-  if (info.version?.trim()) parts.push(info.version.trim());
+  const version = info.version?.trim();
+  if (version && version !== "latest") parts.push(version);
   const sha = shortSha(info.git_sha);
   if (sha) parts.push(sha);
   if (info.build_id?.trim()) parts.push(`Build #${info.build_id.trim()}`);
