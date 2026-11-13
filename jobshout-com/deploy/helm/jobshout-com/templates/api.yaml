@@ -86,6 +86,8 @@ spec:
             # JOBSHOUT_PLATFORM_AGENT_{PROPOSAL,BREAKDOWN,TALENT}
             - name: HIRE_ENABLED
               value: {{ (.Values.hire).enabled | default false | quote }}
+            - name: GROUPS_ENABLED
+              value: {{ (.Values.groups).enabled | default false | quote }}
 
           # envFrom, not env+valueFrom: see the note in web.yaml.
           envFrom:

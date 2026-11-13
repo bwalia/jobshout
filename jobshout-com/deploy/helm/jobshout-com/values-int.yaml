@@ -46,6 +46,8 @@ aiFeatures:
   enabled: false
 hire:
   enabled: false
+groups:
+  enabled: false
 emailOutbox:
   enabled: false
 worker:
