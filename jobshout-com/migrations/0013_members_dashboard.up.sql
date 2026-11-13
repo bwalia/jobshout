@@ -90,7 +90,7 @@ CREATE INDEX IF NOT EXISTS member_portfolio_links_member_idx
 CREATE TABLE IF NOT EXISTS member_skills (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     member_id       UUID NOT NULL REFERENCES members(id) ON DELETE CASCADE,
-    skill_id        UUID REFERENCES showcase_skills(id) ON DELETE SET NULL,
+    skill_slug      TEXT REFERENCES showcase_skills(slug) ON DELETE SET NULL,
     skill_name      TEXT NOT NULL,
     evidence_level  TEXT NOT NULL DEFAULT 'self_declared'
         CHECK (evidence_level IN ('self_declared', 'endorsed', 'verified')),
