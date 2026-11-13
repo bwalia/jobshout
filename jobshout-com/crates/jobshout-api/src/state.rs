@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use jobshout_applications::ApplicationService;
 use jobshout_auth::AccountService;
+use jobshout_billing::BillingService;
 use jobshout_candidates::CandidateService;
 use jobshout_content::InsightService;
 use jobshout_events::EventService;
@@ -25,6 +26,7 @@ pub struct AppState {
     pub notifications: NotificationService,
     pub messaging: MessagingService,
     pub freelance: FreelanceService,
+    pub billing: BillingService,
     /// Public origin used in feed links and newsletter confirmation links.
     pub site_url: Arc<str>,
     /// Identity headers are only trusted alongside this token. `None` means
@@ -38,4 +40,8 @@ pub struct AppState {
     pub messaging_enabled: bool,
     /// Phase 2a: live projects marketplace.
     pub projects_live: bool,
+    /// Phase 2b: free monthly credits + bid spend.
+    pub credits_enabled: bool,
+    /// Phase 2b: Stripe packs/subscriptions (stays off until volume).
+    pub purchases_enabled: bool,
 }

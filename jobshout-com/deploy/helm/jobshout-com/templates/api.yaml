@@ -73,6 +73,12 @@ spec:
               value: {{ (.Values.projectsLive).enabled | default false | quote }}
             - name: PROJECTS_SEED_SAMPLES
               value: {{ (.Values.projectsLive).seedSamples | default false | quote }}
+            - name: CREDITS_ENABLED
+              value: {{ (.Values.credits).enabled | default false | quote }}
+            - name: PURCHASES_ENABLED
+              value: {{ (.Values.credits).purchasesEnabled | default false | quote }}
+            # Stripe keys from Vault when purchasesEnabled (never chart literals):
+            # jobshout-com/<ring>/stripe → STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET
           # envFrom, not env+valueFrom: see the note in web.yaml.
           envFrom:
             - secretRef:

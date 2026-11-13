@@ -126,8 +126,14 @@ Implemented:
   block/report. Web: `/dashboard`, `/messages`, updated nav. Flags (dark on int):
   `MEMBERS_RICH_ENABLED`, `DASHBOARD_ENABLED`, `MESSAGING_ENABLED`.
 
+- **Credits (Phase 2b, flag-gated):** migration `0015` adds append-only `credit_ledger`
+  (balance = sum), packs, subscription plans, Stripe webhook idempotency, daily bid caps.
+  Bid cost bands by budget; confirm dialog before spend; free 10/month when
+  `CREDITS_ENABLED`; purchases/`PURCHASES_ENABLED` stay off until volume. Web `/pricing`
+  and `/credits`. No escrow or payouts.
+
 Deferred: employer-side application review UI, MCP, agents runtime, interviews,
-iOS app screens, billing / credits (Phase 2b), Linked Hire / Groups.
+iOS app screens, Linked Hire / Groups, remaining AI assistants.
 
 North-star: the full Rust + Next.js + Swift build prompt (agents, MCP, interviews,
 policy, globalisation).

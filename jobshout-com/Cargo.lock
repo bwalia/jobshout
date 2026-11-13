@@ -931,6 +931,7 @@ dependencies = [
  "http-body-util",
  "jobshout-applications",
  "jobshout-auth",
+ "jobshout-billing",
  "jobshout-candidates",
  "jobshout-content",
  "jobshout-domain",
@@ -990,6 +991,18 @@ dependencies = [
 [[package]]
 name = "jobshout-billing"
 version = "0.1.0"
+dependencies = [
+ "chrono",
+ "jobshout-domain",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
 
 [[package]]
 name = "jobshout-candidates"
@@ -1022,6 +1035,7 @@ dependencies = [
  "jobshout-api",
  "jobshout-applications",
  "jobshout-auth",
+ "jobshout-billing",
  "jobshout-candidates",
  "jobshout-content",
  "jobshout-events",

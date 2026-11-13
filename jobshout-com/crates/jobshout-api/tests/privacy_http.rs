@@ -11,6 +11,7 @@ use http_body_util::BodyExt;
 use jobshout_api::{router, AppState};
 use jobshout_applications::ApplicationService;
 use jobshout_auth::AccountService;
+use jobshout_billing::BillingService;
 use jobshout_candidates::CandidateService;
 use jobshout_content::InsightService;
 use jobshout_events::EventService;
@@ -81,7 +82,8 @@ fn state(pool: PgPool) -> AppState {
         events: EventService::new(pool.clone()),
         notifications: NotificationService::new(pool.clone()),
         messaging: MessagingService::new(pool.clone()),
-        freelance: FreelanceService::new(pool),
+        freelance: FreelanceService::new(pool.clone()),
+        billing: BillingService::new(pool),
         site_url: Arc::from("https://example.test"),
         internal_token: Some(token),
         email_outbox_enabled: false,
@@ -89,6 +91,8 @@ fn state(pool: PgPool) -> AppState {
         dashboard_enabled: true,
         messaging_enabled: true,
         projects_live: true,
+        credits_enabled: false,
+        purchases_enabled: false,
     }
 }
 

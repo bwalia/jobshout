@@ -39,6 +39,9 @@ messaging:
 projectsLive:
   enabled: false
   seedSamples: false
+credits:
+  enabled: false
+  purchasesEnabled: false
 emailOutbox:
   enabled: false
 worker:

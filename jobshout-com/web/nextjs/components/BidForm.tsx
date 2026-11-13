@@ -5,11 +5,20 @@ import { FormEvent, useState } from "react";
 import { useSession } from "next-auth/react";
 import { Button, ErrorNotice, Field, Input, Textarea, buttonClass } from "@/components/ui";
 import { CheckCircleIcon, SendIcon } from "@/components/icons";
+import { previewBidSpend, type SpendPreview } from "@/lib/credits";
 import { formatProjectBudget, submitBid, type Project } from "@/lib/projects";
 
 type FieldErrors = Partial<
   Record<"amount" | "hourly_rate" | "estimated_hours" | "proposal" | "delivery_timeline", string>
 >;
+
+type Draft = {
+  bid_amount: number | null;
+  hourly_rate: number | null;
+  estimated_hours: number | null;
+  proposal: string;
+  delivery_timeline: string;
+};
 
 export function BidForm({ project }: { project: Project }) {
   const { data: session } = useSession();
@@ -18,6 +27,9 @@ export function BidForm({ project }: { project: Project }) {
   const [errors, setErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [confirm, setConfirm] = useState<{ draft: Draft; preview: SpendPreview | null } | null>(
+    null,
+  );
 
   if (submitted) {
     return (
@@ -40,6 +52,26 @@ export function BidForm({ project }: { project: Project }) {
         </div>
       </div>
     );
+  }
+
+  async function placeBid(draft: Draft) {
+    if (!session?.user?.email) return;
+    setPending(true);
+    setFormError(null);
+    try {
+      await submitBid(
+        { email: session.user.email, name: session.user.name ?? null },
+        project.id,
+        draft,
+      );
+      setSubmitted(true);
+      setConfirm(null);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Could not submit bid");
+      setConfirm(null);
+    } finally {
+      setPending(false);
+    }
   }
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
@@ -75,58 +107,109 @@ export function BidForm({ project }: { project: Project }) {
     setErrors(next);
     if (Object.keys(next).length) return;
 
+    const draft: Draft = {
+      bid_amount,
+      hourly_rate,
+      estimated_hours,
+      proposal,
+      delivery_timeline: delivery,
+    };
+
     setPending(true);
     try {
-      await submitBid(
+      const preview = await previewBidSpend(
         { email: session.user.email, name: session.user.name ?? null },
         project.id,
-        {
-          bid_amount,
-          hourly_rate,
-          estimated_hours,
-          proposal,
-          delivery_timeline: delivery,
-        },
       );
-      setSubmitted(true);
+      if (preview && preview.cost > 0) {
+        setConfirm({ draft, preview });
+        setPending(false);
+        return;
+      }
+      await placeBid(draft);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Could not submit bid");
-    } finally {
       setPending(false);
     }
   }
 
   return (
-    <form onSubmit={onSubmit} className="surface-card space-y-4 p-5 sm:p-6">
-      <div>
-        <h3 className="font-display text-lg font-semibold text-ink">Your proposal</h3>
-        <p className="mt-1 text-sm text-mute">Budget: {formatProjectBudget(project)}</p>
-      </div>
-      {formError ? <ErrorNotice title={formError} /> : null}
-      {isHourly ? (
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Hourly rate" htmlFor="hourly_rate" error={errors.hourly_rate}>
-            <Input id="hourly_rate" name="hourly_rate" type="number" min={1} step="1" />
-          </Field>
-          <Field label="Estimated hours" htmlFor="estimated_hours" error={errors.estimated_hours}>
-            <Input id="estimated_hours" name="estimated_hours" type="number" min={1} step="1" />
-          </Field>
+    <>
+      <form onSubmit={onSubmit} className="surface-card space-y-4 p-5 sm:p-6">
+        <div>
+          <h3 className="font-display text-lg font-semibold text-ink">Your proposal</h3>
+          <p className="mt-1 text-sm text-mute">Budget: {formatProjectBudget(project)}</p>
         </div>
-      ) : (
-        <Field label="Bid amount" htmlFor="amount" error={errors.amount}>
-          <Input id="amount" name="amount" type="number" min={1} step="1" />
+        {formError ? <ErrorNotice title={formError} /> : null}
+        {isHourly ? (
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Hourly rate" htmlFor="hourly_rate" error={errors.hourly_rate}>
+              <Input id="hourly_rate" name="hourly_rate" type="number" min={1} step="1" />
+            </Field>
+            <Field label="Estimated hours" htmlFor="estimated_hours" error={errors.estimated_hours}>
+              <Input id="estimated_hours" name="estimated_hours" type="number" min={1} step="1" />
+            </Field>
+          </div>
+        ) : (
+          <Field label="Bid amount" htmlFor="amount" error={errors.amount}>
+            <Input id="amount" name="amount" type="number" min={1} step="1" />
+          </Field>
+        )}
+        <Field label="Proposal" htmlFor="proposal" error={errors.proposal}>
+          <Textarea id="proposal" name="proposal" rows={6} required />
         </Field>
-      )}
-      <Field label="Proposal" htmlFor="proposal" error={errors.proposal}>
-        <Textarea id="proposal" name="proposal" rows={6} required />
-      </Field>
-      <Field label="Delivery timeline" htmlFor="delivery_timeline" error={errors.delivery_timeline}>
-        <Input id="delivery_timeline" name="delivery_timeline" placeholder="2 weeks" />
-      </Field>
-      <Button type="submit" disabled={pending}>
-        <SendIcon className="h-4 w-4" />
-        {pending ? "Submitting…" : "Submit proposal"}
-      </Button>
-    </form>
+        <Field label="Delivery timeline" htmlFor="delivery_timeline" error={errors.delivery_timeline}>
+          <Input id="delivery_timeline" name="delivery_timeline" placeholder="2 weeks" />
+        </Field>
+        <Button type="submit" disabled={pending}>
+          <SendIcon className="h-4 w-4" />
+          {pending ? "Checking…" : "Submit proposal"}
+        </Button>
+      </form>
+
+      {confirm?.preview ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="credit-confirm-title"
+          className="fixed inset-0 z-50 flex items-end justify-center bg-ink/40 p-4 sm:items-center"
+        >
+          <div className="w-full max-w-md border border-line bg-bg p-6 shadow-lg">
+            <h2 id="credit-confirm-title" className="font-display text-xl font-semibold text-ink">
+              Confirm credit spend
+            </h2>
+            <p className="mt-3 text-sm leading-relaxed text-mute">
+              This proposal uses {confirm.preview.cost} credits ({confirm.preview.balance} →{" "}
+              {confirm.preview.balance_after}).
+            </p>
+            {confirm.preview.balance_after < 0 ? (
+              <p className="mt-2 text-sm text-warn">
+                You do not have enough credits.{" "}
+                <Link href="/credits" className="underline">
+                  Check balance
+                </Link>
+              </p>
+            ) : null}
+            <div className="mt-6 flex flex-wrap gap-3">
+              <Button
+                type="button"
+                disabled={pending || confirm.preview.balance_after < 0}
+                onClick={() => placeBid(confirm.draft)}
+              >
+                {pending ? "Submitting…" : "Confirm & submit"}
+              </Button>
+              <button
+                type="button"
+                className={buttonClass("secondary", "md")}
+                onClick={() => setConfirm(null)}
+                disabled={pending}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
