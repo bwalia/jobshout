@@ -61,6 +61,20 @@ Marketplace-only re-runs: dispatch `deploy-jobshout-com.yml` with a `VERSION`
 (blank = newest release tag) and `DEPLOYMENT_TYPE=deploy` to re-seed without
 rebuilding.
 
+### Stuck Helm lock (`another operation is in progress`)
+
+If a seed fails with `UPGRADE FAILED: another operation (install/upgrade/rollback)
+is in progress`, a prior upgrade left a `pending-*` Helm secret in the ring
+namespace. The deploy workflow clears those before seeding (needs
+`KUBE_CONFIG_DATA_K3S` or `~/.kube/k3s1.yaml` on the self-hosted runner). Manual:
+
+```bash
+kubectl -n int get secret -l owner=helm,name=jobshout-com \
+  -o custom-columns=NAME:.metadata.name,STATUS:.metadata.labels.status
+kubectl -n int delete secret -l owner=helm,name=jobshout-com,status=pending-upgrade
+# also pending-install / pending-rollback if present
+```
+
 ## Image builds
 
 `Dockerfile.api` pins its builder to `$BUILDPLATFORM` and cross-compiles to

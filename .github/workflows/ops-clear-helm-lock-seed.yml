@@ -1,0 +1,165 @@
+name: Ops — clear jobshout-com Helm lock & seed
+
+# Manual ops: clear stuck Helm pending-* secrets for jobshout-com in a ring,
+# then seed Ring Promoter. The durable pre-seed clear also lives in
+# deploy-jobshout-com.yml; use this when you need a one-shot without a full
+# marketplace publish.
+
+on:
+  workflow_dispatch:
+    inputs:
+      VERSION:
+        description: "Version to seed (vX.Y.Z)"
+        required: true
+        default: "v1.0.217"
+      TARGET_ENV:
+        type: choice
+        description: "Target ring"
+        default: "int"
+        options: [int, test, acc]
+
+concurrency:
+  group: ops-clear-jobshout-com-helm-lock
+  cancel-in-progress: true
+
+env:
+  RP_APP: jobshout-com
+  SEED_VERSION: ${{ inputs.VERSION }}
+  TARGET_ENV: ${{ inputs.TARGET_ENV }}
+
+jobs:
+  clear-and-seed:
+    name: Clear Helm lock & seed ${{ inputs.VERSION }} → ${{ inputs.TARGET_ENV }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Clear stuck Helm pending lock
+        env:
+          KUBE_CONFIG_DATA_K3S: ${{ secrets.KUBE_CONFIG_DATA_K3S }}
+        run: |
+          set -euo pipefail
+          NS="${TARGET_ENV}"
+          RELEASE=jobshout-com
+          KUBECONFIG_PATH="${RUNNER_TEMP:-/tmp}/k3s1.kubeconfig"
+          if [ -z "${KUBE_CONFIG_DATA_K3S:-}" ]; then
+            echo "::error::KUBE_CONFIG_DATA_K3S secret is not set"
+            exit 1
+          fi
+          printf '%s' "$KUBE_CONFIG_DATA_K3S" | base64 -d > "$KUBECONFIG_PATH"
+          chmod 600 "$KUBECONFIG_PATH"
+          export KUBECONFIG="$KUBECONFIG_PATH"
+          command -v kubectl >/dev/null 2>&1 || { echo "::error::kubectl missing"; exit 1; }
+
+          echo "Helm release secrets for ${RELEASE} in ns/${NS}:"
+          kubectl -n "$NS" get secret -l "owner=helm,name=${RELEASE}" \
+            -o custom-columns=NAME:.metadata.name,STATUS:.metadata.labels.status,VERSION:.metadata.labels.version \
+            --no-headers 2>/dev/null || true
+
+          deleted=0
+          for status in pending-install pending-upgrade pending-rollback; do
+            names=$(kubectl -n "$NS" get secret \
+              -l "owner=helm,name=${RELEASE},status=${status}" \
+              -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)
+            if [ -n "$names" ]; then
+              echo "Deleting ${status} secrets:"
+              echo "$names"
+              # shellcheck disable=SC2086
+              kubectl -n "$NS" delete secret $names --wait=false
+              deleted=1
+            fi
+          done
+          if [ "$deleted" = 0 ]; then
+            echo "No pending Helm locks for ${RELEASE} in ${NS}."
+          else
+            echo "Cleared pending Helm lock(s) for ${RELEASE} in ${NS}."
+          fi
+
+      - name: Seed jobshout-com and wait
+        env:
+          RP_API_TOKEN: ${{ secrets.RP_API_TOKEN }}
+          RP_URL: ${{ secrets.RP_URL }}
+        run: |
+          set -euo pipefail
+          TAG="${SEED_VERSION}"
+          RP="${RP_URL:-https://rp.workstation.co.uk}"
+          if [ -z "${RP_API_TOKEN:-}" ]; then
+            echo "::error::RP_API_TOKEN is not set"; exit 1
+          fi
+          echo "Seeding ${RP_APP} '${TARGET_ENV}' @ ${TAG}"
+          echo "Track: ${RP}/?app=${RP_APP}"
+          code=$(curl -sS -o /tmp/seed.out -w '%{http_code}' \
+            -X POST "${RP}/api/apps/${RP_APP}/seed?async=1" \
+            -H "Authorization: Bearer ${RP_API_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            -d "$(printf '{"ring":"%s","version":"%s"}' "$TARGET_ENV" "$TAG")" || echo 000)
+          echo "seed -> HTTP ${code} :: $(cat /tmp/seed.out)"
+          case "${code}" in 200|202) ;; *) echo "::error::seed failed"; exit 1 ;; esac
+          JOB_ID=$(python3 -c 'import json; print(json.load(open("/tmp/seed.out")).get("job_id") or "")')
+          if [ -z "$JOB_ID" ]; then
+            echo "::error::no job_id"; exit 1
+          fi
+          python3 - "$RP" "$RP_API_TOKEN" "$JOB_ID" "$TAG" "$RP_APP" "$TARGET_ENV" <<'PY'
+          import json, sys, time, urllib.error, urllib.request
+          rp, token, job_id, tag, app, ring = sys.argv[1:7]
+          url = f"{rp}/api/apps/{app}/jobs/{job_id}"
+          rings_url = f"{rp}/api/apps/{app}/rings"
+          deadline = time.time() + 20 * 60
+
+          def seeded_ring():
+              req = urllib.request.Request(rings_url, headers={"Authorization": f"Bearer {token}"})
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as resp:
+                      rings = json.load(resp).get("rings") or []
+              except Exception as e:
+                  print(f"::warning::rings poll failed: {e}")
+                  return None
+              for r in rings:
+                  if (r.get("ring") or {}).get("name") == ring:
+                      return r
+              return None
+
+          while time.time() < deadline:
+              req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as resp:
+                      body = json.load(resp)
+              except urllib.error.HTTPError as e:
+                  print(f"::warning::poll HTTP {e.code}")
+                  time.sleep(15)
+                  continue
+              status = (body.get("status") or "").lower()
+              print(f"RP job {job_id} status={status}")
+              for step in body.get("steps") or []:
+                  print(f"--- step {step.get('id')} status={step.get('status')} ---")
+                  for line in step.get("logs") or []:
+                      print(line)
+              if status not in ("failed", "error", "cancelled"):
+                  st = seeded_ring()
+                  if st and st.get("current_version") == tag and st.get("healthy"):
+                      print(f"Deployed {tag} to {ring} and healthy.")
+                      if status != "success":
+                          print(f"RP job {job_id} is still {status} — promoting onward "
+                                f"from {ring}; follow it at {rp}/?app={app}")
+                      sys.exit(0)
+              if status == "success":
+                  sys.exit(0)
+              if status in ("failed", "error", "cancelled"):
+                  print(f"::error::RP job {status}")
+                  sys.exit(1)
+              time.sleep(15)
+          print(f"::error::{ring} did not reach {tag} and healthy within 20m")
+          sys.exit(1)
+          PY
+
+      - name: Report rings
+        if: always()
+        env:
+          RP_API_TOKEN: ${{ secrets.RP_API_TOKEN }}
+          RP_URL: ${{ secrets.RP_URL }}
+        run: |
+          set -euo pipefail
+          RP="${RP_URL:-https://rp.workstation.co.uk}"
+          curl -sS -H "Authorization: Bearer ${RP_API_TOKEN}" \
+            "${RP}/api/apps/${RP_APP}/rings" | python3 -m json.tool || true
