@@ -1,18 +1,11 @@
 name: Ops — clear jobshout-com Helm lock & seed
 
-# One-shot ops path: a stuck Helm pending-* secret blocks every Ring Promoter
-# seed with "another operation is in progress". This workflow clears those
-# secrets in the target ring, then seeds jobshout-com at a given version.
-#
-# Triggered by push to the ops branch (workflow_dispatch needs repo write that
-# the cloud-agent token may lack) or by manual dispatch once merged.
+# Manual ops: clear stuck Helm pending-* secrets for jobshout-com in a ring,
+# then seed Ring Promoter. The durable pre-seed clear also lives in
+# deploy-jobshout-com.yml; use this when you need a one-shot without a full
+# marketplace publish.
 
 on:
-  push:
-    branches: [cursor/clear-jobshout-com-helm-lock-0fd1]
-    paths:
-      - '.github/workflows/ops-clear-helm-lock-seed.yml'
-      - '.github/workflows/deploy-jobshout-com.yml'
   workflow_dispatch:
     inputs:
       VERSION:
@@ -25,22 +18,18 @@ on:
         default: "int"
         options: [int, test, acc]
 
-# Own group (not jobshout-com-release) so a dead self-hosted queue cannot
-# block this GitHub-hosted clear+seed. cancel-in-progress drops prior ops runs.
 concurrency:
   group: ops-clear-jobshout-com-helm-lock
   cancel-in-progress: true
 
 env:
   RP_APP: jobshout-com
-  SEED_VERSION: ${{ inputs.VERSION || 'v1.0.217' }}
-  TARGET_ENV: ${{ inputs.TARGET_ENV || 'int' }}
+  SEED_VERSION: ${{ inputs.VERSION }}
+  TARGET_ENV: ${{ inputs.TARGET_ENV }}
 
 jobs:
   clear-and-seed:
-    name: Clear Helm lock & seed ${{ inputs.VERSION || 'v1.0.217' }} → ${{ inputs.TARGET_ENV || 'int' }}
-    # Prefer GitHub-hosted so we are not blocked when the self-hosted Mac is offline.
-    # Needs secrets.KUBE_CONFIG_DATA_K3S (base64 kubeconfig) + RP_API_TOKEN.
+    name: Clear Helm lock & seed ${{ inputs.VERSION }} → ${{ inputs.TARGET_ENV }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
