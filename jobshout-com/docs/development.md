@@ -120,6 +120,24 @@ comments / reactions are migrated, but HTTP routes and a rich `/groups` UI for
 LinkedIn-like feeds are still thin — turning the flag on lets you create/list
 groups once signed in; full post/comment UX is not complete yet.
 
+### Linked Groups (Phase 4)
+
+Flag `GROUPS_ENABLED` (Helm `groups.enabled`). **Enabled on int** for testing;
+dark on test/acc/prod. When off, API routes return 404 and `/groups` shows an
+empty state.
+
+```bash
+# Local: enable in the API process
+GROUPS_ENABLED=true make api
+
+# Ring: Helm overlay
+# jobshout-com/deploy/helm/jobshout-com/values-int.yaml → groups.enabled: true
+# other rings: leave false (or --set groups.enabled=true for a one-off)
+```
+
+Signed-in flows: create group, join (open policy), post, comment, like, report
+stub. Browse/search secret groups are excluded. UI: `/groups`, `/groups/[slug]`.
+
 ## Deploy (int → Ring Promoter)
 
 Public int host: **https://int.jobshout.com**

@@ -47,7 +47,8 @@ aiFeatures:
 hire:
   enabled: false
 groups:
-  enabled: false
+  # Phase 4 MVP: browse/create groups, join, posts, comments — enable on int for testing.
+  enabled: true
 teams:
   enabled: false
 emailOutbox:

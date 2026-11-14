@@ -144,10 +144,12 @@ Implemented:
   Interviews/scorecards and recruiter analytics still thin.
 
 - **Linked Groups (Phase 4, flag-gated):** crate `jobshout-groups`, migration `0018`
-  (groups, members, posts, comments, reactions, reports). Secret groups excluded
-  from list/search. API today: list/search/get + create group (signed-in). Post /
-  comment / reaction HTTP and rich `/groups` feed UI still thin. Flag
-  `GROUPS_ENABLED` dark.
+  (groups, members, posts, comments, reactions, reports). APIs: list/search/create,
+  join, posts, comments, reactions, report stub. Secret groups excluded from
+  list/search. Seed official groups. Web `/groups` and `/groups/[slug]`.
+  Flag `GROUPS_ENABLED`: **on for int** (`values-int.yaml` `groups.enabled: true`),
+  dark on test/acc/prod. Toggle: Helm `groups.enabled` → env `GROUPS_ENABLED`
+  (API returns 404 when off; web shows empty state).
 
 - **Remaining AI (Phase 5b):** Freelancer Assistant, Hiring Assistant, Team Builder,
   Skill Gap Analysis registered as Go builtins (Career Assistant / Interview Prep
