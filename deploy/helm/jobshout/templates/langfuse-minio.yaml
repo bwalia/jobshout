@@ -23,6 +23,7 @@ spec:
       labels:
         {{- include "jobshout.selector" (dict "name" "langfuse-minio") | nindent 8 }}
     spec:
+      {{- include "jobshout.imagePullSecrets" . | nindent 6 }}
       containers:
         - name: minio
           image: {{ .Values.langfuse.minio.image }}
