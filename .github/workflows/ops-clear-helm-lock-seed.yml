@@ -37,7 +37,9 @@ env:
 jobs:
   clear-and-seed:
     name: Clear Helm lock & seed ${{ inputs.VERSION || 'v1.0.217' }} → ${{ inputs.TARGET_ENV || 'int' }}
-    runs-on: self-hosted
+    # Prefer GitHub-hosted so we are not blocked when the self-hosted Mac is offline.
+    # Needs secrets.KUBE_CONFIG_DATA_K3S (base64 kubeconfig) + RP_API_TOKEN.
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
@@ -50,14 +52,11 @@ jobs:
           NS="${TARGET_ENV}"
           RELEASE=jobshout-com
           KUBECONFIG_PATH="${RUNNER_TEMP:-/tmp}/k3s1.kubeconfig"
-          if [ -n "${KUBE_CONFIG_DATA_K3S:-}" ]; then
-            printf '%s' "$KUBE_CONFIG_DATA_K3S" | base64 -d > "$KUBECONFIG_PATH"
-          elif [ -f "$HOME/.kube/k3s1.yaml" ]; then
-            cp "$HOME/.kube/k3s1.yaml" "$KUBECONFIG_PATH"
-          else
-            echo "::error::no kubeconfig (KUBE_CONFIG_DATA_K3S or ~/.kube/k3s1.yaml)"
+          if [ -z "${KUBE_CONFIG_DATA_K3S:-}" ]; then
+            echo "::error::KUBE_CONFIG_DATA_K3S secret is not set"
             exit 1
           fi
+          printf '%s' "$KUBE_CONFIG_DATA_K3S" | base64 -d > "$KUBECONFIG_PATH"
           chmod 600 "$KUBECONFIG_PATH"
           export KUBECONFIG="$KUBECONFIG_PATH"
           command -v kubectl >/dev/null 2>&1 || { echo "::error::kubectl missing"; exit 1; }
