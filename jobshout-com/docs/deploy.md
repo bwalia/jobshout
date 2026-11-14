@@ -84,3 +84,19 @@ Release name: `jobshout-com` in shared ring namespaces.
 
 Ring Promoter app entry lives in `bwalia/ring-promoter` ConfigMap
 (`deploy/k8s/configmap.yaml`, app name `jobshout-com`).
+
+## Auth secrets (web)
+
+| Secret | Source | Keys |
+| --- | --- | --- |
+| `jobshout-com-auth` | Helm (`secrets.authSecret` or auto-generated) | `NEXTAUTH_SECRET`, `AUTH_SECRET` |
+| `jobshout-com-oauth` | WSLVault `jobshout-com/<ring>/oauth` → ESO / manual Secret | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, optional Facebook/Apple/LinkedIn pairs |
+
+Web Deployment `envFrom` mounts both (`jobshout-com-oauth` is `optional: true` until
+populated). Do **not** set `AUTH_DEV_LOGIN` on any ring — local-only credentials
+login is refused when `APP_ENV` is int/test/acc/prod.
+
+After writing Vault keys, sync the ExternalSecret (if used) and restart
+`jobshout-com-web` with an explicit deployments list. Redirect URIs must include
+`https://<host>/api/auth/callback/<provider>` (e.g. Google on int:
+`https://int.jobshout.com/api/auth/callback/google`).

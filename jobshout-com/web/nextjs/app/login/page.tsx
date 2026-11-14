@@ -1,10 +1,11 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { getServerSession } from "next-auth";
+import { DevLoginForm } from "@/components/DevLoginForm";
 import { SocialSignInButtons } from "@/components/SocialSignInButtons";
 import { ErrorNotice, buttonClass } from "@/components/ui";
 import { CheckCircleIcon, ShieldIcon } from "@/components/icons";
-import { authOptions, socialProviders } from "@/lib/auth";
+import { authOptions, isDevLoginEnabled, socialProviders } from "@/lib/auth";
 
 export const metadata: Metadata = {
   title: "Sign in",
@@ -27,6 +28,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Search
   const session = await getServerSession(authOptions());
   const providers = socialProviders();
   const anyConfigured = providers.some((p) => p.configured);
+  const devLogin = isDevLoginEnabled();
   const callbackUrl = searchParams.callbackUrl || "/jobs";
   const errorMessage = searchParams.error
     ? (ERROR_COPY[searchParams.error] ?? ERROR_COPY.Default)
@@ -83,11 +85,23 @@ export default async function LoginPage({ searchParams }: { searchParams: Search
                 <SocialSignInButtons providers={providers} callbackUrl={callbackUrl} />
               </div>
 
-              {!anyConfigured ? (
+              {devLogin ? <DevLoginForm callbackUrl={callbackUrl} /> : null}
+
+              {!anyConfigured && !devLogin ? (
                 <p className="mt-6 rounded-xl border border-line bg-raised px-4 py-3 text-xs leading-relaxed text-mute">
-                  No OAuth credentials are set. Add provider keys to{" "}
-                  <code className="font-mono text-ink">web/nextjs/.env.local</code> from{" "}
+                  No OAuth credentials are set. For local testing set{" "}
+                  <code className="font-mono text-ink">AUTH_DEV_LOGIN=true</code> and{" "}
+                  <code className="font-mono text-ink">APP_ENV=local</code> in{" "}
+                  <code className="font-mono text-ink">web/nextjs/.env.local</code>, or add
+                  provider keys from{" "}
                   <code className="font-mono text-ink">.env.example</code>, then restart the app.
+                </p>
+              ) : null}
+
+              {!anyConfigured && devLogin ? (
+                <p className="mt-4 text-xs leading-relaxed text-mute">
+                  Social IdPs are optional locally. Real Google/LinkedIn keys belong in Vault
+                  for int — see <code className="font-mono text-ink">docs/development.md</code>.
                 </p>
               ) : null}
 
