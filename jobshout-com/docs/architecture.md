@@ -145,7 +145,9 @@ Implemented:
 
 - **Linked Groups (Phase 4, flag-gated):** crate `jobshout-groups`, migration `0018`
   (groups, members, posts, comments, reactions, reports). Secret groups excluded
-  from list/search. Seed official groups. Web `/groups`. Flag `GROUPS_ENABLED` dark.
+  from list/search. API today: list/search/get + create group (signed-in). Post /
+  comment / reaction HTTP and rich `/groups` feed UI still thin. Flag
+  `GROUPS_ENABLED` dark.
 
 - **Remaining AI (Phase 5b):** Freelancer Assistant, Hiring Assistant, Team Builder,
   Skill Gap Analysis registered as Go builtins (Career Assistant / Interview Prep
