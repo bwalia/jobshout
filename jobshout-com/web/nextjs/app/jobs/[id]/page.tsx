@@ -16,7 +16,9 @@ import {
   TargetIcon,
   WalletIcon,
 } from "@/components/icons";
-import { getJob, listJobs, type Job } from "@/lib/api";
+import { getJob, isJobSaved, listJobs, type Job } from "@/lib/api";
+import { toggleSavedJobAction } from "@/app/actions";
+import { currentViewer } from "@/lib/session";
 import { similarJobs } from "@/lib/filter";
 import {
   employmentLabel,
@@ -44,9 +46,19 @@ export async function generateMetadata({
   };
 }
 
-export default async function JobDetailPage({ params }: { params: { id: string } }) {
-  const job = await getJob(params.id);
+export default async function JobDetailPage({
+  params,
+  searchParams = {},
+}: {
+  params: { id: string };
+  searchParams?: { saved?: string; error?: string };
+}) {
+  // With the viewer, a poster can open their own draft or closed job; for
+  // everyone else the API only returns published roles.
+  const viewer = await currentViewer();
+  const job = await getJob(params.id, viewer);
   if (!job) notFound();
+  const saved = viewer && job.status === "published" ? await isJobSaved(job.id, viewer) : false;
 
   let related: Job[] = [];
   let projects: ShowcaseApp[] = [];
@@ -61,6 +73,37 @@ export default async function JobDetailPage({ params }: { params: { id: string }
 
   return (
     <div className="pb-24">
+      {job.status !== "published" ? (
+        <div role="status" className="border-b border-warn/30 bg-warn/10">
+          <div className="mx-auto flex max-w-board flex-wrap items-center justify-between gap-3 px-5 py-3 text-sm sm:px-8">
+            <p className="font-medium text-ink">
+              {job.status === "draft"
+                ? "Draft preview. Only you can see this; it is not on the board and cannot take applications yet."
+                : `This job is ${job.status}. Only you can see it, and it no longer takes applications.`}
+            </p>
+            <div className="flex gap-2">
+              {job.status === "draft" ? (
+                <Link href={`/jobs/${job.id}/edit`} className={buttonClass("secondary", "sm")}>
+                  Edit
+                </Link>
+              ) : null}
+              <Link href="/jobs/mine" className={buttonClass("ghost", "sm")}>
+                My posted jobs
+              </Link>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {searchParams.saved === "1" ? (
+        <p role="status" className="mx-auto max-w-board px-5 pt-4 text-sm font-medium text-good sm:px-8">
+          Saved. Find it any time under <Link href="/jobs/saved" className="underline">Saved jobs</Link>.
+        </p>
+      ) : null}
+      {searchParams.error ? (
+        <p role="alert" className="mx-auto max-w-board px-5 pt-4 text-sm font-medium text-shout sm:px-8">
+          {searchParams.error}
+        </p>
+      ) : null}
       {/* ------------------------------------------------------------- Header */}
       <div className="border-b border-line bg-subtle">
         <div className="mx-auto max-w-board px-5 pb-10 pt-8 sm:px-8">
@@ -180,6 +223,16 @@ export default async function JobDetailPage({ params }: { params: { id: string }
             <Link href={`/jobs/${job.id}/apply`} className={buttonClass("secondary", "lg")}>
               Prefer the short form
             </Link>
+            {job.status === "published" ? (
+              <form action={toggleSavedJobAction}>
+                <input type="hidden" name="job_id" value={job.id} />
+                <input type="hidden" name="op" value={saved ? "unsave" : "save"} />
+                <input type="hidden" name="back" value={`/jobs/${job.id}`} />
+                <button type="submit" className={buttonClass("ghost", "lg")} aria-pressed={saved}>
+                  {saved ? "Saved ✓" : "Save"}
+                </button>
+              </form>
+            ) : null}
             <Link href="/profile" className={buttonClass("secondary", "lg")}>
               <TargetIcon className="h-4 w-4" />
               Score it against my profile

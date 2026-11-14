@@ -14,3 +14,10 @@ postgres:
 
 nebuladb:
   url: "http://nebuladb.test.svc.cluster.local:8080"
+
+# Social sign-in credentials: populate WSL Vault kv path
+# jobshout-com/test/oauth (keys listed under oauth in values.yaml).
+vaultSecrets:
+  - name: jobshout-com-oauth
+    store: wslvault-backend
+    key: jobshout-com/test/oauth

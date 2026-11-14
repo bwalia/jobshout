@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS job_alerts;
+DROP TABLE IF EXISTS saved_jobs;

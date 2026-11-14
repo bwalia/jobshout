@@ -6,6 +6,15 @@ use jobshout_domain::{
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
+/// Server-side board filters.
+#[derive(Debug, Clone, Default)]
+pub struct JobSearch {
+    pub q: Option<String>,
+    pub location: Option<String>,
+    pub types: Vec<String>,
+    pub remote: bool,
+}
+
 #[derive(Clone)]
 pub struct JobRepository {
     pool: PgPool,
@@ -41,6 +50,131 @@ impl JobRepository {
         .map_err(|e| DomainError::Other(e.into()))?;
 
         rows.iter().map(job_from_row).collect()
+    }
+
+    /// Board search: keyword, location, work types and remote, with the
+    /// total match count for paging. Wildcards in the inputs are escaped.
+    pub async fn search(
+        &self,
+        status: Option<JobStatus>,
+        f: &JobSearch,
+        limit: i64,
+        offset: i64,
+    ) -> Result<(Vec<Job>, i64), DomainError> {
+        let like = |v: &Option<String>| {
+            v.as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| {
+                    format!(
+                        "%{}%",
+                        s.replace('\\', "\\\\")
+                            .replace('%', "\\%")
+                            .replace('_', "\\_")
+                    )
+                })
+        };
+        let anywhere = f
+            .location
+            .as_deref()
+            .map(|w| {
+                matches!(
+                    w.trim().to_ascii_lowercase().as_str(),
+                    "remote" | "anywhere"
+                )
+            })
+            .unwrap_or(false);
+        let types: Option<Vec<String>> = if f.types.is_empty() {
+            None
+        } else {
+            Some(f.types.clone())
+        };
+        let rows = sqlx::query(
+            r#"
+            SELECT id, organisation_id, title, summary, description, employment_type,
+                   location, compensation, requirements, status, created_at, updated_at,
+                   published_at, COUNT(*) OVER() AS total
+            FROM jobs
+            WHERE ($1::text IS NULL OR status = $1)
+              AND ($2::text IS NULL OR concat_ws(' ', title, summary, description, requirements::text)
+                   ILIKE $2 ESCAPE '\')
+              AND ($3::text IS NULL
+                   OR ($4 AND COALESCE((location->>'remote')::boolean, false))
+                   OR (NOT $4 AND (concat_ws(' ', location->>'city', location->>'region',
+                                             location->>'country') ILIKE $3 ESCAPE '\'
+                                   OR (COALESCE((location->>'remote')::boolean, false)
+                                       AND 'remote' ILIKE $3 ESCAPE '\'))))
+              AND ($5::text[] IS NULL OR employment_type = ANY($5))
+              AND (NOT $6 OR COALESCE((location->>'remote')::boolean, false))
+            ORDER BY COALESCE(published_at, created_at) DESC
+            LIMIT $7 OFFSET $8
+            "#,
+        )
+        .bind(status.map(|s| s.as_str()))
+        .bind(like(&f.q))
+        .bind(like(&f.location))
+        .bind(anywhere)
+        .bind(types)
+        .bind(f.remote)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| DomainError::Other(e.into()))?;
+        let total = rows.first().map(|r| r.get::<i64, _>("total")).unwrap_or(0);
+        let jobs = rows.iter().map(job_from_row).collect::<Result<_, _>>()?;
+        Ok((jobs, total))
+    }
+
+    /// Every job one poster created, any status, newest activity first.
+    pub async fn list_by_poster(
+        &self,
+        poster_email: &str,
+        limit: i64,
+    ) -> Result<Vec<Job>, DomainError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, organisation_id, title, summary, description, employment_type,
+                   location, compensation, requirements, status, created_at, updated_at, published_at
+            FROM jobs
+            WHERE poster_email <> '' AND lower(poster_email) = lower($1)
+            ORDER BY updated_at DESC
+            LIMIT $2
+            "#,
+        )
+        .bind(poster_email.trim())
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| DomainError::Other(e.into()))?;
+
+        rows.iter().map(job_from_row).collect()
+    }
+
+    /// Move a draft onto the public board. Closed/archived jobs stay put.
+    pub async fn publish(&self, id: JobId) -> Result<Job, DomainError> {
+        let now = Utc::now();
+        let result = sqlx::query(
+            r#"
+            UPDATE jobs SET status = 'published',
+                   published_at = COALESCE(published_at, $2),
+                   updated_at = $2
+            WHERE id = $1 AND status = 'draft'
+            "#,
+        )
+        .bind(id)
+        .bind(now)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| DomainError::Other(e.into()))?;
+        let job = self.get(id).await?;
+        if result.rows_affected() == 0 && job.status != JobStatus::Published {
+            return Err(DomainError::Validation(format!(
+                "a {} job cannot be published",
+                job.status.as_str()
+            )));
+        }
+        Ok(job)
     }
 
     pub async fn get(&self, id: JobId) -> Result<Job, DomainError> {
@@ -189,6 +323,34 @@ impl JobRepository {
             return Err(DomainError::NotFound);
         }
         self.get(id).await
+    }
+
+    /// Remove a draft that nobody has applied to. Anything else is refused
+    /// (applications cascade on delete, so they must never be in play).
+    pub async fn delete_draft(&self, id: JobId) -> Result<(), DomainError> {
+        let result = sqlx::query(
+            r#"
+            DELETE FROM jobs
+            WHERE id = $1 AND status = 'draft'
+              AND NOT EXISTS (SELECT 1 FROM job_applications a WHERE a.job_id = jobs.id)
+            "#,
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| DomainError::Other(e.into()))?;
+        if result.rows_affected() == 0 {
+            let job = self.get(id).await?;
+            return Err(DomainError::Validation(if job.status == JobStatus::Draft {
+                "this draft has applications and cannot be deleted".into()
+            } else {
+                format!(
+                    "a {} job cannot be deleted; close it instead",
+                    job.status.as_str()
+                )
+            }));
+        }
+        Ok(())
     }
 
     pub async fn close(&self, id: JobId) -> Result<Job, DomainError> {

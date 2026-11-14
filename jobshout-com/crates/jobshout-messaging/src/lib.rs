@@ -127,23 +127,34 @@ impl MessagingService {
             return Err(DomainError::Forbidden("messaging blocked".into()));
         }
 
-        // Reuse an existing 1:1 direct conversation if present.
-        if let Some(existing) = sqlx::query_scalar::<_, Uuid>(
+        // One direct thread per pair. A transaction-scoped advisory lock on
+        // the (ordered) pair makes find-or-create atomic, so two concurrent
+        // "Message" clicks cannot open two threads.
+        let mut tx = self.pool.begin().await.map_err(db)?;
+        let (lo, hi) = if me < peer { (me, peer) } else { (peer, me) };
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+            .bind(format!("dm:{lo}:{hi}"))
+            .execute(&mut *tx)
+            .await
+            .map_err(db)?;
+        let existing = sqlx::query_scalar::<_, Uuid>(
             r#"
             SELECT c.id FROM conversations c
             JOIN conversation_participants a ON a.conversation_id = c.id AND a.member_id = $1
             JOIN conversation_participants b ON b.conversation_id = c.id AND b.member_id = $2
             WHERE c.kind = 'direct'
               AND (SELECT COUNT(*) FROM conversation_participants p WHERE p.conversation_id = c.id) = 2
+            ORDER BY c.created_at
             LIMIT 1
             "#,
         )
         .bind(me)
         .bind(peer)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *tx)
         .await
-        .map_err(db)?
-        {
+        .map_err(db)?;
+        if let Some(existing) = existing {
+            tx.commit().await.map_err(db)?;
             return self
                 .list_conversations(me, 50)
                 .await?
@@ -152,7 +163,6 @@ impl MessagingService {
                 .ok_or(DomainError::NotFound);
         }
 
-        let mut tx = self.pool.begin().await.map_err(db)?;
         let id: Uuid = sqlx::query_scalar(
             r#"
             INSERT INTO conversations (kind, subject, created_by)
@@ -249,6 +259,26 @@ impl MessagingService {
             return Err(DomainError::Validation("message too long".into()));
         }
         self.require_participant(member_id, conversation_id).await?;
+        // A block applies to existing threads too, not only to new ones.
+        let blocked: bool = sqlx::query_scalar(
+            r#"
+            SELECT EXISTS (
+              SELECT 1 FROM conversation_participants p
+              JOIN member_blocks b
+                ON (b.blocker_id = p.member_id AND b.blocked_id = $2)
+                OR (b.blocker_id = $2 AND b.blocked_id = p.member_id)
+              WHERE p.conversation_id = $1 AND p.member_id <> $2
+            )
+            "#,
+        )
+        .bind(conversation_id)
+        .bind(member_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(db)?;
+        if blocked {
+            return Err(DomainError::Forbidden("messaging blocked".into()));
+        }
         let mut tx = self.pool.begin().await.map_err(db)?;
         let row = sqlx::query(
             r#"
@@ -282,6 +312,36 @@ impl MessagingService {
             body: row.get("body"),
             created_at: row.get("created_at"),
         })
+    }
+
+    /// Emails of everyone else in a thread, for notifications.
+    pub async fn other_participant_emails(
+        &self,
+        conversation_id: Uuid,
+        member_id: Uuid,
+    ) -> Result<Vec<String>, DomainError> {
+        sqlx::query_scalar(
+            r#"
+            SELECT m.email FROM conversation_participants p
+            JOIN members m ON m.id = p.member_id
+            WHERE p.conversation_id = $1 AND p.member_id <> $2 AND m.email <> ''
+            "#,
+        )
+        .bind(conversation_id)
+        .bind(member_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db)
+    }
+
+    pub async fn unblock(&self, blocker: Uuid, blocked: Uuid) -> Result<(), DomainError> {
+        sqlx::query("DELETE FROM member_blocks WHERE blocker_id = $1 AND blocked_id = $2")
+            .bind(blocker)
+            .bind(blocked)
+            .execute(&self.pool)
+            .await
+            .map_err(db)?;
+        Ok(())
     }
 
     pub async fn block(&self, blocker: Uuid, blocked: Uuid) -> Result<(), DomainError> {

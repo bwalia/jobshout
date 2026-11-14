@@ -11,7 +11,7 @@ use jobshout_freelance::FreelanceService;
 use jobshout_groups::GroupsService;
 use jobshout_hire::HireService;
 use jobshout_integrations::PlatformClient;
-use jobshout_jobs::JobService;
+use jobshout_jobs::{JobService, SavedJobs};
 use jobshout_messaging::MessagingService;
 use jobshout_notifications::NotificationService;
 use jobshout_showcase::ShowcaseService;
@@ -21,6 +21,8 @@ use sqlx::PgPool;
 #[derive(Clone)]
 pub struct AppState {
     pub jobs: JobService,
+    /// Saved jobs and job alerts.
+    pub saved: SavedJobs,
     pub candidates: CandidateService,
     pub applications: ApplicationService,
     pub insights: InsightService,

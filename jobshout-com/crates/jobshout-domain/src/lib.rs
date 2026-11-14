@@ -314,6 +314,8 @@ pub struct JobApplicationWithJob {
 #[derive(Debug, Clone, Deserialize)]
 pub struct CreateJobApplicationRequest {
     pub full_name: String,
+    /// Ignored by the API, which always uses the signed-in account's email.
+    #[serde(default)]
     pub email: String,
     #[serde(default)]
     pub phone: String,

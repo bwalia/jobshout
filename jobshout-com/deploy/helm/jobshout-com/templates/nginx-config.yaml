@@ -32,6 +32,19 @@ data:
       server {
         listen 80;
 
+        # Route handlers that live in the Next.js app, not the Rust API.
+        # Without these, /api/auth/* (NextAuth sign-in, callbacks, session)
+        # fell through to the API and 404'd, so nobody could sign in.
+        # Longest-prefix match picks these over /api/ below.
+        location /api/auth/ {
+          set $web http://jobshout-com-web.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.web.port }};
+          proxy_pass $web;
+        }
+        location /api/job-support/ {
+          set $web http://jobshout-com-web.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.web.port }};
+          proxy_pass $web;
+        }
+
         location /api/ {
           # Identity headers only ever come from the web tier, in-cluster.
           # Blank them on public traffic so they cannot be forged from outside.

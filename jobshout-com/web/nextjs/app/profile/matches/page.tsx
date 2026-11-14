@@ -9,7 +9,8 @@ import {
   TargetIcon,
   WalletIcon,
 } from "@/components/icons";
-import { listProfileMatches, type JobMatch } from "@/lib/api";
+import { getMyProfile, listProfileMatches, type JobMatch } from "@/lib/api";
+import { currentViewer } from "@/lib/session";
 import { formatCompensation, initials, jobCategory, shortLocation } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -24,13 +25,17 @@ export default async function ProfileMatchesPage({
 }: {
   searchParams: { id?: string };
 }) {
-  const id = searchParams.id ?? "";
+  // Matches are private to the profile's owner: send the viewer, and when no
+  // id is given (the footer and nav links), use the viewer's own profile.
+  const viewer = await currentViewer();
+  let id = searchParams.id ?? "";
   let matches: JobMatch[] = [];
   let error = "";
 
-  if (id) {
+  if (viewer) {
     try {
-      matches = await listProfileMatches(id);
+      if (!id) id = (await getMyProfile(viewer))?.id ?? "";
+      if (id) matches = await listProfileMatches(id, viewer);
     } catch (e) {
       error = e instanceof Error ? e.message : "Could not load matches";
     }

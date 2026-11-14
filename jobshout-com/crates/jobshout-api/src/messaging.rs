@@ -23,7 +23,10 @@ pub fn routes() -> Router<AppState> {
             "/api/v1/messages/{id}",
             get(list_messages).post(send_message),
         )
-        .route("/api/v1/members/{handle}/block", post(block_member))
+        .route(
+            "/api/v1/members/{handle}/block",
+            post(block_member).delete(unblock_member),
+        )
         .route("/api/v1/members/{handle}/report", post(report_member))
 }
 
@@ -37,6 +40,23 @@ fn require_enabled(state: &AppState) -> Result<(), ApiError> {
     } else {
         Err(ApiError::from_domain(DomainError::NotFound))
     }
+}
+
+async fn unblock_member(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(handle): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_enabled(&state)?;
+    let who = signed_in(&state, &headers).await?;
+    let me = state.members.ensure(&who).await.map_err(err)?;
+    let (peer, _) = state
+        .members
+        .profile(&handle, Some(&who))
+        .await
+        .map_err(err)?;
+    state.messaging.unblock(me.id, peer.id).await.map_err(err)?;
+    Ok(Json(serde_json::json!({ "blocked": false })))
 }
 
 #[derive(Debug, Deserialize)]
@@ -123,13 +143,28 @@ async fn send_message(
     require_enabled(&state)?;
     let who = signed_in(&state, &headers).await?;
     let me = state.members.ensure(&who).await.map_err(err)?;
-    Ok(Json(
-        state
-            .messaging
-            .send(me.id, id, &body.body)
-            .await
-            .map_err(err)?,
-    ))
+    let message = state
+        .messaging
+        .send(me.id, id, &body.body)
+        .await
+        .map_err(err)?;
+    if let Ok(peers) = state.messaging.other_participant_emails(id, me.id).await {
+        let preview: String = message.body.chars().take(140).collect();
+        for email in peers {
+            state
+                .notifications
+                .notify_email(
+                    &email,
+                    "message",
+                    &format!("New message from {}", me.display_name),
+                    &preview,
+                    &format!("/messages/{id}"),
+                    serde_json::json!({ "conversation_id": id }),
+                )
+                .await;
+        }
+    }
+    Ok(Json(message))
 }
 
 async fn block_member(

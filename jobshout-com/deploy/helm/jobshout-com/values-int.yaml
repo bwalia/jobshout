@@ -63,3 +63,10 @@ scheduler:
 # them on a LAN worker with headroom.
 nodeSelector:
   kubernetes.io/hostname: debian004
+
+# Social sign-in credentials: populate WSL Vault kv path
+# jobshout-com/int/oauth (keys listed under oauth in values.yaml).
+vaultSecrets:
+  - name: jobshout-com-oauth
+    store: wslvault-backend
+    key: jobshout-com/int/oauth

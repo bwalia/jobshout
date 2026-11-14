@@ -7,14 +7,18 @@ import { InsightCard } from "@/components/insights/InsightCard";
 import { HeadlineForm } from "@/components/members/HeadlineForm";
 import { MemberAvatar, memberStats } from "@/components/members/MemberCard";
 import { AgentCard, AppCard } from "@/components/showcase/AppCard";
-import { Badge, EmptyState, buttonClass } from "@/components/ui";
+import { Badge, EmptyState, ErrorNotice, buttonClass } from "@/components/ui";
 import { formatDate } from "@/lib/insights";
 import { getMember, memberHref } from "@/lib/members";
 import { currentViewer } from "@/lib/session";
+import { connectionAction, startConversationAction } from "@/app/messages/actions";
 
 export const dynamic = "force-dynamic";
 
-type Params = { params: { handle: string } };
+type Params = {
+  params: { handle: string };
+  searchParams?: { connection?: string; error?: string };
+};
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const p = await getMember(params.handle).catch(() => null);
@@ -46,7 +50,7 @@ function Section({ title, count, children }: { title: string; count: number; chi
   );
 }
 
-export default async function MemberPage({ params }: Params) {
+export default async function MemberPage({ params, searchParams = {} }: Params) {
   const viewer = await currentViewer();
   const profile = await getMember(params.handle, viewer);
   if (!profile) notFound();
@@ -87,16 +91,55 @@ export default async function MemberPage({ params }: Params) {
               Your feed
             </Link>
           ) : (
-            <FollowButton
-              target={{ type: "member", handle: member.handle }}
-              following={member.following}
-              count={member.follower_count}
-              signedIn={Boolean(viewer)}
-              returnTo={href}
-            />
+            <>
+              <FollowButton
+                target={{ type: "member", handle: member.handle }}
+                following={member.following}
+                count={member.follower_count}
+                signedIn={Boolean(viewer)}
+                returnTo={href}
+              />
+              {viewer && !member.is_agent ? (
+                <>
+                  <form action={startConversationAction}>
+                    <input type="hidden" name="handle" value={member.handle} />
+                    <button type="submit" className={buttonClass("secondary", "md")}>
+                      Message
+                    </button>
+                  </form>
+                  {member.connected ? (
+                    <Badge tone="good">Connected</Badge>
+                  ) : (
+                    <form action={connectionAction}>
+                      <input type="hidden" name="handle" value={member.handle} />
+                      <input type="hidden" name="op" value="request" />
+                      <input type="hidden" name="back" value={href} />
+                      <button type="submit" className={buttonClass("ghost", "md")}>
+                        Connect
+                      </button>
+                    </form>
+                  )}
+                </>
+              ) : null}
+            </>
           )}
         </div>
       </header>
+
+      {searchParams.connection ? (
+        <p role="status" className="mt-4 text-sm font-medium text-good">
+          {searchParams.connection === "accepted"
+            ? "You are now connected."
+            : searchParams.connection === "pending"
+              ? "Connection request sent. They will see it on their Connections page."
+              : `Connection status: ${searchParams.connection}.`}
+        </p>
+      ) : null}
+      {searchParams.error ? (
+        <div className="mt-4">
+          <ErrorNotice title={searchParams.error} />
+        </div>
+      ) : null}
 
       {is_self ? <HeadlineForm headline={member.headline} /> : null}
 

@@ -59,6 +59,9 @@ export default async function DashboardPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Link href="/notifications" className={buttonClass("secondary", "md")}>
+            Notifications{dash.unread_notifications > 0 ? ` (${dash.unread_notifications})` : ""}
+          </Link>
           <Link href="/messages" className={buttonClass("secondary", "md")}>
             Messages{dash.unread_messages > 0 ? ` (${dash.unread_messages})` : ""}
           </Link>
@@ -145,24 +148,29 @@ export default async function DashboardPage() {
             )}
           </section>
 
-          <section className="rounded-card border border-line bg-surface p-5">
-            <h2 className="font-display text-lg font-semibold text-ink">Credits</h2>
-            <p className="mt-2 text-2xl font-semibold text-ink">{dash.credits.balance}</p>
-            <p className="text-sm text-mute">Plan: {dash.credits.plan}</p>
-          </section>
+          {/* Credits only when they are switched on (the API sends a plan). */}
+          {dash.credits.plan ? (
+            <section className="rounded-card border border-line bg-surface p-5">
+              <h2 className="font-display text-lg font-semibold text-ink">Credits</h2>
+              <p className="mt-2 text-2xl font-semibold text-ink">{dash.credits.balance}</p>
+              <p className="text-sm text-mute">Plan: {dash.credits.plan}</p>
+            </section>
+          ) : null}
 
-          <section className="rounded-card border border-line bg-surface p-5">
-            <h2 className="font-display text-lg font-semibold text-ink">Weekly goals</h2>
-            <ul className="mt-3 space-y-2">
-              {dash.weekly_goals.map((g) => (
-                <li key={g.id}>
-                  <Link href={g.href} className="text-sm font-medium text-ink hover:text-shout">
-                    {g.title}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </section>
+          {dash.weekly_goals.length > 0 ? (
+            <section className="rounded-card border border-line bg-surface p-5">
+              <h2 className="font-display text-lg font-semibold text-ink">Weekly goals</h2>
+              <ul className="mt-3 space-y-2">
+                {dash.weekly_goals.map((g) => (
+                  <li key={g.id}>
+                    <Link href={g.href} className="text-sm font-medium text-ink hover:text-shout">
+                      {g.title}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
 
           {dash.approval_inbox.length > 0 ? (
             <section className="rounded-card border border-line bg-surface p-5">

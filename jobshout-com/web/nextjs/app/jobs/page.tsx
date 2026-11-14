@@ -5,7 +5,7 @@ import { BoardSort, JobFilters } from "@/components/JobFilters";
 import { JobSearchBar } from "@/components/JobSearchBar";
 import { Badge, EmptyState, ErrorNotice, buttonClass } from "@/components/ui";
 import { BriefcaseIcon, SearchIcon } from "@/components/icons";
-import { listJobs, type Job } from "@/lib/api";
+import { BOARD_SEARCH_CAP, searchJobs, type Job } from "@/lib/api";
 import { applyFilters, hasActiveFilters, parseFilters } from "@/lib/filter";
 import { employmentLabel } from "@/lib/format";
 
@@ -23,16 +23,36 @@ export default async function JobsPage({
 }) {
   const filters = parseFilters(searchParams);
 
+  // Keyword, location, work type and remote are searched on the server, so
+  // every live job is reachable; category, salary floor and sort refine
+  // that result here.
   let jobs: Job[] = [];
+  let serverTotal = 0;
+  let boardTotal = 0;
   let error = "";
   try {
-    jobs = await listJobs(100);
+    const [found, board] = await Promise.all([
+      searchJobs({
+        q: filters.q,
+        where: filters.where,
+        types: filters.types,
+        remote: filters.remote,
+      }),
+      hasActiveFilters(filters) ? searchTotal() : null,
+    ]);
+    jobs = found.jobs;
+    serverTotal = found.total;
+    boardTotal = board ?? found.total;
   } catch (e) {
     error = e instanceof Error ? e.message : "Could not load jobs";
   }
 
-  const results = applyFilters(jobs, filters);
+  const all = applyFilters(jobs, filters);
   const filtered = hasActiveFilters(filters);
+  const pages = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
+  const page = Math.min(pages, Math.max(1, Number(one(searchParams.page)) || 1));
+  const results = all.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const truncated = serverTotal > BOARD_SEARCH_CAP;
 
   return (
     <div className="mx-auto max-w-board px-5 pb-24 pt-10 sm:px-8 sm:pt-14">
@@ -41,7 +61,7 @@ export default async function JobsPage({
           Open roles
         </h1>
         <p className="mt-3 max-w-xl text-base leading-relaxed text-mute">
-          {jobs.length} live {jobs.length === 1 ? "listing" : "listings"} from the marketplace.
+          {boardTotal} live {boardTotal === 1 ? "listing" : "listings"} from the marketplace.
           Filter it down, then apply in a couple of minutes.
         </p>
       </header>
@@ -89,26 +109,66 @@ export default async function JobsPage({
       ) : null}
 
       <div className="mt-8 grid gap-8 lg:grid-cols-[16rem_1fr] lg:gap-12">
-        <JobFilters filters={filters} resultCount={results.length} />
+        <JobFilters filters={filters} resultCount={all.length} />
 
         <section aria-label="Job results">
           <div className="hidden items-center justify-between gap-4 border-b border-line pb-4 lg:flex">
             <p className="text-sm text-mute">
-              <span className="font-semibold text-ink">{results.length}</span>{" "}
-              {results.length === 1 ? "role" : "roles"}
+              <span className="font-semibold text-ink">{all.length}</span>{" "}
+              {all.length === 1 ? "role" : "roles"}
               {filtered ? " match your filters" : " on the board"}
             </p>
-            <BoardSort value={filters.sort} />
+            <div className="flex items-center gap-3">
+              {filtered ? (
+                <Link href={alertHref(searchParams)} className={buttonClass("ghost", "sm")}>
+                  Alert me about new matches
+                </Link>
+              ) : null}
+              <BoardSort value={filters.sort} />
+            </div>
           </div>
 
+          {truncated ? (
+            <p className="mt-4 text-sm text-mute">
+              Showing the newest {BOARD_SEARCH_CAP} of {serverTotal} matches. Add a keyword or
+              location to narrow it down.
+            </p>
+          ) : null}
+
           {results.length > 0 ? (
-            <ul className="mt-6 grid gap-4 xl:grid-cols-2">
-              {results.map((job) => (
-                <li key={job.id}>
-                  <JobCard job={job} />
-                </li>
-              ))}
-            </ul>
+            <>
+              <ul className="mt-6 grid gap-4 xl:grid-cols-2">
+                {results.map((job) => (
+                  <li key={job.id}>
+                    <JobCard job={job} />
+                  </li>
+                ))}
+              </ul>
+              {pages > 1 ? (
+                <nav
+                  aria-label="Job result pages"
+                  className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-6 text-sm"
+                >
+                  {page > 1 ? (
+                    <Link href={pageHref(searchParams, page - 1)} className={buttonClass("secondary", "sm")}>
+                      Previous
+                    </Link>
+                  ) : (
+                    <span />
+                  )}
+                  <span className="text-mute">
+                    Page {page} of {pages}
+                  </span>
+                  {page < pages ? (
+                    <Link href={pageHref(searchParams, page + 1)} className={buttonClass("secondary", "sm")}>
+                      Next
+                    </Link>
+                  ) : (
+                    <span />
+                  )}
+                </nav>
+              ) : null}
+            </>
           ) : (
             <div className="mt-6">
               {/* A dead end always offers a way out. */}
@@ -155,6 +215,42 @@ export default async function JobsPage({
       </div>
     </div>
   );
+}
+
+const PAGE_SIZE = 24;
+
+function one(v: string | string[] | undefined): string {
+  return (Array.isArray(v) ? v[0] : v) ?? "";
+}
+
+/** Same filters, another page. */
+function pageHref(
+  params: Record<string, string | string[] | undefined>,
+  page: number,
+): string {
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (k !== "page" && v !== undefined) qs.set(k, one(v));
+  }
+  if (page > 1) qs.set("page", String(page));
+  const s = qs.toString();
+  return s ? `/jobs?${s}` : "/jobs";
+}
+
+/** Job alerts form, prefilled with this search. */
+function alertHref(params: Record<string, string | string[] | undefined>): string {
+  const qs = new URLSearchParams();
+  for (const k of ["q", "where", "type", "remote"]) {
+    const v = one(params[k]);
+    if (v) qs.set(k, v);
+  }
+  return `/jobs/alerts?${qs}`;
+}
+
+/** Live jobs on the whole board, for the header count. */
+async function searchTotal(): Promise<number> {
+  const { total } = await searchJobs({});
+  return total;
 }
 
 function Chip({ label }: { label: string }) {

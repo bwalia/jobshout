@@ -234,14 +234,14 @@ impl GroupsService {
         if name.is_empty() || slug.is_empty() {
             return Err(DomainError::Validation("name and slug are required".into()));
         }
-        if !slug
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-            || slug.len() < 2
-            || slug.len() > 64
-        {
+        if !valid_slug(&slug) {
             return Err(DomainError::Validation(
-                "slug must be 2–64 chars: lowercase, digits, hyphens".into(),
+                "slug may only use a-z, 0-9 and single hyphens (2-60 characters)".into(),
+            ));
+        }
+        if name.chars().count() > 120 || req.description.chars().count() > 4_000 {
+            return Err(DomainError::Validation(
+                "name (120) or description (4000) is too long".into(),
             ));
         }
         let kind = match req.kind.as_str() {
@@ -258,7 +258,13 @@ impl GroupsService {
         };
         let id = Uuid::new_v4();
         let now = Utc::now();
-        let result = sqlx::query(
+        // Group and owner membership are written together or not at all.
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| DomainError::Other(e.into()))?;
+        sqlx::query(
             r#"
             INSERT INTO community_groups (
               id, slug, name, description, kind, visibility, join_policy,
@@ -275,16 +281,17 @@ impl GroupsService {
         .bind(join_policy)
         .bind(account_id)
         .bind(now)
-        .execute(&self.pool)
-        .await;
-        if let Err(e) = result {
-            if let sqlx::Error::Database(db) = &e {
-                if db.constraint() == Some("community_groups_slug_key") {
-                    return Err(DomainError::Conflict("slug already taken".into()));
-                }
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| match &e {
+            sqlx::Error::Database(d)
+                if d.constraint() == Some("community_groups_slug_key")
+                    || d.code().as_deref() == Some("23505") =>
+            {
+                DomainError::Conflict(format!("the slug \"{slug}\" is already taken"))
             }
-            return Err(DomainError::Other(e.into()));
-        }
+            _ => DomainError::Other(e.into()),
+        })?;
         sqlx::query(
             r#"
             INSERT INTO community_group_members (id, group_id, member_id, role)
@@ -294,9 +301,12 @@ impl GroupsService {
         .bind(Uuid::new_v4())
         .bind(id)
         .bind(member_id)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(|e| DomainError::Other(e.into()))?;
+        tx.commit()
+            .await
+            .map_err(|e| DomainError::Other(e.into()))?;
         Ok(Group {
             id,
             slug,
@@ -315,7 +325,13 @@ impl GroupsService {
     /// Search never returns secret groups.
     pub async fn search(&self, q: &str, limit: i64) -> Result<Vec<Group>, DomainError> {
         let limit = limit.clamp(1, 50);
-        let pattern = format!("%{}%", q.trim());
+        // Escape LIKE wildcards so "%" or "_" search for themselves.
+        let escaped = q
+            .trim()
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        let pattern = format!("%{escaped}%");
         let rows = sqlx::query_as::<
             _,
             (
@@ -337,7 +353,8 @@ impl GroupsService {
                     WHERE m.group_id = g.id AND NOT m.banned) AS member_count
             FROM community_groups g
             WHERE g.visibility <> 'secret'
-              AND (g.name ILIKE $1 OR g.description ILIKE $1 OR g.slug ILIKE $1)
+              AND (g.name ILIKE $1 ESCAPE '\' OR g.description ILIKE $1 ESCAPE '\'
+                   OR g.slug ILIKE $1 ESCAPE '\')
             ORDER BY g.name
             LIMIT $2
             "#,
@@ -870,5 +887,45 @@ mod tests {
     #[test]
     fn open_join_policy_is_default() {
         assert_eq!(super::default_join(), "open");
+    }
+}
+
+/// Group slugs appear in URLs: lowercase letters, digits and single hyphens.
+pub fn valid_slug(slug: &str) -> bool {
+    let len = slug.len();
+    (2..=60).contains(&len)
+        && slug
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        && !slug.starts_with('-')
+        && !slug.ends_with('-')
+        && !slug.contains("--")
+}
+
+#[cfg(test)]
+mod slug_tests {
+    use super::valid_slug;
+
+    #[test]
+    fn accepts_plain_slugs() {
+        for ok in ["rust", "rust-london", "ai-agents-2026"] {
+            assert!(valid_slug(ok), "{ok}");
+        }
+    }
+
+    #[test]
+    fn rejects_unsafe_slugs() {
+        for bad in [
+            "",
+            "a",
+            "../ <b>x y%",
+            "Rust",
+            "-rust",
+            "rust-",
+            "a--b",
+            "a_b",
+        ] {
+            assert!(!valid_slug(bad), "{bad}");
+        }
     }
 }

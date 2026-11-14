@@ -119,6 +119,8 @@ async fn generate_proposal(
     values.insert("skills".into(), body.skills.clone());
     values.insert("freelancer_profile".into(), body.freelancer_profile.clone());
     values.insert("tone".into(), body.tone.clone());
+    // Check credits before spending a model call, not after.
+    ensure_ai_credits(&state, account.id).await?;
     let launched = client.launch(agent_id, values).await.map_err(err)?;
     let pool = pool(&state).ok_or_else(|| {
         ApiError::from_domain(DomainError::Validation("ai storage not configured".into()))
@@ -138,9 +140,7 @@ async fn generate_proposal(
     )
     .await
     .map_err(err)?;
-    if state.credits_enabled {
-        let _ = state.billing.meter_ai(account.id, &id.to_string(), 1).await;
-    }
+    charge_ai(&state, account.id, id).await;
     Ok(Json(json!({
         "data": {
             "id": id,
@@ -187,6 +187,8 @@ async fn generate_breakdown(
     values.insert("idea".into(), body.idea.clone());
     values.insert("budget_hint".into(), body.budget_hint.clone());
     values.insert("preferred_stack".into(), body.preferred_stack.clone());
+    // Check credits before spending a model call, not after.
+    ensure_ai_credits(&state, account.id).await?;
     let launched = client.launch(agent_id, values).await.map_err(err)?;
     let pool = pool(&state).ok_or_else(|| {
         ApiError::from_domain(DomainError::Validation("ai storage not configured".into()))
@@ -203,6 +205,7 @@ async fn generate_breakdown(
     )
     .await
     .map_err(err)?;
+    charge_ai(&state, account.id, id).await;
     Ok(Json(json!({
         "data": {
             "id": id,
@@ -249,6 +252,8 @@ async fn generate_talent_match(
     values.insert("brief".into(), body.brief.clone());
     values.insert("required_skills".into(), body.required_skills.clone());
     values.insert("candidate_notes".into(), body.candidate_notes.clone());
+    // Check credits before spending a model call, not after.
+    ensure_ai_credits(&state, account.id).await?;
     let launched = client.launch(agent_id, values).await.map_err(err)?;
     let pool = pool(&state).ok_or_else(|| {
         ApiError::from_domain(DomainError::Validation("ai storage not configured".into()))
@@ -265,6 +270,7 @@ async fn generate_talent_match(
     )
     .await
     .map_err(err)?;
+    charge_ai(&state, account.id, id).await;
     Ok(Json(json!({
         "data": {
             "id": id,
@@ -377,4 +383,40 @@ async fn set_status(
         return Err(ApiError::from_domain(DomainError::NotFound));
     }
     Ok(Json(json!({ "data": { "id": id, "status": status } })))
+}
+
+/// Credits one AI generation costs.
+const AI_COST: i32 = 1;
+
+/// Refuse with 402 when credits are on and the account cannot pay.
+async fn ensure_ai_credits(state: &AppState, account_id: uuid::Uuid) -> Result<(), ApiError> {
+    if !state.credits_enabled {
+        return Ok(());
+    }
+    let balance = state.billing.balance(account_id).await.map_err(err)?;
+    if balance.balance < AI_COST {
+        return Err(ApiError {
+            status: axum::http::StatusCode::PAYMENT_REQUIRED,
+            code: "INSUFFICIENT_CREDITS",
+            message: "You do not have enough credits for this AI draft.".into(),
+            request_id: uuid::Uuid::new_v4().to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// Charge for a generated draft. Keyed by draft id, so it is never charged
+/// twice. A failure here (e.g. a concurrent spend emptied the balance) is
+/// logged rather than hidden.
+async fn charge_ai(state: &AppState, account_id: uuid::Uuid, draft_id: uuid::Uuid) {
+    if !state.credits_enabled {
+        return;
+    }
+    if let Err(e) = state
+        .billing
+        .meter_ai(account_id, &draft_id.to_string(), AI_COST)
+        .await
+    {
+        tracing::warn!(error = ?e, %account_id, %draft_id, "could not meter AI draft");
+    }
 }
