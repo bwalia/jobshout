@@ -50,6 +50,33 @@ pub fn is_agent_email(email: &str) -> bool {
         .ends_with("@agents.jobshout.com")
 }
 
+/// Values the `members.availability` column accepts (members_availability_chk).
+pub const AVAILABILITY: &[&str] = &["", "full_time", "part_time", "contract", "not_available"];
+
+/// Check profile fields the database would otherwise reject with a 500.
+pub fn validate_member_input(input: &jobshout_domain::MemberInput) -> Result<(), DomainError> {
+    if let Some(a) = input.availability.as_deref() {
+        if !AVAILABILITY.contains(&a.trim()) {
+            return Err(DomainError::Validation(format!(
+                "availability must be one of: {}",
+                AVAILABILITY[1..].join(", ")
+            )));
+        }
+    }
+    let (min, max) = (input.rate_min.flatten(), input.rate_max.flatten());
+    if min.is_some_and(|v| v < 0.0) || max.is_some_and(|v| v < 0.0) {
+        return Err(DomainError::Validation("rates cannot be negative".into()));
+    }
+    if let (Some(a), Some(b)) = (min, max) {
+        if a > b {
+            return Err(DomainError::Validation(
+                "rate_min must be at or below rate_max".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub fn clean_headline(raw: &str) -> Result<String, DomainError> {
     let s = raw.split_whitespace().collect::<Vec<_>>().join(" ");
     if s.chars().count() > HEADLINE_MAX {
@@ -183,5 +210,35 @@ mod tests {
                 (FeedItemKind::UsedIn, "app-b".into(), Some("agent-y".into())),
             ]
         );
+    }
+}
+
+#[cfg(test)]
+mod member_input_tests {
+    use super::validate_member_input;
+    use jobshout_domain::MemberInput;
+
+    fn input(json: &str) -> MemberInput {
+        serde_json::from_str(json).expect("valid MemberInput json")
+    }
+
+    #[test]
+    fn rejects_unknown_availability_and_bad_rates() {
+        assert!(
+            validate_member_input(&input(r#"{"headline":"x","availability":"open"}"#)).is_err()
+        );
+        assert!(
+            validate_member_input(&input(r#"{"headline":"x","rate_min":90,"rate_max":50}"#))
+                .is_err()
+        );
+        assert!(validate_member_input(&input(r#"{"headline":"x","rate_min":-1}"#)).is_err());
+    }
+
+    #[test]
+    fn accepts_valid_profile() {
+        assert!(validate_member_input(&input(
+            r#"{"headline":"x","availability":"contract","rate_min":50,"rate_max":90}"#
+        ))
+        .is_ok());
     }
 }

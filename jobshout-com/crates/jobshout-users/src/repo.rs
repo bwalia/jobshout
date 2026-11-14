@@ -499,6 +499,9 @@ impl MemberRepository {
             .collect())
     }
 
+    /// Ask to connect. If the other member already asked us, that request
+    /// is accepted instead of creating a second, crossed one. The status
+    /// returned is what is actually stored.
     pub async fn request_connection(
         &self,
         requester: MemberId,
@@ -508,6 +511,21 @@ impl MemberRepository {
             return Err(DomainError::Validation(
                 "you can't connect with yourself".into(),
             ));
+        }
+        let reverse: Option<String> = sqlx::query_scalar(
+            "SELECT status FROM member_connections WHERE requester_id = $1 AND addressee_id = $2",
+        )
+        .bind(addressee)
+        .bind(requester)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(db)?;
+        match reverse.as_deref() {
+            Some("pending") => {
+                return self.respond_connection(requester, addressee, true).await;
+            }
+            Some("accepted") => return Ok(jobshout_domain::ConnectionStatus::Accepted),
+            _ => {}
         }
         sqlx::query(
             r#"
@@ -521,7 +539,143 @@ impl MemberRepository {
         .execute(&self.pool)
         .await
         .map_err(db)?;
-        Ok(jobshout_domain::ConnectionStatus::Pending)
+        let status: String = sqlx::query_scalar(
+            "SELECT status FROM member_connections WHERE requester_id = $1 AND addressee_id = $2",
+        )
+        .bind(requester)
+        .bind(addressee)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(db)?;
+        Ok(match status.as_str() {
+            "accepted" => jobshout_domain::ConnectionStatus::Accepted,
+            "declined" => jobshout_domain::ConnectionStatus::Declined,
+            "blocked" => jobshout_domain::ConnectionStatus::Blocked,
+            _ => jobshout_domain::ConnectionStatus::Pending,
+        })
+    }
+
+    /// Members connected to `me`, by status: requests waiting for me
+    /// ("incoming"), requests I sent ("outgoing"), or "accepted".
+    pub async fn connections(
+        &self,
+        me: MemberId,
+        viewer_email: &str,
+        which: &str,
+    ) -> Result<Vec<Member>, DomainError> {
+        let filter = match which {
+            "incoming" => {
+                "m.id IN (SELECT requester_id FROM member_connections \
+                 WHERE addressee_id = $2 AND status = 'pending')"
+            }
+            "outgoing" => {
+                "m.id IN (SELECT addressee_id FROM member_connections \
+                 WHERE requester_id = $2 AND status = 'pending')"
+            }
+            _ => {
+                "m.id IN (SELECT CASE WHEN requester_id = $2 THEN addressee_id ELSE requester_id END \
+                 FROM member_connections WHERE status = 'accepted' \
+                 AND (requester_id = $2 OR addressee_id = $2))"
+            }
+        };
+        let sql = format!("{MEMBER} WHERE {filter} ORDER BY m.display_name LIMIT 200");
+        let rows = sqlx::query(&sql)
+            .bind(viewer_email)
+            .bind(me)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db)?;
+        rows.iter()
+            .map(|r| member_from_row(r).map(|(m, _)| m))
+            .collect()
+    }
+
+    /// Privacy flags per member: (show_location, show_rate, show_availability).
+    /// Members without a row use the defaults (everything shown).
+    pub async fn privacy_flags(
+        &self,
+        ids: &[Uuid],
+    ) -> Result<std::collections::HashMap<Uuid, (bool, bool, bool)>, DomainError> {
+        if ids.is_empty() {
+            return Ok(Default::default());
+        }
+        let rows = sqlx::query(
+            r#"
+            SELECT member_id, show_location, show_rate, show_availability
+            FROM member_privacy_settings WHERE member_id = ANY($1)
+            "#,
+        )
+        .bind(ids)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db)?;
+        Ok(rows
+            .iter()
+            .map(|r| {
+                (
+                    r.get::<Uuid, _>("member_id"),
+                    (
+                        r.get("show_location"),
+                        r.get("show_rate"),
+                        r.get("show_availability"),
+                    ),
+                )
+            })
+            .collect())
+    }
+
+    pub async fn get_privacy(
+        &self,
+        member_id: Uuid,
+    ) -> Result<jobshout_domain::MemberPrivacy, DomainError> {
+        let row = sqlx::query(
+            r#"
+            SELECT show_location, show_rate, show_availability, searchable
+            FROM member_privacy_settings WHERE member_id = $1
+            "#,
+        )
+        .bind(member_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(db)?;
+        Ok(match row {
+            Some(r) => jobshout_domain::MemberPrivacy {
+                show_location: r.get("show_location"),
+                show_rate: r.get("show_rate"),
+                show_availability: r.get("show_availability"),
+                searchable: r.get("searchable"),
+            },
+            None => jobshout_domain::MemberPrivacy::default(),
+        })
+    }
+
+    pub async fn set_privacy(
+        &self,
+        member_id: Uuid,
+        p: &jobshout_domain::MemberPrivacy,
+    ) -> Result<(), DomainError> {
+        sqlx::query(
+            r#"
+            INSERT INTO member_privacy_settings
+              (member_id, show_location, show_rate, show_availability, searchable, updated_at)
+            VALUES ($1, $2, $3, $4, $5, NOW())
+            ON CONFLICT (member_id) DO UPDATE SET
+              show_location = EXCLUDED.show_location,
+              show_rate = EXCLUDED.show_rate,
+              show_availability = EXCLUDED.show_availability,
+              searchable = EXCLUDED.searchable,
+              updated_at = NOW()
+            "#,
+        )
+        .bind(member_id)
+        .bind(p.show_location)
+        .bind(p.show_rate)
+        .bind(p.show_availability)
+        .bind(p.searchable)
+        .execute(&self.pool)
+        .await
+        .map_err(db)?;
+        Ok(())
     }
 
     pub async fn respond_connection(

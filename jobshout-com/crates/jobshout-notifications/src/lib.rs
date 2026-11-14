@@ -22,6 +22,58 @@ pub struct Notification {
     pub created_at: DateTime<Utc>,
 }
 
+/// Notification kinds the platform sends, with the label shown in settings.
+pub const KINDS: &[(&str, &str)] = &[
+    (
+        "application_received",
+        "Someone applies to a job you posted",
+    ),
+    (
+        "application_status",
+        "Your application moves to a new stage",
+    ),
+    ("message", "New direct messages"),
+    ("connection_request", "Connection requests"),
+    ("connection_accepted", "Accepted connection requests"),
+    ("job_alert", "New jobs matching your job alerts"),
+];
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Preference {
+    pub kind: String,
+    pub label: String,
+    pub in_app: bool,
+}
+
+#[derive(sqlx::FromRow)]
+struct NotificationRow {
+    id: Uuid,
+    account_id: Uuid,
+    kind: String,
+    title: String,
+    body: String,
+    href: String,
+    payload: Value,
+    read_at: Option<DateTime<Utc>>,
+    created_at: DateTime<Utc>,
+}
+
+impl From<NotificationRow> for Notification {
+    fn from(r: NotificationRow) -> Self {
+        Self {
+            id: r.id,
+            account_id: r.account_id,
+            kind: r.kind,
+            title: r.title,
+            body: r.body,
+            href: r.href,
+            payload: r.payload,
+            read_at: r.read_at,
+            created_at: r.created_at,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OutboxEmail {
     pub id: Uuid,
@@ -88,6 +140,156 @@ impl NotificationService {
             read_at: None,
             created_at: now,
         })
+    }
+
+    /// Notify the account behind `email`, if one exists and has not turned
+    /// this kind of in-app notification off. Never fails the caller: a
+    /// notification is a side effect, so problems are logged.
+    pub async fn notify_email(
+        &self,
+        email: &str,
+        kind: &str,
+        title: &str,
+        body: &str,
+        href: &str,
+        payload: Value,
+    ) {
+        let result: Result<(), DomainError> = async {
+            let Some(account_id) = self.account_for_email(email).await? else {
+                return Ok(());
+            };
+            if !self.enabled(account_id, "in_app", kind).await? {
+                return Ok(());
+            }
+            self.notify(account_id, kind, title, body, href, payload)
+                .await
+                .map(|_| ())
+        }
+        .await;
+        if let Err(e) = result {
+            tracing::warn!(error = ?e, kind, "could not create notification");
+        }
+    }
+
+    async fn account_for_email(&self, email: &str) -> Result<Option<Uuid>, DomainError> {
+        sqlx::query_scalar("SELECT id FROM accounts WHERE lower(primary_email) = lower($1)")
+            .bind(email.trim())
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| DomainError::Other(e.into()))
+    }
+
+    /// Preferences default to on; a row only exists once someone turns one off.
+    pub async fn enabled(
+        &self,
+        account_id: Uuid,
+        channel: &str,
+        kind: &str,
+    ) -> Result<bool, DomainError> {
+        let v: Option<bool> = sqlx::query_scalar(
+            "SELECT enabled FROM notification_preferences \
+             WHERE account_id = $1 AND channel = $2 AND kind = $3",
+        )
+        .bind(account_id)
+        .bind(channel)
+        .bind(kind)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| DomainError::Other(e.into()))?;
+        Ok(v.unwrap_or(true))
+    }
+
+    /// The account's own notifications, newest first.
+    pub async fn list(
+        &self,
+        account_id: Uuid,
+        limit: i64,
+        unread_only: bool,
+    ) -> Result<Vec<Notification>, DomainError> {
+        let rows = sqlx::query_as::<_, NotificationRow>(
+            r#"
+            SELECT id, account_id, kind, title, body, href, payload, read_at, created_at
+            FROM notifications
+            WHERE account_id = $1 AND (NOT $3 OR read_at IS NULL)
+            ORDER BY created_at DESC
+            LIMIT $2
+            "#,
+        )
+        .bind(account_id)
+        .bind(limit.clamp(1, 100))
+        .bind(unread_only)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| DomainError::Other(e.into()))?;
+        Ok(rows.into_iter().map(Into::into).collect())
+    }
+
+    pub async fn unread_count(&self, account_id: Uuid) -> Result<i64, DomainError> {
+        sqlx::query_scalar(
+            "SELECT COUNT(*) FROM notifications WHERE account_id = $1 AND read_at IS NULL",
+        )
+        .bind(account_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| DomainError::Other(e.into()))
+    }
+
+    /// Mark the given notifications (or all, when `ids` is empty) read.
+    /// Only the account's own rows are touched.
+    pub async fn mark_read(&self, account_id: Uuid, ids: &[Uuid]) -> Result<u64, DomainError> {
+        let r = sqlx::query(
+            r#"
+            UPDATE notifications SET read_at = NOW()
+            WHERE account_id = $1 AND read_at IS NULL
+              AND (cardinality($2::uuid[]) = 0 OR id = ANY($2))
+            "#,
+        )
+        .bind(account_id)
+        .bind(ids)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| DomainError::Other(e.into()))?;
+        Ok(r.rows_affected())
+    }
+
+    /// Every known kind with its in-app setting for this account.
+    pub async fn preferences(&self, account_id: Uuid) -> Result<Vec<Preference>, DomainError> {
+        let mut out = Vec::new();
+        for (kind, label) in KINDS {
+            out.push(Preference {
+                kind: (*kind).into(),
+                label: (*label).into(),
+                in_app: self.enabled(account_id, "in_app", kind).await?,
+            });
+        }
+        Ok(out)
+    }
+
+    pub async fn set_preference(
+        &self,
+        account_id: Uuid,
+        kind: &str,
+        in_app: bool,
+    ) -> Result<(), DomainError> {
+        if !KINDS.iter().any(|(k, _)| *k == kind) {
+            return Err(DomainError::Validation(format!(
+                "unknown notification kind: {kind}"
+            )));
+        }
+        sqlx::query(
+            r#"
+            INSERT INTO notification_preferences (account_id, channel, kind, enabled)
+            VALUES ($1, 'in_app', $2, $3)
+            ON CONFLICT (account_id, channel, kind) DO UPDATE SET enabled = EXCLUDED.enabled
+            "#,
+        )
+        .bind(account_id)
+        .bind(kind)
+        .bind(in_app)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| DomainError::Other(e.into()))?;
+        Ok(())
     }
 
     /// Queue an email for the worker. Feature flag: callers should check

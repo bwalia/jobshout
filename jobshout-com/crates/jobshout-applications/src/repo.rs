@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use jobshout_domain::{
-    ApplicationStatus, CreateJobApplicationRequest, DomainError, JobApplication,
+    ApplicationStatus, CreateJobApplicationRequest, DomainError, JobApplication, JobApplicationId,
     JobApplicationWithJob, JobId,
 };
 use sqlx::{PgPool, Row};
@@ -40,13 +40,36 @@ impl ApplicationRepository {
         job_id: JobId,
         req: CreateJobApplicationRequest,
     ) -> Result<JobApplication, DomainError> {
-        let job_exists: Option<(Uuid,)> = sqlx::query_as("SELECT id FROM jobs WHERE id = $1")
+        // Only live jobs take applications. Drafts and closed roles answer
+        // NotFound, the same as a missing job, so their details never leak.
+        let job_status: Option<(String,)> = sqlx::query_as("SELECT status FROM jobs WHERE id = $1")
             .bind(job_id)
             .fetch_optional(&self.pool)
             .await
             .map_err(|e| DomainError::Other(e.into()))?;
-        if job_exists.is_none() {
-            return Err(DomainError::NotFound);
+        match job_status {
+            None => return Err(DomainError::NotFound),
+            Some((s,)) if s == "published" => {}
+            Some((s,)) if s == "closed" || s == "archived" => {
+                return Err(DomainError::Validation(
+                    "this job is closed and no longer takes applications".into(),
+                ))
+            }
+            Some(_) => return Err(DomainError::NotFound),
+        }
+
+        // Once the hiring team has moved an application on, the candidate
+        // cannot silently rewrite it. A withdrawn one may be sent again.
+        if let Some(existing) = self.find(job_id, &req.email).await? {
+            if !matches!(
+                existing.status,
+                ApplicationStatus::Submitted | ApplicationStatus::Withdrawn
+            ) {
+                return Err(DomainError::Conflict(format!(
+                    "your application is already {} and can no longer be changed",
+                    existing.status.as_str()
+                )));
+            }
         }
 
         let sql = format!(
@@ -63,10 +86,12 @@ impl ApplicationRepository {
             ON CONFLICT (job_id, lower(email)) DO UPDATE SET
               candidate_profile_id = COALESCE(EXCLUDED.candidate_profile_id, job_applications.candidate_profile_id),
               full_name    = EXCLUDED.full_name,
-              phone        = EXCLUDED.phone,
-              cover_letter = EXCLUDED.cover_letter,
-              cv_text      = EXCLUDED.cv_text,
-              cv_url       = EXCLUDED.cv_url,
+              -- A re-send that leaves a field blank keeps what was there.
+              phone        = COALESCE(NULLIF(EXCLUDED.phone, ''), job_applications.phone),
+              cover_letter = COALESCE(NULLIF(EXCLUDED.cover_letter, ''), job_applications.cover_letter),
+              cv_text      = COALESCE(NULLIF(EXCLUDED.cv_text, ''), job_applications.cv_text),
+              cv_url       = COALESCE(NULLIF(EXCLUDED.cv_url, ''), job_applications.cv_url),
+              status       = 'submitted',
               updated_at   = NOW()
             RETURNING {cols}
             "#,
@@ -160,6 +185,74 @@ impl ApplicationRepository {
                 })
             })
             .collect()
+    }
+
+    pub async fn set_status(
+        &self,
+        job_id: JobId,
+        application_id: JobApplicationId,
+        status: ApplicationStatus,
+    ) -> Result<JobApplication, DomainError> {
+        let sql = format!(
+            r#"
+            UPDATE job_applications SET status = $3, updated_at = NOW()
+            WHERE id = $1 AND job_id = $2 AND status <> 'withdrawn'
+            RETURNING {cols}
+            "#,
+            cols = APP_COLUMNS.replace("a.", ""),
+        );
+        let row = sqlx::query(&sql)
+            .bind(application_id)
+            .bind(job_id)
+            .bind(status.as_str())
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| DomainError::Other(e.into()))?;
+        match row {
+            Some(row) => application_from_row(&row),
+            None => {
+                let exists: Option<(String,)> = sqlx::query_as(
+                    "SELECT status FROM job_applications WHERE id = $1 AND job_id = $2",
+                )
+                .bind(application_id)
+                .bind(job_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| DomainError::Other(e.into()))?;
+                Err(match exists {
+                    Some(_) => {
+                        DomainError::Conflict("the candidate withdrew this application".into())
+                    }
+                    None => DomainError::NotFound,
+                })
+            }
+        }
+    }
+
+    pub async fn withdraw(
+        &self,
+        application_id: JobApplicationId,
+        email: &str,
+    ) -> Result<JobApplication, DomainError> {
+        let sql = format!(
+            r#"
+            UPDATE job_applications SET status = 'withdrawn', updated_at = NOW()
+            WHERE id = $1 AND lower(email) = lower($2)
+            RETURNING {cols}
+            "#,
+            cols = APP_COLUMNS.replace("a.", ""),
+        );
+        let row = sqlx::query(&sql)
+            .bind(application_id)
+            .bind(email)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| DomainError::Other(e.into()))?;
+        // Someone else's application looks exactly like a missing one.
+        row.as_ref()
+            .map(application_from_row)
+            .transpose()?
+            .ok_or(DomainError::NotFound)
     }
 
     pub async fn count_for_job(&self, job_id: JobId) -> Result<i64, DomainError> {

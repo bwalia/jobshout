@@ -2,7 +2,10 @@ use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use axum::routing::get;
 use axum::{Json, Router};
-use jobshout_domain::{CreateJobApplicationRequest, JobApplication, JobApplicationWithJob, JobId};
+use jobshout_domain::{
+    ApplicationStatus, CreateJobApplicationRequest, JobApplication, JobApplicationId,
+    JobApplicationWithJob, JobId,
+};
 use jobshout_policy::{require, Action, Resource};
 use serde::{Deserialize, Serialize};
 
@@ -16,7 +19,15 @@ pub fn routes() -> Router<AppState> {
             get(list_for_job).post(apply),
         )
         .route("/api/v1/jobs/{id}/applications/check", get(check))
+        .route(
+            "/api/v1/jobs/{id}/applications/{application_id}",
+            axum::routing::patch(set_status),
+        )
         .route("/api/v1/applications", get(list_mine))
+        .route(
+            "/api/v1/applications/{application_id}/withdraw",
+            axum::routing::post(withdraw),
+        )
 }
 
 #[derive(Debug, Deserialize)]
@@ -81,6 +92,19 @@ async fn apply(
         .await
         .map_err(ApiError::from_domain)?;
     if let Ok(job) = state.jobs.get(id).await {
+        if let Ok(poster) = state.jobs.poster_email(id).await {
+            state
+                .notifications
+                .notify_email(
+                    &poster,
+                    "application_received",
+                    &format!("New application: {}", job.title),
+                    &format!("{} applied.", application.full_name),
+                    &format!("/jobs/{id}/applicants#{}", application.id),
+                    serde_json::json!({ "job_id": id, "application_id": application.id }),
+                )
+                .await;
+        }
         let _ = state
             .events
             .emit(
@@ -177,4 +201,113 @@ async fn list_mine(
         data,
         limit: q.limit.clamp(1, 100),
     }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetStatusBody {
+    pub status: ApplicationStatus,
+}
+
+/// The job's poster (or staff) moves an application through the pipeline.
+/// The candidate sees the new status on /applications.
+async fn set_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((job_id, application_id)): Path<(JobId, JobApplicationId)>,
+    Json(body): Json<SetStatusBody>,
+) -> Result<Json<JobApplication>, ApiError> {
+    let account = require_account(&state, &headers).await?;
+    let poster = state
+        .jobs
+        .poster_email(job_id)
+        .await
+        .map_err(ApiError::from_domain)?;
+    require(
+        &account,
+        Action::ReadJobApplications,
+        &Resource::JobApplications {
+            poster_email: poster,
+            poster_account_id: None,
+        },
+    )
+    .map_err(ApiError::from_domain)?;
+    let application = state
+        .applications
+        .set_status(job_id, application_id, body.status)
+        .await
+        .map_err(ApiError::from_domain)?;
+    let title = state
+        .jobs
+        .get(job_id)
+        .await
+        .map(|j| j.title)
+        .unwrap_or_else(|_| "your application".into());
+    state
+        .notifications
+        .notify_email(
+            &application.email,
+            "application_status",
+            &format!("Update on {title}"),
+            &format!(
+                "Your application is now: {}.",
+                status_label(application.status)
+            ),
+            "/applications",
+            serde_json::json!({ "job_id": job_id, "application_id": application.id }),
+        )
+        .await;
+    let _ = state
+        .events
+        .emit(
+            "job.application.status_changed",
+            "job_application",
+            &application.id.to_string(),
+            Some(account.id),
+            serde_json::json!({
+                "job_id": job_id,
+                "status": application.status,
+                "candidate_email": application.email,
+            }),
+        )
+        .await;
+    Ok(Json(application))
+}
+
+/// The candidate withdraws their own application. Anyone else's
+/// application id answers 404.
+async fn withdraw(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(application_id): Path<JobApplicationId>,
+) -> Result<Json<JobApplication>, ApiError> {
+    let account = require_account(&state, &headers).await?;
+    let application = state
+        .applications
+        .withdraw(application_id, &account.primary_email)
+        .await
+        .map_err(ApiError::from_domain)?;
+    let _ = state
+        .events
+        .emit(
+            "job.application.withdrawn",
+            "job_application",
+            &application.id.to_string(),
+            Some(account.id),
+            serde_json::json!({ "job_id": application.job_id }),
+        )
+        .await;
+    Ok(Json(application))
+}
+
+/// How a status reads to the candidate (matches the web's labels).
+fn status_label(s: ApplicationStatus) -> &'static str {
+    match s {
+        ApplicationStatus::Submitted => "Submitted",
+        ApplicationStatus::Reviewing => "In review",
+        ApplicationStatus::Shortlisted => "Shortlisted",
+        ApplicationStatus::Interviewing => "Interviewing",
+        ApplicationStatus::Offered => "Offer",
+        ApplicationStatus::Rejected => "Not moving forward",
+        ApplicationStatus::Withdrawn => "Withdrawn",
+    }
 }

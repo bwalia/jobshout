@@ -15,9 +15,9 @@ pub mod rules;
 
 use jobshout_content::Actor;
 use jobshout_domain::{
-    ConnectionStatus, Dashboard, DashboardAction, DashboardCredits, DashboardOpportunity,
-    DashboardPipelineItem, DashboardStats, DomainError, FeedItem, FollowState, FollowedEntry,
-    Member, MemberInput, RichMemberProfile, TalentSearchQuery,
+    ConnectionStatus, Dashboard, DashboardAction, DashboardCredits, DashboardPipelineItem,
+    DashboardStats, DomainError, FeedItem, FollowState, FollowedEntry, Member, MemberInput,
+    RichMemberProfile, TalentSearchQuery,
 };
 
 use repo::MemberRepository;
@@ -100,10 +100,47 @@ impl MemberService {
         handle: &str,
         viewer: Option<&Actor>,
     ) -> Result<(Member, String), DomainError> {
-        self.repo
+        let (mut member, email) = self
+            .repo
             .by_handle(handle, viewer.map(|a| a.email.as_str()))
             .await?
-            .ok_or(DomainError::NotFound)
+            .ok_or(DomainError::NotFound)?;
+        let is_self = viewer.is_some_and(|a| a.email.eq_ignore_ascii_case(&email));
+        if !is_self {
+            self.apply_privacy(std::slice::from_mut(&mut member))
+                .await?;
+        }
+        Ok((member, email))
+    }
+
+    /// Blank what each member chose to hide from other people.
+    async fn apply_privacy(&self, members: &mut [Member]) -> Result<(), DomainError> {
+        let ids: Vec<_> = members.iter().map(|m| m.id).collect();
+        let flags = self.repo.privacy_flags(&ids).await?;
+        for m in members.iter_mut() {
+            if let Some(&(location, rate, availability)) = flags.get(&m.id) {
+                redact(m, location, rate, availability);
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn privacy(
+        &self,
+        actor: &Actor,
+    ) -> Result<jobshout_domain::MemberPrivacy, DomainError> {
+        let me = self.ensure(actor).await?;
+        self.repo.get_privacy(me.id).await
+    }
+
+    pub async fn set_privacy(
+        &self,
+        actor: &Actor,
+        p: jobshout_domain::MemberPrivacy,
+    ) -> Result<jobshout_domain::MemberPrivacy, DomainError> {
+        let me = self.ensure(actor).await?;
+        self.repo.set_privacy(me.id, &p).await?;
+        Ok(p)
     }
 
     /// The members directory: people and agents with public work, most
@@ -116,14 +153,17 @@ impl MemberService {
         offset: i64,
     ) -> Result<(Vec<Member>, i64), DomainError> {
         let q = q.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-        self.repo
+        let (mut members, total) = self
+            .repo
             .directory(
                 q.as_deref(),
                 viewer.map(|a| a.email.as_str()),
                 limit.clamp(1, 50),
                 offset.max(0),
             )
-            .await
+            .await?;
+        self.apply_privacy(&mut members).await?;
+        Ok((members, total))
     }
 
     pub async fn set_profile(
@@ -132,6 +172,7 @@ impl MemberService {
         input: MemberInput,
     ) -> Result<Member, DomainError> {
         let headline = rules::clean_headline(&input.headline)?;
+        rules::validate_member_input(&input)?;
         let me = self.ensure(actor).await?;
         self.repo
             .update_rich_profile(me.id, &input, &headline)
@@ -174,9 +215,12 @@ impl MemberService {
             .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty());
-        self.repo
+        let (mut members, total) = self
+            .repo
             .talent_search(&query, q, availability, viewer.map(|a| a.email.as_str()))
-            .await
+            .await?;
+        self.apply_privacy(&mut members).await?;
+        Ok((members, total))
     }
 
     pub async fn connect(
@@ -187,6 +231,34 @@ impl MemberService {
         let me = self.ensure(actor).await?;
         let (them, _) = self.profile(handle, Some(actor)).await?;
         self.repo.request_connection(me.id, them.id).await
+    }
+
+    /// Incoming requests, outgoing requests and accepted connections.
+    pub async fn connections(
+        &self,
+        actor: &Actor,
+    ) -> Result<jobshout_domain::MemberConnections, DomainError> {
+        let me = self.ensure(actor).await?;
+        let mut incoming = self
+            .repo
+            .connections(me.id, &actor.email, "incoming")
+            .await?;
+        let mut outgoing = self
+            .repo
+            .connections(me.id, &actor.email, "outgoing")
+            .await?;
+        let mut accepted = self
+            .repo
+            .connections(me.id, &actor.email, "accepted")
+            .await?;
+        self.apply_privacy(&mut incoming).await?;
+        self.apply_privacy(&mut outgoing).await?;
+        self.apply_privacy(&mut accepted).await?;
+        Ok(jobshout_domain::MemberConnections {
+            incoming,
+            outgoing,
+            accepted,
+        })
     }
 
     pub async fn respond_connect(
@@ -297,22 +369,9 @@ impl MemberService {
         }
         strength = strength.min(100);
 
-        let opportunities = if me.open_to_work || !skills.is_empty() {
-            vec![DashboardOpportunity {
-                id: "projects-radar".into(),
-                kind: "project".into(),
-                title: "Projects matching your profile".into(),
-                summary: "Browse live projects once PROJECTS_LIVE is on.".into(),
-                href: "/projects".into(),
-                score: 0.72,
-                reasons: vec![
-                    "Based on your skills and availability".into(),
-                    "Budgets in a typical freelancer range".into(),
-                ],
-            }]
-        } else {
-            Vec::new()
-        };
+        // Filled by the API from real job matches when the member has a
+        // candidate profile; never a placeholder.
+        let opportunities = Vec::new();
 
         Ok(Dashboard {
             today,
@@ -343,13 +402,7 @@ impl MemberService {
             unread_messages: 0,
             unread_notifications: 0,
             approval_inbox: Vec::new(),
-            weekly_goals: vec![DashboardAction {
-                id: "goal-proposals".into(),
-                title: "Send 5 proposals this week".into(),
-                reason: "Steady outreach compounds.".into(),
-                href: "/projects".into(),
-                kind: "goal".into(),
-            }],
+            weekly_goals: Vec::new(),
             roles: vec!["member".into()],
             widgets,
         })
@@ -400,5 +453,21 @@ impl MemberService {
         let mut out = rules::dedupe_feed(items);
         out.truncate(limit as usize);
         Ok(out)
+    }
+}
+
+/// Hide the fields a member opted out of showing.
+pub fn redact(m: &mut Member, show_location: bool, show_rate: bool, show_availability: bool) {
+    if !show_location {
+        m.location = String::new();
+        m.timezone = String::new();
+    }
+    if !show_rate {
+        m.rate_min = None;
+        m.rate_max = None;
+        m.rate_currency = String::new();
+    }
+    if !show_availability {
+        m.availability = String::new();
     }
 }

@@ -8,7 +8,8 @@
 mod repo;
 
 use jobshout_domain::{
-    CreateJobApplicationRequest, DomainError, JobApplication, JobApplicationWithJob, JobId,
+    ApplicationStatus, CreateJobApplicationRequest, DomainError, JobApplication, JobApplicationId,
+    JobApplicationWithJob, JobId,
 };
 use sqlx::PgPool;
 
@@ -72,6 +73,54 @@ impl ApplicationService {
     pub async fn count_for_job(&self, job_id: JobId) -> Result<i64, DomainError> {
         self.repo.count_for_job(job_id).await
     }
+
+    /// The hiring side moves an application through the pipeline. Only
+    /// stages a recruiter can set are accepted, and a withdrawn application
+    /// is final.
+    pub async fn set_status(
+        &self,
+        job_id: JobId,
+        application_id: JobApplicationId,
+        status: ApplicationStatus,
+    ) -> Result<JobApplication, DomainError> {
+        if !recruiter_can_set(status) {
+            return Err(DomainError::Validation(format!(
+                "{} cannot be set by the hiring team",
+                status.as_str()
+            )));
+        }
+        self.repo.set_status(job_id, application_id, status).await
+    }
+
+    /// The candidate withdraws their own application.
+    pub async fn withdraw(
+        &self,
+        application_id: JobApplicationId,
+        email: &str,
+    ) -> Result<JobApplication, DomainError> {
+        self.repo.withdraw(application_id, email.trim()).await
+    }
+}
+
+/// Pipeline stages the hiring team may move an application to. `withdrawn`
+/// belongs to the candidate alone.
+pub fn recruiter_can_set(status: ApplicationStatus) -> bool {
+    !matches!(status, ApplicationStatus::Withdrawn)
+}
+
+const MAX_NAME: usize = 200;
+const MAX_PHONE: usize = 50;
+const MAX_URL: usize = 2_000;
+const MAX_COVER_LETTER: usize = 20_000;
+const MAX_CV_TEXT: usize = 60_000;
+
+fn too_long(field: &str, value: &str, max: usize) -> Result<(), DomainError> {
+    if value.chars().count() > max {
+        return Err(DomainError::Validation(format!(
+            "{field} is too long (max {max} characters)"
+        )));
+    }
+    Ok(())
 }
 
 fn validate(
@@ -92,6 +141,21 @@ fn validate(
     }
     if !req.email.contains('@') || req.email.starts_with('@') || req.email.ends_with('@') {
         return Err(DomainError::Validation("email is not valid".into()));
+    }
+    too_long("full_name", &req.full_name, MAX_NAME)?;
+    too_long("phone", &req.phone, MAX_PHONE)?;
+    too_long("cv_url", &req.cv_url, MAX_URL)?;
+    too_long("cover_letter", &req.cover_letter, MAX_COVER_LETTER)?;
+    too_long("cv_text", &req.cv_text, MAX_CV_TEXT)?;
+    // The link is shown to recruiters, so only plain web links are stored
+    // (no javascript:, data: or file: URLs).
+    if !req.cv_url.is_empty() {
+        let lower = req.cv_url.to_ascii_lowercase();
+        if !(lower.starts_with("https://") || lower.starts_with("http://")) {
+            return Err(DomainError::Validation(
+                "cv_url must be an http(s) link".into(),
+            ));
+        }
     }
     if req.cover_letter.is_empty() && req.cv_text.is_empty() && req.cv_url.is_empty() {
         return Err(DomainError::Validation(
@@ -142,6 +206,37 @@ mod tests {
         let mut r = req();
         r.cover_letter = String::new();
         assert!(validate(r).is_err());
+    }
+
+    #[test]
+    fn rejects_script_and_data_cv_links() {
+        for bad in [
+            "javascript:alert(1)",
+            "data:text/html,x",
+            "file:///etc/passwd",
+            "ftp://x",
+        ] {
+            let mut r = req();
+            r.cv_url = bad.into();
+            assert!(validate(r).is_err(), "{bad} should be rejected");
+        }
+    }
+
+    #[test]
+    fn rejects_oversized_fields() {
+        let mut r = req();
+        r.cover_letter = "x".repeat(MAX_COVER_LETTER + 1);
+        assert!(validate(r).is_err());
+        let mut r = req();
+        r.phone = "1".repeat(MAX_PHONE + 1);
+        assert!(validate(r).is_err());
+    }
+
+    #[test]
+    fn recruiters_cannot_withdraw_for_the_candidate() {
+        assert!(!recruiter_can_set(ApplicationStatus::Withdrawn));
+        assert!(recruiter_can_set(ApplicationStatus::Shortlisted));
+        assert!(recruiter_can_set(ApplicationStatus::Rejected));
     }
 
     #[test]

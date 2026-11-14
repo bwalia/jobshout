@@ -23,6 +23,11 @@ pub fn routes() -> Router<AppState> {
         .route("/api/v1/members/talent", get(talent))
         .route("/api/v1/members/me", get(me).patch(update_me))
         .route("/api/v1/members/me/gdpr", axum::routing::post(gdpr))
+        .route("/api/v1/members/me/connections", get(my_connections))
+        .route(
+            "/api/v1/members/me/privacy",
+            get(get_privacy).put(set_privacy),
+        )
         .route("/api/v1/members/{handle}", get(profile))
         .route("/api/v1/members/{handle}/rich", get(rich_profile))
         .route(
@@ -97,6 +102,25 @@ async fn directory(
 async fn me(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<Member>, ApiError> {
     let who = signed_in(&state, &headers).await?;
     Ok(Json(state.members.ensure(&who).await.map_err(err)?))
+}
+
+async fn get_privacy(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<jobshout_domain::MemberPrivacy>, ApiError> {
+    let who = signed_in(&state, &headers).await?;
+    Ok(Json(state.members.privacy(&who).await.map_err(err)?))
+}
+
+async fn set_privacy(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<jobshout_domain::MemberPrivacy>,
+) -> Result<Json<jobshout_domain::MemberPrivacy>, ApiError> {
+    let who = signed_in(&state, &headers).await?;
+    Ok(Json(
+        state.members.set_privacy(&who, body).await.map_err(err)?,
+    ))
 }
 
 async fn update_me(
@@ -286,7 +310,54 @@ async fn connect(
     }
     let who = signed_in(&state, &headers).await?;
     let status = state.members.connect(&who, &handle).await.map_err(err)?;
+    notify_connection(&state, &who, &handle, status).await;
     Ok(Json(serde_json::json!({ "status": status })))
+}
+
+async fn my_connections(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<jobshout_domain::MemberConnections>, ApiError> {
+    if !state.members_rich_enabled {
+        return Err(ApiError::from_domain(DomainError::NotFound));
+    }
+    let who = signed_in(&state, &headers).await?;
+    Ok(Json(state.members.connections(&who).await.map_err(err)?))
+}
+
+/// Tell the other member about a new request or an acceptance.
+async fn notify_connection(state: &AppState, who: &Actor, handle: &str, status: ConnectionStatus) {
+    let (kind, title) = match status {
+        ConnectionStatus::Pending => ("connection_request", "wants to connect"),
+        ConnectionStatus::Accepted => ("connection_accepted", "is now connected with you"),
+        _ => return,
+    };
+    let Ok((_, email)) = state.members.profile(handle, Some(who)).await else {
+        return;
+    };
+    let me = state.members.ensure(who).await.ok();
+    let name = me
+        .as_ref()
+        .map(|m| m.display_name.clone())
+        .unwrap_or_else(|| who.name.clone());
+    let href = me
+        .map(|m| format!("/members/{}", m.handle))
+        .unwrap_or_else(|| "/connections".into());
+    state
+        .notifications
+        .notify_email(
+            &email,
+            kind,
+            &format!("{name} {title}"),
+            "",
+            if kind == "connection_request" {
+                "/connections"
+            } else {
+                &href
+            },
+            serde_json::json!({}),
+        )
+        .await;
 }
 
 #[derive(Debug, Deserialize)]
@@ -309,6 +380,7 @@ async fn respond_connect(
         .respond_connect(&who, &handle, body.accept)
         .await
         .map_err(err)?;
+    notify_connection(&state, &who, &handle, status).await;
     Ok(Json(serde_json::json!({ "status": status })))
 }
 

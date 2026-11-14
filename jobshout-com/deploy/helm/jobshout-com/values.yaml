@@ -87,6 +87,18 @@ secrets:
   # --set-string secrets.opsapiApiKey=..., never commit it.
   opsapiApiKey: ""
 
+# Social sign-in (NextAuth). The web pod loads this Secret with envFrom.
+# Keys: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and optionally
+# LINKEDIN_CLIENT_ID/_SECRET, FACEBOOK_CLIENT_ID/_SECRET, APPLE_ID/APPLE_SECRET.
+# Each OAuth app needs the redirect URI
+#   https://<host>/api/auth/callback/<provider>
+oauth:
+  secretName: jobshout-com-oauth
+
+# WSL Vault -> Secret via ESO (ClusterSecretStore wslvault-backend). Commit
+# paths only, never values. Each ring overlay lists its own paths.
+vaultSecrets: []
+
 # OpsAPI CMS: published posts from one OpsAPI workspace show on /insights, and
 # OpsAPI's webhook calls https://<host>/hooks/opsapi to refresh them. Off unless
 # both url and namespace are set.

@@ -13,6 +13,7 @@ mod insights;
 mod jobs;
 mod members;
 mod messaging;
+mod notifications;
 mod privacy;
 mod profiles;
 mod projects;
@@ -46,6 +47,7 @@ pub fn router(state: AppState) -> Router {
         .merge(members::routes())
         .merge(dashboard::routes())
         .merge(messaging::routes())
+        .merge(notifications::routes())
         .merge(projects::routes())
         .merge(billing::routes())
         .merge(ai::routes())

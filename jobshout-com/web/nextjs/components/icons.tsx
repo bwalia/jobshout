@@ -224,6 +224,13 @@ export const InboxIcon = (p: IconProps) => (
   </Icon>
 );
 
+export const BellIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M6 9a6 6 0 1 1 12 0c0 5 2 6.5 2 6.5H4S6 14 6 9Z" />
+    <path d="M10 19a2 2 0 0 0 4 0" />
+  </Icon>
+);
+
 export const MenuIcon = (p: IconProps) => (
   <Icon {...p}>
     <path d="M4 7h16M4 12h16M4 17h16" />

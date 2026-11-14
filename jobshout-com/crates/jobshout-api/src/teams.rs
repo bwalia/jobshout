@@ -90,7 +90,29 @@ async fn metrics(
     Query(q): Query<MetricsQuery>,
 ) -> Result<Json<Value>, ApiError> {
     require_teams(&state)?;
-    let _ = signed_in(&state, &headers).await?;
+    let who = signed_in(&state, &headers).await?;
+    let account = state
+        .accounts
+        .ensure(&who.email, &who.name, who.agent)
+        .await
+        .map_err(err)?;
+    // Metrics are private to their subject: your own account, a team you
+    // own, or staff. Anything else looks like an empty, missing subject.
+    let allowed = account.is_staff()
+        || match subject_type.as_str() {
+            "account" => subject_id == account.id.to_string(),
+            "team" => state
+                .analytics
+                .list_teams_for_owner(account.id)
+                .await
+                .map_err(err)?
+                .iter()
+                .any(|t| t.id.to_string() == subject_id || t.slug == subject_id),
+            _ => false,
+        };
+    if !allowed {
+        return Err(err(DomainError::NotFound));
+    }
     let rows = state
         .analytics
         .metrics_for(&subject_type, &subject_id, q.limit)

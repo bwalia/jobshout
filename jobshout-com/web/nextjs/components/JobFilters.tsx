@@ -32,6 +32,7 @@ export function JobFilters({
   const setParam = useCallback(
     (key: string, value: string | null) => {
       const params = new URLSearchParams(searchParams.toString());
+      params.delete("page"); // new filters, new result set: back to page 1
       if (value === null || value === "") params.delete(key);
       else params.set(key, value);
       router.push(`${pathname}${params.toString() ? `?${params}` : ""}`, { scroll: false });
@@ -223,6 +224,7 @@ export function BoardSort({ value }: { value: string }) {
       value={value}
       onChange={(v) => {
         const params = new URLSearchParams(searchParams.toString());
+        params.delete("page");
         params.set("sort", v);
         router.push(`${pathname}?${params}`, { scroll: false });
       }}

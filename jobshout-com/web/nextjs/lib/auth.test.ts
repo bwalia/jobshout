@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { isDevLoginEnabled } from "./auth";
+import { isDevLoginEnabled, signInAllowed } from "./auth";
 
 const KEYS = ["AUTH_DEV_LOGIN", "APP_ENV", "NODE_ENV"] as const;
 
@@ -42,5 +42,26 @@ describe("isDevLoginEnabled", () => {
 
     vi.stubEnv("NODE_ENV", "production");
     expect(isDevLoginEnabled()).toBe(false);
+  });
+});
+
+describe("signInAllowed", () => {
+  it("accepts a verified email (boolean or string claim)", () => {
+    expect(signInAllowed({ email: "a@b.com", email_verified: true }, "a@b.com")).toBe(true);
+    expect(signInAllowed({ email: "a@b.com", email_verified: "true" }, null)).toBe(true);
+  });
+
+  it("rejects an email the provider says is unverified", () => {
+    expect(signInAllowed({ email: "staff@jobshout.com", email_verified: false }, "staff@jobshout.com")).toBe(false);
+    expect(signInAllowed({ email: "a@b.com", email_verified: "false" }, "a@b.com")).toBe(false);
+  });
+
+  it("rejects a sign-in with no email at all", () => {
+    expect(signInAllowed({}, null)).toBe(false);
+    expect(signInAllowed(undefined, "")).toBe(false);
+  });
+
+  it("accepts providers without an email_verified claim (Facebook)", () => {
+    expect(signInAllowed({ email: "a@b.com" }, "a@b.com")).toBe(true);
   });
 });

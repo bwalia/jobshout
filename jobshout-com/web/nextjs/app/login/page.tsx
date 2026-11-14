@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { SignOutButton } from "@/components/SignOutButton";
 import type { Metadata } from "next";
 import { getServerSession } from "next-auth";
 import { DevLoginForm } from "@/components/DevLoginForm";
@@ -58,12 +59,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Search
               <Link href={callbackUrl} className={buttonClass("primary", "md", "mt-7 w-full")}>
                 Continue
               </Link>
-              <Link
-                href="/api/auth/signout"
-                className={buttonClass("ghost", "md", "mt-2 w-full")}
-              >
-                Sign out
-              </Link>
+              <SignOutButton className={buttonClass("ghost", "md", "mt-2 w-full")} />
             </>
           ) : (
             <>

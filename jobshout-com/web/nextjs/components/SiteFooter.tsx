@@ -13,12 +13,15 @@ const COLUMNS = [
       { href: "/profile", label: "Matching profile" },
       { href: "/profile/matches", label: "Ranked matches" },
       { href: "/applications", label: "My applications" },
+      { href: "/jobs/saved", label: "Saved jobs" },
+      { href: "/jobs/alerts", label: "Job alerts" },
     ],
   },
   {
     title: "Employers",
     links: [
       { href: "/post-job", label: "Post a job" },
+      { href: "/jobs/mine", label: "My posted jobs" },
       { href: "/jobs", label: "See the board" },
     ],
   },

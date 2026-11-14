@@ -99,9 +99,24 @@ export function authOptions(): NextAuthOptions {
 
   if (envPair("LINKEDIN_CLIENT_ID", "LINKEDIN_CLIENT_SECRET")) {
     providers.push(
+      // "Sign In with LinkedIn using OpenID Connect". The provider's legacy
+      // defaults (r_liteprofile / r_emailaddress) were retired by LinkedIn in
+      // 2023 and fail for new apps.
       LinkedInProvider({
         clientId: process.env.LINKEDIN_CLIENT_ID!,
         clientSecret: process.env.LINKEDIN_CLIENT_SECRET!,
+        client: { token_endpoint_auth_method: "client_secret_post" },
+        issuer: "https://www.linkedin.com/oauth",
+        wellKnown: "https://www.linkedin.com/oauth/.well-known/openid-configuration",
+        authorization: { params: { scope: "openid profile email" } },
+        profile(profile) {
+          return {
+            id: profile.sub,
+            name: profile.name,
+            email: profile.email,
+            image: profile.picture,
+          };
+        },
       }),
     );
   }
@@ -136,9 +151,19 @@ export function authOptions(): NextAuthOptions {
     },
     session: {
       strategy: "jwt",
+      // JWT sessions cannot be revoked server-side; keep them short-lived.
+      maxAge: 7 * 24 * 60 * 60,
     },
     secret: process.env.NEXTAUTH_SECRET,
     callbacks: {
+      // Accounts are keyed by email across providers, so only accept an
+      // email the identity provider has verified. Providers that report
+      // `email_verified` (Google, Apple, LinkedIn OIDC) must say true;
+      // Facebook only returns confirmed addresses and has no such claim.
+      // Dev credentials login has no profile claim — email alone is enough.
+      async signIn({ profile, user }) {
+        return signInAllowed(profile as Record<string, unknown> | undefined, user?.email);
+      },
       async jwt({ token, account, profile, user }) {
         if (account) {
           token.provider = account.provider;
@@ -159,4 +184,18 @@ export function authOptions(): NextAuthOptions {
       },
     },
   };
+}
+
+/** Pure check behind the signIn callback, exported for tests. */
+export function signInAllowed(
+  profile: Record<string, unknown> | undefined | null,
+  email: string | null | undefined,
+): boolean {
+  const address = (email ?? (profile?.email as string | undefined) ?? "").trim();
+  if (!address.includes("@")) return false;
+  if (profile && "email_verified" in profile) {
+    const v = profile.email_verified;
+    return v === true || v === "true";
+  }
+  return true;
 }

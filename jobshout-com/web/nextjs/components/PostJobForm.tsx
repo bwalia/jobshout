@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useFormState, useFormStatus } from "react-dom";
-import { createJobAction } from "@/app/actions";
+import { createJobAction, updateJobAction } from "@/app/actions";
 import { EMPTY_FORM_STATE } from "@/lib/form-state";
 import { JobCard } from "@/components/JobCard";
 import {
@@ -17,7 +17,8 @@ import {
   buttonClass,
 } from "@/components/ui";
 import { CheckCircleIcon } from "@/components/icons";
-import { EMPLOYMENT_TYPES, type EmploymentType, type Job } from "@/lib/api";
+import { EMPLOYMENT_TYPES, type EmploymentType, type Job, type JobStatus } from "@/lib/api";
+import { BLANK_JOB_FORM, type JobFormValues } from "@/lib/job-form";
 import { employmentLabel } from "@/lib/format";
 
 const CURRENCIES = ["GBP", "USD", "EUR", "INR", "AUD", "CAD"];
@@ -29,7 +30,9 @@ const PERIODS = [
   { value: "hourly", label: "per hour" },
 ];
 
-function SubmitButton({ draft }: { draft: boolean }) {
+function SubmitButton({ draft, label }: { draft: boolean; label?: string }) {
+  // Both buttons disable while either submission is in flight, so a double
+  // click cannot post the same job twice.
   const { pending } = useFormStatus();
   return (
     <Button
@@ -40,30 +43,25 @@ function SubmitButton({ draft }: { draft: boolean }) {
       variant={draft ? "secondary" : "primary"}
       disabled={pending}
     >
-      {pending ? "Saving…" : draft ? "Save as draft" : "Publish to the board"}
+      {pending ? "Saving…" : label ?? (draft ? "Save as draft" : "Publish to the board")}
     </Button>
   );
 }
 
-export function PostJobForm() {
-  const [state, formAction] = useFormState(createJobAction, EMPTY_FORM_STATE);
+/**
+ * Post a new job, or edit one when `edit` is given. Editing a live job keeps
+ * it live; editing a draft can save it again or publish it.
+ */
+export function PostJobForm({
+  edit,
+}: {
+  edit?: { jobId: string; status: JobStatus; values: JobFormValues };
+} = {}) {
+  const action = edit ? updateJobAction.bind(null, edit.jobId) : createJobAction;
+  const [state, formAction] = useFormState(action, EMPTY_FORM_STATE);
 
   // Mirrored locally so the preview updates as the employer types.
-  const [draft, setDraft] = useState({
-    title: "",
-    summary: "",
-    description: "",
-    employment_type: "permanent" as EmploymentType,
-    country: "GB",
-    city: "",
-    region: "",
-    remote: true,
-    currency: "GBP",
-    min_amount: "",
-    max_amount: "",
-    period: "annual",
-    requirements: "",
-  });
+  const [draft, setDraft] = useState<JobFormValues>(edit?.values ?? BLANK_JOB_FORM);
 
   function set<K extends keyof typeof draft>(key: K, value: (typeof draft)[K]) {
     setDraft((d) => ({ ...d, [key]: value }));
@@ -77,20 +75,35 @@ export function PostJobForm() {
           <CheckCircleIcon className="h-7 w-7" />
         </span>
         <h2 className="mt-5 font-display text-2xl font-semibold text-ink">
-          {published ? "Your job is live" : "Draft saved"}
+          {edit
+            ? published
+              ? "Changes are live"
+              : "Draft saved"
+            : published
+              ? "Your job is live"
+              : "Draft saved"}
         </h2>
         <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-mute">
           {published
             ? "It is on the public board now and Hiring Agents can start ranking candidates against it."
-            : "It is saved but not on the public board. Publish it when the details are settled."}
+            : "It is saved but not on the public board. Publish it from My posted jobs when the details are settled."}
         </p>
         <div className="mt-7 flex flex-wrap justify-center gap-3">
           <Link href={`/jobs/${state.result.jobId}`} className={buttonClass("primary", "md")}>
             View the listing
           </Link>
-          <Link href="/post-job" className={buttonClass("secondary", "md")}>
-            Post another
+          <Link href="/jobs/mine" className={buttonClass("secondary", "md")}>
+            My posted jobs
           </Link>
+          {edit ? (
+            <Link href={`/jobs/${state.result.jobId}/edit`} className={buttonClass("ghost", "md")}>
+              Keep editing
+            </Link>
+          ) : (
+            <Link href="/post-job" className={buttonClass("ghost", "md")}>
+              Post another
+            </Link>
+          )}
         </div>
         {published ? (
           <p className="mx-auto mt-6 max-w-md text-sm leading-relaxed text-mute">
@@ -294,10 +307,23 @@ export function PostJobForm() {
         </Section>
 
         <div className="flex flex-wrap items-center gap-3 border-t border-line pt-8">
-          <SubmitButton draft={false} />
-          <SubmitButton draft={true} />
+          {edit?.status === "published" ? (
+            <SubmitButton draft={false} label="Save changes" />
+          ) : edit ? (
+            <>
+              <SubmitButton draft={false} label="Save and publish" />
+              <SubmitButton draft={true} label="Save draft" />
+            </>
+          ) : (
+            <>
+              <SubmitButton draft={false} />
+              <SubmitButton draft={true} />
+            </>
+          )}
           <p className="w-full text-xs leading-relaxed text-mute sm:w-auto sm:flex-1">
-            Published roles appear on the board straight away.
+            {edit?.status === "published"
+              ? "This role is live, so changes show on the board as soon as you save."
+              : "Published roles appear on the board straight away."}
           </p>
         </div>
       </form>
@@ -344,21 +370,7 @@ function Section({
 }
 
 /** Shape the in-progress form into a Job so the real card can render it. */
-function previewJob(draft: {
-  title: string;
-  summary: string;
-  description: string;
-  employment_type: EmploymentType;
-  country: string;
-  city: string;
-  region: string;
-  remote: boolean;
-  currency: string;
-  min_amount: string;
-  max_amount: string;
-  period: string;
-  requirements: string;
-}): Job {
+function previewJob(draft: JobFormValues): Job {
   const num = (v: string) => {
     const n = Number(v.replace(/[, ]/g, ""));
     return Number.isFinite(n) && n > 0 ? n : null;

@@ -19,7 +19,7 @@ use jobshout_events::EventService;
 use jobshout_freelance::FreelanceService;
 use jobshout_groups::GroupsService;
 use jobshout_hire::HireService;
-use jobshout_jobs::{seed_organisation_id, JobService};
+use jobshout_jobs::{seed_organisation_id, JobService, SavedJobs};
 use jobshout_messaging::MessagingService;
 use jobshout_notifications::NotificationService;
 use jobshout_showcase::ShowcaseService;
@@ -76,6 +76,7 @@ fn state(pool: PgPool) -> AppState {
     let token = Arc::<str>::from("test-internal-token");
     AppState {
         jobs: JobService::new(pool.clone(), seed_organisation_id()),
+        saved: SavedJobs::new(pool.clone()),
         candidates: CandidateService::new(pool.clone()),
         applications: ApplicationService::new(pool.clone()),
         insights: InsightService::new(pool.clone(), std::iter::empty::<String>()),

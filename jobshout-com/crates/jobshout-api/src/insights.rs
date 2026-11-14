@@ -446,16 +446,16 @@ async fn subscribe(
                     .enqueue_email(&body.email, subject, &body_text, &body_html)
                     .await
                 {
-                    Ok(_) => tracing::info!(%confirm_url, "newsletter confirmation queued"),
+                    Ok(_) => tracing::info!("newsletter confirmation queued"),
                     Err(e) => {
-                        tracing::error!(error = ?e, %confirm_url, "failed to queue newsletter email")
+                        tracing::error!(error = ?e, "failed to queue newsletter email")
                     }
                 }
             } else {
-                tracing::info!(
-                    %confirm_url,
-                    "newsletter confirmation pending (EMAIL_OUTBOX_ENABLED off)"
-                );
+                // The URL carries the confirm token: debug only, so ring logs
+                // at info never hold a usable link. Local dev can still use it.
+                tracing::info!("newsletter confirmation pending (EMAIL_OUTBOX_ENABLED off)");
+                tracing::debug!(%confirm_url, "newsletter confirm link");
             }
             Ok((
                 StatusCode::ACCEPTED,

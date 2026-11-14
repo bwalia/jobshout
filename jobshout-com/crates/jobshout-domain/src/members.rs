@@ -33,6 +33,35 @@ string_enum! {
     }
 }
 
+/// A member's network: requests waiting on them, requests they sent, and
+/// accepted connections.
+#[derive(Debug, Clone, Serialize)]
+pub struct MemberConnections {
+    pub incoming: Vec<Member>,
+    pub outgoing: Vec<Member>,
+    pub accepted: Vec<Member>,
+}
+
+/// What a member shows to other people. Defaults match the table defaults.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemberPrivacy {
+    pub show_location: bool,
+    pub show_rate: bool,
+    pub show_availability: bool,
+    pub searchable: bool,
+}
+
+impl Default for MemberPrivacy {
+    fn default() -> Self {
+        Self {
+            show_location: true,
+            show_rate: true,
+            show_availability: true,
+            searchable: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemberLink {
     pub label: String,

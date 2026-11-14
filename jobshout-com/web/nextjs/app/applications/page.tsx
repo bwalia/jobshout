@@ -10,6 +10,8 @@ import {
 } from "@/components/icons";
 import { listMyApplications, type JobApplicationWithJob } from "@/lib/api";
 import { currentViewer } from "@/lib/session";
+import { withdrawApplicationAction } from "@/app/actions";
+import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import {
   APPLICATION_LABELS,
   employmentLabel,
@@ -37,7 +39,11 @@ const STATUS_TONE: Record<ApplicationStatus, "neutral" | "brand" | "signal" | "g
   withdrawn: "neutral",
 };
 
-export default async function ApplicationsPage() {
+export default async function ApplicationsPage({
+  searchParams,
+}: {
+  searchParams: { done?: string; error?: string };
+}) {
   const viewer = await currentViewer();
 
   let applications: JobApplicationWithJob[] = [];
@@ -60,6 +66,20 @@ export default async function ApplicationsPage() {
           Every role you have applied to, newest first, with where each one stands.
         </p>
       </header>
+
+      {searchParams.done === "withdrawn" ? (
+        <p
+          role="status"
+          className="mt-8 max-w-xl rounded-xl border border-good/30 bg-good/10 px-4 py-3 text-sm font-medium text-good"
+        >
+          Application withdrawn. The employer can see that you are no longer in the running.
+        </p>
+      ) : null}
+      {searchParams.error ? (
+        <div className="mt-8 max-w-xl">
+          <ErrorNotice title={searchParams.error} />
+        </div>
+      ) : null}
 
       {error ? (
         <div className="mt-8 max-w-xl">
@@ -148,7 +168,18 @@ function ApplicationRow({ application }: { application: JobApplicationWithJob })
           <span>Applied {relativeTime(application.created_at)}</span>
         </div>
       </dl>
-      <div className="mt-4">
+      <div className="mt-4 flex flex-wrap items-center gap-4">
+        {application.status !== "withdrawn" && application.status !== "rejected" ? (
+          <form action={withdrawApplicationAction}>
+            <input type="hidden" name="application_id" value={application.id} />
+            <ConfirmSubmit
+              confirm={`Withdraw your application for "${job.title}"?`}
+              className="text-sm font-medium text-mute underline-offset-4 hover:text-ink hover:underline"
+            >
+              Withdraw
+            </ConfirmSubmit>
+          </form>
+        ) : null}
         <Link
           href={`/jobs/${job.id}`}
           className="inline-flex items-center gap-1 text-sm font-medium text-ink underline-offset-4 hover:underline"

@@ -63,12 +63,13 @@ spec:
           envFrom:
             - secretRef:
                 name: jobshout-com-auth
-            # Optional OAuth IdP client secrets. Populate from WSLVault
-            # jobshout-com/<ring>/oauth (GOOGLE_CLIENT_ID/SECRET, …). Absent until
-            # someone creates the Secret — social buttons stay disabled without it.
-            # Never put AUTH_DEV_LOGIN here (local-only; refused when APP_ENV is a ring).
+            # Optional OAuth IdP client secrets. Synced from WSLVault
+            # jobshout-com/<ring>/oauth via vaultSecrets (see values.yaml).
+            # Absent until the path is populated — social buttons stay
+            # "Not configured" on /login. Never put AUTH_DEV_LOGIN here
+            # (local-only; refused when APP_ENV is a ring).
             - secretRef:
-                name: jobshout-com-oauth
+                name: {{ .Values.oauth.secretName }}
                 optional: true
             - secretRef:
                 name: jobshout-com-internal

@@ -24,7 +24,13 @@ export function JobSearchBar({
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    const params = new URLSearchParams();
+    // On the board, keep the other active filters (type, remote, salary,
+    // sort); a new search starts again from page 1. Elsewhere, start fresh.
+    const onBoard = window.location.pathname === "/jobs";
+    const params = new URLSearchParams(onBoard ? window.location.search : "");
+    params.delete("page");
+    params.delete("q");
+    params.delete("where");
     if (q.trim()) params.set("q", q.trim());
     if (where.trim()) params.set("where", where.trim());
     router.push(`/jobs${params.toString() ? `?${params}` : ""}`);
