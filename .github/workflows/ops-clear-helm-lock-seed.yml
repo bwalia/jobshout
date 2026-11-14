@@ -25,9 +25,11 @@ on:
         default: "int"
         options: [int, test, acc]
 
+# Own group (not jobshout-com-release) so a dead self-hosted queue cannot
+# block this GitHub-hosted clear+seed. cancel-in-progress drops prior ops runs.
 concurrency:
-  group: jobshout-com-release
-  cancel-in-progress: false
+  group: ops-clear-jobshout-com-helm-lock
+  cancel-in-progress: true
 
 env:
   RP_APP: jobshout-com
