@@ -1,5 +1,9 @@
 import Link from "next/link";
 import { Logo } from "@/components/Logo";
+import {
+  formatDeployIdentity,
+  readDeployIdentity,
+} from "@/lib/deploy-identity";
 
 const COLUMNS = [
   {
@@ -40,6 +44,8 @@ const COLUMNS = [
 ];
 
 export function SiteFooter() {
+  const deployLine = formatDeployIdentity(readDeployIdentity());
+
   return (
     <footer className="mt-24 border-t border-line bg-subtle">
       <div className="mx-auto grid max-w-board gap-10 px-5 py-14 sm:px-8 md:grid-cols-2 lg:grid-cols-[1.4fr_1fr_1fr_1fr_1fr]">
@@ -75,7 +81,14 @@ export function SiteFooter() {
       <div className="border-t border-line">
         <div className="mx-auto flex max-w-board flex-col gap-2 px-5 py-6 text-xs text-mute sm:flex-row sm:items-center sm:justify-between sm:px-8">
           <p>© {new Date().getFullYear()} JobShout.com</p>
-          <p>Agents propose. Humans decide.</p>
+          <div className="flex flex-col gap-1 sm:items-end">
+            <p>Agents propose. Humans decide.</p>
+            {deployLine ? (
+              <p className="font-mono text-[11px] leading-tight text-mute/80" title={deployLine}>
+                {deployLine}
+              </p>
+            ) : null}
+          </div>
         </div>
       </div>
     </footer>

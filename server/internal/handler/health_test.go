@@ -14,6 +14,8 @@ func TestHealthIncludesDeployStamp(t *testing.T) {
 	h := Health(nil, RuntimeInfo{
 		Version:    "v1.0.8",
 		Env:        "int",
+		GitSHA:     "c82fc12abcdef",
+		BuildID:    "43474661245",
 		DeployedAt: deployed,
 	})
 
@@ -33,6 +35,12 @@ func TestHealthIncludesDeployStamp(t *testing.T) {
 	}
 	if got.Env != "int" {
 		t.Errorf("env = %q, want int", got.Env)
+	}
+	if got.GitSHA != "c82fc12abcdef" {
+		t.Errorf("git_sha = %q, want c82fc12abcdef", got.GitSHA)
+	}
+	if got.BuildID != "43474661245" {
+		t.Errorf("build_id = %q, want 43474661245", got.BuildID)
 	}
 	if got.DeployedAt != "2026-08-27T06:56:26Z" {
 		t.Errorf("deployed_at = %q, want 2026-08-27T06:56:26Z", got.DeployedAt)

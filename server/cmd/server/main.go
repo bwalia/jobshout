@@ -104,6 +104,11 @@ import (
 // Runtime APP_VERSION (Helm image.tag) wins so the sidebar shows what is actually deployed.
 var version = "dev"
 
+// gitSHA and buildID are baked at image build (CI: GITHUB_SHA / GITHUB_RUN_ID).
+// Runtime APP_GIT_SHA / APP_BUILD_ID win when set (e.g. local override).
+var gitSHA = ""
+var buildID = ""
+
 var startedAt = time.Now()
 
 // researchRequestTimeout bounds the synchronous research endpoint.
@@ -1383,10 +1388,12 @@ func main() {
 	})
 	r.Use(corsHandler.Handler)
 
-	// Health check — version/env/deployed_at feed the sidebar build stamp.
+	// Health check — version/env/git_sha/build_id/deployed_at feed the sidebar deploy identity.
 	r.Get("/health", handler.Health(pool, handler.RuntimeInfo{
 		Version:    resolveVersion(),
 		Env:        strings.TrimSpace(os.Getenv("APP_ENV")),
+		GitSHA:     resolveGitSHA(),
+		BuildID:    resolveBuildID(),
 		DeployedAt: resolveDeployedAt(),
 	}))
 
@@ -2276,6 +2283,20 @@ func resolveVersion() string {
 		return v
 	}
 	return "dev"
+}
+
+func resolveGitSHA() string {
+	if v := strings.TrimSpace(os.Getenv("APP_GIT_SHA")); v != "" {
+		return v
+	}
+	return strings.TrimSpace(gitSHA)
+}
+
+func resolveBuildID() string {
+	if v := strings.TrimSpace(os.Getenv("APP_BUILD_ID")); v != "" {
+		return v
+	}
+	return strings.TrimSpace(buildID)
 }
 
 func resolveDeployedAt() time.Time {

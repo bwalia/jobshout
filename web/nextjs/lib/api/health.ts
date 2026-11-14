@@ -4,6 +4,8 @@ export interface HealthInfo {
   status: string;
   version: string;
   env?: string;
+  git_sha?: string;
+  build_id?: string;
   deployed_at?: string;
   db: string;
 }

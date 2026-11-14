@@ -22,7 +22,11 @@ COPY . .
 
 # Release tag (v1.0.8). CI passes --build-arg VERSION=$NEXT_VERSION so /health
 # and the sidebar show the git tag that built this image, not a hardcoded string.
+# GIT_SHA / BUILD_ID (GITHUB_SHA / GITHUB_RUN_ID) travel with the image so the
+# footer can show commit + Actions run without inventing values at deploy time.
 ARG VERSION=dev
+ARG GIT_SHA=
+ARG BUILD_ID=
 # TARGETOS/TARGETARCH are injected by buildx from --platform (e.g. linux/amd64).
 # When building without buildx (local docker compose), they are unset and Go
 # builds for the native arch — so local builds stay correct.
@@ -38,7 +42,7 @@ RUN echo "building GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-$(go env GOARCH)
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS="${TARGETOS:-linux}" GOARCH="${TARGETARCH:-$(go env GOARCH)}" \
-    go build -ldflags="-s -w -X main.version=${VERSION}" -o /jobshout-server ./cmd/server
+    go build -ldflags="-s -w -X main.version=${VERSION} -X main.gitSHA=${GIT_SHA} -X main.buildID=${BUILD_ID}" -o /jobshout-server ./cmd/server
 
 # Pin the runtime base to TARGETPLATFORM. Without it, buildx on an arm64 Mac
 # has shipped an arm64 alpine tagged as linux/amd64; k3s then CrashLoops with

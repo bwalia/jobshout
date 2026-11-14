@@ -34,6 +34,15 @@ spec:
               value: {{ printf "https://%s" .Values.host | quote }}
             - name: PORT
               value: {{ .Values.web.port | quote }}
+            # Footer deploy identity (ring · tag · SHA · Build # · deployed at).
+            # APP_GIT_SHA / APP_BUILD_ID stay from the image build; version/env/
+            # deployed_at are ring-specific and must come from Helm.
+            - name: APP_VERSION
+              value: {{ .Values.image.tag | quote }}
+            - name: APP_ENV
+              value: {{ .Values.env | quote }}
+            - name: APP_DEPLOYED_AT
+              value: {{ now | date "2006-01-02T15:04:05Z07:00" | quote }}
             - name: OPSAPI_URL
               value: {{ .Values.opsapi.url | default "" | quote }}
             - name: OPSAPI_NAMESPACE

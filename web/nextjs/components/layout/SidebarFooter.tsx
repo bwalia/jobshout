@@ -8,6 +8,7 @@ import { useAuthStore } from "@/lib/store/auth-store";
 import { clearTokens } from "@/lib/auth/auth";
 import { cn } from "@/lib/utils/cn";
 import { useHealth } from "@/lib/hooks/useHealth";
+import { formatDeployIdentity } from "@/lib/deploy-identity";
 import {
   TEXT_SIZES,
   applyTextSize,
@@ -226,20 +227,18 @@ function BuildStamp({
   info,
   collapsed,
 }: {
-  info?: { version: string; env?: string; deployed_at?: string };
+  info?: {
+    version: string;
+    env?: string;
+    git_sha?: string;
+    build_id?: string;
+    deployed_at?: string;
+  };
   collapsed?: boolean;
 }) {
   if (!info?.version) return null;
-  const deployed = formatDeployed(info.deployed_at);
-  const absolute = info.deployed_at
-    ? new Date(info.deployed_at).toLocaleString()
-    : undefined;
-  const detail = [info.env, deployed ? `Deployed ${deployed}` : null]
-    .filter(Boolean)
-    .join(" · ");
-  const title = [info.version, info.env, absolute && `Deployed ${absolute}`]
-    .filter(Boolean)
-    .join(" · ");
+  const line = formatDeployIdentity(info);
+  const title = line || info.version;
 
   if (collapsed) {
     return (
@@ -253,30 +252,11 @@ function BuildStamp({
   }
 
   return (
-    <div
-      className="mt-0.5 flex items-start justify-between gap-2 px-1.5"
+    <p
+      className="mt-0.5 truncate px-1.5 font-mono text-2xs leading-tight text-muted-foreground"
       title={title}
     >
-      <span className="min-w-0 truncate text-2xs leading-tight text-muted-foreground">
-        {detail || "\u00a0"}
-      </span>
-      <span className="shrink-0 font-mono text-2xs leading-tight text-muted-foreground">
-        {info.version}
-      </span>
-    </div>
+      {line || info.version}
+    </p>
   );
-}
-
-function formatDeployed(iso?: string): string | null {
-  if (!iso) return null;
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return null;
-  const mins = Math.floor((Date.now() - t) / 60_000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  return new Date(t).toLocaleDateString();
 }

@@ -26,6 +26,11 @@ image:
   pullPolicy: IfNotPresent
   pullSecret: jobshout-registry
 
+# Optional deploy-identity overrides for /health (normally empty — CI bakes
+# GITHUB_SHA / GITHUB_RUN_ID into the server binary via ldflags).
+gitSHA: ""
+buildID: ""
+
 # External Secrets Operator -> HashiCorp Vault (ClusterSecretStore vault-backend).
 # All app secrets live at secret/jobshout/<env>/config and are materialized into
 # a k8s Secret named jobshout-secrets. Registry creds share the same Vault path.

@@ -291,6 +291,9 @@ jobs:
           bx -f jobshout-com/deploy/docker/Dockerfile.web \
             --build-arg NEXT_PUBLIC_JOBSHOUT_COM_API_URL="" \
             --build-arg JOBSHOUT_COM_API_URL=http://jobshout-com-api:8088 \
+            --build-arg APP_VERSION="$VERSION" \
+            --build-arg APP_GIT_SHA="$GITHUB_SHA" \
+            --build-arg APP_BUILD_ID="$GITHUB_RUN_ID" \
             -t "$NS/web:$VERSION" -t "$NS/web:latest" \
             jobshout-com/web/nextjs
           echo "Pushed $NS/{api,web}:$VERSION"
