@@ -392,6 +392,57 @@ jobs:
       && needs.plan.outputs.deploy == 'true'
       && (needs.images.result == 'success' || needs.images.result == 'skipped')
     steps:
+      # A timed-out / interrupted helm upgrade leaves
+      # sh.helm.release.v1.jobshout-com.* with status=pending-* in the ring
+      # namespace. Every later seed then fails immediately with
+      # "UPGRADE FAILED: another operation (install/upgrade/rollback) is in
+      # progress". Clear those locks before we ask RP to helm upgrade again.
+      - name: Clear stuck Helm pending lock
+        env:
+          KUBE_CONFIG_DATA_K3S: ${{ secrets.KUBE_CONFIG_DATA_K3S }}
+          TARGET_ENV: ${{ needs.plan.outputs.target_env }}
+        run: |
+          set -euo pipefail
+          NS="$TARGET_ENV"
+          RELEASE=jobshout-com
+          KUBECONFIG_PATH="${RUNNER_TEMP:-/tmp}/k3s1.kubeconfig"
+          if [ -n "${KUBE_CONFIG_DATA_K3S:-}" ]; then
+            printf '%s' "$KUBE_CONFIG_DATA_K3S" | base64 -d > "$KUBECONFIG_PATH"
+          elif [ -f "$HOME/.kube/k3s1.yaml" ]; then
+            cp "$HOME/.kube/k3s1.yaml" "$KUBECONFIG_PATH"
+          else
+            echo "::warning::no kubeconfig (KUBE_CONFIG_DATA_K3S or ~/.kube/k3s1.yaml) — cannot clear Helm locks; seed may fail if one is stuck"
+            exit 0
+          fi
+          chmod 600 "$KUBECONFIG_PATH"
+          export KUBECONFIG="$KUBECONFIG_PATH"
+          if ! command -v kubectl >/dev/null 2>&1; then
+            echo "::warning::kubectl not on PATH — skipping Helm lock clear"
+            exit 0
+          fi
+          echo "Helm release secrets for ${RELEASE} in ns/${NS}:"
+          kubectl -n "$NS" get secret -l "owner=helm,name=${RELEASE}" \
+            -o custom-columns=NAME:.metadata.name,STATUS:.metadata.labels.status,VERSION:.metadata.labels.version \
+            --no-headers 2>/dev/null || true
+          deleted=0
+          for status in pending-install pending-upgrade pending-rollback; do
+            names=$(kubectl -n "$NS" get secret \
+              -l "owner=helm,name=${RELEASE},status=${status}" \
+              -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)
+            if [ -n "$names" ]; then
+              echo "Deleting ${status} secrets:"
+              echo "$names"
+              # shellcheck disable=SC2086
+              kubectl -n "$NS" delete secret $names --wait=false
+              deleted=1
+            fi
+          done
+          if [ "$deleted" = 0 ]; then
+            echo "No pending Helm locks for ${RELEASE} in ${NS}."
+          else
+            echo "Cleared pending Helm lock(s) for ${RELEASE} in ${NS}."
+          fi
+
       - name: Seed jobshout-com and wait
         env:
           RP_API_TOKEN: ${{ secrets.RP_API_TOKEN }}
