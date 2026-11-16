@@ -201,20 +201,33 @@ func artPrompt(scene coverScene, accent string) string {
 		subject, accent, pal[2].R, pal[2].G, pal[2].B)
 }
 
+// artTries is how many pictures drawArt asks for. The image service makes one
+// try per request, since a second would outlast the edge's 600 s, so a picture
+// with a stray word in it is redrawn from here with a new seed: on int on
+// 2026-11-16 ERNIE painted "AWS" once and the cover went out as a bare diagram.
+const artTries = 2
+
 // drawArt has a picture with no words drawn for scene, to go under its
 // diagram. Any image model will do, since the words are lettered in code; one
-// that shows words anyway is redrawn by the image service, and then refused.
+// that shows words anyway is redrawn once, and then refused.
 func (r *Runner) drawArt(ctx context.Context, orgID uuid.UUID, runID *uuid.UUID, scene coverScene, accent, source string) (image.Image, *Illustration, error) {
-	img, err := r.images.Generate(ctx, IllustrationRequest{
-		OrgID:  orgID,
-		Prompt: artPrompt(scene, accent),
-		Width:  artWidth,
-		Height: artHeight,
-		Steps:  coverSteps,
-		Source: source,
-		RunID:  runID,
-		NoText: true,
-	})
+	var img *Illustration
+	var err error
+	for try := 1; try <= artTries; try++ {
+		img, err = r.images.Generate(ctx, IllustrationRequest{
+			OrgID:  orgID,
+			Prompt: artPrompt(scene, accent),
+			Width:  artWidth,
+			Height: artHeight,
+			Steps:  coverSteps,
+			Source: source,
+			RunID:  runID,
+			NoText: true,
+		})
+		if err == nil || !strings.Contains(err.Error(), "lettering came out wrong") {
+			break
+		}
+	}
 	if err != nil {
 		return nil, nil, err
 	}
