@@ -7,9 +7,11 @@ const (
 	BuiltinHiringAssistant     = "hiring_assistant"
 	BuiltinTeamBuilder         = "team_builder"
 	BuiltinSkillGap            = "skill_gap"
+	BuiltinInterviewPrep       = "interview_prep"
 
 	AgentNameFreelancerAssistant = "Freelancer Assistant"
 	AgentNameHiringAssistant     = "Hiring Assistant"
 	AgentNameTeamBuilder         = "Team Builder"
 	AgentNameSkillGap            = "Skill Gap Analysis"
+	AgentNameInterviewPrep       = "Interview Prep"
 )

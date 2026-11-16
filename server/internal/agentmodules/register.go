@@ -36,6 +36,7 @@ import (
 	"github.com/jobshout/server/internal/seo"
 	"github.com/jobshout/server/internal/service"
 	"github.com/jobshout/server/internal/simpro"
+	"github.com/jobshout/server/internal/interviewprep"
 	"github.com/jobshout/server/internal/skillgap"
 	"github.com/jobshout/server/internal/talentmatch"
 	"github.com/jobshout/server/internal/teambuilder"
@@ -75,6 +76,7 @@ type Deps struct {
 	HiringAssist     hiringassist.Runner
 	TeamBuilder      teambuilder.Runner
 	SkillGap         skillgap.Runner
+	InterviewPrep    interviewprep.Runner
 }
 
 func init() {
@@ -120,6 +122,7 @@ func Register(d Deps) {
 	agentmodule.Register(hiringassist.Module(d.HiringAssist))
 	agentmodule.Register(teambuilder.Module(d.TeamBuilder))
 	agentmodule.Register(skillgap.Module(d.SkillGap))
+	agentmodule.Register(interviewprep.Module(d.InterviewPrep))
 }
 
 type imageAdapter struct{ svc *service.ImageService }

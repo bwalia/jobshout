@@ -4,6 +4,7 @@ import { AuthProvider } from "@/components/AuthProvider";
 import { BetaBanner } from "@/components/BetaBanner";
 import { JobSupportDock } from "@/components/job-support/JobSupportDock";
 import { JobSupportProvider } from "@/components/job-support/JobSupportProvider";
+import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { SiteFooter } from "@/components/SiteFooter";
 import { SiteHeader } from "@/components/SiteHeader";
 import "./globals.css";
@@ -92,10 +93,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <div className="flex min-h-screen flex-col">
               <BetaBanner />
               <SiteHeader />
-              <main id="main" className="flex-1">
+              <main id="main" className="flex-1 pb-20 md:pb-0">
                 {children}
               </main>
               <SiteFooter />
+              <MobileBottomNav />
             </div>
             <JobSupportDock />
           </JobSupportProvider>
