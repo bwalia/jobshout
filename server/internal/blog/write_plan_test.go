@@ -24,3 +24,16 @@ func TestFlexibleStringShapes(t *testing.T) {
 		}
 	}
 }
+
+// A planned figure whose content comes back as a list still decodes, so the
+// run goes on instead of failing at the plan step.
+func TestWritePlan_FigureContentAsList(t *testing.T) {
+	var plan writePlan
+	in := `{"figures": [{"kind": "process", "section": "Rollout", "content": ["new pod starts", "readiness probe passes", "old pod drains"]}]}`
+	if err := json.Unmarshal([]byte(in), &plan); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(plan.Figures) != 1 || plan.Figures[0].Content != "new pod starts, readiness probe passes, old pod drains" || plan.Figures[0].Section != "Rollout" {
+		t.Fatalf("got %+v", plan.Figures)
+	}
+}

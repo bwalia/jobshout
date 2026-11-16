@@ -45,6 +45,18 @@ type figureBrief struct {
 	Content string `json:"content"`
 }
 
+// UnmarshalJSON decodes a planned figure tolerantly, as the redraw planner
+// does (figureJSON): a model that gives content as a list must not fail the
+// whole run at the plan step, as it did on prod on 2026-11-16.
+func (f *figureBrief) UnmarshalJSON(b []byte) error {
+	var j figureJSON
+	if err := json.Unmarshal(b, &j); err != nil {
+		return err
+	}
+	*f = figureBrief{Kind: string(j.Kind), Section: string(j.Section), Content: string(j.Content)}
+	return nil
+}
+
 // flexibleString accepts whatever shape a model gives a cover hint: a string,
 // an array of strings (["lighthouse","hull"]), or objects and arrays of
 // objects ([{"name":"lighthouse"}]). Every string inside is kept, joined with
