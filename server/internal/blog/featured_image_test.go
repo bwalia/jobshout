@@ -129,3 +129,24 @@ func TestDrawCover_ErnieDrawsThePictureUnderTheDiagram(t *testing.T) {
 		t.Fatalf("cover=%q provider=%q model=%q note=%q", a.CoverImageURL, a.CoverImageProvider, a.CoverImageModel, a.CoverNote)
 	}
 }
+
+// The image service makes one try per request, so a picture with a stray word
+// is redrawn here rather than the cover going out as a bare diagram.
+func TestDrawCover_PictureWithWordsIsRedrawnOnce(t *testing.T) {
+	ernie := &captionIllustrator{fakeIllustrator{enabled: true, provider: "mflux", model: "ernie-image-turbo", wordsOnce: true}}
+	r := newTestRunner(&fakeCMS{})
+	r.cfg.CoverStyle = CoverStylePicture
+	r.WithIllustrator(ernie)
+	a := &GeneratedArticle{Title: "Tracing with AWS X-Ray", Slug: "xray",
+		CoverScene: coverScene{Layout: layoutHub, Labels: []string{"AWS X-Ray", "Monitoring", "Distributed Applications", "Resource Allocation"}}}
+
+	if err := r.drawCover(context.Background(), uuid.New(), a); err != nil {
+		t.Fatal(err)
+	}
+	if len(ernie.calls) != 2 || !ernie.calls[1].NoText {
+		t.Fatalf("want the picture drawn again, got %d calls", len(ernie.calls))
+	}
+	if a.CoverImageProvider != "mflux" || a.CoverImageModel != "ernie-image-turbo+scene:hub" {
+		t.Fatalf("the redrawn picture is not under the cover: provider=%q model=%q note=%q", a.CoverImageProvider, a.CoverImageModel, a.CoverNote)
+	}
+}

@@ -33,12 +33,18 @@ type fakeIllustrator struct {
 	// store, when set, receives each image the way the real image service
 	// stores before returning a URL.
 	store *memCovers
+	// wordsOnce makes the first picture come back with a stray word in it, as
+	// the image service reports one.
+	wordsOnce bool
 }
 
 func (f *fakeIllustrator) Enabled() bool { return f.enabled }
 
 func (f *fakeIllustrator) Generate(ctx context.Context, req IllustrationRequest) (*Illustration, error) {
 	f.calls = append(f.calls, req)
+	if f.wordsOnce && len(f.calls) == 1 {
+		return nil, fmt.Errorf("imagegen: gemini failed (quota); mflux fallback failed: imagegen: the lettering came out wrong in 1 tries (extra AWS)")
+	}
 	if f.failAfter < 0 || (f.failAfter > 0 && len(f.calls) > f.failAfter) {
 		return nil, fmt.Errorf("the GPU is busy")
 	}
