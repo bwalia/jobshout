@@ -56,6 +56,7 @@ import (
 	"github.com/jobshout/server/internal/hiringassist"
 	"github.com/jobshout/server/internal/imagegen"
 	"github.com/jobshout/server/internal/imagestore"
+	"github.com/jobshout/server/internal/interviewprep"
 	integ "github.com/jobshout/server/internal/integration"
 	emailAdapter "github.com/jobshout/server/internal/integration/adapters/email"
 	githubAdapter "github.com/jobshout/server/internal/integration/adapters/github"
@@ -1107,6 +1108,7 @@ func main() {
 		HiringAssist:     hiringassist.Heuristic{},
 		TeamBuilder:      teambuilder.Heuristic{},
 		SkillGap:         skillgap.Heuristic{},
+		InterviewPrep:    interviewprep.Heuristic{},
 	})
 
 	// ─── Autonomous agent engine ────────────────────────────────────────────

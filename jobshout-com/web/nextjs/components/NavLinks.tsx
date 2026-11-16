@@ -3,17 +3,19 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-/** Phase 1 nav: Home · Work · Network · Discover (+ legacy shortcuts). */
+/**
+ * Prompt nav: Home · Work (Jobs, Projects) · Hire · Groups · Network · Discover.
+ * Messages / post-job stay reachable from avatar and secondary actions.
+ */
 const LINKS = [
   { href: "/dashboard", label: "Home" },
   { href: "/jobs", label: "Jobs" },
   { href: "/projects", label: "Projects" },
+  { href: "/hire", label: "Hire" },
+  { href: "/groups", label: "Groups" },
   { href: "/members", label: "Network" },
-  { href: "/showcase", label: "Showcase" },
-  { href: "/agents", label: "Agents" },
-  { href: "/insights", label: "Insights" },
+  { href: "/showcase", label: "Discover" },
   { href: "/messages", label: "Messages" },
-  { href: "/post-job", label: "Post a job" },
 ];
 
 export function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
@@ -22,7 +24,12 @@ export function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <>
       {LINKS.map((link) => {
-        const active = pathname === link.href || pathname.startsWith(`${link.href}/`);
+        const active =
+          pathname === link.href ||
+          pathname.startsWith(`${link.href}/`) ||
+          (link.href === "/showcase" &&
+            (pathname.startsWith("/agents") || pathname.startsWith("/insights"))) ||
+          (link.href === "/members" && pathname.startsWith("/following"));
         return (
           <Link
             key={link.href}
