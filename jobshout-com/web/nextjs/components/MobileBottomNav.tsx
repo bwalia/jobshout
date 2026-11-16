@@ -4,14 +4,26 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const TABS = [
-  { href: "/dashboard", label: "Home" },
-  { href: "/jobs", label: "Work" },
-  { href: "/messages", label: "Messages" },
-  { href: "/notifications", label: "Alerts" },
-  { href: "/members/me", label: "Me" },
+  { href: "/", label: "Home", match: (p: string) => p === "/" },
+  { href: "/jobs", label: "Jobs", match: (p: string) => p.startsWith("/jobs") },
+  {
+    href: "/members",
+    label: "Talents",
+    match: (p: string) => p.startsWith("/members") || p.startsWith("/following"),
+  },
+  {
+    href: "/agents",
+    label: "Agents",
+    match: (p: string) => p.startsWith("/agents") || p.startsWith("/showcase"),
+  },
+  {
+    href: "/messages",
+    label: "Messages",
+    match: (p: string) => p.startsWith("/messages"),
+  },
 ];
 
-/** Phone bottom bar — Phase 1 responsive requirement. Hidden from md up. */
+/** Phone bottom bar — mirrors the simplified primary destinations. Hidden from md up. */
 export function MobileBottomNav() {
   const pathname = usePathname();
   return (
@@ -21,10 +33,7 @@ export function MobileBottomNav() {
     >
       <ul className="mx-auto flex max-w-lg items-stretch justify-between px-2 pb-[env(safe-area-inset-bottom)]">
         {TABS.map((tab) => {
-          const active =
-            pathname === tab.href ||
-            (tab.href !== "/dashboard" && pathname.startsWith(`${tab.href}/`)) ||
-            (tab.href === "/jobs" && (pathname.startsWith("/projects") || pathname.startsWith("/jobs")));
+          const active = tab.match(pathname);
           return (
             <li key={tab.href} className="flex-1">
               <Link
