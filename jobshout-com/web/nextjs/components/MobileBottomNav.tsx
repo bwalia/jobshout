@@ -3,18 +3,22 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+/**
+ * Phone bottom bar — Groups and Insights sit in the primary five so they are
+ * as reachable as Jobs. Talents / Agents stay in the header sheet + desktop nav.
+ */
 const TABS = [
   { href: "/", label: "Home", match: (p: string) => p === "/" },
   { href: "/jobs", label: "Jobs", match: (p: string) => p.startsWith("/jobs") },
   {
-    href: "/members",
-    label: "Talents",
-    match: (p: string) => p.startsWith("/members") || p.startsWith("/following"),
+    href: "/groups",
+    label: "Groups",
+    match: (p: string) => p.startsWith("/groups"),
   },
   {
-    href: "/agents",
-    label: "Agents",
-    match: (p: string) => p.startsWith("/agents") || p.startsWith("/showcase"),
+    href: "/insights",
+    label: "Insights",
+    match: (p: string) => p.startsWith("/insights"),
   },
   {
     href: "/messages",
