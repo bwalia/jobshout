@@ -38,7 +38,7 @@ jobs:
           WANT_VERSION: ${{ github.event.inputs.VERSION || env.WANT_VERSION || '' }}
           # Push events have no inputs — default promote-prod ON. workflow_dispatch can set false.
           PROMOTE_PROD: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.PROMOTE_PROD == false && '0' || '1' }}
-          BASELINE_VERSION: v1.0.224
+          BASELINE_VERSION: v1.0.225
         run: |
           set -euo pipefail
           RP="${RP_URL:-https://rp.workstation.co.uk}"
