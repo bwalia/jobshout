@@ -11,9 +11,15 @@ import {
   updateScheduledTask,
   deleteScheduledTask,
   getScheduledTaskRuns,
+  runScheduledTaskOnce,
   type SchedulerListParams,
 } from "@/lib/api/scheduler";
-import type { CreateScheduledTaskRequest, UpdateScheduledTaskRequest } from "@/lib/types/scheduler";
+import type {
+  CreateScheduledTaskRequest,
+  ScheduledTaskRun,
+  UpdateScheduledTaskRequest,
+} from "@/lib/types/scheduler";
+import { apiErrorMessage } from "@/lib/api/client";
 
 export const schedulerKeys = {
   all: ["scheduled-tasks"] as const,
@@ -82,4 +88,63 @@ export function useDeleteScheduledTask() {
     },
     onError: (e: Error) => toast.error(`Failed: ${e.message}`),
   });
+}
+
+export type RunOnceContext = {
+  id: string;
+  workflow_id?: string | null;
+};
+
+/**
+ * Manual one-off fire for testing. Leaves the schedule's next run time alone.
+ * Toast links to the resulting article / workflow / runs hub when present.
+ */
+export function useRunScheduledTaskOnce() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id }: RunOnceContext) => runScheduledTaskOnce(id),
+    onSuccess: (run: ScheduledTaskRun, vars) => {
+      qc.invalidateQueries({ queryKey: schedulerKeys.lists() });
+      qc.invalidateQueries({ queryKey: schedulerKeys.runs(run.scheduled_task_id) });
+      if (run.status === "failed") {
+        toast.error(run.error_message || "Run failed.");
+        return;
+      }
+      const href = resultHrefForRun(run, vars.workflow_id);
+      if (href) {
+        toast.success("Run started.", {
+          action: {
+            label: "Open result",
+            onClick: () => {
+              window.location.href = href;
+            },
+          },
+        });
+      } else {
+        toast.success("Run completed. Check history on this schedule.");
+      }
+    },
+    onError: (e: Error) => toast.error(apiErrorMessage(e, "Failed to run schedule")),
+  });
+}
+
+/** Deep link for whatever the dispatcher produced on this schedule run. */
+export function resultHrefForRun(
+  run: ScheduledTaskRun,
+  workflowId?: string | null
+): string | null {
+  if (run.workflow_run_id && workflowId) {
+    return `/workflows/${workflowId}?run=${run.workflow_run_id}`;
+  }
+  if (run.execution_id) {
+    return "/panel/runs";
+  }
+  if (!run.output) return null;
+  try {
+    const parsed = JSON.parse(run.output) as Record<string, unknown>;
+    if (typeof parsed.blog_run_id === "string") return `/articles/${parsed.blog_run_id}`;
+  } catch {
+    // Output is free text for some task types.
+  }
+  return null;
 }

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -16,8 +17,15 @@ import (
 	"github.com/jobshout/server/internal/repository"
 )
 
+// scheduleRunner fires a stored schedule through the same dispatch path the
+// cron tick uses. Implemented by scheduler.Runner.
+type scheduleRunner interface {
+	RunNow(ctx context.Context, t model.ScheduledTask) (*model.ScheduledTaskRun, error)
+}
+
 type SchedulerHandler struct {
 	repo       repository.SchedulerRepository
+	runner     scheduleRunner
 	validate   *validator.Validate
 	cronParser cron.Parser
 }
@@ -28,6 +36,12 @@ func NewSchedulerHandler(repo repository.SchedulerRepository) *SchedulerHandler 
 		validate:   validator.New(),
 		cronParser: cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor),
 	}
+}
+
+// WithRunner attaches the dispatcher used by POST .../run.
+func (h *SchedulerHandler) WithRunner(r scheduleRunner) *SchedulerHandler {
+	h.runner = r
+	return h
 }
 
 // schedulePresets maps the friendly preset names exposed in the API to the
@@ -369,4 +383,30 @@ func (h *SchedulerHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	RespondJSON(w, http.StatusOK, result)
+}
+
+// RunOnce fires a schedule immediately for testing. Auth and org ownership
+// match the other schedule routes; the cron cadence is left unchanged.
+func (h *SchedulerHandler) RunOnce(w http.ResponseWriter, r *http.Request) {
+	t, ok := h.ownedTask(w, r)
+	if !ok {
+		return
+	}
+	if h.runner == nil {
+		RespondError(w, http.StatusServiceUnavailable, "scheduler runner is not configured")
+		return
+	}
+
+	run, err := h.runner.RunNow(r.Context(), *t)
+	if run != nil && run.Status == "failed" {
+		// Return the run so the UI can show the error and any partial links;
+		// the dispatch failure is already on the record.
+		RespondJSON(w, http.StatusOK, run)
+		return
+	}
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, "failed to run: "+err.Error())
+		return
+	}
+	RespondJSON(w, http.StatusOK, run)
 }

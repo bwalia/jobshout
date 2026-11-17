@@ -1907,6 +1907,7 @@ func main() {
 					r.Put("/", schedulerHandler.Update)
 					r.Delete("/", schedulerHandler.Delete)
 					r.Get("/runs", schedulerHandler.ListRuns)
+					r.Post("/run", schedulerHandler.RunOnce)
 				})
 			})
 
@@ -2135,10 +2136,12 @@ func main() {
 
 	// ─── Scheduler dispatcher ───────────────────────────────────────────────
 	// Ticks every 30s, picks up due scheduled_tasks, and dispatches them to
-	// the appropriate path (blog pipeline / workflow / agent).
+	// the appropriate path (blog pipeline / workflow / agent). Also backs
+	// POST /scheduled-tasks/{id}/run for one-off operator tests.
 	schedulerRunner := scheduler.NewRunner(schedulerRepo, blogSvc, workflowSvc, execSvc, multiAgentSvc, logger).
 		WithCareer(careerSvc).
 		WithMarketingEmail(emailSvc)
+	schedulerHandler.WithRunner(schedulerRunner)
 	go schedulerRunner.Start(ctx)
 
 	// ─── Usage partition maintainer ─────────────────────────────────────────

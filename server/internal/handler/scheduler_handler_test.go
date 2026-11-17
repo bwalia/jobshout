@@ -63,14 +63,30 @@ func (f *fakeSchedulerRepo) ListRuns(context.Context, uuid.UUID, model.Paginatio
 	return &model.PaginatedResponse[model.ScheduledTaskRun]{}, nil
 }
 
+// fakeScheduleRunner records RunNow calls for handler tests.
+type fakeScheduleRunner struct {
+	last   *model.ScheduledTask
+	run    *model.ScheduledTaskRun
+	err    error
+	called int
+}
+
+func (f *fakeScheduleRunner) RunNow(_ context.Context, t model.ScheduledTask) (*model.ScheduledTaskRun, error) {
+	f.called++
+	cp := t
+	f.last = &cp
+	return f.run, f.err
+}
+
 func TestSchedulerHandler_OrgIsolation(t *testing.T) {
 	orgA, orgB, task := uuid.New(), uuid.New(), uuid.New()
 	repo := &fakeSchedulerRepo{byID: map[uuid.UUID]*model.ScheduledTask{task: {ID: task, OrgID: orgB}}}
-	h := NewSchedulerHandler(repo)
+	runner := &fakeScheduleRunner{run: &model.ScheduledTaskRun{ID: uuid.New(), Status: "completed"}}
+	h := NewSchedulerHandler(repo).WithRunner(runner)
 	params := map[string]string{"taskID": task.String()}
 
 	for name, fn := range map[string]http.HandlerFunc{
-		"get": h.GetByID, "update": h.Update, "delete": h.Delete, "runs": h.ListRuns,
+		"get": h.GetByID, "update": h.Update, "delete": h.Delete, "runs": h.ListRuns, "run": h.RunOnce,
 	} {
 		rec := httptest.NewRecorder()
 		fn(rec, sprintReq(`{"name":"taken"}`, orgA, params))
@@ -78,8 +94,48 @@ func TestSchedulerHandler_OrgIsolation(t *testing.T) {
 			t.Errorf("%s on another org's task = %d, want 404", name, rec.Code)
 		}
 	}
-	if repo.lastReq != nil || repo.deleted != 0 {
+	if repo.lastReq != nil || repo.deleted != 0 || runner.called != 0 {
 		t.Fatal("another org's task was changed")
+	}
+}
+
+func TestSchedulerHandler_RunOnce(t *testing.T) {
+	org, taskID := uuid.New(), uuid.New()
+	repo := &fakeSchedulerRepo{byID: map[uuid.UUID]*model.ScheduledTask{
+		taskID: {ID: taskID, OrgID: org, Name: "Nightly", TaskType: "agent", Status: "active"},
+	}}
+	runID := uuid.New()
+	runner := &fakeScheduleRunner{run: &model.ScheduledTaskRun{
+		ID: runID, ScheduledTaskID: taskID, Status: "completed",
+	}}
+	h := NewSchedulerHandler(repo).WithRunner(runner)
+	params := map[string]string{"taskID": taskID.String()}
+
+	rec := httptest.NewRecorder()
+	h.RunOnce(rec, sprintReq("", org, params))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("RunOnce = %d %s", rec.Code, rec.Body.String())
+	}
+	if runner.called != 1 || runner.last == nil || runner.last.ID != taskID {
+		t.Fatalf("runner called=%d last=%v", runner.called, runner.last)
+	}
+
+	// No runner wired — refuse rather than inventing a second dispatch path.
+	h2 := NewSchedulerHandler(repo)
+	rec = httptest.NewRecorder()
+	h2.RunOnce(rec, sprintReq("", org, params))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("no runner = %d, want 503", rec.Code)
+	}
+
+	// A failed dispatch still returns the run record so the UI can show why.
+	msg := "no target"
+	runner.run = &model.ScheduledTaskRun{ID: runID, Status: "failed", ErrorMessage: &msg}
+	runner.err = errors.New(msg)
+	rec = httptest.NewRecorder()
+	h.RunOnce(rec, sprintReq("", org, params))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("failed run = %d %s", rec.Code, rec.Body.String())
 	}
 }
 

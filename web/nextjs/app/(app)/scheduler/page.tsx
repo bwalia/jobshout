@@ -7,6 +7,8 @@ import {
   useUpdateScheduledTask,
   useDeleteScheduledTask,
   useScheduledTaskRuns,
+  useRunScheduledTaskOnce,
+  resultHrefForRun,
 } from "@/lib/hooks/useScheduler";
 import { useAgents } from "@/lib/hooks/useAgents";
 import { useWorkflows } from "@/lib/hooks/useWorkflows";
@@ -122,6 +124,7 @@ export default function SchedulerPage() {
   const createMutation = useCreateScheduledTask();
   const updateMutation = useUpdateScheduledTask();
   const deleteMutation = useDeleteScheduledTask();
+  const runOnceMutation = useRunScheduledTaskOnce();
 
   const [showForm, setShowForm] = useState(false);
   // Article-schedule state. Kept out of `form` because it does not map onto
@@ -902,10 +905,34 @@ export default function SchedulerPage() {
                   {/* A schedule is only trustworthy if you can see it fired and
                       what it produced, so history is shown inline rather than
                       behind another page. */}
-                  <TaskRunHistory taskId={task.id} runCount={task.run_count} />
+                  <TaskRunHistory
+                    taskId={task.id}
+                    runCount={task.run_count}
+                    workflowId={task.workflow_id}
+                  />
                 </div>
 
                 <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    title="Run this schedule once now, without changing its next fire time"
+                    disabled={
+                      runOnceMutation.isPending &&
+                      runOnceMutation.variables?.id === task.id
+                    }
+                    onClick={() =>
+                      runOnceMutation.mutate({
+                        id: task.id,
+                        workflow_id: task.workflow_id,
+                      })
+                    }
+                    className="inline-flex h-8 items-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    {runOnceMutation.isPending &&
+                    runOnceMutation.variables?.id === task.id
+                      ? "Running…"
+                      : "Run once"}
+                  </button>
                   {task.status === "active" ? (
                     <button
                       onClick={() =>
@@ -991,9 +1018,11 @@ function describeBlogTask(task: ScheduledTask): string {
 function TaskRunHistory({
   taskId,
   runCount,
+  workflowId,
 }: {
   taskId: string;
   runCount: number;
+  workflowId?: string | null;
 }) {
   const [open, setOpen] = useState(false);
   // Only fetched once opened — a page of twenty tasks should not fire twenty
@@ -1027,7 +1056,7 @@ function TaskRunHistory({
             <p className="text-xs text-muted-foreground">No runs recorded.</p>
           )}
           {runs.map((run) => {
-            const blogRunId = blogRunIdOf(run.output);
+            const resultHref = resultHrefForRun(run, workflowId);
             return (
               <div
                 key={run.id}
@@ -1045,12 +1074,9 @@ function TaskRunHistory({
                     ? new Date(run.started_at).toLocaleString()
                     : "—"}
                 </span>
-                {blogRunId && (
-                  <Link
-                    href={`/articles/${blogRunId}`}
-                    className="text-primary hover:underline"
-                  >
-                    View article
+                {resultHref && (
+                  <Link href={resultHref} className="text-primary hover:underline">
+                    Open result
                   </Link>
                 )}
                 {run.error_message && (
@@ -1063,21 +1089,4 @@ function TaskRunHistory({
       )}
     </div>
   );
-}
-
-/**
- * Pulls the blog run id out of a scheduled run's output.
- *
- * The dispatcher writes it as JSON, but output is a free-text column shared
- * with every other task type — so anything unparseable simply means "no article
- * to link to" rather than an error.
- */
-function blogRunIdOf(output: string | null): string | null {
-  if (!output) return null;
-  try {
-    const parsed = JSON.parse(output);
-    return typeof parsed?.blog_run_id === "string" ? parsed.blog_run_id : null;
-  } catch {
-    return null;
-  }
 }
