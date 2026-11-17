@@ -174,6 +174,52 @@ func (r *Runner) runOne(ctx context.Context, t model.ScheduledTask) {
 	}()
 	log.Info("scheduler: running scheduled task")
 
+	runRec, dispatchErr := r.execute(ctx, t, log)
+	if err := r.repo.CreateRun(ctx, runRec); err != nil {
+		log.Error("scheduler: persist run failed", zap.Error(err))
+	}
+
+	// Advance the task: increment count + compute next_run_at.
+	if err := r.repo.IncrementRunCount(ctx, t.ID); err != nil {
+		log.Error("scheduler: increment run count failed", zap.Error(err))
+	}
+	if errors.Is(dispatchErr, errTaskMisconfigured) {
+		r.pauseMisconfigured(ctx, t, log)
+		return
+	}
+	r.scheduleNext(ctx, t, log)
+}
+
+// RunNow fires a schedule once through the same dispatch path as the cron
+// tick, without claiming the task or moving next_run_at / status. Operators
+// use this from the panel to test a schedule without waiting for the next
+// tick or burning a one-shot.
+func (r *Runner) RunNow(ctx context.Context, t model.ScheduledTask) (*model.ScheduledTaskRun, error) {
+	log := r.logger.With(
+		zap.String("task_id", t.ID.String()),
+		zap.String("name", t.Name),
+		zap.String("trigger", "manual"),
+	)
+	log.Info("scheduler: manual run-once")
+
+	runRec, dispatchErr := r.execute(ctx, t, log)
+	if err := r.repo.CreateRun(ctx, runRec); err != nil {
+		return runRec, fmt.Errorf("persist run: %w", err)
+	}
+	// Count the run for history, but leave cadence alone — a manual test must
+	// not skip the next cron fire or mark a one-shot completed.
+	if err := r.repo.IncrementRunCount(ctx, t.ID); err != nil {
+		log.Error("scheduler: increment run count failed", zap.Error(err))
+	}
+	if dispatchErr != nil {
+		return runRec, dispatchErr
+	}
+	return runRec, nil
+}
+
+// execute dispatches one scheduled task and returns the finished run record.
+// Callers own persistence and schedule advancement.
+func (r *Runner) execute(ctx context.Context, t model.ScheduledTask, log *zap.Logger) (*model.ScheduledTaskRun, error) {
 	runRec := &model.ScheduledTaskRun{
 		ID:              uuid.New(),
 		ScheduledTaskID: t.ID,
@@ -209,22 +255,10 @@ func (r *Runner) runOne(ctx context.Context, t model.ScheduledTask) {
 		runRec.Status = "failed"
 		runRec.ErrorMessage = &msg
 		log.Error("scheduler: task failed", zap.Error(err))
-	} else {
-		runRec.Status = "completed"
+		return runRec, err
 	}
-	if err := r.repo.CreateRun(ctx, runRec); err != nil {
-		log.Error("scheduler: persist run failed", zap.Error(err))
-	}
-
-	// Advance the task: increment count + compute next_run_at.
-	if err := r.repo.IncrementRunCount(ctx, t.ID); err != nil {
-		log.Error("scheduler: increment run count failed", zap.Error(err))
-	}
-	if errors.Is(err, errTaskMisconfigured) {
-		r.pauseMisconfigured(ctx, t, log)
-		return
-	}
-	r.scheduleNext(ctx, t, log)
+	runRec.Status = "completed"
+	return runRec, nil
 }
 
 // errTaskMisconfigured marks a failure that no amount of waiting will fix: the

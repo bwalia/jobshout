@@ -53,3 +53,13 @@ export async function getScheduledTaskRuns(
   );
   return data;
 }
+
+/** Fire a schedule once for testing without waiting for the next cron tick. */
+export async function runScheduledTaskOnce(
+  taskId: string
+): Promise<ScheduledTaskRun> {
+  const { data } = await apiClient.post<ScheduledTaskRun>(
+    `/scheduled-tasks/${taskId}/run`
+  );
+  return data;
+}
