@@ -35,7 +35,7 @@ jobs:
           RP_API_TOKEN: ${{ secrets.RP_API_TOKEN }}
           RP_URL: ${{ secrets.RP_URL }}
           RP_PROD_PASSWORD: ${{ secrets.RP_PROD_PASSWORD }}
-          WANT_VERSION: ${{ github.event.inputs.VERSION || env.WANT_VERSION || '' }}
+          WANT_VERSION: v1.0.226
           # Push events have no inputs — default promote-prod ON. workflow_dispatch can set false.
           PROMOTE_PROD: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.PROMOTE_PROD == false && '0' || '1' }}
           BASELINE_VERSION: v1.0.224
