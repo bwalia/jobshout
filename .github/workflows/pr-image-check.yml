@@ -27,7 +27,11 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: server/go.mod
-          cache-dependency-path: server/go.sum
+          # Off: this self-hosted runner keeps ~/go/pkg/mod and the build cache
+          # between runs. Restoring the 2.8 GB Actions cache over them took
+          # 5-9 min (read-only module files), and saving it again ran #374's
+          # check past its 15 min limit.
+          cache: false
 
       - name: Build, vet & test
         working-directory: server
