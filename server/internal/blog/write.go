@@ -450,9 +450,17 @@ Rules:
 // paragraphs referring to figures that are not there.
 //
 // It is deliberately stingier than the diagram rules. A diagram costs the model
-// a few hundred tokens; an illustration costs tens of seconds of a single
-// shared GPU, and one picture that explains the argument is enough.
-var illustrationRules = fmt.Sprintf(`
+// a few hundred tokens; an illustration costs minutes of a single shared GPU,
+// and one picture that explains the argument is enough.
+//
+// The body shapes are the planner's (figureKinds), because only those can be
+// drawn as a diagram. These rules used to ask for "a sentence a screen-reader
+// user would find useful": writers turned the planner's lists into prose and
+// bare lists, and none of 7 planned figures on int and prod (2026-11-16/17)
+// could be drawn.
+func (r *Runner) illustrationRules() string {
+	kinds, format := r.figureKinds()
+	return fmt.Sprintf(`
 ILLUSTRATIONS:
 
 You may request up to %d generated figures, and should use 1–2 in a
@@ -464,39 +472,24 @@ looking at them. They are not decorative art, animations, or metaphorical
 scenes of people in offices.
 
 Keep mermaid for a precise sequence, state or ER diagram. Do not replace a
-mermaid fence with an illustration. A second visual idea that is a
-comparison, architecture or process belongs in an illustration fence.
+mermaid fence with an illustration.
 
-Pick a kind and write a fence whose body lists the facts to put on the
-figure (labels, rows, steps, parties). Do not describe a scene.
+Each fence names a kind (%s) and its body is the
+figure's content: ONE line in one of the shapes below, nothing else — no
+sentences, no "name: value" pairs, no plain list without arrows or a centre.
+%s
 
-Kinds:
-  flow           a labeled path: request route, data flow, handoff
-  comparison     a side-by-side table or matrix of options
-  architecture   named components and how they connect
-  process        numbered steps in order
-  concept        an annotated diagram of a mechanism
+The fence itself, with that unrelated example:
 
-Examples:
-
-  `+"```"+`illustration comparison
-  Polling vs webhooks: latency, operational cost, failure modes, and when each wins
-  `+"```"+`
-
-  `+"```"+`illustration flow
-  Client → API gateway → auth service → three workers writing to Postgres
+  `+"```"+`illustration process
+  Mix dough → Proof → Shape loaves → Bake
   `+"```"+`
 
 Rules:
-- The figure must encode THIS article's facts. "Polling vs webhooks on
-  latency and cost" works. "A modern server room" does not.
-- Name the actual labels the picture should show. A vague theme produces
-  a decorative animation; a list of terms produces a useful figure.
-- Readable text on the figure is required — labels, headers, step numbers.
+- Every label names a real thing THIS article discusses, in its own words.
 - Never request more than %d. The pipeline drops extras.
-- The description becomes the image's alt text, so write it as a sentence a
-  screen-reader user would find useful.
-`, maxInlineIllustrations, maxInlineIllustrations)
+`, maxInlineIllustrations, kinds, format, maxInlineIllustrations)
+}
 
 // tableRules is always on: a comparison the reader can scan does not need
 // an image generator, and goldmark already renders GFM tables.
@@ -514,7 +507,7 @@ replace one that has numbers.
 func (r *Runner) visualRules() string {
 	rules := diagramRules + tableRules
 	if r.canLetterFigures() {
-		rules += illustrationRules
+		rules += r.illustrationRules()
 	}
 	return rules
 }
@@ -525,7 +518,8 @@ func (r *Runner) plannedFiguresNote(plan *writePlan) string {
 	if !r.canLetterFigures() || plan == nil || len(plan.Figures) == 0 {
 		return ""
 	}
-	return "PLANNED FIGURES — emit an illustration fence for each, using that kind and these facts:\n" +
+	return "PLANNED FIGURES — emit an illustration fence for each under its section, with that kind and " +
+		"its content copied exactly as the fence body (it is already in a shape that can be drawn):\n" +
 		formatFigures(plan.Figures)
 }
 

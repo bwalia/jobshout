@@ -56,25 +56,31 @@ func TestIllustrationRules_TeachTheFenceThatIsActuallyParsed(t *testing.T) {
 	// appears there rather than as a tidied-up copy — the point of this test is
 	// that the two definitions cannot drift, and comparing against a rewritten
 	// version would defeat it.
-	const example = "  ```illustration comparison\n" +
-		"  Polling vs webhooks: latency, operational cost, failure modes, and when each wins\n" +
+	const example = "  ```illustration process\n" +
+		"  Mix dough → Proof → Shape loaves → Bake\n" +
 		"  ```"
 	if !strings.Contains(rules, example) {
 		t.Fatalf("the prompt's example fence changed shape:\n%s", rules)
 	}
 	// The matcher must find it even indented, because that is how a model
 	// copying the example will write it.
-	if !illustrationFence.MatchString(example) {
-		t.Error("the fence the prompt teaches is not the fence illustrateBody matches")
-	}
 	got := illustrationFence.FindStringSubmatch(example)
 	if got == nil {
-		t.Fatal("the taught fence produced no submatch")
+		t.Fatal("the fence the prompt teaches is not the fence illustrateBody matches")
 	}
-	if got[1] != "comparison" {
-		t.Errorf("kind = %q, want comparison", got[1])
+	if got[1] != "process" {
+		t.Errorf("kind = %q, want process", got[1])
 	}
-	if !strings.Contains(got[2], "Polling vs webhooks") {
-		t.Errorf("the description was not captured from the taught fence: %#v", got)
+	// And what it teaches must be drawable as a diagram, which is the only way
+	// prod draws a figure.
+	kind, body := parseIllustration(got[1], got[2])
+	if why := figureMisfit(body, "mix the dough, proof it, shape loaves and bake"); why != "" {
+		t.Errorf("the taught body is refused: %s", why)
+	}
+	if s, ok := figureScene(kind, body); !ok || len(s.Labels) != 4 {
+		t.Errorf("the taught body is not a drawable scene: %+v %v", s, ok)
+	}
+	if strings.Contains(rules, "sentence a screen-reader") {
+		t.Error("the rules still ask for a sentence, which cannot be drawn")
 	}
 }
