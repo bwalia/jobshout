@@ -19,46 +19,8 @@ env:
   TARGET_ENV: int
 
 jobs:
-  wait-tag:
-    name: Wait for tag after v1.0.225
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    outputs:
-      version: ${{ steps.ver.outputs.version }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Wait for newer release tag
-        id: ver
-        run: |
-          set -euo pipefail
-          BASELINE=v1.0.225
-          deadline=$((SECONDS + 100 * 60))
-          VERSION=""
-          while [ "$SECONDS" -lt "$deadline" ]; do
-            git fetch --tags origin
-            tip=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)
-            echo "tip=$tip baseline=$BASELINE"
-            if [ -n "$tip" ] && [ "$tip" != "$BASELINE" ]; then
-              newest=$(printf '%s\n%s\n' "$BASELINE" "$tip" | sort -V | tail -1)
-              if [ "$newest" = "$tip" ]; then
-                VERSION=$tip
-                break
-              fi
-            fi
-            sleep 30
-          done
-          if [ -z "$VERSION" ]; then
-            echo "::error::timed out waiting for a tag newer than $BASELINE"
-            exit 1
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Will rebuild jobshout-com for $VERSION"
-
   rebuild-and-seed:
     name: Rebuild api+web & seed int
-    needs: [wait-tag]
     runs-on: [self-hosted, macOS]
     timeout-minutes: 120
     permissions:
@@ -124,7 +86,7 @@ jobs:
         run: |
           set -euo pipefail
           [ -n "${RELAY_HOST:-}" ] && .github/scripts/registry-relay.sh "192.168.1.23 192.168.1.140 192.168.1.104 192.168.1.47 192.168.1.36" >/dev/null || true
-          VERSION="${{ needs.wait-tag.outputs.version }}"
+          VERSION="v1.0.225"
           CFG="${RUNNER_TEMP:-/tmp}/jobshout-com-buildkitd.toml"
           python3 - "$CFG" <<'PY'
           from pathlib import Path
@@ -189,7 +151,7 @@ jobs:
           RP_URL: ${{ secrets.RP_URL }}
         run: |
           set -euo pipefail
-          TAG="${{ needs.wait-tag.outputs.version }}"
+          TAG="v1.0.225"
           RP="${RP_URL:-https://rp.workstation.co.uk}"
           if [ -z "${RP_API_TOKEN:-}" ]; then
             echo "::error::RP_API_TOKEN is not set"; exit 1
