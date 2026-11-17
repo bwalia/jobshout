@@ -35,8 +35,10 @@ jobs:
           RP_API_TOKEN: ${{ secrets.RP_API_TOKEN }}
           RP_URL: ${{ secrets.RP_URL }}
           RP_PROD_PASSWORD: ${{ secrets.RP_PROD_PASSWORD }}
-          WANT_VERSION: ${{ github.event.inputs.VERSION || '' }}
-          PROMOTE_PROD: ${{ github.event.inputs.PROMOTE_PROD == false && '0' || '1' }}
+          WANT_VERSION: ${{ github.event.inputs.VERSION || env.WANT_VERSION || '' }}
+          # Push events have no inputs — default promote-prod ON. workflow_dispatch can set false.
+          PROMOTE_PROD: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.PROMOTE_PROD == false && '0' || '1' }}
+          BASELINE_VERSION: v1.0.224
         run: |
           set -euo pipefail
           RP="${RP_URL:-https://rp.workstation.co.uk}"
@@ -55,6 +57,16 @@ jobs:
           promote_prod = os.environ.get("PROMOTE_PROD", "1") == "1"
           apps = ["jobshout", "jobshout-com"]
           ring_order = ["int", "test", "acc", "prod"]
+
+          def _ver_gt(a, b):
+              def parts(v):
+                  v = v.lstrip("vV")
+                  try:
+                      return tuple(int(x) for x in v.split("."))
+                  except Exception:
+                      return (0,)
+              return parts(a) > parts(b)
+
 
           def req(method, path, body=None, timeout=60):
               data = None
@@ -171,13 +183,24 @@ jobs:
                       state = rings(app)
                       print_table(app, state)
 
-              # Target version: explicit input, else whatever is already on int (or highest non-empty)
+              # Target version: explicit input/env, else wait for int to move past BASELINE
+              # so a premature push does not promote a stale release to prod.
+              baseline = (os.environ.get("BASELINE_VERSION") or "v1.0.224").strip()
               target = want
               if not target:
-                  for r in ("int", "test", "acc"):
-                      if state.get(r, {}).get("version"):
-                          target = state[r]["version"]
+                  print(f"{app}: no WANT_VERSION — waiting for int > {baseline}")
+                  deadline = time.time() + 90 * 60
+                  while time.time() < deadline:
+                      st = rings(app)
+                      ver = (st.get("int") or {}).get("version") or ""
+                      print(f"poll {app}/int version={ver} baseline={baseline}")
+                      if ver and ver != baseline and _ver_gt(ver, baseline):
+                          target = ver
                           break
+                      time.sleep(30)
+                  if not target:
+                      blockers.append(f"{app}: timed out waiting for int > {baseline}")
+                      continue
               print(f"{app}: target version = {target or '(unknown)'}")
 
               if target:
