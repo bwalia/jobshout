@@ -8,6 +8,10 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
+# Emulated amd64 builds (Colima/QEMU) OOMs or SIGTERM static workers when too
+# many pages generate in parallel; cap memory and leave headroom for the timeout
+# raised in next.config.mjs.
+ENV NODE_OPTIONS=--max-old-space-size=4096
 # Browser uses same-origin /api via the nginx gateway; SSR uses JOBSHOUT_COM_API_URL at runtime.
 ARG NEXT_PUBLIC_JOBSHOUT_COM_API_URL=
 ENV NEXT_PUBLIC_JOBSHOUT_COM_API_URL=$NEXT_PUBLIC_JOBSHOUT_COM_API_URL
