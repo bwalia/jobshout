@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/jobshout/server/internal/gatewayauth"
 )
 
@@ -35,6 +37,8 @@ type MFluxClient struct {
 	defaultModel string
 	auth         *gatewayauth.Signer
 	httpClient   *http.Client
+	// pollEvery is the pause between asks for a submitted picture.
+	pollEvery time.Duration
 }
 
 // DefaultModel is the model a request that names none is drawn with.
@@ -54,6 +58,7 @@ func NewMFluxClient(baseURL, defaultModel, jwtSecret string, timeout time.Durati
 		defaultModel: defaultModel,
 		auth:         gatewayauth.New(jwtSecret),
 		httpClient:   &http.Client{Timeout: timeout},
+		pollEvery:    5 * time.Second,
 	}
 }
 
@@ -75,6 +80,9 @@ type mfluxGenerateRequest struct {
 	NegativePrompt string   `json:"negative_prompt,omitempty"`
 	ExpectText     []string `json:"expect_text,omitempty"`
 	NoText         bool     `json:"no_text,omitempty"`
+	// ID names a submitted job, so a retried submission finds the picture it
+	// already started.
+	ID string `json:"id,omitempty"`
 }
 
 type mfluxGenerateResponse struct {
@@ -105,42 +113,48 @@ type mfluxModelsResponse struct {
 // do performs a signed request and returns the body, mapping the failures that
 // have distinct causes onto errors that say which one happened.
 func (c *MFluxClient) do(ctx context.Context, method, path string, body any) ([]byte, error) {
+	data, _, err := c.send(ctx, method, path, body)
+	return data, err
+}
+
+// send is do that also returns the status, 0 when no answer came back.
+func (c *MFluxClient) send(ctx context.Context, method, path string, body any) ([]byte, int, error) {
 	var reader io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
 		if err != nil {
-			return nil, fmt.Errorf("imagegen: encode request: %w", err)
+			return nil, 0, fmt.Errorf("imagegen: encode request: %w", err)
 		}
 		reader = bytes.NewReader(encoded)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
 	if err != nil {
-		return nil, fmt.Errorf("imagegen: build request: %w", err)
+		return nil, 0, fmt.Errorf("imagegen: build request: %w", err)
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	if err := c.auth.Apply(req); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("imagegen: call image service at %s: %w", c.baseURL, err)
+		return nil, 0, fmt.Errorf("imagegen: call image service at %s: %w", c.baseURL, err)
 	}
 	defer resp.Body.Close()
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("imagegen: read response: %w", err)
+		return nil, resp.StatusCode, fmt.Errorf("imagegen: read response: %w", err)
 	}
 
 	if gatewayauth.IsAuthStatus(resp.StatusCode) {
 		// Terminal, and worth saying why: retrying with the same secret
 		// produces the same verdict, so a caller should fix configuration
 		// rather than back off.
-		return nil, fmt.Errorf(
+		return nil, resp.StatusCode, fmt.Errorf(
 			"imagegen: the image gateway rejected the request (status %d) — the JWT signature did not verify. "+
 				"Check IMAGE_JWT_SECRET matches the gateway's secret and that this host's clock is accurate. "+
 				"Response: %s",
@@ -150,15 +164,19 @@ func (c *MFluxClient) do(ctx context.Context, method, path string, body any) ([]
 	if resp.StatusCode == http.StatusServiceUnavailable {
 		// The service says it is busy, not broken. Named separately so a caller
 		// can tell "come back later" apart from "this will never work".
-		return nil, fmt.Errorf("imagegen: the image service is busy: %s", snippet(data))
+		return nil, resp.StatusCode, fmt.Errorf("imagegen: the image service is busy: %s", snippet(data))
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("imagegen: image service returned %d: %s", resp.StatusCode, snippet(data))
+		return nil, resp.StatusCode, fmt.Errorf("imagegen: image service returned %d: %s", resp.StatusCode, snippet(data))
 	}
-	return data, nil
+	return data, resp.StatusCode, nil
 }
 
-// Generate implements Client.
+// Generate implements Client. The picture is submitted as a job and asked for
+// until it is ready: the edge in front of the service drops a request at 600 s,
+// and beside Ollama on a busy GPU a picture takes longer (prod, 2026-11-17: two
+// covers drawn in 10-11 min, both after the edge had given up on them). A
+// service too old to take jobs is called the old way.
 func (c *MFluxClient) Generate(ctx context.Context, req GenerateRequest) (*GenerateResponse, error) {
 	if err := req.Normalize(); err != nil {
 		return nil, err
@@ -169,7 +187,7 @@ func (c *MFluxClient) Generate(ctx context.Context, req GenerateRequest) (*Gener
 		model = c.defaultModel
 	}
 
-	data, err := c.do(ctx, http.MethodPost, "/api/generate", mfluxGenerateRequest{
+	body := mfluxGenerateRequest{
 		Prompt:         req.Prompt,
 		Model:          model,
 		Width:          req.Width,
@@ -179,7 +197,17 @@ func (c *MFluxClient) Generate(ctx context.Context, req GenerateRequest) (*Gener
 		NegativePrompt: req.NegativePrompt,
 		ExpectText:     req.ExpectText,
 		NoText:         req.NoText,
-	})
+		ID:             uuid.NewString(),
+	}
+	_, status, err := c.send(ctx, http.MethodPost, "/api/generate/jobs", body)
+	var data []byte
+	switch {
+	case status == http.StatusNotFound || status == http.StatusMethodNotAllowed:
+		body.ID = ""
+		data, err = c.do(ctx, http.MethodPost, "/api/generate", body)
+	case err == nil:
+		data, err = c.waitForJob(ctx, body.ID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -211,6 +239,39 @@ func (c *MFluxClient) Generate(ctx context.Context, req GenerateRequest) (*Gener
 		Steps:      parsed.Steps,
 		DurationMS: parsed.DurationMS,
 	}, nil
+}
+
+// waitForJob asks for a submitted picture until the service has it. An edge
+// blip on one ask is asked again; a few in a row, or the job's own failure,
+// end it. Bounded by the client's timeout, as a single request was.
+func (c *MFluxClient) waitForJob(ctx context.Context, id string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.httpClient.Timeout)
+	defer cancel()
+	blips := 0
+	for {
+		data, status, err := c.send(ctx, http.MethodGet, "/api/generate/jobs/"+id, nil)
+		switch {
+		case err == nil && status != http.StatusAccepted:
+			return data, nil
+		case err == nil:
+			blips = 0
+		case ctx.Err() != nil:
+			return nil, err
+		case status == 0 || status == http.StatusBadGateway || status == http.StatusGatewayTimeout:
+			if blips++; blips >= 5 {
+				return nil, err
+			}
+		default:
+			return nil, err
+		}
+		t := time.NewTimer(c.pollEvery)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return nil, fmt.Errorf("imagegen: waiting for the picture: %w", ctx.Err())
+		case <-t.C:
+		}
+	}
 }
 
 // ListModels implements Client.

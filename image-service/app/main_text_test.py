@@ -7,6 +7,7 @@ the OCR are stubbed, so nothing touches the GPU.
 from __future__ import annotations
 
 import base64
+import time
 import unittest
 from unittest import mock
 
@@ -70,6 +71,32 @@ class GenerateLetteringTests(unittest.TestCase):
     def test_nothing_expected_is_drawn_once_and_not_read(self) -> None:
         got = self.post([])
         self.assertEqual((got["text_ok"], got["attempts"], self.seeds), (None, 1, [7]))
+
+
+class GenerateJobTests(unittest.TestCase):
+    """A picture submitted as a job is asked for until it is ready."""
+
+    def test_submitted_picture_is_handed_back_when_ready(self) -> None:
+        async def draw(req, model_name, width, height, steps, seed):
+            return _picture(seed)
+
+        with mock.patch.object(main, "_draw", draw), \
+                mock.patch.object(main.video.renderer, "start"), \
+                mock.patch.object(main.textcheck, "read_text", return_value="\n"), \
+                mock.patch.dict(main.app.dependency_overrides, {main.require_auth: lambda: "test"}), \
+                TestClient(main.app) as client:
+            body = {"id": "job-12345678", "prompt": "art", "seed": 7, "no_text": True}
+            self.assertEqual(client.post("/api/generate/jobs", json=body).status_code, 202)
+            # A retried submission finds the same job rather than drawing twice.
+            self.assertEqual(client.post("/api/generate/jobs", json=body).status_code, 202)
+            for _ in range(100):
+                r = client.get("/api/generate/jobs/job-12345678")
+                if r.status_code != 202:
+                    break
+                time.sleep(0.01)
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertEqual((r.json()["seed"], r.json()["text_ok"]), (7, True))
+            self.assertEqual(client.get("/api/generate/jobs/job-unknown1").status_code, 404)
 
 
 if __name__ == "__main__":
