@@ -722,3 +722,66 @@ func TestMFluxClient_HonoursContextCancellation(t *testing.T) {
 		t.Fatal("expected the cancelled request to fail")
 	}
 }
+
+// A picture is submitted as a job and asked for until it is ready, so no one
+// request outlives the edge's 600 s. A blip on one ask is asked again.
+func TestMFluxClient_WaitsForASubmittedPicture(t *testing.T) {
+	var id string
+	asks := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/generate/jobs":
+			var sent mfluxGenerateRequest
+			_ = json.NewDecoder(r.Body).Decode(&sent)
+			id = sent.ID
+			w.WriteHeader(http.StatusAccepted)
+		case r.Method == http.MethodGet && id != "" && r.URL.Path == "/api/generate/jobs/"+id:
+			asks++
+			switch asks {
+			case 1, 3:
+				w.WriteHeader(http.StatusAccepted)
+			case 2:
+				w.WriteHeader(http.StatusGatewayTimeout)
+			default:
+				_ = json.NewEncoder(w).Encode(mfluxGenerateResponse{
+					ImageBase64: base64.StdEncoding.EncodeToString(onePixelPNG(t)), Model: "ernie-image-turbo", Seed: 9})
+			}
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusTeapot)
+		}
+	}))
+	defer srv.Close()
+	c := NewMFluxClient(srv.URL, "ernie-image-turbo", "", 0)
+	c.pollEvery = time.Millisecond
+
+	resp, err := c.Generate(context.Background(), GenerateRequest{Prompt: "art", NoText: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id == "" || asks != 4 || resp.Seed != 9 {
+		t.Fatalf("id=%q asks=%d seed=%d", id, asks, resp.Seed)
+	}
+}
+
+// A service from before jobs is called the old way.
+func TestMFluxClient_OldServiceIsCalledDirectly(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		if r.URL.Path != "/api/generate" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(mfluxGenerateResponse{
+			ImageBase64: base64.StdEncoding.EncodeToString(onePixelPNG(t)), Model: "ernie-image-turbo"})
+	}))
+	defer srv.Close()
+
+	if _, err := NewMFluxClient(srv.URL, "ernie-image-turbo", "", 0).Generate(context.Background(), GenerateRequest{Prompt: "art"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(paths, " ") != "/api/generate/jobs /api/generate" {
+		t.Fatalf("paths = %v", paths)
+	}
+}

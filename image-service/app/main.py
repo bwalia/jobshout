@@ -11,7 +11,7 @@ import time
 from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Response, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 # models is needed for default_steps below. It is safe to call from the request
@@ -138,6 +138,53 @@ def _validate_dimension(value: int, label: str) -> int:
 
 @app.post("/api/generate", response_model=GenerateResponse)
 async def generate(req: GenerateRequest, caller: str = Depends(require_auth)):
+    return await _generate(req, caller)
+
+
+# ─── Generate as a job ───────────────────────────────────────────────────────
+# The edge in front of this service drops a request at 600 s, and beside Ollama
+# on a busy GPU a picture takes longer (prod, 2026-11-17: two covers in 10-11
+# min, each finished after the caller had been sent a 504). A job answers at
+# once and is asked for until its picture is ready. Jobs live in memory: a
+# restart loses them, and the caller's next ask gets a 404.
+
+JOB_KEEP_SECONDS = 1800
+_jobs: dict[str, tuple[asyncio.Task, float]] = {}
+
+
+class GenerateJob(GenerateRequest):
+    # Caller-chosen, so a retried submission finds the job it already started.
+    id: str = Field(min_length=8, max_length=64, pattern=r"^[A-Za-z0-9-]+$")
+
+
+@app.post("/api/generate/jobs", status_code=status.HTTP_202_ACCEPTED)
+async def submit_generate(req: GenerateJob, caller: str = Depends(require_auth)):
+    now = time.monotonic()
+    for job_id, (task, submitted) in list(_jobs.items()):
+        if task.done() and now - submitted > JOB_KEEP_SECONDS:
+            del _jobs[job_id]
+    if req.id not in _jobs:
+        _jobs[req.id] = (asyncio.create_task(_generate(req, caller)), now)
+    return {"id": req.id}
+
+
+@app.get("/api/generate/jobs/{job_id}", response_model=GenerateResponse)
+async def generate_job(job_id: str, caller: str = Depends(require_auth)):
+    job = _jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no such job (the image service may have restarted)")
+    task = job[0]
+    if not task.done():
+        return JSONResponse({"status": "running"}, status_code=status.HTTP_202_ACCEPTED)
+    exc = task.exception()
+    if isinstance(exc, HTTPException):
+        raise exc
+    if exc is not None:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"generation failed: {exc}")
+    return task.result()
+
+
+async def _generate(req: GenerateRequest, caller: str) -> GenerateResponse:
     model_name = req.model.strip() or config.DEFAULT_MODEL
 
     width = _validate_dimension(req.width, "width")
