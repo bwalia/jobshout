@@ -1,58 +1,52 @@
 import Link from "next/link";
+import { HeroSearch } from "@/components/HeroSearch";
 import { JobCard } from "@/components/JobCard";
-import { JobSearchBar } from "@/components/JobSearchBar";
-import { Badge, Eyebrow, SectionHeading, buttonClass } from "@/components/ui";
+import { SectionHeading, buttonClass } from "@/components/ui";
 import {
   ArrowRightIcon,
+  BotIcon,
   BriefcaseIcon,
   FileTextIcon,
-  GlobeIcon,
-  SendIcon,
-  ShieldIcon,
   SparkIcon,
-  TargetIcon,
-  UserIcon,
+  UsersIcon,
 } from "@/components/icons";
 import { listJobs, type Job } from "@/lib/api";
-import { jobCategory } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-const POPULAR = ["Rust", "Kubernetes", "Frontend", "Data", "Security", "Remote"];
-
-const CANDIDATE_STEPS = [
-  {
-    icon: <UserIcon className="h-5 w-5" />,
-    title: "Build a profile once",
-    body: "Skills, preferred roles, salary floor. Your Career Agent uses it to rank every new posting.",
-  },
-  {
-    icon: <TargetIcon className="h-5 w-5" />,
-    title: "See why each role fits",
-    body: "Explainable match scores — not a black box. Every score comes with the reasons behind it.",
-  },
-  {
-    icon: <SendIcon className="h-5 w-5" />,
-    title: "Apply when you say so",
-    body: "Nothing is ever sent on your behalf without you approving it first.",
-  },
+const POPULAR: Array<{ label: string; href: string }> = [
+  { label: "Rust jobs", href: "/jobs?q=Rust" },
+  { label: "Remote", href: "/jobs?where=Remote" },
+  { label: "AI agents", href: "/agents?q=AI" },
+  { label: "Hiring talent", href: "/members?q=engineer" },
+  { label: "Groups", href: "/groups" },
+  { label: "Trends", href: "/insights" },
 ];
 
-const EMPLOYER_STEPS = [
+const DISCOVER = [
   {
+    href: "/jobs",
+    icon: <BriefcaseIcon className="h-5 w-5" />,
+    title: "Jobs",
+    body: "Open roles with filters recruiters and candidates already use.",
+  },
+  {
+    href: "/agents",
+    icon: <BotIcon className="h-5 w-5" />,
+    title: "AI agents",
+    body: "Browse showcase agents and teams — what they run and what they ship.",
+  },
+  {
+    href: "/members",
+    icon: <UsersIcon className="h-5 w-5" />,
+    title: "Talents",
+    body: "Find people by headline and skills when you are hiring or networking.",
+  },
+  {
+    href: "/insights",
     icon: <FileTextIcon className="h-5 w-5" />,
-    title: "Post in two minutes",
-    body: "Title, description, salary, requirements. Publish straight away or save it as a draft.",
-  },
-  {
-    icon: <SparkIcon className="h-5 w-5" />,
-    title: "Hiring Agents shortlist",
-    body: "Candidates are ranked against your requirements, with the reasoning attached.",
-  },
-  {
-    icon: <ShieldIcon className="h-5 w-5" />,
-    title: "Humans stay in the loop",
-    body: "Agents propose. Your team decides who moves forward. Every action is logged.",
+    title: "Insights",
+    body: "Latest trends, market shifts, and practical analysis.",
   },
 ];
 
@@ -66,8 +60,6 @@ export default async function HomePage() {
   }
 
   const featured = jobs.slice(0, 6);
-  const remoteCount = jobs.filter((j) => j.location.remote).length;
-  const categories = countCategories(jobs);
 
   return (
     <>
@@ -78,18 +70,15 @@ export default async function HomePage() {
 
         <div className="relative mx-auto max-w-board px-5 pb-16 pt-16 sm:px-8 sm:pb-24 sm:pt-24">
           <div className="mx-auto max-w-3xl text-center">
-            <div className="flex justify-center">
-              <Badge tone="brand">
-                <SparkIcon className="h-3.5 w-3.5" />
-                AI-native employment marketplace
-              </Badge>
-            </div>
+            <p className="animate-fade-in font-display text-sm font-semibold uppercase tracking-[0.22em] text-shout">
+              JobShout
+            </p>
 
-            <h1 className="mt-7 animate-rise-in font-display text-[clamp(2.5rem,7vw,4.75rem)] font-semibold leading-[1.02] tracking-[-0.035em] text-ink">
-              Find work worth
+            <h1 className="mt-5 animate-rise-in font-display text-[clamp(2.5rem,7vw,4.5rem)] font-semibold leading-[1.02] tracking-[-0.035em] text-ink">
+              Search work, talent,
               <br className="hidden sm:block" />{" "}
               <span className="relative inline-block">
-                shouting about
+                agents &amp; trends
                 <span
                   aria-hidden
                   className="absolute -bottom-1 left-0 h-[0.18em] w-full rounded-full bg-shout/70"
@@ -97,69 +86,57 @@ export default async function HomePage() {
               </span>
             </h1>
 
-            <p className="mx-auto mt-7 max-w-xl text-base leading-relaxed text-mute sm:text-lg">
-              Search every open role on the board, apply in a couple of minutes, and let a Career
-              Agent tell you exactly why a job fits — before you spend an evening on it.
+            <p className="mx-auto mt-6 max-w-xl text-base leading-relaxed text-mute sm:text-lg">
+              A simple place to find AI showcase agents, jobs, talents, group posts, and the latest
+              market insights — without a cluttered dashboard.
             </p>
           </div>
 
           <div className="mx-auto mt-10 max-w-3xl animate-fade-in">
-            <JobSearchBar />
+            <HeroSearch />
             <div className="mt-5 flex flex-wrap items-center justify-center gap-2 text-sm">
-              <span className="text-mute">Popular:</span>
+              <span className="text-mute">Try:</span>
               {POPULAR.map((term) => (
                 <Link
-                  key={term}
-                  href={`/jobs?q=${encodeURIComponent(term)}`}
+                  key={term.href}
+                  href={term.href}
                   className="rounded-pill border border-line bg-surface px-3 py-1.5 text-xs font-medium text-body transition-colors duration-200 hover:border-shout hover:text-shout"
                 >
-                  {term}
+                  {term.label}
                 </Link>
               ))}
             </div>
           </div>
-
-          <dl className="mx-auto mt-14 grid max-w-2xl grid-cols-1 gap-px overflow-hidden rounded-card border border-line bg-line sm:grid-cols-3">
-            <Stat value={jobs.length} label="Open roles" />
-            <Stat value={remoteCount} label="Remote-friendly" />
-            <Stat value={categories.length} label="Categories" />
-          </dl>
         </div>
       </section>
 
-      {/* ------------------------------------------------------ Browse by area */}
-      {categories.length > 0 ? (
-        <section className="mx-auto max-w-board px-5 py-16 sm:px-8 sm:py-20">
-          <SectionHeading
-            eyebrow="Browse"
-            title="Pick a lane"
-            lead="Every posting is grouped by discipline so you can skip straight to your patch of the board."
-          />
-          <ul className="mt-9 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {categories.map(({ name, count }) => (
-              <li key={name}>
-                <Link
-                  href={`/jobs?category=${encodeURIComponent(name)}`}
-                  className="surface-card group flex items-center gap-4 p-5 transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-edge hover:shadow-lift"
-                >
-                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-shout/10 text-shout">
-                    <BriefcaseIcon className="h-5 w-5" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-display text-base font-semibold text-ink">
-                      {name}
-                    </span>
-                    <span className="text-sm text-mute">
-                      {count} {count === 1 ? "role" : "roles"}
-                    </span>
-                  </span>
-                  <ArrowRightIcon className="h-4 w-4 text-mute transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-shout" />
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
+      {/* ------------------------------------------------------ Discover lanes */}
+      <section className="mx-auto max-w-board px-5 py-16 sm:px-8 sm:py-20">
+        <SectionHeading
+          eyebrow="Browse"
+          title="Everything in one search"
+          lead="Pick a lane, or stay on Home and switch the search scope above."
+        />
+        <ul className="mt-9 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+          {DISCOVER.map((item) => (
+            <li key={item.href}>
+              <Link href={item.href} className="group block">
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-shout/10 text-shout transition-transform duration-200 group-hover:scale-105">
+                  {item.icon}
+                </span>
+                <span className="mt-4 block font-display text-lg font-semibold text-ink">
+                  {item.title}
+                </span>
+                <span className="mt-1.5 block text-sm leading-relaxed text-mute">{item.body}</span>
+                <span className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-shout">
+                  Open
+                  <ArrowRightIcon className="h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </section>
 
       {/* ------------------------------------------------------ Featured roles */}
       <section className="border-y border-line bg-subtle">
@@ -167,7 +144,7 @@ export default async function HomePage() {
           <SectionHeading
             eyebrow="Fresh on the board"
             title="Latest open roles"
-            lead="Straight from the marketplace API — newest first."
+            lead="Straight from the marketplace — newest first."
             action={
               <Link href="/jobs" className={buttonClass("secondary", "md")}>
                 See all roles
@@ -185,100 +162,48 @@ export default async function HomePage() {
               ))}
             </ul>
           ) : (
-            <div className="surface-card mt-9 px-6 py-14 text-center">
+            <div className="mt-9 px-6 py-14 text-center">
               <p className="font-display text-lg font-semibold text-ink">
                 The board is empty right now
               </p>
               <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-mute">
-                No published roles came back from the API. If you are running this locally, start
-                the API on port 8088 and seed it — or post the first job yourself.
+                No published roles came back from the API. Post the first job, or search agents and
+                talents instead.
               </p>
-              <Link href="/post-job" className={buttonClass("primary", "md", "mt-6")}>
-                Post the first job
-              </Link>
+              <div className="mt-6 flex flex-wrap justify-center gap-3">
+                <Link href="/post-job" className={buttonClass("primary", "md")}>
+                  Post a job
+                </Link>
+                <Link href="/agents" className={buttonClass("secondary", "md")}>
+                  Browse agents
+                </Link>
+              </div>
             </div>
           )}
         </div>
       </section>
 
-      {/* --------------------------------------------------------- How it works */}
-      <section className="mx-auto max-w-board px-5 py-16 sm:px-8 sm:py-24">
-        <div className="grid gap-14 lg:grid-cols-2 lg:gap-20">
-          <div>
-            <Eyebrow>For candidates</Eyebrow>
-            <h2 className="mt-4 font-display text-3xl font-semibold tracking-[-0.02em] text-ink sm:text-4xl">
-              Stop rewriting the same application
-            </h2>
-            <ol className="mt-8 space-y-6">
-              {CANDIDATE_STEPS.map((step, i) => (
-                <Step key={step.title} index={i + 1} {...step} />
-              ))}
-            </ol>
-            <Link href="/profile" className={buttonClass("primary", "md", "mt-9")}>
-              Build my profile
-              <ArrowRightIcon className="h-4 w-4" />
-            </Link>
-          </div>
-
-          <div>
-            <Eyebrow>For employers</Eyebrow>
-            <h2 className="mt-4 font-display text-3xl font-semibold tracking-[-0.02em] text-ink sm:text-4xl">
-              Reach people who actually match
-            </h2>
-            <ol className="mt-8 space-y-6">
-              {EMPLOYER_STEPS.map((step, i) => (
-                <Step key={step.title} index={i + 1} {...step} />
-              ))}
-            </ol>
-            <Link href="/post-job" className={buttonClass("secondary", "md", "mt-9")}>
-              Post a job
-              <ArrowRightIcon className="h-4 w-4" />
-            </Link>
-          </div>
-        </div>
-      </section>
-
-      {/* ---------------------------------------------------------------- Trust */}
-      <section className="border-t border-line bg-subtle">
-        <div className="mx-auto max-w-board px-5 py-16 sm:px-8 sm:py-20">
-          <div className="grid gap-8 md:grid-cols-3">
-            <TrustCard
-              icon={<ShieldIcon className="h-5 w-5" />}
-              title="You approve every move"
-              body="No agent sends an application, a message, or an offer without a human saying yes first."
-            />
-            <TrustCard
-              icon={<TargetIcon className="h-5 w-5" />}
-              title="Scores you can argue with"
-              body="Every match ships with its reasons, so you can tell a good fit from a keyword collision."
-            />
-            <TrustCard
-              icon={<GlobeIcon className="h-5 w-5" />}
-              title="Remote treated properly"
-              body="Remote is a first-class filter, not a checkbox buried at the bottom of a form."
-            />
-          </div>
-        </div>
-      </section>
-
       {/* ------------------------------------------------------------ Final CTA */}
       <section className="mx-auto max-w-board px-5 py-16 sm:px-8 sm:py-24">
-        <div className="relative overflow-hidden rounded-card border border-line bg-surface px-6 py-14 text-center sm:px-14">
+        <div className="relative overflow-hidden border border-line bg-surface px-6 py-14 text-center sm:px-14">
           <div aria-hidden className="pointer-events-none absolute inset-0 halo opacity-80" />
           <div className="relative">
-            <h2 className="mx-auto max-w-2xl font-display text-3xl font-semibold tracking-[-0.025em] text-ink sm:text-[2.75rem] sm:leading-[1.08]">
-              Hiring, or looking? Start on the same board.
+            <p className="font-display text-sm font-semibold uppercase tracking-[0.2em] text-shout">
+              JobShout
+            </p>
+            <h2 className="mx-auto mt-4 max-w-2xl font-display text-3xl font-semibold tracking-[-0.025em] text-ink sm:text-[2.5rem] sm:leading-[1.08]">
+              Hiring, looking, or exploring AI agents?
             </h2>
             <p className="mx-auto mt-5 max-w-lg text-base leading-relaxed text-mute">
-              One marketplace, two sides, and agents that do the reading so people can do the
-              deciding.
+              Start with search. Switch scope for jobs, talents, groups, agents, or insights.
             </p>
             <div className="mt-9 flex flex-wrap justify-center gap-3">
               <Link href="/jobs" className={buttonClass("primary", "lg")}>
-                Browse open roles
+                <SparkIcon className="h-4 w-4" />
+                Browse jobs
               </Link>
-              <Link href="/post-job" className={buttonClass("secondary", "lg")}>
-                Post a job
+              <Link href="/groups" className={buttonClass("secondary", "lg")}>
+                Explore groups
               </Link>
             </div>
           </div>
@@ -286,82 +211,4 @@ export default async function HomePage() {
       </section>
     </>
   );
-}
-
-function Stat({ value, label }: { value: number; label: string }) {
-  return (
-    <div className="flex items-center justify-center gap-3 bg-surface px-4 py-4 sm:block sm:py-6 sm:text-center">
-      <dt className="sr-only">{label}</dt>
-      <dd className="flex items-center gap-3 sm:block">
-        <span className="font-display text-3xl font-semibold tracking-[-0.02em] text-ink sm:block sm:text-4xl">
-          {value}
-        </span>
-        <span className="text-xs font-medium uppercase tracking-[0.12em] text-mute sm:mt-1 sm:block">
-          {label}
-        </span>
-      </dd>
-    </div>
-  );
-}
-
-function Step({
-  index,
-  icon,
-  title,
-  body,
-}: {
-  index: number;
-  icon: React.ReactNode;
-  title: string;
-  body: string;
-}) {
-  return (
-    <li className="flex gap-5">
-      <span className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-line bg-surface text-shout">
-        {icon}
-        <span
-          aria-hidden
-          className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-ink text-[0.65rem] font-bold text-bg"
-        >
-          {index}
-        </span>
-      </span>
-      <div className="min-w-0 pt-1">
-        <h3 className="font-display text-lg font-semibold text-ink">{title}</h3>
-        <p className="mt-1.5 text-sm leading-relaxed text-mute">{body}</p>
-      </div>
-    </li>
-  );
-}
-
-function TrustCard({
-  icon,
-  title,
-  body,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  body: string;
-}) {
-  return (
-    <div>
-      <span className="flex h-11 w-11 items-center justify-center rounded-xl border border-line bg-surface text-signal">
-        {icon}
-      </span>
-      <h3 className="mt-4 font-display text-lg font-semibold text-ink">{title}</h3>
-      <p className="mt-2 text-sm leading-relaxed text-mute">{body}</p>
-    </div>
-  );
-}
-
-function countCategories(jobs: Job[]): Array<{ name: string; count: number }> {
-  const tally = new Map<string, number>();
-  for (const job of jobs) {
-    const name = jobCategory(job);
-    tally.set(name, (tally.get(name) ?? 0) + 1);
-  }
-  return [...tally.entries()]
-    .map(([name, count]) => ({ name, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 8);
 }

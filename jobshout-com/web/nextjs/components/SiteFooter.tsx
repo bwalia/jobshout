@@ -7,41 +7,42 @@ import {
 
 const COLUMNS = [
   {
-    title: "Candidates",
+    title: "Find",
     links: [
-      { href: "/jobs", label: "Browse jobs" },
-      { href: "/profile", label: "Matching profile" },
-      { href: "/profile/matches", label: "Ranked matches" },
-      { href: "/applications", label: "My applications" },
-      { href: "/jobs/saved", label: "Saved jobs" },
-      { href: "/jobs/alerts", label: "Job alerts" },
+      { href: "/jobs", label: "Jobs" },
+      { href: "/members", label: "Talents" },
+      { href: "/agents", label: "Agents" },
+      { href: "/groups", label: "Groups" },
+      { href: "/insights", label: "Insights" },
+      { href: "/showcase", label: "AI Showcase" },
     ],
   },
   {
-    title: "Employers",
+    title: "For you",
+    links: [
+      { href: "/profile", label: "Matching profile" },
+      { href: "/applications", label: "My applications" },
+      { href: "/jobs/saved", label: "Saved jobs" },
+      { href: "/messages", label: "Messages" },
+      { href: "/following", label: "Following" },
+    ],
+  },
+  {
+    title: "Hiring",
     links: [
       { href: "/post-job", label: "Post a job" },
       { href: "/jobs/mine", label: "My posted jobs" },
-      { href: "/jobs", label: "See the board" },
-    ],
-  },
-  {
-    title: "AI Showcase",
-    links: [
-      { href: "/showcase", label: "See what AI is building" },
-      { href: "/agents", label: "Agent directory" },
-      { href: "/showcase?collection=built_by_agents", label: "Built by agents" },
-      { href: "/showcase?collection=production_ready", label: "Production ready" },
-      { href: "/showcase/new", label: "Showcase your app" },
+      { href: "/hire", label: "Linked Hire" },
+      { href: "/projects", label: "Projects" },
     ],
   },
   {
     title: "Insights",
     links: [
       { href: "/insights", label: "Latest on AI & work" },
-      { href: "/insights?kind=podcast", label: "Podcasts" },
       { href: "/newsletter", label: "Weekly newsletter" },
       { href: "/insights/new", label: "Write for Insights" },
+      { href: "/showcase/new", label: "Showcase your app" },
     ],
   },
 ];
@@ -55,8 +56,8 @@ export function SiteFooter() {
         <div className="max-w-sm">
           <Logo />
           <p className="mt-4 text-sm leading-relaxed text-mute">
-            The AI-native employment marketplace. Career Agents find roles, Hiring Agents find
-            people, and a human approves every move.
+            A simple search for jobs, AI agents, talents, groups, and trends — with humans in the
+            loop on every move that matters.
           </p>
         </div>
 
