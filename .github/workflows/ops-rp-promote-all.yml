@@ -1,0 +1,251 @@
+name: Ops — RP promote all rings
+
+# One-shot ops branch workflow. Push to cursor/rp-promote-all-envs-618f to run.
+# Reports ring state for jobshout + jobshout-com, keeps acc auto_promote off,
+# and promotes acc → prod when RP_PROD_PASSWORD is available (JSON field "password").
+
+on:
+  push:
+    branches: [cursor/rp-promote-all-envs-618f]
+  workflow_dispatch:
+    inputs:
+      VERSION:
+        description: "Version that should be live (vX.Y.Z). Empty = whatever is on acc."
+        required: false
+        default: ""
+      PROMOTE_PROD:
+        description: "Promote acc → prod when password secret is set"
+        type: boolean
+        default: true
+
+concurrency:
+  group: ops-rp-promote-all
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: Report rings & promote
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - name: Report, ensure auto_promote, promote to prod
+        env:
+          RP_API_TOKEN: ${{ secrets.RP_API_TOKEN }}
+          RP_URL: ${{ secrets.RP_URL }}
+          RP_PROD_PASSWORD: ${{ secrets.RP_PROD_PASSWORD }}
+          WANT_VERSION: ${{ github.event.inputs.VERSION || '' }}
+          PROMOTE_PROD: ${{ github.event.inputs.PROMOTE_PROD == false && '0' || '1' }}
+        run: |
+          set -euo pipefail
+          RP="${RP_URL:-https://rp.workstation.co.uk}"
+          if [ -z "${RP_API_TOKEN:-}" ]; then
+            echo "::error::RP_API_TOKEN is not set"
+            exit 1
+          fi
+          export RP RP_API_TOKEN RP_PROD_PASSWORD WANT_VERSION PROMOTE_PROD
+          python3 <<'PY'
+          import json, os, sys, time, urllib.error, urllib.request
+
+          rp = os.environ["RP"].rstrip("/")
+          token = os.environ["RP_API_TOKEN"]
+          prod_pw = (os.environ.get("RP_PROD_PASSWORD") or "").strip()
+          want = (os.environ.get("WANT_VERSION") or "").strip()
+          promote_prod = os.environ.get("PROMOTE_PROD", "1") == "1"
+          apps = ["jobshout", "jobshout-com"]
+          ring_order = ["int", "test", "acc", "prod"]
+
+          def req(method, path, body=None, timeout=60):
+              data = None
+              headers = {
+                  "Authorization": f"Bearer {token}",
+                  "Accept": "application/json",
+                  "X-Actor": "jobshout-ops-rp-promote",
+              }
+              if body is not None:
+                  data = json.dumps(body).encode()
+                  headers["Content-Type"] = "application/json"
+              r = urllib.request.Request(rp + path, data=data, headers=headers, method=method)
+              try:
+                  with urllib.request.urlopen(r, timeout=timeout) as resp:
+                      raw = resp.read()
+                      code = resp.status
+              except urllib.error.HTTPError as e:
+                  raw = e.read()
+                  code = e.code
+                  raise RuntimeError(f"{method} {path} -> HTTP {code}: {raw[:500]!r}") from None
+              if not raw:
+                  return code, None
+              try:
+                  return code, json.loads(raw)
+              except Exception:
+                  return code, raw.decode("utf-8", "replace")
+
+          def rings(app):
+              _, body = req("GET", f"/api/apps/{app}/rings")
+              out = {}
+              for item in (body or {}).get("rings") or []:
+                  ring = item.get("ring") or {}
+                  name = ring.get("name") if isinstance(ring, dict) else ring
+                  if not name:
+                      continue
+                  out[name] = {
+                      "version": item.get("current_version") or item.get("version") or "",
+                      "healthy": bool(item.get("healthy")),
+                      "auto_promote": bool(item.get("auto_promote")),
+                      "raw": item,
+                  }
+              return out
+
+          def print_table(app, state):
+              print(f"\n=== {app} ===")
+              print(f"{'ring':<6} {'version':<12} {'healthy':<8} {'auto_promote'}")
+              for name in ring_order:
+                  s = state.get(name) or {}
+                  print(f"{name:<6} {(s.get('version') or '-'):<12} {str(s.get('healthy')):<8} {s.get('auto_promote')}")
+
+          def set_auto_promote(app, ring, enabled):
+              path = f"/api/apps/{app}/rings/{ring}/auto-promote"
+              code, body = req("PUT", path, {"enabled": bool(enabled)})
+              print(f"auto_promote {app}/{ring} -> {enabled} (HTTP {code}) {body}")
+
+          def wait_job(app, job_id, label, timeout_s=25 * 60):
+              deadline = time.time() + timeout_s
+              path = f"/api/apps/{app}/jobs/{job_id}"
+              last = None
+              while time.time() < deadline:
+                  _, body = req("GET", path)
+                  status = ((body or {}).get("status") or "").lower()
+                  if status != last:
+                      print(f"job {job_id} ({label}) status={status}")
+                      last = status
+                  if status in ("success", "succeeded", "completed"):
+                      return True
+                  if status in ("failed", "failure", "error", "cancelled", "canceled"):
+                      print(f"::error::{label} failed: {body}")
+                      return False
+                  # Success early if target ring healthy at desired version
+                  time.sleep(15)
+              print(f"::error::{label} timed out after {timeout_s}s")
+              return False
+
+          def promote(app, from_ring, password=None):
+              body = {"from_ring": from_ring}
+              if password:
+                  body["password"] = password
+              code, resp = req("POST", f"/api/apps/{app}/promote?async=1", body)
+              print(f"promote {app} from {from_ring} -> HTTP {code} {resp}")
+              job_id = (resp or {}).get("job_id") if isinstance(resp, dict) else None
+              if not job_id:
+                  raise RuntimeError(f"promote {app} from {from_ring}: no job_id")
+              return job_id
+
+          def wait_ring_version(app, ring, version, timeout_s=35 * 60):
+              if not version:
+                  return True
+              deadline = time.time() + timeout_s
+              while time.time() < deadline:
+                  st = rings(app).get(ring) or {}
+                  ver = st.get("version") or ""
+                  healthy = st.get("healthy")
+                  print(f"wait {app}/{ring}: version={ver} healthy={healthy} want={version}")
+                  if ver == version and healthy:
+                      return True
+                  time.sleep(20)
+              return False
+
+          summary = {}
+          blockers = []
+
+          for app in apps:
+              state = rings(app)
+              print_table(app, state)
+              summary[app] = {k: {"version": v.get("version"), "healthy": v.get("healthy"), "auto_promote": v.get("auto_promote")} for k, v in state.items()}
+
+              # Keep auto_promote OFF on acc (and prod). Leave int/test alone if already on.
+              for ring in ("acc", "prod"):
+                  if state.get(ring) and state[ring].get("auto_promote"):
+                      print(f"::warning::{app}/{ring} auto_promote was ON — disabling")
+                      set_auto_promote(app, ring, False)
+                      state = rings(app)
+                      print_table(app, state)
+
+              # Target version: explicit input, else whatever is already on int (or highest non-empty)
+              target = want
+              if not target:
+                  for r in ("int", "test", "acc"):
+                      if state.get(r, {}).get("version"):
+                          target = state[r]["version"]
+                          break
+              print(f"{app}: target version = {target or '(unknown)'}")
+
+              if target:
+                  # Wait for auto-promote cascade int→test→acc when those rings auto_promote out
+                  for ring in ("int", "test", "acc"):
+                      ok = wait_ring_version(app, ring, target, timeout_s=40 * 60)
+                      if not ok:
+                          # If int/test have auto_promote, they should catch up; otherwise explicit promote
+                          prev = {"test": "int", "acc": "test"}.get(ring)
+                          if prev and (rings(app).get(prev) or {}).get("version") == target:
+                              print(f"explicit promote {app} {prev} → next (toward {ring})")
+                              jid = promote(app, prev)
+                              if not wait_job(app, jid, f"{app} promote from {prev}"):
+                                  blockers.append(f"{app}: promote from {prev} failed")
+                                  continue
+                              if not wait_ring_version(app, ring, target, timeout_s=25 * 60):
+                                  blockers.append(f"{app}: {ring} did not reach {target}")
+                                  continue
+                          else:
+                              blockers.append(f"{app}: {ring} not at {target} yet (upstream missing)")
+                              continue
+
+              # Prod promote
+              state = rings(app)
+              acc_ver = (state.get("acc") or {}).get("version") or ""
+              prod_ver = (state.get("prod") or {}).get("version") or ""
+              if not promote_prod:
+                  print(f"{app}: PROMOTE_PROD disabled; leaving prod at {prod_ver}")
+                  continue
+              if not acc_ver:
+                  blockers.append(f"{app}: acc has no version; cannot promote to prod")
+                  continue
+              if prod_ver == acc_ver and (state.get("prod") or {}).get("healthy"):
+                  print(f"{app}: prod already at {prod_ver} and healthy")
+                  continue
+              if not prod_pw:
+                  blockers.append(
+                      f"{app}: prod promote blocked — RP_PROD_PASSWORD secret missing "
+                      f"(JSON field must be 'password'). acc={acc_ver} prod={prod_ver}"
+                  )
+                  continue
+              print(f"{app}: promoting acc ({acc_ver}) → prod")
+              jid = promote(app, "acc", password=prod_pw)
+              if not wait_job(app, jid, f"{app} promote acc→prod", timeout_s=35 * 60):
+                  blockers.append(f"{app}: acc→prod promote job failed")
+                  continue
+              if not wait_ring_version(app, "prod", acc_ver, timeout_s=20 * 60):
+                  blockers.append(f"{app}: prod did not become healthy at {acc_ver}")
+
+          print("\n===== FINAL RING STATE =====")
+          final = {}
+          for app in apps:
+              st = rings(app)
+              print_table(app, st)
+              final[app] = {
+                  k: {
+                      "version": v.get("version"),
+                      "healthy": v.get("healthy"),
+                      "auto_promote": v.get("auto_promote"),
+                  }
+                  for k, v in st.items()
+              }
+
+          print("\n===== SUMMARY_JSON =====")
+          print(json.dumps({"final": final, "blockers": blockers}, indent=2))
+          if blockers:
+              for b in blockers:
+                  print(f"::error::{b}")
+              sys.exit(1)
+          print("All requested promotions complete.")
+          PY
