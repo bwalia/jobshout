@@ -26,7 +26,7 @@ jobs:
   promote:
     name: Report rings & promote
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 180
     permissions:
       contents: read
     steps:
@@ -38,7 +38,7 @@ jobs:
           WANT_VERSION: ${{ github.event.inputs.VERSION || env.WANT_VERSION || '' }}
           # Push events have no inputs — default promote-prod ON. workflow_dispatch can set false.
           PROMOTE_PROD: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.PROMOTE_PROD == false && '0' || '1' }}
-          BASELINE_VERSION: v1.0.225
+          BASELINE_VERSION: v1.0.224
         run: |
           set -euo pipefail
           RP="${RP_URL:-https://rp.workstation.co.uk}"
@@ -68,7 +68,7 @@ jobs:
               return parts(a) > parts(b)
 
 
-          def req(method, path, body=None, timeout=60):
+          def req(method, path, body=None, timeout=60, attempts=8):
               data = None
               headers = {
                   "Authorization": f"Bearer {token}",
@@ -78,15 +78,24 @@ jobs:
               if body is not None:
                   data = json.dumps(body).encode()
                   headers["Content-Type"] = "application/json"
-              r = urllib.request.Request(rp + path, data=data, headers=headers, method=method)
-              try:
-                  with urllib.request.urlopen(r, timeout=timeout) as resp:
-                      raw = resp.read()
-                      code = resp.status
-              except urllib.error.HTTPError as e:
-                  raw = e.read()
-                  code = e.code
-                  raise RuntimeError(f"{method} {path} -> HTTP {code}: {raw[:500]!r}") from None
+              last = None
+              for i in range(attempts):
+                  r = urllib.request.Request(rp + path, data=data, headers=headers, method=method)
+                  try:
+                      with urllib.request.urlopen(r, timeout=timeout) as resp:
+                          raw = resp.read()
+                          code = resp.status
+                      break
+                  except urllib.error.HTTPError as e:
+                      raw = e.read()
+                      code = e.code
+                      raise RuntimeError(f"{method} {path} -> HTTP {code}: {raw[:500]!r}") from None
+                  except Exception as e:
+                      last = e
+                      print(f"::warning::{method} {path} attempt {i+1}/{attempts}: {e}", flush=True)
+                      time.sleep(5 + i * 2)
+              else:
+                  raise RuntimeError(f"{method} {path} failed after {attempts} attempts: {last}")
               if not raw:
                   return code, None
               try:
@@ -193,7 +202,7 @@ jobs:
                   while time.time() < deadline:
                       st = rings(app)
                       ver = (st.get("int") or {}).get("version") or ""
-                      print(f"poll {app}/int version={ver} baseline={baseline}")
+                      print(f"poll {app}/int version={ver} baseline={baseline}", flush=True)
                       if ver and ver != baseline and _ver_gt(ver, baseline):
                           target = ver
                           break
