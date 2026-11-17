@@ -462,10 +462,13 @@ class _Render:
 
         (self.dir / "parts.txt").write_text("".join(f"file '{p.name}'\n" for p in parts))
         final = self.dir / "video.mp4"
-        # Every part was encoded with identical settings, so they join without
-        # a second encode.
+        # Every part was encoded with identical settings, so the picture joins
+        # without a second encode. The narration is brought to -16 LUFS, web
+        # video's usual loudness: Kokoro came out at -23.5, quiet beside
+        # anything else a viewer plays (int, 2026-11-17).
         _run([config.VIDEO_FFMPEG, "-y", "-f", "concat", "-safe", "0", "-i", "parts.txt",
-              "-c", "copy", "-movflags", "+faststart", final.name], timeout=600, cwd=self.dir)
+              "-c:v", "copy", "-af", "loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000",
+              "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", final.name], timeout=600, cwd=self.dir)
         return final
 
 
