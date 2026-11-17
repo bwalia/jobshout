@@ -54,8 +54,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: npm
-          cache-dependency-path: web/nextjs/package-lock.json
+          # No Actions cache: this self-hosted runner keeps ~/.npm between runs,
+          # and restoring the 4.4 GB cache took 10 min and then failed (#374).
 
       - name: Typecheck & lint
         working-directory: web/nextjs
