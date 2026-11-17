@@ -145,8 +145,8 @@ Return JSON in exactly this shape:
 {"title": "a short title", "cast": [{"name": "...", "look": "..."}], "shots": [{"narration": "...", "visual": "..."}]}
 
 Rules for "cast":
-- Every recurring character: a short name, and a fixed look of 15 to 30 words — age, build, hair, face, outfit and colours; an animal or robot by its species, size, colour and features.
-- The look is pasted into every shot that names the character, so it must be complete on its own.
+- Every recurring character: a short name, and a fixed look of 15 to 30 words — gender, age, build, hair, face, outfit and colours; an animal or robot by its species, size, colour and features.
+- The look is pasted into every shot that names the character, so it must be complete on its own and describe that character only — never mention another character in it.
 
 Rules for "narration":
 - What the narrator says during that shot: one or two short spoken sentences, {WORDS}.
@@ -165,7 +165,7 @@ Return JSON in exactly this shape:
 {"title": "a short title", "cast": [{"name": "...", "look": "..."}], "shots": [{"narration": "...", "visual": "..."}]}
 
 Rules for "cast":
-- A person or animal who appears in more than one shot: a short name and a fixed look of 15 to 30 words (age, build, hair, clothing, colours). Leave "cast" empty when there is none.
+- A person or animal who appears in more than one shot: a short name and a fixed look of 15 to 30 words (gender, age, build, hair, clothing, colours) describing only them. Leave "cast" empty when there is none.
 
 Rules for "narration":
 - What the narrator says during that shot: one or two short spoken sentences, {WORDS}.
