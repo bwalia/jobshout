@@ -106,3 +106,38 @@ func TestProductImageIsOrgScoped(t *testing.T) {
 		t.Fatal("expected a non-store URL to be refused")
 	}
 }
+
+// Each keyframe is drawn on its own, so a character's look is written into
+// every shot that names them, not left to the writer to repeat.
+func TestParseScriptWritesTheCastIntoEveryShot(t *testing.T) {
+	in := `{"title": "Last Beacon",
+	  "cast": [{"name": "Mira", "look": "a young woman engineer, short black bob, yellow raincoat."},
+	           {"name": "Luna", "look": "a small silver robot fox with glowing blue eyes"}],
+	  "shots": [
+	    {"narration": "Mira reached the island.", "visual": "Wide shot of Mira on a stormy pier."},
+	    {"narration": "Her fox kept watch.", "visual": "Close-up of LUNA beside mira at the door."},
+	    {"narration": "The light came back.", "visual": "The lantern blazes over the sea."}]}`
+	s, err := ParseScript(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"Wide shot of Mira (a young woman engineer, short black bob, yellow raincoat) on a stormy pier.",
+		"Close-up of LUNA (a small silver robot fox with glowing blue eyes) beside mira (a young woman engineer, short black bob, yellow raincoat) at the door.",
+		"The lantern blazes over the sea.",
+	}
+	for i, w := range want {
+		if s.Shots[i].Visual != w {
+			t.Errorf("shot %d:\n got %q\nwant %q", i, s.Shots[i].Visual, w)
+		}
+	}
+}
+
+// A shot's narration target is its share of the length: 30 s across 5 shots
+// is about 15 words a shot, not anywhere in a fixed 8-20.
+func TestScriptPromptGivesEachShotItsShareOfTheWords(t *testing.T) {
+	p := scriptPrompt(Brief{Topic: "lighthouses", Seconds: 30, Kind: model.VideoKindAnime, Voice: "af_heart"})
+	if !strings.Contains(p, "12 to 18 words") || strings.Contains(p, "{WORDS}") || !strings.Contains(p, `"cast"`) {
+		t.Fatalf("prompt:\n%s", p)
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -98,15 +99,20 @@ func scriptPrompt(b Brief) string {
 	default:
 		fmt.Fprintf(&sb, "Write a narrated video about: %s\n\n", b.Topic)
 	}
-	fmt.Fprintf(&sb, "Length: about %d seconds of narration — about %d words in total, across %d shots.\n",
-		b.Seconds, int(float64(b.Seconds)*wordsPerSecond), shots)
+	words := int(float64(b.Seconds) * wordsPerSecond)
+	fmt.Fprintf(&sb, "Length: about %d seconds of narration — about %d words in total, across %d shots. "+
+		"The narration is the video's length: a short script makes a short video.\n",
+		b.Seconds, words, shots)
 	fmt.Fprintf(&sb, "Format: %s.\n", format)
 	fmt.Fprintf(&sb, "Narration language: %s.\n", Language(b.Voice))
 	fmt.Fprintf(&sb, "Visual style: %s.\n", style)
 	if b.Notes != "" {
 		fmt.Fprintf(&sb, "Notes from the requester: %s\n", b.Notes)
 	}
-	sb.WriteString(kindGuidance(b.Kind))
+	// A fixed 8-20 word range a shot let models write 5-11, and a 30 s video
+	// ran 21-24 s (int, 2026-11-17); the shot's share of the total is the target.
+	per := max(words/shots, 8)
+	sb.WriteString(strings.ReplaceAll(kindGuidance(b.Kind), "{WORDS}", fmt.Sprintf("%d to %d words", per-3, per+3)))
 	return sb.String()
 }
 
@@ -122,7 +128,7 @@ Return JSON in exactly this shape:
 {"title": "a short title", "shots": [{"narration": "...", "visual": "...", "product": true}]}
 
 Rules for "narration":
-- Spoken ad copy for that shot: one or two short sentences, 8 to 20 words, benefit-led and energetic.
+- Spoken ad copy for that shot: one or two short sentences, {WORDS}, benefit-led and energetic.
 - The first shot hooks with the single biggest reason to care. The last shot ends on a clear call to action.
 - Plain spoken language. No stage directions, shot numbers, emojis or hashtags.
 - State only claims you are confident are true. Never invent statistics, prices, awards or quotes.
@@ -136,26 +142,33 @@ Rules for "visual":
 	case model.VideoKindAnime:
 		return `
 Return JSON in exactly this shape:
-{"title": "a short title", "shots": [{"narration": "...", "visual": "..."}]}
+{"title": "a short title", "cast": [{"name": "...", "look": "..."}], "shots": [{"narration": "...", "visual": "..."}]}
+
+Rules for "cast":
+- Every recurring character: a short name, and a fixed look of 15 to 30 words — age, build, hair, face, outfit and colours; an animal or robot by its species, size, colour and features.
+- The look is pasted into every shot that names the character, so it must be complete on its own.
 
 Rules for "narration":
-- What the narrator says during that shot: one or two short spoken sentences, 8 to 20 words.
+- What the narrator says during that shot: one or two short spoken sentences, {WORDS}.
 - The first shot hooks the viewer in its first sentence. The last shot lands a clear ending.
 - Plain spoken language. No stage directions, shot numbers, emojis or hashtags.
 - State only facts you are confident are true. Never invent statistics, quotes or names.
 
 Rules for "visual":
 - A self-contained description of an anime-style animated scene an image model can draw, 25 to 60 words, always in English: character or subject, action, setting, composition, camera angle, lighting and colour palette.
-- Recurring characters are described with the same distinctive hair, outfit, colours and features every time, so they look the same in every shot.
+- Call each character by their exact "cast" name every time they appear, never "the engineer", "she" or "they", so their look can be added and they stay the same in every shot.
 - No written words, letters, numbers, captions, logos or signs in the picture, and no real, identifiable people.
 - Vary the framing between wide establishing shots, medium shots and close-ups.`
 	default:
 		return `
 Return JSON in exactly this shape:
-{"title": "a short title", "shots": [{"narration": "...", "visual": "..."}]}
+{"title": "a short title", "cast": [{"name": "...", "look": "..."}], "shots": [{"narration": "...", "visual": "..."}]}
+
+Rules for "cast":
+- A person or animal who appears in more than one shot: a short name and a fixed look of 15 to 30 words (age, build, hair, clothing, colours). Leave "cast" empty when there is none.
 
 Rules for "narration":
-- What the narrator says during that shot: one or two short spoken sentences, 8 to 20 words.
+- What the narrator says during that shot: one or two short spoken sentences, {WORDS}.
 - The first shot hooks the viewer in its first sentence. The last shot lands a clear ending.
 - Plain spoken language. No stage directions, shot numbers, emojis or hashtags.
 - State only facts you are confident are true. Never invent statistics, quotes or names.
@@ -163,7 +176,7 @@ Rules for "narration":
 Rules for "visual":
 - A self-contained description an image model can draw on its own: subject, action, setting, composition, camera angle, lighting and colour palette, in 25 to 60 words. Always in English.
 - Show concretely what the narration is about. Prefer a scene over an abstract concept.
-- A recurring person, animal or place is described with the same distinctive details every time it appears, so it looks the same in every shot.
+- Call a "cast" member by their exact name in every shot they appear in, so their look can be added; describe a recurring place the same way every time.
 - No written words, letters, numbers, captions, logos or signs in the picture, and no real, identifiable people.
 - Vary the framing between wide, medium and close-up shots.`
 	}
@@ -328,9 +341,11 @@ func ParseScript(content string) (*Script, error) {
 		return nil, errors.New("the reply held no JSON object")
 	}
 	var raw struct {
-		Title  text      `json:"title"`
-		Shots  []rawShot `json:"shots"`
-		Scenes []rawShot `json:"scenes"`
+		Title      text         `json:"title"`
+		Shots      []rawShot    `json:"shots"`
+		Scenes     []rawShot    `json:"scenes"`
+		Cast       []castMember `json:"cast"`
+		Characters []castMember `json:"characters"`
 	}
 	if err := json.Unmarshal([]byte(content[start:end+1]), &raw); err != nil {
 		return nil, fmt.Errorf("the reply was not valid JSON: %w", err)
@@ -338,10 +353,13 @@ func ParseScript(content string) (*Script, error) {
 	if len(raw.Shots) == 0 {
 		raw.Shots = raw.Scenes
 	}
+	if len(raw.Cast) == 0 {
+		raw.Cast = raw.Characters
+	}
 	script := &Script{Title: truncate(string(raw.Title), maxTitle)}
 	for _, s := range raw.Shots {
 		narration := firstText(s.Narration, s.Voiceover, s.Text)
-		visual := firstText(s.Visual, s.VisualPrompt, s.ImagePrompt, s.Description)
+		visual := withCast(firstText(s.Visual, s.VisualPrompt, s.ImagePrompt, s.Description), raw.Cast)
 		if narration == "" || visual == "" {
 			continue
 		}
@@ -354,6 +372,29 @@ func ParseScript(content string) (*Script, error) {
 		script.Shots = script.Shots[:maxShots]
 	}
 	return script, nil
+}
+
+type castMember struct {
+	Name text `json:"name"`
+	Look text `json:"look"`
+}
+
+// withCast writes each named character's fixed look into a shot's picture
+// description, after the first mention of their name. Every keyframe is drawn
+// on its own, so a look the writer gave once was a different person in every
+// other shot: int's anime engineer (2026-11-17) was a boy in a hard hat, then
+// three other people, and the robot fox was never a fox.
+func withCast(visual string, cast []castMember) string {
+	for _, c := range cast {
+		name, look := strings.TrimSpace(string(c.Name)), strings.TrimSpace(string(c.Look))
+		if name == "" || look == "" {
+			continue
+		}
+		if loc := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(name) + `\b`).FindStringIndex(visual); loc != nil {
+			visual = visual[:loc[1]] + " (" + strings.TrimSuffix(look, ".") + ")" + visual[loc[1]:]
+		}
+	}
+	return visual
 }
 
 func firstText(values ...text) string {
