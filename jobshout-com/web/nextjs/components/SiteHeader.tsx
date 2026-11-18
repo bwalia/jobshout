@@ -1,22 +1,26 @@
 import Link from "next/link";
-import { SignOutButton } from "@/components/SignOutButton";
 import { getServerSession } from "next-auth";
 import { Logo } from "@/components/Logo";
 import { MobileMenu } from "@/components/MobileMenu";
 import { NavLinks } from "@/components/NavLinks";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { MobileAccountSection, UserMenu, type MenuUser } from "@/components/UserMenu";
 import { buttonClass } from "@/components/ui";
-import { BellIcon, UserCheckIcon, UserIcon } from "@/components/icons";
+import { BellIcon } from "@/components/icons";
 import { unreadNotifications } from "@/lib/notifications";
 import { authOptions } from "@/lib/auth";
 
 export async function SiteHeader() {
   const session = await getServerSession(authOptions());
-  const who = session?.user?.name || session?.user?.email || null;
+  const user: MenuUser | null = session?.user
+    ? {
+        name: session.user.name ?? null,
+        email: session.user.email ?? null,
+        image: session.user.image ?? null,
+      }
+    : null;
 
-  const authControl = session ? (
-    <SignOutButton className={buttonClass("secondary", "sm", "w-full xl:w-auto")} />
-  ) : (
+  const signIn = (
     <Link href="/login" className={buttonClass("secondary", "sm", "w-full xl:w-auto")}>
       Sign in
     </Link>
@@ -39,13 +43,6 @@ export async function SiteHeader() {
     </Link>
   ) : null;
 
-  const following = session ? (
-    <Link href="/following" className={buttonClass("ghost", "sm", "w-full xl:w-auto")}>
-      <UserCheckIcon className="h-4 w-4" />
-      Following
-    </Link>
-  ) : null;
-
   return (
     <header className="sticky top-0 z-40 border-b border-line bg-bg/85 backdrop-blur-xl">
       <div className="mx-auto flex h-[4.25rem] max-w-board items-center gap-4 px-5 sm:px-8">
@@ -56,23 +53,13 @@ export async function SiteHeader() {
         </nav>
 
         <div className="ml-auto flex items-center gap-2">
-          {who ? (
-            <span className="hidden items-center gap-2 rounded-pill border border-line py-1.5 pl-2 pr-3.5 text-sm text-body 2xl:flex">
-              <UserIcon className="h-4 w-4 text-mute" />
-              <span className="max-w-[10rem] truncate">{who}</span>
-            </span>
-          ) : null}
           <ThemeToggle />
           {bell}
-          {following ? <div className="hidden xl:block">{following}</div> : null}
-          <div className="hidden xl:block">{authControl}</div>
+          <div className="hidden xl:block">{user ? <UserMenu user={user} /> : signIn}</div>
           <Link href="/post-job" className={buttonClass("primary", "sm", "hidden sm:inline-flex")}>
             Post a job
           </Link>
-          <MobileMenu>
-            {following}
-            {authControl}
-          </MobileMenu>
+          <MobileMenu>{user ? <MobileAccountSection user={user} /> : signIn}</MobileMenu>
         </div>
       </div>
     </header>

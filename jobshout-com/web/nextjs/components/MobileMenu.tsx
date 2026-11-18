@@ -1,11 +1,18 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { MenuIcon, XIcon } from "@/components/icons";
 import { MobileNavLinks } from "@/components/NavLinks";
 
 export function MobileMenu({ children }: { children?: React.ReactNode }) {
   const [open, setOpen] = useState(false);
+  const pathname = usePathname();
+
+  // Any navigation from inside the sheet (nav or account links) closes it.
+  useEffect(() => {
+    setOpen(false);
+  }, [pathname]);
 
   // Escape closes; body scroll locks while the sheet is open.
   useEffect(() => {
@@ -41,7 +48,7 @@ export function MobileMenu({ children }: { children?: React.ReactNode }) {
             onClick={() => setOpen(false)}
             className="absolute inset-0 cursor-default bg-ink/40 backdrop-blur-sm"
           />
-          <div className="absolute inset-x-3 top-3 animate-rise-in rounded-2xl border border-line bg-surface p-3 shadow-pop">
+          <div className="absolute inset-x-3 top-3 max-h-[calc(100dvh-10rem)] animate-rise-in overflow-y-auto overscroll-contain rounded-2xl border border-line bg-surface p-3 shadow-pop">
             <div className="flex items-center justify-between px-1 pb-2">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-mute">Menu</p>
               <button

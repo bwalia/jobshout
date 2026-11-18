@@ -2,7 +2,9 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { getServerSession } from "next-auth";
 import { ProfileForm } from "@/components/ProfileForm";
-import { Badge, ErrorNotice } from "@/components/ui";
+import { SignOutButton } from "@/components/SignOutButton";
+import { Avatar } from "@/components/UserMenu";
+import { Badge, ErrorNotice, buttonClass } from "@/components/ui";
 import { TargetIcon } from "@/components/icons";
 import { getMyProfile, type CandidateProfile } from "@/lib/api";
 import { authOptions } from "@/lib/auth";
@@ -83,7 +85,38 @@ export default async function ProfilePage() {
           </div>
         </div>
 
-        <aside className="order-1 lg:order-2 lg:sticky lg:top-24 lg:self-start">
+        <aside className="order-1 space-y-5 lg:order-2 lg:sticky lg:top-24 lg:self-start">
+          {session?.user ? (
+            <section aria-labelledby="account-heading" className="surface-card p-5">
+              <h2 id="account-heading" className="sr-only">
+                Your account
+              </h2>
+              <div className="flex items-center gap-3">
+                <Avatar
+                  size="lg"
+                  user={{
+                    name: session.user.name ?? null,
+                    email: session.user.email ?? null,
+                    image: session.user.image ?? null,
+                  }}
+                />
+                <div className="min-w-0">
+                  {session.user.name ? (
+                    <p className="truncate font-semibold text-ink">{session.user.name}</p>
+                  ) : null}
+                  {session.user.email ? (
+                    <p className="truncate text-sm text-mute">{session.user.email}</p>
+                  ) : null}
+                </div>
+              </div>
+              <div className="mt-4 flex flex-col gap-2">
+                <Link href="/members/me" className={buttonClass("secondary", "sm", "w-full")}>
+                  View public profile
+                </Link>
+                <SignOutButton className={buttonClass("ghost", "sm", "w-full")} />
+              </div>
+            </section>
+          ) : null}
           <div className="surface-card p-5">
             <h2 className="font-display text-base font-semibold text-ink">
               What makes matching work
