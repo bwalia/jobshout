@@ -71,11 +71,19 @@ jobs:
     name: PR image check
     needs: [go-checks, web-checks]
     runs-on: self-hosted
-    timeout-minutes: 90
+    # jobshout-com-web under QEMU is ~45m alone; keep headroom after the light
+    # parallel batch and the --load export.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
       - name: Cross-build linux/amd64 (no push)
+        env:
+          # Long QEMU next builds keep a buildx --load session open past the
+          # default client timeout; without this the export dies with
+          # "no active session … context deadline exceeded" (~47m on #379).
+          DOCKER_CLIENT_TIMEOUT: "7200"
+          COMPOSE_HTTP_TIMEOUT: "7200"
         run: |
           set -euo pipefail
           CACHE_ROOT="${HOME}/.cache/jobshout-buildkit"
@@ -93,6 +101,10 @@ jobs:
               "$@"
           }
 
+          # Light images in parallel. Do NOT co-schedule jobshout-com-web: its
+          # QEMU next build holds a --load session for ~45m and then loses the
+          # export when five other --load sessions share the same builder
+          # ("no active session … context deadline exceeded", PR #379).
           fail=0
           bx server -t jobshout/server:pr -f server/Dockerfile server &
           pids="$!"
@@ -103,12 +115,7 @@ jobs:
           pids="$pids $!"
           bx review-bot -t jobshout/review-bot:pr -f review-bot/Dockerfile review-bot &
           pids="$pids $!"
-          # JobShout.com marketplace — same images deploy-jobshout-com.yml pushes.
           bx jobshout-com-api -t jobshout-com/api:pr -f jobshout-com/deploy/docker/Dockerfile.api jobshout-com &
-          pids="$pids $!"
-          bx jobshout-com-web --build-arg NEXT_PUBLIC_JOBSHOUT_COM_API_URL="" \
-            --build-arg JOBSHOUT_COM_API_URL=http://jobshout-com-api:8088 \
-            -t jobshout-com/web:pr -f jobshout-com/deploy/docker/Dockerfile.web jobshout-com/web/nextjs &
           pids="$pids $!"
           for pid in $pids; do
             wait "$pid" || fail=1
@@ -117,6 +124,11 @@ jobs:
             echo "::error::one or more parallel PR image builds failed"
             exit 1
           fi
+
+          echo "Building jobshout-com-web alone so --load export keeps its session"
+          bx jobshout-com-web --build-arg NEXT_PUBLIC_JOBSHOUT_COM_API_URL="" \
+            --build-arg JOBSHOUT_COM_API_URL=http://jobshout-com-api:8088 \
+            -t jobshout-com/web:pr -f jobshout-com/deploy/docker/Dockerfile.web jobshout-com/web/nextjs
 
           for img in jobshout/server:pr jobshout/web:pr jobshout/python-sidecar:pr jobshout/review-bot:pr \
                      jobshout-com/api:pr jobshout-com/web:pr; do

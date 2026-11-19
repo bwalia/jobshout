@@ -1,0 +1,25 @@
+name: Ops — rebuild jobshout-com images & seed
+
+# One-shot Mac rebuild+seed already completed successfully (run 44013481580).
+# Keep this file only so push concurrency cancels any leftover Mac rebuild
+# queued against this branch; do not occupy the self-hosted runner again.
+
+on:
+  push:
+    branches: [cursor/jobshout-com-build-timeout-618f]
+  workflow_dispatch:
+
+concurrency:
+  group: ops-rebuild-jobshout-com
+  cancel-in-progress: true
+
+jobs:
+  rebuild-and-seed:
+    name: Rebuild api+web & seed int
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Skip — one-shot already done
+        run: |
+          echo "jobshout-com images were rebuilt and seeded on run 44013481580."
+          echo "Skipping Mac rebuild so PR image check keeps the self-hosted runner."
