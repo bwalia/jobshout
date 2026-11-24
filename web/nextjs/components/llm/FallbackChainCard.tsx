@@ -7,7 +7,8 @@ import { toast } from "sonner";
 import { getLLMRouting, putLLMRouting } from "@/lib/api/llm-providers";
 import { apiErrorMessage } from "@/lib/api/client";
 import { cn } from "@/lib/utils/cn";
-import type { LLMProviderConfig, LLMRouteStep, LLMRoutingMode } from "@/lib/types/llm-provider";
+import { providerName } from "@/components/agent/ModelPicker";
+import type { BuiltinProvider, LLMProviderConfig, LLMRouteStep, LLMRoutingMode } from "@/lib/types/llm-provider";
 
 const inputClass =
   "h-9 rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
@@ -15,9 +16,17 @@ const inputClass =
 /**
  * The org's fallback chain: which providers take over, in order, when an
  * agent's own model cannot answer — a self-hosted model that is busy or
- * unreachable, a cloud key over quota. Only active providers can be chained.
+ * unreachable, a cloud key over quota. A step is one of the server's own
+ * providers (set up in its settings, e.g. Claude on AWS Bedrock) or one of the
+ * org's active providers.
  */
-export function FallbackChainCard({ providers }: { providers: LLMProviderConfig[] }) {
+export function FallbackChainCard({
+  providers,
+  builtin,
+}: {
+  providers: LLMProviderConfig[];
+  builtin: BuiltinProvider[];
+}) {
   const queryClient = useQueryClient();
   const { data: routing, isLoading } = useQuery({ queryKey: ["llm-routing"], queryFn: getLLMRouting });
 
@@ -38,7 +47,9 @@ export function FallbackChainCard({ providers }: { providers: LLMProviderConfig[
     setChain(
       routing.chain.length > 0
         ? routing.chain
-        : routing.effective.map((s) => ({ provider_config_id: s.provider_config_id }))
+        : routing.effective.map((s) =>
+            s.provider ? { provider: s.provider } : { provider_config_id: s.provider_config_id }
+          )
     );
   }, [routing]);
 
@@ -63,7 +74,15 @@ export function FallbackChainCard({ providers }: { providers: LLMProviderConfig[
     setChain(next);
   }
 
-  const addable = active.filter((p) => !chain.some((s) => s.provider_config_id === p.id));
+  // Select values: "server:<name>" for a server provider, the config id otherwise.
+  const keyOf = (s: LLMRouteStep) => (s.provider ? `server:${s.provider}` : s.provider_config_id ?? "");
+  const inChain = new Set(chain.map(keyOf));
+  const addable = [
+    ...builtin
+      .filter((b) => !inChain.has(`server:${b.name}`))
+      .map((b) => ({ value: `server:${b.name}`, label: `${providerName(b.name)} (server)` })),
+    ...active.filter((p) => !inChain.has(p.id)).map((p) => ({ value: p.id, label: `${p.name} (${p.provider_type})` })),
+  ];
 
   return (
     <section className="rounded-xl border border-border bg-card p-6">
@@ -130,25 +149,31 @@ export function FallbackChainCard({ providers }: { providers: LLMProviderConfig[
 
           {chain.length === 0 ? (
             <p className="rounded-lg border border-dashed border-border p-4 text-center text-sm text-muted-foreground">
-              No providers in the chain yet. Add an active provider below.
+              No providers in the chain yet. Add one below.
             </p>
           ) : (
             <ol className="space-y-2">
               {chain.map((step, i) => {
-                const p = byId.get(step.provider_config_id);
-                const missing = !p || !p.is_active;
+                const p = step.provider ? undefined : byId.get(step.provider_config_id ?? "");
+                const missing = step.provider ? !builtin.some((b) => b.name === step.provider) : !p || !p.is_active;
                 return (
                   <li
-                    key={`${step.provider_config_id}-${i}`}
+                    key={`${keyOf(step)}-${i}`}
                     className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-background p-2"
                   >
                     <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold">
                       {i + 1}
                     </span>
                     <span className="min-w-0 flex-1 text-sm">
-                      <span className="font-medium">{p?.name ?? "Deleted provider"}</span>
-                      <span className="text-muted-foreground"> · {p?.provider_type ?? "?"}</span>
-                      {missing && <span className="ml-2 text-xs text-destructive">inactive — skipped</span>}
+                      <span className="font-medium">
+                        {step.provider ? providerName(step.provider) : p?.name ?? "Deleted provider"}
+                      </span>
+                      <span className="text-muted-foreground"> · {step.provider ? "server" : p?.provider_type ?? "?"}</span>
+                      {missing && (
+                        <span className="ml-2 text-xs text-destructive">
+                          {step.provider ? "not configured" : "inactive"} — skipped
+                        </span>
+                      )}
                     </span>
                     <input
                       value={step.model ?? ""}
@@ -157,7 +182,7 @@ export function FallbackChainCard({ providers }: { providers: LLMProviderConfig[
                         next[i] = { ...step, model: e.target.value || undefined };
                         setChain(next);
                       }}
-                      placeholder={p?.default_model ?? "model"}
+                      placeholder={step.provider ? "default model" : p?.default_model ?? "model"}
                       aria-label={`Model for step ${i + 1}`}
                       className={cn(inputClass, "w-48")}
                       disabled={!enabled}
@@ -180,10 +205,10 @@ export function FallbackChainCard({ providers }: { providers: LLMProviderConfig[
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <select value={adding} onChange={(e) => setAdding(e.target.value)} className={inputClass} disabled={!enabled || addable.length === 0}>
-                <option value="">{addable.length === 0 ? "No more active providers" : "Add a provider…"}</option>
-                {addable.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({p.provider_type})
+                <option value="">{addable.length === 0 ? "No more providers" : "Add a provider…"}</option>
+                {addable.map((a) => (
+                  <option key={a.value} value={a.value}>
+                    {a.label}
                   </option>
                 ))}
               </select>
@@ -191,7 +216,10 @@ export function FallbackChainCard({ providers }: { providers: LLMProviderConfig[
                 type="button"
                 onClick={() => {
                   if (!adding) return;
-                  setChain([...chain, { provider_config_id: adding }]);
+                  setChain([
+                    ...chain,
+                    adding.startsWith("server:") ? { provider: adding.slice(7) } : { provider_config_id: adding },
+                  ]);
                   setAdding("");
                 }}
                 disabled={!adding || !enabled}

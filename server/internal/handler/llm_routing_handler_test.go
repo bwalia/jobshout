@@ -16,7 +16,9 @@ import (
 	"github.com/jobshout/server/internal/orgroute"
 )
 
-type memRouting struct{ rows map[uuid.UUID]*model.OrgLLMRouting }
+type memRouting struct {
+	rows map[uuid.UUID]*model.OrgLLMRouting
+}
 
 func (m *memRouting) Get(_ context.Context, orgID uuid.UUID) (*model.OrgLLMRouting, error) {
 	return m.rows[orgID], nil
@@ -26,7 +28,9 @@ func (m *memRouting) Upsert(_ context.Context, r *model.OrgLLMRouting) error {
 	return nil
 }
 
-type memProviders struct{ byOrg map[uuid.UUID][]model.LLMProviderConfig }
+type memProviders struct {
+	byOrg map[uuid.UUID][]model.LLMProviderConfig
+}
 
 func (m *memProviders) ListActiveWithSecrets(_ context.Context, orgID uuid.UUID) ([]model.LLMProviderConfig, error) {
 	return m.byOrg[orgID], nil
@@ -46,7 +50,8 @@ func TestLLMRoutingHandler_PutValidatesChainAgainstOrg(t *testing.T) {
 	providers := &memProviders{byOrg: map[uuid.UUID][]model.LLMProviderConfig{orgA: {pa}, orgB: {pb}}}
 	routing := &memRouting{rows: map[uuid.UUID]*model.OrgLLMRouting{}}
 	res := orgroute.NewResolver(orgroute.Stores{Providers: providers, Routing: routing}, orgroute.Options{
-		Build: func(model.LLMProviderConfig) (llm.Client, error) { return nopLLM{}, nil },
+		Build:   func(model.LLMProviderConfig) (llm.Client, error) { return nopLLM{}, nil },
+		Builtin: map[string]llm.Client{"ollama": nopLLM{}},
 	})
 	h := NewLLMRoutingHandler(routing, providers, res)
 
@@ -79,10 +84,23 @@ func TestLLMRoutingHandler_PutValidatesChainAgainstOrg(t *testing.T) {
 		t.Fatalf("response = %s", rec.Body.String())
 	}
 
+	// A server provider can be chained only when it is configured.
+	if rec := put(orgA, `{"chain":[{"provider":"claude"}]}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("unconfigured server provider = %d, want 400", rec.Code)
+	}
+	if rec := put(orgA, `{"chain":[{"provider":"ollama","provider_config_id":"`+pa.ID.String()+`"}]}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("step naming both = %d, want 400", rec.Code)
+	}
+	rec = put(orgA, `{"chain":[{"provider":"ollama","provider_config_id":"00000000-0000-0000-0000-000000000000"},{"provider_config_id":"`+pa.ID.String()+`"}]}`)
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	if rec.Code != http.StatusOK || len(out.Effective) != 2 || out.Effective[0].Provider != "ollama" {
+		t.Fatalf("server provider chain = %d %s", rec.Code, rec.Body.String())
+	}
+
 	// Disabling keeps the chain but routes to env.
 	rec = put(orgA, `{"enabled":false}`)
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
-	if out.Source != "env" || len(routing.rows[orgA].Chain) != 1 {
+	if out.Source != "env" || len(routing.rows[orgA].Chain) != 2 {
 		t.Fatalf("disabled response = %s", rec.Body.String())
 	}
 }

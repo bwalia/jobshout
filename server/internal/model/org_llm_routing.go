@@ -22,11 +22,13 @@ type OrgLLMRouting struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 }
 
-// LLMRouteStep is one hop of an org's ordered fallback chain: a provider
-// config of the org and, optionally, the model to ask it for (empty = the
-// config's default_model).
+// LLMRouteStep is one hop of an org's ordered fallback chain: either a
+// provider config of the org, or one of the server's own providers (Provider:
+// "claude", "gemini", "ollama", "openai" — the ones keyed in Vault), and
+// optionally the model to ask it for (empty = that provider's default).
 type LLMRouteStep struct {
-	ProviderConfigID uuid.UUID `json:"provider_config_id" validate:"required"`
+	ProviderConfigID uuid.UUID `json:"provider_config_id" validate:"required_without=Provider"`
+	Provider         string    `json:"provider,omitempty"`
 	Model            string    `json:"model,omitempty"`
 }
 

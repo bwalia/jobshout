@@ -79,9 +79,14 @@ export interface ProviderTestResult {
   error?: string;
 }
 
-/** One hop of the org's fallback chain. Empty model = the provider's default. */
+/**
+ * One hop of the org's fallback chain: one of the server's own providers
+ * (`provider`, e.g. "claude") or one of the org's providers
+ * (`provider_config_id`). Empty model = the provider's default.
+ */
 export interface LLMRouteStep {
-  provider_config_id: string;
+  provider_config_id?: string;
+  provider?: string;
   model?: string;
 }
 
@@ -97,7 +102,7 @@ export interface LLMRouting {
   enabled: boolean;
   mode: LLMRoutingMode;
   chain: LLMRouteStep[];
-  effective: { provider_config_id: string; name: string; provider_type: string; model: string }[];
+  effective: { provider_config_id: string; provider?: string; name: string; provider_type: string; model: string }[];
 }
 
 export interface PutLLMRoutingRequest {

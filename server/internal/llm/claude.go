@@ -271,7 +271,14 @@ func (c *ClaudeClient) send(ctx context.Context, body *claudeRequest) (int, []by
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		err := fmt.Errorf("claude: unexpected status %d: %s", resp.StatusCode, string(rawBody))
+		// Classified, so a throttled or unavailable Claude (Bedrock throttles
+		// often) falls back like the other hosted providers do.
+		msg := string(rawBody)
+		if len(msg) > 500 {
+			msg = msg[:500]
+		}
+		err := &ProviderError{Provider: "claude", Kind: kindForStatus(resp.StatusCode), Status: resp.StatusCode,
+			Message: msg, RetryAfter: retryAfterHeader(resp.Header)}
 		attempt.end(err)
 		return resp.StatusCode, rawBody, err
 	}
