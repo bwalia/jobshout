@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -42,11 +43,14 @@ type Store interface {
 
 // Step is one resolved hop of an org's chain.
 type Step struct {
-	ConfigID     uuid.UUID  `json:"provider_config_id"`
-	Name         string     `json:"name"`
-	ProviderType string     `json:"provider_type"`
-	Model        string     `json:"model"`
-	Client       llm.Client `json:"-"`
+	ConfigID     uuid.UUID `json:"provider_config_id"`
+	Name         string    `json:"name"`
+	ProviderType string    `json:"provider_type"`
+	// Provider is set when the hop is one of the server's own providers
+	// rather than an org config.
+	Provider string     `json:"provider,omitempty"`
+	Model    string     `json:"model"`
+	Client   llm.Client `json:"-"`
 }
 
 // Options tune a Resolver. Zero values are sensible.
@@ -58,8 +62,12 @@ type Options struct {
 	// LLM benchmark), so org-routed calls are recorded like env ones.
 	Decorate func(llm.Client) llm.Client
 	// Build constructs a client for a config. Default: BuildClient.
-	Build  func(model.LLMProviderConfig) (llm.Client, error)
-	Logger *zap.Logger
+	Build func(model.LLMProviderConfig) (llm.Client, error)
+	// Builtin are the server's own provider clients by name, as registered
+	// before this resolver wrapped them, so a chain can hop to them without
+	// coming back through the org wrapper.
+	Builtin map[string]llm.Client
+	Logger  *zap.Logger
 }
 
 // Resolver resolves and caches org chains.
@@ -104,6 +112,13 @@ func NewResolver(store Store, opts Options) *Resolver {
 		clients: map[uuid.UUID]cachedClient{},
 		now:     time.Now,
 	}
+}
+
+// HasBuiltin reports whether name is one of the server's own providers a chain
+// can hop to.
+func (r *Resolver) HasBuiltin(name string) bool {
+	_, ok := r.opts.Builtin[name]
+	return ok
 }
 
 // Invalidate drops the org's cached chain; the next call re-reads it.
@@ -155,7 +170,9 @@ func (r *Resolver) resolve(ctx context.Context, orgID uuid.UUID, routing *model.
 	if err != nil {
 		return nil, err
 	}
-	if len(configs) == 0 {
+	// An org with no configs of its own may still have saved a chain of the
+	// server's providers.
+	if len(configs) == 0 && (routing == nil || len(routing.Chain) == 0) {
 		return nil, nil
 	}
 	byID := make(map[uuid.UUID]model.LLMProviderConfig, len(configs))
@@ -176,6 +193,17 @@ func (r *Resolver) resolve(ctx context.Context, orgID uuid.UUID, routing *model.
 
 	steps := make([]Step, 0, len(plan))
 	for _, p := range plan {
+		if p.Provider != "" {
+			client, ok := r.opts.Builtin[p.Provider]
+			if !ok {
+				r.opts.Logger.Warn("orgroute: chain hop names a server provider that is not configured",
+					zap.String("org_id", orgID.String()), zap.String("provider", p.Provider))
+				continue
+			}
+			steps = append(steps, Step{Name: p.Provider, ProviderType: p.Provider, Provider: p.Provider,
+				Model: strings.TrimSpace(p.Model), Client: client})
+			continue
+		}
 		cfg, ok := byID[p.ProviderConfigID]
 		if !ok {
 			// Deleted or deactivated since the chain was saved: skip the hop.
@@ -326,8 +354,15 @@ func (c *orgClient) Generate(ctx context.Context, req llm.GenerateRequest) (*llm
 			zap.String("org_id", orgID.String()),
 			zap.String("provider", c.inner.ProviderName()),
 			zap.String("model", req.Model),
-			zap.String("next", chain.steps[0].Name),
 			zap.Error(err))
+		// The provider that just failed is not asked the same thing again.
+		steps := slices.DeleteFunc(slices.Clone(chain.steps), func(s Step) bool {
+			return s.Provider == c.inner.ProviderName() && s.Model == req.Model
+		})
+		if len(steps) == 0 {
+			return resp, err
+		}
+		return c.res.Generate(ctx, orgID, steps, req)
 	}
 	return c.res.Generate(ctx, orgID, chain.steps, req)
 }

@@ -117,3 +117,31 @@ func TestBuildClient_MistralAndGrok(t *testing.T) {
 		t.Error("grok without an api_key must be refused")
 	}
 }
+
+// A chain can hop to the server's own providers (the keys in Vault), even for
+// an org with no provider configs of its own, and the provider that just
+// failed is not asked again.
+func TestFallbackMode_ServerProvidersInChain(t *testing.T) {
+	org := uuid.New()
+	claude := &stubClient{name: "claude", err: errors.New("claude: throttled")}
+	gemini := &stubClient{name: "gemini"}
+	store := &fakeStore{routing: map[uuid.UUID]*model.OrgLLMRouting{org: {
+		OrgID: org, Enabled: true, Mode: model.RoutingModeFallback,
+		Chain: []model.LLMRouteStep{{Provider: "claude"}, {Provider: "gemini", Model: "g-pro"}, {Provider: "openai"}},
+	}}}
+	res := NewResolver(store, Options{Builtin: map[string]llm.Client{"claude": claude, "gemini": gemini}})
+
+	steps, err := res.Chain(context.Background(), org)
+	if err != nil || len(steps) != 2 {
+		t.Fatalf("steps = %+v, %v; want claude and gemini (openai is not configured)", steps, err)
+	}
+	// The agent's own call went to claude and failed: gemini answers, and
+	// claude is not tried a second time.
+	resp, err := res.Wrap(claude).Generate(WithOrg(context.Background(), org), llm.GenerateRequest{})
+	if err != nil || resp.Content != "gemini" {
+		t.Fatalf("answer = %v, %v; want gemini", resp, err)
+	}
+	if len(claude.models) != 1 || gemini.models[0] != "g-pro" {
+		t.Fatalf("claude calls = %d (want 1), gemini model = %v", len(claude.models), gemini.models)
+	}
+}

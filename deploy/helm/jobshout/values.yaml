@@ -218,9 +218,16 @@ ai:
   openaiBaseURL: "https://api.openai.com"
   openaiModel: "gpt-4o-mini"
   openaiModels: ""
-  claudeBaseURL: "https://api.anthropic.com"
-  claudeModel: "claude-sonnet-5-5"
-  claudeModels: ""
+  # Claude is served by AWS Bedrock (London), through Bedrock's Anthropic
+  # Messages endpoint, which the Claude client speaks unchanged. CLAUDE_API_KEY
+  # in jobshout/<ring>/llm is therefore a Bedrock API key (long-term: it is
+  # read once at start, so replace it before its expiry date). Model names are
+  # Bedrock inference-profile IDs; eu.* keeps processing inside the EU. To go
+  # back to Anthropic directly: https://api.anthropic.com, claude-sonnet-5-5,
+  # and an Anthropic key.
+  claudeBaseURL: "https://bedrock-runtime.eu-west-2.amazonaws.com/anthropic"
+  claudeModel: "eu.anthropic.claude-sonnet-5-5"
+  claudeModels: "eu.anthropic.claude-sonnet-5-5,eu.anthropic.claude-opus-5-5,eu.anthropic.claude-haiku-5-5"
   # Per-task model selection. When true, an agent whose modelProvider is "auto"
   # gets a provider+model chosen per call — cheap local models for routine work,
   # stronger ones for planning and code. Agents pinned to a provider are

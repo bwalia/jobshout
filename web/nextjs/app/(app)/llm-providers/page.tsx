@@ -372,7 +372,7 @@ function ProvidersTab() {
         )}
       </section>
 
-      <FallbackChainCard providers={providers ?? []} />
+      <FallbackChainCard providers={providers ?? []} builtin={builtinProviders ?? []} />
       {openProvider && <ProviderDrawer provider={openProvider} onClose={() => setOpenProvider(null)} />}
     </div>
   );

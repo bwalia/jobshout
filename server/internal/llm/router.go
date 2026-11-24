@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 
 	"go.uber.org/zap"
@@ -156,6 +157,10 @@ func (r *Router) WrapClients(wrap func(Client) Client) {
 		r.clients[name] = wrap(c)
 	}
 }
+
+// Clients returns a copy of the registered clients by provider name, as they
+// are wrapped at the time of the call.
+func (r *Router) Clients() map[string]Client { return maps.Clone(r.clients) }
 
 // For returns the Client for the given provider name, falling back to the
 // default provider when providerName is empty.

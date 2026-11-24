@@ -89,8 +89,8 @@ func (h *LLMRoutingHandler) Get(w http.ResponseWriter, r *http.Request) {
 	h.respond(w, r, orgID, http.StatusOK)
 }
 
-// Put replaces the org's routing settings. Every chain hop must name an
-// active provider config of this org.
+// Put replaces the org's routing settings. Every chain hop must name a
+// configured server provider or an active provider config of this org.
 func (h *LLMRoutingHandler) Put(w http.ResponseWriter, r *http.Request) {
 	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
 	if err != nil {
@@ -131,18 +131,29 @@ func (h *LLMRoutingHandler) Put(w http.ResponseWriter, r *http.Request) {
 		for _, p := range active {
 			mine[p.ID] = true
 		}
-		seen := map[uuid.UUID]bool{}
+		seen := map[string]bool{}
 		for _, s := range req.Chain {
-			if !mine[s.ProviderConfigID] {
+			hop := s.ProviderConfigID.String()
+			switch {
+			case s.Provider != "" && s.ProviderConfigID != uuid.Nil:
+				RespondError(w, http.StatusBadRequest, "chain: a step names a server provider or a provider config, not both")
+				return
+			case s.Provider != "":
+				hop = s.Provider
+				if h.resolver == nil || !h.resolver.HasBuiltin(s.Provider) {
+					RespondError(w, http.StatusBadRequest, "chain: server provider "+s.Provider+" is not configured")
+					return
+				}
+			case !mine[s.ProviderConfigID]:
 				// Another org's config is indistinguishable from a missing one.
-				RespondError(w, http.StatusBadRequest, "chain: provider config "+s.ProviderConfigID.String()+" not found or inactive")
+				RespondError(w, http.StatusBadRequest, "chain: provider config "+hop+" not found or inactive")
 				return
 			}
-			if seen[s.ProviderConfigID] && s.Model == "" {
-				RespondError(w, http.StatusBadRequest, "chain: provider config "+s.ProviderConfigID.String()+" repeated without a different model")
+			if seen[hop] && s.Model == "" {
+				RespondError(w, http.StatusBadRequest, "chain: "+hop+" repeated without a different model")
 				return
 			}
-			seen[s.ProviderConfigID] = true
+			seen[hop] = true
 		}
 		next.Chain = req.Chain
 	}

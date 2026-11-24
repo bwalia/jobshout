@@ -365,7 +365,10 @@ func main() {
 	orgRoutingRepo := repository.NewOrgLLMRoutingRepository(pool)
 	orgResolver := orgroute.NewResolver(orgroute.Stores{Providers: llmProviderRepo, Routing: orgRoutingRepo}, orgroute.Options{
 		Decorate: func(c llm.Client) llm.Client { return llmBench.Wrap(tracing.Wrap(c)) },
-		Logger:   logger,
+		// Taken before the org wrap below, so a chain hop to a server
+		// provider does not route back through the org's chain.
+		Builtin: llmRouter.Clients(),
+		Logger:  logger,
 	})
 	llmRouter.WrapClients(orgResolver.Wrap)
 	// Self-hosted Ollama is the fallback when a cloud provider is over quota or
