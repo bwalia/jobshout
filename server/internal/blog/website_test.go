@@ -229,3 +229,12 @@ func TestCopyable(t *testing.T) {
 		}
 	}
 }
+
+func TestUploadableURL_MermaidUploadsAsPNG(t *testing.T) {
+	if got, want := uploadableURL("https://mermaid.ink/svg/abc"), "https://mermaid.ink/img/abc?type=png&width=1200"; got != want {
+		t.Errorf("mermaid svg: got %q, want %q", got, want)
+	}
+	if src := "https://jobshout.test/api/v1/images/file/x.png"; uploadableURL(src) != src {
+		t.Errorf("stored image changed: %q", uploadableURL(src))
+	}
+}

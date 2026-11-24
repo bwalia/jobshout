@@ -3,6 +3,7 @@ package research
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -401,19 +402,27 @@ func (a *Agent) researchPinned(ctx context.Context, req Request, brief *Brief, p
 	return brief, nil
 }
 
-// readSeeds reads the caller's seed URLs as sources, up to MaxSources.
+// contextURL finds a link written into a request's free-text context.
+var contextURL = regexp.MustCompile(`https?://[^\s<>()\[\]"']+`)
+
+// readSeeds reads the caller's seed URLs, and any links in its context, as
+// sources, up to MaxSources.
 //
 // A seed that cannot be read is a warning, not a failure: the seeds are a head
 // start, and search still runs to fill whatever they did not.
 func (a *Agent) readSeeds(
 	ctx context.Context, req Request, brief *Brief, progress ProgressFunc, tried map[string]struct{},
 ) []Document {
-	if len(req.Seeds) == 0 {
+	// Links the requester wrote into the context ("use HMRC's guidance at …")
+	// are sources they chose, so they are read like seeds.
+	raws := append(append([]string(nil), req.Seeds...), contextURL.FindAllString(req.Context, -1)...)
+	if len(raws) == 0 {
 		return nil
 	}
-	seeds := make([]Source, 0, len(req.Seeds))
-	seen := make(map[string]struct{}, len(req.Seeds))
-	for _, raw := range req.Seeds {
+	seeds := make([]Source, 0, len(raws))
+	seen := make(map[string]struct{}, len(raws))
+	for _, raw := range raws {
+		raw = strings.TrimRight(raw, ".,;:!?")
 		u, err := validateURL(raw)
 		if err != nil {
 			brief.Warnings = append(brief.Warnings, fmt.Sprintf("skipped seed url %s: %v", strings.TrimSpace(raw), err))

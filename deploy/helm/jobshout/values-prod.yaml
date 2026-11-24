@@ -105,6 +105,10 @@ extraSecretRefs:
   - jobshout-google
   - jobshout-cms
   - jobshout-linkedin
+  # BRAVE_SEARCH_API_KEY: web search for research (Article Writer, Research
+  # Agent). Without it research searches Hacker News and arXiv only, and reads
+  # the links written into an article's context.
+  - jobshout-research
   # - jobshout-meta
   # OPENAI_API_KEY / CLAUDE_API_KEY (or ANTHROPIC_API_KEY) / GEMINI_API_KEY:
   # each key set registers that provider in the model picker. Models are
@@ -127,6 +131,9 @@ vaultSecrets:
   - name: jobshout-linkedin
     store: wslvault-backend
     key: jobshout/prod/linkedin
+  - name: jobshout-research
+    store: wslvault-backend
+    key: jobshout/prod/research
   # - name: jobshout-meta
   #   store: wslvault-backend
   #   key: jobshout/prod/meta

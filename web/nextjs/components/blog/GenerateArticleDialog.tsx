@@ -305,7 +305,7 @@ export function GenerateArticleDialog({
                 rows={2}
                 value={row.context ?? ""}
                 onChange={(e) => updateRow(row.id, { context: e.target.value })}
-                placeholder="Angle, points to cover, things to avoid"
+                placeholder="Angle, points to cover, things to avoid, links to read (e.g. https://www.gov.uk/…)"
                 className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground"
               />
             </div>

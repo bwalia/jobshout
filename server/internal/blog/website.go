@@ -128,7 +128,7 @@ func (r *Runner) HostImages(ctx context.Context, cms CMSPublisher, title, html, 
 		if u, ok := hosted[src]; ok {
 			return u, nil
 		}
-		data, ctype, err := r.fetchImage(ctx, src)
+		data, ctype, err := r.fetchImage(ctx, uploadableURL(src))
 		if err != nil {
 			return "", err
 		}
@@ -177,6 +177,16 @@ func (r *Runner) HostImages(ctx context.Context, cms CMSPublisher, title, html, 
 		return "", "", fmt.Errorf("blog: copy images to %s: %w", cms.Namespace(), hostErr)
 	}
 	return html, featured, nil
+}
+
+// uploadableURL is the address to fetch src from for upload. A mermaid.ink
+// SVG carries <style> and <foreignObject>, which website media libraries refuse
+// as active content, so its PNG render is uploaded instead.
+func uploadableURL(src string) string {
+	if code, ok := strings.CutPrefix(src, mermaidInkSVG); ok {
+		return "https://mermaid.ink/img/" + code + "?type=png&width=1200"
+	}
+	return src
 }
 
 // copyable reports whether HostImages may fetch src: an image in this ring's

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jobshout/server/internal/model"
 	"github.com/jobshout/server/internal/research"
@@ -510,5 +511,19 @@ func TestCountCitations(t *testing.T) {
 				t.Errorf("countCitations(%q) = %d, want %d", tt.markdown, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestWrite_PromptsCarryTodaysDate(t *testing.T) {
+	stub := &stubLLM{responses: writeScript("T", "# T\n\nBody [1].")}
+	r := NewRunner(Config{ContentDir: "content/blogs"}, stub, nil, &fakeResearcher{}, testLogger())
+	if _, err := r.Generate(context.Background(), GenerateRequest{Briefs: briefsFor("t")}, nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	today := "Today is " + time.Now().Format("2 January 2006")
+	for i, c := range stub.calls {
+		if !strings.HasPrefix(c.Messages[0].Content, today) {
+			t.Errorf("call %d is not dated: %.60q", i, c.Messages[0].Content)
+		}
 	}
 }
