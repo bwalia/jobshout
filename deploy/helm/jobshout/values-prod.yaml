@@ -36,9 +36,11 @@ ai:
   # once at start, so replace it before its expiry date). Model names are
   # Bedrock inference-profile IDs; eu.* keeps processing inside the EU. Prod
   # only: the other rings stay on Anthropic's defaults in values.yaml.
+  # Offer only models the AWS account has enabled (Bedrock answers 403 for the
+  # rest); add Sonnet/Opus 5.5 here once they are enabled in eu-west-2.
   claudeBaseURL: "https://bedrock-runtime.eu-west-2.amazonaws.com/anthropic"
-  claudeModel: "eu.anthropic.claude-sonnet-5-5"
-  claudeModels: "eu.anthropic.claude-sonnet-5-5,eu.anthropic.claude-opus-5-5,eu.anthropic.claude-haiku-5-5"
+  claudeModel: "eu.anthropic.claude-haiku-4-5-20251001-v1:0"
+  claudeModels: "eu.anthropic.claude-haiku-4-5-20251001-v1:0"
   blogProseNumCtx: 16384
 
 api:
