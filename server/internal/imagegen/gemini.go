@@ -327,12 +327,11 @@ func encodeAsPNG(raw []byte, mime string) ([]byte, int, int, error) {
 // ListModels implements Client.
 func (c *GeminiClient) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	available := c.apiKey != ""
-	return []ModelInfo{
-		{
-			Name:      geminiDefaultModel,
-			Provider:  ProviderGemini,
-			Available: available,
-			Fast:      true,
-		},
-	}, nil
+	// The configured model (IMAGE_GEMINI_MODEL) first, so a per-task choice
+	// can name the model the platform default uses.
+	out := []ModelInfo{{Name: c.defaultModel, Provider: ProviderGemini, Available: available, Fast: true}}
+	if c.defaultModel != geminiDefaultModel {
+		out = append(out, ModelInfo{Name: geminiDefaultModel, Provider: ProviderGemini, Available: available, Fast: true})
+	}
+	return out, nil
 }
