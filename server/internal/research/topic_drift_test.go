@@ -108,6 +108,26 @@ func TestResearch_SeedsCountTowardMaxSources(t *testing.T) {
 	}
 }
 
+// A link the requester wrote into the context is read as a seed: with no web
+// search configured it is the only way to point research at the right page.
+func TestResearch_ReadsLinksInTheContext(t *testing.T) {
+	backend := driftBackend()
+	agent := newTestAgent(t, backend, driftModel(`{"queries": ["agent tracing"]}`))
+	agent.cfg.MaxSources = 1
+
+	if _, err := agent.Research(context.Background(), Request{
+		Topic: driftTopic, Context: "Base it on " + seedURL + ".",
+	}, nil); err != nil {
+		t.Fatalf("Research returned error: %v", err)
+	}
+	if fetched := backend.fetchURLs(); len(fetched) == 0 || fetched[0] != seedURL {
+		t.Errorf("the context's link was not read first: %v", fetched)
+	}
+	if n := backend.searchCalls(); n != 0 {
+		t.Errorf("searched %d times with the source budget filled by the context's link", n)
+	}
+}
+
 func TestResearch_PlannerPromptIncludesFocus(t *testing.T) {
 	model := driftModel(`{"queries": ["observability ai agents"]}`)
 	agent := newTestAgent(t, driftBackend(), model)

@@ -303,7 +303,9 @@ func cleanCoverLabels(in []string) []string {
 	var out []string
 	for _, l := range in {
 		l = labelNoise.Replace(citationMark.ReplaceAllString(l, ""))
-		l = truncateWords(strings.TrimSpace(l), 4, maxCoverLabel)
+		// The box's width is the limit, not a word count: "You let a UK property"
+		// fits, and cutting it at four words left "You let a UK".
+		l = truncateWords(strings.TrimSpace(l), 6, maxCoverLabel)
 		k := strings.ToLower(l)
 		if l == "" && len(out) == 0 {
 			out = append(out, "")

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -765,7 +766,7 @@ func (r *Runner) complete(ctx context.Context, modelName, prompt string, maxToke
 		MaxTokens: maxTokens,
 		NumCtx:    numCtx,
 		JSON:      jsonReply,
-		Messages:  []llm.Message{{Role: llm.RoleUser, Content: prompt}},
+		Messages:  []llm.Message{{Role: llm.RoleUser, Content: asOf(time.Now()) + prompt}},
 	})
 	if err != nil {
 		return nil, err
@@ -774,6 +775,13 @@ func (r *Runner) complete(ctx context.Context, modelName, prompt string, maxToke
 		return nil, fmt.Errorf("empty response from %s", r.llm.ProviderName())
 	}
 	return resp, nil
+}
+
+// asOf dates a prompt. Without it the model writes as of its training data:
+// "Her Majesty's Revenue and Customs", last year's rates and tax year.
+func asOf(now time.Time) string {
+	return "Today is " + now.Format("2 January 2006") +
+		". Write as of today: current names, office-holders, rates and tax years.\n\n"
 }
 
 // formatFindings numbers the verified claims for a prompt.
