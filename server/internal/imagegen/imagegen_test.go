@@ -785,3 +785,14 @@ func TestMFluxClient_OldServiceIsCalledDirectly(t *testing.T) {
 		t.Fatalf("paths = %v", paths)
 	}
 }
+
+func TestListModels_OffersTheConfiguredHostedModel(t *testing.T) {
+	g, _ := NewGeminiClient("", "k", "gemini-3-pro-image").ListModels(context.Background())
+	if len(g) != 2 || g[0].Name != "gemini-3-pro-image" || g[1].Name != geminiDefaultModel {
+		t.Errorf("gemini: got %+v, want the configured model then the built-in", g)
+	}
+	o, _ := NewOpenAIClient("", "k", "gpt-image-1").ListModels(context.Background())
+	if len(o) != 2 || o[0].Name != "gpt-image-1" {
+		t.Errorf("openai: got %+v, want gpt-image-1 once, first", o)
+	}
+}

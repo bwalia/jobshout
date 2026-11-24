@@ -193,8 +193,12 @@ func (c *OpenAIClient) Generate(ctx context.Context, req GenerateRequest) (*Gene
 // options beats one that is empty because discovery was impossible.
 func (c *OpenAIClient) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	available := c.apiKey != ""
-	return []ModelInfo{
-		{Name: "gpt-image-1", Provider: ProviderOpenAI, Available: available},
-		{Name: "dall-e-3", Provider: ProviderOpenAI, Available: available},
-	}, nil
+	// The configured model (IMAGE_OPENAI_MODEL) first, then the built-ins.
+	out := []ModelInfo{{Name: c.defaultModel, Provider: ProviderOpenAI, Available: available}}
+	for _, name := range []string{"gpt-image-1", "dall-e-3"} {
+		if name != c.defaultModel {
+			out = append(out, ModelInfo{Name: name, Provider: ProviderOpenAI, Available: available})
+		}
+	}
+	return out, nil
 }
