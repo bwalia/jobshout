@@ -20,7 +20,7 @@ Org admins (users with the `org:manage` permission) manage keys:
 
 | Scope | Routes |
 |---|---|
-| `runs` | `POST /tasks/launch`, `POST /tasks/{id}/run`, `GET /tasks/{id}/runs`, `GET /task-runs/{id}` |
+| `runs` | `POST /tasks/launch`, `POST /tasks/{id}/run`, `GET /tasks/{id}/runs`, `GET /task-runs/{id}`, `GET /blogs/runs/{id}` (read only; another org's run is a 404) |
 | `approvals` | `GET /approvals`, `GET /approvals/{id}`, `POST /approvals/{id}/decide` |
 | `agents:read` | `GET /agents`, `GET /agents/{id}`, `GET /agent-schemas`, `GET /agent-schemas/generic` |
 | `knowledge` | `GET` and `POST /agents/{id}/knowledge`; `GET`, `PUT` and `DELETE /agents/{id}/knowledge/{fileID}` |

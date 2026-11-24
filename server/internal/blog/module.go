@@ -66,6 +66,13 @@ func schema() agentschema.Schema {
 				Help:        "The OpsAPI namespace the article is filed in. A connected namespace reuses its saved key; a new one asks for its key once. Blank uses the writer's own website, else this ring's CMS.",
 			},
 			{Key: "model", Label: "Model override (optional)", Type: "text", Placeholder: "agent default"},
+			{
+				// Off by default: a launch files nothing until someone presses
+				// Publish. On, the finished articles are filed where Publish
+				// would file them, as drafts, like a scheduled run's.
+				Key: "auto_publish", Label: "File the drafts on the website when finished", Type: "checkbox", Default: "false",
+				Help: "Files the finished articles as drafts where Publish would, without a click. Nothing goes live: a person still publishes each draft.",
+			},
 		},
 		TitleRules: []agentschema.TitleRule{
 			{Prefix: "Write: ", FromKey: "topic", Fallback: "article"},
@@ -119,6 +126,10 @@ func launch(w Writer) agentmodule.LaunchFunc {
 		if w == nil {
 			return nil, fmt.Errorf("article writer is not configured")
 		}
+		autoPublish, err := launchFlag(in.Values["auto_publish"])
+		if err != nil {
+			return nil, fmt.Errorf("auto_publish: %w", err)
+		}
 		uid := in.UserID
 		tid := in.Task.ID
 		// The launched agent writes the run: the Article Writer or a clone of
@@ -140,6 +151,7 @@ func launch(w Writer) agentmodule.LaunchFunc {
 			// A name only; the key stays sealed on the integration.
 			Destination: strings.TrimSpace(in.Values["destination"]),
 			TaskID:      &tid,
+			AutoPublish: autoPublish,
 		})
 		if err != nil {
 			return nil, err
@@ -159,4 +171,17 @@ func launch(w Writer) agentmodule.LaunchFunc {
 			ExtraMeta:   map[string]any{model.TaskMetaRunID: id.String()},
 		}, nil
 	}
+}
+
+// launchFlag reads a checkbox launch value. Blank is off, so launches that
+// never heard of the field keep their behaviour; anything unreadable is refused
+// rather than guessed, because "on" files drafts on a website.
+func launchFlag(v string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", "false", "0", "no", "off":
+		return false, nil
+	case "true", "1", "yes", "on":
+		return true, nil
+	}
+	return false, fmt.Errorf("want true or false, got %q", v)
 }

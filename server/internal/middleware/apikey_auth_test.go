@@ -111,6 +111,7 @@ func TestAPIKeyRouteScope_OpsAPIRoutes(t *testing.T) {
 		{"POST", "/api/v1/tasks/" + id + "/run"}:                         model.ScopeRuns,
 		{"GET", "/api/v1/tasks/" + id + "/runs"}:                         model.ScopeRuns,
 		{"GET", "/api/v1/task-runs/" + id}:                               model.ScopeRuns,
+		{"GET", "/api/v1/blogs/runs/" + id}:                              model.ScopeRuns,
 		{"GET", "/api/v1/approvals"}:                                     model.ScopeApprovals,
 		{"GET", "/api/v1/approvals/"}:                                    model.ScopeApprovals,
 		{"GET", "/api/v1/approvals/" + id}:                               model.ScopeApprovals,
@@ -140,6 +141,20 @@ func TestAPIKeyRouteScope_OpsAPIRoutes(t *testing.T) {
 	}
 	if _, ok := APIKeyRouteScope("PUT", "/api/v1/agents/"+id+"/knowledge/external/../x"); ok {
 		t.Error("dot-segment external key matched")
+	}
+	// Following a blog run is read only: no publishing, retrying or the
+	// articles' bodies through a key.
+	for _, k := range [][2]string{
+		{"POST", "/api/v1/blogs/runs/" + id + "/publish"},
+		{"POST", "/api/v1/blogs/runs/" + id + "/retry"},
+		{"DELETE", "/api/v1/blogs/runs/" + id},
+		{"GET", "/api/v1/blogs/runs/" + id + "/articles"},
+		{"GET", "/api/v1/blogs/runs"},
+		{"POST", "/api/v1/blogs/generate"},
+	} {
+		if _, ok := APIKeyRouteScope(k[0], k[1]); ok {
+			t.Errorf("%s %s matched; an API key may only read a blog run", k[0], k[1])
+		}
 	}
 	if _, ok := APIKeyRouteScope("POST", "/api/v1/approvals/not-a-uuid/decide"); ok {
 		t.Error("non-uuid id matched")

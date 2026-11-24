@@ -107,6 +107,16 @@ Settings → Integrations, and selects it.
   then the ring's CMS (`OPSAPI_*` env). The choice is recorded on the run
   (`options.destination`), so Publish, auto-publish and Retry reach the same
   site even if the agent is repointed later.
+- **File without a click:** a launch (task launch, chat, or an API key with
+  the `runs` scope) can set the Article Writer's `auto_publish` value to
+  `true`. The finished articles are then filed as drafts where Publish would
+  file them, as a scheduled run's are. It is off unless asked; a value other
+  than true/false (`1`/`0`, `yes`/`no`, `on`/`off`) fails the launch with
+  `400`. Nothing goes live: a person still publishes each draft.
+- **Following a run from another system:** the launch answers with the blog
+  run id (`run_id`). An API key with the `runs` scope reads
+  `GET /api/v1/blogs/runs/{id}` (status, article summaries, `error_message`,
+  `published_at`); the same route is a 404 for another org's run.
 - **Validation:** a named website that does not exist, is not active, or lacks
   its key, namespace or URL fails the launch with `400` before any writing
   starts. A website the agent names is still checked only at Publish, as before.
