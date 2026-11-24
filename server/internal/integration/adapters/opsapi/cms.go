@@ -13,7 +13,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"strings"
 	"time"
@@ -114,8 +116,12 @@ type CreatePostRequest struct {
 	AuthorName       string   `json:"author_name,omitempty"`
 	FeaturedImageURL string   `json:"featured_image_url,omitempty"`
 	Tags             []string `json:"tags,omitempty"`
-	SEOTitle         string   `json:"seo_title,omitempty"`
-	SEODescription   string   `json:"seo_description,omitempty"`
+	// CategoryUUIDs files the post under existing categories; the first is
+	// its primary category. Unknown uuids are ignored by opsapi, so callers
+	// resolve names with ListCategories first.
+	CategoryUUIDs  []string `json:"category_uuids,omitempty"`
+	SEOTitle       string   `json:"seo_title,omitempty"`
+	SEODescription string   `json:"seo_description,omitempty"`
 }
 
 // Post is the subset of opsapi's created-post row that JobShout stores. The
@@ -521,3 +527,138 @@ func (c *Client) pageError(resp *http.Response, what, scope, pageUUID string) er
 }
 
 func strconvQuote(s string) string { return fmt.Sprintf("%q", s) }
+
+// Category is one of a namespace's blog categories.
+type Category struct {
+	UUID string `json:"uuid"`
+	Name string `json:"name"`
+	Slug string `json:"slug"`
+}
+
+// ListCategories returns the namespace's blog categories (cms:read).
+func (c *Client) ListCategories(ctx context.Context) ([]Category, error) {
+	resp, err := c.pageCall(ctx, http.MethodGet, "/api/v2/cms/categories", nil)
+	if err != nil {
+		return nil, fmt.Errorf("opsapi: list categories: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.pageError(resp, "list categories", "cms:read", "")
+	}
+	var env struct {
+		Success bool            `json:"success"`
+		Data    json.RawMessage `json:"data"`
+		Error   string          `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		return nil, fmt.Errorf("opsapi: decode category list: %w", err)
+	}
+	if !env.Success && env.Error != "" {
+		return nil, fmt.Errorf("opsapi: list categories: %s", env.Error)
+	}
+	raw := bytes.TrimSpace(env.Data)
+	if len(raw) > 0 && raw[0] == '{' {
+		// A paged shape: {"items": [...]} or {"data": [...]}.
+		var obj map[string]json.RawMessage
+		if json.Unmarshal(raw, &obj) == nil {
+			for _, k := range []string{"items", "categories", "rows", "data"} {
+				if v, ok := obj[k]; ok {
+					raw = v
+					break
+				}
+			}
+		}
+	}
+	var cats []Category
+	if len(raw) > 0 && string(raw) != "null" {
+		if err := json.Unmarshal(raw, &cats); err != nil {
+			return nil, fmt.Errorf("opsapi: decode categories: %w", err)
+		}
+	}
+	return cats, nil
+}
+
+// MaxMediaBytes is opsapi's upload limit for one image.
+const MaxMediaBytes = 8 << 20
+
+// ErrMediaNotConfigured is returned by UploadMedia when the opsapi deployment
+// has no public image storage (CMS_PUBLIC_S3_*): uploads answer 503.
+var ErrMediaNotConfigured = errors.New("opsapi: cms media storage not configured")
+
+// Media is an image in opsapi's CMS media library.
+type Media struct {
+	UUID     string `json:"uuid"`
+	URL      string `json:"url"`
+	MimeType string `json:"mime_type"`
+}
+
+// UploadMedia adds one image to the website's media library via
+// POST /api/v2/cms/media (needs cms:update) and returns its public URL.
+// opsapi works out the type from the bytes (JPEG, PNG, WebP, GIF or SVG; an
+// SVG with scripts is refused) and stores each upload as a new library item.
+// title and alt are optional and shown in the dashboard's media library.
+func (c *Client) UploadMedia(ctx context.Context, filename, contentType string, data []byte, title, alt string) (*Media, error) {
+	if len(data) == 0 {
+		return nil, fmt.Errorf("opsapi: upload media %q: empty file", filename)
+	}
+	if len(data) > MaxMediaBytes {
+		return nil, fmt.Errorf("opsapi: upload media %q: %d bytes is over opsapi's %d byte limit", filename, len(data), MaxMediaBytes)
+	}
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	h := make(textproto.MIMEHeader)
+	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename=%q`, filename))
+	if contentType != "" {
+		h.Set("Content-Type", contentType)
+	}
+	part, err := mw.CreatePart(h)
+	if err != nil {
+		return nil, fmt.Errorf("opsapi: upload media: %w", err)
+	}
+	if _, err := part.Write(data); err != nil {
+		return nil, fmt.Errorf("opsapi: upload media: %w", err)
+	}
+	for k, v := range map[string]string{"title": title, "alt_text": alt} {
+		if v = strings.TrimSpace(v); v != "" {
+			if err := mw.WriteField(k, v); err != nil {
+				return nil, fmt.Errorf("opsapi: upload media: %w", err)
+			}
+		}
+	}
+	if err := mw.Close(); err != nil {
+		return nil, fmt.Errorf("opsapi: upload media: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.BaseURL+"/api/v2/cms/media", &body)
+	if err != nil {
+		return nil, fmt.Errorf("opsapi: build media request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Namespace-Slug", c.cfg.Namespace)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("opsapi: upload media %q: %w", filename, err)
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK, http.StatusCreated:
+	case http.StatusServiceUnavailable:
+		return nil, fmt.Errorf("%w in namespace %q: %s", ErrMediaNotConfigured, c.cfg.Namespace, readBodySnippet(resp))
+	default:
+		return nil, c.pageError(resp, "upload media "+strconvQuote(filename), "cms:update", "")
+	}
+	var env struct {
+		Success bool   `json:"success"`
+		Data    Media  `json:"data"`
+		Error   string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		return nil, fmt.Errorf("opsapi: decode media response: %w", err)
+	}
+	if strings.TrimSpace(env.Data.URL) == "" {
+		return nil, fmt.Errorf("opsapi: upload media %q: no url in response: %s", filename, env.Error)
+	}
+	return &env.Data, nil
+}

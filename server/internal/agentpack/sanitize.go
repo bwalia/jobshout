@@ -20,6 +20,13 @@ var engineAllow = map[string]bool{
 	"writer_industry":    true,
 	"writer_focus":       true,
 	"writer_destination": true,
+	// How the writer files on its website: byline, category and tag names,
+	// content rules and whether images are copied there. None is a secret.
+	"writer_rules":      true,
+	"writer_author":     true,
+	"writer_categories": true,
+	"writer_tags":       true,
+	"writer_cms_images": true,
 }
 
 func isSecretKey(k string) bool {

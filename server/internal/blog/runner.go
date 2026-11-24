@@ -411,6 +411,10 @@ func (r *Runner) Generate(ctx context.Context, req GenerateRequest, progress Pro
 				Context:  strings.TrimSpace(b.Context),
 				Audience: strings.TrimSpace(b.Audience),
 				Industry: strings.TrimSpace(b.Industry),
+				// The writer's house style and content rules. Dropping them
+				// here meant no writer_style ever reached a prompt.
+				Style: strings.TrimSpace(b.Style),
+				Rules: strings.TrimSpace(b.Rules),
 				// A discovered topic's trending pages and the run's focus
 				// areas keep research on the brief. Dropped here, research
 				// started from the topic's wording alone and drifted.
@@ -459,17 +463,20 @@ func (r *Runner) Generate(ctx context.Context, req GenerateRequest, progress Pro
 // nothing is visible to anyone, and deleting them to "clean up" would throw
 // away work the user can simply publish again — the alternative, an
 // all-or-nothing rollback, is not something the CMS API offers anyway.
-func (r *Runner) Publish(ctx context.Context, orgID uuid.UUID, articles []GeneratedArticle, progress ProgressFunc) (*PublishResult, error) {
+func (r *Runner) Publish(ctx context.Context, orgID uuid.UUID, articles []GeneratedArticle, post model.PostSettings, progress ProgressFunc) (*PublishResult, error) {
 	if !r.CanPublish() {
 		return nil, fmt.Errorf("blog: publishing is not configured (set OPSAPI_BASE_URL, OPSAPI_API_KEY and OPSAPI_NAMESPACE)")
 	}
-	return r.PublishTo(ctx, orgID, r.cms, articles, progress)
+	return r.PublishTo(ctx, orgID, r.cms, articles, post, progress)
 }
 
 // PublishTo files articles in cms rather than the ring's CMS. It is how a
 // writer agent configured for its own website — a named opsapi integration —
 // reaches that site instead of the one the ring was deployed with.
-func (r *Runner) PublishTo(ctx context.Context, orgID uuid.UUID, cms CMSPublisher, articles []GeneratedArticle, progress ProgressFunc) (*PublishResult, error) {
+//
+// post is how the writer files on that website — byline, categories, tags and
+// whether its images are copied there. The zero value files as before.
+func (r *Runner) PublishTo(ctx context.Context, orgID uuid.UUID, cms CMSPublisher, articles []GeneratedArticle, post model.PostSettings, progress ProgressFunc) (*PublishResult, error) {
 	if cms == nil {
 		return nil, fmt.Errorf("blog: no CMS to publish to")
 	}
@@ -479,6 +486,13 @@ func (r *Runner) PublishTo(ctx context.Context, orgID uuid.UUID, cms CMSPublishe
 
 	namespace := cms.Namespace()
 	posts := make([]PostedArticle, 0, len(articles))
+
+	// Resolved once, before anything is filed: a category the website does
+	// not have fails the publish here rather than after half the drafts.
+	categories, err := resolveCategories(ctx, cms, post.Categories)
+	if err != nil {
+		return nil, err
+	}
 
 	for i, a := range articles {
 		report(progress, model.BlogStepPublishing,
@@ -515,21 +529,33 @@ func (r *Runner) PublishTo(ctx context.Context, orgID uuid.UUID, cms CMSPublishe
 				fmt.Errorf("blog: publish %d/%d: %w", i+1, len(articles), err)
 		}
 
-		post, err := cms.CreatePost(ctx, opsapi.CreatePostRequest{
+		body := a.HTML
+		if post.CMSImages {
+			report(progress, model.BlogStepPublishing,
+				fmt.Sprintf("Copying images to %s — %s", namespace, a.Topic), model.AgentNameArticleWriter)
+			if body, featured, err = r.HostImages(ctx, cms, a.Title, body, featured); err != nil {
+				return &PublishResult{Namespace: namespace, Posts: posts, PublishedAt: r.clock()},
+					fmt.Errorf("blog: publish %d/%d: %w", i+1, len(articles), err)
+			}
+		}
+
+		created, err := cms.CreatePost(ctx, opsapi.CreatePostRequest{
 			Title:       a.Title,
 			Slug:        a.Slug,
 			Excerpt:     a.Excerpt,
-			ContentHTML: a.HTML,
+			ContentHTML: body,
 			Status:      opsapi.StatusDraft,
-			AuthorName:  r.cfg.AuthorName,
+			AuthorName:  r.postAuthor(post),
 			// Cover → opsapi Featured image: absolute, and verified to exist.
 			FeaturedImageURL: featured,
 			// Tags say who the piece was written for, so an editor opening the
 			// CMS can tell a developer deep dive from a plain-English briefing
 			// without reading either — which is the whole point of running two
 			// schedules into one namespace.
-			Tags:     articleTags(a),
-			SEOTitle: a.Title,
+			// A writer with tags of its own replaces these.
+			Tags:          postTags(a, post),
+			CategoryUUIDs: categories,
+			SEOTitle:      a.Title,
 			// opsapi caps meta descriptions at the same length we trim excerpts
 			// to, so the excerpt serves both without a second derivation.
 			SEODescription: a.Excerpt,
@@ -544,9 +570,9 @@ func (r *Runner) PublishTo(ctx context.Context, orgID uuid.UUID, cms CMSPublishe
 
 		posts = append(posts, PostedArticle{
 			Slug:     a.Slug,
-			PostUUID: post.UUID,
-			PostSlug: post.Slug,
-			Status:   post.Status,
+			PostUUID: created.UUID,
+			PostSlug: created.Slug,
+			Status:   created.Status,
 			// The article's cover, so the caller can persist a backfilled one.
 			// A pre-existing cover is the same value already stored, so writing
 			// it back is a no-op; empty leaves the stored row untouched.

@@ -27,6 +27,26 @@ const (
 	// config exported from one ring finds that ring's own integration (and its
 	// own key) on import. Empty is the ring's CMS.
 	EngineConfigWriterDestination = "writer_destination"
+	// EngineConfigWriterRules is free-text rules every article must keep —
+	// what a regulated site may never say ("no investment advice", "never
+	// promise a return"). Unlike the style, the self-review checks the draft
+	// against them and the revision fixes every break.
+	EngineConfigWriterRules = "writer_rules"
+	// EngineConfigWriterAuthor is the byline on the website's posts. Empty is
+	// the ring's BLOG_AUTHOR_NAME.
+	EngineConfigWriterAuthor = "writer_author"
+	// EngineConfigWriterCategories is the website categories a post is filed
+	// under, by name or slug: a list, or one comma-separated string. They must
+	// already exist on the website; the first is the post's primary category.
+	EngineConfigWriterCategories = "writer_categories"
+	// EngineConfigWriterTags replaces the tags a post gets by default (who it
+	// was written for, and its industry) with these: a list, or one
+	// comma-separated string. Public sites show tags to readers.
+	EngineConfigWriterTags = "writer_tags"
+	// EngineConfigWriterCMSImages, when true, uploads a post's cover and the
+	// images in its body to the website's own image storage (OpsAPI
+	// /api/v2/cms/media), so the site does not load them from this ring.
+	EngineConfigWriterCMSImages = "writer_cms_images"
 )
 
 // WriterSettings is a writer agent's configuration, read from EngineConfig.
@@ -36,6 +56,18 @@ type WriterSettings struct {
 	Industry    string
 	Focus       []string
 	Destination string
+	Rules       string
+	// Post is how the writer's articles are filed on its website.
+	Post PostSettings
+}
+
+// PostSettings is how a writer files posts on its website. The zero value
+// files them as every writer did before these settings existed.
+type PostSettings struct {
+	Author     string   `json:"author,omitempty"`
+	Categories []string `json:"categories,omitempty"`
+	Tags       []string `json:"tags,omitempty"`
+	CMSImages  bool     `json:"cms_images,omitempty"`
 }
 
 // WriterSettingsOf reads a writer agent's settings. A nil agent, or one never
@@ -54,7 +86,26 @@ func WriterSettingsOf(a *Agent) WriterSettings {
 		Industry:    str(EngineConfigWriterIndustry),
 		Focus:       stringList(a.EngineConfig[EngineConfigWriterFocus]),
 		Destination: str(EngineConfigWriterDestination),
+		Rules:       str(EngineConfigWriterRules),
+		Post: PostSettings{
+			Author:     str(EngineConfigWriterAuthor),
+			Categories: stringList(a.EngineConfig[EngineConfigWriterCategories]),
+			Tags:       stringList(a.EngineConfig[EngineConfigWriterTags]),
+			CMSImages:  boolSetting(a.EngineConfig[EngineConfigWriterCMSImages]),
+		},
 	}
+}
+
+// boolSetting reads a JSON boolean, or the strings "true"/"false" a form or
+// an older pack may have saved.
+func boolSetting(v any) bool {
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		return strings.EqualFold(strings.TrimSpace(t), "true")
+	}
+	return false
 }
 
 // ApplyWriterSettings fills what the request left unset from the agent's
@@ -63,6 +114,9 @@ func WriterSettingsOf(a *Agent) WriterSettings {
 func (r *GenerateBlogRequest) ApplyWriterSettings(ws WriterSettings) {
 	if r.Style == "" {
 		r.Style = ws.Style
+	}
+	if r.Rules == "" {
+		r.Rules = ws.Rules
 	}
 	if r.Audience == "" {
 		r.Audience = ws.Audience

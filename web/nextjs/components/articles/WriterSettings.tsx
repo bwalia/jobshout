@@ -31,8 +31,17 @@ function focusText(v: unknown): string {
   return str(v);
 }
 
+function list(text: string): string[] {
+  return text
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 /**
- * A writer agent's own settings: style, keywords, reader, website. This is how
+ * A writer agent's own settings: style, content rules, keywords, reader,
+ * website, and how posts are filed there (byline, categories, tags, images).
+ * This is how
  * the Article Writer is set up for a website or project without code — clone
  * it, then change the clone's settings here. Schedules and launches that name
  * their own keywords or reader still win over these defaults.
@@ -55,6 +64,11 @@ export function WriterSettings({ agentId }: { agentId: string }) {
   const [industry, setIndustry] = useState("");
   const [reader, setReader] = useState("");
   const [destination, setDestination] = useState("");
+  const [rules, setRules] = useState("");
+  const [author, setAuthor] = useState("");
+  const [categories, setCategories] = useState("");
+  const [tags, setTags] = useState("");
+  const [cmsImages, setCmsImages] = useState(false);
   const [addingSite, setAddingSite] = useState(false);
   const [cloneName, setCloneName] = useState("");
   const [cloning, setCloning] = useState(false);
@@ -66,6 +80,11 @@ export function WriterSettings({ agentId }: { agentId: string }) {
     setIndustry(str(cfg[K.industry]));
     setReader(str(cfg[K.audience]));
     setDestination(str(cfg[K.destination]));
+    setRules(str(cfg[K.rules]));
+    setAuthor(str(cfg[K.author]));
+    setCategories(focusText(cfg[K.categories]));
+    setTags(focusText(cfg[K.tags]));
+    setCmsImages(cfg[K.cmsImages] === true || cfg[K.cmsImages] === "true");
   }, [agent]);
 
   if (!agent) return null;
@@ -73,10 +92,7 @@ export function WriterSettings({ agentId }: { agentId: string }) {
   // site overrides the picked website: a website just added is saved at once.
   function save(site = destination) {
     if (!agent) return;
-    const keywords = focus
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const keywords = list(focus);
     update.mutate({
       id: agent.id,
       payload: {
@@ -87,6 +103,11 @@ export function WriterSettings({ agentId }: { agentId: string }) {
           [K.industry]: industry.trim(),
           [K.audience]: reader,
           [K.destination]: site,
+          [K.rules]: rules.trim(),
+          [K.author]: author.trim(),
+          [K.categories]: list(categories),
+          [K.tags]: list(tags),
+          [K.cmsImages]: cmsImages,
         },
       },
     });
@@ -143,6 +164,24 @@ export function WriterSettings({ agentId }: { agentId: string }) {
               placeholder="e.g. Business and technology mix: lead with the benefit, then practical tips and tricks a team can try this week. 700–1,000 words, plain English, end with a short 'Try this' list."
               className={inputClass}
             />
+          </div>
+
+          <div>
+            <label htmlFor="writer-rules" className="text-xs text-muted-foreground">
+              Content rules
+            </label>
+            <textarea
+              id="writer-rules"
+              rows={4}
+              value={rules}
+              onChange={(e) => setRules(e.target.value)}
+              placeholder="e.g. Never give financial or investment advice. Never promise or imply a return. Any figure must be dated and sourced."
+              className={inputClass}
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Stricter than the style: the writer checks its draft against these and fixes every break. One
+              rule per line.
+            </p>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
@@ -236,6 +275,67 @@ export function WriterSettings({ agentId }: { agentId: string }) {
               </p>
             </div>
           </div>
+
+          <fieldset className="grid gap-4 border-t border-border pt-4 sm:grid-cols-2">
+            <legend className="mb-2 text-xs font-medium text-foreground">How posts are filed on the website</legend>
+            <div>
+              <label htmlFor="writer-author" className="text-xs text-muted-foreground">
+                Byline
+              </label>
+              <input
+                id="writer-author"
+                value={author}
+                onChange={(e) => setAuthor(e.target.value)}
+                placeholder="Default byline (set on the server)"
+                className={inputClass}
+              />
+            </div>
+            <div>
+              <label htmlFor="writer-categories" className="text-xs text-muted-foreground">
+                Categories
+              </label>
+              <input
+                id="writer-categories"
+                value={categories}
+                onChange={(e) => setCategories(e.target.value)}
+                placeholder="Market insights"
+                className={inputClass}
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                Comma-separated names or slugs that already exist on the website. The first is the main one.
+              </p>
+            </div>
+            <div>
+              <label htmlFor="writer-tags" className="text-xs text-muted-foreground">
+                Tags
+              </label>
+              <input
+                id="writer-tags"
+                value={tags}
+                onChange={(e) => setTags(e.target.value)}
+                placeholder="Tags for who it was written for"
+                className={inputClass}
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                Comma-separated. Replaces the default tags; readers see these.
+              </p>
+            </div>
+            <label className="flex items-start gap-2 self-center text-sm text-foreground">
+              <input
+                type="checkbox"
+                checked={cmsImages}
+                onChange={(e) => setCmsImages(e.target.checked)}
+                className="mt-1"
+              />
+              <span>
+                Store images on the website
+                <span className="block text-xs text-muted-foreground">
+                  Copies the cover and diagrams to the website&apos;s media library, so the site does not load
+                  them from JobShout.
+                </span>
+              </span>
+            </label>
+          </fieldset>
 
           {addingSite && (
             <AddWebsiteForm
