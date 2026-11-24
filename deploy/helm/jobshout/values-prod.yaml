@@ -30,6 +30,15 @@ ai:
   ollamaTimeout: "45m"
   blogProseModel: "qwen3.8:latest"
   blogMaxRuntime: "120m"
+  # Claude is served by AWS Bedrock (London), through Bedrock's Anthropic
+  # Messages endpoint, which the Claude client speaks unchanged. CLAUDE_API_KEY
+  # in jobshout/prod/llm is therefore a Bedrock API key (long-term: it is read
+  # once at start, so replace it before its expiry date). Model names are
+  # Bedrock inference-profile IDs; eu.* keeps processing inside the EU. Prod
+  # only: the other rings stay on Anthropic's defaults in values.yaml.
+  claudeBaseURL: "https://bedrock-runtime.eu-west-2.amazonaws.com/anthropic"
+  claudeModel: "eu.anthropic.claude-sonnet-5-5"
+  claudeModels: "eu.anthropic.claude-sonnet-5-5,eu.anthropic.claude-opus-5-5,eu.anthropic.claude-haiku-5-5"
   blogProseNumCtx: 16384
 
 api:
