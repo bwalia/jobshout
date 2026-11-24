@@ -22,6 +22,7 @@ package blog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -499,67 +500,13 @@ func (r *Runner) PublishTo(ctx context.Context, orgID uuid.UUID, cms CMSPublishe
 			fmt.Sprintf("Posting %d/%d to %s — %s", i+1, len(articles), namespace, a.Topic),
 			model.AgentNameArticleWriter)
 
-		// Title and Excerpt are derived, not stored: an article loaded back from
-		// blog_articles arrives with markdown and HTML and nothing else. Fill
-		// them in here, or opsapi rejects the post outright for having no title.
-		//
-		// The stored HTML is kept as-is when present — it is what was reviewed
-		// in the UI, so it is what should be sent. Only articles written before
-		// the conversion step existed are rendered on the way out.
-		if a.HTML == "" {
-			if err := a.render(); err != nil {
-				return nil, err
-			}
-		} else {
-			if a.Title == "" {
-				a.Title = articleTitle(a.Markdown, a.Topic)
-			}
-			if a.Excerpt == "" {
-				a.Excerpt = articleExcerpt(a.HTML)
-			}
-		}
-
-		// Every post carries a featured image that is really in storage: the
-		// article's cover, one drawn now, or the branded fallback. A post that
-		// cannot have one is not filed — as a draft it is one click from a live
-		// page with a broken picture.
-		featured, err := r.ensureCover(ctx, orgID, &a, progress)
+		req, err := r.buildPost(ctx, orgID, cms, &a, post, categories, progress)
 		if err != nil {
 			return &PublishResult{Namespace: namespace, Posts: posts, PublishedAt: r.clock()},
 				fmt.Errorf("blog: publish %d/%d: %w", i+1, len(articles), err)
 		}
 
-		body := a.HTML
-		if post.CMSImages {
-			report(progress, model.BlogStepPublishing,
-				fmt.Sprintf("Copying images to %s — %s", namespace, a.Topic), model.AgentNameArticleWriter)
-			if body, featured, err = r.HostImages(ctx, cms, a.Title, body, featured); err != nil {
-				return &PublishResult{Namespace: namespace, Posts: posts, PublishedAt: r.clock()},
-					fmt.Errorf("blog: publish %d/%d: %w", i+1, len(articles), err)
-			}
-		}
-
-		created, err := cms.CreatePost(ctx, opsapi.CreatePostRequest{
-			Title:       a.Title,
-			Slug:        a.Slug,
-			Excerpt:     a.Excerpt,
-			ContentHTML: body,
-			Status:      opsapi.StatusDraft,
-			AuthorName:  r.postAuthor(post),
-			// Cover → opsapi Featured image: absolute, and verified to exist.
-			FeaturedImageURL: featured,
-			// Tags say who the piece was written for, so an editor opening the
-			// CMS can tell a developer deep dive from a plain-English briefing
-			// without reading either — which is the whole point of running two
-			// schedules into one namespace.
-			// A writer with tags of its own replaces these.
-			Tags:          postTags(a, post),
-			CategoryUUIDs: categories,
-			SEOTitle:      a.Title,
-			// opsapi caps meta descriptions at the same length we trim excerpts
-			// to, so the excerpt serves both without a second derivation.
-			SEODescription: a.Excerpt,
-		})
+		created, err := cms.CreatePost(ctx, req)
 		if err != nil {
 			// The drafts posted before this one exist in the CMS. Return
 			// them with the error so the caller can record them — otherwise
@@ -595,4 +542,157 @@ func (r *Runner) PublishTo(ctx context.Context, orgID uuid.UUID, cms CMSPublishe
 		Posts:       posts,
 		PublishedAt: now,
 	}, nil
+}
+
+// buildPost is the CMS post one article is filed as: what PublishTo creates
+// and what Resend sends again. It may draw the article's cover (a.CoverImageURL
+// is then set) and, with post.CMSImages, copy its images to the website.
+func (r *Runner) buildPost(
+	ctx context.Context, orgID uuid.UUID, cms CMSPublisher, a *GeneratedArticle,
+	post model.PostSettings, categories []string, progress ProgressFunc,
+) (opsapi.CreatePostRequest, error) {
+	// Title and Excerpt are derived, not stored: an article loaded back from
+	// blog_articles arrives with markdown and HTML and nothing else. Fill
+	// them in here, or opsapi rejects the post outright for having no title.
+	//
+	// The stored HTML is kept as-is when present — it is what was reviewed
+	// in the UI, so it is what should be sent. Only articles written before
+	// the conversion step existed are rendered on the way out.
+	if a.HTML == "" {
+		if err := a.render(); err != nil {
+			return opsapi.CreatePostRequest{}, err
+		}
+	} else {
+		if a.Title == "" {
+			a.Title = articleTitle(a.Markdown, a.Topic)
+		}
+		if a.Excerpt == "" {
+			a.Excerpt = articleExcerpt(a.HTML)
+		}
+	}
+
+	// Every post carries a featured image that is really in storage: the
+	// article's cover, one drawn now, or the branded fallback. A post that
+	// cannot have one is not filed — as a draft it is one click from a live
+	// page with a broken picture.
+	featured, err := r.ensureCover(ctx, orgID, a, progress)
+	if err != nil {
+		return opsapi.CreatePostRequest{}, err
+	}
+
+	body := a.HTML
+	if post.CMSImages {
+		report(progress, model.BlogStepPublishing,
+			fmt.Sprintf("Copying images to %s — %s", cms.Namespace(), a.Topic), model.AgentNameArticleWriter)
+		if body, featured, err = r.HostImages(ctx, cms, a.Title, body, featured); err != nil {
+			return opsapi.CreatePostRequest{}, err
+		}
+	}
+
+	return opsapi.CreatePostRequest{
+		Title:       a.Title,
+		Slug:        a.Slug,
+		Excerpt:     a.Excerpt,
+		ContentHTML: body,
+		Status:      opsapi.StatusDraft,
+		AuthorName:  r.postAuthor(post),
+		// Cover → opsapi Featured image: absolute, and verified to exist.
+		FeaturedImageURL: featured,
+		// Tags say who the piece was written for, so an editor opening the
+		// CMS can tell a developer deep dive from a plain-English briefing
+		// without reading either — which is the whole point of running two
+		// schedules into one namespace.
+		// A writer with tags of its own replaces these.
+		Tags:          postTags(*a, post),
+		CategoryUUIDs: categories,
+		SEOTitle:      a.Title,
+		// opsapi caps meta descriptions at the same length we trim excerpts
+		// to, so the excerpt serves both without a second derivation.
+		SEODescription: a.Excerpt,
+	}, nil
+}
+
+// CMSPostUpdater rewrites an existing post in place. The opsapi client
+// implements it; declared apart from CMSPublisher so fakes that only create
+// drafts keep compiling.
+type CMSPostUpdater interface {
+	UpdatePost(ctx context.Context, postUUID string, req opsapi.UpdatePostRequest) (*opsapi.Post, error)
+}
+
+// Resend actions: what Resend did with the article's post.
+const (
+	ResendUpdated = "updated"
+	ResendCreated = "created"
+)
+
+// ResendResult is where one resent article landed.
+type ResendResult struct {
+	PostedArticle
+	Namespace string `json:"namespace"`
+	// Action is ResendUpdated (the existing post was rewritten in place) or
+	// ResendCreated (a new draft was filed: the article had no post, or the
+	// CMS no longer had it).
+	Action string `json:"action"`
+}
+
+// Resend sends one stored article to cms again, as it is — nothing is
+// rewritten. The payload is the one PublishTo builds.
+//
+// postUUID is the post the article was filed as, "" when it never was. That
+// post is updated in place (content, title, excerpt, cover, tags, categories,
+// SEO), keeping its status and slug: a post an editor already took live stays
+// live at its URL. If the CMS no longer has it (deleted in its dashboard) the
+// article is filed again as a new draft, exactly as Publish would.
+func (r *Runner) Resend(
+	ctx context.Context, orgID uuid.UUID, cms CMSPublisher, a GeneratedArticle, postUUID string, post model.PostSettings,
+) (*ResendResult, error) {
+	if cms == nil {
+		return nil, fmt.Errorf("blog: no CMS to publish to")
+	}
+	categories, err := resolveCategories(ctx, cms, post.Categories)
+	if err != nil {
+		return nil, err
+	}
+	req, err := r.buildPost(ctx, orgID, cms, &a, post, categories, nil)
+	if err != nil {
+		return nil, err
+	}
+	out := &ResendResult{Namespace: cms.Namespace()}
+
+	if postUUID = strings.TrimSpace(postUUID); postUUID != "" {
+		updater, ok := cms.(CMSPostUpdater)
+		if !ok {
+			return nil, fmt.Errorf("blog: this CMS client cannot update an existing post")
+		}
+		updated, uerr := updater.UpdatePost(ctx, postUUID, opsapi.UpdatePostRequest{
+			Title: req.Title, Excerpt: req.Excerpt, ContentHTML: req.ContentHTML,
+			AuthorName: req.AuthorName, FeaturedImageURL: req.FeaturedImageURL,
+			Tags: req.Tags, CategoryUUIDs: req.CategoryUUIDs,
+			SEOTitle: req.SEOTitle, SEODescription: req.SEODescription,
+		})
+		switch {
+		case uerr == nil:
+			out.PostedArticle = PostedArticle{Slug: a.Slug, PostUUID: updated.UUID, PostSlug: updated.Slug,
+				Status: updated.Status, CoverImageURL: a.CoverImageURL}
+			if out.PostUUID == "" {
+				out.PostUUID = postUUID
+			}
+			out.Action = ResendUpdated
+			return out, nil
+		case errors.Is(uerr, opsapi.ErrPostNotFound):
+			r.logger.Warn("blog: resend found no post in the CMS, filing a new draft",
+				zap.String("namespace", out.Namespace), zap.String("post_uuid", postUUID), zap.String("slug", a.Slug))
+		default:
+			return nil, uerr
+		}
+	}
+
+	created, err := cms.CreatePost(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	out.PostedArticle = PostedArticle{Slug: a.Slug, PostUUID: created.UUID, PostSlug: created.Slug,
+		Status: created.Status, CoverImageURL: a.CoverImageURL}
+	out.Action = ResendCreated
+	return out, nil
 }

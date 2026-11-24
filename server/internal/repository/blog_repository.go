@@ -57,6 +57,13 @@ type BlogRepository interface {
 	UpdateArticleImageRedraw(ctx context.Context, articleID uuid.UUID, redraw model.ImageRedraw) error
 	// UpdateArticleBody stores a redrawn article's markdown and the HTML it renders to.
 	UpdateArticleBody(ctx context.Context, articleID uuid.UUID, markdown, html string) error
+	// ClaimArticleResend marks a Resend to OpsAPI of the article as in flight.
+	// False when another resend holds the claim and it is younger than
+	// staleAfter (an older one was abandoned by a pod that died).
+	ClaimArticleResend(ctx context.Context, articleID uuid.UUID, staleAfter time.Duration) (bool, error)
+	// FinishArticleResend records a resend's outcome and releases the claim.
+	// post, when set, is the CMS post the article now has.
+	FinishArticleResend(ctx context.Context, articleID uuid.UUID, rec model.ArticleResend, post *model.BlogArticlePost) error
 	// UpdateArticles writes the run's lightweight per-article summaries, so a
 	// brief can be persisted without a full terminal Update racing the step
 	// trace.
@@ -151,7 +158,8 @@ const blogArticleColumns = `
 	id, run_id, org_id, topic, title, slug, path, references_json, markdown, html,
 	post_uuid, post_status, posted_at, word_count, created_at,
 	cover_image_url, cover_image_prompt, cover_image_meta,
-	insights_item_id, insights_slug, insights_status, insights_posted_at, audience, industry, image_redraw`
+	insights_item_id, insights_slug, insights_status, insights_posted_at, audience, industry, image_redraw,
+	last_resend`
 
 // scanBlogArticle reads one row in blogArticleColumns order.
 func scanBlogArticle(row pgx.Row) (*model.BlogArticle, error) {
@@ -168,13 +176,14 @@ func scanBlogArticle(row pgx.Row) (*model.BlogArticle, error) {
 	// audience/industry are nullable: every article written before readers
 	// existed is a developer piece, which the audience package spells as empty.
 	var aud, industry *string
-	var redrawRaw []byte
+	var redrawRaw, resendRaw []byte
 	err := row.Scan(
 		&a.ID, &a.RunID, &a.OrgID, &a.Topic, &title, &a.Slug, &a.Path, &referencesRaw,
 		&a.Markdown, &a.HTML,
 		&a.PostUUID, &a.PostStatus, &a.PostedAt, &a.WordCount, &a.CreatedAt,
 		&coverURL, &coverPrompt, &coverMetaRaw,
 		&a.InsightsItemID, &a.InsightsSlug, &a.InsightsStatus, &a.InsightsPostedAt, &aud, &industry, &redrawRaw,
+		&resendRaw,
 	)
 	if err != nil {
 		return nil, err
@@ -201,6 +210,12 @@ func scanBlogArticle(row pgx.Row) (*model.BlogArticle, error) {
 		var rd model.ImageRedraw
 		if json.Unmarshal(redrawRaw, &rd) == nil {
 			a.ImageRedraw = &rd
+		}
+	}
+	if len(resendRaw) > 0 {
+		var rs model.ArticleResend
+		if json.Unmarshal(resendRaw, &rs) == nil {
+			a.LastResend = &rs
 		}
 	}
 	// Fall back to the topic so the UI always has something to show, matching
@@ -499,6 +514,48 @@ func (r *blogRepository) UpdateArticleImageRedraw(ctx context.Context, articleID
 	}
 	if _, err := r.pool.Exec(ctx, `UPDATE blog_articles SET image_redraw = $2 WHERE id = $1`, articleID, raw); err != nil {
 		return fmt.Errorf("blog_repo: update article image redraw: %w", err)
+	}
+	return nil
+}
+
+func (r *blogRepository) ClaimArticleResend(ctx context.Context, articleID uuid.UUID, staleAfter time.Duration) (bool, error) {
+	// One conditional UPDATE is the lock: of two concurrent claims, Postgres
+	// lets exactly one see the column NULL (or stale) and set it.
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE blog_articles SET resend_started_at = NOW()
+		WHERE id = $1
+		  AND (resend_started_at IS NULL OR resend_started_at < NOW() - make_interval(secs => $2))`,
+		articleID, staleAfter.Seconds())
+	if err != nil {
+		return false, fmt.Errorf("blog_repo: claim article resend: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+func (r *blogRepository) FinishArticleResend(
+	ctx context.Context, articleID uuid.UUID, rec model.ArticleResend, post *model.BlogArticlePost,
+) error {
+	raw, err := json.Marshal(rec)
+	if err != nil {
+		return fmt.Errorf("blog_repo: encode article resend: %w", err)
+	}
+	var postUUID, postStatus, cover string
+	if post != nil {
+		postUUID, postStatus, cover = post.PostUUID, post.Status, post.CoverImageURL
+	}
+	// A new post (the article had none, or the CMS lost it) moves posted_at;
+	// an update in place keeps the original filing time.
+	_, err = r.pool.Exec(ctx, `
+		UPDATE blog_articles SET
+		    last_resend       = $2,
+		    resend_started_at = NULL,
+		    posted_at         = CASE WHEN $3 <> '' AND post_uuid IS DISTINCT FROM $3 THEN NOW() ELSE posted_at END,
+		    post_uuid         = COALESCE(NULLIF($3, ''), post_uuid),
+		    post_status       = COALESCE(NULLIF($4, ''), post_status),
+		    cover_image_url   = COALESCE(NULLIF($5, ''), cover_image_url)
+		WHERE id = $1`, articleID, raw, postUUID, postStatus, cover)
+	if err != nil {
+		return fmt.Errorf("blog_repo: finish article resend: %w", err)
 	}
 	return nil
 }
