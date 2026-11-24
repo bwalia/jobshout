@@ -37,9 +37,6 @@ extraSecretRefs:
   # Secrets Rotation: SECRETS_VAULT_ADDR / SECRETS_VAULT_TOKEN / RP_API_TOKEN
   # (and optional SECRETS_ROT_GITHUB_TOKEN).
   - jobshout-secretsrot
-  # GEMINI_API_KEY: registers Gemini as an LLM provider (int's default, see
-  # ai.provider) and as the first-choice image backend.
-  - jobshout-gemini
   # Shared workstation gateway secrets: OLLAMA_JWT_SECRET and IMAGE_JWT_SECRET.
   # The chart renders jobshout-secrets with them empty, so without this the
   # image gateway (images.workstation.co.uk) refuses every cover request (403)
@@ -98,9 +95,6 @@ vaultSecrets:
   - name: jobshout-secretsrot
     store: wslvault-backend
     key: jobshout/int/secretsrot
-  - name: jobshout-gemini
-    store: wslvault-backend
-    key: jobshout/int/gemini
   - name: jobshout-gateways
     store: wslvault-backend
     key: jobshout/int/gateways
@@ -129,7 +123,7 @@ ai:
   enabled: true
   # Gemini is int's default text provider: the Article Writer, Course
   # Generator, Research and every agent without a provider of its own use it.
-  # Needs GEMINI_API_KEY from the jobshout-gemini secret above.
+  # Needs GEMINI_API_KEY from the jobshout-llm secret above.
   provider: gemini
   geminiModel: "gemini-flash-latest"
   ollamaBaseURL: "https://ollama.workstation.co.uk"

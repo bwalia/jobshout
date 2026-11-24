@@ -95,7 +95,7 @@ secrets:
   databasePassword: ""
   jwtSecret: ""
   openaiApiKey: ""
-  # Prefer jobshout/<ring>/gemini → jobshout-gemini; never committed here.
+  # Prefer jobshout/<ring>/llm → jobshout-llm; never committed here.
   geminiApiKey: ""
   # Prefer jobshout/<ring>/gateways → jobshout-gateways; never committed here.
   ollamaJwtSecret: ""
