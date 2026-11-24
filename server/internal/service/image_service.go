@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -105,6 +106,19 @@ func (s *ImageService) Generate(ctx context.Context, req GenerateImageRequest) (
 		return nil, fmt.Errorf("a prompt is required")
 	}
 
+	source := req.Source
+	if source == "" {
+		source = model.ImageSourceManual
+	}
+	if req.Provider == "" && req.Model == "" && s.repo != nil {
+		// The org's model for this task, while its provider is configured.
+		if routes, err := s.repo.Routes(ctx, req.OrgID); err != nil {
+			s.logger.Warn("image routes unavailable; using the platform default", zap.Error(err))
+		} else if rt, ok := routes[source]; ok && s.HasProvider(rt.Provider) {
+			req.Provider, req.Model = rt.Provider, rt.Model
+		}
+	}
+
 	seed := req.Seed
 	if seed == 0 {
 		// Zero is the zero value of an omitted field, not a request for seed 0.
@@ -149,10 +163,6 @@ func (s *ImageService) Generate(ctx context.Context, req GenerateImageRequest) (
 	}
 
 	if s.repo != nil {
-		source := req.Source
-		if source == "" {
-			source = model.ImageSourceManual
-		}
 		record := &model.GeneratedImage{
 			OrgID:      req.OrgID,
 			CreatedBy:  req.UserID,
@@ -184,6 +194,27 @@ func (s *ImageService) ListModels(ctx context.Context) []imagegen.ModelInfo {
 		return nil
 	}
 	return s.router.ListModels(ctx)
+}
+
+// HasProvider reports whether the named image provider is configured.
+func (s *ImageService) HasProvider(name string) bool {
+	return s.Enabled() && slices.Contains(s.router.Providers(), name)
+}
+
+// Routes returns the org's image model per task.
+func (s *ImageService) Routes(ctx context.Context, orgID uuid.UUID) (map[string]model.ImageRoute, error) {
+	if s == nil || s.repo == nil {
+		return map[string]model.ImageRoute{}, nil
+	}
+	return s.repo.Routes(ctx, orgID)
+}
+
+// SetRoutes replaces the org's image model per task. The caller validates.
+func (s *ImageService) SetRoutes(ctx context.Context, orgID uuid.UUID, routes map[string]model.ImageRoute, updatedBy *uuid.UUID) error {
+	if s == nil || s.repo == nil {
+		return fmt.Errorf("image routing needs a database")
+	}
+	return s.repo.PutRoutes(ctx, orgID, routes, updatedBy)
 }
 
 // DefaultProvider names the provider used when a request does not choose one.

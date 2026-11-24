@@ -19,6 +19,33 @@ const (
 	ImageSourceManual = "manual"
 )
 
+// ImageRoute is the provider and model an org picks for one image task. An
+// empty Model is that provider's default.
+type ImageRoute struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model,omitempty"`
+}
+
+// ImageTask is one kind of image the platform draws, keyed by the Source its
+// images are recorded with.
+type ImageTask struct {
+	Source string `json:"source"`
+	Label  string `json:"label"`
+}
+
+// ImageTasks are the tasks an org can give their own image model, in the
+// order the settings page lists them.
+var ImageTasks = []ImageTask{
+	{ImageSourceBlogCover, "Article covers"},
+	{ImageSourceBlogInline, "Article figures"},
+	{"marketing_email", "Marketing emails"},
+	{"course", "Course images"},
+	{"task_manager", "Image Generator agent"},
+	{ImageSourceAgentTool, "Agents (generate_image tool)"},
+	{"chat", "Chat"},
+	{ImageSourceManual, "Images page, when no model is picked"},
+}
+
 // GeneratedImage records one image the platform produced.
 type GeneratedImage struct {
 	ID    uuid.UUID `json:"id"`
@@ -52,8 +79,8 @@ type GeneratedImage struct {
 // CoverImage is an article's cover: where it is, what asked for it, and enough
 // detail to draw it again.
 type CoverImage struct {
-	URL    string `json:"url"`
-	Prompt string `json:"prompt"`
+	URL    string         `json:"url"`
+	Prompt string         `json:"prompt"`
 	Meta   CoverImageMeta `json:"meta"`
 }
 

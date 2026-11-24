@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -20,6 +22,10 @@ type ImageRepository interface {
 	Create(ctx context.Context, img *model.GeneratedImage) error
 	ListByOrg(ctx context.Context, orgID uuid.UUID, limit int) ([]model.GeneratedImage, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*model.GeneratedImage, error)
+	// Routes returns the org's image model per task (empty when it chose none).
+	Routes(ctx context.Context, orgID uuid.UUID) (map[string]model.ImageRoute, error)
+	// PutRoutes replaces the org's image model per task.
+	PutRoutes(ctx context.Context, orgID uuid.UUID, routes map[string]model.ImageRoute, updatedBy *uuid.UUID) error
 }
 
 type imageRepository struct {
@@ -124,4 +130,39 @@ func (r *imageRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.Gen
 		return nil, fmt.Errorf("image_repo: get image: %w", err)
 	}
 	return img, nil
+}
+
+func (r *imageRepository) Routes(ctx context.Context, orgID uuid.UUID) (map[string]model.ImageRoute, error) {
+	var raw []byte
+	err := r.pool.QueryRow(ctx, `SELECT routes FROM org_image_routing WHERE org_id = $1`, orgID).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return map[string]model.ImageRoute{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("org_image_routing: get: %w", err)
+	}
+	routes := map[string]model.ImageRoute{}
+	if err := json.Unmarshal(raw, &routes); err != nil {
+		return nil, fmt.Errorf("org_image_routing: decode: %w", err)
+	}
+	return routes, nil
+}
+
+func (r *imageRepository) PutRoutes(ctx context.Context, orgID uuid.UUID, routes map[string]model.ImageRoute, updatedBy *uuid.UUID) error {
+	if routes == nil {
+		routes = map[string]model.ImageRoute{}
+	}
+	raw, err := json.Marshal(routes)
+	if err != nil {
+		return fmt.Errorf("org_image_routing: encode: %w", err)
+	}
+	_, err = r.pool.Exec(ctx, `
+		INSERT INTO org_image_routing (org_id, routes, updated_by) VALUES ($1, $2, $3)
+		ON CONFLICT (org_id) DO UPDATE
+		SET routes = EXCLUDED.routes, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+		orgID, raw, updatedBy)
+	if err != nil {
+		return fmt.Errorf("org_image_routing: put: %w", err)
+	}
+	return nil
 }

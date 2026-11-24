@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -121,6 +122,63 @@ func (h *ImageHandler) Generate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	RespondJSON(w, http.StatusOK, resp)
+}
+
+// imageRoutingResponse is GET/PUT /api/v1/images/routing: the tasks an org
+// can give its own image model, and the ones it has.
+type imageRoutingResponse struct {
+	Tasks  []model.ImageTask           `json:"tasks"`
+	Routes map[string]model.ImageRoute `json:"routes"`
+}
+
+func (h *ImageHandler) respondRouting(w http.ResponseWriter, r *http.Request, orgID uuid.UUID) {
+	routes, err := h.images.Routes(r.Context(), orgID)
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, "failed to load image routing")
+		return
+	}
+	RespondJSON(w, http.StatusOK, imageRoutingResponse{Tasks: model.ImageTasks, Routes: routes})
+}
+
+// Routing handles GET /api/v1/images/routing.
+func (h *ImageHandler) Routing(w http.ResponseWriter, r *http.Request) {
+	if orgID, ok := h.orgFromRequest(w, r); ok {
+		h.respondRouting(w, r, orgID)
+	}
+}
+
+// PutRouting handles PUT /api/v1/images/routing. Every route names a known
+// task and a configured provider; a task left out uses the platform default.
+func (h *ImageHandler) PutRouting(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := h.orgFromRequest(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Routes map[string]model.ImageRoute `json:"routes"`
+	}
+	if !DecodeJSON(w, r, &req) {
+		return
+	}
+	for source, rt := range req.Routes {
+		if !slices.ContainsFunc(model.ImageTasks, func(t model.ImageTask) bool { return t.Source == source }) {
+			RespondError(w, http.StatusBadRequest, "unknown image task "+source)
+			return
+		}
+		if !h.images.HasProvider(rt.Provider) {
+			RespondError(w, http.StatusBadRequest, "image provider "+rt.Provider+" is not configured")
+			return
+		}
+	}
+	var userID *uuid.UUID
+	if parsed, err := uuid.Parse(middleware.GetUserID(r.Context())); err == nil {
+		userID = &parsed
+	}
+	if err := h.images.SetRoutes(r.Context(), orgID, req.Routes, userID); err != nil {
+		RespondError(w, http.StatusInternalServerError, "failed to save image routing")
+		return
+	}
+	h.respondRouting(w, r, orgID)
 }
 
 // imageModelsResponse is the payload behind the image model picker. It mirrors

@@ -67,3 +67,21 @@ export interface GeneratedImage {
   duration_ms: number;
   created_at: string;
 }
+
+/** One kind of image the platform draws (generated_images.source). */
+export interface ImageTask {
+  source: string;
+  label: string;
+}
+
+/** The provider and model an org picks for one image task. */
+export interface ImageRoute {
+  provider: string;
+  model?: string;
+}
+
+/** GET/PUT /images/routing. A task without a route uses the platform default. */
+export interface ImageRoutingResponse {
+  tasks: ImageTask[];
+  routes: Record<string, ImageRoute>;
+}

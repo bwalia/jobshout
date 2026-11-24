@@ -6,6 +6,7 @@ import { AlertTriangle, ChevronRight } from "lucide-react";
 import { LLMBenchmarksPanel } from "@/components/panels/LLMBenchmarksPanel";
 import { ProviderDrawer } from "@/components/llm/ProviderDrawer";
 import { FallbackChainCard } from "@/components/llm/FallbackChainCard";
+import { ImageRoutingCard } from "@/components/image/ImageRoutingCard";
 import { testLLMProvider } from "@/lib/api/llm-providers";
 import { apiErrorMessage } from "@/lib/api/client";
 import { toast } from "sonner";
@@ -373,6 +374,8 @@ function ProvidersTab() {
       </section>
 
       <FallbackChainCard providers={providers ?? []} builtin={builtinProviders ?? []} />
+
+      <ImageRoutingCard />
       {openProvider && <ProviderDrawer provider={openProvider} onClose={() => setOpenProvider(null)} />}
     </div>
   );
