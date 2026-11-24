@@ -136,6 +136,10 @@ type BlogBrief struct {
 	// brief — tone, length, what to include. It rides on the brief so a retry
 	// writes the same way, and is free text for the same reason Context is.
 	Style string `json:"style,omitempty"`
+	// Rules are the writing agent's non-negotiable content rules. Like Style
+	// they ride on the brief, but the self-review also checks the draft
+	// against them and the revision fixes every break.
+	Rules string `json:"rules,omitempty"`
 }
 
 // BlogRun records a single invocation of the article pipeline.
@@ -208,6 +212,9 @@ type BlogRunOptions struct {
 	// reach the site the articles were written for even if the agent is
 	// repointed later. Empty is the ring's CMS.
 	Destination string `json:"destination,omitempty"`
+	// Rules are the content rules the run was asked to keep, so discovered
+	// briefs — and a retry — are held to the same rules.
+	Rules string `json:"rules,omitempty"`
 }
 
 // RunOptions extracts what a run records about how it was asked to work.
@@ -223,6 +230,7 @@ func (r *GenerateBlogRequest) RunOptions() BlogRunOptions {
 		Writer:        r.Writer,
 		Style:         r.Style,
 		Destination:   r.Destination,
+		Rules:         r.Rules,
 	}
 }
 
@@ -434,6 +442,9 @@ type GenerateBlogRequest struct {
 	// writer_destination. A name, never a key: the key stays sealed on the
 	// integration. Empty is the agent's website, else the ring's CMS.
 	Destination string `json:"destination,omitempty"`
+	// Rules are content rules every brief in the run must keep. A run usually
+	// takes them from its agent's writer_rules rather than naming them.
+	Rules string `json:"rules,omitempty"`
 }
 
 // Normalize folds the legacy Topics field into Briefs and trims empties, so
@@ -455,6 +466,7 @@ func (r *GenerateBlogRequest) Normalize() {
 	}
 	r.Industry = audience.NormalizeIndustry(r.Industry)
 	r.Style = strings.TrimSpace(r.Style)
+	r.Rules = strings.TrimSpace(r.Rules)
 
 	briefs := make([]BlogBrief, 0, len(r.Briefs)+len(r.Topics))
 	for _, b := range r.Briefs {
@@ -468,6 +480,7 @@ func (r *GenerateBlogRequest) Normalize() {
 			Audience: r.resolveAudience(b.Audience),
 			Industry: r.resolveIndustry(b.Industry),
 			Style:    firstNonEmpty(b.Style, r.Style),
+			Rules:    firstNonEmpty(strings.TrimSpace(b.Rules), r.Rules),
 			Seeds:    b.Seeds,
 			Focus:    b.Focus,
 		})
@@ -500,6 +513,7 @@ func (r *GenerateBlogRequest) Normalize() {
 			Audience: r.Audience,
 			Industry: r.Industry,
 			Style:    r.Style,
+			Rules:    r.Rules,
 		})
 	}
 	r.Briefs = briefs

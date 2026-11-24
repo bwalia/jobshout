@@ -139,7 +139,7 @@ func TestGenerate_RendersHTML(t *testing.T) {
 
 func TestPublish_WithoutCMSIsRefused(t *testing.T) {
 	r := newTestRunner(nil)
-	_, err := r.Publish(context.Background(), uuid.Nil, []GeneratedArticle{{Topic: "x", Markdown: "# x"}}, nil)
+	_, err := r.Publish(context.Background(), uuid.Nil, []GeneratedArticle{{Topic: "x", Markdown: "# x"}}, model.PostSettings{}, nil)
 	if err == nil {
 		t.Fatal("expected Publish to be refused without a CMS")
 	}
@@ -150,7 +150,7 @@ func TestPublish_WithoutCMSIsRefused(t *testing.T) {
 
 func TestPublish_NothingToPublish(t *testing.T) {
 	r := newTestRunner(&fakeCMS{})
-	if _, err := r.Publish(context.Background(), uuid.Nil, nil, nil); err == nil {
+	if _, err := r.Publish(context.Background(), uuid.Nil, nil, model.PostSettings{}, nil); err == nil {
 		t.Fatal("expected an error when publishing zero articles")
 	}
 }
@@ -166,7 +166,7 @@ func TestPublish_AlwaysCreatesDrafts(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 
-	result, err := r.Publish(context.Background(), uuid.Nil, arts, nil)
+	result, err := r.Publish(context.Background(), uuid.Nil, arts, model.PostSettings{}, nil)
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestPublish_SendsFeaturedImageURL(t *testing.T) {
 		Title: "Covered", Excerpt: "Has a cover.",
 		HTML:          "<p>Body</p>",
 		CoverImageURL: "/api/v1/images/file/org/2026/08/cover.png",
-	}}, nil)
+	}}, model.PostSettings{}, nil)
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestPublish_BackfillsMissingCover(t *testing.T) {
 		Title: "Coverless", Excerpt: "No cover stored.",
 		HTML: "<p>Body</p>",
 		// CoverImageURL deliberately empty.
-	}}, nil)
+	}}, model.PostSettings{}, nil)
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -268,7 +268,7 @@ func TestPublish_CoverFailureFilesFallbackCover(t *testing.T) {
 
 	result, err := r.Publish(context.Background(), uuid.Nil, []GeneratedArticle{{
 		Topic: "x", Slug: "x", Title: "X", Excerpt: "e", HTML: "<p>b</p>",
-	}}, nil)
+	}}, model.PostSettings{}, nil)
 	if err != nil {
 		t.Fatalf("publish must succeed even when the cover cannot be drawn: %v", err)
 	}
@@ -295,7 +295,7 @@ func TestPublish_NoIllustratorStillFilesACover(t *testing.T) {
 
 	if _, err := r.Publish(context.Background(), uuid.Nil, []GeneratedArticle{{
 		Topic: "plain", Slug: "plain", Title: "Plain", Excerpt: "e", HTML: "<p>b</p>",
-	}}, nil); err != nil {
+	}}, model.PostSettings{}, nil); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	if cms.posts[0].FeaturedImageURL == "" {
@@ -312,7 +312,7 @@ func TestPublish_ReplacesCoverMissingFromStorage(t *testing.T) {
 	if _, err := r.Publish(context.Background(), uuid.Nil, []GeneratedArticle{{
 		Topic: "stale", Slug: "stale", Title: "Stale", Excerpt: "e", HTML: "<p>b</p>",
 		CoverImageURL: "/api/v1/images/file/org/2026/08/gone.png",
-	}}, nil); err != nil {
+	}}, model.PostSettings{}, nil); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	if strings.HasSuffix(cms.posts[0].FeaturedImageURL, "gone.png") {
@@ -329,7 +329,7 @@ func TestPublish_DoesNotTrustForeignCoverURL(t *testing.T) {
 	if _, err := r.Publish(context.Background(), uuid.Nil, []GeneratedArticle{{
 		Topic: "f", Slug: "f", Title: "F", Excerpt: "e", HTML: "<p>b</p>",
 		CoverImageURL: "https://www.example.com/img/blog/f/cover.svg",
-	}}, nil); err != nil {
+	}}, model.PostSettings{}, nil); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	if strings.Contains(cms.posts[0].FeaturedImageURL, "example.com") {
@@ -346,7 +346,7 @@ func TestPublish_RefusesWithoutPublicBaseURL(t *testing.T) {
 
 	_, err := r.Publish(context.Background(), uuid.Nil, []GeneratedArticle{{
 		Topic: "n", Slug: "n", Title: "N", Excerpt: "e", HTML: "<p>b</p>",
-	}}, nil)
+	}}, model.PostSettings{}, nil)
 	if err == nil || !strings.Contains(err.Error(), "FRONTEND_BASE_URL") {
 		t.Fatalf("want a refusal naming FRONTEND_BASE_URL, got %v", err)
 	}
@@ -363,7 +363,7 @@ func TestPublish_RendersArticlesWithoutHTML(t *testing.T) {
 
 	_, err := r.Publish(context.Background(), uuid.Nil, []GeneratedArticle{{
 		Topic: "legacy", Slug: "legacy", Markdown: "# Legacy\n\nStored before HTML existed.",
-	}}, nil)
+	}}, model.PostSettings{}, nil)
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -445,7 +445,7 @@ func TestPublish_RecomputesDerivedFieldsFromStoredArticle(t *testing.T) {
 		HTML:     "<p>Start with the events.</p>",
 	}
 
-	if _, err := r.Publish(context.Background(), uuid.Nil, []GeneratedArticle{stored}, nil); err != nil {
+	if _, err := r.Publish(context.Background(), uuid.Nil, []GeneratedArticle{stored}, model.PostSettings{}, nil); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	if len(cms.posts) != 1 {

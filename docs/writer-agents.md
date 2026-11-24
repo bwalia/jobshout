@@ -35,11 +35,42 @@ One Article Writer pipeline serves every website. A new site or style is a
    | Industry | `writer_industry` | Banking, Education, HealthTech, FinTech, Tax Returns |
    | Written for | `writer_audience` | `developer`, `technote` or `business` |
    | Website | `writer_destination` | Workstation Website |
+   | Content rules | `writer_rules` | Never give investment advice. Never promise or imply a return. |
+   | Byline | `writer_author` | Portfolio Lab |
+   | Categories | `writer_categories` | Market insights |
+   | Tags | `writer_tags` | UK property, Gulf investors |
+   | Store images on the website | `writer_cms_images` | `true` |
 
    The model is the agent's own model (Models tab), as before.
 
+   - **Writing style** goes to the planning, drafting and expanding prompts.
+   - **Content rules** go to the same prompts and also to the self-review,
+     which flags every sentence that breaks one, and to the revision, which
+     has to fix it. Use them for what a site may never say (a regulated
+     business's compliance lines); use the style for tone.
+   - **Byline** replaces the ring's `BLOG_AUTHOR_NAME` on this writer's posts.
+   - **Categories** must already exist on the website (names or slugs; the
+     first is the primary category). A name the website does not have fails
+     Publish before any draft is filed, and the error lists the ones it has.
+   - **Tags** replace the default tags (who the piece was written for, and
+     its industry). Public sites show tags to readers.
+   - **Store images on the website** copies the cover, the article's own
+     images and its diagrams to the website's OpsAPI media library
+     (`POST /api/v2/cms/media`, needs `cms:update`) and points the post at
+     those copies, so the site does not load pictures from this ring or from
+     mermaid.ink. Regenerate cover and Redraw images copy the new pictures
+     too. The OpsAPI must have image storage (`GET /api/v2/cms/media/config`
+     → `configured: true`); without it Publish fails rather than leaving the
+     pictures here. Other image URLs in a post are left alone.
+
+   Byline, categories, tags and images are read from the writer when a run is
+   filed, so fixing them applies to runs still waiting for Publish.
+
 4. **Schedule.** Create a `blog` schedule with `agent_id` set to the clone and
-   `{"trending": true, "trending_count": 1, "auto_publish": true}`. Keywords,
+   `{"trending": true, "trending_count": 1, "auto_publish": true}`.
+   Trending topics come from Hacker News and arXiv only, so they suit a
+   technology site. For any other kind of site, schedule runs with briefs
+   (`topics` or `briefs`, each with its own context) instead of `trending`. Keywords,
    industry and reader come from the agent; a schedule that names its own wins,
    so one agent can serve several schedules.
 

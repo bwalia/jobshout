@@ -504,6 +504,24 @@ func (s *blogService) destinationName(ctx context.Context, run *model.BlogRun) (
 	return model.WriterSettingsOf(agent).Destination, nil
 }
 
+// postSettings is how a run's posts are filed on its website — byline,
+// categories, tags, images — read from its writer agent when it is filed, so
+// fixing a writer's category or byline applies to a run waiting for Publish.
+// A run with no agent files as before.
+func (s *blogService) postSettings(ctx context.Context, run *model.BlogRun) (model.PostSettings, error) {
+	if run.AgentID == nil {
+		return model.PostSettings{}, nil
+	}
+	agent, err := s.agentRepo.FindByID(ctx, *run.AgentID)
+	if err != nil {
+		return model.PostSettings{}, fmt.Errorf("blog_svc: read the run's writer: %w", err)
+	}
+	if agent == nil || agent.OrgID != run.OrgID {
+		return model.PostSettings{}, nil
+	}
+	return model.WriterSettingsOf(agent).Post, nil
+}
+
 // destination is the CMS a run's articles are filed in: its named opsapi
 // integration when it has one, else nil for the ring's CMS.
 //
@@ -1357,11 +1375,15 @@ func (s *blogService) Publish(ctx context.Context, orgID uuid.UUID, runID uuid.U
 	run.Steps = append(run.Steps, publishSteps()...)
 	tracker := s.newTracker(run)
 
+	post, err := s.postSettings(ctx, run)
+	if err != nil {
+		return nil, err
+	}
 	var result *blog.PublishResult
 	if dest != nil {
-		result, err = s.runner.PublishTo(ctx, orgID, dest, articles, tracker.advance)
+		result, err = s.runner.PublishTo(ctx, orgID, dest, articles, post, tracker.advance)
 	} else {
-		result, err = s.runner.Publish(ctx, orgID, articles, tracker.advance)
+		result, err = s.runner.Publish(ctx, orgID, articles, post, tracker.advance)
 	}
 	if err != nil {
 		// Drafts posted before the failure are recorded, so a retry skips
@@ -1645,6 +1667,7 @@ func (s *blogService) Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUI
 		Industry: run.Options.Industry,
 		Writer:   run.Options.Writer,
 		Style:    run.Options.Style,
+		Rules:    run.Options.Rules,
 		// The same website, so the retried articles file where the rest did.
 		Destination: run.Options.Destination,
 		AgentID:     run.AgentID,
@@ -1721,6 +1744,7 @@ func discoveryRetryRequest(run *model.BlogRun) model.GenerateBlogRequest {
 		Industry:      run.Options.Industry,
 		Writer:        run.Options.Writer,
 		Style:         run.Options.Style,
+		Rules:         run.Options.Rules,
 		Destination:   run.Options.Destination,
 		AgentID:       run.AgentID,
 	}
@@ -2067,6 +2091,15 @@ func (s *blogService) RegenerateCover(ctx context.Context, orgID, articleID uuid
 		if !ok || updater == nil {
 			return a, fmt.Errorf("blog_svc: cover saved but the CMS client cannot update featured images")
 		}
+		// A writer whose images live on its website gets the new cover
+		// copied there too, not pointed back at this ring.
+		if post, perr := s.articlePostSettings(ctx, a); perr != nil {
+			return a, fmt.Errorf("blog_svc: cover saved but CMS sync failed: %w", perr)
+		} else if post.CMSImages {
+			if _, abs, err = s.runner.HostImages(ctx, cms, a.Title, "", abs); err != nil {
+				return a, fmt.Errorf("blog_svc: cover saved but copying it to the website failed: %w", err)
+			}
+		}
 		if _, err := updater.UpdateFeaturedImage(ctx, *a.PostUUID, abs); err != nil {
 			return a, fmt.Errorf("blog_svc: cover saved but CMS featured image update failed: %w", err)
 		}
@@ -2088,6 +2121,15 @@ func (s *blogService) articleCMS(ctx context.Context, a *model.BlogArticle) (blo
 		return dest, nil
 	}
 	return s.runner.RingCMS(), nil
+}
+
+// articlePostSettings is how the article's run files on its website.
+func (s *blogService) articlePostSettings(ctx context.Context, a *model.BlogArticle) (model.PostSettings, error) {
+	run, err := s.repo.GetByID(ctx, a.RunID)
+	if err != nil {
+		return model.PostSettings{}, fmt.Errorf("looking up run: %w", err)
+	}
+	return s.postSettings(ctx, run)
 }
 
 // postImagesUpdater is implemented by the opsapi client: a redrawn article
@@ -2176,7 +2218,17 @@ func (s *blogService) RedrawImages(ctx context.Context, orgID, articleID uuid.UU
 	if !ok || updater == nil {
 		return a, res, fmt.Errorf("blog_svc: images redrawn but the CMS client cannot update posts")
 	}
-	if _, err := updater.UpdatePostImages(ctx, *a.PostUUID, a.HTML, blog.PublicImageURL(s.runner.PublicBaseURL(), a.CoverImageURL)); err != nil {
+	body, cover := a.HTML, blog.PublicImageURL(s.runner.PublicBaseURL(), a.CoverImageURL)
+	post, err := s.articlePostSettings(ctx, a)
+	if err != nil {
+		return a, res, fmt.Errorf("blog_svc: images redrawn but CMS sync failed: %w", err)
+	}
+	if post.CMSImages {
+		if body, cover, err = s.runner.HostImages(ctx, cms, a.Title, body, cover); err != nil {
+			return a, res, fmt.Errorf("blog_svc: images redrawn but copying them to the website failed: %w", err)
+		}
+	}
+	if _, err := updater.UpdatePostImages(ctx, *a.PostUUID, body, cover); err != nil {
 		return a, res, fmt.Errorf("blog_svc: images redrawn but CMS post update failed: %w", err)
 	}
 	return a, res, nil

@@ -115,3 +115,48 @@ func TestDestinationPrecedenceAndRecorded(t *testing.T) {
 		t.Error("an over-long destination name should be rejected")
 	}
 }
+
+func TestWriterSettingsOfReadsPostSettingsAndRules(t *testing.T) {
+	ws := WriterSettingsOf(writerAgent(map[string]any{
+		EngineConfigWriterRules:      " Never promise a return. ",
+		EngineConfigWriterAuthor:     " Portfolio Lab ",
+		EngineConfigWriterCategories: []any{"Market insights", " "},
+		EngineConfigWriterTags:       "UK property, Gulf investors",
+		EngineConfigWriterCMSImages:  true,
+	}))
+	want := PostSettings{
+		Author:     "Portfolio Lab",
+		Categories: []string{"Market insights"},
+		Tags:       []string{"UK property", "Gulf investors"},
+		CMSImages:  true,
+	}
+	if !reflect.DeepEqual(ws.Post, want) {
+		t.Errorf("post = %#v, want %#v", ws.Post, want)
+	}
+	if ws.Rules != "Never promise a return." {
+		t.Errorf("rules = %q", ws.Rules)
+	}
+	if ws := WriterSettingsOf(writerAgent(map[string]any{EngineConfigWriterCMSImages: "true"})); !ws.Post.CMSImages {
+		t.Error(`cms images saved as the string "true" read as off`)
+	}
+}
+
+// A run takes the agent's rules unless it names its own, keeps them on every
+// brief, and records them so a retry is held to the same rules.
+func TestRulesRideFromAgentToBriefsAndRun(t *testing.T) {
+	req := GenerateBlogRequest{Briefs: []BlogBrief{{Topic: "a"}, {Topic: "b", Rules: "Brief's own."}}}
+	req.ApplyWriterSettings(WriterSettings{Rules: "Agent's rules."})
+	req.Normalize()
+	if req.Briefs[0].Rules != "Agent's rules." || req.Briefs[1].Rules != "Brief's own." {
+		t.Errorf("brief rules = %q, %q", req.Briefs[0].Rules, req.Briefs[1].Rules)
+	}
+	if req.RunOptions().Rules != "Agent's rules." {
+		t.Errorf("run options rules = %q", req.RunOptions().Rules)
+	}
+
+	named := GenerateBlogRequest{Rules: "Run's own."}
+	named.ApplyWriterSettings(WriterSettings{Rules: "Agent's rules."})
+	if named.Rules != "Run's own." {
+		t.Errorf("a run's own rules were replaced: %q", named.Rules)
+	}
+}

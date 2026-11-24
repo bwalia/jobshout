@@ -324,4 +324,9 @@ export const WRITER_SETTING_KEYS = {
   industry: "writer_industry",
   focus: "writer_focus",
   destination: "writer_destination",
+  rules: "writer_rules",
+  author: "writer_author",
+  categories: "writer_categories",
+  tags: "writer_tags",
+  cmsImages: "writer_cms_images",
 } as const;

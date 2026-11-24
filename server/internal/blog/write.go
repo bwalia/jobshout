@@ -303,7 +303,7 @@ Find concrete problems. Look specifically for:
   generic office instead of a labeled figure (flow, comparison, architecture,
   process, or annotated concept). Flag it so the revision can rewrite the
   fence as a specific kind with the facts to render.
-%s
+%s%s
 
 List each problem as one specific, actionable sentence naming where it occurs.
 If the draft has no real problems, return an empty list — do not invent work.
@@ -312,7 +312,7 @@ Respond with JSON only, in exactly this shape:
 {"issues": ["...", "..."]}`,
 		reader.ReviewLine(),
 		plan.Title, plan.Angle, formatSources(rb), markdown,
-		reader.ReviewExtras())
+		reader.ReviewExtras(), rulesCheck(brief))
 
 	var c critique
 	if err := r.generateJSON(ctx, modelName, "review", prompt, maxPlanTokens, &c); err != nil {
@@ -346,7 +346,7 @@ AVAILABLE SOURCES (cite by number):
 
 PROBLEMS TO FIX:
 %s
-
+%s
 CURRENT DRAFT:
 %s
 
@@ -370,7 +370,7 @@ article's actual labels, rows or steps. Do not add a "Further Reading" or
 Return only the revised markdown article — no preamble, no commentary on what
 you changed.`,
 		reader.IndefinitePiece(), reader.Reader,
-		plan.Title, formatSources(rb), formatIssues(c.Issues), markdown)
+		plan.Title, formatSources(rb), formatIssues(c.Issues), rulesBlock(brief), markdown)
 
 	resp, err := r.generate(ctx, modelName, brief, prompt)
 	if err != nil {
@@ -560,7 +560,7 @@ func industryBlock(brief model.BlogBrief) string {
 	if s != "" {
 		s = "\n" + s + "\n"
 	}
-	return s + styleBlock(brief)
+	return s + styleBlock(brief) + rulesBlock(brief)
 }
 
 // styleBlock is the writer agent's own style instructions, when it has any.
@@ -575,6 +575,42 @@ func styleBlock(brief model.BlogBrief) string {
 	return "\nHOUSE STYLE — this writer's own instructions. Follow them for tone, length,\n" +
 		"structure and what to include; they never override the rules on sources and\n" +
 		"citations:\n" + style + "\n"
+}
+
+// rulesBlock is the writer agent's content rules, when it has any. They are
+// stricter than the style: the review checks the draft against them (see
+// rulesCheck) and the revision has to fix every break.
+func rulesBlock(brief model.BlogBrief) string {
+	rules := strings.TrimSpace(brief.Rules)
+	if rules == "" {
+		return ""
+	}
+	return "\nCONTENT RULES — non-negotiable. Every sentence must keep these. Where a rule\n" +
+		"and the angle or the house style disagree, the rule wins; leave the point out\n" +
+		"rather than break a rule:\n" + rules + "\n"
+}
+
+// rulesCheck is the review's extra check for a writer with content rules.
+func rulesCheck(brief model.BlogBrief) string {
+	rules := strings.TrimSpace(brief.Rules)
+	if rules == "" {
+		return ""
+	}
+	// Starts on its own line: the audience's review checks before it end
+	// without a newline.
+	return "\n- BREAKS OF THE WRITER'S CONTENT RULES. Check every sentence against these\n" +
+		"  rules and flag each one that breaks a rule, quoting it and naming the rule.\n" +
+		"  A break is always a problem, however good the sentence is otherwise:\n" +
+		indentLines(rules, "  ") + "\n"
+}
+
+// indentLines prefixes every line of s.
+func indentLines(s, prefix string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	for i, l := range lines {
+		lines[i] = prefix + l
+	}
+	return strings.Join(lines, "\n")
 }
 
 // expand fills out an article that came in under the target length.
