@@ -2127,6 +2127,8 @@ func main() {
 			// registered above, outside auth, so CMS covers stay loadable.
 			r.Route("/images", func(r chi.Router) {
 				r.Get("/models", imageHandler.ListModels)
+				r.Get("/routing", imageHandler.Routing)
+				r.With(middleware.RequirePermission(rbacSvc, model.PermOrgManage)).Put("/routing", imageHandler.PutRouting)
 				r.Post("/generate", imageHandler.Generate)
 				r.Post("/upload", imageHandler.Upload)
 				r.Get("/", imageHandler.List)

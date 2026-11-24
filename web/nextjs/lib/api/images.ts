@@ -4,10 +4,22 @@ import type {
   GenerateImageRequest,
   GenerateImageResponse,
   ImageModelsResponse,
+  ImageRoute,
+  ImageRoutingResponse,
 } from "@/lib/types/image";
 
 export async function getImageModels(): Promise<ImageModelsResponse> {
   const { data } = await apiClient.get<ImageModelsResponse>("/images/models");
+  return data;
+}
+
+export async function getImageRouting(): Promise<ImageRoutingResponse> {
+  const { data } = await apiClient.get<ImageRoutingResponse>("/images/routing");
+  return data;
+}
+
+export async function putImageRouting(routes: Record<string, ImageRoute>): Promise<ImageRoutingResponse> {
+  const { data } = await apiClient.put<ImageRoutingResponse>("/images/routing", { routes });
   return data;
 }
 
