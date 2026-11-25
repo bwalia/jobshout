@@ -413,6 +413,12 @@ func articleTerms(markdown string, max int) []string {
 			count[base] += count[t] // "APIs" is "API"
 			continue
 		}
+		// A lone letter ("B" of "B200", "D" of "3D") is never a thing to label:
+		// it has no lowercase tail, so it passed as a name and a cover read
+		// "B, API, D".
+		if len([]rune(t)) < 2 {
+			continue
+		}
 		single := !strings.Contains(t, " ")
 		if single && strings.ToLower(t[1:]) == t[1:] && !mid[t] {
 			continue

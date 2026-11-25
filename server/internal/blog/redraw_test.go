@@ -184,6 +184,17 @@ func TestArticleTerms(t *testing.T) {
 	}
 }
 
+// A clinic article on the RTX PRO 6000 drew a hub labelled "B, API, D".
+func TestArticleTerms_NoLoneLetters(t *testing.T) {
+	md := "# Title\n\nThe Blackwell B 200 card renders 3D scans; a clinic's PACS reads them.\n" +
+		"Plan B is a cloud API, and option D is waiting. Blackwell cuts the wait.\n"
+	for _, term := range articleTerms(md, 10) {
+		if len([]rune(term)) < 2 {
+			t.Errorf("lone letter %q in %q", term, articleTerms(md, 10))
+		}
+	}
+}
+
 // Both model scenes unusable: the cover is a hub of what the article names,
 // centred on the term its title names — not a flow of its headings.
 func TestGroundedCover_FallsBackToTheArticlesTerms(t *testing.T) {
