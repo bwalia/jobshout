@@ -192,7 +192,11 @@ func artPrompt(scene coverScene, accent string) string {
 	// The plan's scene of the subject; else the labels, which name steps and
 	// ideas rather than things, so the art is only roughly on topic.
 	subject := strings.TrimRight(strings.TrimSpace(scene.Picture), ".")
+	// The scene may name the people in it ("a radiologist reading scans");
+	// the house rule against people applies only to a scene made of labels.
+	avoid := "No text, letters, numbers, labels, captions, signs, screens with writing, logos or watermarks."
 	if subject == "" {
+		avoid = "No text, letters, numbers, labels, captions, signs, screens with writing, logos, watermarks or people."
 		subject = strings.ToLower(strings.Join(scene.Labels, ", "))
 		if scene.Eyebrow != "" {
 			subject = strings.ToLower(scene.Eyebrow) + ": " + subject
@@ -202,9 +206,8 @@ func artPrompt(scene coverScene, accent string) string {
 	return fmt.Sprintf("A wide, atmospheric editorial illustration of %s, "+
 		"shown as real objects and places, never as written words. "+
 		"Deep navy background, one %s accent colour (#%02x%02x%02x) as soft glowing light, isometric 3D, "+
-		"cinematic depth of field, rich detail toward the edges and a calm, uncluttered middle. "+
-		"No text, letters, numbers, labels, captions, signs, screens with writing, logos, watermarks or people.",
-		subject, accent, pal[2].R, pal[2].G, pal[2].B)
+		"cinematic depth of field, rich detail toward the edges and a calm, uncluttered middle. %s",
+		subject, accent, pal[2].R, pal[2].G, pal[2].B, avoid)
 }
 
 // artTries is how many pictures drawArt asks for. The image service makes one

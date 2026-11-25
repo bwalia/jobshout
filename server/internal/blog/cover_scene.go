@@ -174,7 +174,7 @@ const maxCoverPicture = 300
 
 // coverPictureAsk is what every plan prompt asks for in "picture". The example
 // is from an unrelated field, so a copied one cannot pass for the article.
-const coverPictureAsk = `a "picture" of one sentence: a real scene showing the article's subject as physical things in a place a reader would recognise (for an article on bakery deliveries: "a delivery van loading trays of bread outside a small high-street bakery at dawn"), with no screens, words or diagrams`
+const coverPictureAsk = `a "picture" of one sentence: a real scene showing the article's subject as physical things in a place a reader would recognise (for an article on bakery deliveries: "a delivery van loading trays of bread outside a small high-street bakery at dawn"), with nothing that carries writing: no signs, papers, forms, books, screens or diagrams, since the image model letters them and a picture with words in it is thrown away`
 
 // percentStat finds a headline percentage such as "68%" in a title.
 var percentStat = regexp.MustCompile(`[-+−]?\d{1,3}(?:\.\d+)?\s?%`)
