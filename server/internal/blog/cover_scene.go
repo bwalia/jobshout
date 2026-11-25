@@ -54,6 +54,10 @@ type coverScene struct {
 	Labels  []string    `json:"labels"`
 	Stat    string      `json:"stat,omitempty"`
 	Eyebrow string      `json:"eyebrow,omitempty"`
+	// Picture is the real-world scene the art under the diagram shows: the
+	// article's subject as things in a place. Without it the art was drawn
+	// from the labels, and a property-tax cover came out as a server room.
+	Picture string `json:"picture,omitempty"`
 }
 
 // UnmarshalJSON accepts the shapes a model gives a scene: the object asked
@@ -83,9 +87,11 @@ func (s *coverScene) UnmarshalJSON(b []byte) error {
 				}
 			}
 		}
-		var stat, eyebrow []string
+		var stat, eyebrow, picture []string
 		collectStrings(t["stat"], &stat)
 		collectStrings(t["eyebrow"], &eyebrow)
+		collectStrings(t["picture"], &picture)
+		s.Picture = strings.Join(picture, " ")
 		if num, ok := t["stat"].(float64); ok {
 			stat = []string{strconv.FormatFloat(num, 'f', -1, 64)}
 		}
@@ -159,8 +165,16 @@ func coverSceneFor(a *GeneratedArticle) coverScene {
 		s.Eyebrow = derived.Eyebrow
 	}
 	s.Eyebrow = strings.ToUpper(truncateWords(strings.TrimSpace(s.Eyebrow), 3, 26))
+	s.Picture = truncateRunes(strings.TrimSpace(s.Picture), maxCoverPicture)
 	return s
 }
+
+// maxCoverPicture bounds the scene sentence, so the art prompt stays a prompt.
+const maxCoverPicture = 300
+
+// coverPictureAsk is what every plan prompt asks for in "picture". The example
+// is from an unrelated field, so a copied one cannot pass for the article.
+const coverPictureAsk = `a "picture" of one sentence: a real scene showing the article's subject as physical things in a place a reader would recognise (for an article on bakery deliveries: "a delivery van loading trays of bread outside a small high-street bakery at dawn"), with no screens, words or diagrams`
 
 // percentStat finds a headline percentage such as "68%" in a title.
 var percentStat = regexp.MustCompile(`[-+−]?\d{1,3}(?:\.\d+)?\s?%`)

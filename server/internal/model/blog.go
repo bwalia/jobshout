@@ -215,6 +215,8 @@ type BlogRunOptions struct {
 	// Rules are the content rules the run was asked to keep, so discovered
 	// briefs — and a retry — are held to the same rules.
 	Rules string `json:"rules,omitempty"`
+	// Provider is the run's own LLM provider, so a retry uses it again.
+	Provider string `json:"provider,omitempty"`
 }
 
 // RunOptions extracts what a run records about how it was asked to work.
@@ -231,6 +233,7 @@ func (r *GenerateBlogRequest) RunOptions() BlogRunOptions {
 		Style:         r.Style,
 		Destination:   r.Destination,
 		Rules:         r.Rules,
+		Provider:      r.Provider,
 	}
 }
 
@@ -387,6 +390,11 @@ type GenerateBlogRequest struct {
 	// Topics is the legacy form: a bare list of subjects with no context.
 	Topics []string `json:"topics,omitempty"`
 	Model  string   `json:"model,omitempty"`
+	// Provider is the LLM provider for this run, beating the agent's: a schedule
+	// can write on Ollama while hand-started runs use the agent's Claude. Empty
+	// or "auto" is the agent's provider. A provider other than the agent's drops
+	// the agent's models too, which name that provider's models.
+	Provider string `json:"provider,omitempty"`
 	// Trending, when set, tells the pipeline to discover what to write about
 	// instead of taking it from the request.
 	//

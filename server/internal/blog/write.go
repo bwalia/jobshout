@@ -144,13 +144,14 @@ Decide:
    argument (do not default to flow: use flow only when the point is a
    sequence of steps), with 2-6 labels of 1-3 words each in this article's own terms
    (section ideas, not sector names), a "stat" only when a finding states that
-   exact figure (otherwise ""), and an "eyebrow" of 1-3 words naming the field.
+   exact figure (otherwise ""), an "eyebrow" of 1-3 words naming the field, and
+   %s.
 %s
 %s
 The title must be about the TOPIC given above; research that wandered off it is not a reason to change subject.
 
 Respond with JSON only, in exactly this shape:
-{"title": "...", "angle": "...", "sections": ["...", "..."], "cover_accent": "...", "cover_scene": {"layout": "...", "labels": ["...", "..."], "stat": "", "eyebrow": "..."}%s}`,
+{"title": "...", "angle": "...", "sections": ["...", "..."], "cover_accent": "...", "cover_scene": {"layout": "...", "labels": ["...", "..."], "stat": "", "eyebrow": "...", "picture": "..."}%s}`,
 		reader.PlanningLine(),
 		brief.Topic,
 		guidanceOrNone(brief.Context),
@@ -159,6 +160,7 @@ Respond with JSON only, in exactly this shape:
 		formatFindings(rb.Findings),
 		reader.TitleStyle,
 		reader.Sections,
+		coverPictureAsk,
 		coverLayoutGuide,
 		figureAsk,
 		extraJSON,

@@ -104,6 +104,11 @@ func (r *Runner) RedrawImages(ctx context.Context, orgID uuid.UUID, a *Generated
 	// back to the heuristic in coverSceneFor.
 	a.CoverAccent = ""
 	a.CoverScene = r.groundedCover(ctx, a.Title, md, scene)
+	// A replanned or derived scene has no picture; the first plan's still
+	// describes the article.
+	if a.CoverScene.Picture == "" {
+		a.CoverScene.Picture = scene.Picture
+	}
 	if strings.TrimSpace(a.CoverAngle) == "" {
 		a.CoverAngle = strings.TrimSpace(a.Excerpt)
 	}
@@ -129,7 +134,7 @@ func (r *Runner) planRedraw(ctx context.Context, title, markdown string) (*write
 	}
 	prompt := fmt.Sprintf(`Read this finished article and plan its pictures. Use only what the article says; skip the references.
 
-1. A cover diagram of the article's central claim. Pick the one layout below whose meaning matches what the article argues. Do not default to flow: use flow only when the article's point is a sequence of steps. Give 2-6 labels of 1-3 words each, copied from the article's own terms (the things it names, not section titles or generic words), a "stat" only when the article states that exact figure (otherwise ""), and an "eyebrow" of 1-3 words naming the field.
+1. A cover diagram of the article's central claim. Pick the one layout below whose meaning matches what the article argues. Do not default to flow: use flow only when the article's point is a sequence of steps. Give 2-6 labels of 1-3 words each, copied from the article's own terms (the things it names, not section titles or generic words), a "stat" only when the article states that exact figure (otherwise ""), an "eyebrow" of 1-3 words naming the field, and %s.
 %s
 
 2. The one or two sections where a figure would teach the reader most. Each figure names a kind (%s), a section, and its content.
@@ -144,8 +149,8 @@ THINGS THE ARTICLE NAMES (take cover and figure labels from these): %s
 ARTICLE:
 %s
 
-Respond with JSON only: {"cover_scene": {"layout": "...", "labels": ["...", "..."], "stat": "", "eyebrow": "..."}, "figures": [{"kind": "process", "section": "...", "content": "..."}]}`,
-		coverLayoutGuide, kinds, format, title, strings.Join(headings, "\n- "), strings.Join(articleTerms(markdown, 12), ", "), body)
+Respond with JSON only: {"cover_scene": {"layout": "...", "labels": ["...", "..."], "stat": "", "eyebrow": "...", "picture": "..."}, "figures": [{"kind": "process", "section": "...", "content": "..."}]}`,
+		coverPictureAsk, coverLayoutGuide, kinds, format, title, strings.Join(headings, "\n- "), strings.Join(articleTerms(markdown, 12), ", "), body)
 
 	var out struct {
 		CoverScene coverScene   `json:"cover_scene"`

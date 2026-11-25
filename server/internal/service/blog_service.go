@@ -401,6 +401,19 @@ func agentModels(agent *model.Agent) (prose, structured string) {
 	return prose, structured
 }
 
+// runModels is the provider a run calls and the agent's models it may use. A
+// provider named on the run beats the agent's; one that differs drops the
+// agent's models, which belong to the agent's provider. A model named on the
+// run still beats both; see blog.GenerateRequest for the full order.
+func runModels(agent *model.Agent, req model.GenerateBlogRequest) (provider, prose, structured string) {
+	provider = agentProvider(agent)
+	prose, structured = agentModels(agent)
+	if p := llm.NormalizeProvider(req.Provider); p != "" && p != provider {
+		return p, "", ""
+	}
+	return provider, prose, structured
+}
+
 // agentProvider is the LLM provider set on the agent, or "" for the server's.
 func agentProvider(agent *model.Agent) string {
 	if agent == nil || agent.ModelProvider == nil {
@@ -1093,8 +1106,16 @@ func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, age
 	// A trending run has no subject yet — find one before anything else, and
 	// record it on the run so what it chose is visible while it writes rather
 	// than only once it finishes.
+	// The run's provider and models, settled once: discovery and writing must
+	// call the same provider, or a Claude model name reaches Ollama.
+	provider, agentProse, agentStructured := runModels(agent, req)
+
 	if req.Trending {
-		briefs, derr := s.discoverBriefs(ctx, run, req, tracker)
+		dctx := ctx
+		if provider != "" {
+			dctx = llm.WithProvider(ctx, provider)
+		}
+		briefs, derr := s.discoverBriefs(dctx, run, req, tracker)
 		if superseded.Load() {
 			log.Info("blog: attempt superseded, abandoning it", zap.Int("attempt", run.Attempt))
 			return
@@ -1116,10 +1137,6 @@ func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, age
 		}
 	}
 
-	// What the org configured on the agent in the UI. A model named on this
-	// particular run still wins; see blog.GenerateRequest for the full order.
-	agentProse, agentStructured := agentModels(agent)
-
 	_, err := s.runner.Generate(ctx, blog.GenerateRequest{
 		OrgID:                run.OrgID,
 		RunID:                &run.ID,
@@ -1128,7 +1145,7 @@ func (s *blogService) runGeneration(ctx context.Context, run *model.BlogRun, age
 		MaxArticles:          req.MaxArticles,
 		AgentProseModel:      agentProse,
 		AgentStructuredModel: agentStructured,
-		AgentProvider:        agentProvider(agent),
+		AgentProvider:        provider,
 		OnArticle:            func(a blog.GeneratedArticle) error { return s.persistArticle(run, a) },
 	}, tracker.advance)
 
@@ -1668,6 +1685,7 @@ func (s *blogService) Retry(ctx context.Context, orgID uuid.UUID, runID uuid.UUI
 		Writer:   run.Options.Writer,
 		Style:    run.Options.Style,
 		Rules:    run.Options.Rules,
+		Provider: run.Options.Provider,
 		// The same website, so the retried articles file where the rest did.
 		Destination: run.Options.Destination,
 		AgentID:     run.AgentID,
@@ -1745,6 +1763,7 @@ func discoveryRetryRequest(run *model.BlogRun) model.GenerateBlogRequest {
 		Writer:        run.Options.Writer,
 		Style:         run.Options.Style,
 		Rules:         run.Options.Rules,
+		Provider:      run.Options.Provider,
 		Destination:   run.Options.Destination,
 		AgentID:       run.AgentID,
 	}
