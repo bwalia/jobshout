@@ -9,7 +9,7 @@ import {
   Search,
   Pencil,
   Trash2,
-  ChevronLeft,
+  Menu,
   ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
@@ -117,9 +117,11 @@ function SectionHeader({
 function SidebarBody({
   collapsed,
   onToggleCollapse,
+  toggleLabel,
 }: {
   collapsed: boolean;
   onToggleCollapse?: () => void;
+  toggleLabel?: string;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -173,8 +175,9 @@ function SidebarBody({
 
   return (
     <aside
+      id="app-sidebar"
       className={cn(
-        "flex h-full flex-col border-r border-sidebar-border bg-sidebar",
+        "flex h-full flex-col overflow-x-hidden border-r border-sidebar-border bg-sidebar transition-[width] duration-200 ease-out",
         collapsed ? "w-[72px]" : "w-[260px]"
       )}
     >
@@ -184,6 +187,19 @@ function SidebarBody({
           collapsed ? "h-auto flex-col py-3" : "h-14"
         )}
       >
+        {onToggleCollapse && (
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-sidebar-foreground transition-colors hover:bg-sidebar-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label={toggleLabel}
+            aria-expanded={!collapsed}
+            aria-controls="app-sidebar"
+            title={toggleLabel}
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+        )}
         <Link
           href="/panel/dashboard"
           title="JobShout home"
@@ -212,19 +228,6 @@ function SidebarBody({
             className="flex h-10 w-10 items-center justify-center rounded-md text-sidebar-foreground hover:bg-sidebar-muted hover:text-foreground"
           >
             <Search className="h-5 w-5" />
-          </button>
-        )}
-        {onToggleCollapse && (
-          <button
-            type="button"
-            onClick={onToggleCollapse}
-            className={cn(
-              "hidden h-8 w-8 shrink-0 items-center justify-center rounded-md text-sidebar-foreground hover:bg-sidebar-muted hover:text-foreground lg:flex",
-              collapsed && "rotate-180"
-            )}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            <ChevronLeft className="h-4 w-4" />
           </button>
         )}
       </div>
@@ -418,12 +421,43 @@ export function ChatSidebar() {
     setMobileSidebarOpen(false);
   }, [pathname, searchParams, setMobileSidebarOpen]);
 
+  // Ctrl/Cmd+B toggles the sidebar (desktop) like most editors; never while
+  // typing, where it means "bold".
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== "b") return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+      e.preventDefault();
+      if (window.matchMedia("(min-width: 1024px)").matches) toggleSidebar();
+      else setMobileSidebarOpen(!useUiStore.getState().mobileSidebarOpen);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [toggleSidebar, setMobileSidebarOpen]);
+
+  // The mobile drawer closes on Escape and stops the page behind it scrolling.
+  useEffect(() => {
+    if (!mobileSidebarOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMobileSidebarOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [mobileSidebarOpen, setMobileSidebarOpen]);
+
   return (
     <>
       <div className="fixed left-0 top-0 z-30 hidden h-screen lg:block">
         <SidebarBody
           collapsed={sidebarCollapsed}
           onToggleCollapse={toggleSidebar}
+          toggleLabel={sidebarCollapsed ? "Expand menu (Ctrl+B)" : "Collapse menu (Ctrl+B)"}
         />
       </div>
 
@@ -436,7 +470,11 @@ export function ChatSidebar() {
             onClick={() => setMobileSidebarOpen(false)}
           />
           <div className="absolute left-0 top-0 h-full shadow-card-hover">
-            <SidebarBody collapsed={false} />
+            <SidebarBody
+              collapsed={false}
+              onToggleCollapse={() => setMobileSidebarOpen(false)}
+              toggleLabel="Close menu"
+            />
           </div>
         </div>
       )}
