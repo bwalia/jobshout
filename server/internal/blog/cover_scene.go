@@ -165,8 +165,33 @@ func coverSceneFor(a *GeneratedArticle) coverScene {
 		s.Eyebrow = derived.Eyebrow
 	}
 	s.Eyebrow = strings.ToUpper(truncateWords(strings.TrimSpace(s.Eyebrow), 3, 26))
-	s.Picture = truncateRunes(strings.TrimSpace(s.Picture), maxCoverPicture)
+	s.Picture = wordlessPicture(truncateRunes(strings.TrimSpace(s.Picture), maxCoverPicture))
 	return s
+}
+
+// writingObject is a thing an image model paints text on. Prod's tax cover
+// was "a payment slip and a calculator, with a calendar showing tax quarter
+// dates": ERNIE lettered them and the picture was thrown away.
+var writingObject = regexp.MustCompile(`(?i)\b(paper|document|form|slip|receipt|invoice|letter|book|notebook|calendar|clock|calculator|money|cash|banknote|coin|sign|signage|poster|whiteboard|screen|monitor|laptop|computer|phone|tablet|chart|graph|newspaper|label|ticket|passport|ledger|date)s?\b`)
+
+// clauseBreak is where a scene sentence can be cut and still read.
+var clauseBreak = regexp.MustCompile(`,\s*|;\s*|\s+(?:with|holding|showing|on|beside|next to|while)\s+`)
+
+// wordlessPicture cuts a scene before the clause that names a writing object,
+// so the art prompt never asks for one; "" when the first clause does.
+func wordlessPicture(p string) string {
+	loc := writingObject.FindStringIndex(p)
+	if loc == nil {
+		return p
+	}
+	cut := -1
+	for _, b := range clauseBreak.FindAllStringIndex(p[:loc[0]], -1) {
+		cut = b[0]
+	}
+	if cut <= 0 {
+		return ""
+	}
+	return strings.TrimSpace(p[:cut])
 }
 
 // maxCoverPicture bounds the scene sentence, so the art prompt stays a prompt.
@@ -174,7 +199,7 @@ const maxCoverPicture = 300
 
 // coverPictureAsk is what every plan prompt asks for in "picture". The example
 // is from an unrelated field, so a copied one cannot pass for the article.
-const coverPictureAsk = `a "picture" of one sentence: a real scene showing the article's subject as physical things in a place a reader would recognise (for an article on bakery deliveries: "a delivery van loading trays of bread outside a small high-street bakery at dawn"), with nothing that carries writing: no signs, papers, forms, books, screens or diagrams, since the image model letters them and a picture with words in it is thrown away`
+const coverPictureAsk = `a "picture" of one sentence: a real scene showing the article's subject as physical objects in a place a reader would recognise (for an article on bakery deliveries: "a delivery van loading wooden trays of bread outside a small bakery at dawn"). Name only things with no writing on them: no paper, documents, forms, slips, receipts, books, calendars, clocks, calculators, money, signs, screens, phones or charts, and none of the article's own terms. The image model paints those as text, and a picture with text in it is thrown away`
 
 // percentStat finds a headline percentage such as "68%" in a title.
 var percentStat = regexp.MustCompile(`[-+−]?\d{1,3}(?:\.\d+)?\s?%`)
