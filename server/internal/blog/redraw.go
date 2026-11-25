@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/jobshout/server/internal/imagestore"
+	"github.com/jobshout/server/internal/llm"
 )
 
 // figureKinds is the figure kinds this runner can draw and the format to write
@@ -62,13 +63,21 @@ type RedrawResult struct {
 // terms, and the one or two sections a figure teaches most in. The figures it
 // had are kept when none can be drawn; the cover is kept when no new one can
 // be stored.
-func (r *Runner) RedrawImages(ctx context.Context, orgID uuid.UUID, a *GeneratedArticle) (RedrawResult, error) {
+//
+// models is the writer's choice (AgentProvider, AgentStructuredModel), so the
+// redraw is planned by the model that wrote the article: planned by the
+// server's default, prod's covers were labelled by llama3.1:8b.
+func (r *Runner) RedrawImages(ctx context.Context, orgID uuid.UUID, a *GeneratedArticle, models GenerateRequest) (RedrawResult, error) {
 	var res RedrawResult
 	if !r.canLetterFigures() && !r.canDrawCover() {
 		return res, errors.New("blog: no image model or image store to draw with")
 	}
+	if p := llm.NormalizeProvider(models.AgentProvider); p != "" {
+		ctx = llm.WithProvider(ctx, p)
+	}
+	model := r.structuredModel(models)
 	md := figureImage.ReplaceAllString(a.Markdown, "")
-	plan, scene, planNotes, err := r.planRedraw(ctx, a.Title, md)
+	plan, scene, planNotes, err := r.planRedraw(ctx, model, a.Title, md)
 	if err != nil {
 		return res, fmt.Errorf("blog: plan the redraw: %w", err)
 	}
@@ -103,7 +112,7 @@ func (r *Runner) RedrawImages(ctx context.Context, orgID uuid.UUID, a *Generated
 	// The model's scene, held to the article's own words; an empty one falls
 	// back to the heuristic in coverSceneFor.
 	a.CoverAccent = ""
-	a.CoverScene = r.groundedCover(ctx, a.Title, md, scene)
+	a.CoverScene = r.groundedCover(ctx, model, a.Title, md, scene)
 	// A replanned or derived scene has no picture; the first plan's still
 	// describes the article.
 	if a.CoverScene.Picture == "" {
@@ -125,7 +134,7 @@ func (r *Runner) RedrawImages(ctx context.Context, orgID uuid.UUID, a *Generated
 
 // planRedraw asks the structured model, once, for a finished article's cover
 // diagram and figures; notes say why no figure was planned, when none was.
-func (r *Runner) planRedraw(ctx context.Context, title, markdown string) (*writePlan, coverScene, []string, error) {
+func (r *Runner) planRedraw(ctx context.Context, model, title, markdown string) (*writePlan, coverScene, []string, error) {
 	headings := collectH2s(markdown)
 	kinds, format := r.figureKinds()
 	body := markdown
@@ -156,7 +165,7 @@ Respond with JSON only: {"cover_scene": {"layout": "...", "labels": ["...", "...
 		CoverScene coverScene   `json:"cover_scene"`
 		Figures    []figureJSON `json:"figures"`
 	}
-	if err := r.generateJSON(ctx, r.structuredModel(GenerateRequest{}), "redraw", prompt, 1000, &out); err != nil {
+	if err := r.generateJSON(ctx, model, "redraw", prompt, 1000, &out); err != nil {
 		return nil, coverScene{}, nil, err
 	}
 	plan := &writePlan{Title: title}
@@ -164,7 +173,7 @@ Respond with JSON only: {"cover_scene": {"layout": "...", "labels": ["...", "...
 	plan.Figures, misfits = fitFigures(out.Figures, markdown)
 	if len(plan.Figures) == 0 && len(misfits) > 0 {
 		var again []string
-		if plan.Figures, again = r.replanFigures(ctx, title, markdown, headings, misfits); len(plan.Figures) == 0 {
+		if plan.Figures, again = r.replanFigures(ctx, model, title, markdown, headings, misfits); len(plan.Figures) == 0 {
 			if len(again) > 0 {
 				misfits = again
 			}
@@ -196,7 +205,7 @@ func fitFigures(in []figureJSON, markdown string) (fit []figureBrief, misfits []
 // replanFigures asks once more, saying why, when no planned figure fits the
 // article — groundedCover's retry, for figures. Without it a redraw whose
 // plan copied the prompt's example drew nothing and kept the old figures.
-func (r *Runner) replanFigures(ctx context.Context, title, markdown string, headings, misfits []string) ([]figureBrief, []string) {
+func (r *Runner) replanFigures(ctx context.Context, model, title, markdown string, headings, misfits []string) ([]figureBrief, []string) {
 	kinds, format := r.figureKinds()
 	body := markdown
 	if len(body) > maxRedrawArticleChars {
@@ -222,7 +231,7 @@ Respond with JSON only: {"figures": [{"kind": "process", "section": "...", "cont
 	var out struct {
 		Figures []figureJSON `json:"figures"`
 	}
-	if err := r.generateJSON(ctx, r.structuredModel(GenerateRequest{}), "redraw-figures", prompt, 600, &out); err != nil {
+	if err := r.generateJSON(ctx, model, "redraw-figures", prompt, 600, &out); err != nil {
 		return nil, nil
 	}
 	return fitFigures(out.Figures, markdown)
@@ -285,7 +294,7 @@ func groundScene(s coverScene, markdown string) (scene coverScene, rejected []st
 // be drawn without filler, the model is asked once more, told why; when that
 // fails too, the cover is a hub of the things the article names, and with too
 // few of those the scene is empty and coverSceneFor derives one.
-func (r *Runner) groundedCover(ctx context.Context, title, markdown string, scene coverScene) coverScene {
+func (r *Runner) groundedCover(ctx context.Context, model, title, markdown string, scene coverScene) coverScene {
 	s, rejected, ok := groundScene(scene, markdown)
 	if ok {
 		return s
@@ -314,7 +323,7 @@ ARTICLE:
 Respond with JSON only: {"layout": "...", "labels": ["...", "..."], "stat": "", "eyebrow": "..."}`,
 		why, coverLayoutGuide, title, strings.Join(articleTerms(markdown, 12), ", "), body)
 	var retry coverScene
-	if err := r.generateJSON(ctx, r.structuredModel(GenerateRequest{}), "redraw-cover", prompt, 400, &retry); err == nil {
+	if err := r.generateJSON(ctx, model, "redraw-cover", prompt, 400, &retry); err == nil {
 		if s, _, ok := groundScene(retry, markdown); ok {
 			return s
 		}

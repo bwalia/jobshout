@@ -25,7 +25,7 @@ func TestRedrawImages(t *testing.T) {
 		"## Why it matters\n\nTeams ship faster.\n\n![old figure](https://jobshout.co.uk" + imagestore.URLPrefix + "org/2026/10/old.png)\n\n" +
 		"## How the pipeline runs\n\nEvery commit builds an image, runs the tests, then we deploy.\n\nMore detail.\n"}
 
-	res, err := r.RedrawImages(context.Background(), uuid.New(), a)
+	res, err := r.RedrawImages(context.Background(), uuid.New(), a, GenerateRequest{})
 	if err != nil || res.Figures != 1 || !res.Cover {
 		t.Fatalf("err=%v res=%+v", err, res)
 	}
@@ -56,7 +56,7 @@ func TestRedrawImages_ReplansFiguresTheArticleDoesNotSupport(t *testing.T) {
 	a := &GeneratedArticle{Title: "Ingress security", Markdown: "# Ingress security\n\n## The gateway\n\n" +
 		"A client request passes the API gateway, then the ingress controller, then a service pod.\n"}
 
-	res, err := r.RedrawImages(context.Background(), uuid.New(), a)
+	res, err := r.RedrawImages(context.Background(), uuid.New(), a, GenerateRequest{})
 	if err != nil || res.Figures != 1 || !strings.Contains(a.Markdown, "![Client → API gateway → Ingress controller → Service pod](") {
 		t.Fatalf("err=%v res=%+v\n%s", err, res, a.Markdown)
 	}
@@ -79,7 +79,7 @@ func TestRedrawImages_SaysWhyNoFigureWasPlanned(t *testing.T) {
 	a := &GeneratedArticle{Title: "Ingress security", Markdown: "# Ingress security\n\n## The gateway\n\n" +
 		"Kong, HAProxy, Shieldfy and Contour all sit in front of the cluster.\n"}
 
-	res, err := r.RedrawImages(context.Background(), uuid.New(), a)
+	res, err := r.RedrawImages(context.Background(), uuid.New(), a, GenerateRequest{})
 	notes := strings.Join(res.Notes, " | ")
 	if err != nil || res.Figures != 0 || !strings.Contains(notes, "no planned figure fits the article") || !strings.Contains(notes, "bare list") {
 		t.Fatalf("err=%v res=%+v", err, res)
@@ -100,7 +100,7 @@ func TestRedrawImages_PrunesOldFiguresTheArticleDoesNotSupport(t *testing.T) {
 		img("API Gateway: auth service, orders service, billing service, Redis cache", "copied") +
 		img("Distribution: Ingress objects, Score: tenant-supplied snippets, Alert: secret exfiltration", "pairs")}
 
-	res, err := r.RedrawImages(context.Background(), uuid.New(), a)
+	res, err := r.RedrawImages(context.Background(), uuid.New(), a, GenerateRequest{})
 	if err != nil || !strings.Contains(a.Markdown, "good.png") || strings.Contains(a.Markdown, "copied.png") || strings.Contains(a.Markdown, "pairs.png") {
 		t.Fatalf("err=%v notes=%v\n%s", err, res.Notes, a.Markdown)
 	}
@@ -122,7 +122,7 @@ func TestRedrawImages_KeepsWhatItCannotReplace(t *testing.T) {
 	old := "## How it runs\n\nCommit, build, test, deploy.\n\n![old](" + imagestore.URLPrefix + "o/old.png)\n"
 	a := &GeneratedArticle{Title: "T", Markdown: old, HTML: "<p>kept</p>", CoverImageURL: coverURL}
 
-	res, err := r.RedrawImages(context.Background(), uuid.New(), a)
+	res, err := r.RedrawImages(context.Background(), uuid.New(), a, GenerateRequest{})
 	if err != nil || res.Figures != 0 || res.Cover || a.Markdown != old || a.HTML != "<p>kept</p>" || a.CoverImageURL != coverURL {
 		t.Fatalf("err=%v res=%+v md=%q cover=%q", err, res, a.Markdown, a.CoverImageURL)
 	}
@@ -156,7 +156,7 @@ func TestGroundedCover_RetriesWithTheReason(t *testing.T) {
 	}}}
 	r.llm = stub
 	md := "GitOps with Argo CD syncs the staging cluster from a Helm chart."
-	s := r.groundedCover(context.Background(), "T", md, coverScene{Layout: layoutHub, Labels: []string{"GitOps", "teams", "data"}})
+	s := r.groundedCover(context.Background(), "", "T", md, coverScene{Layout: layoutHub, Labels: []string{"GitOps", "teams", "data"}})
 	if s.Layout != layoutHub || len(s.Labels) != 4 {
 		t.Fatalf("scene = %+v", s)
 	}
@@ -191,11 +191,32 @@ func TestGroundedCover_FallsBackToTheArticlesTerms(t *testing.T) {
 	stub := &stubLLM{responses: []scriptedResponse{{trigger: "cannot be drawn", content: `{"layout":"hub","labels":["Argo CD","Flux"]}`}}}
 	r.llm = stub
 	md := "Agnost runs on Kubernetes. Install Agnost, then use Kusk Gateway. Create a ReplicaSet. Kusk Gateway reads OpenAPI. Kubernetes schedules pods."
-	s := r.groundedCover(context.Background(), "Shipping with Kusk Gateway", md, coverScene{Layout: layoutHub, Labels: []string{"Argo CD"}})
+	s := r.groundedCover(context.Background(), "", "Shipping with Kusk Gateway", md, coverScene{Layout: layoutHub, Labels: []string{"Argo CD"}})
 	if s.Layout != layoutHub || len(s.Labels) < 4 || s.Labels[0] != "Kusk Gateway" {
 		t.Fatalf("scene = %+v", s)
 	}
 	if prompt := stub.calls[0].Messages[len(stub.calls[0].Messages)-1].Content; !strings.Contains(prompt, "THINGS THE ARTICLE NAMES: ") {
 		t.Fatal("the retry must offer the article's terms")
+	}
+}
+
+// A redraw is planned by the writer's model on the writer's provider, not the
+// server's default: prod's redraws were planned by llama3.1:8b.
+func TestRedrawImages_PlansWithTheWritersModel(t *testing.T) {
+	r := testRunner(&noLetterIllustrator{fakeIllustrator{enabled: true}}).WithCoverStore(newMemCovers())
+	stub := &stubLLM{responses: []scriptedResponse{{
+		trigger: "Read this finished article",
+		content: `{"cover_scene":{"layout":"hub","labels":["Argo CD","Git repository","staging cluster","Helm chart"],"eyebrow":"GitOps"},"figures":[]}`,
+	}}}
+	r.llm = stub
+	a := &GeneratedArticle{Title: "CI in practice", Markdown: "# CI in practice\n\n" +
+		"Argo CD syncs the staging cluster from a Git repository and a Helm chart.\n\n## Why it matters\n\nTeams ship faster.\n"}
+
+	if _, err := r.RedrawImages(context.Background(), uuid.New(), a,
+		GenerateRequest{AgentProvider: "claude", AgentStructuredModel: "writer-model"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(stub.calls) == 0 || stub.calls[0].Model != "writer-model" {
+		t.Fatalf("redraw planned with %+v, want the writer's model", stub.calls)
 	}
 }

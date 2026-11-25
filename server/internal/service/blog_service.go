@@ -401,6 +401,25 @@ func agentModels(agent *model.Agent) (prose, structured string) {
 	return prose, structured
 }
 
+// redrawModels is the writer's model choice for redrawing a's images, so they
+// are planned by the model that wrote it. The server's when the run or its
+// agent cannot be found.
+func (s *blogService) redrawModels(ctx context.Context, a *model.BlogArticle) blog.GenerateRequest {
+	if s.agentRepo == nil {
+		return blog.GenerateRequest{}
+	}
+	run, err := s.repo.GetByID(ctx, a.RunID)
+	if err != nil || run == nil {
+		return blog.GenerateRequest{}
+	}
+	agent, err := s.runAgent(ctx, run)
+	if err != nil {
+		return blog.GenerateRequest{}
+	}
+	provider, prose, structured := runModels(agent, model.GenerateBlogRequest{})
+	return blog.GenerateRequest{AgentProvider: provider, AgentProseModel: prose, AgentStructuredModel: structured}
+}
+
 // runModels is the provider a run calls and the agent's models it may use. A
 // provider named on the run beats the agent's; one that differs drops the
 // agent's models, which belong to the agent's provider. A model named on the
@@ -2205,7 +2224,7 @@ func (s *blogService) RedrawImages(ctx context.Context, orgID, articleID uuid.UU
 		Excerpt: articleExcerpt(a), CoverImageURL: a.CoverImageURL,
 		Audience: a.Audience, Industry: a.Industry, RunID: &runID,
 	}
-	res, err = s.runner.RedrawImages(drawCtx, orgID, gen)
+	res, err = s.runner.RedrawImages(drawCtx, orgID, gen, s.redrawModels(ctx, a))
 	if err != nil {
 		return nil, res, err
 	}
