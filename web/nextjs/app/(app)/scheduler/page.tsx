@@ -11,6 +11,7 @@ import {
   resultHrefForRun,
 } from "@/lib/hooks/useScheduler";
 import { useAgents } from "@/lib/hooks/useAgents";
+import { ModelPicker, type ModelSelection } from "@/components/agent/ModelPicker";
 import { useWorkflows } from "@/lib/hooks/useWorkflows";
 import { agentHref } from "@/lib/agents/links";
 import { useAgentSchemas } from "@/lib/hooks/useAgentSchemas";
@@ -141,6 +142,9 @@ export default function SchedulerPage() {
   const [blogAudience, setBlogAudience] = useState("");
   const [blogIndustry, setBlogIndustry] = useState("");
   const [autoPublish, setAutoPublish] = useState(false);
+  // The schedule's own model; empty is the writer agent's. Lets the nightly
+  // run stay on Ollama while hand-started runs use the agent's Claude.
+  const [blogModel, setBlogModel] = useState<ModelSelection>({ provider: "", model: "" });
   // Set while editing an existing schedule; null means the form creates one.
   const [editingId, setEditingId] = useState<string | null>(null);
   const [cronPreset, setCronPreset] = useState("0 * * * *");
@@ -185,6 +189,8 @@ export default function SchedulerPage() {
       auto_publish: autoPublish,
       ...(blogAudience ? { audience: blogAudience } : {}),
       ...(blogIndustry.trim() ? { industry: blogIndustry.trim() } : {}),
+      ...(blogModel.provider ? { provider: blogModel.provider } : {}),
+      ...(blogModel.model ? { model: blogModel.model } : {}),
     };
     if (blogMode === "fixed") {
       return {
@@ -217,6 +223,7 @@ export default function SchedulerPage() {
     setBlogAudience("");
     setBlogIndustry("");
     setAutoPublish(false);
+    setBlogModel({ provider: "", model: "" });
     setCronPreset("0 * * * *");
     setForm({
       name: "",
@@ -265,6 +272,10 @@ export default function SchedulerPage() {
     setAutoPublish(input.auto_publish === true);
     setBlogAudience(typeof input.audience === "string" ? input.audience : "");
     setBlogIndustry(typeof input.industry === "string" ? input.industry : "");
+    setBlogModel({
+      provider: typeof input.provider === "string" ? input.provider : "",
+      model: typeof input.model === "string" ? input.model : "",
+    });
     if (input.trending === true) {
       setBlogMode(focus.length > 0 ? "focused" : "trending");
       setTrendingCount(
@@ -531,6 +542,21 @@ export default function SchedulerPage() {
                   <p className="text-xs text-muted-foreground">
                     Frames the examples and consequences for one sector, and
                     steers what the researcher goes looking for.
+                  </p>
+
+                  <label htmlFor="schedule-model" className="text-sm font-medium">
+                    Model
+                  </label>
+                  <ModelPicker
+                    id="schedule-model"
+                    value={blogModel}
+                    onChange={setBlogModel}
+                    includeAuto={false}
+                    defaultLabel="The writer's model"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    What this schedule writes with. Runs you start by hand keep
+                    the writer&apos;s own model.
                   </p>
 
                   <label className="pt-2 text-sm font-medium">What to write about</label>

@@ -106,3 +106,24 @@ func TestAgentModelsToleratesAnUnconfiguredAgent(t *testing.T) {
 		})
 	}
 }
+
+// A schedule that names Ollama runs on Ollama with the server's models, while
+// a run that names nothing keeps the agent's Claude and its model.
+func TestRunModelsRunProviderBeatsTheAgents(t *testing.T) {
+	provider, name := "claude", "claude-model"
+	agent := &model.Agent{ModelProvider: &provider, ModelName: &name}
+
+	for _, tc := range []struct {
+		run, wantProvider, wantProse string
+	}{
+		{"", "claude", "claude-model"},
+		{"auto", "claude", "claude-model"},
+		{"Claude", "claude", "claude-model"},
+		{"ollama", "ollama", ""},
+	} {
+		p, prose, _ := runModels(agent, model.GenerateBlogRequest{Provider: tc.run})
+		if p != tc.wantProvider || prose != tc.wantProse {
+			t.Errorf("run provider %q: got (%q, %q), want (%q, %q)", tc.run, p, prose, tc.wantProvider, tc.wantProse)
+		}
+	}
+}

@@ -189,12 +189,18 @@ func artPrompt(scene coverScene, accent string) string {
 	if !ok {
 		accent, pal = "copper", fallbackPalettes["copper"]
 	}
-	subject := strings.ToLower(strings.Join(scene.Labels, ", "))
-	if scene.Eyebrow != "" {
-		subject = strings.ToLower(scene.Eyebrow) + ": " + subject
+	// The plan's scene of the subject; else the labels, which name steps and
+	// ideas rather than things, so the art is only roughly on topic.
+	subject := strings.TrimRight(strings.TrimSpace(scene.Picture), ".")
+	if subject == "" {
+		subject = strings.ToLower(strings.Join(scene.Labels, ", "))
+		if scene.Eyebrow != "" {
+			subject = strings.ToLower(scene.Eyebrow) + ": " + subject
+		}
+		subject = "the subject of an article about " + subject
 	}
-	return fmt.Sprintf("A wide, atmospheric editorial illustration for a technology article about %s, "+
-		"pictured as objects, machines and symbols, never as written words. "+
+	return fmt.Sprintf("A wide, atmospheric editorial illustration of %s, "+
+		"shown as real objects and places, never as written words. "+
 		"Deep navy background, one %s accent colour (#%02x%02x%02x) as soft glowing light, isometric 3D, "+
 		"cinematic depth of field, rich detail toward the edges and a calm, uncluttered middle. "+
 		"No text, letters, numbers, labels, captions, signs, screens with writing, logos, watermarks or people.",
