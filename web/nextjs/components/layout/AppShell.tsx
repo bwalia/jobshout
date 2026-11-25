@@ -24,7 +24,7 @@ function needsLegacyGutter(pathname: string): boolean {
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const { sidebarCollapsed, setMobileSidebarOpen, openRunDialog } = useUiStore();
+  const { sidebarCollapsed, setMobileSidebarOpen, toggleSidebar, openRunDialog } = useUiStore();
   const pathname = usePathname();
   const gutter = needsLegacyGutter(pathname);
 
@@ -43,11 +43,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       >
         <BetaBanner />
         <header className="sticky top-0 z-20 flex h-12 shrink-0 items-center gap-2 border-b border-border bg-background px-3 lg:px-6">
+          {/* Burger: opens the drawer on mobile, collapses/expands the sidebar on desktop. */}
           <button
             type="button"
-            onClick={() => setMobileSidebarOpen(true)}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-secondary hover:text-foreground lg:hidden"
-            aria-label="Open menu"
+            onClick={() => {
+              if (window.matchMedia("(min-width: 1024px)").matches) toggleSidebar();
+              else setMobileSidebarOpen(true);
+            }}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-secondary hover:text-foreground"
+            aria-label="Toggle navigation menu"
+            aria-expanded={sidebarCollapsed ? false : undefined}
           >
             <Menu className="h-5 w-5" />
           </button>
