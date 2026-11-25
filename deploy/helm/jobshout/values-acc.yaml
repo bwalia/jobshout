@@ -56,6 +56,11 @@ wafLab:
 extraSecretRefs:
   - jobshout-core
   - jobshout-gateways
+  # "Continue with Google" on /login and /signup (GOOGLE_OAUTH_CLIENT_ID /
+  # GOOGLE_OAUTH_CLIENT_SECRET). The OAuth client must list
+  # https://acc.jobshout.co.uk/api/v1/auth/google/callback as a redirect URI.
+  # Optional ref: the button stays hidden until jobshout/acc/google is populated.
+  - jobshout-google
   # OPENAI_API_KEY / CLAUDE_API_KEY (or ANTHROPIC_API_KEY) / GEMINI_API_KEY:
   # each key set registers that provider in the model picker. Models are
   # chosen with ai.*Model / ai.*Models (values.yaml), not here.
@@ -68,6 +73,9 @@ vaultSecrets:
   - name: jobshout-gateways
     store: wslvault-backend
     key: jobshout/acc/gateways
+  - name: jobshout-google
+    store: wslvault-backend
+    key: jobshout/acc/google
   - name: jobshout-llm
     store: wslvault-backend
     key: jobshout/acc/llm
