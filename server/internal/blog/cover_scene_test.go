@@ -32,3 +32,16 @@ func TestArtPrompt_DrawsThePlansPicture(t *testing.T) {
 		t.Errorf("no picture should fall back to the labels: %s", fallback)
 	}
 }
+
+func TestWordlessPicture_CutsBeforeWritingObjects(t *testing.T) {
+	for in, want := range map[string]string{
+		"A letting agent at a desk in a high-street office, holding a rental payment slip and a calculator, with a calendar showing tax quarter dates on the wall behind.": "A letting agent at a desk in a high-street office",
+		"A radiologist reviewing 3D images on a computer screen in a hospital radiology department.":                                                                       "A radiologist reviewing 3D images",
+		"A delivery van loading wooden trays of bread outside a small bakery at dawn":                                                                                      "A delivery van loading wooden trays of bread outside a small bakery at dawn",
+		"A calendar on a kitchen wall": "",
+	} {
+		if got := wordlessPicture(in); got != want {
+			t.Errorf("wordlessPicture(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
