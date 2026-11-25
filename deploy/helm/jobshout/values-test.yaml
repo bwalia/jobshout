@@ -54,6 +54,9 @@ extraSecretRefs:
   - jobshout-core
   - jobshout-secretsrot
   - jobshout-gateways
+  # GOOGLE_OAUTH_CLIENT_ID / _SECRET: "Continue with Google". The shared OAuth
+  # client already lists https://test.jobshout.co.uk/api/v1/auth/google/callback.
+  - jobshout-google
   # OPENAI_API_KEY / CLAUDE_API_KEY (or ANTHROPIC_API_KEY) / GEMINI_API_KEY:
   # each key set registers that provider in the model picker. Models are
   # chosen with ai.*Model / ai.*Models (values.yaml), not here.
@@ -69,6 +72,9 @@ vaultSecrets:
   - name: jobshout-gateways
     store: wslvault-backend
     key: jobshout/test/gateways
+  - name: jobshout-google
+    store: wslvault-backend
+    key: jobshout/test/google
   - name: jobshout-llm
     store: wslvault-backend
     key: jobshout/test/llm
