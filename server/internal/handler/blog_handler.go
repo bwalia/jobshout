@@ -370,6 +370,11 @@ func (h *BlogHandler) RegenerateCover(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		SyncCMS bool `json:"sync_cms"`
+		// Provider and Model choose the image provider for this regeneration
+		// ("gemini", "flux", ...). Empty uses the org's routing and default;
+		// an unknown provider also falls back to the default.
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
 	}
 	// Empty body is fine — defaults to JobShout-only regeneration.
 	if r.Body != nil && r.ContentLength != 0 {
@@ -378,7 +383,7 @@ func (h *BlogHandler) RegenerateCover(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	article, err := h.svc.RegenerateCover(r.Context(), orgID, id, body.SyncCMS)
+	article, err := h.svc.RegenerateCover(r.Context(), orgID, id, body.SyncCMS, blog.ImageChoice{Provider: strings.TrimSpace(body.Provider), Model: strings.TrimSpace(body.Model)})
 	if err != nil {
 		msg := err.Error()
 		switch {

@@ -17,6 +17,7 @@ import (
 	"github.com/jobshout/server/internal/companyweb"
 	"github.com/jobshout/server/internal/course"
 	"github.com/jobshout/server/internal/creditcontroller"
+	"github.com/jobshout/server/internal/facebook"
 	"github.com/jobshout/server/internal/freelancerassist"
 	"github.com/jobshout/server/internal/hiringassist"
 	"github.com/jobshout/server/internal/images"
@@ -64,6 +65,7 @@ type Deps struct {
 	LinuxPatch       linuxpatch.Runner
 	Course           course.Runner
 	LinkedIn         linkedin.Runner
+	Facebook         facebook.Runner
 	CompanyWeb       companyweb.Runner
 	Video            video.Runner
 	MarketingEmail   marketingemail.Runner
@@ -110,6 +112,7 @@ func Register(d Deps) {
 	agentmodule.Register(linuxpatch.Module(d.LinuxPatch))
 	agentmodule.Register(course.Module(d.Course))
 	agentmodule.Register(linkedin.Module(d.LinkedIn))
+	agentmodule.Register(facebook.Module(d.Facebook))
 	agentmodule.Register(companyweb.Module(d.CompanyWeb))
 	agentmodule.Register(video.Module(d.Video))
 	agentmodule.Register(marketingemail.Module(d.MarketingEmail))

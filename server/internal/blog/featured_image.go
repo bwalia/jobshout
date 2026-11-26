@@ -150,6 +150,14 @@ func (r *Runner) canDrawCover() bool {
 // diagram of the same scene alone, which still letters it exactly: a redraw
 // would otherwise keep the old cover, typos and all.
 func (r *Runner) drawCover(ctx context.Context, orgID uuid.UUID, a *GeneratedArticle) error {
+	err := r.drawCoverImage(ctx, orgID, a)
+	if err == nil {
+		r.describeCover(ctx, a)
+	}
+	return err
+}
+
+func (r *Runner) drawCoverImage(ctx context.Context, orgID uuid.UUID, a *GeneratedArticle) error {
 	if r.coverPictures() {
 		err := r.pictureCover(ctx, orgID, a)
 		if err == nil || r.covers == nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +21,12 @@ type Router struct {
 	clients         map[string]Client
 	defaultProvider string
 	logger          *zap.Logger
+	// fallbackOrder is tried, in order, after the chosen provider fails or is
+	// rate limited (IMAGE_FALLBACK_ORDER).
+	fallbackOrder []string
+	// statuses is what the "Built-in providers" cards show, built once from
+	// configuration so a disabled or unconfigured provider is still listed.
+	statuses []ProviderStatus
 
 	// cache memoises model discovery. Listing models on the local path is an
 	// HTTP call to a machine that may be asleep, and a picker that hangs for
@@ -58,6 +65,24 @@ func NewRouter(cfg *config.Config) *Router {
 	if cfg.OpenAIAPIKey != "" {
 		r.clients[ProviderOpenAI] = NewOpenAIClient(cfg.OpenAIBaseURL, cfg.OpenAIAPIKey, cfg.ImageOpenAIModel)
 	}
+
+	// FLUX registers when its host's key and a model are both set; the model
+	// has no default in code.
+	fluxKey := cfg.BFLAPIKey
+	if strings.EqualFold(cfg.FluxHost, FluxHostFal) {
+		fluxKey = cfg.FalKey
+	}
+	if fluxKey != "" && cfg.FluxModel != "" {
+		r.clients[ProviderFlux] = NewFluxClient(cfg.FluxHost, cfg.FluxBaseURL, fluxKey, cfg.FluxModel)
+	}
+
+	// Midjourney is opt-in and only against a bridge the operator named.
+	if cfg.MidjourneyEnabled && cfg.MidjourneyAPIURL != "" {
+		r.clients[ProviderMidjourney] = NewMidjourneyClient(
+			cfg.MidjourneyAPIURL, cfg.MidjourneyAPIKey, cfg.MidjourneyModel, cfg.ImageTimeout)
+	}
+	r.fallbackOrder = cfg.ImageFallbackOrder
+	r.statuses = buildStatuses(cfg, r.clients)
 
 	// A default naming a provider that did not register would make every
 	// unqualified request fail. Falling back to whichever provider does exist
@@ -134,10 +159,7 @@ func (r *Router) For(provider string) (Client, error) {
 // that call fails. A cancelled context does not fall back — the caller has
 // already given up. An explicit mflux or openai choice is honoured as-is,
 // as is a request that names a workstation model such as z-image-turbo.
-func (r *Router) Generate(ctx context.Context, provider string, req GenerateRequest) (*GenerateResponse, error) {
-	if r == nil || len(r.clients) == 0 {
-		return nil, fmt.Errorf("imagegen: no image provider is configured (set GEMINI_API_KEY, IMAGE_BASE_URL or OPENAI_API_KEY)")
-	}
+func (r *Router) generateOnce(ctx context.Context, provider string, req GenerateRequest) (*GenerateResponse, error) {
 	if r.preferGemini(provider, req.Model) {
 		resp, err := r.clients[ProviderGemini].Generate(ctx, req)
 		if err == nil {
@@ -176,6 +198,90 @@ func (r *Router) Generate(ctx context.Context, provider string, req GenerateRequ
 		return nil, err
 	}
 	return c.Generate(ctx, req)
+}
+
+// Generate produces an image with the named provider, then walks the fallback
+// order when that fails or is rate limited. A safety-filter rejection is
+// retried once on the same provider with a simplified prompt before moving on.
+// A cancelled context stops everything: the caller has given up.
+func (r *Router) Generate(ctx context.Context, provider string, req GenerateRequest) (*GenerateResponse, error) {
+	if r == nil || len(r.clients) == 0 {
+		return nil, fmt.Errorf("imagegen: no image provider is configured (set GEMINI_API_KEY, IMAGE_BASE_URL, OPENAI_API_KEY or BFL_API_KEY)")
+	}
+	resp, err := r.withSimplifiedRetry(ctx, req, func(q GenerateRequest) (*GenerateResponse, error) {
+		return r.generateOnce(ctx, provider, q)
+	})
+	if err == nil || ctx.Err() != nil {
+		return resp, err
+	}
+
+	tried := map[string]bool{}
+	if c, e := r.For(provider); e == nil {
+		tried[c.Provider()] = true
+	}
+	if r.preferGemini(provider, req.Model) {
+		tried[ProviderGemini], tried[ProviderMFlux] = true, true
+	}
+	for _, name := range r.fallbackOrder {
+		c, ok := r.clients[name]
+		if !ok || tried[name] || !clientLetters(c, req.Text) {
+			continue
+		}
+		tried[name] = true
+		fb := req
+		fb.Model = "" // a model id belongs to the provider it was chosen for
+		if r.logger != nil {
+			r.logger.Warn("image provider failed; trying the next in the fallback order",
+				zap.Error(err), zap.String("next", name))
+		}
+		resp, ferr := r.withSimplifiedRetry(ctx, fb, func(q GenerateRequest) (*GenerateResponse, error) {
+			return c.Generate(ctx, q)
+		})
+		if ferr == nil {
+			return resp, nil
+		}
+		if ctx.Err() != nil {
+			return nil, ferr
+		}
+		err = fmt.Errorf("%w; %s also failed: %v", err, name, ferr)
+	}
+	if IsModerated(err) {
+		return nil, fmt.Errorf("the image provider declined this prompt, even simplified; try rewording the title or summary (%w)", err)
+	}
+	return nil, err
+}
+
+// withSimplifiedRetry calls do, and if the provider's safety filter rejects
+// the prompt, calls it once more with a simplified, family-friendly prompt.
+func (r *Router) withSimplifiedRetry(ctx context.Context, req GenerateRequest, do func(GenerateRequest) (*GenerateResponse, error)) (*GenerateResponse, error) {
+	resp, err := do(req)
+	if err == nil || !IsModerated(err) || ctx.Err() != nil {
+		return resp, err
+	}
+	if r.logger != nil {
+		r.logger.Warn("image prompt rejected by a safety filter; retrying simplified", zap.Error(err))
+	}
+	simple := req
+	simple.Prompt = SimplifyPrompt(req.Prompt)
+	simple.NegativePrompt = ""
+	return do(simple)
+}
+
+// SimplifyPrompt reduces a prompt that a safety filter rejected to its first
+// sentences, framed as a neutral illustration. Filters most often trip on a
+// detail deep in a long, specific prompt rather than on the subject.
+func SimplifyPrompt(p string) string {
+	p = strings.Join(strings.Fields(p), " ")
+	const max = 240
+	if len(p) > max {
+		p = p[:max]
+		if i := strings.LastIndexAny(p, ".!?"); i > 40 {
+			p = p[:i+1]
+		} else if i := strings.LastIndex(p, " "); i > 0 {
+			p = p[:i]
+		}
+	}
+	return "A calm, abstract, family-friendly illustration with no people and no text, inspired by: " + p
 }
 
 // preferGemini reports whether this request should try the hosted Gemini
@@ -315,4 +421,67 @@ func (r *Router) Warm(ctx context.Context) {
 		return
 	}
 	r.ListModels(ctx)
+}
+
+// ProviderStatus is one card on the "Built-in providers" page.
+type ProviderStatus struct {
+	Provider string `json:"provider"`
+	Label    string `json:"label"`
+	Kind     string `json:"kind"`   // always "image"
+	Status   string `json:"status"` // available | not_configured | disabled
+	Model    string `json:"model,omitempty"`
+	Host     string `json:"host,omitempty"`
+	Warning  string `json:"warning,omitempty"`
+	Default  bool   `json:"default"`
+	Hint     string `json:"hint,omitempty"`
+}
+
+const (
+	StatusAvailable     = "available"
+	StatusNotConfigured = "not_configured"
+	StatusDisabled      = "disabled"
+)
+
+func buildStatuses(cfg *config.Config, clients map[string]Client) []ProviderStatus {
+	st := func(name, label, model, hint string) ProviderStatus {
+		s := ProviderStatus{Provider: name, Label: label, Kind: "image", Status: StatusNotConfigured, Model: model, Hint: hint}
+		if _, ok := clients[name]; ok {
+			s.Status = StatusAvailable
+		}
+		return s
+	}
+	gem := st(ProviderGemini, "Nano Banana (Google Gemini)", cfg.ImageGeminiModel, "Set GEMINI_API_KEY")
+	flux := st(ProviderFlux, "FLUX", cfg.FluxModel, "Set BFL_API_KEY (or FAL_KEY with FLUX_HOST=fal) and FLUX_MODEL")
+	flux.Host = strings.ToLower(cfg.FluxHost)
+	mj := st(ProviderMidjourney, "Midjourney (unofficial)", cfg.MidjourneyModel, "Set MIDJOURNEY_ENABLED=true and MIDJOURNEY_API_URL")
+	mj.Warning = MidjourneyWarning
+	if !cfg.MidjourneyEnabled {
+		mj.Status = StatusDisabled
+	}
+	return []ProviderStatus{
+		gem, flux, mj,
+		st(ProviderOpenAI, "OpenAI Images", cfg.ImageOpenAIModel, "Set OPENAI_API_KEY"),
+		st(ProviderMFlux, "Workstation (mflux)", cfg.ImageDefaultModel, "Set IMAGE_BASE_URL"),
+	}
+}
+
+// Statuses reports every image provider, configured or not, for the UI.
+func (r *Router) Statuses() []ProviderStatus {
+	if r == nil {
+		return nil
+	}
+	out := make([]ProviderStatus, len(r.statuses))
+	copy(out, r.statuses)
+	for i := range out {
+		out[i].Default = out[i].Provider == r.defaultProvider
+	}
+	return out
+}
+
+// FallbackOrder returns the configured fallback chain.
+func (r *Router) FallbackOrder() []string {
+	if r == nil {
+		return nil
+	}
+	return append([]string(nil), r.fallbackOrder...)
 }

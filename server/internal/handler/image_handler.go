@@ -211,6 +211,48 @@ func (h *ImageHandler) ListModels(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// imageProvidersResponse is GET /api/v1/images/providers.
+type imageProvidersResponse struct {
+	DefaultProvider string                    `json:"default_provider"`
+	FallbackOrder   []string                  `json:"fallback_order"`
+	Providers       []imagegen.ProviderStatus `json:"providers"`
+}
+
+// Providers handles GET /api/v1/images/providers: one status per image
+// provider (available, not configured or disabled). Only names and states are
+// returned; keys never leave the server.
+func (h *ImageHandler) Providers(w http.ResponseWriter, r *http.Request) {
+	providers := h.images.ProviderStatuses()
+	if providers == nil {
+		providers = []imagegen.ProviderStatus{}
+	}
+	order := h.images.FallbackOrder()
+	if order == nil {
+		order = []string{}
+	}
+	RespondJSON(w, http.StatusOK, imageProvidersResponse{
+		DefaultProvider: h.images.DefaultProvider(),
+		FallbackOrder:   order,
+		Providers:       providers,
+	})
+}
+
+// Usage handles GET /api/v1/images/usage?days=30: images drawn per provider
+// and model.
+func (h *ImageHandler) Usage(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := h.orgFromRequest(w, r)
+	if !ok {
+		return
+	}
+	days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+	usage, err := h.images.Usage(r.Context(), orgID, days)
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	RespondJSON(w, http.StatusOK, map[string]any{"usage": usage})
+}
+
 // List handles GET /api/v1/images — the org's generated images, newest first.
 func (h *ImageHandler) List(w http.ResponseWriter, r *http.Request) {
 	orgID, ok := h.orgFromRequest(w, r)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -22,6 +23,8 @@ type ImageRepository interface {
 	Create(ctx context.Context, img *model.GeneratedImage) error
 	ListByOrg(ctx context.Context, orgID uuid.UUID, limit int) ([]model.GeneratedImage, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*model.GeneratedImage, error)
+	// Usage counts the org's images per provider and model since a time.
+	Usage(ctx context.Context, orgID uuid.UUID, since time.Time) ([]model.ImageUsage, error)
 	// Routes returns the org's image model per task (empty when it chose none).
 	Routes(ctx context.Context, orgID uuid.UUID) (map[string]model.ImageRoute, error)
 	// PutRoutes replaces the org's image model per task.
@@ -165,4 +168,26 @@ func (r *imageRepository) PutRoutes(ctx context.Context, orgID uuid.UUID, routes
 		return fmt.Errorf("org_image_routing: put: %w", err)
 	}
 	return nil
+}
+
+func (r *imageRepository) Usage(ctx context.Context, orgID uuid.UUID, since time.Time) ([]model.ImageUsage, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT provider, model, COUNT(*), COALESCE(AVG(duration_ms), 0)::int
+		FROM generated_images
+		WHERE org_id = $1 AND created_at >= $2
+		GROUP BY provider, model
+		ORDER BY COUNT(*) DESC, provider, model`, orgID, since)
+	if err != nil {
+		return nil, fmt.Errorf("image_repo: usage: %w", err)
+	}
+	defer rows.Close()
+	out := make([]model.ImageUsage, 0)
+	for rows.Next() {
+		var u model.ImageUsage
+		if err := rows.Scan(&u.Provider, &u.Model, &u.Count, &u.AvgDurationMS); err != nil {
+			return nil, fmt.Errorf("image_repo: scan usage: %w", err)
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
 }

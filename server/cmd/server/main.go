@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -32,6 +33,7 @@ import (
 	"github.com/jobshout/server/internal/costengine"
 	"github.com/jobshout/server/internal/course"
 	"github.com/jobshout/server/internal/creditcontroller"
+	"github.com/jobshout/server/internal/facebook"
 	"github.com/jobshout/server/internal/linkedin"
 	"github.com/jobshout/server/internal/linuxpatch"
 	"github.com/jobshout/server/internal/liveevents"
@@ -679,6 +681,7 @@ func main() {
 			AuthorName:      cfg.BlogAuthorName,
 			PublicBaseURL:   cfg.FrontendBaseURL,
 			CoverStyle:      cfg.BlogCoverStyle,
+			CoverStylePreset: cfg.CoverStylePreset,
 			Model:           firstNonEmptyStr(blogModel, cfg.BlogModel),
 			ProseModel:      cfg.BlogProseModel,
 			StructuredModel: cfg.BlogStructuredModel,
@@ -695,6 +698,13 @@ func main() {
 		// exists in this store and, when none could be drawn, stores a branded
 		// fallback here — so no post reaches the CMS without a featured image.
 		blogRunner = blogRunner.WithCoverStore(imgStore)
+		// Alt text from the Ollama vision model, when IMAGE_ALT_MODEL names one.
+		if cfg.ImageAltModel != "" {
+			blogRunner = blogRunner.WithCoverDescriber(&coverDescriber{
+				client: llm.NewOllamaClientWithAuth(cfg.OllamaBaseURL, cfg.ImageAltModel, cfg.OllamaJWTSecret, cfg.OllamaTimeout),
+				model:  cfg.ImageAltModel,
+			})
+		}
 		// JobShout.com Insights, beside the CMS. NewClient returns nil when the
 		// URL or token is missing, which the runner reads as "not configured".
 		blogRunner = blogRunner.WithInsights(jobshoutcom.NewClient(jobshoutcom.Config{
@@ -943,6 +953,25 @@ func main() {
 		zap.String("api_version", linkedInCfg.APIVersion),
 	)
 
+	// ─── Facebook Page Manager ──────────────────────────────────────────────
+	facebookCfg := facebook.LoadConfig()
+	facebookProvider, facebookModel := agentLLM(cfg, facebook.Builtin)
+	facebookCfg.Provider = facebookProvider
+	facebookCfg.Model = firstNonEmptyStr(facebookModel, facebookCfg.Model)
+	var facebookDrafter *facebook.Drafter
+	if _, err := llmRouter.For(facebookProvider); err == nil {
+		facebookDrafter = &facebook.Drafter{LLM: llmRouter.Routed(facebookProvider), Cfg: facebookCfg}
+	}
+	facebookSvc := facebook.NewService(facebook.NewStore(pool), agentRepo, facebook.NewClient(facebookCfg.GraphVersion),
+		facebookDrafter, facebookImages{images: imageSvc}, facebookCfg, logger)
+	facebookSvc.BindTasks(taskSvc)
+	logger.Info("facebook page manager initialised",
+		zap.Bool("configured", facebookCfg.Configured()),
+		zap.Bool("llm", facebookDrafter != nil),
+		zap.Bool("images", imageSvc.Enabled()),
+		zap.String("graph_version", facebookCfg.GraphVersion),
+	)
+
 	// ─── Video Producer ─────────────────────────────────────────────────────
 	// Renders on the workstation image service (same host, gateway and secret
 	// as images); the script is written here with the platform LLM.
@@ -1103,6 +1132,7 @@ func main() {
 		LinuxPatch:       linuxPatchSvc,
 		Course:           courseSvc,
 		LinkedIn:         linkedInSvc,
+		Facebook:         facebookSvc,
 		CompanyWeb:       companyweb.ClientRunner{Client: researchClient},
 		Video:            videoSvc,
 		MarketingEmail:   emailSvc,
@@ -1349,6 +1379,7 @@ func main() {
 	videoHandler := handler.NewVideoHandler(videoSvc)
 	marketingEmailHandler := handler.NewMarketingEmailHandler(emailSvc)
 	linkedInHandler := handler.NewLinkedInHandler(linkedInSvc, cfg.FrontendBaseURL)
+	facebookHandler := facebook.NewHandler(facebookSvc, cfg.FrontendBaseURL)
 	secretsRotHandler := handler.NewSecretsRotationHandler(secretsRotSvc)
 	linuxPatchHandler := handler.NewLinuxPatchHandler(linuxPatchSvc)
 	abTestHandler := handler.NewABTestHandler(abTestSvc)
@@ -1441,6 +1472,8 @@ func main() {
 		r.Get("/mail/connection/oauth/callback", mailHandler.OAuthCallback)
 		// LinkedIn redirects the browser here with ?code=&state= — no JWT.
 		r.Get("/linkedin/oauth/callback", linkedInHandler.OAuthCallback)
+		// Facebook redirects the browser here with ?code=&state= — no JWT.
+		r.Get("/facebook/oauth/callback", facebookHandler.OAuthCallback)
 
 		// Generated images are public. Keys embed UUIDs so they are not
 		// enumerable, and Cache-Control already marks them immutable. Auth
@@ -1801,6 +1834,8 @@ func main() {
 				r.Post("/posts/{postID}/publish", linkedInHandler.Publish)
 			})
 
+			r.Route("/facebook", facebookHandler.Routes)
+
 			r.Route("/meta-leads", func(r chi.Router) {
 				r.Get("/status", metaLeadHandler.Status)
 				r.Get("/connections", metaLeadHandler.ListConnections)
@@ -2133,6 +2168,8 @@ func main() {
 			// registered above, outside auth, so CMS covers stay loadable.
 			r.Route("/images", func(r chi.Router) {
 				r.Get("/models", imageHandler.ListModels)
+				r.Get("/providers", imageHandler.Providers)
+				r.Get("/usage", imageHandler.Usage)
 				r.Get("/routing", imageHandler.Routing)
 				r.With(middleware.RequirePermission(rbacSvc, model.PermOrgManage)).Put("/routing", imageHandler.PutRouting)
 				r.Post("/generate", imageHandler.Generate)
@@ -2182,6 +2219,8 @@ func main() {
 	go courseSvc.StartResumer(ctx)
 	// LinkedIn drafts for newly published articles, for orgs that connected it.
 	go linkedInSvc.StartAutoDraft(ctx)
+	// Facebook posts approved for a time are published when it comes.
+	go facebookSvc.StartScheduler(ctx)
 	go videoSvc.StartResumer(ctx)
 	emailSvc.FailStale(ctx, 30*time.Minute)
 
@@ -2322,4 +2361,24 @@ func resolveDeployedAt() time.Time {
 		}
 	}
 	return startedAt
+}
+
+// facebookImages adapts the image service to the Facebook Page Manager's
+// creatives. The URL it returns is what Facebook fetches, so a result with no
+// stored URL is an error rather than an empty success.
+type facebookImages struct{ images *service.ImageService }
+
+func (f facebookImages) Enabled() bool { return f.images != nil && f.images.Enabled() }
+
+func (f facebookImages) Generate(ctx context.Context, orgID, userID uuid.UUID, prompt string) (string, error) {
+	res, err := f.images.Generate(ctx, service.GenerateImageRequest{
+		OrgID: orgID, UserID: &userID, Prompt: prompt, Source: "facebook_page_manager",
+	})
+	if err != nil {
+		return "", err
+	}
+	if res.URL == "" {
+		return "", errors.New("the image was generated but has nowhere to be stored")
+	}
+	return res.URL, nil
 }

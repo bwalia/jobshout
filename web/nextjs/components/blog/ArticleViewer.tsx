@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { apiErrorMessage, isRequestTimeout } from "@/lib/api/client";
 import { redrawBlogArticleImages, resendBlogArticle } from "@/lib/api/blog";
+import { RegenerateCoverControl } from "@/components/blog/RegenerateCoverControl";
 import { blogKeys } from "@/lib/hooks/useBlog";
 import { cn } from "@/lib/utils/cn";
 import { MermaidDiagram } from "@/components/blog/MermaidDiagram";
@@ -155,10 +156,12 @@ export function ArticleViewer({ article }: { article: BlogArticle }) {
       {article.cover_image_url && (
         <StoredImage
           src={article.cover_image_url}
-          alt={article.cover_image_prompt || article.title || article.topic}
+          alt={article.cover_image_meta?.alt || article.title || article.topic}
           className="mb-3 aspect-video w-full rounded-lg border border-border object-cover"
         />
       )}
+
+      {article.cover_image_url && <RegenerateCoverControl article={article} />}
 
       {/* Header: file path + actions */}
       <div className="flex items-start justify-between gap-4 border-b border-border pb-3">

@@ -142,3 +142,20 @@ export async function resendBlogArticle(id: string): Promise<BlogArticle> {
   );
   return data;
 }
+
+/**
+ * Redraws only the cover, optionally with one image provider/model chosen for
+ * this post. An empty provider uses the org's routing and the server default.
+ * Also updates the CMS post when it has been filed.
+ */
+export async function regenerateBlogCover(
+  id: string,
+  choice: { provider?: string; model?: string } = {}
+): Promise<BlogArticle> {
+  const { data } = await apiClient.post<BlogArticle>(
+    `/blogs/articles/${id}/regenerate-cover`,
+    { sync_cms: true, provider: choice.provider || undefined, model: choice.model || undefined },
+    { timeout: 600_000 }
+  );
+  return data;
+}

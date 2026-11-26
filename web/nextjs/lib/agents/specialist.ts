@@ -23,6 +23,7 @@ export const AGENT_CLIENT_BUILTINS = [
   "course_generator",
   "jobshout_com_writer",
   "linkedin_poster",
+  "facebook_page_manager",
   "video_producer",
   "marketing_email_writer",
   "meta_lead_analyst",

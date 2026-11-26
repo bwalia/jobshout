@@ -4,6 +4,7 @@ import type {
   GenerateImageRequest,
   GenerateImageResponse,
   ImageModelsResponse,
+  ImageProvidersResponse,
   ImageRoute,
   ImageRoutingResponse,
 } from "@/lib/types/image";
@@ -62,4 +63,9 @@ export async function getGeneratedImages(limit = 50): Promise<GeneratedImage[]> 
     params: { limit },
   });
   return data.images ?? [];
+}
+
+export async function getImageProviders(): Promise<ImageProvidersResponse> {
+  const { data } = await apiClient.get<ImageProvidersResponse>("/images/providers");
+  return data;
 }

@@ -85,3 +85,25 @@ export interface ImageRoutingResponse {
   tasks: ImageTask[];
   routes: Record<string, ImageRoute>;
 }
+
+/** One image provider card. Mirrors imagegen.ProviderStatus. */
+export interface ImageProviderStatus {
+  provider: string;
+  label: string;
+  kind: "image";
+  status: "available" | "not_configured" | "disabled";
+  model?: string;
+  host?: string;
+  /** Terms-of-service / stability warning (Midjourney). */
+  warning?: string;
+  default: boolean;
+  /** What to set on the server to enable it. */
+  hint?: string;
+}
+
+/** GET /images/providers. */
+export interface ImageProvidersResponse {
+  default_provider: string;
+  fallback_order: string[];
+  providers: ImageProviderStatus[];
+}

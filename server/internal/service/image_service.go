@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -255,4 +256,32 @@ func (s *ImageService) StoreUpload(ctx context.Context, orgID uuid.UUID, data []
 		return "", fmt.Errorf("image storage is not configured on this server")
 	}
 	return s.store.PutFile(ctx, orgID, data, ext, contentType)
+}
+
+// ProviderStatuses reports every image provider, configured or not, for the
+// "Built-in providers" cards.
+func (s *ImageService) ProviderStatuses() []imagegen.ProviderStatus {
+	if s == nil {
+		return nil
+	}
+	return s.router.Statuses()
+}
+
+// FallbackOrder is the configured provider fallback chain.
+func (s *ImageService) FallbackOrder() []string {
+	if s == nil {
+		return nil
+	}
+	return s.router.FallbackOrder()
+}
+
+// Usage counts the org's images per provider and model over the last days.
+func (s *ImageService) Usage(ctx context.Context, orgID uuid.UUID, days int) ([]model.ImageUsage, error) {
+	if s == nil || s.repo == nil {
+		return nil, fmt.Errorf("image usage is not available on this server")
+	}
+	if days <= 0 || days > 365 {
+		days = 30
+	}
+	return s.repo.Usage(ctx, orgID, time.Now().AddDate(0, 0, -days))
 }

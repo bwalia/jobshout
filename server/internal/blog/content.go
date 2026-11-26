@@ -50,8 +50,10 @@ type GeneratedArticle struct {
 	CoverImageProvider string
 	CoverImageModel    string
 	CoverImageSeed     int64
-	CoverImageWidth    int
-	CoverImageHeight   int
+	// CoverImageAlt is the cover's alt text (see describeCover).
+	CoverImageAlt    string
+	CoverImageWidth  int
+	CoverImageHeight int
 
 	// Cover brief from the plan step. CoverAngle is the article's one-sentence
 	// angle; redrawing a cover derives its scene from it.

@@ -17,6 +17,7 @@ import { ArticlesView } from "@/components/articles/ArticlesView";
 import { ImagesView } from "@/components/image/ImagesView";
 import { CourseGeneratorClient } from "@/components/courses/CourseGeneratorClient";
 import { InsightsWriterClient } from "@/components/insights-writer/InsightsWriterClient";
+import { FacebookClient } from "@/components/facebook/FacebookClient";
 import { LinkedInClient } from "@/components/linkedin/LinkedInClient";
 import { VideoProducerClient } from "@/components/video/VideoProducerClient";
 import { MarketingEmailClient } from "@/components/marketing-email/MarketingEmailClient";
@@ -54,6 +55,7 @@ export const AGENT_CLIENTS: Record<string, ComponentType> = {
   course_generator: CourseGeneratorClient,
   jobshout_com_writer: InsightsWriterClient,
   linkedin_poster: LinkedInClient,
+  facebook_page_manager: FacebookClient,
   video_producer: VideoProducerClient,
   marketing_email_writer: MarketingEmailClient,
   meta_lead_analyst: MetaLeadClient,

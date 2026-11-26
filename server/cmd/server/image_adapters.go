@@ -5,6 +5,7 @@ import (
 
 	"github.com/jobshout/server/internal/blog"
 	"github.com/jobshout/server/internal/imagegen"
+	"github.com/jobshout/server/internal/llm"
 	"github.com/jobshout/server/internal/marketingemail"
 	"github.com/jobshout/server/internal/service"
 	"github.com/jobshout/server/internal/tools"
@@ -32,13 +33,24 @@ func (b *blogIllustrator) Enabled() bool { return b.images.Enabled() }
 func (b *blogIllustrator) Letters(need imagegen.TextNeed) bool { return b.images.CanLetter(need) }
 
 func (b *blogIllustrator) Generate(ctx context.Context, req blog.IllustrationRequest) (*blog.Illustration, error) {
+	// A provider/model chosen for this one post (WithImageChoice) applies to
+	// its cover only, never to figures or other callers.
+	provider, model := "", req.Model
+	// It is skipped for a picture whose labels must be spelt right when the
+	// chosen provider cannot letter them: the pipeline then draws that one with
+	// the default, and uses the choice for the wordless art under the labels.
+	if c, ok := blog.ImageChoiceFrom(ctx); ok && req.Source == "blog_cover" && model == "" &&
+		(req.NoText || c.Provider == "" || imagegen.Letters(c.Provider, c.Model, req.Text)) {
+		provider, model = c.Provider, c.Model
+	}
 	result, err := b.images.Generate(ctx, service.GenerateImageRequest{
-		OrgID:  req.OrgID,
-		Prompt: req.Prompt,
-		Model:  req.Model,
-		Width:  req.Width,
-		Height: req.Height,
-		Steps:  req.Steps,
+		OrgID:    req.OrgID,
+		Prompt:   req.Prompt,
+		Provider: provider,
+		Model:    model,
+		Width:    req.Width,
+		Height:   req.Height,
+		Steps:    req.Steps,
 		// Unseeded: two articles about the same subject should not get the same
 		// picture, which is what a fixed seed would produce.
 		Seed:       -1,
@@ -111,4 +123,14 @@ func (t *toolImageGenerator) GenerateImage(ctx context.Context, req tools.ImageR
 		Width:    result.Width,
 		Height:   result.Height,
 	}, nil
+}
+
+// coverDescriber adapts the Ollama vision call to blog.CoverDescriber.
+type coverDescriber struct {
+	client *llm.OllamaClient
+	model  string
+}
+
+func (d *coverDescriber) DescribeImage(ctx context.Context, prompt string, png []byte) (string, error) {
+	return d.client.DescribeImage(ctx, d.model, prompt, png)
 }
