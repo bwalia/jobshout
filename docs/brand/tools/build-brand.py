@@ -12,6 +12,7 @@ icons. Edit the geometry here, never the generated files.
 from __future__ import annotations
 
 import io
+from contextlib import contextmanager
 import math
 import shutil
 import subprocess
@@ -36,6 +37,22 @@ RASPBERRY = "#CC3A63"
 INK = "#1C1714"
 PLUM = "#1A0F18"
 CREAM = "#FFF7EB"
+
+# The mark's gradient and the wordmark's "Shout" gradient. The panel
+# (web/nextjs) swaps these for its Daybook navy and gold; see PANEL below.
+MARK_STOPS = (FUCHSIA, ROSE, AMBER)
+TEXT_STOPS = (FUCHSIA, ROSE, AMBER)
+
+# The panel uses Daybook's palette (navy ink, muted gold, warm paper), so
+# its copy of the mark is navy with a gold live agent and a gold "Shout". Only
+# web/nextjs gets these; jobshout.com and the Apple icons keep the brand.
+PANEL = {
+    "MARK_STOPS": ("#1D3A5F", "#274B78", "#3F6699"),
+    "TEXT_STOPS": ("#8A6A22", "#9C7A2E", "#B08C3A"),
+    "LIVE": "#D4B26A",
+    "INK": "#14213D",
+    "CREAM": "#FFFFFF",
+}
 
 # ── The mark: the Shout wheel ────────────────────────────────────────────────
 # A hub (you) broadcasting to a team of agents. Four long spokes reach the
@@ -88,8 +105,11 @@ def orbit_arcs() -> str:
 
 
 def glyph(fill: str, *, live: str, small: bool = False, depth: bool = False,
-          core: str | None = CREAM, orbit_opacity: float = 0.5) -> str:
-    """SVG elements for the mark. `fill` is a colour or url(#id)."""
+          core: str | None = "", orbit_opacity: float = 0.5) -> str:
+    """SVG elements for the mark. `fill` is a colour or url(#id).
+    `core` defaults to CREAM; None leaves the core out."""
+    if core == "":
+        core = CREAM
     parts = []
     if small:
         # 16–32 px: four thick spokes, the hub and the live agent. No orbit.
@@ -136,13 +156,15 @@ def glyph(fill: str, *, live: str, small: bool = False, depth: bool = False,
     return body + "".join(extra)
 
 
-def shout_gradient(gid: str = "shout", x1=150, y1=150, x2=874, y2=874) -> str:
+def shout_gradient(gid: str = "shout", x1=150, y1=150, x2=874, y2=874,
+                   stops: tuple[str, str, str] | None = None) -> str:
+    a, b, c = stops or MARK_STOPS
     return (
         f'<linearGradient id="{gid}" gradientUnits="userSpaceOnUse" '
         f'x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}">'
-        f'<stop offset="0" stop-color="{FUCHSIA}"/>'
-        f'<stop offset="0.5" stop-color="{ROSE}"/>'
-        f'<stop offset="1" stop-color="{AMBER}"/></linearGradient>'
+        f'<stop offset="0" stop-color="{a}"/>'
+        f'<stop offset="0.5" stop-color="{b}"/>'
+        f'<stop offset="1" stop-color="{c}"/></linearGradient>'
     )
 
 
@@ -276,7 +298,7 @@ def words(x: float, baseline: float, size: float, job: str) -> tuple[str, float]
     jd, jw = text_path("Job", size, x, baseline)
     sx = x + jw + TRACKING * size
     sd, sw = text_path("Shout", size, sx, baseline)
-    grad = shout_gradient("shoutText", sx, baseline - cap_height(size), sx + sw, baseline)
+    grad = shout_gradient("shoutText", sx, baseline - cap_height(size), sx + sw, baseline, TEXT_STOPS)
     return (
         f'<defs>{grad}</defs><path fill="{job}" d="{jd}"/><path fill="url(#shoutText)" d="{sd}"/>',
         sx + sw - x,
@@ -315,6 +337,18 @@ def render(src: Path, dst: Path, width: int, height: int | None = None) -> None:
     if height:
         cmd += ["-h", str(height)]
     subprocess.run(cmd + ["-o", str(dst), str(src)], check=True)
+
+
+@contextmanager
+def palette(overrides: dict):
+    """Temporarily swap module-level colours (MARK_STOPS, LIVE, INK, ...)."""
+    g = globals()
+    saved = {k: g[k] for k in overrides}
+    g.update(overrides)
+    try:
+        yield
+    finally:
+        g.update(saved)
 
 
 def flatten(png: Path) -> None:
@@ -369,19 +403,44 @@ def main() -> None:
     shutil.copy(png / "icon-ios-1024.png", ios / "Brand/AppIcon-1024.png")
     shutil.copy(png / "icon-mac-1024.png", ios / "Brand/AppIcon-mac-1024.png")
 
+    # The panel's navy-and-gold copies, written beside the brand ones.
+    panel_dir = BRAND / "panel"
+    panel_dir.mkdir(exist_ok=True)
+    with palette(PANEL):
+        panel = {
+            "logo-glyph.svg": glyph_svg(),
+            "logo-glyph-small.svg": glyph_svg(small=True),
+            "lockup.svg": lockup(INK, "JobShout logo, horizontal lockup, for light backgrounds"),
+        }
+    # On Daybook's dark navy the wheel takes its pale blue and the gold lifts
+    # to its dark-theme shade. BrandMark swaps to these under .dark.
+    with palette({**PANEL, "MARK_STOPS": ("#5C82B5", "#8FB3E0", "#B5CDEE"),
+                  "TEXT_STOPS": ("#C9A85E", "#D4B26A", "#E0C383"), "CREAM": "#0E1626"}):
+        panel["lockup-on-dark.svg"] = lockup("#E8ECF3", "JobShout logo, horizontal lockup, for dark backgrounds")
+        panel["logo-glyph-on-dark.svg"] = glyph_svg()
+        panel["logo-glyph-small-on-dark.svg"] = glyph_svg(small=True)
+    panel_paths = {}
+    for k, v in panel.items():
+        (panel_dir / k).write_text(v)
+        panel_paths[k] = panel_dir / k
+
     # Web: SVG icon, Apple touch icon and a real favicon.ico, for both apps.
     for app in (ROOT / "web/nextjs", ROOT / "jobshout-com/web/nextjs"):
+        src = {**paths, **panel_paths} if app.name == "nextjs" and app.parent.parent == ROOT else paths
         brand_dir = app / "public/brand"
         brand_dir.mkdir(parents=True, exist_ok=True)
         for name in ("logo-glyph.svg", "logo-glyph-small.svg", "logo-mono.svg", "lockup.svg", "lockup-on-dark.svg"):
-            shutil.copy(paths[name], brand_dir / name)
-        shutil.copy(paths["logo-glyph-small.svg"], app / "app/icon.svg")
+            shutil.copy(src[name], brand_dir / name)
+        if src is not paths:
+            for name in ("logo-glyph-on-dark.svg", "logo-glyph-small-on-dark.svg"):
+                shutil.copy(src[name], brand_dir / name)
+        shutil.copy(src["logo-glyph-small.svg"], app / "app/icon.svg")
         render(paths["logo-icon-ios.svg"], app / "app/apple-icon.png", 180)
         flatten(app / "app/apple-icon.png")
         sizes = []
         for px in (16, 32, 48):
             buf = io.BytesIO(subprocess.run(
-                ["rsvg-convert", "-w", str(px), str(paths["logo-glyph-small.svg"])],
+                ["rsvg-convert", "-w", str(px), str(src["logo-glyph-small.svg"])],
                 check=True, capture_output=True).stdout)
             sizes.append(Image.open(buf).convert("RGBA"))
         sizes[-1].save(app / "app/favicon.ico", sizes=[(s.width, s.height) for s in sizes], append_images=sizes[:-1])
