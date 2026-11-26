@@ -104,9 +104,45 @@ type pen struct {
 	rnd    *rand.Rand
 	// bold and medium replace the Go fonts when set.
 	bold, medium *truetype.Font
+	// k is the output's pixels per design unit (0 means 1). Paths scale with
+	// the context's matrix, but gg stretches a glyph's bitmap with it, so type
+	// is set at k times its size in pixel space instead: sharp, not blurred.
+	k float64
+}
+
+func (p *pen) scale() float64 {
+	if p.k == 0 {
+		return 1
+	}
+	return p.k
+}
+
+// str draws s anchored at (x, y) in design units.
+func (p *pen) str(s string, x, y, ax, ay float64) {
+	k := p.scale()
+	if k == 1 {
+		p.dc.DrawStringAnchored(s, x, y, ax, ay)
+		return
+	}
+	p.dc.Push()
+	p.dc.Identity()
+	p.dc.DrawStringAnchored(s, x*k, y*k, ax, ay)
+	p.dc.Pop()
+}
+
+// width is s's width in design units in the current face.
+func (p *pen) width(s string) float64 {
+	w, _ := p.dc.MeasureString(s)
+	return w / p.scale()
+}
+
+// wrap word-wraps s to w design units in the current face.
+func (p *pen) wrap(s string, w float64) []string {
+	return p.dc.WordWrap(s, w*p.scale())
 }
 
 func (p *pen) face(bold bool, size float64) {
+	size *= p.scale()
 	key := fmt.Sprintf("%t/%.1f", bold, size)
 	f, ok := p.faces[key]
 	if !ok {
@@ -130,11 +166,11 @@ func (p *pen) face(bold bool, size float64) {
 func (p *pen) text(s string, x, y, size float64, c color.Color, bold bool, ax float64) {
 	p.face(bold, size)
 	p.dc.SetColor(c)
-	p.dc.DrawStringAnchored(s, x, y, ax, 0.5)
+	p.str(s, x, y, ax, 0.5)
 }
 
 // fitText draws s centred in width w, shrinking the type until it fits on at
-// most two lines.
+// most two lines. Diagrams only: it assumes k is 1.
 func (p *pen) fitText(s string, x, y, w, size float64, c color.Color) {
 	for ; size > 14; size -= 2 {
 		p.face(true, size)
@@ -151,7 +187,7 @@ func (p *pen) fitText(s string, x, y, w, size float64, c color.Color) {
 func (p *pen) widest(lines []string) float64 {
 	m := 0.0
 	for _, l := range lines {
-		if w, _ := p.dc.MeasureString(l); w > m {
+		if w := p.width(l); w > m {
 			m = w
 		}
 	}
@@ -160,8 +196,7 @@ func (p *pen) widest(lines []string) float64 {
 
 func (p *pen) measure(s string, size float64, bold bool) float64 {
 	p.face(bold, size)
-	w, _ := p.dc.MeasureString(s)
-	return w
+	return p.width(s)
 }
 
 // spaced draws tracked capitals for the corner tag.
@@ -170,9 +205,8 @@ func (p *pen) spaced(s string, x, y, size, track float64, c color.Color) float64
 	p.dc.SetColor(c)
 	for _, r := range s {
 		ch := string(r)
-		p.dc.DrawStringAnchored(ch, x, y, 0, 0.5)
-		w, _ := p.dc.MeasureString(ch)
-		x += w + track
+		p.str(ch, x, y, 0, 0.5)
+		x += p.width(ch) + track
 	}
 	return x
 }
@@ -184,9 +218,15 @@ func (p *pen) fill(c color.Color) {
 
 func (p *pen) stroke(c color.Color, width float64, dash ...float64) {
 	p.dc.SetColor(c)
-	p.dc.SetLineWidth(width)
+	// gg's line width and dashes are in pixels, not design units.
+	k := p.scale()
+	p.dc.SetLineWidth(width * k)
 	if len(dash) > 0 {
-		p.dc.SetDash(dash...)
+		d := make([]float64, len(dash))
+		for i, v := range dash {
+			d[i] = v * k
+		}
+		p.dc.SetDash(d...)
 	}
 	p.dc.Stroke()
 	p.dc.SetDash()

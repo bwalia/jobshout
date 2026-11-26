@@ -19,10 +19,14 @@ import (
 // cHeadline is the colour of the line set biggest on a card.
 var cHeadline = rgb{0xfa, 0xcc, 0x15}
 
+// cardScale is a card's pixels per design unit: 3200x1800, so its type stays
+// sharp on a retina screen where the cover spans the article column.
+const cardScale = 2
+
 // coverCardAsk is what a headline card needs from the plan: the line it sets
 // biggest, and the numbers its chart draws. The other parts (stat, eyebrow,
 // labels) are asked for with the diagram.
-const coverCardAsk = `a "headline" of 2-6 words stating the article's point, which reads on from the stat when there is one (stat "$35 billion", headline "dollar baby"; stat "100%", headline "of the rent, paid gross"), and a "trend" only when the article reports how one number changed over time: 4-12 numbers in order, with "trend_from" and "trend_to" of 2-5 words saying what the first and last point are (otherwise [] and "")`
+const coverCardAsk = `a "headline" of 2-6 words stating the article's point, which reads on from the stat when there is one (stat "$35 billion", headline "dollar baby"; stat "100%", headline "of the rent, paid gross"), and a "trend" only when the article reports how one number changed over time: 4-12 numbers in order, with "trend_from" and "trend_to" of 2-5 words saying what the first and last point are (otherwise [] and ""), a "dek": one plain sentence of 12-22 words telling a reader what the article explains, and "notes": for each label in order, 3-8 words saying what it means in this article (stat "", labels ["Full monthly rent", "Tax deducted upfront"], notes ["Paid gross once HMRC approves you", "Agent keeps 20% for HMRC"])`
 
 // drawCard renders a cover as a headline card: the article's figure and point
 // set large, its title under them, and on the right the trend it reports or
@@ -33,10 +37,19 @@ func drawCard(scene coverScene, title, accent string) ([]byte, error) {
 	if err := coverFonts(); err != nil {
 		return nil, fmt.Errorf("cover fonts: %w", err)
 	}
-	dc := gg.NewContext(int(designW), int(designH))
-	p := &pen{dc: dc, accent: coverAccentColour(accent), faces: map[string]font.Face{}}
-	all := strings.Join(append([]string{scene.Eyebrow, scene.Stat, scene.Headline, title, scene.TrendFrom, scene.TrendTo}, scene.Labels...), "")
-	if err := cardFonts(); err == nil && hasGlyphs(cardBold, all) && hasGlyphs(cardMedium, title) {
+	dc := gg.NewContext(int(designW*cardScale), int(designH*cardScale))
+	dc.Scale(cardScale, cardScale)
+	p := &pen{dc: dc, accent: coverAccentColour(accent), faces: map[string]font.Face{}, k: cardScale}
+	dek := scene.Dek
+	if dek == "" {
+		dek = title
+	}
+	var notes []string
+	for _, l := range scene.Labels {
+		notes = append(notes, scene.note(l))
+	}
+	all := strings.Join(append([]string{scene.Eyebrow, scene.Stat, scene.Headline, scene.TrendFrom, scene.TrendTo}, scene.Labels...), "")
+	if err := cardFonts(); err == nil && hasGlyphs(cardBold, all) && hasGlyphs(cardMedium, dek+strings.Join(notes, "")) {
 		p.bold, p.medium = cardBold, cardMedium
 	}
 	dc.SetLineJoin(gg.LineJoinRound)
@@ -44,7 +57,8 @@ func drawCard(scene coverScene, title, accent string) ([]byte, error) {
 
 	dc.DrawRectangle(0, 0, designW, designH)
 	p.fill(cInk.a(1))
-	glow := gg.NewRadialGradient(1230, 470, 0, 1230, 470, 720)
+	// Gradients are in pixels, not design units.
+	glow := gg.NewRadialGradient(1230*cardScale, 470*cardScale, 0, 1230*cardScale, 470*cardScale, 720*cardScale)
 	glow.AddColorStop(0, p.accent.a(0.1))
 	glow.AddColorStop(1, p.accent.a(0))
 	dc.SetFillStyle(glow)
@@ -57,7 +71,8 @@ func drawCard(scene coverScene, title, accent string) ([]byte, error) {
 	}
 
 	// The left column, biggest first: the stat, then the headline that reads
-	// on from it, then the title. With no stat the headline leads; with
+	// on from it, then the dek saying what the article explains (its title
+	// when the plan gave none). With no stat the headline leads; with
 	// neither, the title does.
 	type part struct {
 		text           string
@@ -82,7 +97,7 @@ func drawCard(scene coverScene, title, accent string) ([]byte, error) {
 	} else {
 		add(lead, 150, 64, leadLines, true, cHeadline.a(1), 1.02, 0)
 		add(rest, 92, 44, 2, true, cText.a(1), 1.08, 14)
-		add(title, 36, 26, 3, false, cMuted.mix(cText, 0.4).a(1), 1.3, 34)
+		add(dek, 36, 26, 3, false, cMuted.mix(cText, 0.4).a(1), 1.3, 34)
 	}
 	const colX, colW = 88.0, 770.0
 	sizes := make([]float64, len(parts))
@@ -98,15 +113,18 @@ func drawCard(scene coverScene, title, accent string) ([]byte, error) {
 		p.face(pt.bold, sizes[i])
 		p.dc.SetColor(pt.c)
 		for _, l := range wrapped[i] {
-			p.dc.DrawString(l, colX, y+sizes[i]*0.8)
+			p.str(l, colX, y+sizes[i]*0.8, 0, 0)
 			y += sizes[i] * pt.lead
 		}
 	}
 
-	if len(scene.Trend) >= minTrendPoints {
+	switch {
+	case len(scene.Trend) >= minTrendPoints:
 		p.trend(scene)
-	} else {
-		p.ladder(scene.Labels)
+	case scene.Layout == layoutVersus && len(scene.Labels) >= 2:
+		p.sides(scene.Labels[:2], notes[:2])
+	default:
+		p.ladder(scene.Labels, notes)
 	}
 
 	var buf bytes.Buffer
@@ -156,12 +174,12 @@ func (p *pen) fitLines(s string, w, max, min float64, n int, bold bool) (float64
 	size := max
 	for ; size > min; size -= 4 {
 		p.face(bold, size)
-		if lines := p.dc.WordWrap(s, w); len(lines) <= n && p.widest(lines) <= w {
+		if lines := p.wrap(s, w); len(lines) <= n && p.widest(lines) <= w {
 			return size, lines
 		}
 	}
 	p.face(bold, min)
-	lines := p.dc.WordWrap(s, w)
+	lines := p.wrap(s, w)
 	if len(lines) > n {
 		lines = lines[:n]
 		lines[n-1] = strings.TrimRight(lines[n-1], " ,;:") + "…"
@@ -196,7 +214,7 @@ func (p *pen) trend(s coverScene) {
 		return x, chartB - (chartB-chartT)*(s.Trend[i]-lo)/span
 	}
 
-	area := gg.NewLinearGradient(0, chartT, 0, chartB)
+	area := gg.NewLinearGradient(0, chartT*cardScale, 0, chartB*cardScale)
 	area.AddColorStop(0, p.accent.a(0.35))
 	area.AddColorStop(1, p.accent.a(0))
 	dc.MoveTo(chartL, chartB)
@@ -242,10 +260,10 @@ func (p *pen) trend(s coverScene) {
 }
 
 // ladder draws the article's steps or parts down the right of a card,
-// numbered, with the last one in the accent.
-func (p *pen) ladder(labels []string) {
+// numbered, with the last one in the accent and each one's note under it.
+func (p *pen) ladder(labels, notes []string) {
 	if len(labels) > 6 {
-		labels = labels[:6]
+		labels, notes = labels[:6], notes[:6]
 	}
 	n := len(labels)
 	if n == 0 {
@@ -270,9 +288,49 @@ func (p *pen) ladder(labels []string) {
 		}
 		p.disc(cx, y, 30, fillC, line, 4)
 		p.text(strconv.Itoa(i+1), cx, y, 28, num, true, 0.5)
-		size, lines := p.fitLines(l, textW, 40, 24, 2, true)
-		p.face(true, size)
-		p.dc.SetColor(txt)
-		p.dc.DrawStringWrapped(strings.Join(lines, " "), textX, y, 0, 0.5, textW, 1.15, gg.AlignLeft)
+		if notes[i] == "" {
+			p.lines(l, textX, y, textW, 40, 24, 2, true, txt, 0.5)
+			continue
+		}
+		p.lines(l, textX, y-18, textW, 36, 24, 1, true, txt, 0.5)
+		p.lines(notes[i], textX, y+22, textW, 24, 18, 1, false, cMuted.mix(cText, 0.3).a(1), 0.5)
+	}
+}
+
+// sides draws a versus scene's two sides as panels, one over the other with
+// "vs" between: the first plain, the second in the accent, each with what it
+// means under it.
+func (p *pen) sides(labels, notes []string) {
+	const x, w, h, padX = chartL, chartR - chartL, 190.0, 40.0
+	mid := (chartT + chartB) / 2
+	tops := []float64{mid - 40 - h, mid + 40}
+	for i, l := range labels {
+		y := tops[i]
+		fillC, line, txt := cPanel.a(0.85), cSlate2.a(1), cText.a(1)
+		if i == 1 {
+			fillC, line, txt = p.accent.a(0.12), p.accent.a(1), p.accent.a(1)
+		}
+		p.box(x, y, w, h, 22, fillC, line, 3)
+		if notes[i] == "" {
+			p.lines(l, x+padX, y+h/2, w-2*padX, 48, 28, 2, true, txt, 0.5)
+			continue
+		}
+		p.lines(l, x+padX, y+h/2-26, w-2*padX, 44, 28, 1, true, txt, 0.5)
+		p.lines(notes[i], x+padX, y+h/2+30, w-2*padX, 28, 20, 1, false, cMuted.mix(cText, 0.4).a(1), 0.5)
+	}
+	p.disc(x+w/2, mid, 34, cInk.a(1), p.accent.a(1), 4)
+	p.text("vs", x+w/2, mid-2, 28, p.accent.a(1), true, 0.5)
+}
+
+// lines sets s from x in width w at the largest size from max to min that
+// fits in n lines, the block centred on y when ay is 0.5.
+func (p *pen) lines(s string, x, y, w, max, min float64, n int, bold bool, c color.Color, ay float64) {
+	size, ls := p.fitLines(s, w, max, min, n, bold)
+	p.face(bold, size)
+	p.dc.SetColor(c)
+	lead := size * 1.15
+	top := y - ay*lead*float64(len(ls))
+	for i, l := range ls {
+		p.str(l, x, top+lead*float64(i)+lead/2, 0, 0.5)
 	}
 }

@@ -214,9 +214,10 @@ func (r *Runner) storeSceneCover(ctx context.Context, orgID uuid.UUID, a *Genera
 	}
 	var img []byte
 	var err error
+	scale := 1.0
 	if art == nil && r.cardCovers() {
 		img, err = drawCard(scene, a.Title, accent)
-		drawnBy = "card"
+		drawnBy, scale = "card", cardScale
 	} else {
 		img, err = drawSceneOn(art, scene, accent, seed)
 	}
@@ -234,7 +235,7 @@ func (r *Runner) storeSceneCover(ctx context.Context, orgID uuid.UUID, a *Genera
 	a.CoverImageProvider = provider
 	a.CoverImageModel = drawnBy
 	a.CoverImageSeed = artSeed
-	a.CoverImageWidth, a.CoverImageHeight = int(designW), int(designH)
+	a.CoverImageWidth, a.CoverImageHeight = int(designW*scale), int(designH*scale)
 	return nil
 }
 

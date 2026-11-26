@@ -151,7 +151,7 @@ Decide:
 The title must be about the TOPIC given above; research that wandered off it is not a reason to change subject.
 
 Respond with JSON only, in exactly this shape:
-{"title": "...", "angle": "...", "sections": ["...", "..."], "cover_accent": "...", "cover_scene": {"layout": "...", "labels": ["...", "..."], "stat": "", "eyebrow": "...", "headline": "...", "trend": [], "trend_from": "", "trend_to": "", "picture": "..."}%s}`,
+{"title": "...", "angle": "...", "sections": ["...", "..."], "cover_accent": "...", "cover_scene": {"layout": "...", "labels": ["...", "..."], "stat": "", "eyebrow": "...", "headline": "...", "dek": "...", "notes": ["...", "..."], "trend": [], "trend_from": "", "trend_to": "", "picture": "..."}%s}`,
 		reader.PlanningLine(),
 		brief.Topic,
 		guidanceOrNone(brief.Context),

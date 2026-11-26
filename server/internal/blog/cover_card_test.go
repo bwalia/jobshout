@@ -27,6 +27,15 @@ var cardCases = map[string]struct {
 		"Jensen Huang's 11 days away from NVIDIA"},
 	"headline": {coverScene{Eyebrow: "KUBERNETES", Headline: "Gateway API replaces Ingress",
 		Labels: []string{"Ingress", "HTTPRoute", "Gateway", "GatewayClass"}}, "Gateway API Replaces Ingress"},
+	"versus": {coverScene{Layout: layoutVersus, Eyebrow: "NON-RESIDENT LANDLORDS", Headline: "Gross rent or net: the choice",
+		Labels: []string{"Full monthly rent", "Tax deducted upfront"},
+		Notes:  map[string]string{"full monthly rent": "Paid gross once HMRC approves you", "tax deducted upfront": "Agent keeps 20% for HMRC"},
+		Dek:    "Living abroad, your letting agent holds back basic-rate tax unless HMRC lets you take the rent gross."},
+		"Tax on UK rental income when you live abroad"},
+	"notes": {coverScene{Eyebrow: "NON-RESIDENT LANDLORD", Stat: "20%", Headline: "held back from every rent payment",
+		Labels: []string{"Tenant pays agent", "Agent deducts tax", "You file Self Assessment"},
+		Notes:  map[string]string{"tenant pays agent": "Full rent reaches your UK agent", "agent deducts tax": "Basic rate goes to HMRC quarterly"}},
+		"Tax on UK rental income when you live abroad"},
 	"title":    {coverScene{}, "A title with nothing else to go on"},
 	"nonLatin": {coverScene{Headline: "Ταχύτερη αναζήτηση"}, "Αναζήτηση με GPU"},
 }
@@ -40,8 +49,8 @@ func TestDrawCard_DrawsEveryShape(t *testing.T) {
 			t.Fatalf("%s: %v", name, err)
 		}
 		img, err := png.Decode(bytes.NewReader(b))
-		if err != nil || img.Bounds().Dx() != int(designW) || img.Bounds().Dy() != int(designH) {
-			t.Fatalf("%s: not a %vx%v PNG: %v", name, designW, designH, err)
+		if w, h := int(designW*cardScale), int(designH*cardScale); err != nil || img.Bounds().Dx() != w || img.Bounds().Dy() != h {
+			t.Fatalf("%s: not a %vx%v PNG: %v", name, w, h, err)
 		}
 		if other, dup := seen[string(b)]; dup {
 			t.Errorf("%s drew the same card as %s", name, other)
@@ -70,8 +79,9 @@ func TestDrawCover_CardNeedsNoImageModel(t *testing.T) {
 	if len(ill.calls) != 0 {
 		t.Fatalf("a card asked the image model for %d pictures", len(ill.calls))
 	}
-	if a.CoverImageProvider != "diagram" || a.CoverImageModel != "card" || !r.coverStored(context.Background(), a.CoverImageURL) {
-		t.Fatalf("cover=%q provider=%q model=%q", a.CoverImageURL, a.CoverImageProvider, a.CoverImageModel)
+	if a.CoverImageProvider != "diagram" || a.CoverImageModel != "card" || a.CoverImageWidth != int(designW*cardScale) ||
+		!r.coverStored(context.Background(), a.CoverImageURL) {
+		t.Fatalf("cover=%q provider=%q model=%q width=%d", a.CoverImageURL, a.CoverImageProvider, a.CoverImageModel, a.CoverImageWidth)
 	}
 }
 
@@ -88,6 +98,22 @@ func TestCoverScene_ReadsTheCardFields(t *testing.T) {
 	}
 	if want := []float64{100, 96, 1200, 31}; len(s.Trend) != len(want) || s.Trend[2] != 1200 || s.Trend[3] != 31 {
 		t.Fatalf("trend = %v, want %v", s.Trend, want)
+	}
+	// Notes come as a list beside the labels and are kept by label, so a
+	// label dropped later cannot shift the rest onto the wrong notes.
+	if err := json.Unmarshal([]byte(`{"layout":"versus","labels":["Gross rent","Net rent"],"notes":["HMRC approved","20% withheld"],"dek":"Two ways to be paid."}`), &s); err != nil {
+		t.Fatal(err)
+	}
+	if s.note("net rent") != "20% withheld" || s.note("Gross rent") != "HMRC approved" || s.Dek != "Two ways to be paid." {
+		t.Fatalf("notes/dek lost: %+v", s)
+	}
+	stored, _ := json.Marshal(s)
+	var back coverScene
+	if err := json.Unmarshal(stored, &back); err != nil || back.note("Net rent") != "20% withheld" {
+		t.Fatalf("notes lost on a round trip: %s -> %+v", stored, back)
+	}
+	if err := json.Unmarshal([]byte(`{"labels":["a","b"],"notes":["only one"]}`), &s); err != nil || s.Notes != nil {
+		t.Fatalf("notes that do not pair with the labels were kept: %+v", s.Notes)
 	}
 	short := coverSceneFor(&GeneratedArticle{Title: "T", CoverScene: coverScene{Layout: layoutFlow, Trend: []float64{1, 2}}})
 	if short.Trend != nil {

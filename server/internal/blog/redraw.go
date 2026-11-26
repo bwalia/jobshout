@@ -122,6 +122,14 @@ func (r *Runner) RedrawImages(ctx context.Context, orgID uuid.UUID, a *Generated
 		c := &a.CoverScene
 		c.Headline, c.Trend, c.TrendFrom, c.TrendTo = scene.Headline, scene.Trend, scene.TrendFrom, scene.TrendTo
 	}
+	// Notes are keyed by label, so the first plan's still fit the labels the
+	// two plans share.
+	if a.CoverScene.Dek == "" {
+		a.CoverScene.Dek = scene.Dek
+	}
+	if a.CoverScene.Notes == nil {
+		a.CoverScene.Notes = scene.Notes
+	}
 	if strings.TrimSpace(a.CoverAngle) == "" {
 		a.CoverAngle = strings.TrimSpace(a.Excerpt)
 	}
@@ -162,7 +170,7 @@ THINGS THE ARTICLE NAMES (take cover and figure labels from these): %s
 ARTICLE:
 %s
 
-Respond with JSON only: {"cover_scene": {"layout": "...", "labels": ["...", "..."], "stat": "", "eyebrow": "...", "headline": "...", "trend": [], "trend_from": "", "trend_to": "", "picture": "..."}, "figures": [{"kind": "process", "section": "...", "content": "..."}]}`,
+Respond with JSON only: {"cover_scene": {"layout": "...", "labels": ["...", "..."], "stat": "", "eyebrow": "...", "headline": "...", "dek": "...", "notes": ["...", "..."], "trend": [], "trend_from": "", "trend_to": "", "picture": "..."}, "figures": [{"kind": "process", "section": "...", "content": "..."}]}`,
 		coverCardAsk, coverPictureAsk, coverLayoutGuide, kinds, format, title, strings.Join(headings, "\n- "), strings.Join(articleTerms(markdown, 12), ", "), body)
 
 	var out struct {
