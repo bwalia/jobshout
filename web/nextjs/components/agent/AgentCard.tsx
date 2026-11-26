@@ -3,28 +3,14 @@ import { agentHref } from "@/lib/agents/links";
 import { hasAgentClient } from "@/lib/agents/specialist";
 import { AgentStatusBadge } from "@/components/agent/AgentStatusBadge";
 import type { Agent } from "@/lib/types/agent";
+import { avatarColour } from "@/lib/agents/avatar";
 
 interface AgentCardProps {
   agent: Agent;
   currentTask?: string;
 }
 
-const AVATAR_COLOURS = [
-  "bg-violet-600",
-  "bg-blue-600",
-  "bg-emerald-600",
-  "bg-orange-600",
-  "bg-rose-600",
-  "bg-cyan-600",
-  "bg-indigo-600",
-  "bg-pink-600",
-];
-
-function getAvatarColour(name: string): string {
-  const ch = name.trim().charCodeAt(0);
-  if (!Number.isFinite(ch)) return AVATAR_COLOURS[0];
-  return AVATAR_COLOURS[ch % AVATAR_COLOURS.length] ?? AVATAR_COLOURS[0];
-}
+const getAvatarColour = avatarColour;
 
 function getInitials(name: string): string {
   const parts = name
@@ -36,15 +22,15 @@ function getInitials(name: string): string {
 }
 
 function performanceColour(score: number): string {
-  if (score >= 80) return "text-emerald-600 dark:text-emerald-400";
-  if (score >= 50) return "text-orange-600 dark:text-orange-400";
-  return "text-red-600 dark:text-red-400";
+  if (score >= 80) return "text-signal-live";
+  if (score >= 50) return "text-signal-warn";
+  return "text-signal-error";
 }
 
 function performanceBgColour(score: number): string {
-  if (score >= 80) return "bg-emerald-500";
-  if (score >= 50) return "bg-orange-500";
-  return "bg-red-500";
+  if (score >= 80) return "bg-signal-live";
+  if (score >= 50) return "bg-signal-warn";
+  return "bg-signal-error";
 }
 
 export function AgentCard({ agent, currentTask }: AgentCardProps) {

@@ -41,9 +41,10 @@ module.exports = {
       // every label. 2xs was 11px; 12px is the smallest we let text go.
       fontSize: {
         "2xs": ["0.75rem", { lineHeight: "1rem", letterSpacing: "0.02em" }],
-        xs: ["0.8125rem", { lineHeight: "1.125rem" }],
-        sm: ["0.875rem", { lineHeight: "1.3125rem" }],
-        base: ["1rem", { lineHeight: "1.5rem" }],
+        xs: ["0.8125rem", { lineHeight: "1.25rem" }],
+        // sm is Daybook's 0.9rem: most labels and table cells are text-sm.
+        sm: ["0.9rem", { lineHeight: "1.375rem" }],
+        base: ["1rem", { lineHeight: "1.625rem" }],
         lg: ["1.125rem", { lineHeight: "1.6875rem" }],
         xl: ["1.25rem", { lineHeight: "1.8125rem", letterSpacing: "-0.01em" }],
         "2xl": ["1.5625rem", { lineHeight: "2.0625rem", letterSpacing: "-0.015em" }],
@@ -84,6 +85,10 @@ module.exports = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        gold: {
+          DEFAULT: "hsl(var(--gold))",
+          tint: "hsl(var(--gold-tint))",
+        },
         sidebar: {
           DEFAULT: "hsl(var(--sidebar))",
           foreground: "hsl(var(--sidebar-foreground))",
@@ -117,8 +122,9 @@ module.exports = {
         sm: "calc(var(--radius) - 6px)",
       },
       boxShadow: {
-        card: "0 1px 2px 0 rgba(0, 0, 0, 0.04)",
-        "card-hover": "0 2px 8px -2px rgba(0, 0, 0, 0.08)",
+        // Daybook's soft navy shadow.
+        card: "0 1px 2px rgba(20, 33, 61, 0.05), 0 4px 14px rgba(20, 33, 61, 0.04)",
+        "card-hover": "0 1px 2px rgba(20, 33, 61, 0.06), 0 8px 24px rgba(20, 33, 61, 0.08)",
         // Kept as no-ops so existing class names don't break; glows removed.
         signal: "none",
         "glow-live": "none",

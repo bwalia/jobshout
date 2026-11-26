@@ -4,157 +4,129 @@
 
 @layer base {
   /* ═══════════════════════════════════════════════════════════════════════
-     BRAND — the whole palette is these four colours and nothing else.
+     THEME — Daybook's palette (daybook-website/src/app/globals.scss):
+     navy ink, muted gold and warm paper. Fonts were already shared
+     (Poppins / Unbounded / JetBrains Mono, see app/layout.tsx).
 
-       #F9F0E0  beige      the page ground
-       #FFF7EB  cream      panels, cards, and text that sits on a colour
-       #A2AB73  sage       success / "done"
-       #CC3A63  raspberry  every primary action
+       #F6F4EE  paper   the page ground
+       #FFFFFF  white   cards and panels
+       #EFEBE1  paper-2 sidebar, secondary surfaces
+       #14213D  ink     body text (15.6:1 on white)
+       #46526A  ink-2   secondary text (7.9:1 on white)
+       #1D3A5F  navy    every primary action (11.6:1 with white text)
+       #9C7A2E  gold    the accent rule and highlights
 
-     There is deliberately no white: cards are cream and lift off a beige
-     ground, which is the way round this palette wants. The only colour not
-     in the four is a warm charcoal for text, because the palette has no dark.
-
-     To lighten or darken everything, change --brand-canvas-l alone.
+     Values are HSL triplets because Tailwind reads them as hsl(var(--x)).
      ═══════════════════════════════════════════════════════════════════════ */
   :root {
-    /* ── Brand ───────────────────────────────────────────────────────────── */
-    --brand-canvas-h: 38.4;
-    --brand-canvas-s: 67.6%;
-    --brand-canvas-l: 92.7%;        /* #F9F0E0 beige — the ground */
+    --background: 45 31% 95%;            /* #F6F4EE paper */
+    --foreground: 221 51% 16%;           /* #14213D ink */
 
-    --brand-card-h: 36;
-    --brand-card-s: 100%;
-    --brand-card-l: 96.1%;          /* #FFF7EB cream — panels sit above it */
+    --card: 0 0% 100%;
+    --card-foreground: 221 51% 16%;
 
-    /* Warm charcoal, biased to the cream so text never looks blue on it. */
-    --brand-ink-h: 32;
-    --brand-ink-s: 16%;
-    --brand-ink-l: 15%;             /* 13.9:1 on cream, 13.1:1 on beige */
+    --popover: 0 0% 100%;
+    --popover-foreground: 221 51% 16%;
 
-    --brand-accent-h: 343.2;
-    --brand-accent-s: 58.9%;
-    --brand-accent-l: 51%;          /* #CC3A63 — cream text on it is 4.58:1 */
+    --primary: 214 53% 24%;              /* #1D3A5F navy */
+    --primary-foreground: 218 31% 97%;
 
-    --brand-success-h: 69.6;
-    --brand-success-s: 25%;
-    --brand-success-l: 56.1%;       /* #A2AB73 — text on it uses -19% */
+    --secondary: 43 30% 91%;             /* #EFEBE1 paper-2 */
+    --secondary-foreground: 221 51% 16%;
 
-    /* A deeper, browner red than the accent so Delete never reads as Save. */
-    --brand-danger-h: 4;
-    --brand-danger-s: 58%;
-    --brand-danger-l: 38%;
+    --muted: 43 30% 92%;
+    --muted-foreground: 220 20% 35%;     /* #46526A ink-2 */
 
-    /* ── Derived — do not edit; change the brand block above ─────────────── */
-    --background: var(--brand-canvas-h) var(--brand-canvas-s) var(--brand-canvas-l);
-    --foreground: var(--brand-ink-h) var(--brand-ink-s) var(--brand-ink-l);
+    /* Hover / selected tint: navy-tint ground, navy text. */
+    --accent: 214 40% 92%;               /* #E3EAF3 */
+    --accent-foreground: 214 53% 24%;
 
-    --card: var(--brand-card-h) var(--brand-card-s) var(--brand-card-l);
-    --card-foreground: var(--brand-ink-h) var(--brand-ink-s) var(--brand-ink-l);
+    --destructive: 357 64% 43%;          /* #B4282E */
+    --destructive-foreground: 0 0% 100%;
 
-    --popover: var(--brand-card-h) var(--brand-card-s) var(--brand-card-l);
-    --popover-foreground: var(--brand-ink-h) var(--brand-ink-s) var(--brand-ink-l);
-
-    /* Cream, not white, on every coloured surface. */
-    --primary: var(--brand-accent-h) var(--brand-accent-s) var(--brand-accent-l);
-    --primary-foreground: var(--brand-card-h) var(--brand-card-s) var(--brand-card-l);
-
-    --secondary: var(--brand-canvas-h) var(--brand-canvas-s) calc(var(--brand-canvas-l) - 3%);
-    --secondary-foreground: var(--brand-ink-h) var(--brand-ink-s) var(--brand-ink-l);
-
-    --muted: var(--brand-canvas-h) var(--brand-canvas-s) calc(var(--brand-canvas-l) - 2%);
-    /* 6.9:1 on cream and 6.5:1 on beige — secondary text you can actually read. */
-    --muted-foreground: var(--brand-ink-h) calc(var(--brand-ink-s) - 4%) calc(var(--brand-ink-l) + 18%);
-
-    --accent: var(--brand-accent-h) calc(var(--brand-accent-s) - 20%) 92%;
-    --accent-foreground: var(--brand-accent-h) var(--brand-accent-s) 32%;
-
-    --destructive: var(--brand-danger-h) var(--brand-danger-s) var(--brand-danger-l);
-    --destructive-foreground: var(--brand-card-h) var(--brand-card-s) var(--brand-card-l);
-
-    /* Cards lift off the ground by only 1.07, so the border is what actually
-       draws the layout. Kept at ~3:1 against the ground for that reason. */
-    --border: var(--brand-ink-h) 18% 51%;
-    --input: var(--brand-ink-h) 18% 49%;
-    --ring: var(--brand-accent-h) var(--brand-accent-s) var(--brand-accent-l);
+    /* A touch darker than Daybook's #DDD6C6 line: cards are white on paper,
+       so the border is what draws the layout of a dense dashboard. */
+    --border: 42 20% 78%;
+    --input: 42 16% 68%;
+    --ring: 213 51% 31%;                 /* #274B78 */
 
     --radius: 0.5rem;
 
-    /* Sidebar recedes below the ground; cards advance above it. */
-    --sidebar: var(--brand-canvas-h) var(--brand-canvas-s) calc(var(--brand-canvas-l) - 4%);
-    --sidebar-foreground: var(--brand-ink-h) calc(var(--brand-ink-s) - 4%) calc(var(--brand-ink-l) + 16%);
-    --sidebar-accent: var(--brand-accent-h) var(--brand-accent-s) var(--brand-accent-l);
-    --sidebar-muted: var(--brand-canvas-h) var(--brand-canvas-s) calc(var(--brand-canvas-l) - 8%);
-    --sidebar-border: var(--brand-ink-h) 18% 58%;
+    --sidebar: 43 30% 91%;
+    --sidebar-foreground: 220 20% 35%;
+    --sidebar-accent: 214 53% 24%;
+    --sidebar-muted: 43 28% 86%;
+    --sidebar-border: 42 22% 80%;
 
-    --status-todo: var(--brand-ink-h) 12% 38%;
-    --status-progress: 210 55% 36%;
-    --status-review: 275 42% 42%;
-    --status-done: var(--brand-success-h) calc(var(--brand-success-s) + 6%) calc(var(--brand-success-l) - 21%);
-    --status-blocked: var(--brand-danger-h) var(--brand-danger-s) var(--brand-danger-l);
-    --status-idle: var(--brand-ink-h) 12% 42%;
+    /* Gold, for the eyebrow rule and highlights (not a status). */
+    --gold: 41 54% 40%;                  /* #9C7A2E */
+    --gold-tint: 43 56% 90%;             /* #F4ECD8 */
 
-    --signal: var(--brand-success-h) calc(var(--brand-success-s) + 6%) calc(var(--brand-success-l) - 21%);
-    --signal-live: var(--brand-success-h) calc(var(--brand-success-s) + 4%) calc(var(--brand-success-l) - 20%);
-    --signal-warn: 25 72% 34%;
-    --signal-error: var(--brand-danger-h) var(--brand-danger-s) var(--brand-danger-l);
-    --signal-info: 210 55% 36%;
+    --status-todo: 222 13% 45%;
+    --status-progress: 214 53% 34%;
+    --status-review: 248 50% 52%;        /* Daybook violet */
+    --status-done: 152 45% 28%;
+    --status-blocked: 357 64% 43%;
+    --status-idle: 222 13% 50%;
+
+    --signal: 152 45% 28%;
+    --signal-live: 152 45% 30%;
+    --signal-warn: 34 100% 33%;          /* Daybook amber #A85F00 */
+    --signal-error: 357 64% 43%;
+    --signal-info: 214 53% 34%;
   }
 
-  /* Dark mode: the same four hues with the neutrals inverted — a warm
-     near-black ground carrying the cream into the text, so both themes read
-     as one product. Driven by the same brand block. */
+  /* Dark: Daybook's dark tokens — deep navy ground, pale-blue actions. */
   .dark {
-    --brand-canvas-l: 9%;
-    --brand-card-l: 13%;
+    --background: 220 46% 10%;           /* #0E1626 */
+    --foreground: 218 31% 93%;           /* #E8ECF3 */
 
-    --background: var(--brand-ink-h) 12% var(--brand-canvas-l);
-    --foreground: var(--brand-card-h) 45% 93%;
+    --card: 219 44% 14%;                 /* #141F33 */
+    --card-foreground: 218 31% 93%;
 
-    --card: var(--brand-ink-h) 11% var(--brand-card-l);
-    --card-foreground: var(--brand-card-h) 45% 93%;
+    --popover: 219 44% 14%;
+    --popover-foreground: 218 31% 93%;
 
-    --popover: var(--brand-ink-h) 11% var(--brand-card-l);
-    --popover-foreground: var(--brand-card-h) 45% 93%;
+    --primary: 213 57% 72%;              /* #8FB3E0 */
+    --primary-foreground: 220 46% 10%;
 
-    /* 62%, not 57%: dark text on it and it as text both clear 4.5:1. */
-    --primary: var(--brand-accent-h) 62% 62%;
-    --primary-foreground: var(--brand-ink-h) 30% 10%;
+    --secondary: 219 42% 18%;            /* #1A2740 */
+    --secondary-foreground: 218 31% 93%;
 
-    --secondary: var(--brand-ink-h) 10% 18%;
-    --secondary-foreground: var(--brand-card-h) 30% 90%;
+    --muted: 219 42% 18%;
+    --muted-foreground: 218 22% 75%;     /* #B3BDCE */
 
-    --muted: var(--brand-ink-h) 10% 18%;
-    --muted-foreground: var(--brand-card-h) 14% 70%;
+    --accent: 218 43% 19%;               /* #1C2C47 */
+    --accent-foreground: 213 57% 80%;
 
-    --accent: var(--brand-accent-h) 30% 22%;
-    --accent-foreground: var(--brand-accent-h) 62% 74%;
+    --destructive: 0 77% 74%;            /* #F08A8A */
+    --destructive-foreground: 220 46% 10%;
 
-    --destructive: var(--brand-danger-h) 60% 55%;
-    --destructive-foreground: var(--brand-card-h) 45% 95%;
+    --border: 219 32% 26%;
+    --input: 219 30% 30%;
+    --ring: 213 57% 72%;
 
-    --border: var(--brand-ink-h) 10% 26%;
-    --input: var(--brand-ink-h) 10% 28%;
-    --ring: var(--brand-accent-h) 62% 62%;
+    --sidebar: 218 52% 8%;               /* #0A1220 */
+    --sidebar-foreground: 218 22% 75%;
+    --sidebar-accent: 213 57% 72%;
+    --sidebar-muted: 219 44% 14%;
+    --sidebar-border: 219 32% 22%;
 
-    --sidebar: var(--brand-ink-h) 12% 11%;
-    --sidebar-foreground: var(--brand-card-h) 12% 68%;
-    --sidebar-accent: var(--brand-accent-h) 62% 62%;
-    --sidebar-muted: var(--brand-ink-h) 11% 16%;
-    --sidebar-border: var(--brand-ink-h) 10% 24%;
+    --gold: 41 55% 62%;                  /* #D4B26A */
+    --gold-tint: 37 33% 15%;
 
-    --status-todo: var(--brand-card-h) 10% 64%;
-    --status-progress: 210 62% 64%;
-    --status-review: 275 50% 72%;
-    --status-done: var(--brand-success-h) 34% 64%;
-    --status-blocked: var(--brand-danger-h) 60% 55%;
-    --status-idle: var(--brand-ink-h) 8% 54%;
+    --status-todo: 218 17% 62%;
+    --status-progress: 213 57% 72%;
+    --status-review: 249 82% 78%;
+    --status-done: 152 40% 62%;
+    --status-blocked: 0 77% 74%;
+    --status-idle: 218 17% 55%;
 
-    --signal: var(--brand-success-h) 34% 64%;
-    --signal-live: var(--brand-success-h) 36% 66%;
-    --signal-warn: 30 70% 60%;
-    --signal-error: var(--brand-danger-h) 60% 55%;
-    --signal-info: 210 62% 64%;
+    --signal: 152 40% 62%;
+    --signal-live: 152 42% 64%;
+    --signal-warn: 36 86% 63%;
+    --signal-error: 0 77% 74%;
+    --signal-info: 213 57% 72%;
   }
 }
 
@@ -164,7 +136,10 @@
   }
   body {
     @apply bg-background text-foreground antialiased;
+    line-height: 1.6;
   }
+  /* Running text (descriptions, notes, chat) reads at Daybook's 1.7. */
+  p { line-height: 1.7; }
   /* Text size setting (sidebar footer). Everything is in rem, so this one
      number scales every label, button and gap together. */
   html[data-text-size="large"] { font-size: 112.5%; }

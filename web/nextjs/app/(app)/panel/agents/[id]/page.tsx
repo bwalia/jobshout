@@ -68,6 +68,7 @@ import {
 import type { Skill, SkillKind } from "@/lib/api/skills";
 import type { Task } from "@/lib/types/project";
 import { PRIORITY_BADGE, THEME_BADGE } from "@/lib/status-colors";
+import { avatarColour } from "@/lib/agents/avatar";
 
 // ---------------------------------------------------------------------------
 // Tab types
@@ -106,20 +107,7 @@ function tabIcon(tabId: Tab) {
 // ---------------------------------------------------------------------------
 // Avatar helpers (mirrored from AgentCard to keep consistency)
 // ---------------------------------------------------------------------------
-const AVATAR_COLOURS = [
-  "bg-violet-600",
-  "bg-blue-600",
-  "bg-emerald-600",
-  "bg-orange-600",
-  "bg-rose-600",
-  "bg-cyan-600",
-  "bg-indigo-600",
-  "bg-pink-600",
-];
-
-function getAvatarColour(name: string): string {
-  return AVATAR_COLOURS[name.charCodeAt(0) % AVATAR_COLOURS.length];
-}
+const getAvatarColour = avatarColour;
 
 function getInitials(name: string): string {
   return name
@@ -990,9 +978,9 @@ const SKILL_KIND_META: Record<
   SkillKind,
   { icon: React.ElementType; color: string }
 > = {
-  tool: { icon: Wrench, color: "text-sky-400" },
-  prompt: { icon: MessageSquareText, color: "text-violet-400" },
-  bundle: { icon: Boxes, color: "text-orange-400" },
+  tool: { icon: Wrench, color: "text-status-progress" },
+  prompt: { icon: MessageSquareText, color: "text-status-review" },
+  bundle: { icon: Boxes, color: "text-signal-warn" },
 };
 
 function SkillsTab({ agentId }: { agentId: string }) {

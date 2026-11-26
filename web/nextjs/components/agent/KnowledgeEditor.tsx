@@ -92,7 +92,7 @@ export function KnowledgeEditor({ value, onChange, onSave }: KnowledgeEditorProp
             </span>
           )}
           {saveState === "saved" && (
-            <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
+            <span className="flex items-center gap-1 text-xs text-status-done">
               <svg
                 className="h-3.5 w-3.5"
                 xmlns="http://www.w3.org/2000/svg"
