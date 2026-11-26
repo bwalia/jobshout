@@ -23,6 +23,8 @@ const PROVIDER_LABELS: Record<string, string> = {
   gemini: "Gemini",
   mflux: "Local (workstation)",
   openai: "OpenAI",
+  flux: "FLUX",
+  midjourney: "Midjourney (unofficial)",
 };
 
 function providerLabel(provider: string): string {

@@ -184,7 +184,11 @@ const (
 
 // artPrompt asks for the picture under a scene's diagram: the scene's things
 // as objects in the house style, and no words, which the diagram carries.
-func artPrompt(scene coverScene, accent string) string {
+func artPrompt(scene coverScene, accent string) string { return artPromptStyled(scene, accent, "") }
+
+// artPromptStyled is artPrompt with an operator-set style preset in place of
+// the built-in style sentence. The no-text rule is always kept.
+func artPromptStyled(scene coverScene, accent, preset string) string {
 	pal, ok := fallbackPalettes[accent]
 	if !ok {
 		accent, pal = "copper", fallbackPalettes["copper"]
@@ -202,6 +206,10 @@ func artPrompt(scene coverScene, accent string) string {
 			subject = strings.ToLower(scene.Eyebrow) + ": " + subject
 		}
 		subject = "the subject of an article about " + subject
+	}
+	if preset = strings.TrimSpace(preset); preset != "" {
+		return fmt.Sprintf("A wide editorial illustration of %s, shown as real objects and places, never as written words. %s. %s",
+			subject, strings.TrimRight(preset, ". "), avoid)
 	}
 	return fmt.Sprintf("A wide, atmospheric editorial illustration of %s, "+
 		"shown as real objects and places, never as written words. "+
@@ -225,7 +233,7 @@ func (r *Runner) drawArt(ctx context.Context, orgID uuid.UUID, runID *uuid.UUID,
 	for try := 1; try <= artTries; try++ {
 		img, err = r.images.Generate(ctx, IllustrationRequest{
 			OrgID:  orgID,
-			Prompt: artPrompt(scene, accent),
+			Prompt: artPromptStyled(scene, accent, r.cfg.CoverStylePreset),
 			Width:  artWidth,
 			Height: artHeight,
 			Steps:  coverSteps,

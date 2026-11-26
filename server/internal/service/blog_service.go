@@ -79,7 +79,7 @@ type BlogService interface {
 	// When syncCMS is true and the article already has a CMS post UUID, the
 	// new cover is also written to opsapi's featured_image_url so listing
 	// cards update without re-publishing the body.
-	RegenerateCover(ctx context.Context, orgID, articleID uuid.UUID, syncCMS bool) (*model.BlogArticle, error)
+	RegenerateCover(ctx context.Context, orgID, articleID uuid.UUID, syncCMS bool, choice blog.ImageChoice) (*model.BlogArticle, error)
 	// RedrawImages redraws one article's in-body figures and its cover from
 	// its content. With syncCMS and a CMS post, the post's body and featured
 	// image are updated. The result says what changed and, in its notes, why
@@ -1062,6 +1062,7 @@ func (s *blogService) persistArticle(run *model.BlogRun, a blog.GeneratedArticle
 			Seed:     a.CoverImageSeed,
 			Width:    a.CoverImageWidth,
 			Height:   a.CoverImageHeight,
+			Alt:      a.CoverImageAlt,
 		},
 	}
 	// An article from an attempt that has been cancelled or retried must not
@@ -2068,7 +2069,7 @@ type featuredImageUpdater interface {
 	UpdateFeaturedImage(ctx context.Context, postUUID, imageURL string) (*opsapi.Post, error)
 }
 
-func (s *blogService) RegenerateCover(ctx context.Context, orgID, articleID uuid.UUID, syncCMS bool) (*model.BlogArticle, error) {
+func (s *blogService) RegenerateCover(ctx context.Context, orgID, articleID uuid.UUID, syncCMS bool, choice blog.ImageChoice) (*model.BlogArticle, error) {
 	if s.runner == nil {
 		return nil, fmt.Errorf("blog_svc: generator not configured")
 	}
@@ -2087,6 +2088,7 @@ func (s *blogService) RegenerateCover(ctx context.Context, orgID, articleID uuid
 	// pointing at the old (often missing) image.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Minute)
 	defer cancel()
+	ctx = blog.WithImageChoice(ctx, choice)
 
 	runID := a.RunID
 	gen := &blog.GeneratedArticle{
@@ -2111,6 +2113,7 @@ func (s *blogService) RegenerateCover(ctx context.Context, orgID, articleID uuid
 		Seed:     gen.CoverImageSeed,
 		Width:    gen.CoverImageWidth,
 		Height:   gen.CoverImageHeight,
+		Alt:      gen.CoverImageAlt,
 	}
 	if err := s.repo.UpdateArticleCover(ctx, a.ID, gen.CoverImageURL, gen.CoverImagePrompt, meta); err != nil {
 		return nil, err
@@ -2242,7 +2245,7 @@ func (s *blogService) RedrawImages(ctx context.Context, orgID, articleID uuid.UU
 	if res.Cover {
 		meta := model.CoverImageMeta{
 			Provider: gen.CoverImageProvider, Model: gen.CoverImageModel, Seed: gen.CoverImageSeed,
-			Width: gen.CoverImageWidth, Height: gen.CoverImageHeight,
+			Width: gen.CoverImageWidth, Height: gen.CoverImageHeight, Alt: gen.CoverImageAlt,
 		}
 		if err := s.repo.UpdateArticleCover(ctx, a.ID, gen.CoverImageURL, gen.CoverImagePrompt, meta); err != nil {
 			return a, res, err

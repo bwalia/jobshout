@@ -94,4 +94,16 @@ type CoverImageMeta struct {
 	Seed     int64  `json:"seed,omitempty"`
 	Width    int    `json:"width,omitempty"`
 	Height   int    `json:"height,omitempty"`
+	// Alt is the cover's alt text: from the vision model when one is
+	// configured, otherwise derived from the title.
+	Alt string `json:"alt,omitempty"`
+}
+
+// ImageUsage is how many images one provider and model drew for an org in a
+// period. Counts only: no price list is configured, so no cost is guessed.
+type ImageUsage struct {
+	Provider      string `json:"provider"`
+	Model         string `json:"model"`
+	Count         int    `json:"count"`
+	AvgDurationMS int    `json:"avg_duration_ms"`
 }

@@ -56,6 +56,10 @@ type Config struct {
 	// default — the article's idea drawn as a diagram, no GPU) or
 	// CoverStylePicture (a generated picture from the image service).
 	CoverStyle string
+	// CoverStylePreset replaces the built-in art style sentence of a picture
+	// cover (COVER_STYLE_PRESET), e.g. "flat illustration, warm colours, soft
+	// lighting, space on the left for a title". Empty keeps the house style.
+	CoverStylePreset string
 	// Model is the LLM used for writing — planning, drafting, reviewing,
 	// revising and expanding. Empty means the provider's default.
 	//
@@ -264,6 +268,8 @@ type Runner struct {
 	// covers is the image store covers are verified against before publishing
 	// and fallback covers are written to (WithCoverStore).
 	covers CoverStore
+	// describer writes a cover's alt text from the picture (WithCoverDescriber).
+	describer CoverDescriber
 	// insights files articles in JobShout.com's Insights hub, a destination
 	// beside the CMS. Nil means that destination is not configured.
 	insights InsightsPublisher

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -25,6 +26,9 @@ func (c *routedClient) Provider() string                                        
 
 type routesRepo struct{ routes map[string]model.ImageRoute }
 
+func (r *routesRepo) Usage(context.Context, uuid.UUID, time.Time) ([]model.ImageUsage, error) {
+	return nil, nil
+}
 func (r *routesRepo) Create(context.Context, *model.GeneratedImage) error { return nil }
 func (r *routesRepo) ListByOrg(context.Context, uuid.UUID, int) ([]model.GeneratedImage, error) {
 	return nil, nil

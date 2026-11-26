@@ -116,6 +116,8 @@ export interface BlogArticle {
     seed?: number;
     width?: number;
     height?: number;
+    /** Alt text for the cover: from the vision model, else the title. */
+    alt?: string;
   };
   /** What the last Redraw images did. Kept because the page stops waiting
    *  long before a redraw on the workstation ends. */

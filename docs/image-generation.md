@@ -220,3 +220,66 @@ new key. They are served with a one-year immutable cache header.
   every model, because the model is a field in the request and there is one GPU
   behind all of them. A hostname per model would be a second edge vhost, a
   second certificate and a second route, all pointing at the same process.
+
+
+## Hosted providers: Nano Banana, FLUX, Midjourney
+
+Cards for each appear under **Models & providers → Built-in image providers**
+(`GET /api/v1/images/providers`): Available, Not configured or Disabled. State
+only; keys and models are server settings.
+
+| Provider | Enable with | Notes |
+|---|---|---|
+| Nano Banana (`gemini`) | `GEMINI_API_KEY`, model `IMAGE_GEMINI_MODEL` | Gemini `generateContent`, base64 image parts. |
+| FLUX (`flux`) | `FLUX_HOST=bfl` + `BFL_API_KEY`, or `FLUX_HOST=fal` + `FAL_KEY`; and `FLUX_MODEL` | Async: submit, then poll the URL the API returns (BFL `polling_url`; fal `status_url`/`response_url`). No model id is hardcoded. Optional `FLUX_BASE_URL` for BFL's EU/US endpoints. |
+| Midjourney (`midjourney`) | `MIDJOURNEY_ENABLED=true`, `MIDJOURNEY_API_URL` (+ `MIDJOURNEY_API_KEY`) | **Unofficial.** No public API exists; the adapter calls a bridge you choose and may breach Midjourney's terms. Contract below. |
+
+**Fallback.** `IMAGE_FALLBACK_ORDER` (default `gemini,flux`) is tried in order
+after the chosen provider fails or is rate limited (429, 402 out of credits).
+The default provider is `IMAGE_PROVIDER`. Providers that cannot letter the
+requested text are skipped, as before.
+
+**Safety filters.** A rejection is retried once on the same provider with a
+simplified prompt (`SimplifyPrompt`), then the chain continues. If every
+provider declines, the error asks the user to reword the title or summary.
+
+**Output checks.** Every hosted result must be PNG or JPEG, at most 25 MB and
+at least 256 px a side, and is normalised to PNG before it is stored.
+
+**Midjourney bridge contract.** `POST MIDJOURNEY_API_URL` with
+`Authorization: Bearer <key>` and JSON
+`{"prompt","aspect_ratio","width","height","seed"?,"model"?}`. Reply with an
+image body (`Content-Type: image/*`) or JSON `{"image_base64"}` /
+`{"image_url"}` / `{"error"}`. A bridge that must poll Midjourney does so itself.
+
+### Adding another image provider
+
+1. Add `internal/imagegen/<name>.go` implementing `Client` (`Generate`,
+   `ListModels`, `Provider`). Use `doRetry`, `download` and `finishImage` from
+   `hosted.go`; return `*ProviderError` with `FailureRateLimited` or
+   `FailureModerated` where the API says so.
+2. Add a `Provider<Name>` constant in `client.go`, config fields in
+   `config/config.go`, and a registration plus `buildStatuses` entry in
+   `router.go`. Model names come from config, never code.
+3. Add the env vars to `.env.example` and the Helm configmap; keys go in Vault.
+4. Add a test with a mocked `httptest` server (see `hosted_test.go`).
+
+### Blog covers: provider per post, style preset, alt text, usage
+
+- **Per post.** `POST /blogs/articles/{id}/regenerate-cover` accepts
+  `{"sync_cms", "provider", "model"}`; the article page has a picker beside
+  "Regenerate cover". The choice applies to that cover only. Where a cover's
+  labels must be spelt exactly and the chosen provider cannot letter them
+  (`imagegen.Letters`), that picture uses the default and the choice goes to
+  the wordless art beneath it. Empty means org routing, then the default and
+  the fallback order.
+- **Style preset.** `COVER_STYLE_PRESET` replaces the built-in art style of
+  picture covers (`BLOG_COVER_STYLE=picture`). The no-text rule is always kept.
+  Unset keeps today's house style. It is an environment setting, not an
+  in-app one.
+- **Alt text.** With `IMAGE_ALT_MODEL` (an Ollama vision model such as
+  minicpm-v) the stored cover is described once drawn; otherwise, or if the
+  model fails, alt text is `Cover illustration for: <title>`. Stored as
+  `cover_image_meta.alt`. It is not sent to the CMS, whose post has no alt field.
+- **Usage.** `GET /api/v1/images/usage?days=30` counts images per provider and
+  model, with average duration. No prices are configured, so no cost is shown.

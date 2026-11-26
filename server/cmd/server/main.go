@@ -681,6 +681,7 @@ func main() {
 			CoverStyle:      cfg.BlogCoverStyle,
 			Model:           firstNonEmptyStr(blogModel, cfg.BlogModel),
 			ProseModel:      cfg.BlogProseModel,
+			CoverStylePreset: cfg.CoverStylePreset,
 			StructuredModel: cfg.BlogStructuredModel,
 			ProseNumCtx:     cfg.BlogProseNumCtx,
 			Provider:        blogProvider,
@@ -697,6 +698,13 @@ func main() {
 		blogRunner = blogRunner.WithCoverStore(imgStore)
 		// JobShout.com Insights, beside the CMS. NewClient returns nil when the
 		// URL or token is missing, which the runner reads as "not configured".
+		// Alt text from the Ollama vision model, when IMAGE_ALT_MODEL names one.
+		if cfg.ImageAltModel != "" {
+			blogRunner = blogRunner.WithCoverDescriber(&coverDescriber{
+				client: llm.NewOllamaClientWithAuth(cfg.OllamaBaseURL, cfg.ImageAltModel, cfg.OllamaJWTSecret, cfg.OllamaTimeout),
+				model:  cfg.ImageAltModel,
+			})
+		}
 		blogRunner = blogRunner.WithInsights(jobshoutcom.NewClient(jobshoutcom.Config{
 			BaseURL: cfg.JobshoutComAPIURL,
 			Token:   cfg.JobshoutComAPIToken,
@@ -2160,6 +2168,8 @@ func main() {
 	// three months past boot. A server that outlives that horizon stops being
 	// able to record usage, silently, and takes budget enforcement down with it
 	// because spend is read from that table. Keeps the horizon rolling.
+				r.Get("/providers", imageHandler.Providers)
+				r.Get("/usage", imageHandler.Usage)
 	go database.StartUsagePartitionMaintainer(ctx, pool, logger)
 
 	// ─── Pentest reconciler ─────────────────────────────────────────────────

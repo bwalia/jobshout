@@ -47,6 +47,15 @@ data:
   IMAGE_TIMEOUT: {{ .Values.ai.imageTimeout | default "10m" | quote }}
   IMAGE_OPENAI_MODEL: {{ .Values.ai.imageOpenaiModel | default "gpt-image-1" | quote }}
   IMAGE_GEMINI_MODEL: {{ .Values.ai.imageGeminiModel | default "gemini-3.1-flash-lite-image" | quote }}
+  # FLUX (BFL or fal) and the optional Midjourney bridge. Keys (BFL_API_KEY,
+  # FAL_KEY, MIDJOURNEY_API_KEY) come from Vault via extraSecretRefs.
+  FLUX_HOST: {{ .Values.ai.fluxHost | default "bfl" | quote }}
+  FLUX_MODEL: {{ .Values.ai.fluxModel | default "" | quote }}
+  MIDJOURNEY_ENABLED: {{ .Values.ai.midjourneyEnabled | default false | quote }}
+  MIDJOURNEY_API_URL: {{ .Values.ai.midjourneyApiUrl | default "" | quote }}
+  COVER_STYLE_PRESET: {{ .Values.ai.coverStylePreset | default "" | quote }}
+  IMAGE_ALT_MODEL: {{ .Values.ai.imageAltModel | default "" | quote }}
+  IMAGE_FALLBACK_ORDER: {{ .Values.ai.imageFallbackOrder | default "gemini,flux" | quote }}
   GEMINI_BASE_URL: {{ .Values.ai.geminiBaseURL | default "https://generativelanguage.googleapis.com" | quote }}
   # GEMINI_API_KEY also registers Gemini as an LLM provider: used when
   # LLM_PROVIDER is "gemini" or an agent's model_provider is. This is its

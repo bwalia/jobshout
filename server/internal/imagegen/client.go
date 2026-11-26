@@ -24,6 +24,10 @@ const (
 	ProviderGemini = "gemini"
 	// ProviderOpenAI is OpenAI's hosted image API.
 	ProviderOpenAI = "openai"
+	// ProviderFlux is FLUX on Black Forest Labs' API or fal.ai (FLUX_HOST).
+	ProviderFlux = "flux"
+	// ProviderMidjourney is an optional, operator-configured Midjourney bridge.
+	ProviderMidjourney = "midjourney"
 )
 
 // DefaultWidth and DefaultHeight produce a 16:9 image, which is the shape a
