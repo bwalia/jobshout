@@ -97,9 +97,9 @@ func drawCard(scene coverScene, title, accent string) ([]byte, error) {
 	}
 	// A foot of facts takes the bottom of the card: the column and the
 	// chart move up and the type steps down to make room.
-	colTop, colH, big, dekLines := 170.0, 630.0, 1.0, 3
+	colTop, colH, big := 170.0, 630.0, 1.0
 	if len(scene.Facts) > 0 {
-		colTop, colH, big, dekLines = 150.0, 540.0, 0.84, 2
+		colTop, colH, big = 150.0, 540.0, 0.84
 		p.lift = 40
 	}
 	if lead == "" {
@@ -107,7 +107,7 @@ func drawCard(scene coverScene, title, accent string) ([]byte, error) {
 	} else {
 		add(lead, 150*big, 64, leadLines, true, cHeadline.a(1), 1.02, 0)
 		add(rest, 92*big, 44, 2, true, cText.a(1), 1.08, 14)
-		add(dek, 36, 26, dekLines, false, cMuted.mix(cText, 0.4).a(1), 1.3, 34*big)
+		add(dek, 36, 26, 3, false, cMuted.mix(cText, 0.4).a(1), 1.3, 34*big)
 	}
 	const colX, colW = 88.0, 770.0
 	sizes := make([]float64, len(parts))
@@ -305,9 +305,24 @@ func (p *pen) ladder(labels, notes []string) {
 			p.lines(l, textX, y, textW, 40, 24, 2, true, txt, 0.5)
 			continue
 		}
-		p.lines(l, textX, y-18, textW, 36, 24, 1, true, txt, 0.5)
-		p.lines(notes[i], textX, y+22, textW, 24, 18, 1, false, cMuted.mix(cText, 0.3).a(1), 0.5)
+		noteLines := 1
+		if gap >= 110 {
+			noteLines = 2
+		}
+		p.labelled(l, notes[i], textX, y, textW, 36, 24, noteLines, txt, cMuted.mix(cText, 0.3).a(1))
 	}
+}
+
+// labelled sets a label over its note as one block centred on y, the note on
+// up to noteLines lines so it reads whole instead of ending in "…".
+func (p *pen) labelled(label, note string, x, y, w, lmax, nmax float64, noteLines int, lc, nc color.Color) {
+	ls, _ := p.fitLines(label, w, lmax, 24, 1, true)
+	ns, nl := p.fitLines(note, w, nmax, 18, noteLines, false)
+	const gap = 10.0
+	lh, nh := ls*1.15, ns*1.15*float64(len(nl))
+	top := y - (lh+gap+nh)/2
+	p.lines(label, x, top+lh/2, w, ls, ls, 1, true, lc, 0.5)
+	p.lines(note, x, top+lh+gap+nh/2, w, ns, ns, noteLines, false, nc, 0.5)
 }
 
 // sides draws a versus scene's two sides as panels, one over the other with
@@ -329,8 +344,7 @@ func (p *pen) sides(labels, notes []string) {
 			p.lines(l, x+padX, y+h/2, w-2*padX, 48, 28, 2, true, txt, 0.5)
 			continue
 		}
-		p.lines(l, x+padX, y+h/2-26, w-2*padX, 44, 28, 1, true, txt, 0.5)
-		p.lines(notes[i], x+padX, y+h/2+30, w-2*padX, 28, 20, 1, false, cMuted.mix(cText, 0.4).a(1), 0.5)
+		p.labelled(l, notes[i], x+padX, y+h/2, w-2*padX, 44, 28, 2, txt, cMuted.mix(cText, 0.4).a(1))
 	}
 	p.disc(x+w/2, mid, 34, cInk.a(1), p.accent.a(1), 4)
 	p.text("vs", x+w/2, mid-2, 28, p.accent.a(1), true, 0.5)

@@ -7,7 +7,11 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/fogleman/gg"
+	"golang.org/x/image/font"
 
 	"github.com/google/uuid"
 )
@@ -42,8 +46,35 @@ var cardCases = map[string]struct {
 		Dek:    "Living abroad, your letting agent holds back basic-rate tax unless HMRC lets you take the rent gross.",
 		Facts:  []coverFact{{"20%", "basic-rate tax withheld"}, {"NRL1", "form to get rent gross"}, {"31 January", "Self Assessment deadline"}}},
 		"Tax on UK rental income when you live abroad"},
+	"prod":     {prodTaxScene, "Tax on UK rental income when you live abroad"},
 	"title":    {coverScene{}, "A title with nothing else to go on"},
 	"nonLatin": {coverScene{Headline: "Ταχύτερη αναζήτηση"}, "Αναζήτηση με GPU"},
+}
+
+// prodTaxScene is what Claude planned for prod's tax cover on v1.0.251, which
+// cut its dek and both notes to "…".
+var prodTaxScene = coverScene{Layout: layoutVersus, Eyebrow: "NON-RESIDENT LANDLORDS", Headline: "Two ways to receive UK rental income",
+	Labels: []string{"Rent in full monthly", "Tax deducted upfront"},
+	Notes: map[string]string{"rent in full monthly": "Approved via form NRL1i; landlord pays tax by 31 January",
+		"tax deducted upfront": "Agent deducts basic-rate tax; submitted to HMRC quarterly"},
+	Dek:   "Non-resident landlords can choose between receiving rent with tax deducted by their agent, or applying to HMRC for approval to receive the full amount",
+	Facts: []coverFact{{"basic rate", "income tax deducted from rent"}, {"31 January", "Self Assessment return deadline"}}}
+
+// The card's dek and a versus panel's notes are set whole, not cut to "…".
+func TestDrawCard_SetsDekAndNotesWhole(t *testing.T) {
+	if err := cardFonts(); err != nil {
+		t.Fatal(err)
+	}
+	p := &pen{dc: gg.NewContext(1, 1), faces: map[string]font.Face{}, k: cardScale, bold: cardBold, medium: cardMedium}
+	check := func(s string, w, max, min float64, n int) {
+		if _, ls := p.fitLines(s, w, max, min, n, false); strings.HasSuffix(ls[len(ls)-1], "…") {
+			t.Errorf("%q cut to %q", s, ls)
+		}
+	}
+	check(prodTaxScene.Dek, 770, 36, 26, 3)
+	for _, n := range prodTaxScene.Notes {
+		check(n, chartR-chartL-80, 28, 20, 2)
+	}
 }
 
 func TestDrawCard_DrawsEveryShape(t *testing.T) {
