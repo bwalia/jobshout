@@ -26,7 +26,7 @@ const cardScale = 2
 // coverCardAsk is what a headline card needs from the plan: the line it sets
 // biggest, and the numbers its chart draws. The other parts (stat, eyebrow,
 // labels) are asked for with the diagram.
-const coverCardAsk = `a "headline" of 2-6 words stating the article's point, which reads on from the stat when there is one (stat "$35 billion", headline "dollar baby"; stat "100%", headline "of the rent, paid gross"), and a "trend" only when the article reports how one number changed over time: 4-12 numbers in order, with "trend_from" and "trend_to" of 2-5 words saying what the first and last point are (otherwise [] and ""), a "dek": one plain sentence of 12-22 words telling a reader what the article explains, and "notes": for each label in order, 3-8 words saying what it means in this article (stat "", labels ["Full monthly rent", "Tax deducted upfront"], notes ["Paid gross once HMRC approves you", "Agent keeps 20% for HMRC"])`
+const coverCardAsk = `a "headline" of 2-6 words stating the article's point, which reads on from the stat when there is one (stat "$35 billion", headline "dollar baby"; stat "100%", headline "of the rent, paid gross"), and a "trend" only when the article reports how one number changed over time: 4-12 numbers in order, with "trend_from" and "trend_to" of 2-5 words saying what the first and last point are (otherwise [] and ""), a "dek": one plain sentence of 12-22 words telling a reader what the article explains, and "notes": for each label in order, 3-8 words saying what it means in this article (stat "", labels ["Full monthly rent", "Tax deducted upfront"], notes ["Paid gross once HMRC approves you", "Agent keeps 20% for HMRC"]), and "facts": up to 3 figures a reader should take away, each {"figure": a number, rate, date, amount or form name exactly as the article writes it, "label": 2-5 words saying what it is} (e.g. {"figure": "20%", "label": "basic-rate tax withheld"}), never the stat again`
 
 // drawCard renders a cover as a headline card: the article's figure and point
 // set large, its title under them, and on the right the trend it reports or
@@ -49,6 +49,9 @@ func drawCard(scene coverScene, title, accent string) ([]byte, error) {
 		notes = append(notes, scene.note(l))
 	}
 	all := strings.Join(append([]string{scene.Eyebrow, scene.Stat, scene.Headline, scene.TrendFrom, scene.TrendTo}, scene.Labels...), "")
+	for _, f := range scene.Facts {
+		all += f.Figure + f.Label
+	}
 	if err := cardFonts(); err == nil && hasGlyphs(cardBold, all) && hasGlyphs(cardMedium, dek+strings.Join(notes, "")) {
 		p.bold, p.medium = cardBold, cardMedium
 	}
@@ -92,12 +95,19 @@ func drawCard(scene coverScene, title, accent string) ([]byte, error) {
 	if lead == "" {
 		lead, rest, leadLines = scene.Headline, "", 2
 	}
+	// A foot of facts takes the bottom of the card: the column and the
+	// chart move up and the type steps down to make room.
+	colTop, colH, big, dekLines := 170.0, 630.0, 1.0, 3
+	if len(scene.Facts) > 0 {
+		colTop, colH, big, dekLines = 150.0, 540.0, 0.84, 2
+		p.lift = 40
+	}
 	if lead == "" {
-		add(title, 84, 44, 4, true, cText.a(1), 1.12, 0)
+		add(title, 84*big, 44, 4, true, cText.a(1), 1.12, 0)
 	} else {
-		add(lead, 150, 64, leadLines, true, cHeadline.a(1), 1.02, 0)
-		add(rest, 92, 44, 2, true, cText.a(1), 1.08, 14)
-		add(dek, 36, 26, 3, false, cMuted.mix(cText, 0.4).a(1), 1.3, 34)
+		add(lead, 150*big, 64, leadLines, true, cHeadline.a(1), 1.02, 0)
+		add(rest, 92*big, 44, 2, true, cText.a(1), 1.08, 14)
+		add(dek, 36, 26, dekLines, false, cMuted.mix(cText, 0.4).a(1), 1.3, 34*big)
 	}
 	const colX, colW = 88.0, 770.0
 	sizes := make([]float64, len(parts))
@@ -107,7 +117,7 @@ func drawCard(scene coverScene, title, accent string) ([]byte, error) {
 		sizes[i], wrapped[i] = p.fitLines(pt.text, colW, pt.max, pt.min, pt.lines, pt.bold)
 		height += pt.spaceTop + float64(len(wrapped[i]))*sizes[i]*pt.lead
 	}
-	y := math.Max(170, 170+(630-height)/2)
+	y := math.Max(colTop, colTop+(colH-height)/2)
 	for i, pt := range parts {
 		y += pt.spaceTop
 		p.face(pt.bold, sizes[i])
@@ -126,6 +136,7 @@ func drawCard(scene coverScene, title, accent string) ([]byte, error) {
 	default:
 		p.ladder(scene.Labels, notes)
 	}
+	p.facts(scene.Facts)
 
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, dc.Image()); err != nil {
@@ -189,15 +200,16 @@ func (p *pen) fitLines(s string, w, max, min float64, n int, bold bool) (float64
 
 // The chart's frame on the right of a card.
 const (
-	chartL, chartR = 960.0, 1512.0
-	chartT, chartB = 230.0, 690.0
-	minTrendPoints = 3
-	maxTrendPoints = 24
+	chartL, chartR        = 960.0, 1512.0
+	chartTop, chartBottom = 230.0, 690.0
+	minTrendPoints        = 3
+	maxTrendPoints        = 24
 )
 
 // trend draws the article's numbers as a line rising or falling to its last
 // point, which is the accent; the first and last are named.
 func (p *pen) trend(s coverScene) {
+	chartT, chartB := chartTop-p.lift, chartBottom-p.lift
 	dc := p.dc
 	lo, hi := s.Trend[0], s.Trend[0]
 	for _, v := range s.Trend {
@@ -262,6 +274,7 @@ func (p *pen) trend(s coverScene) {
 // ladder draws the article's steps or parts down the right of a card,
 // numbered, with the last one in the accent and each one's note under it.
 func (p *pen) ladder(labels, notes []string) {
+	chartT, chartB := chartTop-p.lift, chartBottom-p.lift
 	if len(labels) > 6 {
 		labels, notes = labels[:6], notes[:6]
 	}
@@ -301,6 +314,7 @@ func (p *pen) ladder(labels, notes []string) {
 // "vs" between: the first plain, the second in the accent, each with what it
 // means under it.
 func (p *pen) sides(labels, notes []string) {
+	chartT, chartB := chartTop-p.lift, chartBottom-p.lift
 	const x, w, h, padX = chartL, chartR - chartL, 190.0, 40.0
 	mid := (chartT + chartB) / 2
 	tops := []float64{mid - 40 - h, mid + 40}
@@ -320,6 +334,29 @@ func (p *pen) sides(labels, notes []string) {
 	}
 	p.disc(x+w/2, mid, 34, cInk.a(1), p.accent.a(1), 4)
 	p.text("vs", x+w/2, mid-2, 28, p.accent.a(1), true, 0.5)
+}
+
+// facts sets a card's foot: each figure the article states, in the accent,
+// with what it is under it, in equal cells across the card.
+func (p *pen) facts(fs []coverFact) {
+	if len(fs) == 0 {
+		return
+	}
+	const x0, x1, top = 88.0, chartR, 730.0
+	p.dc.MoveTo(x0, top)
+	p.dc.LineTo(x1, top)
+	p.stroke(cSlate.a(1), 2)
+	w := (x1 - x0) / float64(len(fs))
+	for i, f := range fs {
+		x := x0 + w*float64(i)
+		if i > 0 {
+			p.dc.MoveTo(x-28, top+30)
+			p.dc.LineTo(x-28, top+124)
+			p.stroke(cSlate.a(1), 2)
+		}
+		p.lines(f.Figure, x, top+56, w-64, 52, 30, 1, true, p.accent.a(1), 0.5)
+		p.lines(f.Label, x, top+106, w-64, 26, 18, 1, false, cMuted.mix(cText, 0.3).a(1), 0.5)
+	}
 }
 
 // lines sets s from x in width w at the largest size from max to min that

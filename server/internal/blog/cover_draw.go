@@ -108,6 +108,8 @@ type pen struct {
 	// the context's matrix, but gg stretches a glyph's bitmap with it, so type
 	// is set at k times its size in pixel space instead: sharp, not blurred.
 	k float64
+	// lift raises a card's chart to make room for the facts along its foot.
+	lift float64
 }
 
 func (p *pen) scale() float64 {
