@@ -66,6 +66,17 @@ type coverScene struct {
 	Trend     []float64 `json:"trend,omitempty"`
 	TrendFrom string    `json:"trend_from,omitempty"`
 	TrendTo   string    `json:"trend_to,omitempty"`
+	// Dek is one sentence saying what the article explains, set under the
+	// headline in place of the title. Notes say what each label means here,
+	// keyed by the label in lower case: grounding and cleaning drop and
+	// reorder labels, so a list beside them would drift.
+	Dek   string            `json:"dek,omitempty"`
+	Notes map[string]string `json:"notes,omitempty"`
+}
+
+// note is what label means in the article, or "".
+func (s coverScene) note(label string) string {
+	return s.Notes[strings.ToLower(strings.TrimSpace(label))]
 }
 
 // UnmarshalJSON accepts the shapes a model gives a scene: the object asked
@@ -110,6 +121,26 @@ func (s *coverScene) UnmarshalJSON(b []byte) error {
 		collectStrings(t["trend_from"], &from)
 		collectStrings(t["trend_to"], &to)
 		s.Headline, s.TrendFrom, s.TrendTo = strings.Join(headline, " "), strings.Join(from, " "), strings.Join(to, " ")
+		var dek []string
+		collectStrings(t["dek"], &dek)
+		s.Dek = strings.Join(dek, " ")
+		// Notes arrive as a list beside the labels, or as the map stored here.
+		switch n := t["notes"].(type) {
+		case []any:
+			var notes []string
+			collectStrings(n, &notes)
+			if len(notes) == len(s.Labels) {
+				for i, l := range s.Labels {
+					s.setNote(l, notes[i])
+				}
+			}
+		case map[string]any:
+			for l, v := range n {
+				if note, ok := v.(string); ok {
+					s.setNote(l, note)
+				}
+			}
+		}
 		points, _ := t["trend"].([]any)
 		for _, v := range points {
 			if n, ok := trendNumber(v); ok {
@@ -118,6 +149,16 @@ func (s *coverScene) UnmarshalJSON(b []byte) error {
 		}
 	}
 	return nil
+}
+
+func (s *coverScene) setNote(label, note string) {
+	if note = truncateWords(strings.TrimSpace(note), 10, 64); note == "" {
+		return
+	}
+	if s.Notes == nil {
+		s.Notes = map[string]string{}
+	}
+	s.Notes[strings.ToLower(strings.TrimSpace(label))] = note
 }
 
 // trendNumber reads a trend point given as a number or as text like "$1,200"
@@ -202,6 +243,7 @@ func coverSceneFor(a *GeneratedArticle) coverScene {
 	s.Headline = truncateWords(strings.TrimSpace(s.Headline), 8, 48)
 	s.TrendFrom = truncateWords(strings.TrimSpace(s.TrendFrom), 5, 30)
 	s.TrendTo = truncateWords(strings.TrimSpace(s.TrendTo), 5, 30)
+	s.Dek = truncateWords(strings.TrimSpace(s.Dek), 24, 150)
 	if len(s.Trend) < minTrendPoints || len(s.Trend) > maxTrendPoints {
 		s.Trend = nil
 	}
