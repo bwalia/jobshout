@@ -36,6 +36,12 @@ var cardCases = map[string]struct {
 		Labels: []string{"Tenant pays agent", "Agent deducts tax", "You file Self Assessment"},
 		Notes:  map[string]string{"tenant pays agent": "Full rent reaches your UK agent", "agent deducts tax": "Basic rate goes to HMRC quarterly"}},
 		"Tax on UK rental income when you live abroad"},
+	"facts": {coverScene{Layout: layoutVersus, Eyebrow: "NON-RESIDENT LANDLORDS", Headline: "Gross rent or net: the choice",
+		Labels: []string{"Full monthly rent", "Tax deducted upfront"},
+		Notes:  map[string]string{"full monthly rent": "Paid gross once HMRC approves you", "tax deducted upfront": "Agent keeps 20% for HMRC"},
+		Dek:    "Living abroad, your letting agent holds back basic-rate tax unless HMRC lets you take the rent gross.",
+		Facts:  []coverFact{{"20%", "basic-rate tax withheld"}, {"NRL1", "form to get rent gross"}, {"31 January", "Self Assessment deadline"}}},
+		"Tax on UK rental income when you live abroad"},
 	"title":    {coverScene{}, "A title with nothing else to go on"},
 	"nonLatin": {coverScene{Headline: "Ταχύτερη αναζήτηση"}, "Αναζήτηση με GPU"},
 }
@@ -114,6 +120,19 @@ func TestCoverScene_ReadsTheCardFields(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(`{"labels":["a","b"],"notes":["only one"]}`), &s); err != nil || s.Notes != nil {
 		t.Fatalf("notes that do not pair with the labels were kept: %+v", s.Notes)
+	}
+	// A fact is drawn only when the article states its figure, and never
+	// repeats the stat; they arrive as objects or as "figure: label".
+	if err := json.Unmarshal([]byte(`{"layout":"versus","labels":["a","b"],"stat":"20%","facts":[
+		{"figure":"20%","label":"basic rate"},{"value":"NRL1","caption":"form to get rent gross"},
+		"31 January: filing deadline",{"figure":"£9,999","label":"made up"},{"figure":2026,"label":"tax year"}]}`), &s); err != nil {
+		t.Fatal(err)
+	}
+	got := coverSceneFor(&GeneratedArticle{Title: "T", CoverScene: s,
+		Markdown: "Agents keep 20% unless you send form NRL1. File by 31 January for the 2026 return."}).Facts
+	want := []coverFact{{"NRL1", "form to get rent gross"}, {"31 January", "filing deadline"}, {"2026", "tax year"}}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Fatalf("facts = %+v, want %+v", got, want)
 	}
 	short := coverSceneFor(&GeneratedArticle{Title: "T", CoverScene: coverScene{Layout: layoutFlow, Trend: []float64{1, 2}}})
 	if short.Trend != nil {

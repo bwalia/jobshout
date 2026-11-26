@@ -72,6 +72,74 @@ type coverScene struct {
 	// reorder labels, so a list beside them would drift.
 	Dek   string            `json:"dek,omitempty"`
 	Notes map[string]string `json:"notes,omitempty"`
+	// Facts are the figures a reader should take away, set along a card's
+	// foot. Each figure must appear in the article as written.
+	Facts []coverFact `json:"facts,omitempty"`
+}
+
+// coverFact is one figure the article states and what it is.
+type coverFact struct {
+	Figure string `json:"figure"`
+	Label  string `json:"label"`
+}
+
+// maxCoverFacts is how many facts a card's foot holds.
+const maxCoverFacts = 3
+
+// readFact takes a fact as the object asked for, under the key names a model
+// tends to use, or as "figure: label" text.
+func readFact(v any) (coverFact, bool) {
+	var f coverFact
+	switch t := v.(type) {
+	case map[string]any:
+		for _, k := range []string{"figure", "value", "number", "stat"} {
+			switch x := t[k].(type) {
+			case string:
+				f.Figure = x
+			case float64:
+				f.Figure = strconv.FormatFloat(x, 'f', -1, 64)
+			}
+			if f.Figure != "" {
+				break
+			}
+		}
+		for _, k := range []string{"label", "caption", "text", "what"} {
+			if x, ok := t[k].(string); ok && x != "" {
+				f.Label = x
+				break
+			}
+		}
+	case string:
+		for _, sep := range []string{": ", " — ", " - "} {
+			if i := strings.Index(t, sep); i > 0 {
+				f.Figure, f.Label = t[:i], t[i+len(sep):]
+				break
+			}
+		}
+	}
+	f.Figure, f.Label = strings.TrimSpace(f.Figure), strings.TrimSpace(f.Label)
+	return f, f.Figure != "" && f.Label != ""
+}
+
+// groundFacts keeps the facts whose figure the article states, not the stat
+// again, at most maxCoverFacts.
+func groundFacts(facts []coverFact, markdown, stat string) []coverFact {
+	text := strings.ToLower(markdown)
+	seen := map[string]bool{strings.ToLower(strings.TrimSpace(stat)): true}
+	var out []coverFact
+	for _, f := range facts {
+		f.Figure = truncateRunes(strings.TrimSpace(f.Figure), 14)
+		f.Label = truncateWords(strings.TrimSpace(f.Label), 6, 40)
+		k := strings.ToLower(f.Figure)
+		if f.Figure == "" || f.Label == "" || seen[k] || !strings.Contains(text, k) {
+			continue
+		}
+		seen[k] = true
+		if out = append(out, f); len(out) == maxCoverFacts {
+			break
+		}
+	}
+	return out
 }
 
 // note is what label means in the article, or "".
@@ -139,6 +207,12 @@ func (s *coverScene) UnmarshalJSON(b []byte) error {
 				if note, ok := v.(string); ok {
 					s.setNote(l, note)
 				}
+			}
+		}
+		facts, _ := t["facts"].([]any)
+		for _, v := range facts {
+			if f, ok := readFact(v); ok {
+				s.Facts = append(s.Facts, f)
 			}
 		}
 		points, _ := t["trend"].([]any)
@@ -244,6 +318,7 @@ func coverSceneFor(a *GeneratedArticle) coverScene {
 	s.TrendFrom = truncateWords(strings.TrimSpace(s.TrendFrom), 5, 30)
 	s.TrendTo = truncateWords(strings.TrimSpace(s.TrendTo), 5, 30)
 	s.Dek = truncateWords(strings.TrimSpace(s.Dek), 24, 150)
+	s.Facts = groundFacts(s.Facts, a.Markdown, s.Stat)
 	if len(s.Trend) < minTrendPoints || len(s.Trend) > maxTrendPoints {
 		s.Trend = nil
 	}
