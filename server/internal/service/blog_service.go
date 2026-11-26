@@ -85,6 +85,11 @@ type BlogService interface {
 	// image are updated. The result says what changed and, in its notes, why
 	// anything did not.
 	RedrawImages(ctx context.Context, orgID, articleID uuid.UUID, syncCMS bool) (*model.BlogArticle, blog.RedrawResult, error)
+	// ResendArticle sends one stored article to its CMS again without
+	// rewriting it: its existing post is updated in place, or a new draft is
+	// filed when it has none or the CMS lost it. The outcome is recorded on
+	// the article (LastResend) whether it succeeds or not. See blog_resend.go.
+	ResendArticle(ctx context.Context, orgID, articleID uuid.UUID) (*model.BlogArticle, error)
 	// BindTasks updates the Task Manager card when a launched run finishes.
 	BindTasks(tasks TaskService)
 	// BindIntegrations lets a writer agent file to its own website: the named

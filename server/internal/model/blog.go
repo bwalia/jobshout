@@ -350,6 +350,30 @@ type BlogArticle struct {
 	// ImageRedraw is what the last Redraw images did. Kept because the page
 	// stops waiting long before a redraw on the workstation ends.
 	ImageRedraw *ImageRedraw `json:"image_redraw,omitempty"`
+	// LastResend is the outcome of the last "Resend to OpsAPI".
+	LastResend *ArticleResend `json:"last_resend,omitempty"`
+}
+
+// Outcomes of a Resend to OpsAPI (ArticleResend.Result).
+const (
+	ResendResultUpdated = "updated"
+	ResendResultCreated = "created"
+	ResendResultFailed  = "failed"
+)
+
+// ArticleResend is the outcome of one Resend to OpsAPI: the stored article
+// sent to its CMS again without being rewritten.
+type ArticleResend struct {
+	At time.Time `json:"at"`
+	// Result is ResendResultUpdated (the existing post was rewritten in place),
+	// ResendResultCreated (a new draft was filed) or ResendResultFailed.
+	Result string `json:"result"`
+	// Namespace is the CMS workspace the article was sent to.
+	Namespace string `json:"namespace,omitempty"`
+	// PostUUID and PostStatus are the CMS post after the resend.
+	PostUUID   string `json:"post_uuid,omitempty"`
+	PostStatus string `json:"post_status,omitempty"`
+	Error      string `json:"error,omitempty"`
 }
 
 // ImageRedraw is the outcome of one Redraw images.

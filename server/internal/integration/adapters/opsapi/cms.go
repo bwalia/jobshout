@@ -26,6 +26,11 @@ import (
 // article body can CreatePost with StatusPublished instead.
 var ErrUpdateForbidden = errors.New("opsapi: cms update forbidden")
 
+// ErrPostNotFound is returned by a post update when opsapi has no such post in
+// the namespace — never created there, or deleted (opsapi soft-deletes, and a
+// deleted post answers 404 like a missing one).
+var ErrPostNotFound = errors.New("opsapi: post not found")
+
 // IsUpdateForbidden reports whether err is (or wraps) ErrUpdateForbidden.
 func IsUpdateForbidden(err error) bool {
 	return errors.Is(err, ErrUpdateForbidden)
@@ -230,8 +235,41 @@ func (c *Client) UpdatePostImages(ctx context.Context, postUUID, contentHTML, im
 	return c.patchPost(ctx, postUUID, fields)
 }
 
+// UpdatePostRequest is the body of PUT /api/v2/cms/posts/{uuid}: the fields
+// CreatePostRequest sends, minus status and slug. opsapi applies only the
+// fields present, so leaving those two out keeps whatever an editor set: a
+// post already live stays live, at the URL it was published under.
+type UpdatePostRequest struct {
+	Title            string   `json:"title,omitempty"`
+	Excerpt          string   `json:"excerpt,omitempty"`
+	ContentHTML      string   `json:"content_html,omitempty"`
+	AuthorName       string   `json:"author_name,omitempty"`
+	FeaturedImageURL string   `json:"featured_image_url,omitempty"`
+	Tags             []string `json:"tags,omitempty"`
+	CategoryUUIDs    []string `json:"category_uuids,omitempty"`
+	SEOTitle         string   `json:"seo_title,omitempty"`
+	SEODescription   string   `json:"seo_description,omitempty"`
+}
+
+// UpdatePost rewrites an existing post's content in place. A post opsapi no
+// longer has (deleted in its dashboard) fails with ErrPostNotFound, so the
+// caller can file it again instead. Needs the cms:update scope.
+func (c *Client) UpdatePost(ctx context.Context, postUUID string, req UpdatePostRequest) (*Post, error) {
+	return c.putPost(ctx, postUUID, req, "update")
+}
+
 // patchPost PUTs a partial field map to /api/v2/cms/posts/{uuid}.
 func (c *Client) patchPost(ctx context.Context, postUUID string, fields map[string]string) (*Post, error) {
+	action := "update"
+	if _, ok := fields["status"]; ok && len(fields) == 1 {
+		action = "set status to " + fields["status"]
+	}
+	return c.putPost(ctx, postUUID, fields, action)
+}
+
+// putPost sends PUT /api/v2/cms/posts/{uuid} with fields as the JSON body;
+// action names the call in errors.
+func (c *Client) putPost(ctx context.Context, postUUID string, fields any, action string) (*Post, error) {
 	postUUID = strings.TrimSpace(postUUID)
 	if postUUID == "" {
 		return nil, fmt.Errorf("opsapi: update post: no post uuid")
@@ -256,10 +294,6 @@ func (c *Client) patchPost(ctx context.Context, postUUID string, fields map[stri
 	}
 	defer resp.Body.Close()
 
-	action := "update"
-	if _, ok := fields["status"]; ok && len(fields) == 1 {
-		action = "set status to " + fields["status"]
-	}
 	if resp.StatusCode != http.StatusOK {
 		b := readBodySnippet(resp)
 		switch resp.StatusCode {
@@ -269,8 +303,8 @@ func (c *Client) patchPost(ctx context.Context, postUUID string, fields map[stri
 					"in namespace %q. Response: %s",
 				ErrUpdateForbidden, action, postUUID, c.cfg.Namespace, b)
 		case http.StatusNotFound:
-			return nil, fmt.Errorf("opsapi: post %s not found in namespace %q — was the draft deleted? Response: %s",
-				postUUID, c.cfg.Namespace, b)
+			return nil, fmt.Errorf("%w: %s in namespace %q — was the draft deleted? Response: %s",
+				ErrPostNotFound, postUUID, c.cfg.Namespace, b)
 		default:
 			return nil, fmt.Errorf("opsapi: %s on post %s failed (status %d): %s",
 				action, postUUID, resp.StatusCode, b)

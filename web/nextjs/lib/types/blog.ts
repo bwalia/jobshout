@@ -125,6 +125,20 @@ export interface BlogArticle {
     figures_drawn: number;
     cover_redrawn: boolean;
   };
+  /** The outcome of the last "Resend to OpsAPI". */
+  last_resend?: BlogArticleResend;
+}
+
+/** One "Resend to OpsAPI": the stored article sent to its CMS again. */
+export interface BlogArticleResend {
+  at: string;
+  /** updated = the existing post was rewritten in place; created = a new
+   *  draft was filed (the article had none, or the CMS had deleted it). */
+  result: "updated" | "created" | "failed";
+  namespace?: string;
+  post_uuid?: string;
+  post_status?: string;
+  error?: string;
 }
 
 export interface BlogRunOptions {

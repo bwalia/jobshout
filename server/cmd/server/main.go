@@ -210,6 +210,11 @@ func requestTimeout(next http.Handler) http.Handler {
 			strings.HasSuffix(r.URL.Path, "/regenerate-cover") || strings.HasSuffix(r.URL.Path, "/redraw-images")) {
 			timeout = imageRequestTimeout
 		}
+		// A resent article with no cover has one drawn before it is filed.
+		if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/blogs/articles/") &&
+			strings.HasSuffix(r.URL.Path, "/resend") {
+			timeout = imageRequestTimeout
+		}
 		if r.Method == http.MethodPost && (strings.HasSuffix(r.URL.Path, "/messages") ||
 			strings.HasSuffix(r.URL.Path, "/messages/stream") ||
 			strings.HasSuffix(r.URL.Path, "/chat/route")) {
@@ -1616,6 +1621,7 @@ func main() {
 				r.Get("/articles/{articleID}", blogHandler.GetArticle)
 				r.Post("/articles/{articleID}/regenerate-cover", blogHandler.RegenerateCover)
 				r.Post("/articles/{articleID}/redraw-images", blogHandler.RedrawImages)
+				r.Post("/articles/{articleID}/resend", blogHandler.ResendArticle)
 			})
 
 			// Research is exposed on its own, not only via the article

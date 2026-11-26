@@ -16,9 +16,10 @@ import {
   Loader2,
   Newspaper,
   RefreshCw,
+  Send,
 } from "lucide-react";
 import { apiErrorMessage, isRequestTimeout } from "@/lib/api/client";
-import { redrawBlogArticleImages } from "@/lib/api/blog";
+import { redrawBlogArticleImages, resendBlogArticle } from "@/lib/api/blog";
 import { blogKeys } from "@/lib/hooks/useBlog";
 import { cn } from "@/lib/utils/cn";
 import { MermaidDiagram } from "@/components/blog/MermaidDiagram";
@@ -47,7 +48,43 @@ export function ArticleViewer({ article }: { article: BlogArticle }) {
   const [tab, setTab] = useState<Tab>("article");
   const [copied, setCopied] = useState(false);
   const [redrawing, setRedrawing] = useState(false);
+  const [resending, setResending] = useState(false);
   const qc = useQueryClient();
+
+  async function resendToOpsAPI() {
+    // The button is disabled while in flight; the server also refuses a
+    // second resend of the same article until the first is done.
+    if (resending) return;
+    setResending(true);
+    try {
+      const updated = await resendBlogArticle(article.id);
+      const r = updated.last_resend;
+      const where = r?.namespace ? ` in ${r.namespace}` : "";
+      if (r?.result === "created") {
+        toast.success(`Filed a new draft${where}`, {
+          description: article.post_uuid
+            ? "The earlier post was no longer in the CMS, so the article was filed again."
+            : undefined,
+        });
+      } else {
+        toast.success(`Updated the post${where}`, {
+          description: r?.post_status ? `Its status is unchanged: ${r.post_status}.` : undefined,
+        });
+      }
+    } catch (e) {
+      if (isRequestTimeout(e)) {
+        toast.info("Still sending", {
+          description: "Reload this page in a minute to see whether the resend went through.",
+        });
+      } else {
+        toast.error(apiErrorMessage(e, "Could not resend the article to OpsAPI"));
+      }
+    } finally {
+      // The outcome is recorded on the article either way.
+      await qc.invalidateQueries({ queryKey: blogKeys.articles(article.run_id) });
+      setResending(false);
+    }
+  }
 
   async function redrawImages() {
     setRedrawing(true);
@@ -161,6 +198,25 @@ export function ArticleViewer({ article }: { article: BlogArticle }) {
           </button>
           <button
             type="button"
+            onClick={() => void resendToOpsAPI()}
+            disabled={resending}
+            aria-busy={resending}
+            title={
+              article.post_uuid
+                ? "Send this article to OpsAPI again: updates its existing post (status and URL unchanged), or files a new draft if the post was deleted"
+                : "Send this article to OpsAPI as a new draft, without rewriting it"
+            }
+            className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+          >
+            {resending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Send className="h-3.5 w-3.5" />
+            )}
+            {resending ? "Sending…" : "Resend to OpsAPI"}
+          </button>
+          <button
+            type="button"
             onClick={copyMarkdown}
             className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
@@ -182,6 +238,7 @@ export function ArticleViewer({ article }: { article: BlogArticle }) {
         </div>
       </div>
       {article.image_redraw && <LastRedraw redraw={article.image_redraw} />}
+      {article.last_resend && <LastResend resend={article.last_resend} />}
 
       {/* Tabs. Sticky rather than an inner scroll region: the page scrolls in
           the shell's <main>, and nothing between it and this component has a
@@ -357,6 +414,33 @@ function SourceList({ references }: { references: BlogReference[] }) {
         </li>
       ))}
     </ol>
+  );
+}
+
+/** The outcome of the last Resend to OpsAPI. */
+function LastResend({ resend }: { resend: NonNullable<BlogArticle["last_resend"]> }) {
+  const when = new Date(resend.at).toLocaleString();
+  const where = resend.namespace ? ` in ${resend.namespace}` : "";
+  const what =
+    resend.result === "updated"
+      ? `updated post ${resend.post_uuid ?? ""}${where}`
+      : resend.result === "created"
+        ? `filed new draft ${resend.post_uuid ?? ""}${where}`
+        : `failed${where}`;
+  return (
+    <div
+      className={cn(
+        "mb-3 rounded-md border px-3 py-2 text-xs",
+        resend.result === "failed"
+          ? "border-destructive/40 bg-destructive/5 text-destructive"
+          : "border-border bg-muted/40 text-muted-foreground"
+      )}
+    >
+      <p>
+        Last resend to OpsAPI, {when}: {what}.
+      </p>
+      {resend.error && <p className="mt-1 break-words">{resend.error}</p>}
+    </div>
   );
 }
 

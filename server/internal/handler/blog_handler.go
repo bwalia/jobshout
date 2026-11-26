@@ -447,6 +447,42 @@ func (h *BlogHandler) RedrawImages(w http.ResponseWriter, r *http.Request) {
 	RespondJSON(w, http.StatusOK, reply)
 }
 
+// ResendArticle handles POST /api/v1/blogs/articles/{articleID}/resend — sends
+// a stored article to its CMS again without rewriting it: its post is updated
+// in place, or filed as a new draft when it has none or the CMS lost it. Same
+// access as Publish: any signed-in member of the article's organization.
+func (h *BlogHandler) ResendArticle(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "articleID"))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid article ID")
+		return
+	}
+	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid org_id in token")
+		return
+	}
+	article, err := h.svc.ResendArticle(r.Context(), orgID, id)
+	switch {
+	case err == nil:
+		RespondJSON(w, http.StatusOK, article)
+	case errors.Is(err, service.ErrArticleNotFound):
+		RespondError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, service.ErrArticleOtherOrg):
+		RespondError(w, http.StatusForbidden, err.Error())
+	case errors.Is(err, service.ErrResendInProgress):
+		RespondError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, service.ErrResendNotConfigured):
+		RespondError(w, http.StatusServiceUnavailable, err.Error())
+	case errors.Is(err, service.ErrResendNoContent):
+		RespondError(w, http.StatusBadRequest, err.Error())
+	default:
+		// The CMS refused or could not be reached; its message says why
+		// (missing cms:update scope, wrong namespace, ...).
+		RespondError(w, http.StatusBadGateway, err.Error())
+	}
+}
+
 // CheckWebsite handles GET /api/v1/blogs/destinations/check?namespace=&base_url=
 // — the add-website form's first step. base_url defaults to this ring's
 // OpsAPI. The answer never includes a key.

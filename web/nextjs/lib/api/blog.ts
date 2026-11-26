@@ -128,3 +128,17 @@ export async function redrawBlogArticleImages(id: string): Promise<RedrawResult>
   );
   return data;
 }
+
+/**
+ * Sends a stored article to its OpsAPI CMS again, without rewriting it: its
+ * post is updated in place, or filed as a new draft when it has none or the
+ * CMS deleted it. Usually one CMS call; minutes only when a cover is drawn.
+ */
+export async function resendBlogArticle(id: string): Promise<BlogArticle> {
+  const { data } = await apiClient.post<BlogArticle>(
+    `/blogs/articles/${id}/resend`,
+    undefined,
+    { timeout: 600_000 }
+  );
+  return data;
+}
