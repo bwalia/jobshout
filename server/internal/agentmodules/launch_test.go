@@ -162,6 +162,38 @@ func TestArticleLaunch(t *testing.T) {
 	}
 }
 
+// auto_publish is off unless a launch asks for it, and an unreadable value is
+// refused before any run starts: "on" files drafts on a website.
+func TestArticleLaunch_AutoPublish(t *testing.T) {
+	cases := []struct {
+		val  string
+		want bool
+	}{{"", false}, {"false", false}, {"0", false}, {"true", true}, {" TRUE ", true}, {"1", true}, {"on", true}}
+	for _, c := range cases {
+		w := &stubBlog{}
+		vals := map[string]string{"topic": "edge AI"}
+		if c.val != "" {
+			vals["auto_publish"] = c.val
+		}
+		if _, err := blog.Module(w).Launch(context.Background(), launchIn(vals, "task_manager")); err != nil {
+			t.Fatalf("auto_publish=%q: %v", c.val, err)
+		}
+		if w.last.AutoPublish != c.want {
+			t.Fatalf("auto_publish=%q: AutoPublish = %v, want %v", c.val, w.last.AutoPublish, c.want)
+		}
+	}
+
+	w := &stubBlog{}
+	_, err := blog.Module(w).Launch(context.Background(),
+		launchIn(map[string]string{"topic": "edge AI", "auto_publish": "maybe"}, "task_manager"))
+	if err == nil || !strings.Contains(err.Error(), "auto_publish") {
+		t.Fatalf("err = %v, want an auto_publish error", err)
+	}
+	if w.last.Briefs != nil {
+		t.Fatal("a run started for an unreadable auto_publish")
+	}
+}
+
 type stubResearch struct {
 	n    int
 	last research.Request

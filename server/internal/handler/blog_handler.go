@@ -259,8 +259,15 @@ func (h *BlogHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, http.StatusBadRequest, "invalid run ID")
 		return
 	}
-	run, err := h.svc.GetByID(r.Context(), id)
+	orgID, err := uuid.Parse(middleware.GetOrgID(r.Context()))
 	if err != nil {
+		RespondError(w, http.StatusBadRequest, "invalid org_id in token")
+		return
+	}
+	// Another org's run answers exactly like a missing one, as task runs do:
+	// a session or an API key never learns that the id exists.
+	run, err := h.svc.GetByID(r.Context(), id)
+	if err != nil || run == nil || run.OrgID != orgID {
 		RespondError(w, http.StatusNotFound, "blog run not found")
 		return
 	}

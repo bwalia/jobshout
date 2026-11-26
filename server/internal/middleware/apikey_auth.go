@@ -61,6 +61,10 @@ var apiKeyRoutes = []apiKeyRoute{
 	route("POST", "/tasks/{id}/run", model.ScopeRuns),
 	route("GET", "/tasks/{id}/runs", model.ScopeRuns),
 	route("GET", "/task-runs/{id}", model.ScopeRuns),
+	// An Article Writer launch answers with a blog run id, not a task run:
+	// this is how the caller follows it. Read only, and only the run itself
+	// (status, article summaries, error) — not its articles' bodies.
+	route("GET", "/blogs/runs/{id}", model.ScopeRuns),
 	route("GET", "/approvals", model.ScopeApprovals),
 	route("GET", "/approvals/{id}", model.ScopeApprovals),
 	route("POST", "/approvals/{id}/decide", model.ScopeApprovals),
