@@ -125,7 +125,15 @@ const (
 	// (Nano Banana, ERNIE-Image). Without one the cover is the diagram: a
 	// picture whose labels are gibberish is worse than either.
 	CoverStylePicture = "picture"
+	// CoverStyleCard sets the article's figure and point in large type with
+	// its trend or steps beside them (cover_card.go). Like the diagram it
+	// needs only the cover store.
+	CoverStyleCard = "card"
 )
+
+func (r *Runner) cardCovers() bool {
+	return strings.EqualFold(strings.TrimSpace(r.cfg.CoverStyle), CoverStyleCard)
+}
 
 func (r *Runner) coverPictures() bool {
 	return strings.EqualFold(strings.TrimSpace(r.cfg.CoverStyle), CoverStylePicture) && r.canIllustrate()
@@ -204,7 +212,14 @@ func (r *Runner) storeSceneCover(ctx context.Context, orgID uuid.UUID, a *Genera
 		}
 		art, provider, drawnBy, artSeed = pic, drawn.Provider, drawn.Model+"+"+drawnBy, drawn.Seed
 	}
-	img, err := drawSceneOn(art, scene, accent, seed)
+	var img []byte
+	var err error
+	if art == nil && r.cardCovers() {
+		img, err = drawCard(scene, a.Title, accent)
+		drawnBy = "card"
+	} else {
+		img, err = drawSceneOn(art, scene, accent, seed)
+	}
 	if err != nil {
 		return err
 	}

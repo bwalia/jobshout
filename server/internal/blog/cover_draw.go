@@ -102,6 +102,8 @@ type pen struct {
 	accent rgb
 	faces  map[string]font.Face
 	rnd    *rand.Rand
+	// bold and medium replace the Go fonts when set.
+	bold, medium *truetype.Font
 }
 
 func (p *pen) face(bold bool, size float64) {
@@ -109,8 +111,14 @@ func (p *pen) face(bold bool, size float64) {
 	f, ok := p.faces[key]
 	if !ok {
 		tt := coverMedium
+		if p.medium != nil {
+			tt = p.medium
+		}
 		if bold {
 			tt = coverBold
+			if p.bold != nil {
+				tt = p.bold
+			}
 		}
 		f = truetype.NewFace(tt, &truetype.Options{Size: size, Hinting: font.HintingFull})
 		p.faces[key] = f

@@ -260,9 +260,11 @@ ai:
   # What a cover is. "diagram": the article's idea drawn as a vector diagram
   # (no GPU, needs only the image store). "picture": the article's idea as a
   # lettered infographic, drawn only by a model that captions (Gemini, or
-  # imageModel ernie-image-turbo); with none it is the diagram.
+  # imageModel ernie-image-turbo); with none it is the diagram. "card": the
+  # article's figure and point set in large type, with its trend or steps
+  # beside them; every word typeset, no GPU, needs only the image store.
   # Needs blogCoverImages. Body figures follow blogCoverImages either way.
-  blogCoverStyle: picture
+  blogCoverStyle: card
   # How long a running row may sit without a heartbeat before the reconciler
   # marks it failed. Must outlast a legitimate long LLM call. Max runtime is
   # the wall-clock budget PER ARTICLE (a run gets it times its article count);

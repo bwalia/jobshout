@@ -2,6 +2,7 @@ package blog
 
 import (
 	"encoding/json"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -58,6 +59,13 @@ type coverScene struct {
 	// article's subject as things in a place. Without it the art was drawn
 	// from the labels, and a property-tax cover came out as a server room.
 	Picture string `json:"picture,omitempty"`
+	// Headline, Trend, TrendFrom and TrendTo are the headline card's: the
+	// article's point set large after the stat, and the numbers its chart
+	// draws with what the first and last are.
+	Headline  string    `json:"headline,omitempty"`
+	Trend     []float64 `json:"trend,omitempty"`
+	TrendFrom string    `json:"trend_from,omitempty"`
+	TrendTo   string    `json:"trend_to,omitempty"`
 }
 
 // UnmarshalJSON accepts the shapes a model gives a scene: the object asked
@@ -97,8 +105,32 @@ func (s *coverScene) UnmarshalJSON(b []byte) error {
 		}
 		s.Stat = strings.Join(stat, " ")
 		s.Eyebrow = strings.Join(eyebrow, " ")
+		var headline, from, to []string
+		collectStrings(t["headline"], &headline)
+		collectStrings(t["trend_from"], &from)
+		collectStrings(t["trend_to"], &to)
+		s.Headline, s.TrendFrom, s.TrendTo = strings.Join(headline, " "), strings.Join(from, " "), strings.Join(to, " ")
+		points, _ := t["trend"].([]any)
+		for _, v := range points {
+			if n, ok := trendNumber(v); ok {
+				s.Trend = append(s.Trend, n)
+			}
+		}
 	}
 	return nil
+}
+
+// trendNumber reads a trend point given as a number or as text like "$1,200"
+// or "31%".
+func trendNumber(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case string:
+		f, err := strconv.ParseFloat(strings.Trim(strings.ReplaceAll(n, ",", ""), " $£€%"), 64)
+		return f, err == nil && !math.IsNaN(f) && !math.IsInf(f, 0)
+	}
+	return 0, false
 }
 
 // canonicalCoverLayout maps a layout name or a near miss onto a known layout.
@@ -166,6 +198,13 @@ func coverSceneFor(a *GeneratedArticle) coverScene {
 	}
 	s.Eyebrow = strings.ToUpper(truncateWords(strings.TrimSpace(s.Eyebrow), 3, 26))
 	s.Picture = wordlessPicture(truncateRunes(strings.TrimSpace(s.Picture), maxCoverPicture))
+	s.Stat = truncateRunes(strings.TrimSpace(s.Stat), 16)
+	s.Headline = truncateWords(strings.TrimSpace(s.Headline), 8, 48)
+	s.TrendFrom = truncateWords(strings.TrimSpace(s.TrendFrom), 5, 30)
+	s.TrendTo = truncateWords(strings.TrimSpace(s.TrendTo), 5, 30)
+	if len(s.Trend) < minTrendPoints || len(s.Trend) > maxTrendPoints {
+		s.Trend = nil
+	}
 	return s
 }
 
