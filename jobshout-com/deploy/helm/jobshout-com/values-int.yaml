@@ -3,12 +3,20 @@ host: int.jobshout.com
 
 # image.tag is injected by Ring Promoter (--set image.tag=<jsc-v…>).
 
+# int pins these pods to debian004 (nodeSelector below), which is almost fully
+# requested; they idle at a few millicores. At the chart's 50-100m a rolling
+# update's surge pod could not be scheduled and helm --wait timed out
+# (26 Nov 2026, v1.0.249). Limits and memory are unchanged.
 api:
   replicas: 1
+  resources:
+    requests: { cpu: 10m }
 
 web:
   replicas: 1
   apiURL: "http://jobshout-com-api.int.svc.cluster.local:8088"
+  resources:
+    requests: { cpu: 10m }
 
 postgres:
   enabled: true
