@@ -17,19 +17,15 @@ export const STATUS_DOT_HSL: Record<TaskStatus, string> = {
   done: "hsl(var(--status-done))",
 };
 
-/** Light + dark badge pairs for status pills that used to be one-theme-only. */
+/** Status pills, from the theme tokens so both themes follow the palette. */
 export const THEME_BADGE = {
-  success:
-    "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-400",
-  warning:
-    "bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-400",
-  muted: "bg-zinc-100 text-zinc-700 dark:bg-zinc-500/20 dark:text-zinc-400",
-  info: "bg-blue-100 text-blue-800 dark:bg-blue-500/20 dark:text-blue-400",
-  danger: "bg-red-100 text-red-800 dark:bg-red-500/20 dark:text-red-400",
-  purple:
-    "bg-violet-100 text-violet-800 dark:bg-violet-500/20 dark:text-violet-400",
-  orange:
-    "bg-orange-100 text-orange-800 dark:bg-orange-500/20 dark:text-orange-400",
+  success: "bg-status-done/10 text-status-done",
+  warning: "bg-signal-warn/10 text-signal-warn",
+  muted: "bg-muted text-muted-foreground",
+  info: "bg-status-progress/10 text-status-progress",
+  danger: "bg-destructive/10 text-destructive",
+  purple: "bg-status-review/10 text-status-review",
+  orange: "bg-gold/15 text-[#6E5418] dark:text-gold",
 } as const;
 
 /** One priority palette, readable (AA) in both themes. Medium is blue so it
