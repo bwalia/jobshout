@@ -8,7 +8,7 @@
 
 Every **int** run of `deploy-jobshout-com.yml` upserts (beaconpulse-style):
 
-1. Cloudflare CNAME `int.jobshout.com` → `lon1.pop0.uk` (`jobshout-com/deploy/scripts/cloudflare-dns.sh`)
+1. Cloudflare CNAME `int.jobshout.com` → `edge.pop0.uk` (lon1<->lon2 failover switch; see diy-tax-return-infra docs/runbooks/edge-failover.md) (`jobshout-com/deploy/scripts/cloudflare-dns.sh`)
 2. wslproxy vhost from `jobshout-com/deploy/edge/wslproxy-server-int.json`
 
 Manual fallback:
@@ -19,7 +19,7 @@ gh workflow run register-edge-vhost.yml --repo bwalia/jobshout \
   -f zone=jobshout.com \
   -f server_spec=jobshout-com/deploy/edge/wslproxy-server-int.json \
   -f health_path=/health \
-  -f cname_target=lon1.pop0.uk
+  -f cname_target=edge.pop0.uk
 ```
 
 Edge registration is best-effort: the vhost and CNAME outlive any one release, so

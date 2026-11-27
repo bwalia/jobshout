@@ -16,7 +16,8 @@ name: Build & seed JobShout.com (Ring Promoter)
 # of an hour to ImagePullBackOff.
 #
 # Int/test edge (beaconpulse-style, every int or test run, idempotent):
-#   Cloudflare CNAME <env>.jobshout.com → lon1.pop0.uk
+#   Cloudflare CNAME int.jobshout.com → edge.pop0.uk (lon1<->lon2 failover switch),
+#   test.jobshout.com → lon1.pop0.uk (lon2 parity not verified yet)
 #   wslproxy vhost from jobshout-com/deploy/edge/wslproxy-server-<env>.json,
 #   VPN/LAN-only via access_profile jobshout-preprod
 
@@ -319,9 +320,11 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x jobshout-com/deploy/scripts/cloudflare-dns.sh
+          # edge.pop0.uk is the lon1<->lon2 failover switch; see diy-tax-return-infra docs/runbooks/edge-failover.md.
+          # test.jobshout.com is not in that runbook's eligible-hosts.txt (lon2 parity unverified), so it stays on lon1.
           jobshout-com/deploy/scripts/cloudflare-dns.sh \
             --name "$HOST" \
-            --content lon1.pop0.uk \
+            --content "${{ needs.plan.outputs.target_env == 'int' && 'edge.pop0.uk' || 'lon1.pop0.uk' }}" \
             --zone jobshout.com \
             --proxied false
       - name: Register wslproxy vhost

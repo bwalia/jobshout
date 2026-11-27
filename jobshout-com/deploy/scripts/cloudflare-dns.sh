@@ -2,11 +2,12 @@
 # Idempotent Cloudflare CNAME upsert (beaconpulse-style).
 # Env: CLOUDFLARE_API_TOKEN (required), CLOUDFLARE_ZONE or --zone
 # Usage:
-#   ./cloudflare-dns.sh --name int.jobshout.com --content lon1.pop0.uk --zone jobshout.com
+#   ./cloudflare-dns.sh --name int.jobshout.com --content edge.pop0.uk --zone jobshout.com
 set -euo pipefail
 
 NAME=""
-CONTENT="lon1.pop0.uk"
+# edge.pop0.uk is the lon1<->lon2 failover switch; see diy-tax-return-infra docs/runbooks/edge-failover.md
+CONTENT="edge.pop0.uk"
 ZONE="${CLOUDFLARE_ZONE:-jobshout.com}"
 PROXIED="false"
 
@@ -21,7 +22,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$NAME" ]]; then
-  echo "usage: $0 --name <fqdn> [--content lon1.pop0.uk] [--zone jobshout.com]" >&2
+  echo "usage: $0 --name <fqdn> [--content edge.pop0.uk] [--zone jobshout.com]" >&2
   exit 2
 fi
 if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
