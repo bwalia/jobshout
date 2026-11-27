@@ -1,7 +1,8 @@
 name: Register edge vhost (Cloudflare + wslproxy)
 
 # Make a JobShout host publicly reachable through the wslproxy edge.
-# k3s app hosts (int.jobshout.co.uk, …) stay on the default pop0 CNAME.
+# k3s app hosts (int.jobshout.co.uk, …) stay on the default edge.pop0.uk CNAME
+# (lon1<->lon2 failover switch).
 # Workstation services (strix.workstation.co.uk) must register on **pop1**.
 #
 # Secrets:
@@ -27,10 +28,11 @@ on:
         description: "Path to probe (/login, /auth/sign-in, /health)"
         required: false
         default: /login
+      # edge.pop0.uk is the lon1<->lon2 failover switch; see diy-tax-return-infra docs/runbooks/edge-failover.md
       cname_target:
-        description: "CNAME target (lon1.pop0.uk for k3s apps; pop1.wslproxy.com for workstation services)"
+        description: "CNAME target (edge.pop0.uk for k3s apps = lon1/lon2 failover; pop1.wslproxy.com for workstation services)"
         required: false
-        default: lon1.pop0.uk
+        default: edge.pop0.uk
       gateway_url:
         description: "wslproxy admin URL override (empty = WSLPROXY_GATEWAY_URL secret). pop1 = https://pop1.diytaxreturn.co.uk"
         required: false
@@ -48,7 +50,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           HOST: ${{ inputs.host }}
           ZONE: ${{ inputs.zone }}
-          CNAME_TARGET: ${{ inputs.cname_target || 'lon1.pop0.uk' }}
+          CNAME_TARGET: ${{ inputs.cname_target || 'edge.pop0.uk' }}
         run: |
           set -euo pipefail
           if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then

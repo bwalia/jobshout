@@ -5,7 +5,7 @@
 
 env: int
 # Public host. jobshout.com has no wildcard — each host needs a Cloudflare
-# CNAME -> lon1.pop0.uk plus a wslproxy vhost (register-edge-vhost workflow).
+# CNAME -> edge.pop0.uk (lon1<->lon2 failover switch) plus a wslproxy vhost (register-edge-vhost workflow).
 host: int.jobshout.com
 
 image:

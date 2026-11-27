@@ -4,7 +4,7 @@ Public host for the int ring: **https://int.jobshout.com**
 
 Same edge path as the platform (`int.jobshout.co.uk`):
 
-1. Cloudflare CNAME `int.jobshout.com` → `lon1.pop0.uk` (zone `jobshout.com`)
+1. Cloudflare CNAME `int.jobshout.com` → `edge.pop0.uk` (lon1<->lon2 failover switch; see diy-tax-return-infra docs/runbooks/edge-failover.md) (zone `jobshout.com`)
 2. wslproxy vhost on pop0 using Traefik rule `8f161403-8592-1111-6294-9c57974505b0`
 
 ```bash
@@ -13,7 +13,7 @@ gh workflow run register-edge-vhost.yml --repo bwalia/jobshout \
   -f zone=jobshout.com \
   -f server_spec=jobshout-com/deploy/edge/wslproxy-server-int.json \
   -f health_path=/health \
-  -f cname_target=lon1.pop0.uk
+  -f cname_target=edge.pop0.uk
 ```
 
 Deploy / promote: https://rp.workstation.co.uk/?app=jobshout-com
